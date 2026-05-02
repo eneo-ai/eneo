@@ -88,6 +88,30 @@ Validation:
 | `./scripts/gate-local/anti_slippage.sh --worktree` | Passed: `anti-slippage: worktree clean` |
 | `docker exec eneo-41ae93-eneo-1 true` | Blocked by current Codex process policy before host execution: `approval required by policy, but AskForApproval is set to Never` |
 
+### Iteration 5 — Slice 10.3 Plan Review
+
+- Chosen slice: Flow audit outbox delivery/retry/dead-letter model and worker.
+- Claude artifact: `.codex/artifacts/claude-peer-loop-batch-10-flow-audit-outbox-delivery-plan-20260502T205958Z.md`
+- Claude verdict: `changes_required`
+- Claude green light: `no`
+- Claude minimum score: `5`
+
+Accepted findings:
+
+| Claude finding | Decision |
+|---|---|
+| Copying the outbox `description` into `audit_logs.description` would leak the `action:source` idempotency string into human audit logs. | Keep the outbox description constraint, but synthesize human-readable audit log descriptions during delivery and preserve the outbox string in metadata. |
+| Delivery idempotency was under-specified. | Use `flow_run_audit_outbox.id` as the delivered `audit_logs.id`; existing audit rows with the same id are treated as already delivered. |
+| A bad row must not roll back unrelated deliveries. | Process each row through a nested transaction and test a mixed valid/invalid batch. |
+| Deterministic audit-domain validation errors should not consume transient retry slots. | Dead-letter domain validation failures immediately; reserve bounded retry for unexpected delivery failures. |
+| Adding delivery and health methods to `FlowRunRepository` would deepen the wrong owner. | Add a dedicated `FlowRunAuditOutboxRepository` and move outbox insert ownership there instead of adding more methods to `FlowRunRepository`. |
+| Delivery bypasses tenant audit feature-flag gating and needs an explicit product rationale. | Document that Flow lifecycle audit is part of the PRD-003 durable runtime state and intentionally bypasses `AuditService._should_log_action`. |
+| Retry/backlog policy values were magic numbers. | Add `flow_run_audit_outbox_policy.py` for interval, batch size, max attempts, backoff, and backlog grace. |
+
+Plan revision:
+
+- Added Slice 10.3 to this plan with source evidence, owners, data model, delivery contract, exact audit description examples, metadata keys, health flags, expected files, tests, and validation commands.
+
 Notes:
 
 - The first targeted test run failed because the integration logging setup bypassed pytest root capture for the lifecycle logger. The final tests still assert real `logging.LogRecord` payloads through `caplog.records`; the test helper attaches pytest's capture handler directly to the lifecycle logger for the action window and restores the logger afterward.
@@ -175,3 +199,52 @@ Final validation:
 | `git diff --check -- ...` for touched source/test/doc paths | Passed |
 | `./scripts/gate-local/anti_slippage.sh --worktree` | Passed |
 | `docker exec eneo-41ae93-eneo-1 true` | Blocked by current Codex process policy before host execution: `approval required by policy, but AskForApproval is set to Never` |
+
+### Iteration 6 — Slice 10.3 Implementation Verification
+
+- Implemented Flow audit outbox delivery with retry, dead-letter state, idempotent audit-log projection, Celery beat wiring, and health/runbook coverage.
+- Moved audit outbox persistence out of `FlowRunRepository` into `FlowRunAuditOutboxRepository`.
+- Kept `flow_run_audit_outbox.id == audit_logs.id` as the idempotency key; `BasePublic` provides the server-generated `gen_random_uuid()` id.
+- Tightened the post-green cleanup by making `FlowRunTerminalizer` require an explicit `FlowRunAuditOutboxRepository` dependency and by expanding delivery mapping/constraint coverage.
+
+Claude artifacts:
+
+| Pass | Artifact | Verdict |
+|---|---|---|
+| Plan review | `.codex/artifacts/claude-peer-loop-batch-10-flow-audit-outbox-delivery-plan-20260502T205958Z.md` | `changes_required`, `GREEN_LIGHT: no`, minimum score `5` |
+| Plan verification | `.codex/artifacts/claude-peer-loop-batch-10-flow-audit-outbox-delivery-plan-verification-20260502T210456Z.md` | `green`, `GREEN_LIGHT: yes`, minimum score `8` |
+| Implementation verification | `.codex/artifacts/claude-peer-loop-batch-10-flow-audit-outbox-delivery-implementation-verification-20260502T213041Z.md` | `green`, `GREEN_LIGHT: yes`, minimum score `8` |
+| Final verification | `.codex/artifacts/claude-peer-loop-batch-10-flow-audit-outbox-delivery-final-contract-verification-20260502T214219Z.md` | `green`, `GREEN_LIGHT: yes`, minimum score `9` |
+
+Accepted implementation findings:
+
+| Finding | Change |
+|---|---|
+| Delivered audit rows need human-readable descriptions instead of `action:source`. | `FlowRunAuditOutboxDeliveryService` maps Flow audit actions to human audit descriptions and preserves the outbox string as metadata. |
+| Delivery must be idempotent across retries and duplicate starts. | `AuditLogRepository.create_if_absent` writes with `INSERT ... ON CONFLICT (id) DO NOTHING`; the delivered audit log id is the outbox id. |
+| One bad outbox row must not block neighboring rows. | Delivery uses per-row nested transactions around projection/write/failure handling. |
+| Deterministic domain validation errors should not consume retry slots. | `ValueError` during projection/audit-domain construction dead-letters immediately. |
+| Retry policy values should not be magic numbers. | `flow_run_audit_outbox_policy.py` owns interval, batch size, attempts, backoff, and backlog grace constants. |
+| Optional terminalizer dependency fallback was dead production code. | `FlowRunTerminalizer` now requires explicit `audit_outbox_repo`; services, executor, container, and tests pass it directly. |
+| Projection and constraints needed tighter tests. | Unit tests cover all Flow audit description mappings and failure-message fallback order; integration tests cover timestamp, invalid status, and negative-attempt constraints. |
+
+Validation:
+
+| Command | Result |
+|---|---|
+| `cd backend && uv run ruff check ...` for Slice 10.3 touched source/tests | Passed |
+| `cd backend && uv run ruff format ...` for Slice 10.3 touched source/tests | Passed |
+| `cd backend && uv run pytest tests/unittests/flows/test_flow_audit_outbox_delivery.py tests/unittests/flows/test_flow_review_checkpoint_data_model.py tests/unittests/flows/test_celery_runtime.py tests/unittests/flows/test_flow_runtime_health.py -q` | Passed: `40 passed, 10 warnings` |
+| `cd backend && uv run pytest tests/integration/flows/test_flow_audit_outbox_delivery.py tests/integration/flows/test_flow_runtime_health.py tests/integration/flows/test_flow_terminalization_contract.py tests/integration/flows/test_flow_run_review_checkpoint_repository.py tests/integration/flows/test_flow_run_repository.py -q` | Passed: `50 passed, 16 warnings` |
+| `cd backend && uv run pyright ...` for Slice 10.3 touched source/tests | Passed: `0 errors, 0 warnings, 0 informations` |
+| `cd backend && uv run lint-imports --no-cache` | Passed: `3 kept, 0 broken` |
+| `git diff --check -- ...` for Slice 10.3 touched paths | Passed |
+| `./scripts/gate-local/anti_slippage.sh --worktree` | Passed: `anti-slippage: worktree clean` |
+
+Verification answers:
+
+| Question | Answer |
+|---|---|
+| Are outbox ids server-generated? | Yes. `FlowRunAuditOutbox` inherits `BasePublic`, whose `IdMixin` uses `server_default=func.gen_random_uuid()`. |
+| Is `enable_autobegin_for_flow_task_session(session)` before explicit `session.begin()` acceptable in the delivery task? | Yes. Once `session.begin()` is active, autobegin is inert; the helper keeps Flow task discipline consistent while the explicit transaction owns the `FOR UPDATE SKIP LOCKED` lock lifetime. |
+| Were integration tests run against real PostgreSQL? | Yes. The integration fixtures used testcontainers with `pgvector/pgvector:pg16`; the new partial indexes and check constraints were exercised against PostgreSQL. |

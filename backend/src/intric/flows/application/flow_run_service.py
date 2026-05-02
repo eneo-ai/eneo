@@ -144,7 +144,8 @@ class FlowRunService:
         self.flow_repo = flow_repo
         self.flow_run_repo = flow_run_repo
         self.flow_run_terminalizer = flow_run_terminalizer or FlowRunTerminalizer(
-            flow_run_repo
+            flow_run_repo,
+            flow_run_repo.audit_outbox_repo,
         )
         self.flow_version_repo = flow_version_repo
         self.file_repo = file_repo

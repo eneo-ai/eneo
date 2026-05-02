@@ -11,11 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
-from intric.audit.domain.entity_types import EntityType
 from intric.authentication.principal_types import PrincipalType
 from intric.database.tables.files_table import Files
 from intric.database.tables.flow_tables import (
-    FlowRunAuditOutbox,
     FlowRunRerunInvalidatedSteps,
     FlowRunRerunOperations,
     FlowRunReviewCheckpoints,
@@ -55,6 +53,9 @@ from intric.flows.flow_run_step_result_file import (
     FlowRunStepResultFile,
     FlowRunStepResultFileAvailability,
     FlowRunStepResultFileSource,
+)
+from intric.flows.infrastructure.flow_run_audit_outbox_repo import (
+    FlowRunAuditOutboxRepository,
 )
 from intric.flows.principal import FlowAuditActorFields, FlowPrincipal
 from intric.main.exceptions import BadRequestException, NotFoundException
@@ -124,12 +125,6 @@ _REVIEW_CHECKPOINT_TIMESTAMP_BY_STATE = {
 }
 
 
-def flow_run_audit_description(
-    *, action: ActionType, source: FlowRunLifecycleSource
-) -> str:
-    return f"{action.value}:{source.value}"
-
-
 _RERUN_STEP_RESULT_RESET_VALUES: dict[str, object] = {
     "status": FlowStepResultStatus.PENDING.value,
     "current_attempt_no": None,
@@ -160,9 +155,17 @@ class FlowRunRepository:
         FlowStepResultStatus.RUNNING.value,
     )
 
-    def __init__(self, session: AsyncSession, factory: FlowFactory):
+    def __init__(
+        self,
+        session: AsyncSession,
+        factory: FlowFactory,
+        audit_outbox_repo: FlowRunAuditOutboxRepository | None = None,
+    ):
         self.session = session
         self.factory = factory
+        self.audit_outbox_repo = audit_outbox_repo or FlowRunAuditOutboxRepository(
+            session=session
+        )
 
     async def create(
         self,
@@ -428,7 +431,7 @@ class FlowRunRepository:
             )
 
         actor_fields = requester_principal.audit_actor_fields()
-        outbox_id = await self.insert_review_checkpoint_audit_outbox(
+        outbox_id = await self.audit_outbox_repo.insert_review_checkpoint_audit_outbox(
             checkpoint=checkpoint,
             run_revision=updated_run_row.revision,
             action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_OPENED,
@@ -916,7 +919,7 @@ class FlowRunRepository:
                 "actor_api_key_id": None,
             }
         )
-        return await self.insert_review_checkpoint_audit_outbox(
+        return await self.audit_outbox_repo.insert_review_checkpoint_audit_outbox(
             checkpoint=checkpoint,
             run_revision=run_revision,
             action=action,
@@ -1516,87 +1519,6 @@ class FlowRunRepository:
             )
         )
         return int(getattr(result, "rowcount", 0) or 0)
-
-    async def insert_terminal_audit_outbox(
-        self,
-        *,
-        run: FlowRun,
-        description: str,
-        action: ActionType,
-        entity_type: EntityType,
-        actor_id: UUID | None,
-        actor_type: ActorType,
-        actor_api_key_id: UUID | None,
-        source: FlowRunLifecycleSource,
-        target_status: FlowRunStatus,
-        error_code: str | None,
-        error_message: str | None,
-    ) -> UUID:
-        outbox_id = await self.session.scalar(
-            sa.insert(FlowRunAuditOutbox)
-            .values(
-                tenant_id=run.tenant_id,
-                flow_id=run.flow_id,
-                flow_run_id=run.id,
-                run_revision=run.revision,
-                description=description,
-                action=action.value,
-                entity_type=entity_type.value,
-                entity_id=run.id,
-                actor_id=actor_id,
-                actor_type=actor_type.value,
-                actor_api_key_id=actor_api_key_id,
-                source=source.value,
-                target_status=target_status.value,
-                error_code=error_code,
-                error_message=error_message,
-            )
-            .returning(FlowRunAuditOutbox.id)
-        )
-        if outbox_id is None:
-            raise RuntimeError("Flow run audit outbox insert did not return an id.")
-        return outbox_id
-
-    async def insert_review_checkpoint_audit_outbox(
-        self,
-        *,
-        checkpoint: FlowRunReviewCheckpoint,
-        run_revision: int,
-        action: ActionType,
-        actor_id: UUID | None,
-        actor_type: ActorType,
-        actor_api_key_id: UUID | None,
-        source: FlowRunLifecycleSource,
-        target_state: FlowRunReviewCheckpointState,
-        error_code: str | None = None,
-        error_message: str | None = None,
-    ) -> UUID:
-        outbox_id = await self.session.scalar(
-            sa.insert(FlowRunAuditOutbox)
-            .values(
-                tenant_id=checkpoint.tenant_id,
-                flow_id=checkpoint.flow_id,
-                flow_run_id=checkpoint.flow_run_id,
-                run_revision=run_revision,
-                review_checkpoint_id=checkpoint.id,
-                checkpoint_revision=checkpoint.revision,
-                description=flow_run_audit_description(action=action, source=source),
-                action=action.value,
-                entity_type=EntityType.FLOW_RUN_REVIEW_CHECKPOINT.value,
-                entity_id=checkpoint.id,
-                actor_id=actor_id,
-                actor_type=actor_type.value,
-                actor_api_key_id=actor_api_key_id,
-                source=source.value,
-                target_status=target_state.value,
-                error_code=error_code,
-                error_message=error_message,
-            )
-            .returning(FlowRunAuditOutbox.id)
-        )
-        if outbox_id is None:
-            raise RuntimeError("Review checkpoint audit outbox insert returned no id.")
-        return outbox_id
 
     async def update_input_payload(
         self,

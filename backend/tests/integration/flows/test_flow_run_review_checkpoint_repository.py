@@ -35,10 +35,7 @@ from intric.flows.enums import (
     FlowStepResultStatus,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
-from intric.flows.infrastructure.flow_run_repo import (
-    FlowRunRepository,
-    flow_run_audit_description,
-)
+from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.principal import FlowPrincipal
 from intric.main.exceptions import BadRequestException
 
@@ -925,24 +922,21 @@ async def test_review_checkpoint_outbox_uses_checkpoint_revision_key(
             requester_user_id=admin_user.id,
         )
 
-        review_outbox_id = await repo.insert_review_checkpoint_audit_outbox(
-            checkpoint=checkpoint,
-            run_revision=scenario.run.revision,
-            action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_OPENED,
-            actor_id=admin_user.id,
-            actor_type=ActorType.USER,
-            actor_api_key_id=None,
-            source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_OPENED,
-            target_state=FlowRunReviewCheckpointState.AWAITING_REVIEW,
+        review_outbox_id = (
+            await repo.audit_outbox_repo.insert_review_checkpoint_audit_outbox(
+                checkpoint=checkpoint,
+                run_revision=scenario.run.revision,
+                action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_OPENED,
+                actor_id=admin_user.id,
+                actor_type=ActorType.USER,
+                actor_api_key_id=None,
+                source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_OPENED,
+                target_state=FlowRunReviewCheckpointState.AWAITING_REVIEW,
+            )
         )
-        terminal_outbox_id = await repo.insert_terminal_audit_outbox(
+        terminal_outbox_id = await repo.audit_outbox_repo.insert_terminal_audit_outbox(
             run=scenario.run,
-            description=flow_run_audit_description(
-                action=ActionType.FLOW_RUN_CANCELLED,
-                source=FlowRunLifecycleSource.USER_CANCEL,
-            ),
             action=ActionType.FLOW_RUN_CANCELLED,
-            entity_type=EntityType.FLOW_RUN,
             actor_id=admin_user.id,
             actor_type=ActorType.USER,
             actor_api_key_id=None,
@@ -975,7 +969,7 @@ async def test_review_checkpoint_outbox_uses_checkpoint_revision_key(
         )
 
         with pytest.raises(IntegrityError):
-            await repo.insert_review_checkpoint_audit_outbox(
+            await repo.audit_outbox_repo.insert_review_checkpoint_audit_outbox(
                 checkpoint=checkpoint,
                 run_revision=scenario.run.revision,
                 action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_OPENED,
@@ -1076,7 +1070,9 @@ async def test_awaiting_review_run_cancels_active_checkpoint_by_terminalizer(
             next_step_ids=(scenario.step_ids[1],),
         )
 
-        result = await FlowRunTerminalizer(repo).terminalize_run(
+        result = await FlowRunTerminalizer(
+            repo, repo.audit_outbox_repo
+        ).terminalize_run(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
             target_status=FlowRunStatus.CANCELLED,
@@ -1168,7 +1164,9 @@ async def test_reject_review_checkpoint_does_not_add_cancelled_checkpoint_outbox
             reason="Rejected during repository test.",
             principal=FlowPrincipal.from_user(admin_user),
         )
-        result = await FlowRunTerminalizer(repo).terminalize_run(
+        result = await FlowRunTerminalizer(
+            repo, repo.audit_outbox_repo
+        ).terminalize_run(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
             target_status=FlowRunStatus.CANCELLED,

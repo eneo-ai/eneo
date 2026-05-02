@@ -592,7 +592,7 @@ async def test_count_active_runs_counts_only_queued_and_running_statuses(
         active_count = await run_repo.count_active_runs(tenant_id=admin_user.tenant_id)
         assert active_count == 2
 
-        await FlowRunTerminalizer(run_repo).terminalize_run(
+        await FlowRunTerminalizer(run_repo, run_repo.audit_outbox_repo).terminalize_run(
             run_id=queued_run.id,
             tenant_id=admin_user.tenant_id,
             target_status=FlowRunStatus.CANCELLED,
@@ -750,7 +750,7 @@ async def test_terminalization_is_idempotent_after_terminal_transition(
                 }
             ],
         )
-        terminalizer = FlowRunTerminalizer(run_repo)
+        terminalizer = FlowRunTerminalizer(run_repo, run_repo.audit_outbox_repo)
         cancelled = await terminalizer.terminalize_run(
             run_id=run.id,
             tenant_id=admin_user.tenant_id,
@@ -1620,7 +1620,7 @@ async def test_cancel_terminalization_only_updates_pending_or_running_steps(
         )
         await session.flush()
 
-        await FlowRunTerminalizer(run_repo).terminalize_run(
+        await FlowRunTerminalizer(run_repo, run_repo.audit_outbox_repo).terminalize_run(
             run_id=run.id,
             tenant_id=admin_user.tenant_id,
             target_status=FlowRunStatus.CANCELLED,

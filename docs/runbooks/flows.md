@@ -131,6 +131,32 @@ Actions:
 
 Escalate to the Flow runtime owner. A repair script requires a targeted test fixture that reproduces the open-attempt/open-result shape before modifying data.
 
+### Audit Outbox Delivery Backlog
+
+Likely cause: `flows.deliver_audit_outbox` is not scheduled, the Flow worker is not consuming the Flow queue, or audit-log persistence is failing.
+
+Actions:
+
+1. Confirm Celery beat includes `deliver-flow-audit-outbox`.
+2. Confirm worker logs include `flows.deliver_audit_outbox`.
+3. Check recent `flow_run_audit_outbox.delivery_last_error` values without exposing prompts, payloads, or evidence.
+4. Restart the Flow worker/beat process if delivery logs are absent.
+
+Escalate if backlog remains after two delivery intervals or keeps growing while new runs terminalize.
+
+### Audit Outbox Dead Letters
+
+Likely cause: a deterministic audit row projection failure or repeated audit-log persistence failure after bounded retries.
+
+Actions:
+
+1. Treat this as an audit delivery incident.
+2. Preserve the dead-lettered row; do not delete it to silence `/api/healthz/flows`.
+3. Record the row id, delivery error, action, source, and target status in the incident ticket.
+4. Replay or repair only through a reviewed script that keeps `flow_run_audit_outbox.id` equal to the delivered `audit_logs.id`.
+
+Escalate to the Flow runtime owner. Manual SQL updates require a test fixture that reproduces the dead-letter shape before modifying production data.
+
 ## Rollback
 
 If a new Flow runtime release causes repeated `UNHEALTHY` results:

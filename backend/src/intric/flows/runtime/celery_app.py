@@ -10,6 +10,9 @@ from celery.signals import (  # pyright: ignore[reportMissingTypeStubs]
 )
 
 from intric.database.database import sessionmanager
+from intric.flows.application.flow_run_audit_outbox_policy import (
+    FLOW_AUDIT_OUTBOX_DELIVERY_INTERVAL_SECONDS,
+)
 from intric.flows.application.flow_run_recovery_policy import (
     FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS,
 )
@@ -30,6 +33,7 @@ def create_flow_celery_app() -> Celery:
         task_routes={
             "flows.execute": {"queue": settings.flow_celery_queue},
             "flows.reconcile_running": {"queue": settings.flow_celery_queue},
+            "flows.deliver_audit_outbox": {"queue": settings.flow_celery_queue},
         },
     )
     app.conf.update(  # pyright: ignore[reportUnknownMemberType]
@@ -40,7 +44,11 @@ def create_flow_celery_app() -> Celery:
             "reconcile-stale-running": {
                 "task": "flows.reconcile_running",
                 "schedule": float(FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS),
-            }
+            },
+            "deliver-flow-audit-outbox": {
+                "task": "flows.deliver_audit_outbox",
+                "schedule": float(FLOW_AUDIT_OUTBOX_DELIVERY_INTERVAL_SECONDS),
+            },
         },
     )
     return app

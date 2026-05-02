@@ -13,6 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from intric.authentication.principal_types import PrincipalType
 from intric.authentication.service_key_user import build_service_key_user
 from intric.database.database import sessionmanager
+from intric.flows.application.flow_run_audit_outbox_policy import (
+    FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE,
+)
 from intric.flows.application.flow_run_recovery_policy import (
     flow_stale_running_reconcile_after_seconds,
 )
@@ -360,6 +363,21 @@ async def _reconcile_stale_running_runs_all_tenants(
     return {"status": "ok", "reconciled": reconciled}
 
 
+async def _deliver_flow_audit_outbox(
+    *, limit: int = FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE
+) -> dict[str, int | str]:
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        async with session.begin():
+            container = Container(session=providers.Object(session))
+            service = container.flow_run_audit_outbox_delivery_service()
+            result = await service.deliver_due(
+                now=datetime.now(timezone.utc),
+                limit=limit,
+            )
+            return result.to_task_payload()
+
+
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
     name="flows.reconcile_running",
 )
@@ -367,6 +385,18 @@ def reconcile_stale_running_runs() -> dict[str, int | str]:
     loop = _get_flow_task_loop()
     future = asyncio.run_coroutine_threadsafe(
         _reconcile_stale_running_runs_all_tenants(),
+        loop,
+    )
+    return future.result(timeout=30)
+
+
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+    name="flows.deliver_audit_outbox",
+)
+def deliver_flow_audit_outbox() -> dict[str, int | str]:
+    loop = _get_flow_task_loop()
+    future = asyncio.run_coroutine_threadsafe(
+        _deliver_flow_audit_outbox(),
         loop,
     )
     return future.result(timeout=30)

@@ -341,11 +341,261 @@ cd backend && uv run ruff format --check \
   tests/unit/test_api_key_contract_matrix.py
 ```
 
+## Slice 10.3 — Flow Audit Outbox Delivery
+
+### Problem
+
+`flow_run_audit_outbox` now records terminal and review-checkpoint lifecycle facts in the same transaction as the runtime state change, but rows stop there. PRD-003 requires delivery to keep terminal state, retry, and alert; PRD-009 requires retry/delivery state and operational visibility.
+
+### Source Evidence
+
+| Concept | Evidence | Decision |
+|---|---|---|
+| Durable lifecycle write | `backend/src/intric/database/tables/flow_tables.py:1218-1317` owns `FlowRunAuditOutbox`; `backend/src/intric/flows/infrastructure/flow_run_repo.py:1520-1599` inserts terminal and review-checkpoint rows. | Keep the relational outbox as the canonical lifecycle audit fact. |
+| No consumer | `rg "FlowRunAuditOutbox\|flow_run_audit_outbox" backend/src/intric` finds only the table and insert paths. | Add a Flow-owned Celery delivery task; do not use ARQ. |
+| Generic audit write boundary | `backend/src/intric/audit/infrastructure/audit_log_repo_impl.py:84-111` writes `AuditLog` rows directly. | Delivery uses the existing `AuditLogRepository` contract, not `AuditService.log_async`. |
+| Audit feature flags | `backend/src/intric/audit/application/audit_service.py:129-132` can skip audit logs through tenant/config gating. | Flow lifecycle audit bypasses tenant audit feature flags by design because PRD-003 treats it as part of durable runtime state, not best-effort product telemetry. |
+| Existing audit description field | `flow_run_audit_description(...)` returns `action:source`; `ck_flow_run_audit_outbox_description` enforces that shape. | Keep the outbox idempotency key as-is, but synthesize human-readable `audit_logs.description` during delivery. |
+
+### Canonical Owners
+
+| Concept | Canonical home | Why |
+|---|---|---|
+| Outbox row insert, claim, delivery state | `backend/src/intric/flows/infrastructure/flow_run_audit_outbox_repo.py` | The outbox table has its own lifecycle and should not add more methods to `FlowRunRepository`. |
+| Row-to-audit projection and retry policy application | `backend/src/intric/flows/application/flow_run_audit_outbox_delivery.py` | Application layer owns delivery decisions and the transformation into the platform audit domain. |
+| Retry/backlog constants | `backend/src/intric/flows/application/flow_run_audit_outbox_policy.py` | Keeps retry, beat, and health thresholds in one place. |
+| Aggregate health response | `backend/src/intric/flows/runtime/flow_runtime_health.py` | Existing health module owns DB snapshots and pure classification. |
+| Celery task and schedule | `backend/src/intric/flows/runtime/tasks.py`; `backend/src/intric/flows/runtime/celery_app.py` | Existing Flow Celery runtime owns scheduled Flow runtime maintenance. |
+
+### Data Model
+
+Add a migration after `20260502_flow_step_review_policy`:
+
+- `delivery_status`: `pending`, `delivered`, or `dead_lettered`; default `pending`.
+- `delivery_attempts`: integer, default `0`, constrained `>= 0`.
+- `next_delivery_at`: timezone timestamp, default `now()`.
+- `delivered_at`: timezone timestamp, nullable.
+- `dead_lettered_at`: timezone timestamp, nullable.
+- `delivery_last_error`: text, nullable.
+
+Do not add `audit_log_id`. Delivery creates the final audit log with `audit_logs.id == flow_run_audit_outbox.id`, so the outbox primary key is also the idempotency key for the audit row. This avoids a second identifier, avoids dangling FKs when audit retention deletes old audit rows, and makes duplicate delivery safe.
+
+Status constraints:
+
+- `pending`: `delivered_at IS NULL AND dead_lettered_at IS NULL`.
+- `delivered`: `delivered_at IS NOT NULL AND dead_lettered_at IS NULL`.
+- `dead_lettered`: `delivered_at IS NULL AND dead_lettered_at IS NOT NULL`.
+
+Indexes:
+
+- pending delivery index on `next_delivery_at, created_at` where `delivery_status = 'pending'`.
+- dead-letter index on `dead_lettered_at` where `delivery_status = 'dead_lettered'`.
+
+Retention decision: delivered/dead-lettered outbox retention is a follow-up for Slice 10.5 because delivered rows are operational lifecycle records, not a blocker for adding durable delivery. The model intentionally avoids an `audit_logs` FK so audit-log retention cannot break Flow outbox rows.
+
+### Delivery Contract
+
+Policy values live in `flow_run_audit_outbox_policy.py`:
+
+- `FLOW_AUDIT_OUTBOX_DELIVERY_INTERVAL_SECONDS = 60`
+- `FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE = 100`
+- `FLOW_AUDIT_OUTBOX_MAX_ATTEMPTS = 5`
+- `FLOW_AUDIT_OUTBOX_RETRY_BACKOFF_SECONDS = (60, 300, 900, 3600)`
+- `FLOW_AUDIT_OUTBOX_BACKLOG_GRACE_SECONDS = 300`
+
+Delivery loop:
+
+1. Load due pending rows with `FOR UPDATE SKIP LOCKED`.
+2. Process each row in its own nested transaction so one bad row cannot roll back unrelated deliveries.
+3. Build `AuditLog(id=outbox.id, ...)`.
+4. Call `AuditLogRepository.create_if_absent(...)`, implemented with `INSERT ... ON CONFLICT (id) DO NOTHING`, so an existing audit row with the outbox id is treated as already delivered.
+5. Mark the outbox `delivered` in the same transaction.
+6. Domain validation failures dead-letter immediately because retry cannot repair the row.
+7. Unexpected delivery failures schedule bounded retry until max attempts; max attempts dead-letters.
+
+### Audit Projection
+
+The delivered audit log description is synthesized from lifecycle state instead of copying the outbox's `action:source` idempotency string:
+
+| Outbox row | Delivered `audit_logs.description` |
+|---|---|
+| `action=flow_run_completed`, `source=executor_completed` | `Flow run completed by executor_completed.` |
+| `action=flow_run_failed`, `source=task_timeout` | `Flow run failed by task_timeout.` |
+| `action=flow_run_review_checkpoint_approved`, `source=review_checkpoint_approved` | `Flow run review checkpoint approved by review_checkpoint_approved.` |
+
+Delivered metadata keys:
+
+- `flow_id`
+- `flow_run_id`
+- `run_revision`
+- `source`
+- `target_status`
+- `review_checkpoint_id`
+- `checkpoint_revision`
+- `error_code`
+- `outbox_description`
+
+Only `FLOW_RUN_FAILED` maps to `Outcome.FAILURE`; all other lifecycle rows are successful audit records of the lifecycle operation. Failure audit logs use the outbox `error_message`, then `error_code`, then `action:source` to guarantee the audit domain receives a non-empty failure message.
+
+### Health Contract
+
+Extend `/api/healthz/flows` aggregate response with `audit_outbox` counts only:
+
+- `pending_count`
+- `delivery_backlog_count`
+- `dead_lettered_count`
+- `oldest_delivery_backlog_age_seconds`
+- `oldest_dead_lettered_age_seconds`
+
+Flags:
+
+- `AUDIT_OUTBOX_DELIVERY_BACKLOG`: `DEGRADED` when pending rows are older than `FLOW_AUDIT_OUTBOX_BACKLOG_GRACE_SECONDS`.
+- `AUDIT_OUTBOX_DEAD_LETTERS`: `UNHEALTHY` when any dead-lettered row exists.
+
+The public health response must not expose tenant ids, flow ids, run ids, checkpoint ids, outbox ids, audit ids, prompts, payloads, evidence, or raw database errors.
+
+### Expected Files To Change
+
+Source:
+
+- `backend/src/intric/database/tables/flow_tables.py`
+- `backend/alembic/versions/20260502_flow_audit_outbox_delivery.py`
+- `backend/src/intric/flows/infrastructure/flow_run_audit_outbox_repo.py`
+- `backend/src/intric/flows/infrastructure/flow_run_repo.py`
+- `backend/src/intric/flows/application/flow_run_audit_outbox_policy.py`
+- `backend/src/intric/flows/application/flow_run_audit_outbox_delivery.py`
+- `backend/src/intric/flows/application/flow_run_terminalization.py`
+- `backend/src/intric/flows/application/flow_run_service.py`
+- `backend/src/intric/flows/runtime/celery_app.py`
+- `backend/src/intric/flows/runtime/executor.py`
+- `backend/src/intric/flows/runtime/tasks.py`
+- `backend/src/intric/flows/runtime/flow_runtime_health.py`
+- `backend/src/intric/main/container/container.py`
+
+Tests:
+
+- `backend/tests/unittests/flows/test_flow_audit_outbox_delivery.py`
+- `backend/tests/unittests/flows/test_flow_review_checkpoint_data_model.py`
+- `backend/tests/unittests/flows/test_celery_runtime.py`
+- `backend/tests/unittests/flows/test_flow_runtime_health.py`
+- `backend/tests/integration/flows/test_flow_audit_outbox_delivery.py`
+- `backend/tests/integration/flows/test_flow_runtime_health.py`
+- `backend/tests/integration/flows/test_flow_run_repository.py`
+- targeted review/terminalization contract tests that currently call `FlowRunRepository.insert_*_audit_outbox`.
+
+Docs:
+
+- Batch 10 plan/journal/reconciliation/retrospective.
+- `docs/runbooks/flows.md`
+
+### Tests Required
+
+- Delivery creates one `audit_logs` row with `id == outbox.id` and marks the outbox delivered.
+- Re-running delivery for an outbox whose audit log already exists marks delivered without creating a second audit log.
+- In a multi-row batch, a deterministic invalid row dead-letters and valid neighboring rows deliver.
+- Unexpected repository failure schedules retry, then dead-letters at `FLOW_AUDIT_OUTBOX_MAX_ATTEMPTS`.
+- Check constraints reject impossible delivery status/timestamp combinations, unsupported delivery statuses, and negative delivery attempts.
+- Celery app routes and schedules `flows.deliver_audit_outbox` on the Flow queue.
+- Health classification degrades on aged backlog and becomes unhealthy on dead letters.
+- Terminalization still rolls back when outbox insert fails before terminal state change.
+
+### Validation Commands
+
+```bash
+cd backend && uv run pytest \
+  tests/unittests/flows/test_flow_audit_outbox_delivery.py \
+  tests/unittests/flows/test_flow_review_checkpoint_data_model.py \
+  tests/unittests/flows/test_celery_runtime.py \
+  tests/unittests/flows/test_flow_runtime_health.py \
+  tests/integration/flows/test_flow_audit_outbox_delivery.py \
+  tests/integration/flows/test_flow_runtime_health.py \
+  tests/integration/flows/test_flow_terminalization_contract.py \
+  tests/integration/flows/test_flow_run_review_checkpoint_repository.py \
+  tests/integration/flows/test_flow_run_repository.py \
+  -q
+```
+
+```bash
+cd backend && uv run pyright \
+  src/intric/flows/infrastructure/flow_run_audit_outbox_repo.py \
+  src/intric/flows/infrastructure/flow_run_repo.py \
+  src/intric/flows/application/flow_run_audit_outbox_policy.py \
+  src/intric/flows/application/flow_run_audit_outbox_delivery.py \
+  src/intric/flows/application/flow_run_terminalization.py \
+  src/intric/flows/application/flow_run_service.py \
+  src/intric/flows/runtime/celery_app.py \
+  src/intric/flows/runtime/executor.py \
+  src/intric/flows/runtime/tasks.py \
+  src/intric/flows/runtime/flow_runtime_health.py \
+  src/intric/main/container/container.py \
+  tests/unittests/flows/test_flow_audit_outbox_delivery.py \
+  tests/unittests/flows/test_flow_review_checkpoint_data_model.py \
+  tests/unittests/flows/test_celery_runtime.py \
+  tests/unittests/flows/test_flow_runtime_health.py \
+  tests/integration/flows/test_flow_audit_outbox_delivery.py \
+  tests/integration/flows/test_flow_runtime_health.py \
+  tests/integration/flows/test_flow_terminalization_contract.py \
+  tests/integration/flows/test_flow_run_review_checkpoint_repository.py \
+  tests/integration/flows/test_flow_run_repository.py
+```
+
+```bash
+cd backend && uv run ruff check \
+  src/intric/flows/infrastructure/flow_run_audit_outbox_repo.py \
+  src/intric/flows/infrastructure/flow_run_repo.py \
+  src/intric/flows/application/flow_run_audit_outbox_policy.py \
+  src/intric/flows/application/flow_run_audit_outbox_delivery.py \
+  src/intric/flows/application/flow_run_terminalization.py \
+  src/intric/flows/application/flow_run_service.py \
+  src/intric/flows/runtime/celery_app.py \
+  src/intric/flows/runtime/executor.py \
+  src/intric/flows/runtime/tasks.py \
+  src/intric/flows/runtime/flow_runtime_health.py \
+  src/intric/main/container/container.py \
+  tests/unittests/flows/test_flow_audit_outbox_delivery.py \
+  tests/unittests/flows/test_flow_review_checkpoint_data_model.py \
+  tests/unittests/flows/test_celery_runtime.py \
+  tests/unittests/flows/test_flow_runtime_health.py \
+  tests/integration/flows/test_flow_audit_outbox_delivery.py \
+  tests/integration/flows/test_flow_runtime_health.py \
+  tests/integration/flows/test_flow_terminalization_contract.py \
+  tests/integration/flows/test_flow_run_review_checkpoint_repository.py \
+  tests/integration/flows/test_flow_run_repository.py
+```
+
+```bash
+cd backend && uv run ruff format --check \
+  src/intric/flows/infrastructure/flow_run_audit_outbox_repo.py \
+  src/intric/flows/infrastructure/flow_run_repo.py \
+  src/intric/flows/application/flow_run_audit_outbox_policy.py \
+  src/intric/flows/application/flow_run_audit_outbox_delivery.py \
+  src/intric/flows/application/flow_run_terminalization.py \
+  src/intric/flows/application/flow_run_service.py \
+  src/intric/flows/runtime/celery_app.py \
+  src/intric/flows/runtime/executor.py \
+  src/intric/flows/runtime/tasks.py \
+  src/intric/flows/runtime/flow_runtime_health.py \
+  src/intric/main/container/container.py \
+  tests/unittests/flows/test_flow_audit_outbox_delivery.py \
+  tests/unittests/flows/test_flow_review_checkpoint_data_model.py \
+  tests/unittests/flows/test_celery_runtime.py \
+  tests/unittests/flows/test_flow_runtime_health.py \
+  tests/integration/flows/test_flow_audit_outbox_delivery.py \
+  tests/integration/flows/test_flow_runtime_health.py \
+  tests/integration/flows/test_flow_terminalization_contract.py \
+  tests/integration/flows/test_flow_run_review_checkpoint_repository.py \
+  tests/integration/flows/test_flow_run_repository.py
+```
+
+```bash
+cd backend && uv run lint-imports --no-cache
+./scripts/gate-local/anti_slippage.sh --worktree
+```
+
 ## Deferred Batch 10 Slices
 
 | Slice | Scope | Gate |
 |---|---|---|
-| 10.3 | Audit outbox delivery/retry/dead-letter model and worker | Requires explicit delivery-model and data-model approval because `FlowRunAuditOutbox` has no consumer or delivery columns today. |
 | 10.4 | `tool_calls_metadata` cleanup | Requires migration/count proof and generated schema impact review. |
 | 10.5 | Evidence/export/runbook/docs cleanup | After event and health signals exist. |
 | 10.6 | Branding/namespace ADR/backlog closure | No package rename; update docs/backlog only unless separately approved. |

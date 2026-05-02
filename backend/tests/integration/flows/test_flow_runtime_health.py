@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from intric.database.tables.flow_tables import FlowRuns
+from intric.database.tables.flow_tables import FlowRunAuditOutbox, FlowRuns
 from intric.flows.domain.flow import Flow, FlowStep
 from intric.flows.enums import FlowRunStatus
 from intric.flows.flow_factory import FlowFactory
@@ -29,6 +29,7 @@ def _policy() -> FlowRuntimeHealthPolicy:
         stale_running_after_seconds=60,
         stale_running_unhealthy_after_seconds=120,
         terminal_integrity_lookback=timedelta(hours=24),
+        audit_outbox_backlog_grace_seconds=300,
     )
 
 
@@ -315,3 +316,106 @@ async def test_flow_runtime_health_snapshot_reports_stale_runs_and_open_terminal
     ]
     assert response.data_integrity.terminal_runs_with_open_attempts_count == 1
     assert response.data_integrity.terminal_runs_with_active_step_results_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_runtime_health_snapshot_reports_audit_outbox_delivery_state(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        flow = await _create_published_flow(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        policy = _policy()
+        now = datetime.now(timezone.utc)
+        pending_run = await _create_run(
+            run_repo=run_repo,
+            flow=flow,
+            admin_user=admin_user,
+            case="pending-audit-outbox",
+        )
+        dead_lettered_run = await _create_run(
+            run_repo=run_repo,
+            flow=flow,
+            admin_user=admin_user,
+            case="dead-lettered-audit-outbox",
+        )
+        await session.execute(
+            sa.insert(FlowRunAuditOutbox).values(
+                tenant_id=admin_user.tenant_id,
+                flow_id=flow.id,
+                flow_run_id=pending_run.id,
+                run_revision=pending_run.revision,
+                description="flow_run_completed:executor_completed",
+                action="flow_run_completed",
+                entity_type="flow_run",
+                entity_id=pending_run.id,
+                actor_id=admin_user.id,
+                actor_type="user",
+                source="executor_completed",
+                target_status="completed",
+                delivery_status="pending",
+                delivery_attempts=0,
+                next_delivery_at=now
+                - timedelta(seconds=policy.audit_outbox_backlog_grace_seconds + 5),
+                created_at=now - timedelta(minutes=10),
+            )
+        )
+        await session.execute(
+            sa.insert(FlowRunAuditOutbox).values(
+                tenant_id=admin_user.tenant_id,
+                flow_id=flow.id,
+                flow_run_id=dead_lettered_run.id,
+                run_revision=dead_lettered_run.revision,
+                description="flow_run_failed:task_failure",
+                action="flow_run_failed",
+                entity_type="flow_run",
+                entity_id=dead_lettered_run.id,
+                actor_id=admin_user.id,
+                actor_type="user",
+                source="task_failure",
+                target_status="failed",
+                error_code="flow_task_failure",
+                error_message="flow_task_failure: task failed.",
+                delivery_status="dead_lettered",
+                delivery_attempts=5,
+                next_delivery_at=None,
+                dead_lettered_at=now - timedelta(minutes=2),
+                delivery_last_error="ValueError: invalid audit row",
+            )
+        )
+        await session.flush()
+
+        snapshot = await load_flow_runtime_health_snapshot(
+            session=session,
+            now=now,
+            policy=policy,
+        )
+        response = classify_flow_runtime_health(
+            snapshot=snapshot,
+            now=now,
+            policy=policy,
+            probe=FlowRuntimeProbe(db_query_ok=True, db_query_duration_ms=8),
+        )
+
+    assert response.status == FlowRuntimeHealthStatus.UNHEALTHY
+    assert response.status_flags == [
+        FlowRuntimeHealthFlag.AUDIT_OUTBOX_DELIVERY_BACKLOG,
+        FlowRuntimeHealthFlag.AUDIT_OUTBOX_DEAD_LETTERS,
+    ]
+    assert response.audit_outbox.pending_count == 1
+    assert response.audit_outbox.delivery_backlog_count == 1
+    assert response.audit_outbox.dead_lettered_count == 1
+    assert response.audit_outbox.oldest_delivery_backlog_age_seconds == 600
+    assert response.audit_outbox.oldest_dead_lettered_age_seconds == 120

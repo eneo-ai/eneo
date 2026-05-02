@@ -269,7 +269,7 @@ async def test_terminalization_fails_run_once_and_writes_one_outbox_event(
             attempt_no=1,
             celery_task_id="terminalization-contract-other-run",
         )
-        terminalizer = FlowRunTerminalizer(run_repo)
+        terminalizer = FlowRunTerminalizer(run_repo, run_repo.audit_outbox_repo)
 
         with _capture_flow_lifecycle_logs(caplog):
             first = await terminalizer.terminalize_run(
@@ -442,7 +442,7 @@ async def test_terminalization_lost_race_emits_noop_event(
             "terminalize_run_status",
             AsyncMock(return_value=None),
         )
-        terminalizer = FlowRunTerminalizer(run_repo)
+        terminalizer = FlowRunTerminalizer(run_repo, run_repo.audit_outbox_repo)
 
         with _capture_flow_lifecycle_logs(caplog):
             result = await terminalizer.terminalize_run(
@@ -494,7 +494,7 @@ async def test_completed_terminalization_rejects_open_runtime_rows(
             space_factory=space_factory,
             assistant_factory=assistant_factory,
         )
-        terminalizer = FlowRunTerminalizer(run_repo)
+        terminalizer = FlowRunTerminalizer(run_repo, run_repo.audit_outbox_repo)
 
         with pytest.raises(FlowRunTerminalizationInvariantError):
             await terminalizer.terminalize_run(
@@ -537,11 +537,11 @@ async def test_terminalization_rolls_back_when_audit_outbox_insert_fails(
             assistant_factory=assistant_factory,
         )
         monkeypatch.setattr(
-            run_repo,
+            run_repo.audit_outbox_repo,
             "insert_terminal_audit_outbox",
             AsyncMock(side_effect=RuntimeError("outbox unavailable")),
         )
-        terminalizer = FlowRunTerminalizer(run_repo)
+        terminalizer = FlowRunTerminalizer(run_repo, run_repo.audit_outbox_repo)
 
         with _capture_flow_lifecycle_logs(caplog):
             with pytest.raises(RuntimeError, match="outbox unavailable"):

@@ -9,9 +9,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.database.tables.flow_tables import (
+    FlowRunAuditOutbox,
     FlowRuns,
     FlowStepAttempts,
     FlowStepResults,
+)
+from intric.flows.application.flow_run_audit_outbox_policy import (
+    FLOW_AUDIT_OUTBOX_BACKLOG_GRACE_SECONDS,
 )
 from intric.flows.application.flow_run_recovery_policy import (
     FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
@@ -41,6 +45,8 @@ class FlowRuntimeHealthFlag(str, Enum):
     STALE_RUNNING_RECONCILER_LAG = "STALE_RUNNING_RECONCILER_LAG"
     TERMINAL_RUNS_WITH_OPEN_ATTEMPTS = "TERMINAL_RUNS_WITH_OPEN_ATTEMPTS"
     TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS = "TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS"
+    AUDIT_OUTBOX_DELIVERY_BACKLOG = "AUDIT_OUTBOX_DELIVERY_BACKLOG"
+    AUDIT_OUTBOX_DEAD_LETTERS = "AUDIT_OUTBOX_DEAD_LETTERS"
 
 
 class FlowRuntimeProbeFailure(str, Enum):
@@ -54,6 +60,7 @@ class FlowRuntimeHealthPolicy:
     stale_running_after_seconds: int
     stale_running_unhealthy_after_seconds: int
     terminal_integrity_lookback: timedelta
+    audit_outbox_backlog_grace_seconds: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +76,11 @@ class FlowRuntimeHealthSnapshot:
     oldest_terminal_run_with_open_attempts_updated_at: datetime | None = None
     terminal_runs_with_active_step_results_count: int = 0
     oldest_terminal_run_with_active_step_results_updated_at: datetime | None = None
+    audit_outbox_pending_count: int = 0
+    audit_outbox_delivery_backlog_count: int = 0
+    oldest_audit_outbox_delivery_backlog_created_at: datetime | None = None
+    audit_outbox_dead_lettered_count: int = 0
+    oldest_audit_outbox_dead_lettered_at: datetime | None = None
 
 
 class FlowRuntimeProbe(BaseModel):
@@ -95,11 +107,20 @@ class FlowRuntimeDataIntegrity(BaseModel):
     oldest_terminal_run_with_active_step_results_age_seconds: int | None = None
 
 
+class FlowRuntimeAuditOutboxSummary(BaseModel):
+    pending_count: int = 0
+    delivery_backlog_count: int = 0
+    dead_lettered_count: int = 0
+    oldest_delivery_backlog_age_seconds: int | None = None
+    oldest_dead_lettered_age_seconds: int | None = None
+
+
 class FlowRuntimeHealthThresholds(BaseModel):
     stale_queued_after_seconds: int
     stale_running_after_seconds: int
     stale_running_unhealthy_after_seconds: int
     terminal_integrity_lookback_hours: int
+    audit_outbox_backlog_grace_seconds: int
 
 
 class FlowRuntimeHealthResponse(BaseModel):
@@ -113,6 +134,9 @@ class FlowRuntimeHealthResponse(BaseModel):
     runs: FlowRuntimeRunSummary = Field(default_factory=FlowRuntimeRunSummary)
     data_integrity: FlowRuntimeDataIntegrity = Field(
         default_factory=FlowRuntimeDataIntegrity
+    )
+    audit_outbox: FlowRuntimeAuditOutboxSummary = Field(
+        default_factory=FlowRuntimeAuditOutboxSummary
     )
     thresholds: FlowRuntimeHealthThresholds
 
@@ -129,6 +153,7 @@ def build_flow_runtime_health_policy(
             task_timeout_seconds=task_timeout_seconds
         ),
         terminal_integrity_lookback=timedelta(hours=TERMINAL_INTEGRITY_LOOKBACK_HOURS),
+        audit_outbox_backlog_grace_seconds=FLOW_AUDIT_OUTBOX_BACKLOG_GRACE_SECONDS,
     )
 
 
@@ -141,6 +166,9 @@ async def load_flow_runtime_health_snapshot(
     stale_queued_before = now - timedelta(seconds=policy.stale_queued_after_seconds)
     stale_running_before = now - timedelta(seconds=policy.stale_running_after_seconds)
     terminal_integrity_after = now - policy.terminal_integrity_lookback
+    audit_outbox_backlog_before = now - timedelta(
+        seconds=policy.audit_outbox_backlog_grace_seconds
+    )
 
     status_counts = await _load_run_status_counts(session)
     stale_queued = await _load_stale_run_summary(
@@ -163,6 +191,10 @@ async def load_flow_runtime_health_snapshot(
             updated_after=terminal_integrity_after,
         )
     )
+    audit_outbox = await _load_audit_outbox_summary(
+        session=session,
+        backlog_before=audit_outbox_backlog_before,
+    )
 
     return FlowRuntimeHealthSnapshot(
         queued_count=status_counts.get(FlowRunStatus.QUEUED.value, 0),
@@ -182,6 +214,13 @@ async def load_flow_runtime_health_snapshot(
         oldest_terminal_run_with_active_step_results_updated_at=(
             terminal_active_step_results.oldest_updated_at
         ),
+        audit_outbox_pending_count=audit_outbox.pending_count,
+        audit_outbox_delivery_backlog_count=audit_outbox.delivery_backlog_count,
+        oldest_audit_outbox_delivery_backlog_created_at=(
+            audit_outbox.oldest_backlog_created_at
+        ),
+        audit_outbox_dead_lettered_count=audit_outbox.dead_lettered_count,
+        oldest_audit_outbox_dead_lettered_at=(audit_outbox.oldest_dead_lettered_at),
     )
 
 
@@ -200,6 +239,14 @@ def classify_flow_runtime_health(
     active_step_result_age = _age_seconds(
         now,
         snapshot.oldest_terminal_run_with_active_step_results_updated_at,
+    )
+    audit_backlog_age = _age_seconds(
+        now,
+        snapshot.oldest_audit_outbox_delivery_backlog_created_at,
+    )
+    audit_dead_letter_age = _age_seconds(
+        now,
+        snapshot.oldest_audit_outbox_dead_lettered_at,
     )
     status_flags = _flow_runtime_health_flags(
         snapshot=snapshot,
@@ -238,6 +285,13 @@ def classify_flow_runtime_health(
                 active_step_result_age
             ),
         ),
+        audit_outbox=FlowRuntimeAuditOutboxSummary(
+            pending_count=snapshot.audit_outbox_pending_count,
+            delivery_backlog_count=snapshot.audit_outbox_delivery_backlog_count,
+            dead_lettered_count=snapshot.audit_outbox_dead_lettered_count,
+            oldest_delivery_backlog_age_seconds=audit_backlog_age,
+            oldest_dead_lettered_age_seconds=audit_dead_letter_age,
+        ),
         thresholds=FlowRuntimeHealthThresholds(
             stale_queued_after_seconds=policy.stale_queued_after_seconds,
             stale_running_after_seconds=policy.stale_running_after_seconds,
@@ -245,6 +299,9 @@ def classify_flow_runtime_health(
                 policy.stale_running_unhealthy_after_seconds
             ),
             terminal_integrity_lookback_hours=TERMINAL_INTEGRITY_LOOKBACK_HOURS,
+            audit_outbox_backlog_grace_seconds=(
+                policy.audit_outbox_backlog_grace_seconds
+            ),
         ),
     )
 
@@ -272,6 +329,15 @@ def flow_runtime_health_probe_failure_response(
 class _RunSummary:
     count: int
     oldest_updated_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class _AuditOutboxSummary:
+    pending_count: int
+    delivery_backlog_count: int
+    oldest_backlog_created_at: datetime | None
+    dead_lettered_count: int
+    oldest_dead_lettered_at: datetime | None
 
 
 async def _load_run_status_counts(session: AsyncSession) -> dict[str, int]:
@@ -378,6 +444,51 @@ async def _load_terminal_runs_with_active_step_results_summary(
     )
 
 
+async def _load_audit_outbox_summary(
+    *,
+    session: AsyncSession,
+    backlog_before: datetime,
+) -> _AuditOutboxSummary:
+    pending_count = await session.scalar(
+        sa.select(sa.func.count())
+        .select_from(FlowRunAuditOutbox)
+        .where(FlowRunAuditOutbox.delivery_status == "pending")
+    )
+    backlog_count, oldest_backlog_created_at = (
+        await session.execute(
+            sa.select(
+                sa.func.count(),
+                sa.func.min(FlowRunAuditOutbox.created_at),
+            )
+            .select_from(FlowRunAuditOutbox)
+            .where(FlowRunAuditOutbox.delivery_status == "pending")
+            .where(
+                sa.or_(
+                    FlowRunAuditOutbox.next_delivery_at.is_(None),
+                    FlowRunAuditOutbox.next_delivery_at <= backlog_before,
+                )
+            )
+        )
+    ).one()
+    dead_lettered_count, oldest_dead_lettered_at = (
+        await session.execute(
+            sa.select(
+                sa.func.count(),
+                sa.func.min(FlowRunAuditOutbox.dead_lettered_at),
+            )
+            .select_from(FlowRunAuditOutbox)
+            .where(FlowRunAuditOutbox.delivery_status == "dead_lettered")
+        )
+    ).one()
+    return _AuditOutboxSummary(
+        pending_count=int(pending_count or 0),
+        delivery_backlog_count=int(backlog_count or 0),
+        oldest_backlog_created_at=_normalize_datetime(oldest_backlog_created_at),
+        dead_lettered_count=int(dead_lettered_count or 0),
+        oldest_dead_lettered_at=_normalize_datetime(oldest_dead_lettered_at),
+    )
+
+
 def _flow_runtime_health_flags(
     *,
     snapshot: FlowRuntimeHealthSnapshot,
@@ -399,6 +510,10 @@ def _flow_runtime_health_flags(
         flags.append(FlowRuntimeHealthFlag.TERMINAL_RUNS_WITH_OPEN_ATTEMPTS)
     if snapshot.terminal_runs_with_active_step_results_count > 0:
         flags.append(FlowRuntimeHealthFlag.TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS)
+    if snapshot.audit_outbox_delivery_backlog_count > 0:
+        flags.append(FlowRuntimeHealthFlag.AUDIT_OUTBOX_DELIVERY_BACKLOG)
+    if snapshot.audit_outbox_dead_lettered_count > 0:
+        flags.append(FlowRuntimeHealthFlag.AUDIT_OUTBOX_DEAD_LETTERS)
     return flags
 
 
@@ -413,6 +528,7 @@ def _flow_runtime_health_status(
         FlowRuntimeHealthFlag.STALE_RUNNING_RECONCILER_LAG,
         FlowRuntimeHealthFlag.TERMINAL_RUNS_WITH_OPEN_ATTEMPTS,
         FlowRuntimeHealthFlag.TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS,
+        FlowRuntimeHealthFlag.AUDIT_OUTBOX_DEAD_LETTERS,
     }
     if any(flag in unhealthy_flags for flag in status_flags):
         return FlowRuntimeHealthStatus.UNHEALTHY
@@ -424,8 +540,8 @@ def _flow_runtime_health_status(
 def _flow_runtime_status_reason(*, status: FlowRuntimeHealthStatus) -> str:
     return {
         FlowRuntimeHealthStatus.HEALTHY: "Flow runtime DB signals are healthy.",
-        FlowRuntimeHealthStatus.DEGRADED: "Flow runtime has recoverable stale run signals.",
-        FlowRuntimeHealthStatus.UNHEALTHY: "Flow runtime has stale reconciliation lag or terminal-run integrity issues.",
+        FlowRuntimeHealthStatus.DEGRADED: "Flow runtime has recoverable stale run or audit outbox signals.",
+        FlowRuntimeHealthStatus.UNHEALTHY: "Flow runtime has stale reconciliation lag, terminal-run integrity issues, or audit dead letters.",
         FlowRuntimeHealthStatus.UNKNOWN: "Flow runtime DB signals could not be read.",
     }[status]
 

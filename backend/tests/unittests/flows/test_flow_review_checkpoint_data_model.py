@@ -7,6 +7,7 @@ from intric.audit.domain.category_mappings import CATEGORY_MAPPINGS
 from intric.audit.domain.entity_types import EntityType
 from intric.database.tables.flow_tables import (
     FLOW_RUN_ACTIVE_REVIEW_CHECKPOINT_STATE_VALUES,
+    FLOW_RUN_AUDIT_OUTBOX_DELIVERY_STATUS_VALUES,
     FLOW_RUN_AUDIT_TARGET_STATUS_VALUES,
     FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES,
     FLOW_RUN_STATUS_VALUES,
@@ -166,8 +167,34 @@ def test_review_audit_outbox_uses_checkpoint_revision_key() -> None:
     columns = FlowRunAuditOutbox.__table__.columns
 
     assert {"review_checkpoint_id", "checkpoint_revision"}.issubset(columns.keys())
+    assert {
+        "delivery_status",
+        "delivery_attempts",
+        "next_delivery_at",
+        "delivered_at",
+        "dead_lettered_at",
+        "delivery_last_error",
+    }.issubset(columns.keys())
     assert "ck_flow_run_audit_outbox_checkpoint_key" in _constraint_names(
         FlowRunAuditOutbox
+    )
+    assert "ck_flow_run_audit_outbox_delivery_attempts" in _constraint_names(
+        FlowRunAuditOutbox
+    )
+    assert "ck_flow_run_audit_outbox_delivery_status" in _constraint_names(
+        FlowRunAuditOutbox
+    )
+    assert "ck_flow_run_audit_outbox_delivery_timestamps" in _constraint_names(
+        FlowRunAuditOutbox
+    )
+    assert FLOW_RUN_AUDIT_OUTBOX_DELIVERY_STATUS_VALUES == (
+        "pending",
+        "delivered",
+        "dead_lettered",
+    )
+    assert "dead_lettered" in _check_constraint_sql(
+        FlowRunAuditOutbox,
+        "ck_flow_run_audit_outbox_delivery_status",
     )
     assert "awaiting_review" in _check_constraint_sql(
         FlowRunAuditOutbox,
@@ -208,4 +235,29 @@ def test_review_audit_outbox_uses_checkpoint_revision_key() -> None:
     assert (
         str(checkpoint_index.dialect_options["postgresql"]["where"])
         == "review_checkpoint_id IS NOT NULL"
+    )
+
+    pending_delivery_index = _index_by_name(
+        FlowRunAuditOutbox,
+        "ix_flow_run_audit_outbox_pending_delivery",
+    )
+    assert tuple(column.name for column in pending_delivery_index.columns) == (
+        "next_delivery_at",
+        "created_at",
+    )
+    assert (
+        str(pending_delivery_index.dialect_options["postgresql"]["where"])
+        == "delivery_status = 'pending'"
+    )
+
+    dead_lettered_index = _index_by_name(
+        FlowRunAuditOutbox,
+        "ix_flow_run_audit_outbox_dead_lettered",
+    )
+    assert tuple(column.name for column in dead_lettered_index.columns) == (
+        "dead_lettered_at",
+    )
+    assert (
+        str(dead_lettered_index.dialect_options["postgresql"]["where"])
+        == "delivery_status = 'dead_lettered'"
     )

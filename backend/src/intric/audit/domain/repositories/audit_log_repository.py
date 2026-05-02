@@ -40,6 +40,11 @@ class AuditLogRepository(ABC):
         pass
 
     @abstractmethod
+    async def create_if_absent(self, audit_log: AuditLog) -> AuditLog:
+        """Create an audit log entry or return the existing row with the same id."""
+        pass
+
+    @abstractmethod
     async def get_by_id(
         self, audit_log_id: UUID, tenant_id: UUID
     ) -> Optional[AuditLog]:

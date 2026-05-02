@@ -71,6 +71,11 @@ FLOW_RUN_AUDIT_TARGET_STATUS_VALUES = tuple(
         )
     )
 )
+FLOW_RUN_AUDIT_OUTBOX_DELIVERY_STATUS_VALUES = (
+    "pending",
+    "delivered",
+    "dead_lettered",
+)
 FLOW_STEP_RESULT_STATUS_VALUES = tuple(item.value for item in FlowStepResultStatus)
 FLOW_STEP_ATTEMPT_STATUS_VALUES = tuple(item.value for item in FlowStepAttemptStatus)
 FLOW_RUN_STEP_RESULT_FILE_SOURCE_VALUES = ("generated_output", "declared_artifact")
@@ -1216,6 +1221,8 @@ class FlowRunStepResultFiles(BasePublic):
 
 
 class FlowRunAuditOutbox(BasePublic):
+    """The row id is reused as the delivered audit log id."""
+
     __tablename__ = "flow_run_audit_outbox"  # type: ignore[assignment]
 
     tenant_id: Mapped[UUID] = mapped_column(
@@ -1258,6 +1265,29 @@ class FlowRunAuditOutbox(BasePublic):
     target_status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     error_code: Mapped[Optional[str]] = mapped_column(nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(nullable=True)
+    delivery_status: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default="pending",
+    )
+    delivery_attempts: Mapped[int] = mapped_column(
+        nullable=False,
+        server_default="0",
+    )
+    next_delivery_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=True,
+        server_default=sa.func.now(),
+    )
+    delivered_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    dead_lettered_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    delivery_last_error: Mapped[Optional[str]] = mapped_column(sa.Text(), nullable=True)
 
     __table_args__ = (
         Index(
@@ -1312,8 +1342,44 @@ class FlowRunAuditOutbox(BasePublic):
             f"source IN ({_check_values(FLOW_RUN_LIFECYCLE_SOURCE_VALUES)})",
             name="ck_flow_run_audit_outbox_source",
         ),
+        CheckConstraint(
+            "delivery_attempts >= 0",
+            name="ck_flow_run_audit_outbox_delivery_attempts",
+        ),
+        CheckConstraint(
+            "delivery_status IN "
+            f"({_check_values(FLOW_RUN_AUDIT_OUTBOX_DELIVERY_STATUS_VALUES)})",
+            name="ck_flow_run_audit_outbox_delivery_status",
+        ),
+        CheckConstraint(
+            "("
+            "(delivery_status = 'pending' "
+            "AND delivered_at IS NULL "
+            "AND dead_lettered_at IS NULL) "
+            "OR "
+            "(delivery_status = 'delivered' "
+            "AND delivered_at IS NOT NULL "
+            "AND dead_lettered_at IS NULL) "
+            "OR "
+            "(delivery_status = 'dead_lettered' "
+            "AND delivered_at IS NULL "
+            "AND dead_lettered_at IS NOT NULL)"
+            ")",
+            name="ck_flow_run_audit_outbox_delivery_timestamps",
+        ),
         Index("ix_flow_run_audit_outbox_tenant_created", "tenant_id", "created_at"),
         Index("ix_flow_run_audit_outbox_action", "action"),
+        Index(
+            "ix_flow_run_audit_outbox_pending_delivery",
+            "next_delivery_at",
+            "created_at",
+            postgresql_where=sa.text("delivery_status = 'pending'"),
+        ),
+        Index(
+            "ix_flow_run_audit_outbox_dead_lettered",
+            "dead_lettered_at",
+            postgresql_where=sa.text("delivery_status = 'dead_lettered'"),
+        ),
     )
 
 

@@ -8,6 +8,7 @@ from typing import Any, Optional, cast
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import override
 
@@ -109,6 +110,43 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         result = await self.session.scalar(query)
         assert result is not None
         return self._to_domain(result)
+
+    @override
+    async def create_if_absent(self, audit_log: AuditLog) -> AuditLog:
+        query = (
+            pg_insert(AuditLogTable)
+            .values(
+                id=audit_log.id,
+                tenant_id=audit_log.tenant_id,
+                actor_id=audit_log.actor_id,
+                actor_api_key_id=audit_log.actor_api_key_id,
+                actor_type=audit_log.actor_type.value,
+                action=audit_log.action.value,
+                entity_type=audit_log.entity_type.value,
+                entity_id=audit_log.entity_id,
+                timestamp=audit_log.timestamp,
+                description=audit_log.description,
+                log_metadata=audit_log.metadata,
+                outcome=audit_log.outcome.value,
+                ip_address=audit_log.ip_address,
+                user_agent=audit_log.user_agent,
+                request_id=audit_log.request_id,
+                error_message=audit_log.error_message,
+            )
+            .on_conflict_do_nothing(index_elements=[AuditLogTable.id])
+            .returning(AuditLogTable)
+        )
+        result = await self.session.scalar(query)
+        if result is not None:
+            return self._to_domain(result)
+
+        existing_log = await self.get_by_id(
+            audit_log_id=audit_log.id,
+            tenant_id=audit_log.tenant_id,
+        )
+        if existing_log is None:
+            raise RuntimeError("Audit log conflict did not return an existing row.")
+        return existing_log
 
     @override
     async def get_by_id(

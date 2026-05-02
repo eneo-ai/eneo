@@ -20,6 +20,7 @@ def _policy() -> FlowRuntimeHealthPolicy:
         stale_running_after_seconds=120,
         stale_running_unhealthy_after_seconds=240,
         terminal_integrity_lookback=timedelta(hours=24),
+        audit_outbox_backlog_grace_seconds=300,
     )
 
 
@@ -114,6 +115,41 @@ def test_terminal_run_open_work_is_unhealthy() -> None:
         response.data_integrity.oldest_terminal_run_with_active_step_results_age_seconds
         == 60
     )
+
+
+def test_audit_outbox_backlog_degrades_health() -> None:
+    response = _classify(
+        FlowRuntimeHealthSnapshot(
+            audit_outbox_pending_count=2,
+            audit_outbox_delivery_backlog_count=1,
+            oldest_audit_outbox_delivery_backlog_created_at=datetime(
+                2026, 5, 2, 11, 50, tzinfo=timezone.utc
+            ),
+        )
+    )
+
+    assert response.status == FlowRuntimeHealthStatus.DEGRADED
+    assert response.status_flags == [
+        FlowRuntimeHealthFlag.AUDIT_OUTBOX_DELIVERY_BACKLOG
+    ]
+    assert response.audit_outbox.pending_count == 2
+    assert response.audit_outbox.oldest_delivery_backlog_age_seconds == 600
+
+
+def test_audit_outbox_dead_letters_are_unhealthy() -> None:
+    response = _classify(
+        FlowRuntimeHealthSnapshot(
+            audit_outbox_dead_lettered_count=1,
+            oldest_audit_outbox_dead_lettered_at=datetime(
+                2026, 5, 2, 11, 57, tzinfo=timezone.utc
+            ),
+        )
+    )
+
+    assert response.status == FlowRuntimeHealthStatus.UNHEALTHY
+    assert response.status_flags == [FlowRuntimeHealthFlag.AUDIT_OUTBOX_DEAD_LETTERS]
+    assert response.audit_outbox.dead_lettered_count == 1
+    assert response.audit_outbox.oldest_dead_lettered_age_seconds == 180
 
 
 def test_db_probe_failure_makes_health_unknown() -> None:

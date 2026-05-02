@@ -104,10 +104,16 @@ from intric.flows import (
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_service import AIBuilderService
+from intric.flows.application.flow_run_audit_outbox_delivery import (
+    FlowRunAuditOutboxDeliveryService,
+)
 from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from intric.flows.flow_file_upload_service import FlowFileUploadService
 from intric.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from intric.flows.flow_template_asset_service import FlowTemplateAssetService
+from intric.flows.infrastructure.flow_run_audit_outbox_repo import (
+    FlowRunAuditOutboxRepository,
+)
 from intric.flows.runtime.celery_app import celery_app as flow_celery_app
 from intric.flows.runtime.celery_execution_backend import CeleryFlowExecutionBackend
 from intric.group_chat.application.group_chat_service import GroupChatService
@@ -702,14 +708,20 @@ class Container(containers.DeclarativeContainer):
         FlowTemplateAssetRepository,
         session=session,
     )
+    flow_run_audit_outbox_repo = providers.Factory(
+        FlowRunAuditOutboxRepository,
+        session=session,
+    )
     flow_run_repo = providers.Factory(
         FlowRunRepository,
         session=session,
         factory=flow_factory,
+        audit_outbox_repo=flow_run_audit_outbox_repo,
     )
     flow_run_terminalizer = providers.Factory(
         FlowRunTerminalizer,
         flow_run_repo=flow_run_repo,
+        audit_outbox_repo=flow_run_audit_outbox_repo,
     )
     flow_celery_app = providers.Object(flow_celery_app)
     flow_execution_backend = providers.Factory(
@@ -892,6 +904,11 @@ class Container(containers.DeclarativeContainer):
         repository=audit_log_repo,
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
+    )
+    flow_run_audit_outbox_delivery_service = providers.Factory(
+        FlowRunAuditOutboxDeliveryService,
+        audit_outbox_repo=flow_run_audit_outbox_repo,
+        audit_log_repo=audit_log_repo,
     )
     api_key_scope_revoker = providers.Factory(
         ApiKeyScopeRevoker,

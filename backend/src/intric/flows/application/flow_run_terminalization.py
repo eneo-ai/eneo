@@ -7,17 +7,16 @@ from uuid import UUID
 
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
-from intric.audit.domain.entity_types import EntityType
 from intric.flows.application.flow_run_lifecycle_events import (
     emit_flow_run_terminalization_event,
 )
 from intric.flows.domain.flow import FlowRun, FlowRunStatus, JsonObject
 from intric.flows.enums import FlowRunLifecycleSource, is_terminal_flow_run_status
 from intric.flows.flow import FlowStepAttemptStatus, FlowStepResultStatus
-from intric.flows.infrastructure.flow_run_repo import (
-    FlowRunRepository,
-    flow_run_audit_description,
+from intric.flows.infrastructure.flow_run_audit_outbox_repo import (
+    FlowRunAuditOutboxRepository,
 )
+from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.principal import FlowAuditActorFields, FlowPrincipal
 
 logger = logging.getLogger(__name__)
@@ -37,8 +36,13 @@ class FlowRunTerminalizationResult:
 
 
 class FlowRunTerminalizer:
-    def __init__(self, flow_run_repo: FlowRunRepository):
+    def __init__(
+        self,
+        flow_run_repo: FlowRunRepository,
+        audit_outbox_repo: FlowRunAuditOutboxRepository,
+    ):
         self.flow_run_repo = flow_run_repo
+        self.audit_outbox_repo = audit_outbox_repo
 
     async def terminalize_run(
         self,
@@ -223,11 +227,9 @@ class FlowRunTerminalizer:
             source=source,
         )
         action = self._action_for_status(target_status)
-        outbox_id = await self.flow_run_repo.insert_terminal_audit_outbox(
+        outbox_id = await self.audit_outbox_repo.insert_terminal_audit_outbox(
             run=terminal_run,
-            description=flow_run_audit_description(action=action, source=source),
             action=action,
-            entity_type=EntityType.FLOW_RUN,
             actor_id=actor_fields["actor_id"],
             actor_type=actor_fields["actor_type"],
             actor_api_key_id=actor_fields["actor_api_key_id"],
