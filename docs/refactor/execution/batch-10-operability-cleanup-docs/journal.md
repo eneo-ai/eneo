@@ -115,3 +115,63 @@ Verification answers:
 | Does `flow_run_lifecycle_events.py` have only one source importer? | Yes. `rg "flow_run_lifecycle_events\\|emit_flow_run_terminalization_event" backend/src backend/tests` shows the only source importer is `flow_run_terminalization.py`; other references are tests. |
 | Is the module earned beyond Slice 10.1? | Yes for the current slice because it owns a stable event schema separate from terminalization logic. Revisit in later Batch 10 slices if new lifecycle events need a different module shape. |
 | Is `_capture_flow_lifecycle_logs` duplicated elsewhere? | No. Current references are limited to `test_flow_terminalization_contract.py`. |
+
+### Iteration 3 — Slice 10.2 Plan Review
+
+- Chosen slice: Flow runtime health/readiness probe and runbook.
+- Claude artifact: `.codex/artifacts/claude-peer-loop-batch-10-flow-runtime-health-plan-20260502T202644Z.md`
+- Claude verdict: `changes_required`
+- Claude green light: `no`
+- Claude minimum score: `6`
+
+Accepted findings:
+
+| Claude finding | Decision |
+|---|---|
+| `stale_running_count > 0 => UNHEALTHY` would flap while the reconciler is expected to recover runs. | Classify stale running rows as `DEGRADED` until oldest stale-running age exceeds the reconciler grace window; only then emit `STALE_RUNNING_RECONCILER_LAG` / `UNHEALTHY`. |
+| Terminal open-work checks need a recency bound. | Bound terminal-run open-attempt and active-step-result checks to a 24-hour operator-actionable window. |
+| Stale queued/running thresholds would become three sources of truth. | Add `flow_run_recovery_policy.py` and make `FlowRunService`, Flow Celery beat/task code, and the health probe share it. |
+| The SQL snapshot and pure classification boundaries needed to be explicit. | `flow_runtime_health.py` exposes `load_flow_runtime_health_snapshot(...)` and `classify_flow_runtime_health(...)` separately. |
+| `status_flags: list[str]` invites drift. | Use closed `FlowRuntimeHealthFlag` enum values. |
+| DB query flags duplicated probe fields. | Keep DB query state under `probe`; do not add `DB_QUERY_OK`/`DB_QUERY_ERROR` status flags. |
+| Placeholder broker/beat fields are hedge prose. | The response declares `probe.scope=db_only` and omits placeholder queue/beat liveness fields. |
+| Runbook canonical home should be one place. | Add `docs/runbooks/flows.md`; `docs/TROUBLESHOOTING.md` links to it only. |
+
+Implementation summary so far:
+
+- Added `backend/src/intric/flows/application/flow_run_recovery_policy.py`.
+- Added `backend/src/intric/flows/runtime/flow_runtime_health.py`.
+- Placement note: the first plan named `flows/application/flow_runtime_health.py`, but the implementation uses `flows/runtime/flow_runtime_health.py` because the probe is operational diagnostics over runtime DB state and imports SQLAlchemy tables.
+- Registered `GET /api/healthz/flows` under the existing global health surface.
+- Added unit classification tests, integration DB snapshot tests, and the unauthenticated route contract test.
+- Added the Flow runtime runbook and linked it from troubleshooting docs.
+
+### Iteration 4 — Slice 10.2 Verification
+
+- Claude artifact: `.codex/artifacts/claude-peer-loop-batch-10-flow-runtime-health-implementation-20260502T204202Z.md`
+- Claude verdict: `green`
+- Claude green light: `yes`
+- Claude minimum score: `8`
+
+Accepted post-green cleanup:
+
+| Claude note | Change |
+|---|---|
+| Count only active run statuses in the status-count query. | `_load_run_status_counts` filters to `queued`, `running`, and `awaiting_review`. |
+| Probe failure enum casing should match the health response convention. | `FlowRuntimeProbeFailure` values are uppercase. |
+| Route success/failure timestamps should use one captured clock value. | `/api/healthz/flows` passes the route-entry timestamp to both success and failure responses. |
+| Recovery policy constants need a short coupling note. | `flow_run_recovery_policy.py` documents the Celery beat coupling. |
+
+Final validation:
+
+| Command | Result |
+|---|---|
+| `cd backend && uv run ruff check ...` for Slice 10.2 source/tests | Passed |
+| `cd backend && uv run ruff format --check ...` for Slice 10.2 source/tests | Passed |
+| `cd backend && uv run pyright ...` for Slice 10.2 source/tests | Passed |
+| `cd backend && uv run pytest tests/unittests/flows/test_flow_runtime_health.py tests/integration/flows/test_flow_runtime_health.py tests/unit/test_api_key_contract_matrix.py -q` | Passed: `69 passed, 16 warnings` |
+| `cd backend && uv run pytest tests/unittests/flows/test_celery_runtime.py tests/unittests/flows/test_flow_run_service.py::test_reconcile_stale_running_runs_marks_stale_runs_failed tests/unittests/flows/test_flow_run_service.py::test_reconcile_stale_running_runs_skips_already_reconciled_runs -q` | Passed: `14 passed, 10 warnings` |
+| `cd backend && uv run lint-imports --no-cache` | Passed: `3 kept, 0 broken` |
+| `git diff --check -- ...` for touched source/test/doc paths | Passed |
+| `./scripts/gate-local/anti_slippage.sh --worktree` | Passed |
+| `docker exec eneo-41ae93-eneo-1 true` | Blocked by current Codex process policy before host execution: `approval required by policy, but AskForApproval is set to Never` |

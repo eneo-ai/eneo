@@ -10,6 +10,9 @@ from celery.signals import (  # pyright: ignore[reportMissingTypeStubs]
 )
 
 from intric.database.database import sessionmanager
+from intric.flows.application.flow_run_recovery_policy import (
+    FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS,
+)
 from intric.main.aiohttp_client import aiohttp_client
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
@@ -36,7 +39,7 @@ def create_flow_celery_app() -> Celery:
         beat_schedule={
             "reconcile-stale-running": {
                 "task": "flows.reconcile_running",
-                "schedule": 60.0,
+                "schedule": float(FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS),
             }
         },
     )

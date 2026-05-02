@@ -14,6 +14,15 @@ from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from intric.allowed_origins.get_origin_callback import get_origin
+from intric.flows.runtime.flow_runtime_health import (
+    FlowRuntimeHealthResponse,
+    FlowRuntimeProbe,
+    FlowRuntimeProbeFailure,
+    build_flow_runtime_health_policy,
+    classify_flow_runtime_health,
+    flow_runtime_health_probe_failure_response,
+    load_flow_runtime_health_snapshot,
+)
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.main.request_context import get_request_context
@@ -530,6 +539,60 @@ def get_application():
 
         return response_data
 
+    @app.get("/api/healthz/flows", response_model=FlowRuntimeHealthResponse)
+    async def flow_runtime_health() -> FlowRuntimeHealthResponse:
+        from intric.server.dependencies.container import Container
+
+        settings = get_settings()
+        policy = build_flow_runtime_health_policy(
+            task_timeout_seconds=settings.flow_task_timeout_seconds
+        )
+        query_started_at = time.perf_counter()
+        query_now = datetime.now(timezone.utc)
+
+        async def _load_health_snapshot():
+            async with Container.session_scope() as session:
+                return await load_flow_runtime_health_snapshot(
+                    session=session,
+                    now=query_now,
+                    policy=policy,
+                )
+
+        try:
+            snapshot = await asyncio.wait_for(_load_health_snapshot(), timeout=2.0)
+        except asyncio.TimeoutError:
+            query_duration_ms = int((time.perf_counter() - query_started_at) * 1000)
+            logger.warning("DB query timeout in flow runtime health check")
+            return flow_runtime_health_probe_failure_response(
+                now=query_now,
+                policy=policy,
+                query_duration_ms=query_duration_ms,
+                failure=FlowRuntimeProbeFailure.TIMEOUT,
+            )
+        except Exception as exc:
+            query_duration_ms = int((time.perf_counter() - query_started_at) * 1000)
+            logger.warning(
+                "DB query error in flow runtime health check",
+                extra={"error": str(exc)},
+            )
+            return flow_runtime_health_probe_failure_response(
+                now=query_now,
+                policy=policy,
+                query_duration_ms=query_duration_ms,
+                failure=FlowRuntimeProbeFailure.ERROR,
+            )
+
+        query_duration_ms = int((time.perf_counter() - query_started_at) * 1000)
+        return classify_flow_runtime_health(
+            snapshot=snapshot,
+            now=query_now,
+            policy=policy,
+            probe=FlowRuntimeProbe(
+                db_query_ok=True,
+                db_query_duration_ms=query_duration_ms,
+            ),
+        )
+
     @app.get("/api/healthz/crawler", response_model=CrawlerHealthResponse)
     async def crawler_health(include_all: bool = False) -> CrawlerHealthResponse:
         """Detailed crawler diagnostics. NOT for K8s probes.
@@ -825,6 +888,7 @@ def get_application():
         custom_http_500_exception_handler,
         unhandled_exception_handler,
         get_healthz,
+        flow_runtime_health,
         crawler_health,
         get_version,
     )

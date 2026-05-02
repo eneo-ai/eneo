@@ -188,6 +188,25 @@ class TestPublicEndpoints:
         ]
         assert "get_current_active_user" not in dep_names
 
+    def test_flow_healthz_endpoint_exists_without_auth(self):
+        from intric.server.main import get_application
+
+        app = get_application()
+        flow_route = None
+        for route in app.routes:
+            if getattr(route, "path", None) == "/api/healthz/flows":
+                flow_route = route
+                break
+
+        assert flow_route is not None, "/api/healthz/flows route not found"
+        deps = getattr(flow_route, "dependencies", [])
+        dep_names = [
+            getattr(d.dependency, "__name__", "")
+            for d in deps
+            if hasattr(d, "dependency")
+        ]
+        assert "get_current_active_user" not in dep_names
+
 
 class TestAuthPrecedence:
     """Documents which auth method wins when both are present.

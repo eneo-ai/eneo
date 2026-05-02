@@ -222,11 +222,129 @@ docker exec -w /workspace/backend eneo-41ae93-eneo-1 uv run pytest \
 
 Current Codex process blocks Docker execution before the host can run it; local fallback is the active validation path.
 
+## Slice 10.2 — Flow Runtime Health Probe And Runbook
+
+### Problem
+
+Operators can see coarse backend and crawler health, but Flow runtime readiness still requires manually reading `flow_runs`, Celery logs, reconciliation code, and terminalization tests. PRD-009 requires a Flow runtime health probe and runbooks before Flows can be treated as production-supportable.
+
+### Canonical Owner
+
+| Concept | Current owner | Slice 10.2 decision |
+|---|---|---|
+| Global health endpoints | `backend/src/intric/server/main.py` owns `/api/healthz` and `/api/healthz/crawler`. | Register `/api/healthz/flows` on the same global health surface. Do not add an authenticated `/api/v1/flows` diagnostics route. |
+| Flow stale-run thresholds | `FlowRunService` and Flow Celery tasks currently encode stale queued/running timing. | Centralize in `backend/src/intric/flows/application/flow_run_recovery_policy.py` before publishing threshold values in the health response. |
+| Flow runtime DB health contract | No current owner. | Add `backend/src/intric/flows/runtime/flow_runtime_health.py` for typed response models, DB snapshot loading, and pure health classification. |
+| Flow runtime runbook | No current operator runbook. | Add `docs/runbooks/flows.md`; `docs/TROUBLESHOOTING.md` only links to it. |
+
+### Source Shape
+
+`flow_runtime_health.py` must keep three boundaries visible:
+
+- `load_flow_runtime_health_snapshot(...)`: SQL snapshot only, no status policy.
+- `classify_flow_runtime_health(...)`: pure classification from snapshot, policy, and probe result.
+- `FlowRuntimeHealthResponse`: response model consumed by `server/main.py`.
+
+The response is aggregate-only because the endpoint is unauthenticated. It must not expose tenant IDs, flow IDs, run IDs, trace IDs, audit outbox IDs, prompts, payloads, evidence, or raw database errors.
+
+### Status Rules
+
+| Signal | Health status |
+|---|---|
+| DB query timeout/error | `UNKNOWN` |
+| `TERMINAL_RUNS_WITH_OPEN_ATTEMPTS` | `UNHEALTHY` |
+| `TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS` | `UNHEALTHY` |
+| `STALE_RUNNING_RECONCILER_LAG` | `UNHEALTHY` |
+| `STALE_RUNNING_RUNS` inside reconciler grace | `DEGRADED` |
+| `STALE_QUEUED_RUNS` | `DEGRADED` |
+| No flags and DB query succeeds | `HEALTHY` |
+
+Important adjustment from Claude: stale running count alone is not an unhealthy signal because the scheduled reconciler is expected to see stale running rows briefly. The unhealthy signal is stale running age beyond the reconciler grace window.
+
+### Query Constraints
+
+- Use existing DB state only; do not inspect Celery broker state in this slice.
+- Keep the route timeout at 2 seconds, matching the crawler diagnostics responsiveness guard.
+- Bound terminal-run open-work checks to the recent operator-actionable window (`24h`) so historical corruption cannot make the probe permanently slow or permanently unhealthy.
+- Use closed enum values for status flags; do not create open-ended string flags or value-encoded flags.
+- Do not add metrics backend, migrations, audit delivery columns, or delivery workers in this slice.
+
+### Expected Files To Change
+
+Source:
+
+- `backend/src/intric/flows/application/flow_run_recovery_policy.py`
+- `backend/src/intric/flows/application/flow_run_service.py`
+- `backend/src/intric/flows/runtime/celery_app.py`
+- `backend/src/intric/flows/runtime/tasks.py`
+- `backend/src/intric/flows/runtime/flow_runtime_health.py`
+- `backend/src/intric/server/main.py`
+
+Tests:
+
+- `backend/tests/unittests/flows/test_flow_runtime_health.py`
+- `backend/tests/integration/flows/test_flow_runtime_health.py`
+- `backend/tests/unit/test_api_key_contract_matrix.py`
+
+Docs:
+
+- `docs/runbooks/flows.md`
+- `docs/TROUBLESHOOTING.md`
+- Batch 10 plan/journal/reconciliation/retrospective docs.
+
+### Validation Commands
+
+```bash
+cd backend && uv run pytest \
+  tests/unittests/flows/test_flow_runtime_health.py \
+  tests/integration/flows/test_flow_runtime_health.py \
+  tests/unit/test_api_key_contract_matrix.py \
+  -q
+```
+
+```bash
+cd backend && uv run pyright \
+  src/intric/flows/application/flow_run_recovery_policy.py \
+  src/intric/flows/application/flow_run_service.py \
+  src/intric/flows/runtime/celery_app.py \
+  src/intric/flows/runtime/tasks.py \
+  src/intric/flows/runtime/flow_runtime_health.py \
+  src/intric/server/main.py \
+  tests/unittests/flows/test_flow_runtime_health.py \
+  tests/integration/flows/test_flow_runtime_health.py \
+  tests/unit/test_api_key_contract_matrix.py
+```
+
+```bash
+cd backend && uv run ruff check \
+  src/intric/flows/application/flow_run_recovery_policy.py \
+  src/intric/flows/application/flow_run_service.py \
+  src/intric/flows/runtime/celery_app.py \
+  src/intric/flows/runtime/tasks.py \
+  src/intric/flows/runtime/flow_runtime_health.py \
+  src/intric/server/main.py \
+  tests/unittests/flows/test_flow_runtime_health.py \
+  tests/integration/flows/test_flow_runtime_health.py \
+  tests/unit/test_api_key_contract_matrix.py
+```
+
+```bash
+cd backend && uv run ruff format --check \
+  src/intric/flows/application/flow_run_recovery_policy.py \
+  src/intric/flows/application/flow_run_service.py \
+  src/intric/flows/runtime/celery_app.py \
+  src/intric/flows/runtime/tasks.py \
+  src/intric/flows/runtime/flow_runtime_health.py \
+  src/intric/server/main.py \
+  tests/unittests/flows/test_flow_runtime_health.py \
+  tests/integration/flows/test_flow_runtime_health.py \
+  tests/unit/test_api_key_contract_matrix.py
+```
+
 ## Deferred Batch 10 Slices
 
 | Slice | Scope | Gate |
 |---|---|---|
-| 10.2 | Flow runtime health/readiness probe and runbook | Can proceed without migration if it reads current DB state only. |
 | 10.3 | Audit outbox delivery/retry/dead-letter model and worker | Requires explicit delivery-model and data-model approval because `FlowRunAuditOutbox` has no consumer or delivery columns today. |
 | 10.4 | `tool_calls_metadata` cleanup | Requires migration/count proof and generated schema impact review. |
 | 10.5 | Evidence/export/runbook/docs cleanup | After event and health signals exist. |

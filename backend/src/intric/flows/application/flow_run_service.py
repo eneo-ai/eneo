@@ -8,6 +8,10 @@ from typing import Any, Literal, Protocol, Sequence, TypedDict, cast
 from uuid import UUID
 
 from intric.files.file_repo import FileRepository
+from intric.flows.application.flow_run_recovery_policy import (
+    FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
+    flow_stale_running_reconcile_after_seconds,
+)
 from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from intric.flows.domain.flow import (
     FlowRun,
@@ -156,10 +160,12 @@ class FlowRunService:
         self.queued_redispatch_after_seconds = (
             queued_redispatch_after_seconds
             if queued_redispatch_after_seconds is not None
-            else 30
+            else FLOW_QUEUED_REDISPATCH_AFTER_SECONDS
         )
         self.running_reconcile_after_seconds = (
-            max(int(get_settings().flow_task_timeout_seconds), 1) + 60
+            flow_stale_running_reconcile_after_seconds(
+                task_timeout_seconds=get_settings().flow_task_timeout_seconds
+            )
         )
 
     def _is_tenant_admin(self) -> bool:

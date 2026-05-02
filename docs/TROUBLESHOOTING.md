@@ -34,6 +34,9 @@ Eneo provides dedicated health check endpoints for monitoring:
 # Backend API health (includes worker status)
 curl http://localhost:8123/api/healthz
 
+# Flow runtime diagnostics
+curl http://localhost:8123/api/healthz/flows
+
 # Frontend web health
 curl http://localhost:3000/web/healthz
 
@@ -96,6 +99,8 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 - `healthy`: ARQ worker is running and processing jobs
 - `unhealthy`: Worker health check key expired (worker down)
 - `unknown`: Redis connection error or worker status unclear
+
+Flow-specific stuck queued/running and terminalization integrity incidents are covered in [Flow Runtime Runbook](runbooks/flows.md).
 
 ---
 

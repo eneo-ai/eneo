@@ -1,0 +1,447 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+
+import sqlalchemy as sa
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from intric.database.tables.flow_tables import (
+    FlowRuns,
+    FlowStepAttempts,
+    FlowStepResults,
+)
+from intric.flows.application.flow_run_recovery_policy import (
+    FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
+    flow_stale_running_reconcile_after_seconds,
+    flow_stale_running_unhealthy_after_seconds,
+)
+from intric.flows.enums import (
+    TERMINAL_FLOW_RUN_STATUSES,
+    FlowRunStatus,
+    FlowStepAttemptStatus,
+    FlowStepResultStatus,
+)
+
+TERMINAL_INTEGRITY_LOOKBACK_HOURS = 24
+
+
+class FlowRuntimeHealthStatus(str, Enum):
+    HEALTHY = "HEALTHY"
+    DEGRADED = "DEGRADED"
+    UNHEALTHY = "UNHEALTHY"
+    UNKNOWN = "UNKNOWN"
+
+
+class FlowRuntimeHealthFlag(str, Enum):
+    STALE_QUEUED_RUNS = "STALE_QUEUED_RUNS"
+    STALE_RUNNING_RUNS = "STALE_RUNNING_RUNS"
+    STALE_RUNNING_RECONCILER_LAG = "STALE_RUNNING_RECONCILER_LAG"
+    TERMINAL_RUNS_WITH_OPEN_ATTEMPTS = "TERMINAL_RUNS_WITH_OPEN_ATTEMPTS"
+    TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS = "TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS"
+
+
+class FlowRuntimeProbeFailure(str, Enum):
+    TIMEOUT = "TIMEOUT"
+    ERROR = "ERROR"
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRuntimeHealthPolicy:
+    stale_queued_after_seconds: int
+    stale_running_after_seconds: int
+    stale_running_unhealthy_after_seconds: int
+    terminal_integrity_lookback: timedelta
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRuntimeHealthSnapshot:
+    queued_count: int = 0
+    running_count: int = 0
+    awaiting_review_count: int = 0
+    stale_queued_count: int = 0
+    stale_running_count: int = 0
+    oldest_stale_queued_updated_at: datetime | None = None
+    oldest_stale_running_updated_at: datetime | None = None
+    terminal_runs_with_open_attempts_count: int = 0
+    oldest_terminal_run_with_open_attempts_updated_at: datetime | None = None
+    terminal_runs_with_active_step_results_count: int = 0
+    oldest_terminal_run_with_active_step_results_updated_at: datetime | None = None
+
+
+class FlowRuntimeProbe(BaseModel):
+    scope: str = "db_only"
+    db_query_ok: bool
+    db_query_duration_ms: int | None = None
+    db_query_failure: FlowRuntimeProbeFailure | None = None
+
+
+class FlowRuntimeRunSummary(BaseModel):
+    queued_count: int = 0
+    running_count: int = 0
+    awaiting_review_count: int = 0
+    stale_queued_count: int = 0
+    stale_running_count: int = 0
+    oldest_stale_queued_age_seconds: int | None = None
+    oldest_stale_running_age_seconds: int | None = None
+
+
+class FlowRuntimeDataIntegrity(BaseModel):
+    terminal_runs_with_open_attempts_count: int = 0
+    oldest_terminal_run_with_open_attempts_age_seconds: int | None = None
+    terminal_runs_with_active_step_results_count: int = 0
+    oldest_terminal_run_with_active_step_results_age_seconds: int | None = None
+
+
+class FlowRuntimeHealthThresholds(BaseModel):
+    stale_queued_after_seconds: int
+    stale_running_after_seconds: int
+    stale_running_unhealthy_after_seconds: int
+    terminal_integrity_lookback_hours: int
+
+
+class FlowRuntimeHealthResponse(BaseModel):
+    status: FlowRuntimeHealthStatus
+    status_flags: list[FlowRuntimeHealthFlag] = Field(
+        default_factory=list[FlowRuntimeHealthFlag]
+    )
+    status_reason: str
+    response_timestamp_utc: datetime
+    probe: FlowRuntimeProbe
+    runs: FlowRuntimeRunSummary = Field(default_factory=FlowRuntimeRunSummary)
+    data_integrity: FlowRuntimeDataIntegrity = Field(
+        default_factory=FlowRuntimeDataIntegrity
+    )
+    thresholds: FlowRuntimeHealthThresholds
+
+
+def build_flow_runtime_health_policy(
+    *, task_timeout_seconds: int
+) -> FlowRuntimeHealthPolicy:
+    return FlowRuntimeHealthPolicy(
+        stale_queued_after_seconds=FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
+        stale_running_after_seconds=flow_stale_running_reconcile_after_seconds(
+            task_timeout_seconds=task_timeout_seconds
+        ),
+        stale_running_unhealthy_after_seconds=flow_stale_running_unhealthy_after_seconds(
+            task_timeout_seconds=task_timeout_seconds
+        ),
+        terminal_integrity_lookback=timedelta(hours=TERMINAL_INTEGRITY_LOOKBACK_HOURS),
+    )
+
+
+async def load_flow_runtime_health_snapshot(
+    *,
+    session: AsyncSession,
+    now: datetime,
+    policy: FlowRuntimeHealthPolicy,
+) -> FlowRuntimeHealthSnapshot:
+    stale_queued_before = now - timedelta(seconds=policy.stale_queued_after_seconds)
+    stale_running_before = now - timedelta(seconds=policy.stale_running_after_seconds)
+    terminal_integrity_after = now - policy.terminal_integrity_lookback
+
+    status_counts = await _load_run_status_counts(session)
+    stale_queued = await _load_stale_run_summary(
+        session=session,
+        status=FlowRunStatus.QUEUED,
+        stale_before=stale_queued_before,
+    )
+    stale_running = await _load_stale_run_summary(
+        session=session,
+        status=FlowRunStatus.RUNNING,
+        stale_before=stale_running_before,
+    )
+    terminal_open_attempts = await _load_terminal_runs_with_open_attempts_summary(
+        session=session,
+        updated_after=terminal_integrity_after,
+    )
+    terminal_active_step_results = (
+        await _load_terminal_runs_with_active_step_results_summary(
+            session=session,
+            updated_after=terminal_integrity_after,
+        )
+    )
+
+    return FlowRuntimeHealthSnapshot(
+        queued_count=status_counts.get(FlowRunStatus.QUEUED.value, 0),
+        running_count=status_counts.get(FlowRunStatus.RUNNING.value, 0),
+        awaiting_review_count=status_counts.get(FlowRunStatus.AWAITING_REVIEW.value, 0),
+        stale_queued_count=stale_queued.count,
+        stale_running_count=stale_running.count,
+        oldest_stale_queued_updated_at=stale_queued.oldest_updated_at,
+        oldest_stale_running_updated_at=stale_running.oldest_updated_at,
+        terminal_runs_with_open_attempts_count=terminal_open_attempts.count,
+        oldest_terminal_run_with_open_attempts_updated_at=(
+            terminal_open_attempts.oldest_updated_at
+        ),
+        terminal_runs_with_active_step_results_count=(
+            terminal_active_step_results.count
+        ),
+        oldest_terminal_run_with_active_step_results_updated_at=(
+            terminal_active_step_results.oldest_updated_at
+        ),
+    )
+
+
+def classify_flow_runtime_health(
+    *,
+    snapshot: FlowRuntimeHealthSnapshot,
+    now: datetime,
+    policy: FlowRuntimeHealthPolicy,
+    probe: FlowRuntimeProbe,
+) -> FlowRuntimeHealthResponse:
+    stale_queued_age = _age_seconds(now, snapshot.oldest_stale_queued_updated_at)
+    stale_running_age = _age_seconds(now, snapshot.oldest_stale_running_updated_at)
+    open_attempt_age = _age_seconds(
+        now, snapshot.oldest_terminal_run_with_open_attempts_updated_at
+    )
+    active_step_result_age = _age_seconds(
+        now,
+        snapshot.oldest_terminal_run_with_active_step_results_updated_at,
+    )
+    status_flags = _flow_runtime_health_flags(
+        snapshot=snapshot,
+        stale_running_age_seconds=stale_running_age,
+        policy=policy,
+    )
+    status = _flow_runtime_health_status(
+        probe=probe,
+        status_flags=status_flags,
+    )
+
+    return FlowRuntimeHealthResponse(
+        status=status,
+        status_flags=status_flags,
+        status_reason=_flow_runtime_status_reason(status=status),
+        response_timestamp_utc=now,
+        probe=probe,
+        runs=FlowRuntimeRunSummary(
+            queued_count=snapshot.queued_count,
+            running_count=snapshot.running_count,
+            awaiting_review_count=snapshot.awaiting_review_count,
+            stale_queued_count=snapshot.stale_queued_count,
+            stale_running_count=snapshot.stale_running_count,
+            oldest_stale_queued_age_seconds=stale_queued_age,
+            oldest_stale_running_age_seconds=stale_running_age,
+        ),
+        data_integrity=FlowRuntimeDataIntegrity(
+            terminal_runs_with_open_attempts_count=(
+                snapshot.terminal_runs_with_open_attempts_count
+            ),
+            oldest_terminal_run_with_open_attempts_age_seconds=open_attempt_age,
+            terminal_runs_with_active_step_results_count=(
+                snapshot.terminal_runs_with_active_step_results_count
+            ),
+            oldest_terminal_run_with_active_step_results_age_seconds=(
+                active_step_result_age
+            ),
+        ),
+        thresholds=FlowRuntimeHealthThresholds(
+            stale_queued_after_seconds=policy.stale_queued_after_seconds,
+            stale_running_after_seconds=policy.stale_running_after_seconds,
+            stale_running_unhealthy_after_seconds=(
+                policy.stale_running_unhealthy_after_seconds
+            ),
+            terminal_integrity_lookback_hours=TERMINAL_INTEGRITY_LOOKBACK_HOURS,
+        ),
+    )
+
+
+def flow_runtime_health_probe_failure_response(
+    *,
+    now: datetime,
+    policy: FlowRuntimeHealthPolicy,
+    query_duration_ms: int | None,
+    failure: FlowRuntimeProbeFailure,
+) -> FlowRuntimeHealthResponse:
+    return classify_flow_runtime_health(
+        snapshot=FlowRuntimeHealthSnapshot(),
+        now=now,
+        policy=policy,
+        probe=FlowRuntimeProbe(
+            db_query_ok=False,
+            db_query_duration_ms=query_duration_ms,
+            db_query_failure=failure,
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _RunSummary:
+    count: int
+    oldest_updated_at: datetime | None
+
+
+async def _load_run_status_counts(session: AsyncSession) -> dict[str, int]:
+    rows = (
+        await session.execute(
+            sa.select(FlowRuns.status, sa.func.count())
+            .select_from(FlowRuns)
+            .where(
+                FlowRuns.status.in_(
+                    (
+                        FlowRunStatus.QUEUED.value,
+                        FlowRunStatus.RUNNING.value,
+                        FlowRunStatus.AWAITING_REVIEW.value,
+                    )
+                )
+            )
+            .group_by(FlowRuns.status)
+        )
+    ).all()
+    return {str(status): int(count or 0) for status, count in rows}
+
+
+async def _load_stale_run_summary(
+    *,
+    session: AsyncSession,
+    status: FlowRunStatus,
+    stale_before: datetime,
+) -> _RunSummary:
+    count, oldest_updated_at = (
+        await session.execute(
+            sa.select(sa.func.count(), sa.func.min(FlowRuns.updated_at))
+            .select_from(FlowRuns)
+            .where(FlowRuns.status == status.value)
+            .where(FlowRuns.updated_at <= stale_before)
+        )
+    ).one()
+    return _RunSummary(
+        count=int(count or 0),
+        oldest_updated_at=_normalize_datetime(oldest_updated_at),
+    )
+
+
+async def _load_terminal_runs_with_open_attempts_summary(
+    *,
+    session: AsyncSession,
+    updated_after: datetime,
+) -> _RunSummary:
+    terminal_statuses = tuple(status.value for status in TERMINAL_FLOW_RUN_STATUSES)
+    count, oldest_updated_at = (
+        await session.execute(
+            sa.select(
+                sa.func.count(sa.distinct(FlowRuns.id)),
+                sa.func.min(FlowRuns.updated_at),
+            )
+            .select_from(FlowRuns)
+            .join(FlowStepAttempts, FlowStepAttempts.flow_run_id == FlowRuns.id)
+            .where(FlowRuns.status.in_(terminal_statuses))
+            .where(FlowRuns.updated_at >= updated_after)
+            .where(
+                FlowStepAttempts.status.in_(
+                    (
+                        FlowStepAttemptStatus.STARTED.value,
+                        FlowStepAttemptStatus.RETRIED.value,
+                    )
+                )
+            )
+        )
+    ).one()
+    return _RunSummary(
+        count=int(count or 0),
+        oldest_updated_at=_normalize_datetime(oldest_updated_at),
+    )
+
+
+async def _load_terminal_runs_with_active_step_results_summary(
+    *,
+    session: AsyncSession,
+    updated_after: datetime,
+) -> _RunSummary:
+    terminal_statuses = tuple(status.value for status in TERMINAL_FLOW_RUN_STATUSES)
+    count, oldest_updated_at = (
+        await session.execute(
+            sa.select(
+                sa.func.count(sa.distinct(FlowRuns.id)),
+                sa.func.min(FlowRuns.updated_at),
+            )
+            .select_from(FlowRuns)
+            .join(FlowStepResults, FlowStepResults.flow_run_id == FlowRuns.id)
+            .where(FlowRuns.status.in_(terminal_statuses))
+            .where(FlowRuns.updated_at >= updated_after)
+            .where(
+                FlowStepResults.status.in_(
+                    (
+                        FlowStepResultStatus.PENDING.value,
+                        FlowStepResultStatus.RUNNING.value,
+                    )
+                )
+            )
+        )
+    ).one()
+    return _RunSummary(
+        count=int(count or 0),
+        oldest_updated_at=_normalize_datetime(oldest_updated_at),
+    )
+
+
+def _flow_runtime_health_flags(
+    *,
+    snapshot: FlowRuntimeHealthSnapshot,
+    stale_running_age_seconds: int | None,
+    policy: FlowRuntimeHealthPolicy,
+) -> list[FlowRuntimeHealthFlag]:
+    flags: list[FlowRuntimeHealthFlag] = []
+    if snapshot.stale_queued_count > 0:
+        flags.append(FlowRuntimeHealthFlag.STALE_QUEUED_RUNS)
+    if snapshot.stale_running_count > 0:
+        if (
+            stale_running_age_seconds is not None
+            and stale_running_age_seconds > policy.stale_running_unhealthy_after_seconds
+        ):
+            flags.append(FlowRuntimeHealthFlag.STALE_RUNNING_RECONCILER_LAG)
+        else:
+            flags.append(FlowRuntimeHealthFlag.STALE_RUNNING_RUNS)
+    if snapshot.terminal_runs_with_open_attempts_count > 0:
+        flags.append(FlowRuntimeHealthFlag.TERMINAL_RUNS_WITH_OPEN_ATTEMPTS)
+    if snapshot.terminal_runs_with_active_step_results_count > 0:
+        flags.append(FlowRuntimeHealthFlag.TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS)
+    return flags
+
+
+def _flow_runtime_health_status(
+    *,
+    probe: FlowRuntimeProbe,
+    status_flags: list[FlowRuntimeHealthFlag],
+) -> FlowRuntimeHealthStatus:
+    if not probe.db_query_ok:
+        return FlowRuntimeHealthStatus.UNKNOWN
+    unhealthy_flags = {
+        FlowRuntimeHealthFlag.STALE_RUNNING_RECONCILER_LAG,
+        FlowRuntimeHealthFlag.TERMINAL_RUNS_WITH_OPEN_ATTEMPTS,
+        FlowRuntimeHealthFlag.TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS,
+    }
+    if any(flag in unhealthy_flags for flag in status_flags):
+        return FlowRuntimeHealthStatus.UNHEALTHY
+    if status_flags:
+        return FlowRuntimeHealthStatus.DEGRADED
+    return FlowRuntimeHealthStatus.HEALTHY
+
+
+def _flow_runtime_status_reason(*, status: FlowRuntimeHealthStatus) -> str:
+    return {
+        FlowRuntimeHealthStatus.HEALTHY: "Flow runtime DB signals are healthy.",
+        FlowRuntimeHealthStatus.DEGRADED: "Flow runtime has recoverable stale run signals.",
+        FlowRuntimeHealthStatus.UNHEALTHY: "Flow runtime has stale reconciliation lag or terminal-run integrity issues.",
+        FlowRuntimeHealthStatus.UNKNOWN: "Flow runtime DB signals could not be read.",
+    }[status]
+
+
+def _age_seconds(now: datetime, timestamp: datetime | None) -> int | None:
+    if timestamp is None:
+        return None
+    normalized_timestamp = _normalize_datetime(timestamp)
+    if normalized_timestamp is None:
+        return None
+    return max(0, int((now - normalized_timestamp).total_seconds()))
+
+
+def _normalize_datetime(timestamp: datetime | None) -> datetime | None:
+    if timestamp is None:
+        return None
+    if timestamp.tzinfo is None:
+        return timestamp.replace(tzinfo=timezone.utc)
+    return timestamp.astimezone(timezone.utc)

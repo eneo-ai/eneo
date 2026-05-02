@@ -13,6 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from intric.authentication.principal_types import PrincipalType
 from intric.authentication.service_key_user import build_service_key_user
 from intric.database.database import sessionmanager
+from intric.flows.application.flow_run_recovery_policy import (
+    flow_stale_running_reconcile_after_seconds,
+)
 from intric.flows.domain.flow import FlowRunStatus
 from intric.flows.enums import FlowRunLifecycleSource
 from intric.flows.flow_document_limits import resolve_flow_document_render_limits
@@ -325,7 +328,9 @@ async def _reconcile_stale_running_runs_all_tenants(
     *, limit: int = 100
 ) -> dict[str, int | str]:
     stale_before = datetime.now(timezone.utc) - timedelta(
-        seconds=max(1, int(get_settings().flow_task_timeout_seconds)) + 60
+        seconds=flow_stale_running_reconcile_after_seconds(
+            task_timeout_seconds=get_settings().flow_task_timeout_seconds
+        )
     )
     reconciled = 0
     async with sessionmanager.session() as session:
