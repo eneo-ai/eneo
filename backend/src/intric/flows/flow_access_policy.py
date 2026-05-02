@@ -165,10 +165,9 @@ FLOW_ACTION_REQUIREMENTS: dict[FlowApiAction, FlowActionRequirement] = {
         implemented=False,
     ),
     FlowApiAction.RERUN: FlowActionRequirement(
-        required_permissions=(),
+        required_permissions=(Permission.FLOWS_MANAGE,),
         denial_message="You do not have permission to rerun flows.",
         service_key_capability="rerun",
-        implemented=False,
     ),
     FlowApiAction.AUDIT_VIEW: FlowActionRequirement(
         required_permissions=(),
@@ -207,9 +206,7 @@ def require_flow_action(
             and requirement.service_key_allowed_when_requested
         ):
             return
-        raise_service_key_not_supported(
-            capability=requirement.service_key_capability
-        )
+        raise_service_key_not_supported(capability=requirement.service_key_capability)
     if not user_can_perform_flow_action(user, action):
         raise_insufficient_tenant_permission(requirement.denial_message)
 

@@ -35,6 +35,7 @@ def _service_key_user(*permissions: Permission):
         (FlowApiAction.VIEW, [Permission.FLOWS_VIEW]),
         (FlowApiAction.RUN, [Permission.FLOWS_RUN]),
         (FlowApiAction.EDIT, [Permission.FLOWS_MANAGE]),
+        (FlowApiAction.RERUN, [Permission.FLOWS_MANAGE]),
         (
             FlowApiAction.TRACE_VIEW,
             [Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
@@ -56,7 +57,6 @@ def test_policy_accepts_explicit_permissions_for_shipped_actions(
     [
         FlowApiAction.REVIEW,
         FlowApiAction.RESUME,
-        FlowApiAction.RERUN,
         FlowApiAction.AUDIT_VIEW,
     ],
 )
@@ -68,7 +68,7 @@ def test_policy_accepts_explicit_permissions_for_shipped_actions(
         [Permission.FLOWS_RUN],
     ],
 )
-def test_legacy_permissions_do_not_grant_future_actions(
+def test_coarse_permissions_do_not_grant_unimplemented_actions(
     action: FlowApiAction, permissions: list[Permission]
 ) -> None:
     assert user_can_perform_flow_action(_user(*permissions), action) is False
@@ -80,14 +80,48 @@ def test_legacy_permissions_do_not_grant_future_actions(
         FlowApiAction.VIEW,
         FlowApiAction.RUN,
         FlowApiAction.EDIT,
+        FlowApiAction.RERUN,
         FlowApiAction.BUILDER_SESSION_CREATE,
         FlowApiAction.TRACE_VIEW,
     ],
 )
-def test_legacy_flows_alias_keeps_current_shipped_grants(
+def test_coarse_flows_alias_keeps_current_shipped_grants(
     action: FlowApiAction,
 ) -> None:
     assert user_can_perform_flow_action(_user(Permission.FLOWS), action) is True
+
+
+def test_rerun_requires_manage_permission_not_run_or_view() -> None:
+    require_flow_action(_user(Permission.FLOWS_MANAGE), FlowApiAction.RERUN)
+
+    for permission in (Permission.FLOWS_RUN, Permission.FLOWS_VIEW):
+        user = _user(permission)
+
+        assert user_can_perform_flow_action(user, FlowApiAction.RERUN) is False
+        with pytest.raises(UnauthorizedException, match="rerun flows"):
+            require_flow_action(user, FlowApiAction.RERUN)
+
+
+def test_rerun_rejects_service_key_principals() -> None:
+    service_key_user = _service_key_user(Permission.FLOWS_MANAGE)
+
+    with pytest.raises(UnauthorizedException) as default_exc_info:
+        require_flow_action(service_key_user, FlowApiAction.RERUN)
+
+    assert default_exc_info.value.code == "flow_service_key_principal_not_supported"
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        require_flow_action(
+            service_key_user,
+            FlowApiAction.RERUN,
+            allow_service_key_principals=True,
+        )
+
+    assert exc_info.value.code == "flow_service_key_principal_not_supported"
+    assert exc_info.value.context == {
+        "auth_layer": "service_key_principal",
+        "capability": "rerun",
+    }
 
 
 def test_builder_actions_require_edit_and_builder_permissions() -> None:
@@ -143,10 +177,7 @@ def test_service_key_ownership_decode_has_one_source_owner() -> None:
         if path.name == "principal.py":
             continue
         text = path.read_text()
-        if (
-            'getattr(key, "ownership", "user")' in text
-            or "def is_service_key" in text
-        ):
+        if 'getattr(key, "ownership", "user")' in text or "def is_service_key" in text:
             offenders.append(str(path.relative_to(flow_root)))
 
     assert offenders == []
