@@ -312,35 +312,14 @@ IN_PROGRESS
   - Final verification returned green content but the parser rejected Markdown-bold headers, artifact `.codex/artifacts/claude-peer-loop-claude-peer-loop-20260502T150946Z.md`
   - Parser-clean final verification returned `GREEN_LIGHT: yes`, min score 9, artifact `.codex/artifacts/claude-peer-loop-claude-peer-loop-20260502T151334Z.md`
 - Reconciliation: `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-14.md`
-- Outcome: evidence rerun-lineage implementation green and ready to commit
+- Outcome: evidence rerun-lineage implementation green and committed as `e0c95a9c flows: include rerun lineage in evidence exports`
 
 ## Repository Gate
 
 - Branch: `feature/refactor-flows-flowai`
-- HEAD: `3ca48f8b flows: execute rerun attempts with lineage`
+- HEAD: `e0c95a9c flows: include rerun lineage in evidence exports`
 - Staged files: none
-- Pending Batch 8 files:
-  - `backend/src/intric/flows/ai_builder/ai_builder_domain_models.py`
-  - `backend/src/intric/flows/api/flow_models.py`
-  - `backend/src/intric/flows/application/flow_run_service.py`
-  - `backend/src/intric/flows/flow_run_evidence.py`
-  - `backend/src/intric/flows/infrastructure/flow_run_repo.py`
-  - `backend/src/intric/flows/flow_run_evidence_bundle.py`
-  - `backend/src/intric/flows/flow_run_export_json.py`
-  - `backend/src/intric/flows/flow_run_evidence_export_manifest.py`
-  - `backend/tests/integration/flows/test_flow_evidence_api_contracts.py`
-  - `backend/tests/integration/flows/test_flow_run_rerun_repository.py`
-  - `backend/tests/unit/test_flow_openapi_contract.py`
-  - `backend/tests/unittests/flows/test_flow_models.py`
-  - `backend/tests/unittests/flows/test_flow_router.py`
-  - `backend/tests/unittests/flows/test_flow_run_evidence.py`
-  - `backend/tests/unittests/flows/test_flow_run_service.py`
-  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-14.md`
-  - `docs/refactor/execution/batch-8-step-rerun/journal.md`
-  - `docs/refactor/execution/batch-8-step-rerun/plan.md`
-  - `frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts`
-  - `frontend/packages/intric-js/src/types/resources.d.ts`
-  - `frontend/packages/intric-js/src/types/schema.d.ts`
+- Pending Batch 8 files: none; Batch 8 source/test/docs work is committed through `e0c95a9c`.
 - Known do-not-stage local files:
   - `frontend/packages/ui/src/icons/types.d.ts`
   - `scripts/run_codex_review.sh`

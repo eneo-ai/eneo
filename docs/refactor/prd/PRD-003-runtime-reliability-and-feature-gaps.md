@@ -5,7 +5,7 @@
 2. Terminalization must be one idempotent command, not scattered caller-specific status flips.
 3. Per-step file mapping should use one canonical `step_inputs` request shape and delete top-level `file_ids`.
 4. Rerun must invalidate by DAG dependencies, not step order.
-5. Human review must checkpoint, yield the worker, and resume by dispatching a fresh task.
+5. Human review must checkpoint, yield the worker, and resume by re-queuing the existing execution task.
 
 ## Problem
 
@@ -29,7 +29,7 @@ Feature gaps are real but cannot be endpoint-only:
 
 - Do not implement UI-only pause/rerun states.
 - Do not create a generic `RunControl` endpoint.
-- Do not normalize arbitrary runtime payload blobs into tables; Phase 7 already chooses relational owners for lifecycle file references, rerun operations, review checkpoints, and audit/outbox rows.
+- Do not normalize arbitrary runtime payload blobs into tables; Phase 7 already chooses relational owners for lifecycle file references, rerun operations, review checkpoints, and audit outbox rows.
 - Do not block Celery workers while waiting for humans.
 
 ## Users
@@ -70,8 +70,8 @@ sequenceDiagram
   else review checkpoint
     Lifecycle->>DB: checkpoint + next pointer
     Worker-->>Worker: exits task
-    API->>Lifecycle: resume with revision
-    Lifecycle->>Worker: dispatch fresh task
+    API->>Lifecycle: resume with checkpoint revision and idempotency key
+    Lifecycle->>Worker: dispatch existing execution task
   end
 ```
 
@@ -104,7 +104,7 @@ sequenceDiagram
 
 ### Data Model Requirements
 
-- [ ] Review checkpoints have schema version, reviewer, original output, edited output, decision, timestamps, and expected revision.
+- [ ] Review checkpoints have schema version, reviewer, original output, current reviewed output, decision, timestamps, and expected revision.
 - [ ] Rerun stores attempt lineage and invalidation/supersession metadata.
 
 ### Frontend Requirements
@@ -244,9 +244,9 @@ Evidence supersession rule: rerun never deletes historical attempts. It marks pr
 
 | Transition | Preconditions | Postconditions |
 |---|---|---|
-| Step completes and needs review | Run is running; step output exists; review policy applies. | Checkpoint row/payload exists; run status is human-waiting; worker exits. |
-| Edit checkpoint | Checkpoint active; principal has review permission; revision matches. | Edited output revision increments; audit event written. |
-| Resume | Active checkpoint; expected revision matches; principal has resume permission. | Run redispatched from next pointer; checkpoint closed/resumed; worker rehydrates. |
+| Step completes and needs review | Run is running; step output exists; review policy applies. | Checkpoint row/payload exists; run status is `awaiting_review`; worker exits. |
+| Edit checkpoint | Checkpoint active; principal has review permission; revision matches. | Current reviewed output revision increments; audit event written. |
+| Resume | Approved checkpoint; expected revision and idempotency key match. | Run moves `awaiting_review -> queued`; existing execution task rehydrates from persisted state. |
 | Cancel while waiting | Checkpoint active; principal can cancel. | Run terminalized cancelled; checkpoint closed/cancelled; audit event written. |
 
 Persisted checkpoint schema:
@@ -259,9 +259,8 @@ Persisted checkpoint schema:
   "step_id": "step-uuid",
   "attempt_no": 1,
   "next_step_ids": ["next-step-uuid"],
-  "editable_payload": {"transcript": "..."},
   "original_payload": {"transcript": "..."},
-  "edited_payload": null,
+  "current_payload": {"transcript": "..."},
   "revision": 1,
   "state": "awaiting_review",
   "reviewer_principal": null,
@@ -274,11 +273,11 @@ Worker-yield sequence:
 
 1. Executor finishes a step and detects review policy.
 2. Lifecycle owner persists the checkpoint and run/step human-waiting state in one transaction.
-3. Lifecycle owner writes audit/outbox event for checkpoint opened.
+3. Lifecycle owner writes audit outbox event for checkpoint opened.
 4. Worker returns a completed task result such as `{"status": "awaiting_review"}` and releases the slot.
 5. Reviewer edits/approves through API with expected revision.
-6. Resume command closes checkpoint and dispatches a fresh task.
-7. Fresh task rehydrates run state from persisted checkpoint and continues from `next_step_ids`.
+6. Resume command CASes checkpoint/run state, moves the run to `queued`, commits, and dispatches the existing execution task.
+7. The task rehydrates run state from persisted checkpoint and continues from `next_step_ids`.
 
 Stale edit semantics:
 
@@ -293,10 +292,10 @@ Review permission matrix:
 
 | Action | Required Permission |
 |---|---|
-| View checkpoint | `flow.review` or `flow.audit.view` depending on payload sensitivity |
-| Edit checkpoint | `flow.review` |
-| Approve/reject checkpoint | `flow.review` |
-| Resume after approval | `flow.resume` or combined reviewed-resume policy decided by ADR |
+| View checkpoint | Existing flow view permission |
+| Edit checkpoint | Flow manage permission for Batch 9 |
+| Approve/reject checkpoint | Flow manage permission for Batch 9 |
+| Resume after approval | Flow manage permission for Batch 9 |
 | Cancel waiting run | Existing cancel permission plus lifecycle policy |
 
 ### Terminalization Contract
@@ -360,22 +359,22 @@ Claude's final Phase 7 review identified an indirect shared audit path: `backend
 
 ### Chosen Pause/Edit/Resume Mechanism
 
-Choose option 4: **DB state machine plus thin Celery resume task that re-enters the executor**. This incorporates the good part of option 1: the current task exits at the pause point and resume dispatches a fresh task. It rejects Celery chain/chord gates and periodic reconciliation as the primary resume mechanism.
+Choose option 4: **DB state machine plus resume re-queue through the existing execution task**. This incorporates the good part of option 1: the current task exits at the pause point and resume dispatches a new execution attempt through the existing task path. It rejects Celery chain/chord gates, a separate resume task, and periodic reconciliation as the primary resume mechanism.
 
 | Option | Decision | Reason |
 |---|---|---|
-| Terminate task at pause and dispatch fresh Celery task on resume | Partial | Correct worker-yield mechanic, but insufficient unless checkpoint state/revision/idempotency are first-class DB facts. |
+| Terminate task at pause and dispatch the existing execution task on resume | Partial | Correct worker-yield mechanic, but insufficient unless checkpoint state/revision/idempotency are first-class DB facts. |
 | Celery chain/chord with human-gate node | Rejected | Human waits are indefinite; chains/chords are the wrong owner and risk worker/broker complexity. |
 | Periodic reconciliation task picks up paused runs | Rejected as primary, kept as safety net | Resume should be immediate API-driven dispatch; reconciliation can expire stale checkpoints or repair orphan state. |
-| DB state machine plus thin resume task | Accepted | Best long-term owner for revision, duplicate resume, audit, frontend state, and crash recovery. |
+| DB state machine plus existing-task resume re-queue | Accepted | Best long-term owner for revision, duplicate resume, audit, frontend state, and crash recovery without a second execution task path. |
 
 Concrete design:
 
-- Persist at pause: `flow_run_review_checkpoints` row with schema version, state, revision, tenant, run, flow, step, attempt, original output, editable/edited output JSON, next-step pointer, reviewer/requester principals, expected resume deadline, audit/outbox event, and run status `waiting_for_review`.
+- Persist at pause: `flow_run_review_checkpoints` row with schema version, state, revision, tenant, run, flow, step, attempt, original output, current reviewed output JSON, next-step pointer, reviewer/requester principals, audit outbox event, and run status `awaiting_review`.
 - Task exits: current Celery task commits checkpoint and returns `{"status": "awaiting_review"}`.
 - Resume API: `POST /flows/{flow_id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume` with expected revision and idempotency key.
-- Resume task: `FlowRunResumeCommand(run_id, flow_id, tenant_id, checkpoint_id, expected_revision, idempotency_key, requested_by_principal)` on the Flow Celery queue; the task reloads state from DB and re-enters executor.
-- Duplicate resume: compare-and-set checkpoint `awaiting_review` to `resumed`; duplicate idempotency key returns the same resume operation; stale revision returns `flow_review_stale_revision`.
+- Resume dispatch: the service CASes checkpoint/run state, stores the idempotency key, moves the run to `queued`, commits, and dispatches the existing `flows.execute` task with IDs only.
+- Duplicate resume: duplicate idempotency key returns the same accepted checkpoint/run response; stale revision returns `flow_review_stale_revision`.
 - Retry behavior: task payload contains IDs only; retry reloads checkpoint/run state and exits if already resumed/cancelled/terminal.
 - Terminalization: resume/cancel/timeout paths use the same idempotent terminalization command.
 - Audit/outbox: checkpoint opened/edited/resumed/cancelled events write to durable outbox in the same transaction as state changes.
@@ -383,7 +382,7 @@ Concrete design:
 
 ### Terminalization And Outbox Preconditions
 
-Before adding review/rerun, implement the terminalization command and durable audit/outbox table.
+Before adding review/rerun, implement the terminalization command and durable audit outbox table.
 
 Claude identified a current reliability issue: duplicate terminalization can re-emit audit when `update_status` returns the existing terminal row, and stale-running reconciliation does not close open attempts. Phase 7 accepts this attack.
 
@@ -399,18 +398,18 @@ terminalize_run(run_id, tenant_id, target_status, source, error_code?, error_mes
 - closing pending/running step results
 - closing open attempts
 - output/error payload projection
-- audit/outbox row insert
+- audit outbox row insert
 - metrics labels
 - idempotent no-op when already terminal
 
-### Status Predicate Sweep For `waiting_for_review`
+### Status Predicate Sweep For `awaiting_review`
 
 Adding review status requires one migration and one predicate sweep. Update:
 
 - `flow_runs.status` CHECK at `backend/src/intric/database/tables/flow_tables.py:397-399`
 - active/terminal status sets in repositories, service, executor, API schemas, generated frontend types, frontend status helpers
-- stale-running reconciler so waiting runs are not failed as worker stalls
-- concurrency limiter so `waiting_for_review` runs do not occupy active worker slots
+- stale-running reconciler so awaiting-review runs are not failed as worker stalls
+- concurrency limiter so `awaiting_review` runs do not occupy active worker slots
 - default checkpoint TTL policy: no automatic cancellation; reconciliation only repairs orphaned checkpoint/run state unless a later ADR/product decision adds expiry
 
 ### Step Rerun Data Model
@@ -446,8 +445,8 @@ Explicit rejection should return `flow_run_legacy_file_ids_not_supported`; do no
 - [ ] `FlowRunCreateRequest` no longer exposes top-level `file_ids`.
 - [ ] Rerun returns DAG-derived `invalidated_step_ids`.
 - [ ] Human review persists checkpoint and exits worker.
-- [ ] Resume re-dispatches a fresh task and validates expected revision.
-- [ ] Evidence distinguishes original vs edited review output.
+- [ ] Resume re-queues the existing execution task and validates expected checkpoint revision plus run revision CAS.
+- [ ] Evidence distinguishes original vs current reviewed output.
 
 ## Implementation Checklist
 
@@ -486,5 +485,5 @@ For rerun and review, keep endpoints disabled until contract tests pass. If revi
 
 | Question | Default Recommendation |
 |---|---|
-| Should review checkpoint state live in a table or versioned JSONB? | Closed by Phase 7: use a relational `flow_run_review_checkpoints` owner with typed JSON subpayloads for original/edited output. |
-| Should rerun require `flow.review` or `flow.run` plus `flow.edit`? | Add explicit `flow.rerun` or treat as `flow.review` only if output edits are part of review. |
+| Should review checkpoint state live in a table or versioned JSONB? | Closed by Phase 7: use a relational `flow_run_review_checkpoints` owner with typed JSON subpayloads for original/current reviewed output. |
+| Should rerun require review-style permissions or run permission plus edit permission? | Closed by Batch 8: rerun requires Flow manage permission. |
