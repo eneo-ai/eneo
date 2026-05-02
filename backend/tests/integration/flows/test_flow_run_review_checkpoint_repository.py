@@ -14,6 +14,7 @@ from intric.audit.domain.entity_types import EntityType
 from intric.authentication.principal_types import PrincipalType
 from intric.database.tables.flow_tables import (
     FlowRunAuditOutbox,
+    FlowRunReviewCheckpoints,
     FlowRuns,
     FlowStepResults,
 )
@@ -550,6 +551,215 @@ async def test_open_review_checkpoint_replays_existing_attempt_without_second_ou
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_edit_review_checkpoint_updates_projection_without_execution_hash(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_review_checkpoint_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        await repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        await _complete_reviewed_step_result(session=session, scenario=scenario)
+        await session.execute(
+            sa.update(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == scenario.flow_run_id)
+            .where(FlowStepResults.step_id == scenario.step_ids[0])
+            .values(flow_step_execution_hash="execution-hash-before-edit")
+        )
+        opened = await repo.open_review_checkpoint_for_completed_step(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=scenario.step_ids[0],
+            step_order=1,
+            attempt_no=1,
+            requester_principal=FlowPrincipal.from_user(admin_user),
+            next_step_ids=(scenario.step_ids[1],),
+        )
+
+        edited = await repo.edit_review_checkpoint_payload(
+            checkpoint_id=opened.checkpoint.id,
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            expected_revision=opened.checkpoint.revision,
+            current_payload_json={"answer": "edited by reviewer"},
+            principal=FlowPrincipal.from_user(admin_user),
+        )
+        stale_edit = None
+        try:
+            await repo.edit_review_checkpoint_payload(
+                checkpoint_id=opened.checkpoint.id,
+                tenant_id=scenario.tenant_id,
+                flow_id=scenario.flow_id,
+                flow_run_id=scenario.flow_run_id,
+                expected_revision=opened.checkpoint.revision,
+                current_payload_json={"answer": "stale edit"},
+                principal=FlowPrincipal.from_user(admin_user),
+            )
+        except BadRequestException as exc:
+            stale_edit = exc
+        step_result_row = await session.scalar(
+            sa.select(FlowStepResults).where(
+                FlowStepResults.flow_run_id == scenario.flow_run_id,
+                FlowStepResults.step_id == scenario.step_ids[0],
+            )
+        )
+        outbox_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowRunAuditOutbox)
+                    .where(FlowRunAuditOutbox.review_checkpoint_id == edited.id)
+                    .order_by(FlowRunAuditOutbox.checkpoint_revision.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        step_result_values = (
+            (
+                step_result_row.output_payload_json,
+                step_result_row.flow_step_execution_hash,
+            )
+            if step_result_row is not None
+            else None
+        )
+        outbox_actions = [row.action for row in outbox_rows]
+
+    assert edited.state == FlowRunReviewCheckpointState.EDITED
+    assert edited.revision == opened.checkpoint.revision + 1
+    assert edited.current_payload_json == {"answer": "edited by reviewer"}
+    assert stale_edit is not None
+    assert stale_edit.code == "flow_review_stale_revision"
+    assert step_result_values == (
+        {"answer": "edited by reviewer"},
+        "execution-hash-before-edit",
+    )
+    assert outbox_actions == [
+        "flow_run_review_checkpoint_opened",
+        "flow_run_review_checkpoint_edited",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_resume_review_checkpoint_requeues_run_and_replays_idempotently(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_review_checkpoint_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        await repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        await _complete_reviewed_step_result(session=session, scenario=scenario)
+        opened = await repo.open_review_checkpoint_for_completed_step(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=scenario.step_ids[0],
+            step_order=1,
+            attempt_no=1,
+            requester_principal=FlowPrincipal.from_user(admin_user),
+            next_step_ids=(scenario.step_ids[1],),
+        )
+        approved = await repo.approve_review_checkpoint(
+            checkpoint_id=opened.checkpoint.id,
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            expected_revision=opened.checkpoint.revision,
+            principal=FlowPrincipal.from_user(admin_user),
+        )
+
+        resumed = await repo.resume_review_checkpoint(
+            checkpoint_id=approved.id,
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            expected_revision=approved.revision,
+            resume_idempotency_key="resume-key",
+            principal=FlowPrincipal.from_user(admin_user),
+        )
+        replayed = await repo.resume_review_checkpoint(
+            checkpoint_id=approved.id,
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            expected_revision=approved.revision,
+            resume_idempotency_key="resume-key",
+            principal=FlowPrincipal.from_user(admin_user),
+        )
+        already_resumed = None
+        try:
+            await repo.resume_review_checkpoint(
+                checkpoint_id=approved.id,
+                tenant_id=scenario.tenant_id,
+                flow_id=scenario.flow_id,
+                flow_run_id=scenario.flow_run_id,
+                expected_revision=approved.revision,
+                resume_idempotency_key="different-key",
+                principal=FlowPrincipal.from_user(admin_user),
+            )
+        except BadRequestException as exc:
+            already_resumed = exc
+        outbox_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowRunAuditOutbox)
+                    .where(FlowRunAuditOutbox.review_checkpoint_id == approved.id)
+                    .order_by(FlowRunAuditOutbox.checkpoint_revision.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        outbox_actions = [row.action for row in outbox_rows]
+
+    assert resumed.accepted is True
+    assert resumed.checkpoint.state == FlowRunReviewCheckpointState.RESUMED
+    assert resumed.checkpoint.resume_idempotency_key == "resume-key"
+    assert resumed.run.status == FlowRunStatus.QUEUED
+    assert resumed.run.revision == opened.run.revision + 1
+    assert replayed.accepted is False
+    assert replayed.checkpoint.id == resumed.checkpoint.id
+    assert replayed.run.status == FlowRunStatus.QUEUED
+    assert already_resumed is not None
+    assert already_resumed.code == "flow_review_already_resumed"
+    assert outbox_actions == [
+        "flow_run_review_checkpoint_opened",
+        "flow_run_review_checkpoint_approved",
+        "flow_run_review_checkpoint_resumed",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_open_review_checkpoint_requires_running_run_and_completed_step(
     db_container,
     completion_model_factory,
@@ -743,7 +953,7 @@ async def test_mark_running_preserves_original_started_at_on_resume_claim(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_awaiting_review_run_can_be_cancelled_by_terminalizer(
+async def test_awaiting_review_run_cancels_active_checkpoint_by_terminalizer(
     db_container,
     completion_model_factory,
     space_factory,
@@ -759,12 +969,22 @@ async def test_awaiting_review_run_can_be_cancelled_by_terminalizer(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        await session.execute(
-            sa.update(FlowRuns)
-            .where(FlowRuns.id == scenario.flow_run_id)
-            .values(status=FlowRunStatus.AWAITING_REVIEW.value)
-        )
         repo = FlowRunRepository(session=session, factory=FlowFactory())
+        await repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        await _complete_reviewed_step_result(session=session, scenario=scenario)
+        opened = await repo.open_review_checkpoint_for_completed_step(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=scenario.step_ids[0],
+            step_order=1,
+            attempt_no=1,
+            requester_principal=FlowPrincipal.from_user(admin_user),
+            next_step_ids=(scenario.step_ids[1],),
+        )
 
         result = await FlowRunTerminalizer(repo).terminalize_run(
             run_id=scenario.flow_run_id,
@@ -774,9 +994,130 @@ async def test_awaiting_review_run_can_be_cancelled_by_terminalizer(
             error_code="user_cancelled",
             error_message="cancelled in test",
         )
+        checkpoint_row = await session.scalar(
+            sa.select(FlowRunReviewCheckpoints).where(
+                FlowRunReviewCheckpoints.id == opened.checkpoint.id
+            )
+        )
+        checkpoint_outbox_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowRunAuditOutbox)
+                    .where(
+                        FlowRunAuditOutbox.review_checkpoint_id == opened.checkpoint.id
+                    )
+                    .order_by(FlowRunAuditOutbox.checkpoint_revision.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        terminal_outbox_row = await session.scalar(
+            sa.select(FlowRunAuditOutbox).where(
+                FlowRunAuditOutbox.flow_run_id == scenario.flow_run_id,
+                FlowRunAuditOutbox.review_checkpoint_id.is_(None),
+            )
+        )
+        checkpoint_state = checkpoint_row.state if checkpoint_row is not None else None
+        checkpoint_outbox_actions = [row.action for row in checkpoint_outbox_rows]
+        terminal_outbox_action = (
+            terminal_outbox_row.action if terminal_outbox_row is not None else None
+        )
 
     assert result.did_transition is True
     assert result.run.status == FlowRunStatus.CANCELLED
+    assert checkpoint_state == FlowRunReviewCheckpointState.CANCELLED.value
+    assert checkpoint_outbox_actions == [
+        "flow_run_review_checkpoint_opened",
+        "flow_run_review_checkpoint_cancelled",
+    ]
+    assert terminal_outbox_action == "flow_run_cancelled"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_reject_review_checkpoint_does_not_add_cancelled_checkpoint_outbox(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_review_checkpoint_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        await repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        await _complete_reviewed_step_result(session=session, scenario=scenario)
+        opened = await repo.open_review_checkpoint_for_completed_step(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=scenario.step_ids[0],
+            step_order=1,
+            attempt_no=1,
+            requester_principal=FlowPrincipal.from_user(admin_user),
+            next_step_ids=(scenario.step_ids[1],),
+        )
+
+        rejected = await repo.reject_review_checkpoint(
+            checkpoint_id=opened.checkpoint.id,
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            expected_revision=opened.checkpoint.revision,
+            reason="Rejected during repository test.",
+            principal=FlowPrincipal.from_user(admin_user),
+        )
+        result = await FlowRunTerminalizer(repo).terminalize_run(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+            target_status=FlowRunStatus.CANCELLED,
+            source=FlowRunLifecycleSource.REVIEW_REJECTED,
+            error_code="flow_review_rejected",
+            error_message="Rejected during repository test.",
+            principal=FlowPrincipal.from_user(admin_user),
+        )
+        checkpoint_outbox_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowRunAuditOutbox)
+                    .where(
+                        FlowRunAuditOutbox.review_checkpoint_id == opened.checkpoint.id
+                    )
+                    .order_by(FlowRunAuditOutbox.checkpoint_revision.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        terminal_outbox_row = await session.scalar(
+            sa.select(FlowRunAuditOutbox).where(
+                FlowRunAuditOutbox.flow_run_id == scenario.flow_run_id,
+                FlowRunAuditOutbox.review_checkpoint_id.is_(None),
+            )
+        )
+        checkpoint_outbox_actions = [row.action for row in checkpoint_outbox_rows]
+        terminal_outbox_source = (
+            terminal_outbox_row.source if terminal_outbox_row is not None else None
+        )
+
+    assert rejected.state == FlowRunReviewCheckpointState.REJECTED
+    assert result.did_transition is True
+    assert checkpoint_outbox_actions == [
+        "flow_run_review_checkpoint_opened",
+        "flow_run_review_checkpoint_rejected",
+    ]
+    assert terminal_outbox_source == FlowRunLifecycleSource.REVIEW_REJECTED.value
 
 
 @pytest.mark.asyncio

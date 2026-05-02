@@ -319,34 +319,63 @@ Endpoint shape:
 - `POST /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/`
 - `POST /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/`
 
+Public schemas:
+- `FlowRunReviewCheckpointPublic`
+- `FlowRunReviewCheckpointEditRequest`
+- `FlowRunReviewCheckpointApproveRequest`
+- `FlowRunReviewCheckpointRejectRequest`
+- `FlowRunReviewCheckpointResumeRequest`
+- `FlowRunReviewCheckpointResumeResponse`
+
+`FlowRunReviewCheckpointPublic` exposes `id`, `tenant_id`, `flow_id`, `flow_run_id`,
+`step_id`, `step_order`, `attempt_no`, `state`, `revision`, `schema_version`,
+`original_payload_json`, `current_payload_json`, `next_step_ids`, requester/decider
+principal fields, decision timestamps, and row timestamps. It does not expose
+`resume_idempotency_key`; that key is a replay token, not a public checkpoint fact.
+
 Acceptance criteria:
-- [ ] `GET .../review-checkpoints/active/` uses existing `FlowApiAction.VIEW` semantics.
+- [ ] `GET .../review-checkpoints/active/` uses existing `FlowApiAction.VIEW` semantics and returns `200` with `FlowRunReviewCheckpointPublic | null`; `null` means the run currently has no active checkpoint.
+- [ ] Service-key principals keep the same run-visibility boundary as run detail for the active checkpoint read: they may read only checkpoints on runs they own. Product can later narrow this to an evidence-view capability, but Slice 9.4 does not create a second service-key visibility model.
 - [ ] Mutating review endpoints use `FlowApiAction.REVIEW`; resume uses `FlowApiAction.RESUME`.
 - [ ] `FlowApiAction.REVIEW` and `FlowApiAction.RESUME` require `FLOWS_MANAGE` before `implemented=True` is set.
 - [ ] Mutating review/resume routes stay user-principal only; service keys are denied.
 - [ ] Every mutating review endpoint requires `expected_checkpoint_revision`.
+- [ ] Resume idempotency uses the `Idempotency-Key` header, matching `create_flow_run`; missing or blank keys return `flow_review_idempotency_key_required`, and overlong keys return `flow_run_invalid_idempotency_key`.
 - [ ] Edit uses checkpoint revision CAS, updates `current_payload_json`, updates the current step result projection to the same payload, does not update `flow_step_results.flow_step_execution_hash`, increments checkpoint revision, inserts a checkpoint-revision-keyed outbox row, and returns the full checkpoint.
+- [ ] Review mutations lock the run row before the checkpoint row, matching terminalization and checkpoint-open ordering; edit then updates the current step result projection by `(run_id, step_id, current_attempt_no)`, and concurrent edits with the same expected revision produce one winner and one `flow_review_stale_revision`.
+- [ ] Edited payload shape is reviewer-owned in Slice 9.4. The API requires a JSON object but does not validate it against `output_contract`; downstream typed-input validation remains the runtime safety net.
 - [ ] Approve uses checkpoint revision CAS, transitions to `approved`, increments checkpoint revision, inserts a checkpoint-revision-keyed outbox row, and returns the full checkpoint.
 - [ ] Resume requires approved checkpoint state, matching `expected_checkpoint_revision`, and an idempotency key.
-- [ ] Resume CASes checkpoint `approved -> resumed`, stores `resume_idempotency_key`, inserts a checkpoint-revision-keyed outbox row, advances run revision, transitions run `awaiting_review -> queued`, commits, then dispatches the existing `flows.execute` task with IDs only.
-- [ ] Resume does not bypass normal active-run quota; once the run is `queued`, it participates in the existing tenant concurrency limit.
+- [ ] Resume CASes checkpoint `approved -> resumed`, stores `resume_idempotency_key`, inserts one checkpoint-revision-keyed outbox row, advances run revision, transitions run `awaiting_review -> queued`, commits, then dispatches the existing `flows.execute` task with IDs only.
+- [ ] Idempotent resume replay with the same `Idempotency-Key` short-circuits before CAS/outbox insert/dispatch and returns the existing resumed checkpoint plus current run.
+- [ ] Resume does not pre-check the tenant concurrency quota. Once the run is `queued`, it participates in the existing tenant active-run quota like any other queued run.
+- [ ] If post-commit resume dispatch fails, the existing stale queued redispatch owner (`redispatch_stale_queued_runs`) remains the repair path.
 - [ ] Duplicate resume with the same idempotency key returns the same accepted checkpoint/run response.
 - [ ] Resume with a different idempotency key after resume returns `flow_review_already_resumed`.
-- [ ] Resume after cancellation/terminal state returns `flow_review_not_active` or `flow_review_already_resumed` as appropriate.
+- [ ] Resume error codes are state-specific: `flow_review_already_resumed` for `resumed`, `flow_review_rejected` for `rejected`, `flow_review_cancelled` for `cancelled`, and `flow_review_not_approved` for `awaiting_review` or `edited`.
 - [ ] Reject CASes checkpoint to `rejected`, increments checkpoint revision, inserts a checkpoint-revision-keyed outbox row, and calls `terminalize_run(target=CANCELLED, source=REVIEW_REJECTED, error_code="flow_review_rejected")`.
+- [ ] Reject runs in one transaction; if terminalization fails after checkpoint CAS, the checkpoint mutation and checkpoint outbox insert roll back together with the run terminalization.
+- [ ] Reject requires a non-empty `reason` with the rerun reason length limit; missing/blank reason returns `flow_review_reject_reason_required`, and overlong reason returns `flow_review_reject_reason_too_long`.
 - [ ] Rejection uses run status `cancelled`; `source=REVIEW_REJECTED` distinguishes reviewer rejection from user/admin cancellation.
 - [ ] Cancelling a run with an active review checkpoint CASes the checkpoint to `cancelled`, increments checkpoint revision, and inserts a checkpoint-revision-keyed outbox row in the same transaction as run cancellation.
+- [ ] Terminalizer checkpoint cancellation only fires when an active checkpoint exists at cancellation time; reject first transitions the checkpoint to `rejected`, so rejection writes exactly one checkpoint outbox row.
 - [ ] Routers remain HTTP adapters; application service owns transaction orchestration.
+- [ ] New OpenAPI operation IDs are pinned: `get_active_flow_run_review_checkpoint`, `edit_flow_run_review_checkpoint`, `approve_flow_run_review_checkpoint`, `reject_flow_run_review_checkpoint`, and `resume_flow_run_review_checkpoint`.
 
 Tests required:
 - API contract tests for route paths, operation IDs, response models, and error shapes.
-- Service tests for stale edit, duplicate resume, already resumed, cancelled run, rejected checkpoint.
+- Permission tests convert `REVIEW` and `RESUME` from unimplemented negative pins to positive `FLOWS_MANAGE` and coarse `FLOWS` grants; service-key principals remain denied for mutating review/resume endpoints.
+- Service tests for stale edit, edit-then-approve revision, duplicate resume replay, already resumed with another key, rejected checkpoint, cancelled checkpoint, reject reason validation, and service-key denial.
+- Repository integration test for concurrent edit CAS: two edits with the same expected revision produce one persisted edit and one stale-revision failure.
+- Terminalization integration test for cancelling a run with an active checkpoint: run cancellation and checkpoint cancellation outbox rows commit together, and reject writes exactly one checkpoint outbox row.
+- Service or integration test for concurrent reject versus cancel: one terminal transition wins, and persisted audit rows contain one terminal outbox row plus one checkpoint outbox row.
 - Runtime integration test for approve/resume from awaiting review to completed.
 - Runtime integration test proving edit + approve + resume feeds the edited payload to the next step's `previous_step` input source.
-- Permission matrix for user, service key, run owner, `FLOWS_VIEW`, `FLOWS_MANAGE`, `FLOWS_RUN`, and coarse `FLOWS` behavior.
+- Permission matrix for user, service key, tenant admin, space admin, space owner, run owner, `FLOWS_VIEW`, `FLOWS_MANAGE`, `FLOWS_RUN`, and coarse `FLOWS` behavior.
 
 Risk/trade-off:
 - The read endpoint exposes current checkpoint payload through normal flow-view semantics. The response schema must apply the same visibility policy as run detail until product defines a narrower review-view permission.
+- Slice 9.4 intentionally adds checkpoint cancellation inside the terminalizer because terminalization is the canonical run-state transition owner. The test suite must pin that the branch is limited to active checkpoints and does not double-write checkpoint audit rows after reject.
 
 ### Slice 9.5 — Evidence And Export Lineage
 

@@ -20,11 +20,13 @@ from intric.flows.application.flow_run_service import FlowRunService
 from intric.flows.domain.flow import (
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
+    FlowRunReviewCheckpoint,
 )
 from intric.flows.enums import (
     FlowRunLifecycleSource,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
+    FlowRunReviewCheckpointState,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
     RerunDependencyKind,
@@ -44,7 +46,10 @@ from intric.flows.flow_run_rerun_request import (
     build_rerun_request_fingerprint,
 )
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
-from intric.flows.infrastructure.flow_run_repo import FlowRunRerunCommandResult
+from intric.flows.infrastructure.flow_run_repo import (
+    FlowRunRerunCommandResult,
+    FlowRunReviewCheckpointResumeResult,
+)
 from intric.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
     build_published_definition_json,
@@ -365,6 +370,44 @@ def _rerun_command_result(
         run=run,
         invalidated_steps=invalidated_steps,
         created=created,
+    )
+
+
+def _review_checkpoint(
+    user,
+    run: FlowRun,
+    *,
+    state: FlowRunReviewCheckpointState = FlowRunReviewCheckpointState.AWAITING_REVIEW,
+    revision: int = 1,
+    resume_idempotency_key: str | None = None,
+) -> FlowRunReviewCheckpoint:
+    now = datetime.now(timezone.utc)
+    return FlowRunReviewCheckpoint(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        flow_id=run.flow_id,
+        flow_run_id=run.id,
+        step_id=uuid4(),
+        step_order=1,
+        attempt_no=1,
+        state=state,
+        revision=revision,
+        schema_version=1,
+        original_payload_json={"text": "Draft"},
+        current_payload_json={"text": "Draft"},
+        requester_user_id=user.id,
+        requester_principal_type=PrincipalType.USER,
+        decided_by_user_id=None,
+        decided_by_principal_type=None,
+        next_step_ids_json=[],
+        resume_idempotency_key=resume_idempotency_key,
+        edited_at=None,
+        approved_at=None,
+        rejected_at=None,
+        resumed_at=None,
+        cancelled_at=None,
+        created_at=now,
+        updated_at=now,
     )
 
 
@@ -3139,6 +3182,186 @@ async def test_create_run_rejects_invalid_published_snapshot(
         await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
     assert exc_info.value.code == error_code
     assert exc_info.value.context == error_context
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method_name",
+    [
+        "edit_review_checkpoint",
+        "approve_review_checkpoint",
+        "reject_review_checkpoint",
+        "resume_review_checkpoint",
+    ],
+)
+async def test_review_mutations_reject_service_key_principals(user, method_name):
+    service_user = _service_key_user(user)
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    service = FlowRunService(
+        user=service_user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+    method = getattr(service, method_name)
+    kwargs = {
+        "flow_id": uuid4(),
+        "run_id": uuid4(),
+        "checkpoint_id": uuid4(),
+        "expected_checkpoint_revision": 1,
+    }
+    if method_name == "edit_review_checkpoint":
+        kwargs["current_payload_json"] = {"text": "Edited"}
+    if method_name == "reject_review_checkpoint":
+        kwargs["reason"] = "Reject the draft."
+    if method_name == "resume_review_checkpoint":
+        kwargs["idempotency_key"] = "resume-key"
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await method(**kwargs)
+
+    assert exc_info.value.code == "flow_service_key_principal_not_supported"
+    assert exc_info.value.context["auth_layer"] == "service_key_principal"
+    flow_run_repo.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resume_review_checkpoint_requires_idempotency_key(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.resume_review_checkpoint(
+            flow_id=uuid4(),
+            run_id=uuid4(),
+            checkpoint_id=uuid4(),
+            expected_checkpoint_revision=1,
+            idempotency_key=" ",
+        )
+
+    assert exc_info.value.code == "flow_review_idempotency_key_required"
+    flow_run_repo.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reject_review_checkpoint_requires_reason(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.reject_review_checkpoint(
+            flow_id=uuid4(),
+            run_id=uuid4(),
+            checkpoint_id=uuid4(),
+            expected_checkpoint_revision=1,
+            reason=" ",
+        )
+
+    assert exc_info.value.code == "flow_review_reject_reason_required"
+    flow_run_repo.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reject_review_checkpoint_terminalizes_run_with_review_source(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    terminalizer = AsyncMock()
+    run = _run(user=user, flow_id=uuid4()).model_copy(
+        update={"status": FlowRunStatus.AWAITING_REVIEW}
+    )
+    checkpoint = _review_checkpoint(user, run)
+    flow_run_repo.get.return_value = run
+    flow_run_repo.reject_review_checkpoint.return_value = checkpoint
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_terminalizer=terminalizer,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    result = await service.reject_review_checkpoint(
+        flow_id=run.flow_id,
+        run_id=run.id,
+        checkpoint_id=checkpoint.id,
+        expected_checkpoint_revision=checkpoint.revision,
+        reason="Reject the draft.",
+    )
+
+    assert result == checkpoint
+    flow_run_repo.reject_review_checkpoint.assert_awaited_once()
+    terminalizer.terminalize_run.assert_awaited_once()
+    terminal_kwargs = terminalizer.terminalize_run.await_args.kwargs
+    assert terminal_kwargs["run_id"] == run.id
+    assert terminal_kwargs["target_status"] == FlowRunStatus.CANCELLED
+    assert terminal_kwargs["source"] == FlowRunLifecycleSource.REVIEW_REJECTED
+    assert terminal_kwargs["error_code"] == "flow_review_rejected"
+    assert terminal_kwargs["error_message"] == "Reject the draft."
+
+
+@pytest.mark.asyncio
+async def test_resume_review_checkpoint_normalizes_idempotency_key(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    run = _run(user=user, flow_id=uuid4()).model_copy(
+        update={"status": FlowRunStatus.AWAITING_REVIEW}
+    )
+    checkpoint = _review_checkpoint(
+        user,
+        run,
+        state=FlowRunReviewCheckpointState.RESUMED,
+        revision=2,
+        resume_idempotency_key="resume-key",
+    )
+    flow_run_repo.get.return_value = run
+    flow_run_repo.resume_review_checkpoint.return_value = (
+        FlowRunReviewCheckpointResumeResult(
+            checkpoint=checkpoint,
+            run=run,
+            accepted=False,
+        )
+    )
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    result = await service.resume_review_checkpoint(
+        flow_id=run.flow_id,
+        run_id=run.id,
+        checkpoint_id=checkpoint.id,
+        expected_checkpoint_revision=1,
+        idempotency_key=" resume-key ",
+    )
+
+    assert result.accepted is False
+    resume_kwargs = flow_run_repo.resume_review_checkpoint.await_args.kwargs
+    assert resume_kwargs["resume_idempotency_key"] == "resume-key"
 
 
 @pytest.mark.asyncio

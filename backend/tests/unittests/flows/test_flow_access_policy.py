@@ -36,6 +36,8 @@ def _service_key_user(*permissions: Permission):
         (FlowApiAction.RUN, [Permission.FLOWS_RUN]),
         (FlowApiAction.EDIT, [Permission.FLOWS_MANAGE]),
         (FlowApiAction.RERUN, [Permission.FLOWS_MANAGE]),
+        (FlowApiAction.REVIEW, [Permission.FLOWS_MANAGE]),
+        (FlowApiAction.RESUME, [Permission.FLOWS_MANAGE]),
         (
             FlowApiAction.TRACE_VIEW,
             [Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
@@ -55,8 +57,6 @@ def test_policy_accepts_explicit_permissions_for_shipped_actions(
 @pytest.mark.parametrize(
     "action",
     [
-        FlowApiAction.REVIEW,
-        FlowApiAction.RESUME,
         FlowApiAction.AUDIT_VIEW,
     ],
 )
@@ -81,6 +81,8 @@ def test_coarse_permissions_do_not_grant_unimplemented_actions(
         FlowApiAction.RUN,
         FlowApiAction.EDIT,
         FlowApiAction.RERUN,
+        FlowApiAction.REVIEW,
+        FlowApiAction.RESUME,
         FlowApiAction.BUILDER_SESSION_CREATE,
         FlowApiAction.TRACE_VIEW,
     ],
@@ -121,6 +123,29 @@ def test_rerun_rejects_service_key_principals() -> None:
     assert exc_info.value.context == {
         "auth_layer": "service_key_principal",
         "capability": "rerun",
+    }
+
+
+@pytest.mark.parametrize(
+    ("action", "capability"),
+    [
+        (FlowApiAction.REVIEW, "review"),
+        (FlowApiAction.RESUME, "resume"),
+    ],
+)
+def test_review_mutations_reject_service_key_principals(
+    action: FlowApiAction,
+    capability: str,
+) -> None:
+    service_key_user = _service_key_user(Permission.FLOWS_MANAGE)
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        require_flow_action(service_key_user, action)
+
+    assert exc_info.value.code == "flow_service_key_principal_not_supported"
+    assert exc_info.value.context == {
+        "auth_layer": "service_key_principal",
+        "capability": capability,
     }
 
 

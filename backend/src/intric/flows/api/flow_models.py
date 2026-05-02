@@ -16,6 +16,7 @@ from intric.flows.enums import (
     FlowOutputType,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
+    FlowRunReviewCheckpointState,
     FlowRunStatus,
     FlowRuntimeInputFormat,
     FlowStepAttemptStatus,
@@ -254,6 +255,61 @@ FLOW_RUN_STEP_RERUN_RESPONSE_EXAMPLE: dict[str, Any] = {
         "00000000-0000-0000-0000-000000000102",
     ],
     "status": "queued",
+}
+
+FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "id": "00000000-0000-0000-0000-000000000901",
+    "tenant_id": "00000000-0000-0000-0000-000000000010",
+    "flow_id": "00000000-0000-0000-0000-000000000001",
+    "flow_run_id": "00000000-0000-0000-0000-000000000301",
+    "step_id": "00000000-0000-0000-0000-000000000101",
+    "step_order": 1,
+    "attempt_no": 1,
+    "state": "awaiting_review",
+    "revision": 1,
+    "schema_version": 1,
+    "original_payload_json": {"text": "Draft answer."},
+    "current_payload_json": {"text": "Draft answer."},
+    "next_step_ids": ["00000000-0000-0000-0000-000000000102"],
+    "requester_user_id": "00000000-0000-0000-0000-000000000030",
+    "requester_principal_type": "user",
+    "decided_by_user_id": None,
+    "decided_by_principal_type": None,
+    "edited_at": None,
+    "approved_at": None,
+    "rejected_at": None,
+    "resumed_at": None,
+    "cancelled_at": None,
+    "created_at": "2026-03-17T10:05:30Z",
+    "updated_at": "2026-03-17T10:05:30Z",
+}
+
+FLOW_RUN_REVIEW_CHECKPOINT_EDIT_REQUEST_EXAMPLE: dict[str, Any] = {
+    "expected_checkpoint_revision": 1,
+    "current_payload_json": {"text": "Edited answer."},
+}
+
+FLOW_RUN_REVIEW_CHECKPOINT_DECISION_REQUEST_EXAMPLE: dict[str, Any] = {
+    "expected_checkpoint_revision": 2,
+}
+
+FLOW_RUN_REVIEW_CHECKPOINT_REJECT_REQUEST_EXAMPLE: dict[str, Any] = {
+    "expected_checkpoint_revision": 2,
+    "reason": "The draft cannot be used for this case.",
+}
+
+FLOW_RUN_REVIEW_CHECKPOINT_RESUME_RESPONSE_EXAMPLE: dict[str, Any] = {
+    "checkpoint": {
+        **FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE,
+        "state": "resumed",
+        "revision": 3,
+        "resumed_at": "2026-03-17T10:08:00Z",
+    },
+    "run": {
+        **FLOW_RUN_PUBLIC_EXAMPLE,
+        "status": "queued",
+        "revision": 2,
+    },
 }
 
 GRAPH_RESPONSE_EXAMPLE: dict[str, Any] = {
@@ -524,6 +580,92 @@ class FlowRunPublic(BaseModel):
     job_id: UUID | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class FlowRunReviewCheckpointPublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE}
+    )
+
+    id: UUID
+    tenant_id: UUID
+    flow_id: UUID
+    flow_run_id: UUID
+    step_id: UUID
+    step_order: int
+    attempt_no: int
+    state: FlowRunReviewCheckpointState
+    revision: int
+    schema_version: int
+    original_payload_json: dict[str, Any] | None = None
+    current_payload_json: dict[str, Any] | None = None
+    next_step_ids: list[UUID] | None = None
+    requester_user_id: UUID | None = None
+    requester_principal_type: PrincipalType
+    decided_by_user_id: UUID | None = None
+    decided_by_principal_type: PrincipalType | None = None
+    edited_at: datetime | None = None
+    approved_at: datetime | None = None
+    rejected_at: datetime | None = None
+    resumed_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FlowRunReviewCheckpointEditRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": FLOW_RUN_REVIEW_CHECKPOINT_EDIT_REQUEST_EXAMPLE},
+    )
+
+    expected_checkpoint_revision: int = Field(ge=1)
+    current_payload_json: dict[str, Any]
+
+
+class FlowRunReviewCheckpointApproveRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": FLOW_RUN_REVIEW_CHECKPOINT_DECISION_REQUEST_EXAMPLE
+        },
+    )
+
+    expected_checkpoint_revision: int = Field(ge=1)
+
+
+class FlowRunReviewCheckpointRejectRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": FLOW_RUN_REVIEW_CHECKPOINT_REJECT_REQUEST_EXAMPLE
+        },
+    )
+
+    expected_checkpoint_revision: int = Field(ge=1)
+    reason: str = Field(min_length=1, max_length=1024)
+
+
+class FlowRunReviewCheckpointResumeRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": FLOW_RUN_REVIEW_CHECKPOINT_DECISION_REQUEST_EXAMPLE
+        },
+    )
+
+    expected_checkpoint_revision: int = Field(ge=1)
+
+
+class FlowRunReviewCheckpointResumeResponse(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": FLOW_RUN_REVIEW_CHECKPOINT_RESUME_RESPONSE_EXAMPLE
+        }
+    )
+
+    checkpoint: FlowRunReviewCheckpointPublic
+    run: FlowRunPublic
 
 
 class FlowInputPolicyPublic(BaseModel):

@@ -5,6 +5,8 @@ from typing import Any, Sequence
 from intric.flows.api.flow_models import (
     FlowPublic,
     FlowRunPublic,
+    FlowRunReviewCheckpointPublic,
+    FlowRunReviewCheckpointResumeResponse,
     FlowRunStepPublic,
     FlowRunStepRerunResponse,
     FlowRuntimePathsPublic,
@@ -17,6 +19,7 @@ from intric.flows.domain.flow import (
     FlowRun,
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
+    FlowRunReviewCheckpoint,
     FlowSparse,
     FlowStep,
     FlowStepResult,
@@ -133,6 +136,28 @@ class FlowAssembler:
             new_attempt_no=operation.root_attempt_no,
             invalidated_step_ids=[step.step_id for step in invalidated_steps],
             status=operation.status,
+        )
+
+    def to_review_checkpoint_public(
+        self,
+        checkpoint: FlowRunReviewCheckpoint,
+    ) -> FlowRunReviewCheckpointPublic:
+        return FlowRunReviewCheckpointPublic.model_validate(
+            {
+                **checkpoint.model_dump(),
+                "next_step_ids": checkpoint.next_step_ids_json,
+            }
+        )
+
+    def to_review_checkpoint_resume_response(
+        self,
+        *,
+        checkpoint: FlowRunReviewCheckpoint,
+        run: FlowRun,
+    ) -> FlowRunReviewCheckpointResumeResponse:
+        return FlowRunReviewCheckpointResumeResponse(
+            checkpoint=self.to_review_checkpoint_public(checkpoint),
+            run=self.to_run_public(run),
         )
 
     @staticmethod

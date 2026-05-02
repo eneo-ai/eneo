@@ -11,6 +11,7 @@ from intric.files.file_repo import FileRepository
 from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from intric.flows.domain.flow import (
     FlowRun,
+    FlowRunReviewCheckpoint,
     FlowRunStatus,
     FlowStep,
     FlowStepResult,
@@ -57,6 +58,7 @@ from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import (
     FlowRunRepository,
     FlowRunRerunCommandResult,
+    FlowRunReviewCheckpointResumeResult,
     PreseedStep,
     StepInputFileProjection,
 )
@@ -83,6 +85,7 @@ from intric.users.user import UserInDB
 logger = get_logger(__name__)
 
 _RERUN_REASON_MAX_LENGTH = 1024
+_REVIEW_REJECT_REASON_MAX_LENGTH = _RERUN_REASON_MAX_LENGTH
 
 FlowRunAccessKind = Literal[
     "status",
@@ -360,6 +363,49 @@ class FlowRunService:
                 code="flow_run_invalid_idempotency_key",
             )
         return normalized
+
+    def _review_user_principal(self, *, capability: str) -> FlowPrincipal:
+        principal = self._principal()
+        if principal.is_service_key:
+            raise UnauthorizedException(
+                "This Flows endpoint requires a user principal. Service-key principals cannot use this action.",
+                code="flow_service_key_principal_not_supported",
+                context={
+                    "auth_layer": "service_key_principal",
+                    "capability": capability,
+                },
+            )
+        return principal
+
+    def _validate_review_resume_idempotency_key(self, key: str | None) -> str:
+        if key is None or not key.strip():
+            raise BadRequestException(
+                "Review resume requires an Idempotency-Key header.",
+                code="flow_review_idempotency_key_required",
+            )
+        normalized = self._validate_idempotency_key(key)
+        if normalized is None:
+            raise BadRequestException(
+                "Review resume requires an Idempotency-Key header.",
+                code="flow_review_idempotency_key_required",
+            )
+        return normalized
+
+    @staticmethod
+    def _normalize_review_reject_reason(reason: str) -> str:
+        normalized_reason = reason.strip()
+        if not normalized_reason:
+            raise BadRequestException(
+                "Review rejection reason is required.",
+                code="flow_review_reject_reason_required",
+            )
+        if len(normalized_reason) > _REVIEW_REJECT_REASON_MAX_LENGTH:
+            raise BadRequestException(
+                "Review rejection reason must be at most 1024 characters.",
+                code="flow_review_reject_reason_too_long",
+                context={"max_length": _REVIEW_REJECT_REASON_MAX_LENGTH},
+            )
+        return normalized_reason
 
     async def create_run(
         self,
@@ -872,6 +918,113 @@ class FlowRunService:
         return await self.flow_run_repo.list_result_files_for_runs(
             run_ids=run_ids,
             tenant_id=self.user.tenant_id,
+        )
+
+    async def get_active_review_checkpoint(
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+    ) -> FlowRunReviewCheckpoint | None:
+        run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="content")
+        return await self.flow_run_repo.get_active_review_checkpoint(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+        )
+
+    async def edit_review_checkpoint(
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+        checkpoint_id: UUID,
+        expected_checkpoint_revision: int,
+        current_payload_json: JsonObject,
+    ) -> FlowRunReviewCheckpoint:
+        principal = self._review_user_principal(capability="review")
+        run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="content")
+        return await self.flow_run_repo.edit_review_checkpoint_payload(
+            checkpoint_id=checkpoint_id,
+            tenant_id=self.user.tenant_id,
+            flow_id=flow_id,
+            flow_run_id=run.id,
+            expected_revision=expected_checkpoint_revision,
+            current_payload_json=current_payload_json,
+            principal=principal,
+        )
+
+    async def approve_review_checkpoint(
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+        checkpoint_id: UUID,
+        expected_checkpoint_revision: int,
+    ) -> FlowRunReviewCheckpoint:
+        principal = self._review_user_principal(capability="review")
+        run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="content")
+        return await self.flow_run_repo.approve_review_checkpoint(
+            checkpoint_id=checkpoint_id,
+            tenant_id=self.user.tenant_id,
+            flow_id=flow_id,
+            flow_run_id=run.id,
+            expected_revision=expected_checkpoint_revision,
+            principal=principal,
+        )
+
+    async def reject_review_checkpoint(
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+        checkpoint_id: UUID,
+        expected_checkpoint_revision: int,
+        reason: str,
+    ) -> FlowRunReviewCheckpoint:
+        principal = self._review_user_principal(capability="review")
+        normalized_reason = self._normalize_review_reject_reason(reason)
+        run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="content")
+        checkpoint = await self.flow_run_repo.reject_review_checkpoint(
+            checkpoint_id=checkpoint_id,
+            tenant_id=self.user.tenant_id,
+            flow_id=flow_id,
+            flow_run_id=run.id,
+            expected_revision=expected_checkpoint_revision,
+            reason=normalized_reason,
+            principal=principal,
+        )
+        await self.flow_run_terminalizer.terminalize_run(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+            target_status=FlowRunStatus.CANCELLED,
+            source=FlowRunLifecycleSource.REVIEW_REJECTED,
+            error_code="flow_review_rejected",
+            error_message=normalized_reason,
+            cancelled_at=datetime.now(timezone.utc),
+            principal=principal,
+        )
+        return checkpoint
+
+    async def resume_review_checkpoint(
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+        checkpoint_id: UUID,
+        expected_checkpoint_revision: int,
+        idempotency_key: str | None,
+    ) -> FlowRunReviewCheckpointResumeResult:
+        principal = self._review_user_principal(capability="resume")
+        normalized_key = self._validate_review_resume_idempotency_key(idempotency_key)
+        run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="content")
+        return await self.flow_run_repo.resume_review_checkpoint(
+            checkpoint_id=checkpoint_id,
+            tenant_id=self.user.tenant_id,
+            flow_id=flow_id,
+            flow_run_id=run.id,
+            expected_revision=expected_checkpoint_revision,
+            resume_idempotency_key=normalized_key,
+            principal=principal,
         )
 
     async def list_step_results_with_files(

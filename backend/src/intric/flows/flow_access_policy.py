@@ -153,16 +153,14 @@ FLOW_ACTION_REQUIREMENTS: dict[FlowApiAction, FlowActionRequirement] = {
         requires_flow_edit=True,
     ),
     FlowApiAction.REVIEW: FlowActionRequirement(
-        required_permissions=(),
+        required_permissions=(Permission.FLOWS_MANAGE,),
         denial_message="You do not have permission to review flows.",
         service_key_capability="review",
-        implemented=False,
     ),
     FlowApiAction.RESUME: FlowActionRequirement(
-        required_permissions=(),
+        required_permissions=(Permission.FLOWS_MANAGE,),
         denial_message="You do not have permission to resume flows.",
         service_key_capability="resume",
-        implemented=False,
     ),
     FlowApiAction.RERUN: FlowActionRequirement(
         required_permissions=(Permission.FLOWS_MANAGE,),

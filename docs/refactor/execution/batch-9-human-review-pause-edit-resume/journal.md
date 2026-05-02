@@ -154,13 +154,41 @@ IN_PROGRESS
   - Reconciliation: `docs/refactor/execution/batch-9-human-review-pause-edit-resume/claude-reconciliation-6.md`
 - Outcome: executor now opens a review checkpoint after successful review-policy step persistence, returns `awaiting_review`, leaves downstream steps pending, and duplicate task delivery skips the paused run without another checkpoint or model call
 
+### Slice 9.4 — Review API, Edit/Approve/Reject, And Resume Dispatch
+
+- Source:
+  - `backend/src/intric/flows/api/flow_run_execution_router.py`
+  - `backend/src/intric/flows/api/flow_models.py`
+  - `backend/src/intric/flows/api/flow_assembler.py`
+  - `backend/src/intric/flows/application/flow_run_service.py`
+  - `backend/src/intric/flows/application/flow_run_terminalization.py`
+  - `backend/src/intric/flows/infrastructure/flow_run_repo.py`
+  - `backend/src/intric/flows/flow_access_policy.py`
+- Tests:
+  - `backend/tests/unit/test_flow_openapi_contract.py`
+  - `backend/tests/unittests/flows/test_flow_access_policy.py`
+  - `backend/tests/unittests/flows/test_flow_run_service.py`
+  - `backend/tests/integration/flows/test_flow_run_review_checkpoint_repository.py`
+  - `backend/tests/integration/flows/test_flow_review_pause_worker_contract.py`
+- Local validation:
+  - `uv run ruff format ...` from `backend/` on Slice 9.4 source/test files — passed, unchanged after final pass
+  - `uv run ruff check ...` from `backend/` on Slice 9.4 source/test files — passed
+  - `uv run pyright ...` from `backend/` on Slice 9.4 source/test files — passed, 0 errors
+  - `uv run pytest tests/unittests/flows/test_flow_access_policy.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_run_service.py -q` from `backend/` — passed, 174 tests
+  - `uv run pytest tests/integration/flows/test_flow_run_review_checkpoint_repository.py tests/integration/flows/test_flow_review_pause_worker_contract.py -q` from `backend/` — passed, 17 tests
+- Docker validation: blocked before execution by this Codex process with `Rejected("approval required by policy, but AskForApproval is set to Never")`
+- Claude review:
+  - Iteration 1: changes required for the Slice 9.4 plan, artifact `.codex/artifacts/claude-peer-loop-batch-9-slice-9-4-review-api-resume-plan-20260502T173550Z.md`
+  - Iteration 2: green for the revised Slice 9.4 plan, artifact `.codex/artifacts/claude-peer-loop-batch-9-slice-9-4-review-api-resume-plan-verification-20260502T173937Z.md`
+  - Iteration 3: green for implementation, artifact `.codex/artifacts/claude-peer-loop-batch-9-slice-9-4-review-api-resume-implementation-20260502T181025Z.md`
+  - Reconciliation: `docs/refactor/execution/batch-9-human-review-pause-edit-resume/claude-reconciliation-7.md`
+- Outcome: review checkpoint active read, edit, approve, reject, and resume endpoints are typed and permission-gated; resume idempotency uses `Idempotency-Key`, dispatches only on newly accepted resume, rejection terminalizes the run, cancellation closes active checkpoints, and runtime tests cover downstream edited-payload propagation plus last-step terminalization
+
 ## Carry-Forward Risks
 
-- Slice 9.3 must wire `RuntimeStep.review_policy` into the executor pause/yield branch and validate checkpoint step ids against the run's published definition before calling the repository open command.
-- Resume CASes the checkpoint and run, moves the run from `awaiting_review` to `queued`, and dispatches the existing `flows.execute` task. Batch 9 should not add a separate `flows.resume` task unless it deletes code.
 - Frontend generated type updates must not overwrite unrelated local changes.
-- Slice 9.4 must cover last-step review resume where the checkpoint has no downstream step IDs and approval should terminalize the run if no uncompleted steps remain.
-- Slice 9.4 should consume or delete the repository open-result `created` and `audit_outbox_id` fields.
+- Slice 9.5 must add evidence/export lineage for original reviewed output, current edited output, and resumed checkpoint state.
+- Frontend slices must use generated API types for review checkpoint read/edit/approve/reject/resume rather than manual duplicate types.
 
 ## Decisions Made During This Batch
 

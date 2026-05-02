@@ -181,6 +181,20 @@ class FlowRunTerminalizer:
             error_message=error_message,
         )
 
+        checkpoint_principal = self._principal_or_none_from_run(
+            run=terminal_run,
+            principal=principal,
+        )
+        if target_status == FlowRunStatus.CANCELLED:
+            await self.flow_run_repo.cancel_active_review_checkpoint_for_terminal_run(
+                tenant_id=tenant_id,
+                flow_run_id=run_id,
+                run_revision=terminal_run.revision,
+                principal=checkpoint_principal,
+                error_code=error_code,
+                error_message=error_message,
+            )
+
         actor_fields = self._audit_actor_fields(
             run=terminal_run,
             principal=principal,
@@ -219,23 +233,34 @@ class FlowRunTerminalizer:
         raise ValueError("target_status must be terminal")
 
     @staticmethod
+    def _principal_or_none_from_run(
+        *, run: FlowRun, principal: FlowPrincipal | None
+    ) -> FlowPrincipal | None:
+        if principal is not None:
+            return principal
+        try:
+            return FlowPrincipal.from_run(run)
+        except ValueError:
+            return None
+
+    @staticmethod
     def _audit_actor_fields(
         *, run: FlowRun, principal: FlowPrincipal | None, source: FlowRunLifecycleSource
     ) -> FlowAuditActorFields:
-        resolved = principal
+        resolved = FlowRunTerminalizer._principal_or_none_from_run(
+            run=run,
+            principal=principal,
+        )
         if resolved is None:
-            try:
-                resolved = FlowPrincipal.from_run(run)
-            except ValueError:
-                logger.warning(
-                    "flow_run_terminalization.audit_actor_fallback run_id=%s tenant_id=%s source=%s",
-                    run.id,
-                    run.tenant_id,
-                    source.value,
-                )
-                return {
-                    "actor_id": None,
-                    "actor_type": ActorType.SYSTEM,
-                    "actor_api_key_id": None,
-                }
+            logger.warning(
+                "flow_run_terminalization.audit_actor_fallback run_id=%s tenant_id=%s source=%s",
+                run.id,
+                run.tenant_id,
+                source.value,
+            )
+            return {
+                "actor_id": None,
+                "actor_type": ActorType.SYSTEM,
+                "actor_api_key_id": None,
+            }
         return resolved.audit_actor_fields()

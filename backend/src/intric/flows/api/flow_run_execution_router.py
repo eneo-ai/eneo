@@ -24,6 +24,12 @@ from intric.flows.api.flow_models import (
     FlowRunCreateRequest,
     FlowRunPublic,
     FlowRunRedispatchResponse,
+    FlowRunReviewCheckpointApproveRequest,
+    FlowRunReviewCheckpointEditRequest,
+    FlowRunReviewCheckpointPublic,
+    FlowRunReviewCheckpointRejectRequest,
+    FlowRunReviewCheckpointResumeRequest,
+    FlowRunReviewCheckpointResumeResponse,
     FlowRunStepRerunRequest,
     FlowRunStepRerunResponse,
 )
@@ -115,6 +121,42 @@ lifecycle. On replay, the nested `run` is the current persisted run state, so
 `run.revision` can be newer than the submitted `expected_run_revision`.
 
 Rerun is a run lifecycle mutation and currently requires flow management access.
+    """
+
+_FLOW_RUN_REVIEW_ACTIVE_DESCRIPTION = """
+Return the active human review checkpoint for a paused run.
+
+The endpoint returns `null` with `200 OK` when the run has no active checkpoint.
+Current visibility follows run-detail visibility: service-key principals can read only
+checkpoints for runs they own, while human callers follow the existing flow view policy.
+    """
+
+_FLOW_RUN_REVIEW_EDIT_DESCRIPTION = """
+Edit the current payload for a human review checkpoint.
+
+The request uses `expected_checkpoint_revision` as the checkpoint compare token. On success,
+the checkpoint payload and the current step-result projection are updated together.
+    """
+
+_FLOW_RUN_REVIEW_APPROVE_DESCRIPTION = """
+Approve the current payload for a human review checkpoint.
+
+Approval advances the checkpoint revision. Resume is a separate command so clients can make
+the decision durable before dispatching more runtime work.
+    """
+
+_FLOW_RUN_REVIEW_REJECT_DESCRIPTION = """
+Reject a human review checkpoint and cancel the run.
+
+The rejection reason is written to lifecycle audit metadata and the run is terminalized with
+`cancelled` status using the `review_rejected` lifecycle source.
+    """
+
+_FLOW_RUN_REVIEW_RESUME_DESCRIPTION = """
+Resume a run after an approved human review checkpoint.
+
+Use the `Idempotency-Key` header for retries. Replaying the same key returns the current
+checkpoint and run without dispatching another worker task.
     """
 
 
@@ -340,6 +382,305 @@ async def get_flow_run_alias(
     run = await run_service.get_run(run_id=run_id, flow_id=id)
     result_files = await run_service.list_result_files_for_runs(runs=[run])
     return FlowAssembler().to_run_public(run, result_files=result_files)
+
+
+@router.get(
+    "/{id}/runs/{run_id}/review-checkpoints/active/",
+    response_model=FlowRunReviewCheckpointPublic | None,
+    status_code=status.HTTP_200_OK,
+    operation_id="get_active_flow_run_review_checkpoint",
+    summary="Get active flow run review checkpoint",
+    description=_FLOW_RUN_REVIEW_ACTIVE_DESCRIPTION,
+    responses={
+        403: error_response(
+            description=_FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Run not found for this flow and tenant.",
+            message="Flow run not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+    },
+)
+async def get_active_flow_run_review_checkpoint(
+    id: Annotated[
+        UUID, Path(description="Identifier of the flow that owns the requested run.")
+    ],
+    run_id: Annotated[UUID, Path(description="Identifier of the run to inspect.")],
+    request: Request,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await common.enforce_flow_scope_for_request(
+        request,
+        container,
+        flow_id=id,
+        required_access=common.FlowApiAction.VIEW,
+        allow_service_key_principals=True,
+    )
+    checkpoint = await _get_flow_run_service(container).get_active_review_checkpoint(
+        flow_id=id,
+        run_id=run_id,
+    )
+    if checkpoint is None:
+        return None
+    return FlowAssembler().to_review_checkpoint_public(checkpoint)
+
+
+@router.patch(
+    "/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/",
+    response_model=FlowRunReviewCheckpointPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="edit_flow_run_review_checkpoint",
+    summary="Edit flow run review checkpoint",
+    description=_FLOW_RUN_REVIEW_EDIT_DESCRIPTION,
+    responses={
+        400: error_response(
+            description=(
+                "Review edit failed. Representative machine-readable codes include "
+                "flow_review_stale_revision, flow_review_not_active, and "
+                "flow_review_step_result_not_found."
+            ),
+            message="Review checkpoint revision is stale.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="flow_review_stale_revision",
+        ),
+        403: error_response(
+            description=_FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="You do not have permission to review flows.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_tenant_permission",
+            context={"auth_layer": "tenant_role"},
+        ),
+        404: error_response(
+            description="Run or checkpoint not found for this flow and tenant.",
+            message="Review checkpoint not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="flow_review_checkpoint_not_found",
+        ),
+    },
+)
+async def edit_flow_run_review_checkpoint(
+    id: Annotated[UUID, Path(description="Identifier of the flow that owns the run.")],
+    run_id: Annotated[UUID, Path(description="Identifier of the run to mutate.")],
+    checkpoint_id: Annotated[
+        UUID, Path(description="Identifier of the review checkpoint to edit.")
+    ],
+    request: Request,
+    review_in: FlowRunReviewCheckpointEditRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await common.enforce_flow_scope_for_request(
+        request,
+        container,
+        flow_id=id,
+        required_access=common.FlowApiAction.REVIEW,
+    )
+    checkpoint = await _get_flow_run_service(container).edit_review_checkpoint(
+        flow_id=id,
+        run_id=run_id,
+        checkpoint_id=checkpoint_id,
+        expected_checkpoint_revision=review_in.expected_checkpoint_revision,
+        current_payload_json=review_in.current_payload_json,
+    )
+    return FlowAssembler().to_review_checkpoint_public(checkpoint)
+
+
+@router.post(
+    "/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
+    response_model=FlowRunReviewCheckpointPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="approve_flow_run_review_checkpoint",
+    summary="Approve flow run review checkpoint",
+    description=_FLOW_RUN_REVIEW_APPROVE_DESCRIPTION,
+    responses={
+        400: error_response(
+            description=(
+                "Review approval failed. Representative machine-readable codes include "
+                "flow_review_stale_revision and flow_review_not_active."
+            ),
+            message="Review checkpoint revision is stale.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="flow_review_stale_revision",
+        ),
+        403: error_response(
+            description=_FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="You do not have permission to review flows.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_tenant_permission",
+            context={"auth_layer": "tenant_role"},
+        ),
+        404: error_response(
+            description="Run or checkpoint not found for this flow and tenant.",
+            message="Review checkpoint not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="flow_review_checkpoint_not_found",
+        ),
+    },
+)
+async def approve_flow_run_review_checkpoint(
+    id: Annotated[UUID, Path(description="Identifier of the flow that owns the run.")],
+    run_id: Annotated[UUID, Path(description="Identifier of the run to mutate.")],
+    checkpoint_id: Annotated[
+        UUID, Path(description="Identifier of the review checkpoint to approve.")
+    ],
+    request: Request,
+    review_in: FlowRunReviewCheckpointApproveRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await common.enforce_flow_scope_for_request(
+        request,
+        container,
+        flow_id=id,
+        required_access=common.FlowApiAction.REVIEW,
+    )
+    checkpoint = await _get_flow_run_service(container).approve_review_checkpoint(
+        flow_id=id,
+        run_id=run_id,
+        checkpoint_id=checkpoint_id,
+        expected_checkpoint_revision=review_in.expected_checkpoint_revision,
+    )
+    return FlowAssembler().to_review_checkpoint_public(checkpoint)
+
+
+@router.post(
+    "/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
+    response_model=FlowRunReviewCheckpointPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="reject_flow_run_review_checkpoint",
+    summary="Reject flow run review checkpoint",
+    description=_FLOW_RUN_REVIEW_REJECT_DESCRIPTION,
+    responses={
+        400: error_response(
+            description=(
+                "Review rejection failed. Representative machine-readable codes include "
+                "flow_review_stale_revision, flow_review_not_active, "
+                "flow_review_reject_reason_required, and flow_review_reject_reason_too_long."
+            ),
+            message="Review rejection reason is required.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="flow_review_reject_reason_required",
+        ),
+        403: error_response(
+            description=_FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="You do not have permission to review flows.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_tenant_permission",
+            context={"auth_layer": "tenant_role"},
+        ),
+        404: error_response(
+            description="Run or checkpoint not found for this flow and tenant.",
+            message="Review checkpoint not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="flow_review_checkpoint_not_found",
+        ),
+    },
+)
+async def reject_flow_run_review_checkpoint(
+    id: Annotated[UUID, Path(description="Identifier of the flow that owns the run.")],
+    run_id: Annotated[UUID, Path(description="Identifier of the run to mutate.")],
+    checkpoint_id: Annotated[
+        UUID, Path(description="Identifier of the review checkpoint to reject.")
+    ],
+    request: Request,
+    review_in: FlowRunReviewCheckpointRejectRequest,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await common.enforce_flow_scope_for_request(
+        request,
+        container,
+        flow_id=id,
+        required_access=common.FlowApiAction.REVIEW,
+    )
+    checkpoint = await _get_flow_run_service(container).reject_review_checkpoint(
+        flow_id=id,
+        run_id=run_id,
+        checkpoint_id=checkpoint_id,
+        expected_checkpoint_revision=review_in.expected_checkpoint_revision,
+        reason=review_in.reason,
+    )
+    return FlowAssembler().to_review_checkpoint_public(checkpoint)
+
+
+@router.post(
+    "/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
+    response_model=FlowRunReviewCheckpointResumeResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="resume_flow_run_review_checkpoint",
+    summary="Resume flow run review checkpoint",
+    description=_FLOW_RUN_REVIEW_RESUME_DESCRIPTION,
+    responses={
+        400: error_response(
+            description=(
+                "Review resume failed. Representative machine-readable codes include "
+                "flow_review_idempotency_key_required, flow_review_stale_revision, "
+                "flow_review_not_approved, flow_review_already_resumed, "
+                "flow_review_rejected, and flow_review_cancelled."
+            ),
+            message="Review resume requires an Idempotency-Key header.",
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            code="flow_review_idempotency_key_required",
+        ),
+        403: error_response(
+            description=_FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="You do not have permission to resume flows.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_tenant_permission",
+            context={"auth_layer": "tenant_role"},
+        ),
+        404: error_response(
+            description="Run or checkpoint not found for this flow and tenant.",
+            message="Review checkpoint not found.",
+            intric_error_code=ErrorCodes.NOT_FOUND,
+            code="flow_review_checkpoint_not_found",
+        ),
+    },
+)
+async def resume_flow_run_review_checkpoint(
+    id: Annotated[UUID, Path(description="Identifier of the flow that owns the run.")],
+    run_id: Annotated[UUID, Path(description="Identifier of the run to resume.")],
+    checkpoint_id: Annotated[
+        UUID, Path(description="Identifier of the approved review checkpoint.")
+    ],
+    request: Request,
+    review_in: FlowRunReviewCheckpointResumeRequest,
+    background_tasks: BackgroundTasks,
+    idempotency_key: Annotated[
+        str | None,
+        Header(
+            alias="Idempotency-Key",
+            description="Required caller-supplied idempotency key for review resume retries.",
+        ),
+    ] = None,
+    container: Container = Depends(get_container(with_user=True)),
+):
+    await common.enforce_flow_scope_for_request(
+        request,
+        container,
+        flow_id=id,
+        required_access=common.FlowApiAction.RESUME,
+    )
+    run_service = _get_flow_run_service(container)
+    result = await run_service.resume_review_checkpoint(
+        flow_id=id,
+        run_id=run_id,
+        checkpoint_id=checkpoint_id,
+        expected_checkpoint_revision=review_in.expected_checkpoint_revision,
+        idempotency_key=idempotency_key,
+    )
+    if result.accepted:
+        background_tasks.add_task(
+            common.dispatch_flow_run_recoverably_after_commit,
+            **run_service.build_dispatch_request(result.run),
+        )
+    return FlowAssembler().to_review_checkpoint_resume_response(
+        checkpoint=result.checkpoint,
+        run=result.run,
+    )
 
 
 @router.post(

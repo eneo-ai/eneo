@@ -94,6 +94,17 @@ REQUIRED_PATHS: dict[str, set[str]] = {
     "/api/v1/flows/{id}/template-inspect/": {"get"},
     "/api/v1/flows/{id}/runs/": {"get", "post"},
     "/api/v1/flows/{id}/runs/{run_id}/": {"get"},
+    "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/": {"get"},
+    "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/": {"patch"},
+    "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/": {
+        "post"
+    },
+    "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/": {
+        "post"
+    },
+    "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/": {
+        "post"
+    },
     "/api/v1/flows/{id}/runs/{run_id}/cancel/": {"post"},
     "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/": {"post"},
     "/api/v1/flows/{id}/runs/{run_id}/redispatch/": {"post"},
@@ -110,6 +121,12 @@ REQUIRED_SCHEMAS = {
     "FlowRunContractPublic",
     "FlowRunStepRerunRequest",
     "FlowRunStepRerunResponse",
+    "FlowRunReviewCheckpointPublic",
+    "FlowRunReviewCheckpointEditRequest",
+    "FlowRunReviewCheckpointApproveRequest",
+    "FlowRunReviewCheckpointRejectRequest",
+    "FlowRunReviewCheckpointResumeRequest",
+    "FlowRunReviewCheckpointResumeResponse",
     "FlowRunRerunOperationPublic",
     "FlowRunRerunInvalidatedStepPublic",
     "FlowRunEvidenceResponse",
@@ -149,6 +166,26 @@ REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
     ("/api/v1/flows/{id}/input-policy/", "get"): "get_flow_input_policy",
     ("/api/v1/flows/{id}/files/", "post"): "upload_flow_file",
     ("/api/v1/flows/{id}/runs/{run_id}/", "get"): "get_flow_run_alias",
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/",
+        "get",
+    ): "get_active_flow_run_review_checkpoint",
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/",
+        "patch",
+    ): "edit_flow_run_review_checkpoint",
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
+        "post",
+    ): "approve_flow_run_review_checkpoint",
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
+        "post",
+    ): "reject_flow_run_review_checkpoint",
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
+        "post",
+    ): "resume_flow_run_review_checkpoint",
     ("/api/v1/flows/{id}/runs/{run_id}/cancel/", "post"): "cancel_flow_run_alias",
     (
         "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/",
@@ -216,6 +253,26 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
         "post",
     ): {"403", "404", "422"},
     (
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/",
+        "get",
+    ): {"403", "404", "422"},
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/",
+        "patch",
+    ): {"400", "403", "404", "422"},
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
+        "post",
+    ): {"400", "403", "404", "422"},
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
+        "post",
+    ): {"400", "403", "404", "422"},
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
+        "post",
+    ): {"400", "403", "404", "422"},
+    (
         "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/",
         "post",
     ): {"400", "403", "404", "422"},
@@ -282,6 +339,26 @@ REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
         "/api/v1/flows/{id}/runs/{run_id}/cancel/",
         "post",
     ): {"403", "404"},
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/",
+        "get",
+    ): {"403", "404"},
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/",
+        "patch",
+    ): {"400", "403", "404"},
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
+        "post",
+    ): {"400", "403", "404"},
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
+        "post",
+    ): {"400", "403", "404"},
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
+        "post",
+    ): {"400", "403", "404"},
     (
         "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/",
         "post",
@@ -364,6 +441,23 @@ def test_openapi_flow_run_control_paths_include_flow_and_run_ids(
     paths = openapi_spec.get("paths", {})
     targets = (
         ("/api/v1/flows/{id}/runs/{run_id}/cancel/", "post"),
+        ("/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/", "get"),
+        (
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/",
+            "patch",
+        ),
+        (
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
+            "post",
+        ),
+        (
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
+            "post",
+        ),
+        (
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
+            "post",
+        ),
         ("/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/", "post"),
         ("/api/v1/flows/{id}/runs/{run_id}/redispatch/", "post"),
         ("/api/v1/flows/{id}/runs/{run_id}/evidence/", "get"),
@@ -378,6 +472,10 @@ def test_openapi_flow_run_control_paths_include_flow_and_run_ids(
         if "{step_id}" in path:
             assert "step_id" in names, (
                 f"{method.upper()} {path} must declare path param step_id"
+            )
+        if "{checkpoint_id}" in path:
+            assert "checkpoint_id" in names, (
+                f"{method.upper()} {path} must declare path param checkpoint_id"
             )
 
 
@@ -411,6 +509,85 @@ def test_openapi_flow_consumer_schemas_present(openapi_spec: dict) -> None:
     schemas = openapi_spec.get("components", {}).get("schemas", {})
     missing = REQUIRED_SCHEMAS - set(schemas.keys())
     assert not missing, f"Missing OpenAPI schemas: {sorted(missing)}"
+
+
+def test_openapi_flow_review_checkpoint_schema_is_public_contract(
+    openapi_spec: dict,
+) -> None:
+    schema = (
+        openapi_spec.get("components", {})
+        .get("schemas", {})
+        .get("FlowRunReviewCheckpointPublic", {})
+    )
+    properties = schema.get("properties", {})
+
+    assert {
+        "id",
+        "tenant_id",
+        "flow_id",
+        "flow_run_id",
+        "step_id",
+        "step_order",
+        "attempt_no",
+        "state",
+        "revision",
+        "schema_version",
+        "original_payload_json",
+        "current_payload_json",
+        "next_step_ids",
+        "requester_user_id",
+        "requester_principal_type",
+        "decided_by_user_id",
+        "decided_by_principal_type",
+        "edited_at",
+        "approved_at",
+        "rejected_at",
+        "resumed_at",
+        "cancelled_at",
+        "created_at",
+        "updated_at",
+    } <= set(properties)
+    assert "resume_idempotency_key" not in properties
+
+
+def test_openapi_active_review_checkpoint_response_is_nullable(
+    openapi_spec: dict,
+) -> None:
+    operation = _get_operation(
+        openapi_spec,
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/",
+        "get",
+    )
+    response_schema = (
+        operation.get("responses", {})
+        .get("200", {})
+        .get("content", {})
+        .get("application/json", {})
+        .get("schema", {})
+    )
+    options = response_schema.get("anyOf") or response_schema.get("oneOf") or []
+
+    assert any(
+        option.get("$ref") == "#/components/schemas/FlowRunReviewCheckpointPublic"
+        for option in options
+        if isinstance(option, dict)
+    )
+    assert any(
+        option.get("type") == "null" for option in options if isinstance(option, dict)
+    )
+
+
+def test_openapi_resume_review_checkpoint_uses_idempotency_header(
+    openapi_spec: dict,
+) -> None:
+    operation = _get_operation(
+        openapi_spec,
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
+        "post",
+    )
+    parameter = _find_parameter(operation, name="Idempotency-Key", location="header")
+
+    assert parameter.get("required") is False
 
 
 def test_openapi_flow_run_step_tool_calls_metadata_is_absent(
