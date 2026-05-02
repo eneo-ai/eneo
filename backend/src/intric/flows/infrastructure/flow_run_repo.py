@@ -1664,6 +1664,30 @@ class FlowRunRepository:
         )
         return [self.factory.from_flow_step_attempt_db(row) for row in rows]
 
+    async def list_review_checkpoints_for_run(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+    ) -> list[FlowRunReviewCheckpoint]:
+        rows = (
+            (
+                await self.session.execute(
+                    sa.select(FlowRunReviewCheckpoints)
+                    .where(FlowRunReviewCheckpoints.flow_run_id == run_id)
+                    .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+                    .order_by(
+                        FlowRunReviewCheckpoints.step_order.asc(),
+                        FlowRunReviewCheckpoints.attempt_no.asc(),
+                        FlowRunReviewCheckpoints.id.asc(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [self.factory.from_flow_run_review_checkpoint_db(row) for row in rows]
+
     async def list_rerun_operations_for_run(
         self,
         *,

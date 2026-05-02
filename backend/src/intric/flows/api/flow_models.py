@@ -284,6 +284,18 @@ FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE: dict[str, Any] = {
     "updated_at": "2026-03-17T10:05:30Z",
 }
 
+FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE: dict[str, Any] = {
+    **FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE,
+    "state": "resumed",
+    "revision": 3,
+    "decision": "approved",
+    "current_payload_json": {"text": "Reviewed answer."},
+    "resume_key_present": True,
+    "edited_at": "2026-03-17T10:06:30Z",
+    "approved_at": "2026-03-17T10:07:30Z",
+    "resumed_at": "2026-03-17T10:08:00Z",
+}
+
 FLOW_RUN_REVIEW_CHECKPOINT_EDIT_REQUEST_EXAMPLE: dict[str, Any] = {
     "expected_checkpoint_revision": 1,
     "current_payload_json": {"text": "Edited answer."},
@@ -1370,6 +1382,40 @@ class FlowStepAttemptPublic(BaseModel):
     updated_at: datetime
 
 
+class FlowRunReviewCheckpointEvidencePublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE}
+    )
+
+    id: UUID
+    tenant_id: UUID
+    flow_id: UUID
+    flow_run_id: UUID
+    step_id: UUID
+    step_order: int
+    attempt_no: int
+    state: FlowRunReviewCheckpointState
+    revision: int
+    schema_version: int
+    original_payload_json: dict[str, Any] | None = None
+    current_payload_json: dict[str, Any] | None = None
+    decision: Literal["approved", "rejected", "cancelled"] | None = None
+    next_step_ids: list[UUID] | None = None
+    resume_key_present: bool
+    # Evidence is tenant/run-authorized, so reviewer IDs follow run ownership exposure.
+    requester_user_id: UUID | None = None
+    requester_principal_type: PrincipalType
+    decided_by_user_id: UUID | None = None
+    decided_by_principal_type: PrincipalType | None = None
+    edited_at: datetime | None = None
+    approved_at: datetime | None = None
+    rejected_at: datetime | None = None
+    resumed_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class FlowRunEvidenceResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -1381,6 +1427,7 @@ class FlowRunEvidenceResponse(BaseModel):
                 "result_files": [FLOW_RUN_RESULT_FILE_EXAMPLE],
                 "rerun_operations": [],
                 "rerun_invalidated_steps": [],
+                "review_checkpoints": [FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE],
                 "debug_export": FLOW_RUN_DEBUG_EXPORT_EXAMPLE,
             }
         }
@@ -1393,6 +1440,7 @@ class FlowRunEvidenceResponse(BaseModel):
     result_files: list[FlowRunStepResultFile]
     rerun_operations: list[FlowRunRerunOperationPublic]
     rerun_invalidated_steps: list[FlowRunRerunInvalidatedStepPublic]
+    review_checkpoints: list[FlowRunReviewCheckpointEvidencePublic]
     debug_export: FlowRunDebugExport
 
 
@@ -1400,11 +1448,11 @@ class FlowRunEvidenceExportResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "schema_version": "flow-evidence-export.v4",
+                "schema_version": "flow-evidence-export.v5",
                 "generated_at": "2026-03-31T12:00:00Z",
                 "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
                 "manifest": {
-                    "schema_version": "flow-evidence-export.v4",
+                    "schema_version": "flow-evidence-export.v5",
                     "provenance_schema_version_min": "flow-attempt-provenance.v1",
                     "provenance_schema_version_current": "flow-attempt-provenance.v1",
                     "provenance_persisted_version_status": "not_tracked",
@@ -1442,6 +1490,21 @@ class FlowRunEvidenceExportResponse(BaseModel):
                         "total_size_bytes": 14012,
                         "artifacts": [FLOW_RUN_RESULT_FILE_EXAMPLE],
                         "note": "Artifact availability is derived from result-file rows joined to file metadata.",
+                    },
+                    "review_checkpoint_summary": {
+                        "count": 1,
+                        "by_state": {
+                            "awaiting_review": 0,
+                            "edited": 0,
+                            "approved": 0,
+                            "rejected": 0,
+                            "resumed": 1,
+                            "cancelled": 0,
+                        },
+                        "any_edited": True,
+                        "any_resumed": True,
+                        "active_checkpoint_id": None,
+                        "active_checkpoint_conflict": False,
                     },
                 },
                 "summary": {
@@ -1510,6 +1573,21 @@ class FlowRunEvidenceExportResponse(BaseModel):
                         "cited_source_count": 1,
                         "unknown_citation_ids": [],
                         "uncited_inserted_source_ids": [],
+                    },
+                    "review_checkpoints": {
+                        "count": 1,
+                        "by_state": {
+                            "awaiting_review": 0,
+                            "edited": 0,
+                            "approved": 0,
+                            "rejected": 0,
+                            "resumed": 1,
+                            "cancelled": 0,
+                        },
+                        "any_edited": True,
+                        "any_resumed": True,
+                        "active_checkpoint_id": None,
+                        "active_checkpoint_conflict": False,
                     },
                     "final_output": {
                         "kind": "mixed",
@@ -1693,6 +1771,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "step_results": [FLOW_RUN_STEP_PUBLIC_EXAMPLE],
                     "step_attempts": [],
                     "result_files": [FLOW_RUN_RESULT_FILE_EXAMPLE],
+                    "review_checkpoints": [FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE],
                     "debug_export": FLOW_RUN_DEBUG_EXPORT_EXAMPLE,
                 },
             }

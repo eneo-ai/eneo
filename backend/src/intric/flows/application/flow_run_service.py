@@ -1294,6 +1294,10 @@ class FlowRunService:
                 tenant_id=self.user.tenant_id,
             )
         )
+        review_checkpoints = await self.flow_run_repo.list_review_checkpoints_for_run(
+            run_id=resolved_run.id,
+            tenant_id=self.user.tenant_id,
+        )
         result_files = await self.flow_run_repo.list_result_files(
             run_id=resolved_run.id,
             tenant_id=self.user.tenant_id,
@@ -1306,6 +1310,7 @@ class FlowRunService:
             result_files=result_files,
             rerun_operations=rerun_operations,
             rerun_invalidated_steps=rerun_invalidated_steps,
+            review_checkpoints=review_checkpoints,
         )
 
     def _build_preseed_steps(

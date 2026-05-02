@@ -390,16 +390,16 @@ Files expected:
 - `backend/tests/unittests/flows/test_flow_run_evidence_bundle.py`
 
 Acceptance criteria:
-- [ ] Evidence bundle includes review checkpoints for the run.
-- [ ] Export manifest schema bumps to `flow-evidence-export.v5`.
-- [ ] Export shows original payload, current reviewed payload, decision, reviewer identity fields allowed by policy, checkpoint revision, and resume linkage.
-- [ ] Redacted export keeps sensitive reviewed payloads within existing evidence policy.
-- [ ] No deleted or unreviewed payload is silently treated as final output.
+- [x] Evidence bundle includes review checkpoints for the run.
+- [x] Export manifest schema bumps to `flow-evidence-export.v5`.
+- [x] Export shows original payload, current reviewed payload, decision, reviewer identity fields allowed by policy, checkpoint revision, and resume linkage.
+- [x] Redacted export keeps sensitive reviewed payloads within existing evidence policy.
+- [x] No deleted or unreviewed payload is silently treated as final output.
 
 Tests required:
-- Export JSON test for original vs current reviewed output.
-- Redaction test for sensitive review payloads.
-- Manifest version test if export schema changes.
+- [x] Export JSON test for original vs current reviewed output.
+- [x] Redaction test for sensitive review payloads.
+- [x] Manifest version test if export schema changes.
 
 Risk/trade-off:
 - Export v5 must include both `original_payload_json` and `current_payload_json` as separate fields; never collapse them into a single output field.

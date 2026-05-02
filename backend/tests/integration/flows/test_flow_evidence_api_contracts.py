@@ -14,6 +14,7 @@ from intric.authentication.principal_types import PrincipalType
 from intric.database.tables.flow_tables import (
     FlowRunRerunInvalidatedSteps,
     FlowRunRerunOperations,
+    FlowRunReviewCheckpoints,
     FlowRuns,
     FlowStepAttempts,
     FlowStepResults,
@@ -30,6 +31,7 @@ from intric.flows import (
 from intric.flows.enums import (
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
+    FlowRunReviewCheckpointState,
     RerunDependencyKind,
 )
 from intric.flows.flow_retention_tombstone import (
@@ -162,6 +164,7 @@ async def _seed_flow_run_contract_data(
     admin_user,
     attempt_provenance_json: dict[str, Any] | None = None,
     include_rerun_lineage: bool = False,
+    include_review_checkpoint_lineage: bool = False,
 ) -> dict[str, str]:
     async with db_container() as container:
         session = container.session()
@@ -394,6 +397,38 @@ async def _seed_flow_run_contract_data(
         rerun_operation_id: str | None = None
         rerun_invalidated_step_id: str | None = None
         replacement_attempt_id: str | None = None
+        review_checkpoint_id: str | None = None
+        if include_review_checkpoint_lineage:
+            reviewed_payload = {
+                "summary": "Reviewed by human",
+                "api_key": "super-secret",
+            }
+            checkpoint = FlowRunReviewCheckpoints(
+                tenant_id=admin_user.tenant_id,
+                flow_id=flow.id,
+                flow_run_id=run.id,
+                step_id=step.id,
+                step_order=1,
+                attempt_no=1,
+                state=FlowRunReviewCheckpointState.RESUMED.value,
+                revision=4,
+                schema_version=1,
+                original_payload_json=step_result.output_payload_json,
+                current_payload_json=reviewed_payload,
+                requester_user_id=admin_user.id,
+                requester_principal_type=PrincipalType.USER.value,
+                decided_by_user_id=admin_user.id,
+                decided_by_principal_type=PrincipalType.USER.value,
+                next_step_ids_json=[],
+                resume_idempotency_key="review-resume-key",
+                edited_at=finished_at,
+                approved_at=finished_at,
+                resumed_at=finished_at,
+            )
+            step_result.output_payload_json = reviewed_payload
+            session.add(checkpoint)
+            await session.flush()
+            review_checkpoint_id = str(checkpoint.id)
         if include_rerun_lineage:
             rerun_operation = FlowRunRerunOperations(
                 tenant_id=admin_user.tenant_id,
@@ -502,6 +537,8 @@ async def _seed_flow_run_contract_data(
             seeded["rerun_invalidated_step_id"] = rerun_invalidated_step_id
         if replacement_attempt_id is not None:
             seeded["replacement_attempt_id"] = replacement_attempt_id
+        if review_checkpoint_id is not None:
+            seeded["review_checkpoint_id"] = review_checkpoint_id
         return seeded
 
 
@@ -682,6 +719,53 @@ async def test_flow_run_evidence_endpoint_includes_rerun_lineage(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_flow_run_evidence_endpoint_includes_review_checkpoint_lineage(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded = await _seed_flow_run_contract_data(
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+        include_review_checkpoint_lineage=True,
+    )
+
+    async with db_container() as container:
+        auth_service = container.auth_service()
+        admin_token = auth_service.create_access_token_for_user(admin_user)
+
+    response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    checkpoint = payload["review_checkpoints"][0]
+    assert checkpoint["id"] == seeded["review_checkpoint_id"]
+    assert checkpoint["state"] == "resumed"
+    assert checkpoint["decision"] == "approved"
+    assert checkpoint["revision"] == 4
+    assert checkpoint["resume_key_present"] is True
+    assert "resume_idempotency_key" not in checkpoint
+    assert checkpoint["original_payload_json"]["summary"] == "Looks good"
+    assert checkpoint["current_payload_json"]["summary"] == "Reviewed by human"
+    assert checkpoint["current_payload_json"]["api_key"] == "[REDACTED]"
+    assert (
+        payload["step_results"][0]["output_payload_json"]
+        == (checkpoint["current_payload_json"])
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_flow_run_evidence_export_preserves_rerun_lineage_redaction_shape(
     client,
     db_container,
@@ -735,8 +819,8 @@ async def test_flow_run_evidence_export_preserves_rerun_lineage_redaction_shape(
     redacted_bundle = redacted_payload["bundle"]
     raw_bundle = raw_payload["bundle"]
 
-    assert redacted_payload["schema_version"] == "flow-evidence-export.v4"
-    assert raw_payload["schema_version"] == "flow-evidence-export.v4"
+    assert redacted_payload["schema_version"] == "flow-evidence-export.v5"
+    assert raw_payload["schema_version"] == "flow-evidence-export.v5"
     assert (
         redacted_payload["content_hash"] == (repeated_redacted_payload["content_hash"])
     )
@@ -785,6 +869,80 @@ async def test_flow_run_evidence_export_preserves_rerun_lineage_redaction_shape(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_flow_run_evidence_export_preserves_review_checkpoint_lineage(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded = await _seed_flow_run_contract_data(
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+        include_review_checkpoint_lineage=True,
+    )
+
+    async with db_container() as container:
+        auth_service = container.auth_service()
+        admin_token = auth_service.create_access_token_for_user(admin_user)
+
+    export_path = (
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export"
+    )
+    redacted_response = await client.get(
+        f"{export_path}?format=json",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    raw_response = await client.get(
+        f"{export_path}?format=json&detail=raw&reason=review-lineage-audit",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert redacted_response.status_code == 200, redacted_response.text
+    assert raw_response.status_code == 200, raw_response.text
+    redacted_payload = redacted_response.json()
+    raw_payload = raw_response.json()
+    redacted_checkpoint = redacted_payload["bundle"]["review_checkpoints"][0]
+    raw_checkpoint = raw_payload["bundle"]["review_checkpoints"][0]
+
+    assert raw_payload["schema_version"] == "flow-evidence-export.v5"
+    assert redacted_payload["schema_version"] == "flow-evidence-export.v5"
+    assert raw_checkpoint["id"] == seeded["review_checkpoint_id"]
+    assert raw_checkpoint["original_payload_json"]["summary"] == "Looks good"
+    assert raw_checkpoint["current_payload_json"]["summary"] == "Reviewed by human"
+    assert raw_checkpoint["current_payload_json"]["api_key"] == "super-secret"
+    assert redacted_checkpoint["current_payload_json"]["api_key"] == "[REDACTED]"
+    assert raw_checkpoint["resume_key_present"] is True
+    assert "resume_idempotency_key" not in raw_checkpoint
+    assert "review-resume-key" not in json.dumps(raw_payload, sort_keys=True)
+    assert (
+        raw_payload["summary"]["review_checkpoints"]
+        == (raw_payload["manifest"]["review_checkpoint_summary"])
+    )
+    assert raw_payload["manifest"]["review_checkpoint_summary"] == {
+        "count": 1,
+        "by_state": {
+            "awaiting_review": 0,
+            "edited": 0,
+            "approved": 0,
+            "rejected": 0,
+            "resumed": 1,
+            "cancelled": 0,
+        },
+        "any_edited": True,
+        "any_resumed": True,
+        "active_checkpoint_id": None,
+        "active_checkpoint_conflict": False,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     client,
     db_container,
@@ -815,7 +973,7 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     assert response.headers["content-type"].startswith("application/json")
     assert "attachment;" in response.headers["content-disposition"]
     payload = response.json()
-    assert payload["schema_version"] == "flow-evidence-export.v4"
+    assert payload["schema_version"] == "flow-evidence-export.v5"
     assert payload["manifest"]["schema_version"] == payload["schema_version"]
     assert payload["manifest"]["run_id"] == seeded["run_id"]
     assert payload["manifest"]["tenant_id"] == str(admin_user.tenant_id)

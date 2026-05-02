@@ -5,13 +5,14 @@ from typing import Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict
 
+from intric.flows.enums import FlowRunReviewCheckpointState
 from intric.flows.flow_run_step_result_file import (
     FlowRunStepResultFileAvailability,
     FlowRunStepResultFileSource,
 )
 
-EVIDENCE_EXPORT_SCHEMA_VERSION: Literal["flow-evidence-export.v4"] = (
-    "flow-evidence-export.v4"
+EVIDENCE_EXPORT_SCHEMA_VERSION: Literal["flow-evidence-export.v5"] = (
+    "flow-evidence-export.v5"
 )
 
 EvidenceExportContentHashInput: TypeAlias = Literal["raw", "redacted"]
@@ -75,10 +76,21 @@ class EvidenceArtifactAvailabilitySummary(BaseModel):
     note: str
 
 
+class EvidenceReviewCheckpointSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    count: int
+    by_state: dict[FlowRunReviewCheckpointState, int]
+    any_edited: bool
+    any_resumed: bool
+    active_checkpoint_id: str | None
+    active_checkpoint_conflict: bool
+
+
 class EvidenceExportManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["flow-evidence-export.v4"]
+    schema_version: Literal["flow-evidence-export.v5"]
     provenance_schema_version_min: str
     provenance_schema_version_current: str
     provenance_persisted_version_status: EvidenceProvenancePersistedVersionStatus
@@ -98,3 +110,4 @@ class EvidenceExportManifest(BaseModel):
     redaction_policy_version: str
     retention_state_summary: EvidenceRetentionStateSummary
     artifact_availability_summary: EvidenceArtifactAvailabilitySummary
+    review_checkpoint_summary: EvidenceReviewCheckpointSummary

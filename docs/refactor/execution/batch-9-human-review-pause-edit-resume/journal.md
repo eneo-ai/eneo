@@ -184,10 +184,40 @@ IN_PROGRESS
   - Reconciliation: `docs/refactor/execution/batch-9-human-review-pause-edit-resume/claude-reconciliation-7.md`
 - Outcome: review checkpoint active read, edit, approve, reject, and resume endpoints are typed and permission-gated; resume idempotency uses `Idempotency-Key`, dispatches only on newly accepted resume, rejection terminalizes the run, cancellation closes active checkpoints, and runtime tests cover downstream edited-payload propagation plus last-step terminalization
 
+### Slice 9.5 — Evidence And Export Lineage
+
+- Source:
+  - `backend/src/intric/flows/flow_run_evidence_bundle.py`
+  - `backend/src/intric/flows/flow_run_export_json.py`
+  - `backend/src/intric/flows/flow_run_evidence_export_manifest.py`
+  - `backend/src/intric/flows/infrastructure/flow_run_repo.py`
+  - `backend/src/intric/flows/application/flow_run_service.py`
+  - `backend/src/intric/flows/api/flow_models.py`
+- Tests:
+  - `backend/tests/unittests/flows/test_flow_run_evidence.py`
+  - `backend/tests/unittests/flows/test_flow_run_service.py`
+  - `backend/tests/unittests/flows/test_flow_router.py`
+  - `backend/tests/unit/test_flow_openapi_contract.py`
+  - `backend/tests/integration/flows/test_flow_evidence_api_contracts.py`
+  - `backend/tests/integration/flows/test_flow_run_review_checkpoint_repository.py`
+- Local validation:
+  - `uv run ruff check ...` from `backend/` on Slice 9.5 source/test files — passed
+  - `uv run ruff format --check ...` from `backend/` on Slice 9.5 source/test files — passed
+  - `uv run pyright ...` from `backend/` on Slice 9.5 source/test files — passed, 0 errors
+  - `uv run pytest tests/unittests/flows/test_flow_run_evidence.py tests/integration/flows/test_flow_run_review_checkpoint_repository.py::test_list_review_checkpoints_for_run_orders_by_step_and_attempt tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_preserves_review_checkpoint_lineage tests/unit/test_flow_openapi_contract.py::test_openapi_flow_evidence_export_documents_json_attachment -q` from `backend/` — passed, 50 tests
+  - `uv run pytest tests/unittests/flows/test_flow_run_evidence.py tests/unittests/flows/test_flow_run_service.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_router.py -q` from `backend/` — passed, 284 tests
+  - `uv run pytest tests/integration/flows/test_flow_evidence_api_contracts.py tests/integration/flows/test_flow_run_review_checkpoint_repository.py -q` from `backend/` — passed, 26 tests
+- Claude review:
+  - Iteration 1: changes required, artifact `.codex/artifacts/claude-peer-loop-review-evidence-lineage-plan-20260502T182811Z.md`
+  - Iteration 2: changes required, artifact `.codex/artifacts/claude-peer-loop-review-evidence-lineage-verification-20260502T184353Z.md`
+  - Iteration 3: green, artifact `.codex/artifacts/claude-peer-loop-review-evidence-lineage-verification-2-20260502T185328Z.md`
+  - Reconciliation: `docs/refactor/execution/batch-9-human-review-pause-edit-resume/claude-reconciliation-8.md`
+- Outcome: evidence bundles now include `review_checkpoints`; raw and redacted exports keep original and current reviewed payloads separate, expose review decision/revision/reviewer identity, hide raw resume idempotency keys, and bump the typed evidence manifest to `flow-evidence-export.v5` with `review_checkpoint_summary`
+
 ## Carry-Forward Risks
 
 - Frontend generated type updates must not overwrite unrelated local changes.
-- Slice 9.5 must add evidence/export lineage for original reviewed output, current edited output, and resumed checkpoint state.
+- Slice 9.6 must regenerate frontend API types for the review checkpoint endpoints and `flow-evidence-export.v5`.
 - Frontend slices must use generated API types for review checkpoint read/edit/approve/reject/resume rather than manual duplicate types.
 
 ## Decisions Made During This Batch

@@ -14,10 +14,12 @@ from intric.files.file_models import FileType
 from intric.flows.domain.flow import (
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
+    FlowRunReviewCheckpoint,
 )
 from intric.flows.enums import (
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
+    FlowRunReviewCheckpointState,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
     RerunDependencyKind,
@@ -213,6 +215,49 @@ def _step_result_for_run(
     )
 
 
+def _review_checkpoint_for_run(
+    run: FlowRun,
+    *,
+    step_id: UUID | None = None,
+    step_order: int = 1,
+    attempt_no: int = 1,
+    state: FlowRunReviewCheckpointState = FlowRunReviewCheckpointState.RESUMED,
+    revision: int = 4,
+    original_payload_json: dict[str, Any] | None = None,
+    current_payload_json: dict[str, Any] | None = None,
+    resume_idempotency_key: str | None = "resume-key",
+) -> FlowRunReviewCheckpoint:
+    now = datetime.now(timezone.utc)
+    resolved_step_id = step_id or uuid4()
+    return FlowRunReviewCheckpoint(
+        id=uuid4(),
+        tenant_id=run.tenant_id,
+        flow_id=run.flow_id,
+        flow_run_id=run.id,
+        step_id=resolved_step_id,
+        step_order=step_order,
+        attempt_no=attempt_no,
+        state=state,
+        revision=revision,
+        schema_version=1,
+        original_payload_json=original_payload_json or {"text": "Original"},
+        current_payload_json=current_payload_json or {"text": "Reviewed"},
+        requester_user_id=run.user_id,
+        requester_principal_type=PrincipalType.USER,
+        decided_by_user_id=run.user_id,
+        decided_by_principal_type=PrincipalType.USER,
+        next_step_ids_json=[uuid4()],
+        resume_idempotency_key=resume_idempotency_key,
+        edited_at=now,
+        approved_at=now,
+        rejected_at=None,
+        resumed_at=now if state == FlowRunReviewCheckpointState.RESUMED else None,
+        cancelled_at=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
 def _result_file_for_run(
     run: FlowRun,
     *,
@@ -253,6 +298,7 @@ def _render_raw_export(
     step_results: list[FlowStepResult] | None = None,
     step_attempts: list[FlowStepAttempt] | None = None,
     result_files: list[FlowRunStepResultFile] | None = None,
+    review_checkpoints: list[FlowRunReviewCheckpoint] | None = None,
 ) -> dict[str, Any]:
     return render_evidence_json_export(
         bundle=build_evidence_bundle(
@@ -261,6 +307,7 @@ def _render_raw_export(
             step_results=step_results or [],
             step_attempts=step_attempts or [],
             result_files=result_files or [],
+            review_checkpoints=review_checkpoints or [],
         ),
         context=_raw_export_context(),
     )
@@ -809,6 +856,7 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
         "redaction_policy_version",
         "retention_state_summary",
         "artifact_availability_summary",
+        "review_checkpoint_summary",
     }
     assert export["schema_version"] == EVIDENCE_EXPORT_SCHEMA_VERSION
     assert export["manifest"]["schema_version"] == export["schema_version"]
@@ -854,6 +902,21 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
             "Artifact availability is derived from result-file rows joined to file "
             "metadata."
         ),
+    }
+    assert export["manifest"]["review_checkpoint_summary"] == {
+        "count": 0,
+        "by_state": {
+            "awaiting_review": 0,
+            "edited": 0,
+            "approved": 0,
+            "rejected": 0,
+            "resumed": 0,
+            "cancelled": 0,
+        },
+        "any_edited": False,
+        "any_resumed": False,
+        "active_checkpoint_id": None,
+        "active_checkpoint_conflict": False,
     }
     assert export["manifest"]["provenance_persisted_version_status"] == "not_tracked"
     assert export["summary"]["status"] == "completed"
@@ -1334,6 +1397,134 @@ def test_evidence_export_omits_result_tool_calls_and_preserves_attempt_provenanc
     assert tool_calls["preview"] == [{"name": "canonical-attempt-copy"}]
 
 
+def test_evidence_export_includes_review_checkpoint_lineage() -> None:
+    run, version = _evidence_run_and_version()
+    step_id = uuid4()
+    original_payload = {"text": "Model draft", "score": 1}
+    reviewed_payload = {"text": "Human reviewed", "score": 2}
+    attempt = _attempt_with_provenance(run, None).model_copy(
+        update={"step_id": step_id, "output_payload_json": original_payload}
+    )
+    step_result = _step_result_for_run(
+        run,
+        step_id=step_id,
+        output_payload_json=reviewed_payload,
+    )
+    checkpoint = _review_checkpoint_for_run(
+        run,
+        step_id=step_id,
+        original_payload_json=original_payload,
+        current_payload_json=reviewed_payload,
+    )
+
+    export = _render_raw_export(
+        run,
+        version,
+        step_results=[step_result],
+        step_attempts=[attempt],
+        review_checkpoints=[checkpoint],
+    )
+
+    exported_checkpoint = export["bundle"]["review_checkpoints"][0]
+    assert exported_checkpoint["original_payload_json"] == original_payload
+    assert exported_checkpoint["current_payload_json"] == reviewed_payload
+    assert exported_checkpoint["decision"] == "approved"
+    assert exported_checkpoint["revision"] == checkpoint.revision
+    assert exported_checkpoint["resume_key_present"] is True
+    assert "resume_idempotency_key" not in exported_checkpoint
+    assert exported_checkpoint["next_step_ids"] == [
+        str(step_id) for step_id in checkpoint.next_step_ids_json or []
+    ]
+    assert export["bundle"]["step_attempts"][0]["output_payload_json"] == (
+        original_payload
+    )
+    assert export["bundle"]["step_results"][0]["output_payload_json"] == (
+        reviewed_payload
+    )
+    assert (
+        export["summary"]["review_checkpoints"]
+        == (export["manifest"]["review_checkpoint_summary"])
+    )
+    assert export["summary"]["review_checkpoints"]["count"] == 1
+    assert export["summary"]["review_checkpoints"]["by_state"]["resumed"] == 1
+    assert export["summary"]["review_checkpoints"]["any_edited"] is True
+    assert export["summary"]["review_checkpoints"]["any_resumed"] is True
+
+
+def test_evidence_export_review_summary_surfaces_active_checkpoint_conflict() -> None:
+    run, version = _evidence_run_and_version()
+    awaiting_checkpoint = _review_checkpoint_for_run(
+        run,
+        state=FlowRunReviewCheckpointState.AWAITING_REVIEW,
+        resume_idempotency_key=None,
+    ).model_copy(
+        update={
+            "edited_at": None,
+            "approved_at": None,
+            "resumed_at": None,
+            "decided_by_user_id": None,
+            "decided_by_principal_type": None,
+        }
+    )
+    approved_checkpoint = _review_checkpoint_for_run(
+        run,
+        state=FlowRunReviewCheckpointState.APPROVED,
+        resume_idempotency_key=None,
+    )
+
+    export = _render_raw_export(
+        run,
+        version,
+        review_checkpoints=[awaiting_checkpoint, approved_checkpoint],
+    )
+
+    summary = export["summary"]["review_checkpoints"]
+    assert summary["by_state"]["awaiting_review"] == 1
+    assert summary["by_state"]["approved"] == 1
+    assert summary["active_checkpoint_id"] is None
+    assert summary["active_checkpoint_conflict"] is True
+    assert export["bundle"]["review_checkpoints"][1]["decision"] == "approved"
+
+
+def test_evidence_export_redacts_review_checkpoint_payloads_without_resume_key() -> (
+    None
+):
+    run, version = _evidence_run_and_version()
+    checkpoint = _review_checkpoint_for_run(
+        run,
+        original_payload_json={"token": "original-secret"},
+        current_payload_json={"api_key": "reviewed-secret"},
+        resume_idempotency_key="resume-key-must-not-export",
+    )
+    raw_bundle = build_evidence_bundle(
+        run=run,
+        version=version,
+        step_results=[],
+        step_attempts=[],
+        review_checkpoints=[checkpoint],
+    )
+    export = render_evidence_json_export(
+        bundle=redact_evidence_bundle(raw_bundle),
+        context=_redacted_export_context(),
+    )
+    serialized_export = json.dumps(export, sort_keys=True)
+    exported_checkpoint = export["bundle"]["review_checkpoints"][0]
+
+    assert "resume-key-must-not-export" not in serialized_export
+    assert "resume_idempotency_key" not in serialized_export
+    assert exported_checkpoint["resume_key_present"] is True
+    assert exported_checkpoint["original_payload_json"]["token"] == "[REDACTED]"
+    assert exported_checkpoint["current_payload_json"]["api_key"] == "[REDACTED]"
+    assert (
+        "bundle.review_checkpoints[0].original_payload_json.token"
+        in export["redaction"]["masked_paths"]
+    )
+    assert (
+        "bundle.review_checkpoints[0].current_payload_json.api_key"
+        in export["redaction"]["masked_paths"]
+    )
+
+
 def test_evidence_export_manifest_rejects_unknown_fields() -> None:
     payload = {
         "schema_version": EVIDENCE_EXPORT_SCHEMA_VERSION,
@@ -1375,11 +1566,30 @@ def test_evidence_export_manifest_rejects_unknown_fields() -> None:
             "artifacts": [],
             "note": "Artifact availability is row-backed.",
         },
-        "unexpected": "blocked",
+        "review_checkpoint_summary": {
+            "count": 0,
+            "by_state": {
+                "awaiting_review": 0,
+                "edited": 0,
+                "approved": 0,
+                "rejected": 0,
+                "resumed": 0,
+                "cancelled": 0,
+            },
+            "any_edited": False,
+            "any_resumed": False,
+            "active_checkpoint_id": None,
+            "active_checkpoint_conflict": False,
+        },
     }
 
     with pytest.raises(ValueError):
-        EvidenceExportManifest.model_validate(payload)
+        EvidenceExportManifest.model_validate({**payload, "unexpected": "blocked"})
+
+    payload_without_review_summary = dict(payload)
+    payload_without_review_summary.pop("review_checkpoint_summary")
+    with pytest.raises(ValueError):
+        EvidenceExportManifest.model_validate(payload_without_review_summary)
 
 
 def test_evidence_export_context_rejects_unknown_fields() -> None:

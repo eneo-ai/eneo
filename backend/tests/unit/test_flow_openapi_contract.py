@@ -127,6 +127,7 @@ REQUIRED_SCHEMAS = {
     "FlowRunReviewCheckpointRejectRequest",
     "FlowRunReviewCheckpointResumeRequest",
     "FlowRunReviewCheckpointResumeResponse",
+    "FlowRunReviewCheckpointEvidencePublic",
     "FlowRunRerunOperationPublic",
     "FlowRunRerunInvalidatedStepPublic",
     "FlowRunEvidenceResponse",
@@ -1073,10 +1074,11 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
         "detail_mode",
         "retention_state_summary",
         "artifact_availability_summary",
+        "review_checkpoint_summary",
     }
     assert _extract_enum_values(
         openapi_spec, manifest_properties["schema_version"]
-    ) == {"flow-evidence-export.v4"}
+    ) == {"flow-evidence-export.v5"}
     assert _extract_enum_values(
         openapi_spec, manifest_properties["content_hash_input"]
     ) == {

@@ -216,11 +216,11 @@ def _evidence_export_payload(run: FlowRun) -> dict:
     generated_at = datetime.now(timezone.utc).isoformat()
     content_hash = "abc123"
     return {
-        "schema_version": "flow-evidence-export.v4",
+        "schema_version": "flow-evidence-export.v5",
         "generated_at": generated_at,
         "content_hash": content_hash,
         "manifest": {
-            "schema_version": "flow-evidence-export.v4",
+            "schema_version": "flow-evidence-export.v5",
             "provenance_schema_version_min": "flow-attempt-provenance.v1",
             "provenance_schema_version_current": "flow-attempt-provenance.v1",
             "provenance_persisted_version_status": "not_tracked",
@@ -258,6 +258,21 @@ def _evidence_export_payload(run: FlowRun) -> dict:
                 "total_size_bytes": 0,
                 "artifacts": [],
                 "note": "Artifact availability is row-backed.",
+            },
+            "review_checkpoint_summary": {
+                "count": 0,
+                "by_state": {
+                    "awaiting_review": 0,
+                    "edited": 0,
+                    "approved": 0,
+                    "rejected": 0,
+                    "resumed": 0,
+                    "cancelled": 0,
+                },
+                "any_edited": False,
+                "any_resumed": False,
+                "active_checkpoint_id": None,
+                "active_checkpoint_conflict": False,
             },
         },
         "summary": {
@@ -2453,6 +2468,9 @@ async def test_flow_run_alias_evidence_delegates_to_run_service(monkeypatch):
         "step_results": [],
         "step_attempts": [],
         "result_files": [],
+        "rerun_operations": [],
+        "rerun_invalidated_steps": [],
+        "review_checkpoints": [],
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -2565,6 +2583,9 @@ async def test_flow_run_alias_evidence_allows_space_admin_without_trace_permissi
         "step_results": [],
         "step_attempts": [],
         "result_files": [],
+        "rerun_operations": [],
+        "rerun_invalidated_steps": [],
+        "review_checkpoints": [],
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),

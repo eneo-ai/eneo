@@ -429,6 +429,96 @@ async def test_review_checkpoint_transition_uses_revision_cas(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_list_review_checkpoints_for_run_orders_by_step_and_attempt(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_review_checkpoint_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        first_step_id, second_step_id = scenario.step_ids
+        second_checkpoint = await repo.create_or_get_review_checkpoint_for_attempt(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=second_step_id,
+            step_order=2,
+            attempt_no=1,
+            original_payload_json={"answer": "second"},
+            current_payload_json={"answer": "second"},
+            requester_principal_type=PrincipalType.USER,
+            requester_user_id=admin_user.id,
+            next_step_ids=(),
+        )
+        await repo.transition_review_checkpoint_state(
+            checkpoint_id=second_checkpoint.id,
+            tenant_id=scenario.tenant_id,
+            expected_revision=second_checkpoint.revision,
+            allowed_source_states=(FlowRunReviewCheckpointState.AWAITING_REVIEW,),
+            target_state=FlowRunReviewCheckpointState.RESUMED,
+            decided_by_user_id=admin_user.id,
+            decided_by_principal_type=PrincipalType.USER,
+        )
+        first_rerun_checkpoint = await repo.create_or_get_review_checkpoint_for_attempt(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=first_step_id,
+            step_order=1,
+            attempt_no=2,
+            original_payload_json={"answer": "first rerun"},
+            current_payload_json={"answer": "first rerun"},
+            requester_principal_type=PrincipalType.USER,
+            requester_user_id=admin_user.id,
+            next_step_ids=(second_step_id,),
+        )
+        await repo.transition_review_checkpoint_state(
+            checkpoint_id=first_rerun_checkpoint.id,
+            tenant_id=scenario.tenant_id,
+            expected_revision=first_rerun_checkpoint.revision,
+            allowed_source_states=(FlowRunReviewCheckpointState.AWAITING_REVIEW,),
+            target_state=FlowRunReviewCheckpointState.RESUMED,
+            decided_by_user_id=admin_user.id,
+            decided_by_principal_type=PrincipalType.USER,
+        )
+        first_checkpoint = await repo.create_or_get_review_checkpoint_for_attempt(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=first_step_id,
+            step_order=1,
+            attempt_no=1,
+            original_payload_json={"answer": "first"},
+            current_payload_json={"answer": "first"},
+            requester_principal_type=PrincipalType.USER,
+            requester_user_id=admin_user.id,
+            next_step_ids=(second_step_id,),
+        )
+
+        checkpoints = await repo.list_review_checkpoints_for_run(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+
+    assert [checkpoint.id for checkpoint in checkpoints] == [
+        first_checkpoint.id,
+        first_rerun_checkpoint.id,
+        second_checkpoint.id,
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_open_review_checkpoint_transitions_run_and_writes_outbox(
     db_container,
     completion_model_factory,

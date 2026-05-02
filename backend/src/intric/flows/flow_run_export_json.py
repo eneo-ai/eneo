@@ -14,6 +14,7 @@ from intric.flows.citation_sidecar import (
     summarize_step_citations,
 )
 from intric.flows.domain.flow import JsonObject
+from intric.flows.enums import FlowRunReviewCheckpointState
 from intric.flows.flow_retention_tombstone import (
     FlowRetentionTombstone,
     extract_retention_tombstones,
@@ -27,6 +28,7 @@ from intric.flows.flow_run_evidence_export_manifest import (
     EvidenceExportManifest,
     EvidenceProvenancePersistedVersionStatus,
     EvidenceRetentionStateSummary,
+    EvidenceReviewCheckpointSummary,
 )
 from intric.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
@@ -187,6 +189,9 @@ def _build_manifest(
             provenance_parse_results=provenance_parse_results,
         ),
         artifact_availability_summary=_artifact_availability_summary(bundle_payload),
+        review_checkpoint_summary=EvidenceReviewCheckpointSummary.model_validate(
+            summary["review_checkpoints"]
+        ),
     )
 
 
@@ -367,6 +372,9 @@ def _build_summary(
         ),
         "citations": citations,
         "rerun_lineage": rerun_lineage,
+        "review_checkpoints": _build_review_checkpoint_summary(
+            bundle_payload
+        ).model_dump(mode="json"),
         "final_output": _build_final_output_summary(
             run.get("output_payload_json"),
             artifact_details=_collect_artifact_details(
@@ -428,6 +436,50 @@ def _rerun_invalidated_step_records(
     bundle_payload: dict[str, Any],
 ) -> list[JsonObject]:
     return _as_json_object_list(bundle_payload.get("rerun_invalidated_steps"))
+
+
+def _review_checkpoint_records(bundle_payload: dict[str, Any]) -> list[JsonObject]:
+    return _as_json_object_list(bundle_payload.get("review_checkpoints"))
+
+
+def _build_review_checkpoint_summary(
+    bundle_payload: dict[str, Any],
+) -> EvidenceReviewCheckpointSummary:
+    checkpoints = _review_checkpoint_records(bundle_payload)
+    state_counts = {state: 0 for state in FlowRunReviewCheckpointState}
+    active_checkpoint_ids: list[str] = []
+    for checkpoint in checkpoints:
+        raw_state = checkpoint.get("state")
+        if not isinstance(raw_state, str):
+            continue
+        try:
+            state = FlowRunReviewCheckpointState(raw_state)
+        except ValueError:
+            continue
+        state_counts[state] += 1
+        if state in {
+            FlowRunReviewCheckpointState.AWAITING_REVIEW,
+            FlowRunReviewCheckpointState.EDITED,
+            FlowRunReviewCheckpointState.APPROVED,
+        }:
+            raw_checkpoint_id = checkpoint.get("id")
+            if isinstance(raw_checkpoint_id, str):
+                active_checkpoint_ids.append(raw_checkpoint_id)
+    active_checkpoint_id = (
+        active_checkpoint_ids[0] if len(active_checkpoint_ids) == 1 else None
+    )
+    return EvidenceReviewCheckpointSummary(
+        count=len(checkpoints),
+        by_state=state_counts,
+        any_edited=any(
+            checkpoint.get("edited_at") is not None for checkpoint in checkpoints
+        ),
+        any_resumed=any(
+            checkpoint.get("resumed_at") is not None for checkpoint in checkpoints
+        ),
+        active_checkpoint_id=active_checkpoint_id,
+        active_checkpoint_conflict=len(active_checkpoint_ids) > 1,
+    )
 
 
 def _collect_rag_sources(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]:

@@ -7,10 +7,12 @@ from intric.flows.domain.flow import (
     FlowRun,
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
+    FlowRunReviewCheckpoint,
     FlowStepAttempt,
     FlowStepResult,
     FlowVersion,
 )
+from intric.flows.enums import FlowRunReviewCheckpointState
 from intric.flows.flow_run_evidence import build_debug_export
 from intric.flows.flow_run_provenance import (
     FlowAttemptProvenance,
@@ -22,6 +24,10 @@ from intric.flows.flow_run_redaction import MaskedField, redact_payload_with_man
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 
 _RESULT_FIELDS_REPLACED_BY_ATTEMPT_PROVENANCE = {"tool_calls_metadata"}
+_REVIEW_CHECKPOINT_FIELDS_EXCLUDED_FROM_EXPORT = {
+    "next_step_ids_json",
+    "resume_idempotency_key",
+}
 
 
 @dataclass(frozen=True)
@@ -46,6 +52,7 @@ class EvidenceBundle:
     result_files: Sequence[FlowRunStepResultFile]
     rerun_operations: Sequence[FlowRunRerunOperation]
     rerun_invalidated_steps: Sequence[FlowRunRerunInvalidatedStep]
+    review_checkpoints: Sequence[FlowRunReviewCheckpoint]
     debug_export: dict[str, Any]
 
     def to_export_payload(self) -> EvidenceBundlePayload:
@@ -73,6 +80,10 @@ class EvidenceBundle:
                     item.model_dump(mode="json")
                     for item in self.rerun_invalidated_steps
                 ],
+                "review_checkpoints": [
+                    _dump_review_checkpoint_record(item)
+                    for item in self.review_checkpoints
+                ],
                 "debug_export": dict(self.debug_export),
             },
             provenance_parse_results=tuple(provenance_parse_results),
@@ -91,6 +102,7 @@ class RedactedEvidenceBundle:
     result_files: tuple[dict[str, Any], ...]
     rerun_operations: tuple[dict[str, Any], ...]
     rerun_invalidated_steps: tuple[dict[str, Any], ...]
+    review_checkpoints: tuple[dict[str, Any], ...]
     debug_export: dict[str, Any]
     masked_paths: tuple[str, ...]
     masked_fields: tuple[MaskedField, ...]
@@ -108,6 +120,7 @@ class RedactedEvidenceBundle:
                 "rerun_invalidated_steps": [
                     dict(item) for item in self.rerun_invalidated_steps
                 ],
+                "review_checkpoints": [dict(item) for item in self.review_checkpoints],
                 "debug_export": dict(self.debug_export),
             },
             provenance_parse_results=self.provenance_parse_results,
@@ -126,6 +139,7 @@ def build_evidence_bundle(
     result_files: Sequence[FlowRunStepResultFile] = (),
     rerun_operations: Sequence[FlowRunRerunOperation] = (),
     rerun_invalidated_steps: Sequence[FlowRunRerunInvalidatedStep] = (),
+    review_checkpoints: Sequence[FlowRunReviewCheckpoint] = (),
 ) -> EvidenceBundle:
     return EvidenceBundle(
         run=run,
@@ -135,6 +149,7 @@ def build_evidence_bundle(
         result_files=tuple(result_files),
         rerun_operations=tuple(rerun_operations),
         rerun_invalidated_steps=tuple(rerun_invalidated_steps),
+        review_checkpoints=tuple(review_checkpoints),
         debug_export=build_debug_export(
             run=run,
             version=version,
@@ -207,6 +222,16 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
     masked_paths.extend(rerun_invalidated_step_section.masked_paths)
     masked_fields.extend(rerun_invalidated_step_section.masked_fields)
 
+    review_checkpoint_section = _redact_record_payloads(
+        section_path="bundle.review_checkpoints",
+        payloads=[
+            _dump_review_checkpoint_record(checkpoint)
+            for checkpoint in bundle.review_checkpoints
+        ],
+    )
+    masked_paths.extend(review_checkpoint_section.masked_paths)
+    masked_fields.extend(review_checkpoint_section.masked_fields)
+
     debug_result = redact_payload_with_manifest(
         bundle.debug_export, path="bundle.debug_export"
     )
@@ -228,6 +253,7 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
         result_files=result_file_section.records,
         rerun_operations=rerun_operation_section.records,
         rerun_invalidated_steps=rerun_invalidated_step_section.records,
+        review_checkpoints=review_checkpoint_section.records,
         debug_export=debug_export,
         masked_paths=tuple(
             dict.fromkeys(
@@ -276,6 +302,34 @@ def _dump_result_record(item: FlowStepResult) -> dict[str, Any]:
     return item.model_dump(
         mode="json", exclude=_RESULT_FIELDS_REPLACED_BY_ATTEMPT_PROVENANCE
     )
+
+
+def _dump_review_checkpoint_record(item: FlowRunReviewCheckpoint) -> dict[str, Any]:
+    dumped = item.model_dump(
+        mode="json", exclude=_REVIEW_CHECKPOINT_FIELDS_EXCLUDED_FROM_EXPORT
+    )
+    dumped["decision"] = _review_checkpoint_decision(item)
+    dumped["next_step_ids"] = (
+        [str(step_id) for step_id in item.next_step_ids_json]
+        if item.next_step_ids_json is not None
+        else None
+    )
+    dumped["resume_key_present"] = item.resume_idempotency_key is not None
+    return dumped
+
+
+def _review_checkpoint_decision(item: FlowRunReviewCheckpoint) -> str | None:
+    """Resumed checkpoints keep the reviewer decision separate from run re-entry."""
+    if item.state in (
+        FlowRunReviewCheckpointState.APPROVED,
+        FlowRunReviewCheckpointState.RESUMED,
+    ):
+        return "approved"
+    if item.state == FlowRunReviewCheckpointState.REJECTED:
+        return "rejected"
+    if item.state == FlowRunReviewCheckpointState.CANCELLED:
+        return "cancelled"
+    return None
 
 
 def _dump_attempt_record(
