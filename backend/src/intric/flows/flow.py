@@ -17,7 +17,6 @@ from intric.flows.domain.flow import (
     FlowTemplateAssetStatus,
     FlowVersion,
     JsonObject,
-    ToolCallMetadata,
 )
 
 __all__ = [
@@ -37,5 +36,4 @@ __all__ = [
     "FlowTemplateAssetStatus",
     "FlowVersion",
     "JsonObject",
-    "ToolCallMetadata",
 ]

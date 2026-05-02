@@ -23,7 +23,6 @@ from intric.flows.flow_run_provenance import (
 from intric.flows.flow_run_redaction import MaskedField, redact_payload_with_manifest
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 
-_RESULT_FIELDS_REPLACED_BY_ATTEMPT_PROVENANCE = {"tool_calls_metadata"}
 _REVIEW_CHECKPOINT_FIELDS_EXCLUDED_FROM_EXPORT = {
     "next_step_ids_json",
     "resume_idempotency_key",
@@ -299,9 +298,7 @@ def _redact_record_payloads(
 
 
 def _dump_result_record(item: FlowStepResult) -> dict[str, Any]:
-    return item.model_dump(
-        mode="json", exclude=_RESULT_FIELDS_REPLACED_BY_ATTEMPT_PROVENANCE
-    )
+    return item.model_dump(mode="json")
 
 
 def _dump_review_checkpoint_record(item: FlowRunReviewCheckpoint) -> dict[str, Any]:

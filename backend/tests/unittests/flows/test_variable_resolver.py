@@ -6,7 +6,10 @@ from uuid import uuid4
 import pytest
 
 from intric.flows.flow import FlowStepResult, FlowStepResultStatus
-from intric.flows.variable_resolver import FlowVariableResolver, iter_template_expressions
+from intric.flows.variable_resolver import (
+    FlowVariableResolver,
+    iter_template_expressions,
+)
 from intric.main.exceptions import BadRequestException
 
 
@@ -29,7 +32,6 @@ def _result(step_order: int, output_payload: dict) -> FlowStepResult:
         status=FlowStepResultStatus.COMPLETED,
         error_message=None,
         flow_step_execution_hash="hash",
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )
@@ -86,7 +88,9 @@ def test_interpolate_raises_on_missing_reference():
     resolver = FlowVariableResolver()
     context = resolver.build_context(
         flow_input={"citizen_name": "Anna"},
-        prior_results=[_result(step_order=1, output_payload={"summary": "Case summary"})],
+        prior_results=[
+            _result(step_order=1, output_payload={"summary": "Case summary"})
+        ],
     )
 
     with pytest.raises(BadRequestException):
@@ -99,7 +103,10 @@ def test_interpolate_raises_on_missing_reference():
 def test_build_context_exposes_friendly_field_aliases():
     resolver = FlowVariableResolver()
     context = resolver.build_context(
-        flow_input={"Namn på brukare": "Anna Andersson", "Personnummer": "19121212-1212"},
+        flow_input={
+            "Namn på brukare": "Anna Andersson",
+            "Personnummer": "19121212-1212",
+        },
         prior_results=[],
     )
 
@@ -111,7 +118,9 @@ def test_build_context_exposes_previous_step_alias_for_step_two():
     resolver = FlowVariableResolver()
     context = resolver.build_context(
         flow_input={},
-        prior_results=[_result(step_order=1, output_payload={"text": "Sammanfattning steg 1"})],
+        prior_results=[
+            _result(step_order=1, output_payload={"text": "Sammanfattning steg 1"})
+        ],
         current_step_order=2,
     )
 

@@ -188,7 +188,6 @@ def _step_result_record(
         status=FlowStepResultStatus.COMPLETED,
         error_message=error_message,
         flow_step_execution_hash=None,
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )

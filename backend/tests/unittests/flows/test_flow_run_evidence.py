@@ -188,7 +188,6 @@ def _step_result_for_run(
     run: FlowRun,
     *,
     step_id: UUID | None = None,
-    tool_calls_metadata: list[dict[str, Any]] | dict[str, Any] | None = None,
     output_payload_json: dict[str, Any] | None = None,
 ) -> FlowStepResult:
     now = datetime.now(timezone.utc)
@@ -209,7 +208,6 @@ def _step_result_for_run(
         status=FlowStepResultStatus.COMPLETED,
         error_message=None,
         flow_step_execution_hash=None,
-        tool_calls_metadata=tool_calls_metadata,
         created_at=now,
         updated_at=now,
     )
@@ -477,7 +475,6 @@ def test_build_debug_export_reads_rag_metadata_from_typed_step_results():
         status=FlowStepResultStatus.COMPLETED,
         error_message=None,
         flow_step_execution_hash=None,
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )
@@ -717,7 +714,6 @@ def test_build_debug_export_adds_rag_source_names_and_run_summary() -> None:
         status=FlowStepResultStatus.COMPLETED,
         error_message=None,
         flow_step_execution_hash=None,
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )
@@ -1363,40 +1359,6 @@ def test_evidence_export_rag_tracking_corrupt_and_retention_purged_precedence() 
     )
 
 
-def test_evidence_export_omits_result_tool_calls_and_preserves_attempt_provenance() -> (
-    None
-):
-    run, version = _evidence_run_and_version()
-    step_id = uuid4()
-    result = _step_result_for_run(
-        run,
-        step_id=step_id,
-        tool_calls_metadata=[{"name": "legacy-result-copy"}],
-    )
-    attempt = _attempt_with_provenance(
-        run,
-        {
-            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
-            "llm": {
-                "tool_calls": [{"name": "canonical-attempt-copy"}],
-            },
-        },
-    ).model_copy(update={"step_id": step_id})
-
-    export = _render_raw_export(
-        run,
-        version,
-        step_results=[result],
-        step_attempts=[attempt],
-    )
-
-    assert "tool_calls_metadata" not in export["bundle"]["step_results"][0]
-    tool_calls = export["bundle"]["step_attempts"][0]["provenance_json"]["llm"][
-        "tool_calls"
-    ]
-    assert tool_calls["preview"] == [{"name": "canonical-attempt-copy"}]
-
-
 def test_evidence_export_includes_review_checkpoint_lineage() -> None:
     run, version = _evidence_run_and_version()
     step_id = uuid4()
@@ -1795,7 +1757,6 @@ def test_render_evidence_json_export_adds_rag_source_details_and_step_overview()
         status=FlowStepResultStatus.COMPLETED,
         error_message=None,
         flow_step_execution_hash=None,
-        tool_calls_metadata=None,
         created_at=started_at,
         updated_at=finished_at,
     )
@@ -2067,7 +2028,6 @@ def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindin
         status=FlowStepResultStatus.COMPLETED,
         error_message=None,
         flow_step_execution_hash=None,
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )
@@ -2113,7 +2073,6 @@ def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindin
         status=FlowStepResultStatus.COMPLETED,
         error_message=None,
         flow_step_execution_hash=None,
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )
@@ -2326,7 +2285,6 @@ def test_render_evidence_json_export_adds_citation_sidecars_and_prompt_context_s
         status=FlowStepResultStatus.COMPLETED,
         error_message=None,
         flow_step_execution_hash=None,
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )
@@ -2525,7 +2483,6 @@ def test_render_evidence_json_export_uses_provenance_citation_compliance_and_run
         status=FlowStepResultStatus.COMPLETED,
         error_message=None,
         flow_step_execution_hash=None,
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )
@@ -2715,7 +2672,6 @@ def test_render_evidence_json_export_surfaces_inherited_citation_context() -> No
         status=FlowStepResultStatus.COMPLETED,
         error_message=None,
         flow_step_execution_hash=None,
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )

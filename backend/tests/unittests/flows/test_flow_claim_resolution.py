@@ -27,13 +27,14 @@ def _result(step_order: int, *, status: FlowStepResultStatus) -> FlowStepResult:
         status=status,
         error_message=None,
         flow_step_execution_hash=None,
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )
 
 
-def _state(*, completed_by_order: dict[int, FlowStepResult] | None = None) -> RunExecutionState:
+def _state(
+    *, completed_by_order: dict[int, FlowStepResult] | None = None
+) -> RunExecutionState:
     return RunExecutionState(
         completed_by_order=completed_by_order or {},
         prior_results=[],

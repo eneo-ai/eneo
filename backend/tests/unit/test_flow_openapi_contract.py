@@ -591,19 +591,6 @@ def test_openapi_resume_review_checkpoint_uses_idempotency_header(
     assert parameter.get("required") is False
 
 
-def test_openapi_flow_run_step_tool_calls_metadata_is_absent(
-    openapi_spec: dict,
-) -> None:
-    schema = (
-        openapi_spec.get("components", {})
-        .get("schemas", {})
-        .get("FlowRunStepPublic", {})
-    )
-    properties = schema.get("properties", {})
-
-    assert "tool_calls_metadata" not in properties
-
-
 def test_openapi_flow_public_run_and_step_expose_result_files(
     openapi_spec: dict,
 ) -> None:

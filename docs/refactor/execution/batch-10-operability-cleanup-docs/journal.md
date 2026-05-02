@@ -248,3 +248,73 @@ Verification answers:
 | Are outbox ids server-generated? | Yes. `FlowRunAuditOutbox` inherits `BasePublic`, whose `IdMixin` uses `server_default=func.gen_random_uuid()`. |
 | Is `enable_autobegin_for_flow_task_session(session)` before explicit `session.begin()` acceptable in the delivery task? | Yes. Once `session.begin()` is active, autobegin is inert; the helper keeps Flow task discipline consistent while the explicit transaction owns the `FOR UPDATE SKIP LOCKED` lock lifetime. |
 | Were integration tests run against real PostgreSQL? | Yes. The integration fixtures used testcontainers with `pgvector/pgvector:pg16`; the new partial indexes and check constraints were exercised against PostgreSQL. |
+
+### Iteration 7 — Slice 10.4 Result Tool-Call Metadata Cleanup
+
+- Chosen slice: remove the duplicate persisted `flow_step_results.tool_calls_metadata` field now that attempt provenance is canonical.
+- Claude plan artifact: `.codex/artifacts/claude-peer-loop-batch-10-tool-calls-result-cleanup-plan-20260502T215246Z.md`
+- Claude verdict: `green`
+- Claude green light: `yes`
+- Claude minimum score: `8`
+
+Accepted plan decisions:
+
+| Decision | Reason |
+|---|---|
+| Drop `flow_step_results.tool_calls_metadata` with a migration after `20260502_flow_audit_delivery`. | Flows are unreleased and live result writes already stored this field as NULL after attempt provenance became canonical. |
+| Remove `FlowStepResult.tool_calls_metadata` and the `ToolCallMetadata` Flow re-export. | The domain result model should not preserve a deleted persistence path. |
+| Remove result-level write/reset/retention/export logic. | Keeping NULL writes, reset keys, retention tombstones, or evidence export exclusions would preserve dead architecture. |
+| Keep `StepExecutionOutput.tool_calls_metadata`. | It is transient runtime data used to move LLM adapter metadata into attempt provenance. |
+| Delete the evidence test that asserted result-level omission. | The behavior no longer exists; API/OpenAPI and attempt provenance tests cover the remaining contract. |
+
+Implementation summary:
+
+- Added migration `backend/alembic/versions/20260502_drop_result_tool_calls.py`.
+- Removed the ORM, domain, repository, rerun reset, retention, and evidence export references to the result-row field.
+- Removed stale test fixture arguments and the now-vacuous evidence omission test.
+- Kept non-Flow completion/assistant metadata and Flow runtime `StepExecutionOutput.tool_calls_metadata` unchanged.
+
+Validation so far:
+
+| Command | Result |
+|---|---|
+| `rg -n "tool_calls_metadata\|ToolCallMetadata" ...` across result/domain/infrastructure/evidence/retention owners | Passed: no output |
+| `cd backend && uv run ruff format ...` for Slice 10.4 source/tests | Passed |
+| `cd backend && uv run ruff check ...` for Slice 10.4 source/tests | Passed |
+| `cd backend && uv run pyright ...` for Slice 10.4 source/tests | Passed: `0 errors, 0 warnings, 0 informations` |
+| `cd backend && uv run pytest ... -q` for the full targeted unit set | Host environment failure: one PDF artifact case cannot import WeasyPrint native `libgobject`; `404 passed` before the failure |
+| `cd backend && uv run pytest ... --deselect tests/unittests/flows/test_typed_io_executor.py::test_document_outputs_generate_downloadable_artifacts[pdf-application/pdf-.pdf] -q` | Passed: `404 passed, 1 deselected, 18 warnings` |
+| `cd backend && uv run pytest tests/integration/test_flow_runtime_retention_cleanup.py tests/integration/flows/test_flow_repository.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/integration/flows/test_flow_run_rerun_repository.py tests/integration/flows/test_flow_step_file_mapping_contract.py -q` | Passed: `41 passed, 16 warnings` |
+| `docker exec eneo-41ae93-eneo-1 true` | Blocked by current Codex process policy before host execution: `approval required by policy, but AskForApproval is set to Never` |
+| `cd backend && uv run lint-imports --no-cache` | Passed: `3 kept, 0 broken` |
+| `cd backend && uv run alembic heads` | Passed: `20260502_drop_result_tool_calls (head)` |
+| `git diff --check -- ...` for Slice 10.4 paths | Passed |
+| `./scripts/gate-local/anti_slippage.sh --worktree` | Passed: `anti-slippage: worktree clean` |
+
+Claude implementation verification:
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-10-tool-calls-result-cleanup-implementation-verification-20260502T221058Z.md`
+- Verdict: `green`
+- Green light: `yes`
+- Minimum score: `9`
+
+Accepted post-green cleanup:
+
+| Claude finding | Change |
+|---|---|
+| `test_openapi_flow_run_step_tool_calls_metadata_is_absent` became structurally vacuous once the field was deleted from every Flow result owner. | Deleted the test instead of preserving a negative assertion for a non-existent field. |
+
+Post-cleanup validation:
+
+| Command | Result |
+|---|---|
+| `cd backend && uv run ruff check tests/unit/test_flow_openapi_contract.py` | Passed |
+| `cd backend && uv run ruff format --check tests/unit/test_flow_openapi_contract.py` | Passed |
+| `cd backend && uv run pyright tests/unit/test_flow_openapi_contract.py` | Passed: `0 errors, 0 warnings, 0 informations` |
+| `cd backend && uv run pytest tests/unit/test_flow_openapi_contract.py -q` | Passed: `36 passed, 16 warnings` |
+| `cd backend && uv run pytest ... --deselect tests/unittests/flows/test_typed_io_executor.py::test_document_outputs_generate_downloadable_artifacts[pdf-application/pdf-.pdf] -q` for the full targeted unit set | Passed: `403 passed, 1 deselected, 18 warnings` |
+| `cd backend && uv run lint-imports --no-cache` | Passed: `3 kept, 0 broken` |
+| `git diff --check -- ...` for Slice 10.4 paths | Passed |
+| `./scripts/gate-local/anti_slippage.sh --worktree` | Passed: `anti-slippage: worktree clean` |
+| `rg -n "tool_calls_metadata\|ToolCallMetadata" scripts backend/scripts` | Passed: no output |
+| `rg -n "from intric\\.flows\\.(flow\|domain\\.flow) import.*ToolCallMetadata\|ToolCallMetadata" backend/src/intric/flows backend/tests` | Passed: no output |

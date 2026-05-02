@@ -136,7 +136,6 @@ _RERUN_STEP_RESULT_RESET_VALUES: dict[str, object] = {
     "num_tokens_output": None,
     "error_message": None,
     "flow_step_execution_hash": None,
-    "tool_calls_metadata": None,
     "started_at": None,
     "finished_at": None,
 }

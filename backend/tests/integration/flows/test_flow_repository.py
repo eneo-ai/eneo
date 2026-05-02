@@ -232,7 +232,6 @@ async def test_save_step_result_upserts_on_run_and_step(
             status=FlowStepResultStatus.PENDING,
             error_message=None,
             flow_step_execution_hash="hash-1",
-            tool_calls_metadata=[],
             created_at=now,
             updated_at=now,
         )
@@ -259,7 +258,6 @@ async def test_save_step_result_upserts_on_run_and_step(
             status=FlowStepResultStatus.COMPLETED,
             error_message=None,
             flow_step_execution_hash="hash-1",
-            tool_calls_metadata=[{"tool_name": "none"}],
             created_at=now,
             updated_at=now,
         )
@@ -365,7 +363,6 @@ async def test_save_step_result_legacy_update_raises_when_row_missing(
             status=FlowStepResultStatus.COMPLETED,
             error_message=None,
             flow_step_execution_hash="hash-legacy",
-            tool_calls_metadata=[],
             created_at=now,
             updated_at=now,
         )

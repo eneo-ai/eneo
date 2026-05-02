@@ -543,9 +543,6 @@ class FlowStepResults(BasePublic):
     )
     error_message: Mapped[Optional[str]] = mapped_column(nullable=True)
     flow_step_execution_hash: Mapped[Optional[str]] = mapped_column(nullable=True)
-    tool_calls_metadata: Mapped[Optional[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=True
-    )
     started_at: Mapped[Optional[datetime]] = mapped_column(
         sa.DateTime(timezone=True), nullable=True
     )

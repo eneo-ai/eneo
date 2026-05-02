@@ -556,7 +556,6 @@ class FlowRepository:
             "status": result.status.value,
             "error_message": result.error_message,
             "flow_step_execution_hash": result.flow_step_execution_hash,
-            "tool_calls_metadata": result.tool_calls_metadata,
         }
 
         if result.status in (

@@ -91,7 +91,6 @@ def build_completed_step_result(
         status=FlowStepResultStatus.COMPLETED,
         error_message=None,
         flow_step_execution_hash=execution_hash,
-        tool_calls_metadata=None,
         created_at=claimed.created_at,
         updated_at=claimed.updated_at,
     )

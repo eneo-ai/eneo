@@ -7,7 +7,9 @@ from intric.flows.flow import FlowStepResult, FlowStepResultStatus
 from intric.flows.runtime.run_outcome import determine_run_outcome
 
 
-def _result(step_order: int, *, status: FlowStepResultStatus, text: str = "") -> FlowStepResult:
+def _result(
+    step_order: int, *, status: FlowStepResultStatus, text: str = ""
+) -> FlowStepResult:
     now = datetime.now(timezone.utc)
     return FlowStepResult(
         id=uuid4(),
@@ -26,7 +28,6 @@ def _result(step_order: int, *, status: FlowStepResultStatus, text: str = "") ->
         status=status,
         error_message=None,
         flow_step_execution_hash=None,
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )

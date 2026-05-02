@@ -56,7 +56,6 @@ def _step_result(
         status=status,
         error_message=None,
         flow_step_execution_hash=None,
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )
@@ -148,7 +147,6 @@ def test_build_completed_step_result_includes_optional_sections_and_hash():
         "structured": {"result": "ok"},
     }
     assert built.flow_step_execution_hash == "abc123"
-    assert built.tool_calls_metadata is None
 
 
 def test_with_webhook_delivery_status_updates_payload_without_losing_existing_fields():

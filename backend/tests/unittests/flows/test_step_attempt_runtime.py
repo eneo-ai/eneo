@@ -45,7 +45,6 @@ def _claimed_result(*, step_order: int = 1) -> FlowStepResult:
         status=FlowStepResultStatus.RUNNING,
         error_message=None,
         flow_step_execution_hash="hash",
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )
@@ -333,7 +332,6 @@ def test_runtime_tool_calls_land_in_attempt_provenance_not_step_result() -> None
         step_result=step_result,
     )
 
-    assert step_result.tool_calls_metadata is None
     parse_result = parse_attempt_provenance(provenance_payload)
     assert parse_result.provenance is not None
     assert parse_result.provenance.llm is not None

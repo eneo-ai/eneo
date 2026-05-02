@@ -217,7 +217,6 @@ async def _create_flow_runtime_fixture(
         status="completed",
         error_message=None,
         flow_step_execution_hash=None,
-        tool_calls_metadata={"count": 1},
         started_at=created_at,
         finished_at=created_at,
         created_at=created_at,
@@ -318,7 +317,6 @@ async def test_cleanup_old_flow_runtime_data_clears_debug_evidence_and_generated
     assert refreshed_step_result.input_payload_json is None
     assert refreshed_step_result.effective_prompt is None
     assert refreshed_step_result.model_parameters_json is None
-    assert refreshed_step_result.tool_calls_metadata is None
     assert refreshed_step_result.output_payload_json is not None
     assert refreshed_step_result.output_payload_json["text"] == "kept output"
     assert refreshed_step_result.output_payload_json["webhook_delivered"] is False

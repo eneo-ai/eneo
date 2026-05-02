@@ -301,7 +301,6 @@ async def _seed_flow_run_contract_data(
             status="completed",
             error_message=None,
             flow_step_execution_hash="hash-1",
-            tool_calls_metadata=[],
         )
         session.add(step_result)
         initial_attempt = FlowStepAttempts(

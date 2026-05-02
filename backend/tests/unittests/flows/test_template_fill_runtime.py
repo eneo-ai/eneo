@@ -91,7 +91,6 @@ def _completed_result(*, run: FlowRun) -> FlowStepResult:
         status=FlowStepResultStatus.COMPLETED,
         error_message=None,
         flow_step_execution_hash="hash",
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )
@@ -300,7 +299,6 @@ async def test_execute_template_fill_step_strips_duplicate_leading_heading_from_
         status=FlowStepResultStatus.COMPLETED,
         error_message=None,
         flow_step_execution_hash="hash",
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )
@@ -368,7 +366,6 @@ async def test_execute_template_fill_step_reports_failed_upstream_step_clearly()
         status=FlowStepResultStatus.FAILED,
         error_message="boom",
         flow_step_execution_hash="hash",
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )

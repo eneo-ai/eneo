@@ -330,7 +330,6 @@ async def _mark_run_completed(
                 num_tokens_output=step.step_order + 10,
                 error_message=f"old-error-{step.step_order}",
                 flow_step_execution_hash=f"hash-{step.step_order}",
-                tool_calls_metadata={"calls": []},
                 started_at=now,
                 finished_at=now,
             )

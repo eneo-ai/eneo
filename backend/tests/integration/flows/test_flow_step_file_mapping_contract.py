@@ -338,7 +338,6 @@ async def test_step_result_files_are_attempt_scoped_and_deduplicated(
             status=FlowStepResultStatus.COMPLETED,
             error_message=None,
             flow_step_execution_hash="hash",
-            tool_calls_metadata=None,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )

@@ -161,7 +161,6 @@ def _claimed_step_result(
         status=FlowStepResultStatus.RUNNING,
         error_message=None,
         flow_step_execution_hash=None,
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )
@@ -2122,7 +2121,6 @@ def _completed_step_result(
         status=FlowStepResultStatus.COMPLETED,
         error_message=None,
         flow_step_execution_hash="hash",
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )
@@ -2647,7 +2645,6 @@ def test_run_execution_state_append_completed():
         status=FlowStepResultStatus.COMPLETED,
         error_message=None,
         flow_step_execution_hash="h",
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )
@@ -2688,7 +2685,6 @@ def test_run_execution_state_all_previous_text_accumulates():
             status=FlowStepResultStatus.COMPLETED,
             error_message=None,
             flow_step_execution_hash="h",
-            tool_calls_metadata=None,
             created_at=now,
             updated_at=now,
         )

@@ -26,7 +26,6 @@ from intric.flows.enums import (
 from intric.flows.flow_review_policy import FlowStepReviewPolicy
 
 JsonObject: TypeAlias = dict[str, Any]
-ToolCallMetadata: TypeAlias = dict[str, Any]
 
 
 class FlowStep(BaseModel):
@@ -175,7 +174,6 @@ class FlowStepResult(BaseModel):
     status: FlowStepResultStatus
     error_message: Optional[str] = None
     flow_step_execution_hash: Optional[str] = None
-    tool_calls_metadata: list[ToolCallMetadata] | ToolCallMetadata | None = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     created_at: datetime

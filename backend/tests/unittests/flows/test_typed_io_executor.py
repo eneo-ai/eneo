@@ -172,7 +172,6 @@ def _completed_step_result(
         status=FlowStepResultStatus.COMPLETED,
         error_message=None,
         flow_step_execution_hash="hash",
-        tool_calls_metadata=None,
         created_at=now,
         updated_at=now,
     )

@@ -468,7 +468,6 @@ class DataRetentionService:
             FlowStepResults.effective_prompt,
             FlowStepResults.output_payload_json,
             FlowStepResults.model_parameters_json,
-            FlowStepResults.tool_calls_metadata,
         ).where(FlowStepResults.flow_run_id.in_(set(actions_by_run_id)))
         step_result_rows = await self.session.execute(step_result_stmt)
         debug_step_results = 0
@@ -491,7 +490,6 @@ class DataRetentionService:
                         row.input_payload_json,
                         row.effective_prompt,
                         row.model_parameters_json,
-                        row.tool_calls_metadata,
                     )
                 )
                 or pruned_output != row.output_payload_json
@@ -522,7 +520,6 @@ class DataRetentionService:
                     effective_prompt=None,
                     output_payload_json=output_payload,
                     model_parameters_json=None,
-                    tool_calls_metadata=None,
                 )
             )
             debug_step_results += result.rowcount or 0
@@ -793,7 +790,6 @@ def _debug_tombstone_counts(
             row.input_payload_json,
             row.effective_prompt,
             row.model_parameters_json,
-            row.tool_calls_metadata,
         )
         if value is not None
     )
