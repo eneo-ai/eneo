@@ -8,6 +8,7 @@ import type {
   FlowRunEvidenceWithTypedSteps,
   FlowRunRerunInvalidatedStep,
   FlowRunRerunOperation,
+  FlowRunReviewCheckpoint,
   FlowRunResultFile,
   FlowRunStep,
   FlowRunStepInputs,
@@ -16,6 +17,8 @@ import type {
 } from "@intric/intric-js";
 
 type FlowRunCreateRequest = components["schemas"]["FlowRunCreateRequest"];
+type FlowRunReviewCheckpointEvidence =
+  components["schemas"]["FlowRunReviewCheckpointEvidencePublic"];
 
 const isoTimestamp = "2026-03-17T10:05:00Z";
 const flowId = "00000000-0000-0000-0000-000000000001";
@@ -25,6 +28,7 @@ const runId = "00000000-0000-0000-0000-000000000301";
 const stepResultId = "00000000-0000-0000-0000-000000000501";
 const resultFileId = "00000000-0000-0000-0000-000000000801";
 const rerunOperationId = "00000000-0000-0000-0000-000000000901";
+const reviewCheckpointId = "00000000-0000-0000-0000-000000000905";
 
 const validFlowStep: FlowStep = {
   id: stepId,
@@ -183,6 +187,39 @@ const validRerunInvalidatedStep: FlowRunRerunInvalidatedStep = {
   updated_at: isoTimestamp
 };
 
+const validReviewCheckpoint: FlowRunReviewCheckpoint = {
+  id: reviewCheckpointId,
+  tenant_id: tenantId,
+  flow_id: flowId,
+  flow_run_id: runId,
+  step_id: stepId,
+  step_order: 1,
+  attempt_no: 1,
+  state: "resumed",
+  revision: 3,
+  schema_version: 1,
+  original_payload_json: { text: "Draft answer." },
+  current_payload_json: { text: "Reviewed answer." },
+  next_step_ids: ["00000000-0000-0000-0000-000000000102"],
+  requester_user_id: "00000000-0000-0000-0000-000000000030",
+  requester_principal_type: "user",
+  decided_by_user_id: "00000000-0000-0000-0000-000000000030",
+  decided_by_principal_type: "user",
+  edited_at: isoTimestamp,
+  approved_at: isoTimestamp,
+  rejected_at: null,
+  resumed_at: isoTimestamp,
+  cancelled_at: null,
+  created_at: isoTimestamp,
+  updated_at: isoTimestamp
+};
+
+const validReviewCheckpointEvidence: FlowRunReviewCheckpointEvidence = {
+  ...validReviewCheckpoint,
+  decision: "approved",
+  resume_key_present: true
+};
+
 const validFlowGraph: FlowGraph = {
   nodes: [
     {
@@ -203,6 +240,7 @@ const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
   result_files: [validFlowRunResultFile],
   rerun_operations: [validRerunOperation],
   rerun_invalidated_steps: [validRerunInvalidatedStep],
+  review_checkpoints: [validReviewCheckpointEvidence],
   debug_export: {
     schema_version: "eneo.flow.debug-export.v2",
     generated_at: isoTimestamp,
@@ -230,11 +268,11 @@ const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
 };
 
 const validFlowEvidenceExport: FlowRunEvidenceExport = {
-  schema_version: "flow-evidence-export.v4",
+  schema_version: "flow-evidence-export.v5",
   generated_at: isoTimestamp,
   content_hash: "sha256:evidence",
   manifest: {
-    schema_version: "flow-evidence-export.v4",
+    schema_version: "flow-evidence-export.v5",
     provenance_schema_version_min: "flow-attempt-provenance.v1",
     provenance_schema_version_current: "flow-attempt-provenance.v1",
     provenance_persisted_version_status: "not_tracked",
@@ -268,6 +306,14 @@ const validFlowEvidenceExport: FlowRunEvidenceExport = {
       total_size_bytes: validFlowRunResultFile.size,
       artifacts: [validFlowRunResultFile],
       note: "Artifact availability is derived from flow_run_step_result_files."
+    },
+    review_checkpoint_summary: {
+      count: 1,
+      by_state: { resumed: 1 },
+      any_edited: true,
+      any_resumed: true,
+      active_checkpoint_id: null,
+      active_checkpoint_conflict: false
     }
   },
   summary: {},

@@ -198,6 +198,10 @@ export type FlowRunDebugExport = components["schemas"]["FlowRunDebugExport"];
 export type FlowRunRerunOperation = components["schemas"]["FlowRunRerunOperationPublic"];
 export type FlowRunRerunInvalidatedStep =
   components["schemas"]["FlowRunRerunInvalidatedStepPublic"];
+export type FlowRunReviewCheckpoint = components["schemas"]["FlowRunReviewCheckpointPublic"];
+export type FlowRunReviewCheckpointState = components["schemas"]["FlowRunReviewCheckpointState"];
+export type FlowRunReviewCheckpointResumeResponse =
+  components["schemas"]["FlowRunReviewCheckpointResumeResponse"];
 export type FlowRunEvidence = components["schemas"]["FlowRunEvidenceResponse"];
 export type FlowRunEvidenceWithTypedSteps = Omit<FlowRunEvidence, "step_results"> & {
   step_results: FlowRunStep[];

@@ -7,6 +7,7 @@ const translations = {
   failed: () => "Failed",
   queued: () => "Queued",
   running: () => "Running",
+  awaiting_review: () => "Awaiting review",
   cancelled: () => "Cancelled"
 };
 
@@ -34,6 +35,15 @@ describe("getFlowRunStatusView", () => {
       label: "Queued",
       textClass: "text-secondary",
       dotClass: "bg-secondary",
+      pulseDot: false
+    });
+  });
+
+  it("maps awaiting review status to non-pulsing attention visuals", () => {
+    expect(getFlowRunStatusView("awaiting_review", translations)).toEqual({
+      label: "Awaiting review",
+      textClass: "text-accent-stronger",
+      dotClass: "bg-accent-default",
       pulseDot: false
     });
   });

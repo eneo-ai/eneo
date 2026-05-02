@@ -3,12 +3,13 @@ export type FlowRunStatusTranslations = {
   failed: () => string;
   queued: () => string;
   running: () => string;
+  awaiting_review: () => string;
   cancelled: () => string;
 };
 
 export function getFlowRunStatusLabel(
   status: string,
-  translations: FlowRunStatusTranslations,
+  translations: FlowRunStatusTranslations
 ): string {
   if (status === "pending") {
     return translations.queued();

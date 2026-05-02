@@ -39,17 +39,6 @@ export type FlowRunProgressStats = {
   progressRatio: number;
 };
 
-const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
-const ACTIVE_STATUSES = new Set(["queued", "running"]);
-
-export function isFlowRunActive(status: string): boolean {
-  return ACTIVE_STATUSES.has(status);
-}
-
-export function isFlowRunTerminal(status: string): boolean {
-  return TERMINAL_STATUSES.has(status);
-}
-
 export function buildFlowRunProgressSnapshot(
   graph: FlowGraph | null,
   steps: FlowRunStep[]

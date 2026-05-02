@@ -421,12 +421,12 @@ Files expected:
 - `frontend/apps/web/messages/sv.json`
 
 Acceptance criteria:
-- [ ] Generated schema includes `awaiting_review` and review checkpoint models.
-- [ ] One frontend status module owns active/terminal/cancellable run status sets; progress, status badge, and run table import it instead of duplicating string sets.
-- [ ] Status badge and run list render awaiting-review distinctly.
-- [ ] Review UI owns editable checkpoint state in one component/service boundary.
-- [ ] Resume/edit buttons use allowed backend state, not guessed frontend conditions.
-- [ ] Translations are updated in English and Swedish together.
+- [x] Generated schema includes `awaiting_review` and review checkpoint models.
+- [x] One frontend status module owns active/terminal/cancellable run status sets; progress, status badge, and run table import it instead of duplicating string sets.
+- [x] Status badge and run list render awaiting-review distinctly.
+- [x] Review UI owns editable checkpoint state in one component/service boundary.
+- [x] Resume/edit buttons use allowed backend state, not guessed frontend conditions.
+- [x] Translations are updated in English and Swedish together.
 
 Tests required:
 - Frontend status presentation tests for `awaiting_review`.
@@ -442,9 +442,9 @@ Risk/trade-off:
 - [x] Stale-running reconciliation closes open attempts and emits durable audit. Completed before Batch 9.
 - [x] `FlowRunCreateRequest` no longer exposes top-level `file_ids`. Completed before Batch 9.
 - [x] Rerun returns DAG-derived `invalidated_step_ids`. Completed in Batch 8.
-- [ ] Human review persists checkpoint and exits worker.
-- [ ] Resume re-queues the existing execution task and validates expected checkpoint revision plus run revision CAS.
-- [ ] Evidence distinguishes original vs edited review output.
+- [x] Human review persists checkpoint and exits worker.
+- [x] Resume re-queues the existing execution task and validates expected checkpoint revision plus run revision CAS.
+- [x] Evidence distinguishes original vs edited review output.
 
 ## Out Of Scope
 
@@ -474,8 +474,10 @@ docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pyright src/intri
 Add slice-specific frontend validation in Slice 9.6:
 
 ```bash
-pnpm -C frontend check
-pnpm -C frontend --filter @intric/web test -- flowRunStatus
+bun --cwd frontend/packages/intric-js test src/client/client.test.js src/endpoints/flows.test.js
+bun --cwd frontend/packages/intric-js run check
+bun --cwd frontend/packages/intric-js run lint
+bun --cwd frontend/apps/web run test:unit -- src/lib/features/flows/components/flowRunStatusSets.test.ts src/lib/features/flows/components/flowRunProgress.test.ts src/lib/features/flows/components/flowRunsFocus.test.ts src/lib/features/flows/components/flowRunStatusLabel.test.ts src/lib/features/flows/components/flowRunStatusPresentation.test.ts src/lib/features/flows/components/FlowRunStatusBadge.test.ts src/lib/features/flows/components/FlowRunReviewCheckpointPanel.test.ts
 ```
 
 ## Scoring Target

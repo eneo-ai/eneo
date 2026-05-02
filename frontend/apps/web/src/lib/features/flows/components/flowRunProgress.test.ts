@@ -1,24 +1,8 @@
 import { describe, expect, test } from "vitest";
 
-import {
-  buildFlowRunProgressSnapshot,
-  getFlowRunFocusedStepOrder,
-  isFlowRunActive,
-  isFlowRunTerminal
-} from "./flowRunProgress";
+import { buildFlowRunProgressSnapshot, getFlowRunFocusedStepOrder } from "./flowRunProgress";
 
 describe("flowRunProgress helpers", () => {
-  test("identifies active and terminal run states", () => {
-    expect(isFlowRunActive("queued")).toBe(true);
-    expect(isFlowRunActive("running")).toBe(true);
-    expect(isFlowRunActive("completed")).toBe(false);
-
-    expect(isFlowRunTerminal("completed")).toBe(true);
-    expect(isFlowRunTerminal("failed")).toBe(true);
-    expect(isFlowRunTerminal("cancelled")).toBe(true);
-    expect(isFlowRunTerminal("running")).toBe(false);
-  });
-
   test("prefers version-pinned graph labels and overlays live step status", () => {
     const snapshot = buildFlowRunProgressSnapshot(
       {

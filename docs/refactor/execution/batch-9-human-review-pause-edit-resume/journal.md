@@ -1,7 +1,8 @@
 # Batch 9 — Human Review Pause/Edit/Resume Journal
 
 ## Status
-IN_PROGRESS
+
+COMPLETED
 
 ## Starting Point
 
@@ -214,11 +215,56 @@ IN_PROGRESS
   - Reconciliation: `docs/refactor/execution/batch-9-human-review-pause-edit-resume/claude-reconciliation-8.md`
 - Outcome: evidence bundles now include `review_checkpoints`; raw and redacted exports keep original and current reviewed payloads separate, expose review decision/revision/reviewer identity, hide raw resume idempotency keys, and bump the typed evidence manifest to `flow-evidence-export.v5` with `review_checkpoint_summary`
 
+### Slice 9.6 — Frontend Generated Types And Review UI State
+
+- Source:
+  - `frontend/packages/intric-js/src/types/schema.d.ts`
+  - `frontend/packages/intric-js/src/types/resources.d.ts`
+  - `frontend/packages/intric-js/src/types/fetch.d.ts`
+  - `frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts`
+  - `frontend/packages/intric-js/src/client/client.js`
+  - `frontend/packages/intric-js/src/endpoints/flows.js`
+  - `frontend/apps/web/src/lib/features/flows/components/flowRunStatusSets.ts`
+  - `frontend/apps/web/src/lib/features/flows/components/flowRunProgress.ts`
+  - `frontend/apps/web/src/lib/features/flows/components/flowRunsFocus.ts`
+  - `frontend/apps/web/src/lib/features/flows/components/flowRunStatusLabel.ts`
+  - `frontend/apps/web/src/lib/features/flows/components/flowRunStatusPresentation.ts`
+  - `frontend/apps/web/src/lib/features/flows/components/FlowRunStatusBadge.svelte`
+  - `frontend/apps/web/src/lib/features/flows/components/FlowRunProgressPanel.svelte`
+  - `frontend/apps/web/src/lib/features/flows/components/FlowRunsTable.svelte`
+  - `frontend/apps/web/src/lib/features/flows/components/FlowRunReviewCheckpointPanel.svelte`
+  - `frontend/apps/web/messages/en.json`
+  - `frontend/apps/web/messages/sv.json`
+- Tests:
+  - `frontend/packages/intric-js/src/client/client.test.js`
+  - `frontend/packages/intric-js/src/endpoints/flows.test.js`
+  - `frontend/apps/web/src/lib/features/flows/components/flowRunStatusSets.test.ts`
+  - `frontend/apps/web/src/lib/features/flows/components/flowRunProgress.test.ts`
+  - `frontend/apps/web/src/lib/features/flows/components/flowRunsFocus.test.ts`
+  - `frontend/apps/web/src/lib/features/flows/components/flowRunStatusLabel.test.ts`
+  - `frontend/apps/web/src/lib/features/flows/components/flowRunStatusPresentation.test.ts`
+  - `frontend/apps/web/src/lib/features/flows/components/FlowRunStatusBadge.test.ts`
+  - `frontend/apps/web/src/lib/features/flows/components/FlowRunReviewCheckpointPanel.test.ts`
+- Local validation:
+  - `bun run i18n:compile` from `frontend/apps/web` — passed
+  - `bun x prettier --write ...` from `frontend/` on touched frontend/package files — passed
+  - `bun test src/client/client.test.js src/endpoints/flows.test.js` from `frontend/packages/intric-js` — passed, 22 tests
+  - `bun run check` from `frontend/packages/intric-js` — passed
+  - `bun run lint` from `frontend/packages/intric-js` — passed
+  - `bun run test:unit -- src/lib/features/flows/components/flowRunStatusSets.test.ts src/lib/features/flows/components/flowRunProgress.test.ts src/lib/features/flows/components/flowRunsFocus.test.ts src/lib/features/flows/components/flowRunStatusLabel.test.ts src/lib/features/flows/components/flowRunStatusPresentation.test.ts src/lib/features/flows/components/FlowRunStatusBadge.test.ts src/lib/features/flows/components/FlowRunReviewCheckpointPanel.test.ts` from `frontend/apps/web` — passed, 37 tests
+  - Targeted `bun x eslint ...` on touched Flow component/test files from `frontend/apps/web` — passed
+  - `git diff --check` — passed
+  - `bun run check` from `frontend/apps/web` — failed on unrelated pre-existing diagnostics in `frontend/packages/intric-js/src/endpoints/assistants.js`, `SpacesManager.ts`, chat/dashboard routes, and route typing in `routes/(app)/spaces/[spaceId]/flows/FlowsTable.svelte`
+- Claude review:
+  - Iteration 1: green with medium follow-up suggestions, artifact `.codex/artifacts/claude-peer-loop-batch-9-slice-9-6-frontend-review-20260502T193424Z.md`
+  - Iteration 2: green, artifact `.codex/artifacts/claude-peer-loop-batch-9-slice-9-6-frontend-review-verification-20260502T194214Z.md`
+  - Reconciliation: `docs/refactor/execution/batch-9-human-review-pause-edit-resume/claude-reconciliation-9.md`
+- Outcome: generated frontend Flow types now include `awaiting_review`, review checkpoint endpoints, and evidence manifest v5; `intric-js` exposes typed review-checkpoint endpoint wrappers; Flow run status classification has one frontend owner; the run table renders awaiting-review runs through a dedicated review checkpoint panel; and the panel uses backend checkpoint state/revision CAS for edit, approve, reject, and resume actions
+
 ## Carry-Forward Risks
 
-- Frontend generated type updates must not overwrite unrelated local changes.
-- Slice 9.6 must regenerate frontend API types for the review checkpoint endpoints and `flow-evidence-export.v5`.
-- Frontend slices must use generated API types for review checkpoint read/edit/approve/reject/resume rather than manual duplicate types.
+- Full web type checking remains blocked by unrelated pre-existing diagnostics outside the Batch 9 Flow review checkpoint files.
+- If the review panel later gains polling, websocket updates, or manual refresh, it must preserve unsaved edits instead of overwriting `draftPayloadText` from a background checkpoint response.
 
 ## Decisions Made During This Batch
 
@@ -236,3 +282,4 @@ IN_PROGRESS
 - Review policy cannot be combined with `FlowOutputMode` values classified by `flow_output_mode_has_outbound_delivery`.
 - `FlowRunRepository.open_review_checkpoint_for_completed_step` owns the SQL transition and audit outbox insert; the caller owns published-graph interpretation and downstream `next_step_ids` selection.
 - Executor pause/yield keeps successful step persistence and review checkpoint opening as separate commits; stale-running reconciliation remains the repair owner for crashes between those commits.
+- Slice 9.6 does not add review-panel polling; stale checkpoint revisions are recovered through backend CAS errors until a product decision adds live collaboration or notification semantics.

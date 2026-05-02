@@ -7,12 +7,14 @@ const translations = {
   failed: () => "Failed",
   queued: () => "Queued",
   running: () => "Running",
-  cancelled: () => "Cancelled",
+  awaiting_review: () => "Awaiting review",
+  cancelled: () => "Cancelled"
 };
 
 test("maps known statuses to translated labels", () => {
   expect(getFlowRunStatusLabel("completed", translations)).toBe("Completed");
   expect(getFlowRunStatusLabel("cancelled", translations)).toBe("Cancelled");
+  expect(getFlowRunStatusLabel("awaiting_review", translations)).toBe("Awaiting review");
 });
 
 test("maps pending status to queued translation", () => {

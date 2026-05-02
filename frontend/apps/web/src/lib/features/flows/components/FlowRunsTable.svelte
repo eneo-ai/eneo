@@ -10,12 +10,23 @@
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import FlowRunEvidence from "./FlowRunEvidence.svelte";
   import FlowRunProgressPanel from "./FlowRunProgressPanel.svelte";
+  import FlowRunReviewCheckpointPanel from "./FlowRunReviewCheckpointPanel.svelte";
   import FlowRunResultFileButton from "./FlowRunResultFileButton.svelte";
   import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
   import { toast } from "$lib/components/toast";
+  import { getFlowRunStatusLabel } from "./flowRunStatusLabel";
   import { getRedispatchToastKind } from "./flowRunRedispatchFeedback";
   import { m } from "$lib/paraglide/messages";
-  import { isFlowRunActive, type FlowRunProgressSnapshot } from "./flowRunProgress";
+  import type { FlowRunProgressSnapshot } from "./flowRunProgress";
+  import {
+    canRedispatchFlowRun,
+    FLOW_RUN_STATUS_FILTER_OPTIONS,
+    isFlowRunActive,
+    isFlowRunAwaitingReview,
+    isFlowRunCancellable,
+    type FlowRunStatus,
+    type FlowRunStatusFilter
+  } from "./flowRunStatusSets";
   import { shouldHandleFlowRunsReload } from "./flowRunsReload";
   import { getActiveFlowRunId, shouldAutoFocusFlowRun } from "./flowRunsFocus";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
@@ -44,32 +55,42 @@
   let loadError: string | null = $state(null);
   let selectedRunId: string | null = $state(null);
 
-  // Filter + sort state (Avancerad mode only). Kept inside the component so it
-  // resets when the user switches flows. `statusFilter = null` means "all".
-  type RunStatusFilter = "completed" | "failed" | "running" | "queued" | "cancelled" | null;
   type SortKey = "started" | "duration" | "status";
   type SortDir = "asc" | "desc";
-  let statusFilter: RunStatusFilter = $state(null);
+  let statusFilter: FlowRunStatusFilter = $state(null);
   let sortKey: SortKey = $state("started");
   let sortDir: SortDir = $state("desc");
 
   const userMode = getFlowUserMode();
   const showAdvancedControls = $derived($userMode === "power_user");
 
-  // Derived counts so filter chips show "Slutförd 12" without a separate query.
   const statusCounts = $derived.by(() => {
-    const counts: Record<string, number> = {
+    const counts: Record<FlowRunStatus, number> = {
       completed: 0,
       failed: 0,
       running: 0,
       queued: 0,
+      awaiting_review: 0,
       cancelled: 0
     };
     for (const r of runs) {
-      if (r.status in counts) counts[r.status]++;
+      counts[r.status]++;
     }
     return counts;
   });
+
+  const statusTranslations = {
+    completed: m.flow_run_status_completed,
+    failed: m.flow_run_status_failed,
+    queued: m.flow_run_status_queued,
+    running: m.flow_run_status_running,
+    awaiting_review: m.flow_run_status_awaiting_review,
+    cancelled: m.flow_run_status_cancelled
+  };
+
+  function getRunStatusLabel(status: string): string {
+    return getFlowRunStatusLabel(status, statusTranslations);
+  }
 
   function runDurationMs(run: FlowRun): number {
     const startRaw = run.started_at ?? run.created_at;
@@ -186,9 +207,8 @@
     }
   });
 
-  // Poll for updates every 5s when there are running runs
   let pollTimeout: ReturnType<typeof setTimeout> | null = null;
-  let hasActiveRuns = $derived(runs.some((r) => r.status === "queued" || r.status === "running"));
+  let hasActiveRuns = $derived(runs.some((r) => isFlowRunActive(r.status)));
 
   $effect(() => {
     if (hasActiveRuns && !pollTimeout && visible) {
@@ -292,6 +312,10 @@
     };
   }
 
+  function handleReviewCheckpointChanged() {
+    void loadRuns();
+  }
+
   function getPrimaryResultFile(resultFiles: FlowRunResultFile[]): FlowRunResultFile | null {
     return resultFiles.find((file) => file.availability === "available") ?? resultFiles[0] ?? null;
   }
@@ -327,11 +351,6 @@
     </div>
   {:else}
     {#if showAdvancedControls}
-      <!--
-        Status filter chips: Avancerad only. Each chip carries a count so users
-        see the data distribution without having to filter to check. Active state
-        uses a subtle accent tint (no gradient, no glow). "Alla" is the default.
-      -->
       <div class="mb-3 flex flex-wrap items-center gap-1.5" role="group" aria-label={m.filter()}>
         <button
           type="button"
@@ -345,19 +364,19 @@
           {m.all_categories()}
           <span class="text-muted tabular-nums">{runs.length}</span>
         </button>
-        {#each [{ key: "completed" as const, label: m.flow_run_status_completed() }, { key: "failed" as const, label: m.flow_run_status_failed() }, { key: "running" as const, label: m.flow_run_status_running() }, { key: "queued" as const, label: m.flow_run_status_queued() }, { key: "cancelled" as const, label: m.flow_run_status_cancelled() }] as option (option.key)}
-          {@const count = statusCounts[option.key] ?? 0}
+        {#each FLOW_RUN_STATUS_FILTER_OPTIONS as status (status)}
+          {@const count = statusCounts[status] ?? 0}
           {#if count > 0}
             <button
               type="button"
               class="border-default focus-visible:ring-accent-default/30 inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-[0.8rem] font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none {statusFilter ===
-              option.key
+              status
                 ? 'bg-accent-default/10 border-accent-default/30 text-accent-stronger'
                 : 'text-secondary hover:bg-hover-dimmer hover:text-primary'}"
-              aria-pressed={statusFilter === option.key}
-              onclick={() => (statusFilter = statusFilter === option.key ? null : option.key)}
+              aria-pressed={statusFilter === status}
+              onclick={() => (statusFilter = statusFilter === status ? null : status)}
             >
-              {option.label}
+              {getRunStatusLabel(status)}
               <span class="text-muted tabular-nums">{count}</span>
             </button>
           {/if}
@@ -495,6 +514,8 @@
                     {formatDuration(run.created_at, run.updated_at)}
                   {:else if run.status === "running"}
                     <span class="text-accent-stronger">{m.flow_run_running()}</span>
+                  {:else if isFlowRunAwaitingReview(run.status)}
+                    <span class="text-accent-stronger">{getRunStatusLabel(run.status)}</span>
                   {:else}
                     —
                   {/if}
@@ -530,7 +551,7 @@
                         class="transition-transform duration-200 {isExpanded ? 'rotate-180' : ''}"
                       />
                     </Button>
-                    {#if run.status === "queued"}
+                    {#if canRedispatchFlowRun(run.status)}
                       <Button
                         variant="outline"
                         size="sm"
@@ -542,7 +563,7 @@
                           : m.flow_run_redispatch()}
                       </Button>
                     {/if}
-                    {#if run.status === "queued" || run.status === "running"}
+                    {#if isFlowRunCancellable(run.status)}
                       <Button
                         variant="destructive"
                         size="sm"
@@ -567,12 +588,6 @@
                   </Table.Cell>
                 </Table.Row>
               {/if}
-              <!--
-              Artifact download for completed runs lives directly inside the
-              Åtgärder (actions) column above — see the inline Tooltip+Button
-              alongside the Bevisunderlag toggle. That keeps the row dense and
-              avoids a dangling half-empty sub-row under each entry.
-            -->
               {#if isExpanded}
                 <Table.Row class="border-default hover:bg-transparent">
                   <Table.Cell
@@ -589,6 +604,13 @@
                         runStartedAt={run.started_at ?? run.created_at}
                         initialSnapshot={progressSnapshotsByRunId[run.id] ?? null}
                         onSnapshotUpdate={(snapshot) => updateProgressSnapshot(run.id, snapshot)}
+                      />
+                    {:else if isFlowRunAwaitingReview(run.status)}
+                      <FlowRunReviewCheckpointPanel
+                        runId={run.id}
+                        flowId={flow.id}
+                        {eneo}
+                        onChanged={handleReviewCheckpointChanged}
                       />
                     {:else}
                       <FlowRunEvidence
@@ -634,12 +656,16 @@
                   <p class="text-muted shrink-0 text-xs tabular-nums">
                     {formatDuration(run.created_at, run.updated_at)}
                   </p>
+                {:else if isFlowRunAwaitingReview(run.status)}
+                  <p class="text-accent-stronger shrink-0 text-xs">
+                    {getRunStatusLabel(run.status)}
+                  </p>
                 {/if}
               </div>
             </button>
-            {#if run.status === "queued" || run.status === "running"}
+            {#if isFlowRunCancellable(run.status)}
               <div class="border-default flex items-center gap-2 border-t px-4 py-2">
-                {#if run.status === "queued"}
+                {#if canRedispatchFlowRun(run.status)}
                   <Button
                     variant="outline"
                     size="sm"
@@ -677,6 +703,13 @@
                     runStartedAt={run.started_at ?? run.created_at}
                     initialSnapshot={progressSnapshotsByRunId[run.id] ?? null}
                     onSnapshotUpdate={(snapshot) => updateProgressSnapshot(run.id, snapshot)}
+                  />
+                {:else if isFlowRunAwaitingReview(run.status)}
+                  <FlowRunReviewCheckpointPanel
+                    runId={run.id}
+                    flowId={flow.id}
+                    {eneo}
+                    onChanged={handleReviewCheckpointChanged}
                   />
                 {:else}
                   <FlowRunEvidence

@@ -18,6 +18,7 @@
       failed: m.flow_run_status_failed,
       queued: m.flow_run_status_queued,
       running: m.flow_run_status_running,
+      awaiting_review: m.flow_run_status_awaiting_review,
       cancelled: m.flow_run_status_cancelled
     })
   );

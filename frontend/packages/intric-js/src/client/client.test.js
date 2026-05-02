@@ -47,4 +47,26 @@ describe("createClient path parameters", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0][0]).toBe("https://api.example.test/api/v1/apps/app-1/");
   });
+
+  it("forwards typed header parameters and caller headers", async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ id: "run-1" }), { status: 200 }));
+    const client = createClient({ baseUrl: "https://api.example.test", fetch });
+
+    await client.fetch("/api/v1/flows/{id}/runs/", {
+      method: "post",
+      params: {
+        path: { id: "flow-1" },
+        header: { "Idempotency-Key": "flow-run:test-key" }
+      },
+      headers: { "X-Request-Source": "frontend-test" },
+      requestBody: { "application/json": {} }
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][1].headers).toMatchObject({
+      "Content-Type": "application/json",
+      "Idempotency-Key": "flow-run:test-key",
+      "X-Request-Source": "frontend-test"
+    });
+  });
 });

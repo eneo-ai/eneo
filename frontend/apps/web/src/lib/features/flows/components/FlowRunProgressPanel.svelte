@@ -7,11 +7,8 @@
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import FlowRunProgressView from "./FlowRunProgressView.svelte";
-  import {
-    buildFlowRunProgressSnapshot,
-    isFlowRunActive,
-    type FlowRunProgressSnapshot
-  } from "./flowRunProgress";
+  import { buildFlowRunProgressSnapshot, type FlowRunProgressSnapshot } from "./flowRunProgress";
+  import { isFlowRunActive } from "./flowRunStatusSets";
 
   const POLL_INTERVAL_MS = 3000;
   const STALE_WARNING_THRESHOLD = 3;

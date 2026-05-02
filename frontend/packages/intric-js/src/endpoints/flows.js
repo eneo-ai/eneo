@@ -41,15 +41,17 @@ export function initFlows(client) {
       .map((byte) => byte.toString(16).padStart(2, "0"))
       .join("");
 
+  /** @returns {Error & {code: string, status: number}} */
   const _removedTopLevelFileIdsError = () => {
-    const error = new Error(
-      "Top-level file_ids is no longer supported. Use step_inputs[stepId].file_ids."
+    const error = /** @type {Error & {code: string, status: number}} */ (
+      new Error("Top-level file_ids is no longer supported. Use step_inputs[stepId].file_ids.")
     );
     error.code = "flow_run_top_level_file_ids_not_supported";
     error.status = 400;
     return error;
   };
 
+  /** @param {unknown} file_ids */
   const _rejectTopLevelFileIds = (file_ids) => {
     if (file_ids !== undefined) {
       throw _removedTopLevelFileIdsError();
@@ -58,6 +60,7 @@ export function initFlows(client) {
 
   const _reservedInputPayloadKeys = new Set(["expected_flow_version", "file_ids", "step_inputs"]);
 
+  /** @param {unknown} input_payload_json */
   const _rejectReservedInputPayloadKeys = (input_payload_json) => {
     if (
       !input_payload_json ||
@@ -72,7 +75,9 @@ export function initFlows(client) {
     if (keys.length === 0) {
       return;
     }
-    const error = new Error("input_payload_json contains reserved Flow run orchestration keys.");
+    const error = /** @type {Error & {code: string, status: number, keys: string[]}} */ (
+      new Error("input_payload_json contains reserved Flow run orchestration keys.")
+    );
     error.code = "flow_run_reserved_input_payload_key";
     error.status = 400;
     error.keys = keys.sort();
@@ -157,7 +162,7 @@ export function initFlows(client) {
    *   expectedFlowVersion?: number,
    *   input_payload_json?: any,
    *   step_inputs?: Record<string, {file_ids?: string[]}>,
-   *   file_ids?: never
+   *   file_ids?: string[]
    * }} params
    * @returns {Promise<string>}
    */
@@ -509,7 +514,7 @@ export function initFlows(client) {
         });
         return _fetch(`/api/v1/flows/${flow.id}/runs/`, {
           method: "post",
-          headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+          params: idempotencyKey ? { header: { "Idempotency-Key": idempotencyKey } } : undefined,
           requestBody: {
             "application/json": requestBody
           }
@@ -617,6 +622,105 @@ export function initFlows(client) {
             query: { format: run.format ?? "json" }
           }
         });
+      },
+
+      reviewCheckpoints: {
+        /**
+         * @param {{flowId: string, runId: string}} params
+         * @returns {Promise<import('../types/resources').FlowRunReviewCheckpoint | null>}
+         */
+        active: async ({ flowId, runId }) => {
+          return _fetch(`/api/v1/flows/${flowId}/runs/${runId}/review-checkpoints/active/`, {
+            method: "get"
+          });
+        },
+
+        /**
+         * @param {{flowId: string, runId: string, checkpointId: string, expectedCheckpointRevision: number, currentPayloadJson: Record<string, unknown>}} params
+         * @returns {Promise<import('../types/resources').FlowRunReviewCheckpoint>}
+         */
+        edit: async ({
+          flowId,
+          runId,
+          checkpointId,
+          expectedCheckpointRevision,
+          currentPayloadJson
+        }) => {
+          return _fetch(
+            `/api/v1/flows/${flowId}/runs/${runId}/review-checkpoints/${checkpointId}/`,
+            {
+              method: "patch",
+              requestBody: {
+                "application/json": {
+                  expected_checkpoint_revision: expectedCheckpointRevision,
+                  current_payload_json: _stableSortObjectKeys(currentPayloadJson)
+                }
+              }
+            }
+          );
+        },
+
+        /**
+         * @param {{flowId: string, runId: string, checkpointId: string, expectedCheckpointRevision: number}} params
+         * @returns {Promise<import('../types/resources').FlowRunReviewCheckpoint>}
+         */
+        approve: async ({ flowId, runId, checkpointId, expectedCheckpointRevision }) => {
+          return _fetch(
+            `/api/v1/flows/${flowId}/runs/${runId}/review-checkpoints/${checkpointId}/approve/`,
+            {
+              method: "post",
+              requestBody: {
+                "application/json": {
+                  expected_checkpoint_revision: expectedCheckpointRevision
+                }
+              }
+            }
+          );
+        },
+
+        /**
+         * @param {{flowId: string, runId: string, checkpointId: string, expectedCheckpointRevision: number, reason: string}} params
+         * @returns {Promise<import('../types/resources').FlowRunReviewCheckpoint>}
+         */
+        reject: async ({ flowId, runId, checkpointId, expectedCheckpointRevision, reason }) => {
+          return _fetch(
+            `/api/v1/flows/${flowId}/runs/${runId}/review-checkpoints/${checkpointId}/reject/`,
+            {
+              method: "post",
+              requestBody: {
+                "application/json": {
+                  expected_checkpoint_revision: expectedCheckpointRevision,
+                  reason
+                }
+              }
+            }
+          );
+        },
+
+        /**
+         * @param {{flowId: string, runId: string, checkpointId: string, expectedCheckpointRevision: number, idempotencyKey: string}} params
+         * @returns {Promise<import('../types/resources').FlowRunReviewCheckpointResumeResponse>}
+         */
+        resume: async ({
+          flowId,
+          runId,
+          checkpointId,
+          expectedCheckpointRevision,
+          idempotencyKey
+        }) => {
+          return _fetch(
+            `/api/v1/flows/${flowId}/runs/${runId}/review-checkpoints/${checkpointId}/resume/`,
+            {
+              method: "post",
+              params: { header: { "Idempotency-Key": idempotencyKey } },
+              requestBody: {
+                "application/json": {
+                  expected_checkpoint_revision: expectedCheckpointRevision
+                }
+              }
+            }
+          );
+        }
       },
 
       /**

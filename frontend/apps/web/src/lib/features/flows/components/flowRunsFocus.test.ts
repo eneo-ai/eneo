@@ -13,6 +13,15 @@ describe("flowRunsFocus helpers", () => {
     ).toBe("running");
   });
 
+  test("does not treat awaiting review as an active run", () => {
+    expect(
+      getActiveFlowRunId([
+        { id: "review", status: "awaiting_review" },
+        { id: "completed", status: "completed" }
+      ])
+    ).toBeNull();
+  });
+
   test("auto-focuses an active run when no run is selected", () => {
     expect(
       shouldAutoFocusFlowRun({

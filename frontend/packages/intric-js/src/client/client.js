@@ -35,7 +35,7 @@ export function createClient(args) {
         : {};
 
   return {
-    fetch: async (endpoint, { method, params, requestBody, signal }) => {
+    fetch: async (endpoint, { method, params, requestBody, signal, headers }) => {
       const payload = parsePayload(requestBody);
       const httpMethod = String(method).toUpperCase();
       let requestEndpoint = `${httpMethod}@${baseUrl}${endpoint}`;
@@ -47,7 +47,9 @@ export function createClient(args) {
           method: httpMethod,
           headers: {
             ...auth,
-            ...payload.header
+            ...payload.header,
+            ...parseHeaderParams(params),
+            ...headers
           },
           body: payload.body,
           signal,
@@ -158,6 +160,23 @@ function parseUrl(baseUrl, endpoint, params) {
   }
 
   return url.toString();
+}
+
+/**
+ * @param {{header?: Record<string, string | number | boolean | null | undefined>} | undefined} params
+ * @returns {Record<string, string> | undefined}
+ */
+function parseHeaderParams(params = undefined) {
+  if (!params?.header) {
+    return undefined;
+  }
+
+  return Object.entries(params.header).reduce((headers, [name, value]) => {
+    if (value !== undefined && value !== null) {
+      headers[name] = String(value);
+    }
+    return headers;
+  }, /** @type {Record<string, string>} */ ({}));
 }
 
 /**

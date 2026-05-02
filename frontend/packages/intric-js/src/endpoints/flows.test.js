@@ -108,6 +108,66 @@ describe("flows templates endpoint", () => {
     });
   });
 
+  it("calls review checkpoint endpoints from flow-run routes", async () => {
+    const fetch = vi.fn(async () => ({ id: "checkpoint-1" }));
+    const flows = initFlows({ fetch });
+
+    await flows.runs.reviewCheckpoints.active({ flowId: "flow-1", runId: "run-1" });
+    await flows.runs.reviewCheckpoints.edit({
+      flowId: "flow-1",
+      runId: "run-1",
+      checkpointId: "checkpoint-1",
+      expectedCheckpointRevision: 1,
+      currentPayloadJson: { z: 2, a: 1 }
+    });
+    await flows.runs.reviewCheckpoints.approve({
+      flowId: "flow-1",
+      runId: "run-1",
+      checkpointId: "checkpoint-1",
+      expectedCheckpointRevision: 2
+    });
+    await flows.runs.reviewCheckpoints.reject({
+      flowId: "flow-1",
+      runId: "run-1",
+      checkpointId: "checkpoint-1",
+      expectedCheckpointRevision: 2,
+      reason: "Rejected by reviewer."
+    });
+    await flows.runs.reviewCheckpoints.resume({
+      flowId: "flow-1",
+      runId: "run-1",
+      checkpointId: "checkpoint-1",
+      expectedCheckpointRevision: 3,
+      idempotencyKey: "flow-review-resume:checkpoint-1:3"
+    });
+
+    expect(fetch.mock.calls.map((call) => call[0])).toEqual([
+      "/api/v1/flows/flow-1/runs/run-1/review-checkpoints/active/",
+      "/api/v1/flows/flow-1/runs/run-1/review-checkpoints/checkpoint-1/",
+      "/api/v1/flows/flow-1/runs/run-1/review-checkpoints/checkpoint-1/approve/",
+      "/api/v1/flows/flow-1/runs/run-1/review-checkpoints/checkpoint-1/reject/",
+      "/api/v1/flows/flow-1/runs/run-1/review-checkpoints/checkpoint-1/resume/"
+    ]);
+    expect(fetch.mock.calls[1][1]).toMatchObject({
+      method: "patch",
+      requestBody: {
+        "application/json": {
+          expected_checkpoint_revision: 1,
+          current_payload_json: { a: 1, z: 2 }
+        }
+      }
+    });
+    expect(fetch.mock.calls[4][1]).toMatchObject({
+      method: "post",
+      params: { header: { "Idempotency-Key": "flow-review-resume:checkpoint-1:3" } },
+      requestBody: {
+        "application/json": {
+          expected_checkpoint_revision: 3
+        }
+      }
+    });
+  });
+
   it("creates flow run with canonical step_inputs payload", async () => {
     const fetch = vi.fn(async () => ({ id: "run-1" }));
     const flows = initFlows({ fetch });
@@ -166,8 +226,8 @@ describe("flows templates endpoint", () => {
     });
 
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0][1].headers).toEqual({
-      "Idempotency-Key": "flow-run:test-key"
+    expect(fetch.mock.calls[0][1].params).toEqual({
+      header: { "Idempotency-Key": "flow-run:test-key" }
     });
   });
 

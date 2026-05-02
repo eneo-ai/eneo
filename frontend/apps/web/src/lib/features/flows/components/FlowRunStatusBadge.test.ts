@@ -53,6 +53,15 @@ describe("FlowRunStatusBadge", () => {
     expect(body).not.toContain("animate-pulse");
   });
 
+  it("renders awaiting review status without the running pulse", () => {
+    const { body } = render(FlowRunStatusBadge, { props: { status: "awaiting_review" } });
+
+    expect(body).toContain(m.flow_run_status_awaiting_review());
+    expect(body).toContain("text-accent-stronger");
+    expect(body).toContain("bg-accent-default");
+    expect(body).not.toContain("animate-pulse");
+  });
+
   it("pulses running status by default", () => {
     const { body } = render(FlowRunStatusBadge, { props: { status: "running" } });
 
