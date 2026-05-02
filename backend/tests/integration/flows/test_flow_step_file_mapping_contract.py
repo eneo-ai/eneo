@@ -63,10 +63,16 @@ def _flow(
     )
 
 
-def _file(*, user_id: UUID, tenant_id: UUID, name: str) -> Files:
+def _file(
+    *,
+    user_id: UUID,
+    tenant_id: UUID,
+    name: str,
+    text: str | None = "file text",
+) -> Files:
     return Files(
         name=name,
-        text="file text",
+        text=text,
         blob=None,
         checksum=f"checksum-{name}",
         size=128,
@@ -265,10 +271,17 @@ async def test_step_result_files_are_attempt_scoped_and_deduplicated(
             tenant_id=admin_user.tenant_id,
             name="artifact.pdf",
         )
-        session.add_all([generated_file, artifact_file])
+        purged_file = _file(
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            name="purged.pdf",
+            text=None,
+        )
+        session.add_all([generated_file, artifact_file, purged_file])
         await session.flush()
         generated_file_id = generated_file.id
         artifact_file_id = artifact_file.id
+        purged_file_id = purged_file.id
 
         flow_repo = FlowRepository(session=session, factory=FlowFactory())
         flow = await flow_repo.create(
@@ -338,6 +351,20 @@ async def test_step_result_files_are_attempt_scoped_and_deduplicated(
             tenant_id=admin_user.tenant_id,
             attempt_no=3,
         )
+        retry_result = result.model_copy(
+            update={
+                "output_payload_json": {
+                    "text": "retry output",
+                    "generated_file_ids": [str(purged_file_id)],
+                },
+            }
+        )
+        await flow_repo.save_step_result(
+            run.id,
+            retry_result,
+            tenant_id=admin_user.tenant_id,
+            attempt_no=4,
+        )
         await session.flush()
 
         result_rows = [
@@ -347,16 +374,53 @@ async def test_step_result_files_are_attempt_scoped_and_deduplicated(
                     await session.execute(
                         sa.select(FlowRunStepResultFiles)
                         .where(FlowRunStepResultFiles.flow_run_id == run.id)
-                        .order_by(FlowRunStepResultFiles.ordinal.asc())
+                        .order_by(
+                            FlowRunStepResultFiles.attempt_no.asc(),
+                            FlowRunStepResultFiles.ordinal.asc(),
+                        )
                     )
                 )
                 .scalars()
                 .all()
             )
         ]
+        listed_files = await run_repo.list_result_files(
+            run_id=run.id,
+            tenant_id=admin_user.tenant_id,
+        )
+        artifact_projection = await run_repo.get_result_file(
+            run_id=run.id,
+            tenant_id=admin_user.tenant_id,
+            file_id=artifact_file_id,
+        )
+        purged_projection = await run_repo.get_result_file(
+            run_id=run.id,
+            tenant_id=admin_user.tenant_id,
+            file_id=purged_file_id,
+        )
+        cross_tenant_projection = await run_repo.get_result_file(
+            run_id=run.id,
+            tenant_id=uuid4(),
+            file_id=artifact_file_id,
+        )
 
-    assert {file_id: (attempt_no, source) for file_id, attempt_no, source, _ in result_rows} == {
+    assert {
+        file_id: (attempt_no, source) for file_id, attempt_no, source, _ in result_rows
+    } == {
         artifact_file_id: (3, "declared_artifact"),
         generated_file_id: (3, "generated_output"),
+        purged_file_id: (4, "generated_output"),
     }
-    assert [ordinal for _, _, _, ordinal in result_rows] == [0, 1]
+    assert [attempt_no for _, attempt_no, _, _ in result_rows] == [3, 3, 4]
+    assert [ordinal for _, _, _, ordinal in result_rows] == [0, 1, 0]
+    assert [item.file_id for item in listed_files] == [
+        result_rows[0][0],
+        result_rows[1][0],
+        purged_file_id,
+    ]
+    assert artifact_projection is not None
+    assert artifact_projection.availability == "available"
+    assert artifact_projection.checksum == "checksum-artifact.pdf"
+    assert purged_projection is not None
+    assert purged_projection.availability == "content_purged"
+    assert cross_tenant_projection is None

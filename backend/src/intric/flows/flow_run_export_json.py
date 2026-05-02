@@ -22,6 +22,7 @@ from intric.flows.flow_run_evidence_bundle import EvidenceBundle, RedactedEviden
 from intric.flows.flow_run_evidence_export_manifest import (
     EVIDENCE_EXPORT_SCHEMA_VERSION,
     EvidenceArtifactAvailabilitySummary,
+    EvidenceArtifactManifestItem,
     EvidenceExportContext,
     EvidenceExportManifest,
     EvidenceProvenancePersistedVersionStatus,
@@ -34,6 +35,10 @@ from intric.flows.flow_run_provenance import (
     normalize_text_preview,
 )
 from intric.flows.flow_run_redaction import REDACTION_POLICY_VERSION
+from intric.flows.flow_run_step_result_file import (
+    FlowRunStepResultFileAvailability,
+    FlowRunStepResultFileSource,
+)
 from intric.flows.source_display import (
     format_source_container_display_name,
     format_source_container_label,
@@ -52,9 +57,8 @@ _RETENTION_NOT_TRACKED_NOTE = (
     "No retention tombstones are present in this export; rows purged before "
     "tombstone tracking remain indistinguishable from never-tracked evidence."
 )
-_ARTIFACT_PAYLOAD_DERIVED_NOTE = (
-    "Canonical file availability is not yet exposed; counts currently come from "
-    "payload-derived artifact references."
+_ARTIFACT_ROW_TRACKED_NOTE = (
+    "Artifact availability is derived from result-file rows joined to file metadata."
 )
 
 
@@ -182,15 +186,7 @@ def _build_manifest(
             bundle_payload,
             provenance_parse_results=provenance_parse_results,
         ),
-        artifact_availability_summary=EvidenceArtifactAvailabilitySummary(
-            tracking_state="payload_derived",
-            payload_artifact_count=(
-                summary["artifacts_count"]
-                if isinstance(summary.get("artifacts_count"), int)
-                else 0
-            ),
-            note=_ARTIFACT_PAYLOAD_DERIVED_NOTE,
-        ),
+        artifact_availability_summary=_artifact_availability_summary(bundle_payload),
     )
 
 
@@ -267,6 +263,53 @@ def _collect_retention_tombstones(
     return tuple(tombstones)
 
 
+def _artifact_availability_summary(
+    bundle_payload: dict[str, Any],
+) -> EvidenceArtifactAvailabilitySummary:
+    artifact_details = _collect_artifact_details(
+        _unique_result_file_records(_result_file_records(bundle_payload))
+    )
+    artifacts = [
+        EvidenceArtifactManifestItem(
+            flow_run_id=str(detail.get("flow_run_id")),
+            flow_id=str(detail.get("flow_id")),
+            tenant_id=str(detail.get("tenant_id")),
+            file_id=str(detail.get("file_id")),
+            step_id=str(detail.get("step_id")),
+            step_result_id=str(detail.get("step_result_id")),
+            step_order=_int_or_none(detail.get("step_order")) or 0,
+            attempt_no=_int_or_none(detail.get("attempt_no")) or 0,
+            ordinal=_int_or_none(detail.get("ordinal")) or 0,
+            source=cast(FlowRunStepResultFileSource, detail.get("source")),
+            name=str(detail.get("name") or ""),
+            checksum=str(detail.get("checksum") or ""),
+            size=_int_or_none(detail.get("size")) or 0,
+            mimetype=(
+                str(detail["mimetype"]) if detail.get("mimetype") is not None else None
+            ),
+            file_type=str(detail.get("file_type") or ""),
+            availability=cast(
+                FlowRunStepResultFileAvailability,
+                detail.get("availability"),
+            ),
+        )
+        for detail in artifact_details
+    ]
+    return EvidenceArtifactAvailabilitySummary(
+        tracking_state="tracked",
+        artifact_count=len(artifacts),
+        available_count=sum(
+            1 for item in artifacts if item.availability == "available"
+        ),
+        content_purged_count=sum(
+            1 for item in artifacts if item.availability == "content_purged"
+        ),
+        total_size_bytes=sum(item.size for item in artifacts),
+        artifacts=artifacts,
+        note=_ARTIFACT_ROW_TRACKED_NOTE,
+    )
+
+
 def _build_summary(
     bundle_payload: dict[str, Any],
     *,
@@ -275,22 +318,20 @@ def _build_summary(
     run = _as_json_object_or_empty(bundle_payload.get("run"))
     step_results = _as_json_object_list(bundle_payload.get("step_results"))
     step_attempts = _as_json_object_list(bundle_payload.get("step_attempts"))
+    result_files = _result_file_records(bundle_payload)
     debug_export = _as_json_object_or_empty(bundle_payload.get("debug_export"))
     debug_run = _as_json_object_or_empty(debug_export.get("run"))
     debug_summary = _as_json_object_or_empty(debug_run.get("summary"))
-    artifacts_count = _count_artifacts(step_results, run.get("output_payload_json"))
+    artifact_details = _collect_artifact_details(
+        _unique_result_file_records(result_files)
+    )
+    artifact_names = _collect_artifact_names(artifact_details)
     rag_sources = _collect_rag_sources(bundle_payload)
     rag_source_names = [
         cast(str, source["name"])
         for source in rag_sources
         if isinstance(source.get("name"), str)
     ]
-    artifact_names = _collect_artifact_names(
-        step_results, run.get("output_payload_json")
-    )
-    artifact_details = _collect_artifact_details(
-        step_results, run.get("output_payload_json")
-    )
     step_overview = _build_step_overview(bundle_payload)
     citations = _build_summary_citations(bundle_payload, step_overview=step_overview)
     return {
@@ -306,7 +347,7 @@ def _build_summary(
             sum(1 for result in step_results if result.get("status") == "failed"),
         ),
         "attempts_count": debug_summary.get("attempts_count", len(step_attempts)),
-        "artifacts_count": artifacts_count,
+        "artifacts_count": len(artifact_details),
         "artifact_names": artifact_names,
         "artifact_details": artifact_details,
         "duration_ms": debug_summary.get("duration_ms"),
@@ -326,7 +367,9 @@ def _build_summary(
         "citations": citations,
         "final_output": _build_final_output_summary(
             run.get("output_payload_json"),
-            step_results=step_results,
+            artifact_details=_collect_artifact_details(
+                _terminal_step_result_files(result_files)
+            ),
         ),
         "step_overview": step_overview,
     }
@@ -496,29 +539,18 @@ def _merge_tracked_rag_summaries(rag_payloads: list[JsonObject]) -> dict[str, An
 def _build_final_output_summary(
     run_output_payload: Any,
     *,
-    step_results: Any = None,
+    artifact_details: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     payload = _as_json_object_or_empty(run_output_payload)
     text_value = payload.get("text")
     structured_value = payload.get("structured")
-    artifact_names = _collect_artifact_names_from_single_payload(payload)
-    artifact_details = _collect_artifact_details_from_single_payload(payload)
-    if step_results is not None:
-        summary_artifact_details = _collect_artifact_details(step_results, payload)
-        if summary_artifact_details:
-            artifact_details = summary_artifact_details
-            artifact_names = list(
-                dict.fromkeys(
-                    detail["name"]
-                    for detail in summary_artifact_details
-                    if isinstance(detail.get("name"), str)
-                )
-            )
+    resolved_artifact_details = artifact_details or []
+    artifact_names = _collect_artifact_names(resolved_artifact_details)
     text_present = isinstance(text_value, str) and text_value.strip() != ""
     structured_present = structured_value is not None or _has_structured_payload(
         payload
     )
-    artifact_count = len(artifact_details)
+    artifact_count = len(resolved_artifact_details)
     kind_flags = [text_present, structured_present, artifact_count > 0]
     if sum(kind_flags) > 1:
         kind = "mixed"
@@ -541,7 +573,7 @@ def _build_final_output_summary(
         "structured_present": structured_present,
         "artifact_count": artifact_count,
         "artifact_names": artifact_names,
-        "artifact_details": artifact_details,
+        "artifact_details": resolved_artifact_details,
     }
 
 
@@ -552,6 +584,9 @@ def _build_step_overview(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]
     )
     if not raw_steps:
         return []
+    result_files_by_step_order = _latest_attempt_result_files_by_step_order(
+        _result_file_records(bundle_payload)
+    )
     step_ref_mapping = build_step_ref_mapping(raw_steps)
     step_labels_by_order: dict[int, str] = {}
     for step in raw_steps:
@@ -580,14 +615,13 @@ def _build_step_overview(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]
         result = results_by_order.get(step_order, {})
         attempts = attempts_by_order.get(step_order, [])
         rag_sources = _collect_rag_sources({"step_attempts": attempts})
-        artifact_details = _collect_artifact_details_from_single_payload(
-            result.get("output_payload_json")
+        artifact_details = _collect_artifact_details(
+            result_files_by_step_order.get(step_order, [])
         )
-        artifact_names = [
-            detail["name"]
-            for detail in artifact_details
-            if isinstance(detail.get("name"), str)
-        ]
+        output_summary = _build_final_output_summary(
+            result.get("output_payload_json"),
+            artifact_details=artifact_details,
+        )
         overview.append(
             {
                 "step_order": step_order,
@@ -610,11 +644,9 @@ def _build_step_overview(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]
                     attempts=attempts,
                     step=step,
                 ),
-                "artifact_names": artifact_names,
+                "artifact_names": _collect_artifact_names(artifact_details),
                 "artifact_details": artifact_details,
-                "result_output_kind": _build_final_output_summary(
-                    result.get("output_payload_json")
-                ).get("kind"),
+                "result_output_kind": output_summary.get("kind"),
                 "output_summary": _build_step_output_summary(
                     result.get("output_payload_json")
                 ),
@@ -633,91 +665,113 @@ def _build_step_overview(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]
     return overview
 
 
-def _count_artifacts(step_results: Any, run_output_payload: Any) -> int:
-    artifact_ids: set[str] = set()
-    for result in _as_json_object_list(step_results):
-        _collect_artifact_ids(result.get("output_payload_json"), artifact_ids)
-    _collect_artifact_ids(run_output_payload, artifact_ids)
-    return len(artifact_ids)
+def _result_file_records(bundle_payload: dict[str, Any]) -> list[JsonObject]:
+    return _as_json_object_list(bundle_payload.get("result_files"))
 
 
-def _collect_artifact_names(step_results: Any, run_output_payload: Any) -> list[str]:
-    names: list[str] = []
-    for result in _as_json_object_list(step_results):
-        _collect_artifact_names_from_payload(result.get("output_payload_json"), names)
-    _collect_artifact_names_from_payload(run_output_payload, names)
-    return list(dict.fromkeys(name for name in names if name))
+def _unique_result_file_records(result_files: Any) -> list[JsonObject]:
+    by_file_id: dict[str, JsonObject] = {}
+    for item in _as_json_object_list(result_files):
+        file_id = item.get("file_id")
+        if file_id is None:
+            continue
+        by_file_id.setdefault(str(file_id), item)
+    return list(by_file_id.values())
 
 
-def _collect_artifact_names_from_single_payload(payload: Any) -> list[str]:
-    names: list[str] = []
-    _collect_artifact_names_from_payload(payload, names)
-    return list(dict.fromkeys(name for name in names if name))
+def _latest_attempt_result_files_by_step_order(
+    result_files: Any,
+) -> dict[int, list[JsonObject]]:
+    rows_by_step_attempt: dict[int, dict[int, list[JsonObject]]] = {}
+    for item in _as_json_object_list(result_files):
+        step_order = _int_or_none(item.get("step_order"))
+        attempt_no = _int_or_none(item.get("attempt_no"))
+        if step_order is None or attempt_no is None:
+            continue
+        rows_by_step_attempt.setdefault(step_order, {}).setdefault(
+            attempt_no, []
+        ).append(item)
 
-
-def _collect_artifact_details(
-    step_results: Any, run_output_payload: Any
-) -> list[dict[str, Any]]:
-    details: list[dict[str, Any]] = []
-    for result in _as_json_object_list(step_results):
-        _collect_artifact_details_from_payload(
-            result.get("output_payload_json"), details
+    result: dict[int, list[JsonObject]] = {}
+    for step_order, attempts in rows_by_step_attempt.items():
+        latest_attempt_no = max(attempts)
+        result[step_order] = sorted(
+            attempts[latest_attempt_no],
+            key=lambda item: _int_or_none(item.get("ordinal")) or 0,
         )
-    _collect_artifact_details_from_payload(run_output_payload, details)
-    return _dedupe_artifact_details(details)
+    return result
 
 
-def _collect_artifact_details_from_single_payload(payload: Any) -> list[dict[str, Any]]:
-    details: list[dict[str, Any]] = []
-    _collect_artifact_details_from_payload(payload, details)
-    return _dedupe_artifact_details(details)
+def _terminal_step_result_files(result_files: Any) -> list[JsonObject]:
+    rows = _as_json_object_list(result_files)
+    step_orders = [
+        step_order
+        for item in rows
+        if (step_order := _int_or_none(item.get("step_order"))) is not None
+    ]
+    if not step_orders:
+        return []
+    terminal_step_order = max(step_orders)
+    return _latest_attempt_result_files_by_step_order(
+        [
+            item
+            for item in rows
+            if _int_or_none(item.get("step_order")) == terminal_step_order
+        ]
+    ).get(terminal_step_order, [])
 
 
-def _collect_artifact_ids(payload: Any, artifact_ids: set[str]) -> None:
-    payload_dict = _as_json_object(payload)
-    if payload_dict is None:
-        return
-    for artifact in _as_json_object_list(payload_dict.get("artifacts")):
-        file_id = artifact.get("file_id")
-        if file_id is not None:
-            artifact_ids.add(str(file_id))
-    for file_id in _as_json_list(payload_dict.get("generated_file_ids")):
-        artifact_ids.add(str(file_id))
-
-
-def _collect_artifact_names_from_payload(
-    payload: Any, artifact_names: list[str]
-) -> None:
-    payload_dict = _as_json_object(payload)
-    if payload_dict is None:
-        return
-    for artifact in _as_json_object_list(payload_dict.get("artifacts")):
-        raw_name = (
-            artifact.get("file_name") or artifact.get("name") or artifact.get("title")
+def _collect_artifact_names(artifact_details: list[dict[str, Any]]) -> list[str]:
+    return list(
+        dict.fromkeys(
+            name.strip()
+            for detail in artifact_details
+            if isinstance((name := detail.get("name")), str) and name.strip()
         )
-        if isinstance(raw_name, str) and raw_name.strip():
-            artifact_names.append(raw_name.strip())
+    )
 
 
-def _collect_artifact_details_from_payload(
-    payload: Any, artifact_details: list[dict[str, Any]]
-) -> None:
-    payload_dict = _as_json_object(payload)
-    if payload_dict is None:
-        return
-    for artifact in _as_json_object_list(payload_dict.get("artifacts")):
-        artifact_details.append(
-            {
-                "file_id": artifact.get("file_id"),
-                "name": artifact.get("file_name")
-                or artifact.get("name")
-                or artifact.get("title"),
-                "mimetype": artifact.get("mimetype"),
-                "size": artifact.get("size"),
-                "checksum": artifact.get("checksum"),
-                "file_type": artifact.get("file_type"),
-            }
-        )
+def _collect_artifact_details(result_files: Any) -> list[dict[str, Any]]:
+    return _dedupe_artifact_details(
+        [
+            _artifact_detail_from_result_file(item)
+            for item in _as_json_object_list(result_files)
+        ]
+    )
+
+
+def _artifact_detail_from_result_file(item: JsonObject) -> dict[str, Any]:
+    return {
+        "flow_run_id": item.get("flow_run_id"),
+        "flow_id": item.get("flow_id"),
+        "tenant_id": item.get("tenant_id"),
+        "file_id": item.get("file_id"),
+        "step_id": item.get("step_id"),
+        "step_result_id": item.get("step_result_id"),
+        "step_order": item.get("step_order"),
+        "attempt_no": item.get("attempt_no"),
+        "ordinal": item.get("ordinal"),
+        "source": item.get("source"),
+        "name": item.get("name"),
+        "mimetype": item.get("mimetype"),
+        "size": item.get("size"),
+        "checksum": item.get("checksum"),
+        "file_type": item.get("file_type"),
+        "availability": item.get("availability"),
+    }
+
+
+def _int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
 
 
 def _dedupe_artifact_details(details: list[dict[str, Any]]) -> list[dict[str, Any]]:

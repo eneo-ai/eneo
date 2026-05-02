@@ -5,6 +5,11 @@ from typing import Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict
 
+from intric.flows.flow_run_step_result_file import (
+    FlowRunStepResultFileAvailability,
+    FlowRunStepResultFileSource,
+)
+
 EVIDENCE_EXPORT_SCHEMA_VERSION: Literal["flow-evidence-export.v3"] = (
     "flow-evidence-export.v3"
 )
@@ -15,7 +20,7 @@ EvidenceProvenancePersistedVersionStatus: TypeAlias = Literal[
     "not_tracked", "tracked", "corrupt", "retention_purged"
 ]
 EvidenceRetentionTrackingState: TypeAlias = Literal["not_tracked", "tracked"]
-EvidenceArtifactAvailabilityTrackingState: TypeAlias = Literal["payload_derived"]
+EvidenceArtifactAvailabilityTrackingState: TypeAlias = Literal["tracked"]
 
 
 class EvidenceExportContext(BaseModel):
@@ -37,11 +42,36 @@ class EvidenceRetentionStateSummary(BaseModel):
     note: str
 
 
+class EvidenceArtifactManifestItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    flow_run_id: str
+    flow_id: str
+    tenant_id: str
+    file_id: str
+    step_id: str
+    step_result_id: str
+    step_order: int
+    attempt_no: int
+    ordinal: int
+    source: FlowRunStepResultFileSource
+    name: str
+    checksum: str
+    size: int
+    mimetype: str | None
+    file_type: str
+    availability: FlowRunStepResultFileAvailability
+
+
 class EvidenceArtifactAvailabilitySummary(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     tracking_state: EvidenceArtifactAvailabilityTrackingState
-    payload_artifact_count: int
+    artifact_count: int
+    available_count: int
+    content_purged_count: int
+    total_size_bytes: int
+    artifacts: list[EvidenceArtifactManifestItem]
     note: str
 
 

@@ -58,6 +58,7 @@ from intric.main.config import get_settings
 from intric.main.exceptions import (
     BadRequestException,
     NotFoundException,
+    ResourceGoneException,
     UnauthorizedException,
 )
 from intric.main.logging import get_logger
@@ -194,6 +195,14 @@ class FlowRunService:
             message,
             code="flow_run_evidence_raw_export_forbidden",
             context={"auth_layer": auth_layer},
+        )
+
+    @staticmethod
+    def _raise_artifact_content_unavailable(*, run_id: UUID, file_id: UUID) -> None:
+        raise ResourceGoneException(
+            "Artifact content has been purged by retention policy.",
+            code="flow_run_artifact_content_unavailable",
+            context={"run_id": str(run_id), "file_id": str(file_id)},
         )
 
     async def _ensure_can_access_run(self, run: FlowRun, *, access_kind: str) -> None:
@@ -750,7 +759,6 @@ class FlowRunService:
         flow_id: UUID,
         file_id: UUID,
     ):
-        """Resolve and return a File that is a downloadable artifact of the given run."""
         from intric.files.file_models import File
 
         if self.file_repo is None:
@@ -760,28 +768,18 @@ class FlowRunService:
             )
 
         run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="artifact")
-        step_results = await self.flow_run_repo.list_step_results(
+        result_file = await self.flow_run_repo.get_result_file(
             run_id=run.id,
             tenant_id=self.user.tenant_id,
+            file_id=file_id,
         )
-
-        downloadable_file_ids: set[str] = set()
-        for result in step_results:
-            payload = result.output_payload_json
-            if not isinstance(payload, dict):
-                continue
-            for artifact in cast(list[Any], payload.get("artifacts", [])):
-                if isinstance(artifact, dict) and "file_id" in artifact:
-                    artifact_dict = cast(JsonObject, artifact)
-                    downloadable_file_ids.add(str(artifact_dict["file_id"]))
-            for gfid in cast(list[Any], payload.get("generated_file_ids", [])):
-                downloadable_file_ids.add(str(gfid))
-
-        if str(file_id) not in downloadable_file_ids:
+        if result_file is None:
             raise NotFoundException(
                 f"File {file_id} is not a downloadable artifact of run {run_id}.",
                 code="flow_run_artifact_not_found",
             )
+        if not result_file.content_available:
+            self._raise_artifact_content_unavailable(run_id=run_id, file_id=file_id)
 
         file: File = await self.file_repo.get_by_id(file_id=file_id)
         if file.tenant_id != self.user.tenant_id:
@@ -790,6 +788,8 @@ class FlowRunService:
                 code="forbidden_action",
                 context={"auth_layer": "domain_policy"},
             )
+        if file.blob is None and file.text is None:
+            self._raise_artifact_content_unavailable(run_id=run_id, file_id=file_id)
         return file
 
     async def get_evidence(
@@ -881,11 +881,16 @@ class FlowRunService:
             run_id=resolved_run.id,
             tenant_id=self.user.tenant_id,
         )
+        result_files = await self.flow_run_repo.list_result_files(
+            run_id=resolved_run.id,
+            tenant_id=self.user.tenant_id,
+        )
         return build_evidence_bundle(
             run=resolved_run,
             version=version,
             step_results=step_results,
             step_attempts=step_attempts,
+            result_files=result_files,
         )
 
     def _build_preseed_steps(

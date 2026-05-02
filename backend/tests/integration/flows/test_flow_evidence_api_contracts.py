@@ -545,8 +545,10 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
         "not_tracked"
     )
     assert payload["manifest"]["artifact_availability_summary"]["tracking_state"] == (
-        "payload_derived"
+        "tracked"
     )
+    assert payload["manifest"]["artifact_availability_summary"]["artifact_count"] == 0
+    assert payload["bundle"]["result_files"] == []
     serialized_bundle = json.dumps(
         payload["bundle"],
         ensure_ascii=False,

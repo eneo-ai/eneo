@@ -219,7 +219,7 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
     (
         "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/",
         "post",
-    ): {"403", "404", "422"},
+    ): {"403", "404", "410", "422"},
     (
         "/api/v1/settings/flow-input-limits",
         "patch",
@@ -282,7 +282,7 @@ REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
     (
         "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/",
         "post",
-    ): {"403", "404"},
+    ): {"403", "404", "410"},
 }
 
 
@@ -738,6 +738,23 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
         openapi_spec, manifest_properties["retention_state_summary"]
     )
     assert "artifact_content_purged_count" in retention_summary.get("properties", {})
+    artifact_summary = _resolve_component_ref(
+        openapi_spec, manifest_properties["artifact_availability_summary"]
+    )
+    artifact_summary_properties = artifact_summary.get("properties", {})
+    assert artifact_summary.get("additionalProperties") is False
+    assert set(artifact_summary_properties) >= {
+        "tracking_state",
+        "artifact_count",
+        "available_count",
+        "content_purged_count",
+        "total_size_bytes",
+        "artifacts",
+        "note",
+    }
+    assert _extract_enum_values(
+        openapi_spec, artifact_summary_properties["tracking_state"]
+    ) == {"tracked"}
     assert manifest_properties["flow_version"].get("type") == "integer"
     assert "anyOf" not in manifest_properties["flow_version"]
     assert not manifest_properties["flow_version"].get("nullable", False)

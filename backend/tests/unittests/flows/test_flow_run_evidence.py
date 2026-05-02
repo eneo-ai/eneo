@@ -4,11 +4,12 @@ import hashlib
 import json
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 import pytest
 
+from intric.files.file_models import FileType
 from intric.flows.enums import FlowStepAttemptStatus, FlowStepResultStatus
 from intric.flows.flow import (
     FlowRun,
@@ -47,6 +48,7 @@ from intric.flows.flow_run_provenance import (
     normalize_rag_payload,
     parse_attempt_provenance,
 )
+from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 
 
 def _redacted_export_context() -> EvidenceExportContext:
@@ -200,12 +202,46 @@ def _step_result_for_run(
     )
 
 
+def _result_file_for_run(
+    run: FlowRun,
+    *,
+    step_id: UUID | None = None,
+    step_result_id: UUID | None = None,
+    step_order: int = 1,
+    attempt_no: int = 1,
+    file_id: UUID | None = None,
+    name: str = "artifact.pdf",
+    checksum: str = "artifact-checksum",
+    size: int = 4096,
+    availability: Literal["available", "content_purged"] = "available",
+) -> FlowRunStepResultFile:
+    return FlowRunStepResultFile(
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_result_id=step_result_id or uuid4(),
+        step_id=step_id or uuid4(),
+        step_order=step_order,
+        attempt_no=attempt_no,
+        file_id=file_id or uuid4(),
+        ordinal=0,
+        source="declared_artifact",
+        name=name,
+        checksum=checksum,
+        size=size,
+        mimetype="application/pdf",
+        file_type=FileType.DOCUMENT,
+        availability=availability,
+    )
+
+
 def _render_raw_export(
     run: FlowRun,
     version: FlowVersion,
     *,
     step_results: list[FlowStepResult] | None = None,
     step_attempts: list[FlowStepAttempt] | None = None,
+    result_files: list[FlowRunStepResultFile] | None = None,
 ) -> dict[str, Any]:
     return render_evidence_json_export(
         bundle=build_evidence_bundle(
@@ -213,6 +249,7 @@ def _render_raw_export(
             version=version,
             step_results=step_results or [],
             step_attempts=step_attempts or [],
+            result_files=result_files or [],
         ),
         context=_raw_export_context(),
     )
@@ -724,11 +761,15 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
         ),
     }
     assert export["manifest"]["artifact_availability_summary"] == {
-        "tracking_state": "payload_derived",
-        "payload_artifact_count": 0,
+        "tracking_state": "tracked",
+        "artifact_count": 0,
+        "available_count": 0,
+        "content_purged_count": 0,
+        "total_size_bytes": 0,
+        "artifacts": [],
         "note": (
-            "Canonical file availability is not yet exposed; counts currently come "
-            "from payload-derived artifact references."
+            "Artifact availability is derived from result-file rows joined to file "
+            "metadata."
         ),
     }
     assert export["manifest"]["provenance_persisted_version_status"] == "not_tracked"
@@ -1243,9 +1284,13 @@ def test_evidence_export_manifest_rejects_unknown_fields() -> None:
             ),
         },
         "artifact_availability_summary": {
-            "tracking_state": "payload_derived",
-            "payload_artifact_count": 0,
-            "note": "Canonical file availability is not yet exposed.",
+            "tracking_state": "tracked",
+            "artifact_count": 0,
+            "available_count": 0,
+            "content_purged_count": 0,
+            "total_size_bytes": 0,
+            "artifacts": [],
+            "note": "Artifact availability is row-backed.",
         },
         "unexpected": "blocked",
     }
@@ -1269,6 +1314,7 @@ def test_render_evidence_json_export_adds_human_readable_rag_and_artifact_summar
     None
 ):
     now = datetime.now(timezone.utc)
+    artifact_file_id = uuid4()
     run = FlowRun(
         id=uuid4(),
         flow_id=uuid4(),
@@ -1279,14 +1325,7 @@ def test_render_evidence_json_export_adds_human_readable_rag_and_artifact_summar
         status=FlowRunStatus.COMPLETED,
         cancelled_at=None,
         input_payload_json=None,
-        output_payload_json={
-            "artifacts": [
-                {
-                    "file_id": str(uuid4()),
-                    "file_name": "beslut-underlag.pdf",
-                }
-            ]
-        },
+        output_payload_json={"text": "done"},
         error_message=None,
         job_id=None,
         created_at=now,
@@ -1317,6 +1356,13 @@ def test_render_evidence_json_export_adds_human_readable_rag_and_artifact_summar
             version=version,
             step_results=[],
             step_attempts=[],
+            result_files=[
+                _result_file_for_run(
+                    run,
+                    file_id=artifact_file_id,
+                    name="beslut-underlag.pdf",
+                )
+            ],
         )
     )
     bundle = replace(
@@ -1376,6 +1422,7 @@ def test_render_evidence_json_export_adds_rag_source_details_and_step_overview()
 ):
     started_at = datetime.now(timezone.utc)
     finished_at = started_at
+    artifact_file_id = uuid4()
     run = FlowRun(
         id=uuid4(),
         flow_id=uuid4(),
@@ -1386,15 +1433,7 @@ def test_render_evidence_json_export_adds_rag_source_details_and_step_overview()
         status=FlowRunStatus.COMPLETED,
         cancelled_at=None,
         input_payload_json=None,
-        output_payload_json={
-            "text": "Beslut till underlag klart.",
-            "artifacts": [
-                {
-                    "file_id": str(uuid4()),
-                    "file_name": "beslut-underlag.pdf",
-                }
-            ],
-        },
+        output_payload_json={"text": "Beslut till underlag klart."},
         error_message=None,
         job_id=None,
         created_at=started_at,
@@ -1456,19 +1495,7 @@ def test_render_evidence_json_export_adds_rag_source_details_and_step_overview()
             },
         },
         effective_prompt=None,
-        output_payload_json={
-            "text": "Beslut till underlag klart.",
-            "artifacts": [
-                {
-                    "file_id": str(uuid4()),
-                    "file_name": "beslut-underlag.pdf",
-                    "checksum": "artifact-checksum",
-                    "file_type": "document",
-                    "mimetype": "application/pdf",
-                    "size": 4096,
-                }
-            ],
-        },
+        output_payload_json={"text": "Beslut till underlag klart."},
         model_parameters_json=None,
         num_tokens_input=None,
         num_tokens_output=None,
@@ -1571,6 +1598,18 @@ def test_render_evidence_json_export_adds_rag_source_details_and_step_overview()
             version=version,
             step_results=[result],
             step_attempts=[attempt],
+            result_files=[
+                _result_file_for_run(
+                    run,
+                    step_id=result.step_id,
+                    step_result_id=result.id,
+                    step_order=1,
+                    attempt_no=1,
+                    file_id=artifact_file_id,
+                    name="beslut-underlag.pdf",
+                    checksum="artifact-checksum",
+                )
+            ],
         )
     )
 

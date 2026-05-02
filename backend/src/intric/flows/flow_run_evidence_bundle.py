@@ -17,6 +17,7 @@ from intric.flows.flow_run_provenance import (
     parse_attempt_provenance,
 )
 from intric.flows.flow_run_redaction import MaskedField, redact_payload_with_manifest
+from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 
 _RESULT_FIELDS_REPLACED_BY_ATTEMPT_PROVENANCE = {"tool_calls_metadata"}
 
@@ -33,6 +34,7 @@ class EvidenceBundle:
     version: FlowVersion
     step_results: Sequence[FlowStepResult]
     step_attempts: Sequence[FlowStepAttempt]
+    result_files: Sequence[FlowRunStepResultFile]
     debug_export: dict[str, Any]
 
     def to_export_payload(self) -> EvidenceBundlePayload:
@@ -50,6 +52,9 @@ class EvidenceBundle:
                     _dump_result_record(item) for item in self.step_results
                 ],
                 "step_attempts": step_attempts,
+                "result_files": [
+                    item.model_dump(mode="json") for item in self.result_files
+                ],
                 "debug_export": dict(self.debug_export),
             },
             provenance_parse_results=tuple(provenance_parse_results),
@@ -65,6 +70,7 @@ class RedactedEvidenceBundle:
     definition_snapshot: dict[str, Any]
     step_results: tuple[dict[str, Any], ...]
     step_attempts: tuple[dict[str, Any], ...]
+    result_files: tuple[dict[str, Any], ...]
     debug_export: dict[str, Any]
     masked_paths: tuple[str, ...]
     masked_fields: tuple[MaskedField, ...]
@@ -77,6 +83,7 @@ class RedactedEvidenceBundle:
                 "definition_snapshot": dict(self.definition_snapshot),
                 "step_results": [dict(item) for item in self.step_results],
                 "step_attempts": [dict(item) for item in self.step_attempts],
+                "result_files": [dict(item) for item in self.result_files],
                 "debug_export": dict(self.debug_export),
             },
             provenance_parse_results=self.provenance_parse_results,
@@ -92,17 +99,20 @@ def build_evidence_bundle(
     version: FlowVersion,
     step_results: Sequence[FlowStepResult],
     step_attempts: Sequence[FlowStepAttempt],
+    result_files: Sequence[FlowRunStepResultFile] = (),
 ) -> EvidenceBundle:
     return EvidenceBundle(
         run=run,
         version=version,
         step_results=tuple(step_results),
         step_attempts=tuple(step_attempts),
+        result_files=tuple(result_files),
         debug_export=build_debug_export(
             run=run,
             version=version,
             step_results=list(step_results),
             step_attempts=list(step_attempts),
+            result_files=list(result_files),
         ),
     )
 
@@ -139,6 +149,15 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
         provenance_parse_results.append(parse_result)
         masked_paths.extend(result.masked_paths)
         masked_fields.extend(result.masked_fields)
+    result_file_payloads: list[dict[str, Any]] = []
+    for index, item in enumerate(bundle.result_files):
+        result = redact_payload_with_manifest(
+            item.model_dump(mode="json"),
+            path=f"bundle.result_files[{index}]",
+        )
+        result_file_payloads.append(cast(dict[str, Any], result.value))
+        masked_paths.extend(result.masked_paths)
+        masked_fields.extend(result.masked_fields)
     debug_result = redact_payload_with_manifest(
         bundle.debug_export, path="bundle.debug_export"
     )
@@ -157,6 +176,7 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
         definition_snapshot=cast(dict[str, Any], definition_result.value),
         step_results=tuple(step_result_payloads),
         step_attempts=tuple(step_attempt_payloads),
+        result_files=tuple(result_file_payloads),
         debug_export=debug_export,
         masked_paths=tuple(
             dict.fromkeys(

@@ -24,6 +24,8 @@ def _default_message_for_status(status_code: int) -> str:
         return "Forbidden: you do not have permission to perform this action."
     if status_code == 404:
         return "Not found"
+    if status_code == 410:
+        return "Gone."
     if status_code == 409:
         return "Conflict."
     if status_code >= 500:

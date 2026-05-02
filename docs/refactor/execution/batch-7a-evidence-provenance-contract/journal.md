@@ -694,3 +694,115 @@ Claude confirmed the accepted findings were resolved:
 - 7A.5 journal content lives under one coherent iteration heading with chronological plan reviews, implementation summary, validation summary, carry-forward risks, and implementation review.
 - The `tool_calls_metadata` deletion sweep lists concrete file paths and links to existing PRD-008 / Batch 10 anchors.
 - Source has no AI slop comments, process/tooling vocabulary, or new deprecated/legacy/backward-compatibility surface for unreleased Flow / Flow AI Builder.
+
+## Iteration 7 — 7A.6 Artifact/File Evidence Ownership
+
+### Starting Point
+
+7A.5 is committed at `1c5bc7c2`.
+
+Current duplicate artifact owners:
+
+- `FlowRepository.save_step_result()` writes `FlowRunStepResultFiles` from output payload artifact keys.
+- Evidence export still scans `output_payload_json.artifacts` and `generated_file_ids`.
+- Signed artifact access still scans step-result output payload JSON.
+- Retention cleanup still extracts generated file ids from output payload JSON before pruning.
+
+### Plan Review 1
+
+Claude returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`.
+
+Accepted plan corrections:
+
+- Known artifact row with purged content returns 410 and `flow_run_artifact_content_unavailable`; missing row remains 404 and `flow_run_artifact_not_found`.
+- Availability means downloadable content exists: `Files.blob` or `Files.text` is present. `Files.transcription` does not make an artifact downloadable.
+- The service must re-check file content after the result-file row lookup before signing to avoid a retention race.
+- `_reconcile_missing_generated_artifact_references()` should be deleted unless implementation proves a real remaining failure mode.
+- JSON artifact keys are a frontend display payload only. 7A.7 deletes them once frontend evidence and run tables read `result_files`.
+- Result-file row ordering, duplicate source precedence, latest-attempt step display, final-output derivation, and hash inclusion are now explicit in the plan.
+- New manifest fields must be declared typed model fields, not allowed extras.
+
+Implementation is proceeding only after these corrections are folded into `plan.md`.
+
+### Implementation Summary
+
+Changed source/tests:
+
+- `backend/src/intric/flows/flow_run_step_result_file.py`
+  - Added the row-backed artifact projection used by repository, evidence bundle, export manifest, and API schema.
+  - Availability is explicit: `available` when file blob/text content exists, otherwise `content_purged`.
+- `backend/src/intric/flows/infrastructure/flow_run_repo.py`
+  - Added `list_result_files()` and `get_result_file()` queries joining `FlowRunStepResultFiles` to `Files`.
+  - The query order is `step_order`, `attempt_no`, then `ordinal`.
+- `backend/src/intric/flows/application/flow_run_service.py`
+  - Signed artifact access now requires a result-file row.
+  - Missing row returns `flow_run_artifact_not_found`.
+  - Known row with purged content returns `flow_run_artifact_content_unavailable`.
+  - File content is re-checked after `FileRepository.get_by_id()` before a signed URL can be produced.
+- `backend/src/intric/main/exceptions.py` and `backend/src/intric/server/exception_handlers.py`
+  - Added `ResourceGoneException` mapped to HTTP 410 without leaking FastAPI exceptions into application logic.
+- `backend/src/intric/flows/flow_run_evidence_bundle.py`
+  - Evidence bundles now include `result_files` in the export payload covered by the content hash.
+- `backend/src/intric/flows/flow_run_evidence.py`
+  - Debug export artifact counts now come from unique result-file rows instead of output payload keys.
+- `backend/src/intric/flows/flow_run_evidence_export_manifest.py`
+  - Artifact availability summary is a strict typed contract with `tracking_state="tracked"`, row-backed counts, and per-artifact metadata.
+- `backend/src/intric/flows/flow_run_export_json.py`
+  - Manifest, summary, final output, and step overview artifact details are derived from `bundle.result_files`.
+  - Payload-derived artifact scanners and `payload_derived` state were deleted.
+  - Latest-attempt display and terminal-step final-output rules are encoded in named row helpers.
+- `backend/src/intric/flows/api/flow_models.py` and `backend/src/intric/flows/api/flow_run_steps_router.py`
+  - OpenAPI examples now expose `result_files`, row-backed artifact summary fields, and the 410 artifact error.
+- `backend/src/intric/data_retention/infrastructure/data_retention_service.py`
+  - Generated artifact cleanup now gets the file-id set from result-file rows.
+  - `_extract_generated_file_ids()` and `_reconcile_missing_generated_artifact_references()` were deleted.
+  - `_prune_generated_artifact_payload()` remains only as display-cache cleanup until 7A.7 removes frontend readers for JSON artifact keys.
+- Tests now pin row-backed repository queries, signed access 404/410 behavior, retention race handling, JSON artifact references being ignored without a result-file row, row-backed export summaries, OpenAPI schema shape, retention cleanup without payload artifact references, and public evidence response parsing.
+
+No migration, frontend view-model rewrite, generated TypeScript hand-edit, Batch 8 rerun work, Batch 9 review work, package rename, or namespace rename started.
+
+### Validation Summary
+
+- `cd backend && uv run pyright`: 0 errors, 0 warnings, 0 informations.
+- `cd backend && uv run ruff check <20 changed Python files>`: all checks passed.
+- `cd backend && uv run ruff format --check <20 changed Python files>`: 20 files already formatted.
+- `cd backend && uv run pytest tests/unittests/flows/test_flow_run_service.py::test_get_run_artifact_file_uses_result_file_row tests/unittests/flows/test_flow_run_service.py::test_get_run_artifact_file_ignores_payload_artifacts_without_result_file_row tests/unittests/flows/test_flow_run_service.py::test_get_run_artifact_file_rejects_unknown_file_id tests/unittests/flows/test_flow_run_service.py::test_get_run_artifact_file_rejects_content_purged_row tests/unittests/flows/test_flow_run_service.py::test_get_run_artifact_file_rechecks_file_content_before_signing tests/unittests/flows/test_flow_run_service.py::test_get_run_artifact_file_rejects_cross_tenant tests/unittests/flows/test_flow_run_service.py::test_get_run_artifact_file_missing_result_file_row tests/unittests/flows/test_flow_run_service.py::test_get_run_artifact_file_no_file_repo tests/unittests/flows/test_flow_run_evidence.py tests/unittests/flows/test_flow_models.py::test_flow_run_evidence_response_parses_typed_nested_models tests/unittests/flows/test_flow_router.py::test_flow_run_alias_evidence_delegates_to_run_service tests/unittests/flows/test_flow_router.py::test_flow_run_alias_evidence_allows_space_admin_without_trace_permission tests/unittests/flows/test_flow_router.py::test_flow_run_evidence_alias_fails_closed_when_audit_write_fails tests/unit/test_flow_openapi_contract.py::test_openapi_flow_evidence_export_documents_json_attachment tests/unit/test_flow_openapi_contract.py::test_openapi_flow_error_responses_include_general_error_examples`: 57 passed, 16 warnings.
+- `cd backend && uv run pytest tests/integration/flows/test_flow_step_file_mapping_contract.py::test_step_result_files_are_attempt_scoped_and_deduplicated tests/integration/test_flow_runtime_retention_cleanup.py::test_cleanup_old_flow_runtime_data_clears_debug_evidence_and_generated_artifacts tests/integration/test_flow_runtime_retention_cleanup.py::test_cleanup_old_flow_runtime_data_uses_result_file_rows_without_payload_refs tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_returns_redacted_json_attachment`: 4 passed, 16 warnings.
+- `cd backend && uv run lint-imports --no-cache`: 3 contracts kept, 0 broken.
+- `rg -n "payload_derived|payload_artifact_count|_extract_generated_file_ids|_collect_artifact_ids|_count_artifacts|_collect_artifact_names_from_payload|_collect_artifact_details_from_payload|_reconcile_missing_generated_artifact_references" backend/src backend/tests`: no matches.
+- Anti-slippage `rg` across touched source/test files found no Codex/session/batch vocabulary, no deprecated/backwards/legacy compatibility phrasing, and no process comments. The only `Claude` match in touched files is the pre-existing `ClaudeException` error class.
+- `git diff --check`: passed.
+- A full backend `ruff check`/`ruff format --check` still hits unrelated pre-existing import-order/formatting issues in Alembic history and unrelated tests, so this slice records changed-file ruff validation instead of rewriting unrelated files.
+
+Warnings observed were existing deprecation warnings outside Flow evidence and not product regressions.
+
+### Carry-Forward Risks
+
+- 7A.7 owns generated/frontend evidence alignment. `frontend/packages/intric-js/src/types/schema.d.ts` is intentionally not hand-edited in this backend slice.
+- 7A.7 must move current frontend display readers from JSON payload artifact keys to `result_files`; after that, delete `_prune_generated_artifact_payload()` and stop writing `output_payload_json.artifacts` / `output_payload_json.generated_file_ids` for Flow runtime display.
+- `_artifact_availability_summary()` currently round-trips typed `FlowRunStepResultFile` rows through the JSON-canonical bundle payload before building manifest items. This keeps the content-hash surface stable, but a future manifest-builder extraction can pass typed rows directly and remove dead fallback defaults.
+- Full persisted/domain `tool_calls_metadata` deletion remains assigned to PRD-008 / Batch 10, unchanged from 7A.5.
+
+### Claude Implementation Review
+
+Session: `eneo-flow-7a6-artifact-file-evidence`.
+
+Iteration 2 returned substantive `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`, but the first artifact prefixed the output contract with Markdown headings, so the wrapper exited nonzero despite the green review.
+
+The same session then returned a parseable confirmation:
+
+- `VERDICT: green`
+- `GREEN_LIGHT: yes`
+- `MIN_SCORE: 8`
+
+Artifacts:
+
+- `.codex/artifacts/claude-peer-loop-7a-6-artifact-file-evidence-ownership-verification-20260502T081801Z.md`
+- `.codex/artifacts/claude-peer-loop-7a-6-artifact-file-evidence-ownership-green-light-format-confirmation-20260502T081932Z.md`
+
+Accepted non-blocking follow-ups:
+
+- A future export-manifest cleanup can avoid rebuilding manifest artifact items from dumped dictionaries.
+- 7A.7 must delete the JSON artifact display-cache path after frontend readers move to `result_files`.
+
+No blocker remains for commit.

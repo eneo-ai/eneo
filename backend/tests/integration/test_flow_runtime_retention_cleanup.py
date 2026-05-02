@@ -14,9 +14,11 @@ from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.files_table import Files
 from intric.database.tables.flow_tables import (
     FlowRuns,
+    FlowRunStepResultFiles,
     Flows,
     FlowStepAttempts,
     FlowStepResults,
+    FlowSteps,
     FlowVersions,
 )
 from intric.database.tables.spaces_table import Spaces
@@ -25,10 +27,6 @@ from intric.flows.flow_retention_tombstone import (
     FLOW_RETENTION_ACTOR_SOURCE,
     FLOW_RETENTION_TOMBSTONES_KEY,
     FlowAttemptRetentionMarker,
-    FlowRetentionDataClass,
-    FlowRetentionState,
-    FlowRetentionTombstone,
-    GeneratedArtifactRetentionCounts,
     RunDebugAttemptRetentionCounts,
     extract_retention_tombstones,
 )
@@ -94,6 +92,7 @@ async def _create_flow_runtime_fixture(
     flow_retention_days: int | None = None,
     flow_settings: dict | None = None,
     generated_file_has_content: bool = True,
+    include_payload_artifact_refs: bool = True,
 ):
     if flow_settings is not None:
         await async_session.execute(
@@ -178,25 +177,51 @@ async def _create_flow_runtime_fixture(
     async_session.add(run)
     await async_session.flush()
 
+    step_id = uuid4()
+    async_session.add(
+        FlowSteps(
+            id=step_id,
+            flow_id=flow.id,
+            tenant_id=tenant.id,
+            assistant_id=assistant.id,
+            step_order=1,
+            user_description="Generate artifact",
+            input_source="flow_input",
+            input_type="text",
+            output_mode="pass_through",
+            output_type="docx",
+            mcp_policy="inherit",
+            created_at=created_at,
+            updated_at=created_at,
+        )
+    )
+    await async_session.flush()
+    output_payload_json = {
+        "text": "kept output",
+        "webhook_delivered": False,
+        "template_fill_debug": {"rendered_docx_text_raw": "debug body"},
+    }
+    if include_payload_artifact_refs:
+        output_payload_json.update(
+            {
+                "generated_file_ids": [str(generated_file.id)],
+                "file_ids": [str(generated_file.id)],
+                "artifacts": [
+                    {"file_id": str(generated_file.id), "name": generated_file.name}
+                ],
+            }
+        )
+
     step_result = FlowStepResults(
         flow_run_id=run.id,
         flow_id=flow.id,
         tenant_id=tenant.id,
-        step_id=None,
+        step_id=step_id,
         step_order=1,
         assistant_id=assistant.id,
         input_payload_json={"text": "sensitive input"},
         effective_prompt="Very sensitive prompt",
-        output_payload_json={
-            "text": "kept output",
-            "webhook_delivered": False,
-            "generated_file_ids": [str(generated_file.id)],
-            "file_ids": [str(generated_file.id)],
-            "artifacts": [
-                {"file_id": str(generated_file.id), "name": generated_file.name}
-            ],
-            "template_fill_debug": {"rendered_docx_text_raw": "debug body"},
-        },
+        output_payload_json=output_payload_json,
         model_parameters_json={"temperature": 0.1},
         num_tokens_input=10,
         num_tokens_output=20,
@@ -210,12 +235,27 @@ async def _create_flow_runtime_fixture(
         updated_at=created_at,
     )
     async_session.add(step_result)
+    await async_session.flush()
+    async_session.add(
+        FlowRunStepResultFiles(
+            flow_run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=tenant.id,
+            step_result_id=step_result.id,
+            step_id=step_id,
+            step_order=1,
+            attempt_no=1,
+            file_id=generated_file.id,
+            ordinal=0,
+            source="declared_artifact",
+        )
+    )
 
     step_attempt = FlowStepAttempts(
         flow_run_id=run.id,
         flow_id=flow.id,
         tenant_id=tenant.id,
-        step_id=None,
+        step_id=step_id,
         step_order=1,
         attempt_no=1,
         celery_task_id=None,
@@ -239,31 +279,6 @@ async def _create_flow_runtime_fixture(
     await async_session.flush()
 
     return run, step_result, step_attempt, generated_file
-
-
-def _result_tombstone_payload(
-    run: FlowRuns,
-    *,
-    object_id: str,
-    data_class: FlowRetentionDataClass = "generated_artifact",
-    retention_state: FlowRetentionState = "artifact_content_purged",
-) -> dict[str, object]:
-    now = datetime.now(timezone.utc)
-    tombstone = FlowRetentionTombstone(
-        tenant_id=str(run.tenant_id),
-        run_id=str(run.id),
-        trace_id=str(run.trace_id),
-        data_class=data_class,
-        object_type="flow_step_result",
-        object_id=object_id,
-        policy_source="tenant.flow_settings.retention_policy.generated_artifact_days",
-        cutoff=now,
-        actor_source=FLOW_RETENTION_ACTOR_SOURCE,
-        counts=GeneratedArtifactRetentionCounts(referenced_file_count=1),
-        timestamp=now,
-        retention_state=retention_state,
-    )
-    return {FLOW_RETENTION_TOMBSTONES_KEY: [tombstone.to_payload()]}
 
 
 @pytest.mark.asyncio
@@ -354,7 +369,7 @@ async def test_cleanup_old_flow_runtime_data_clears_debug_evidence_and_generated
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_reconciles_missing_generated_artifact_references(
+async def test_cleanup_old_flow_runtime_data_uses_result_file_rows_without_payload_refs(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -362,54 +377,20 @@ async def test_cleanup_old_flow_runtime_data_reconciles_missing_generated_artifa
     flow_retention_assistant: Assistants,
     flow_retention_service: DataRetentionService,
 ):
-    run, step_result, _attempt, _generated_file = await _create_flow_runtime_fixture(
+    run, step_result, _attempt, generated_file = await _create_flow_runtime_fixture(
         async_session,
         tenant=test_tenant,
         user=admin_user,
         space=flow_retention_space,
         assistant=flow_retention_assistant,
-        days_old=0,
-        flow_settings={},
-        generated_file_has_content=False,
-    )
-    assert step_result.output_payload_json is not None
-    await async_session.execute(
-        update(FlowStepResults)
-        .where(FlowStepResults.id == step_result.id)
-        .values(
-            output_payload_json={
-                **step_result.output_payload_json,
-                **_result_tombstone_payload(run, object_id=str(step_result.id)),
+        days_old=3,
+        flow_settings={
+            "retention_policy": {
+                "generated_artifact_days": 1,
             }
-        )
+        },
+        include_payload_artifact_refs=False,
     )
-    tombstone_only_result = FlowStepResults(
-        flow_run_id=run.id,
-        flow_id=run.flow_id,
-        tenant_id=run.tenant_id,
-        step_id=None,
-        step_order=2,
-        assistant_id=flow_retention_assistant.id,
-        input_payload_json=None,
-        effective_prompt=None,
-        output_payload_json=_result_tombstone_payload(
-            run,
-            object_id=str(uuid4()),
-        ),
-        model_parameters_json=None,
-        num_tokens_input=None,
-        num_tokens_output=None,
-        status="completed",
-        error_message=None,
-        flow_step_execution_hash=None,
-        tool_calls_metadata=None,
-        started_at=run.created_at,
-        finished_at=run.created_at,
-        created_at=run.created_at,
-        updated_at=run.created_at,
-    )
-    async_session.add(tombstone_only_result)
-    await async_session.flush()
 
     counts = await flow_retention_service.cleanup_old_flow_runtime_data()
     await async_session.flush()
@@ -417,15 +398,13 @@ async def test_cleanup_old_flow_runtime_data_reconciles_missing_generated_artifa
     assert counts == {
         "debug_step_results": 0,
         "debug_step_attempts": 0,
-        "generated_artifact_rows": 0,
-        "generated_artifact_files": 0,
-        "reconciled_artifact_references": 1,
+        "generated_artifact_rows": 1,
+        "generated_artifact_files": 1,
+        "reconciled_artifact_references": 0,
     }
 
     refreshed_step_result = await async_session.get(FlowStepResults, step_result.id)
-    refreshed_tombstone_only = await async_session.get(
-        FlowStepResults, tombstone_only_result.id
-    )
+    refreshed_file = await async_session.get(Files, generated_file.id)
     assert refreshed_step_result is not None
     payload = refreshed_step_result.output_payload_json
     assert isinstance(payload, dict)
@@ -439,5 +418,7 @@ async def test_cleanup_old_flow_runtime_data_reconciles_missing_generated_artifa
     assert payload["webhook_delivered"] is False
     assert payload["template_fill_debug"] == {"rendered_docx_text_raw": "debug body"}
     assert len(extract_retention_tombstones(payload)) == 1
-    assert refreshed_tombstone_only is not None
-    assert extract_retention_tombstones(refreshed_tombstone_only.output_payload_json)
+    assert refreshed_file is not None
+    assert refreshed_file.blob is None
+    assert refreshed_file.text is None
+    assert refreshed_file.transcription is None

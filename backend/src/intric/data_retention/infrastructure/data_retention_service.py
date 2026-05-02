@@ -15,6 +15,7 @@ from intric.database.tables.audit_retention_policy_table import AuditRetentionPo
 from intric.database.tables.files_table import Files
 from intric.database.tables.flow_tables import (
     FlowRuns,
+    FlowRunStepResultFiles,
     Flows,
     FlowStepAttempts,
     FlowStepResults,
@@ -41,7 +42,6 @@ from intric.flows.flow_retention_tombstone import (
     RunDebugStepResultRetentionCounts,
     append_retention_tombstone,
     has_retention_tombstone,
-    is_tombstone_only_payload,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,15 @@ class _FlowRuntimeRetentionAction:
     cutoff: datetime
     policy_source: str
     cleanup_timestamp: datetime
+
+
+@dataclass
+class _GeneratedArtifactRetentionTarget:
+    step_result_id: UUID
+    flow_run_id: UUID
+    tenant_id: UUID
+    output_payload_json: Any
+    file_ids: set[UUID]
 
 
 class DataRetentionService:
@@ -161,9 +170,6 @@ class DataRetentionService:
                 counts["generated_artifact_files"] += artifact_counts[
                     "generated_artifact_files"
                 ]
-        counts[
-            "reconciled_artifact_references"
-        ] = await self._reconcile_missing_generated_artifact_references()
         return counts
 
     def _build_effective_retention_days(
@@ -569,35 +575,54 @@ class DataRetentionService:
                 "reconciled_artifact_references": 0,
             }
 
-        stmt = sa.select(
-            FlowStepResults.id,
-            FlowStepResults.flow_run_id,
-            FlowStepResults.tenant_id,
-            FlowStepResults.output_payload_json,
-        ).where(
-            sa.and_(
-                FlowStepResults.flow_run_id.in_(set(actions_by_run_id)),
-                FlowStepResults.output_payload_json.is_not(None),
+        stmt = (
+            sa.select(
+                FlowStepResults.id,
+                FlowStepResults.flow_run_id,
+                FlowStepResults.tenant_id,
+                FlowStepResults.output_payload_json,
+                FlowRunStepResultFiles.file_id,
             )
+            .join(
+                FlowRunStepResultFiles,
+                FlowRunStepResultFiles.step_result_id == FlowStepResults.id,
+            )
+            .where(FlowRunStepResultFiles.flow_run_id.in_(set(actions_by_run_id)))
         )
         rows = await self.session.execute(stmt)
+        targets: dict[UUID, _GeneratedArtifactRetentionTarget] = {}
+        for row in rows.fetchall():
+            target = targets.get(row.id)
+            if target is None:
+                target = _GeneratedArtifactRetentionTarget(
+                    step_result_id=row.id,
+                    flow_run_id=row.flow_run_id,
+                    tenant_id=row.tenant_id,
+                    output_payload_json=row.output_payload_json,
+                    file_ids=set(),
+                )
+                targets[row.id] = target
+            target.file_ids.add(row.file_id)
+
         file_ids_by_tenant: dict[UUID, set[UUID]] = defaultdict(set)
         updated_rows = 0
 
-        for row in rows.fetchall():
-            file_ids = _extract_generated_file_ids(row.output_payload_json)
-            if not file_ids:
+        for target in targets.values():
+            if not target.file_ids:
                 continue
-            object_id = str(row.id)
-            action = actions_by_run_id[row.flow_run_id]
+            object_id = str(target.step_result_id)
+            action = actions_by_run_id[target.flow_run_id]
             has_marker = has_retention_tombstone(
-                row.output_payload_json,
+                target.output_payload_json,
                 data_class="generated_artifact",
                 object_type="flow_step_result",
                 object_id=object_id,
                 retention_state="artifact_content_purged",
             )
-            pruned_payload = _prune_generated_artifact_payload(row.output_payload_json)
+            pruned_payload = _prune_generated_artifact_payload(
+                target.output_payload_json,
+                only_file_ids=target.file_ids,
+            )
             output_payload = (
                 append_retention_tombstone(
                     pruned_payload,
@@ -608,20 +633,23 @@ class DataRetentionService:
                         object_id=object_id,
                         retention_state="artifact_content_purged",
                         counts=GeneratedArtifactRetentionCounts(
-                            referenced_file_count=len(file_ids)
+                            referenced_file_count=len(target.file_ids)
                         ),
                     ),
                 )
                 if not has_marker
                 else pruned_payload
             )
+            if output_payload == target.output_payload_json:
+                file_ids_by_tenant[target.tenant_id].update(target.file_ids)
+                continue
             update_result = await self.session.execute(
                 sa.update(FlowStepResults)
-                .where(FlowStepResults.id == row.id)
+                .where(FlowStepResults.id == target.step_result_id)
                 .values(output_payload_json=output_payload)
             )
             updated_rows += update_result.rowcount or 0
-            file_ids_by_tenant[row.tenant_id].update(file_ids)
+            file_ids_by_tenant[target.tenant_id].update(target.file_ids)
 
         cleared_files = 0
         for tenant_id, file_ids in file_ids_by_tenant.items():
@@ -650,81 +678,6 @@ class DataRetentionService:
             "generated_artifact_files": cleared_files,
             "reconciled_artifact_references": 0,
         }
-
-    async def _reconcile_missing_generated_artifact_references(self) -> int:
-        reconciled = 0
-        last_step_result_id: UUID | None = None
-        while True:
-            stmt = (
-                sa.select(
-                    FlowStepResults.id,
-                    FlowStepResults.output_payload_json,
-                )
-                .where(
-                    sa.and_(
-                        FlowStepResults.output_payload_json.is_not(None),
-                        (
-                            FlowStepResults.id > last_step_result_id
-                            if last_step_result_id is not None
-                            else sa.true()
-                        ),
-                    )
-                )
-                .order_by(FlowStepResults.id)
-                .limit(RETENTION_BATCH_SIZE)
-            )
-            rows = await self.session.execute(stmt)
-            batch_rows = rows.fetchall()
-            if not batch_rows:
-                break
-
-            payloads_by_row: dict[UUID, dict[str, Any]] = {}
-            referenced_file_ids: set[UUID] = set()
-            for row in batch_rows:
-                payload = row.output_payload_json
-                if is_tombstone_only_payload(payload):
-                    continue
-                if not isinstance(payload, dict):
-                    continue
-                file_ids = _extract_generated_file_ids(payload)
-                if not file_ids:
-                    continue
-                payloads_by_row[row.id] = payload
-                referenced_file_ids.update(file_ids)
-
-            if referenced_file_ids:
-                file_rows = await self.session.execute(
-                    sa.select(Files.id, Files.blob, Files.text).where(
-                        Files.id.in_(referenced_file_ids)
-                    )
-                )
-                file_state = {
-                    row.id: (row.blob is not None or row.text is not None)
-                    for row in file_rows.fetchall()
-                }
-
-                for row_id, payload in payloads_by_row.items():
-                    missing_ids = {
-                        file_id
-                        for file_id in _extract_generated_file_ids(payload)
-                        if not file_state.get(file_id, False)
-                    }
-                    if not missing_ids:
-                        continue
-                    pruned_payload = _prune_generated_artifact_payload(
-                        payload,
-                        only_file_ids=missing_ids,
-                    )
-                    result = await self.session.execute(
-                        sa.update(FlowStepResults)
-                        .where(FlowStepResults.id == row_id)
-                        .values(output_payload_json=pruned_payload)
-                    )
-                    reconciled += result.rowcount or 0
-
-            last_step_result_id = cast(UUID, batch_rows[-1].id)
-
-        return reconciled
 
     async def get_affected_questions_count_for_space(
         self, space_id: UUID, retention_days: int
@@ -946,35 +899,6 @@ def _flow_runtime_policy_source(
     if space_default_days is not None:
         return "space.data_retention_days"
     return "tenant.flow_settings.retention_policy.shared_default_days"
-
-
-def _extract_generated_file_ids(payload: Any) -> set[UUID]:
-    if not isinstance(payload, dict):
-        return set()
-    payload_dict = cast(dict[str, Any], payload)
-    file_ids: set[UUID] = set()
-    for raw_file_id in cast(list[Any], payload_dict.get("generated_file_ids", [])):
-        try:
-            file_ids.add(UUID(str(raw_file_id)))
-        except (TypeError, ValueError):
-            continue
-    for raw_file_id in cast(list[Any], payload_dict.get("file_ids", [])):
-        try:
-            file_ids.add(UUID(str(raw_file_id)))
-        except (TypeError, ValueError):
-            continue
-    for artifact in cast(list[Any], payload_dict.get("artifacts", [])):
-        if not isinstance(artifact, dict):
-            continue
-        artifact_dict = cast(dict[str, Any], artifact)
-        raw_file_id = artifact_dict.get("file_id")
-        if raw_file_id is None:
-            continue
-        try:
-            file_ids.add(UUID(str(raw_file_id)))
-        except (TypeError, ValueError):
-            continue
-    return file_ids
 
 
 def _prune_generated_artifact_payload(

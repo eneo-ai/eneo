@@ -197,9 +197,13 @@ def _evidence_export_payload(run: FlowRun) -> dict:
                 ),
             },
             "artifact_availability_summary": {
-                "tracking_state": "payload_derived",
-                "payload_artifact_count": 0,
-                "note": "Canonical file availability is not yet exposed.",
+                "tracking_state": "tracked",
+                "artifact_count": 0,
+                "available_count": 0,
+                "content_purged_count": 0,
+                "total_size_bytes": 0,
+                "artifacts": [],
+                "note": "Artifact availability is row-backed.",
             },
         },
         "summary": {
@@ -219,6 +223,7 @@ def _evidence_export_payload(run: FlowRun) -> dict:
             "definition_snapshot": {"steps": []},
             "step_results": [],
             "step_attempts": [],
+            "result_files": [],
             "debug_export": {
                 "schema_version": "eneo.flow.debug-export.v2",
                 "generated_at": generated_at,
@@ -1951,6 +1956,7 @@ async def test_flow_run_alias_evidence_delegates_to_run_service(monkeypatch):
         "definition_snapshot": {"steps": []},
         "step_results": [],
         "step_attempts": [],
+        "result_files": [],
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -2062,6 +2068,7 @@ async def test_flow_run_alias_evidence_allows_space_admin_without_trace_permissi
         "definition_snapshot": {"steps": []},
         "step_results": [],
         "step_attempts": [],
+        "result_files": [],
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -2180,6 +2187,7 @@ async def test_flow_run_evidence_alias_fails_closed_when_audit_write_fails(monke
         "definition_snapshot": {"steps": []},
         "step_results": [],
         "step_attempts": [],
+        "result_files": [],
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -2417,6 +2425,7 @@ async def test_flow_run_alias_control_endpoints_reject_scope_mismatch(monkeypatc
         "definition_snapshot": {"steps": []},
         "step_results": [],
         "step_attempts": [],
+        "result_files": [],
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),

@@ -13,6 +13,7 @@ from intric.flows.domain.flow import (
     JsonObject,
 )
 from intric.flows.flow_run_provenance import normalize_rag_payload
+from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 
 DEBUG_EXPORT_SCHEMA_VERSION = "eneo.flow.debug-export.v2"
 
@@ -65,6 +66,7 @@ def build_debug_export(
     version: FlowVersion,
     step_results: list[FlowStepResult] | None = None,
     step_attempts: list[FlowStepAttempt] | None = None,
+    result_files: list[FlowRunStepResultFile] | None = None,
 ) -> dict[str, Any]:
     definition_snapshot = version.definition_json
     rag_by_step_order: dict[int, dict[str, Any]] = {}
@@ -121,7 +123,7 @@ def build_debug_export(
         attempts_count=sum(
             len(attempts) for attempts in attempts_by_step_order.values()
         ),
-        artifacts_count=_count_artifacts(step_results or [], run.output_payload_json),
+        artifacts_count=len({str(item.file_id) for item in result_files or []}),
         duration_ms=_calculate_duration_ms(run.created_at, run.updated_at),
         models_used=_collect_models_used(step_attempts or []),
     )
@@ -272,34 +274,6 @@ def _calculate_duration_ms(started_at: Any, finished_at: Any) -> int | None:
     if not isinstance(started_at, datetime) or not isinstance(finished_at, datetime):
         return None
     return max(0, int((finished_at - started_at).total_seconds() * 1000))
-
-
-def _count_artifacts(
-    step_results: list[FlowStepResult], run_output_payload: Any
-) -> int:
-    artifact_ids: set[str] = set()
-    for result in step_results:
-        _collect_artifact_ids(result.output_payload_json, artifact_ids)
-    _collect_artifact_ids(run_output_payload, artifact_ids)
-    return len(artifact_ids)
-
-
-def _collect_artifact_ids(payload: Any, artifact_ids: set[str]) -> None:
-    if not isinstance(payload, dict):
-        return
-    payload_dict = cast(JsonObject, payload)
-    artifacts = payload_dict.get("artifacts")
-    if isinstance(artifacts, list):
-        for artifact in cast(list[object], artifacts):
-            if isinstance(artifact, dict):
-                artifact_dict = cast(JsonObject, artifact)
-                file_id = artifact_dict.get("file_id")
-                if file_id is not None:
-                    artifact_ids.add(str(file_id))
-    generated_file_ids = payload_dict.get("generated_file_ids")
-    if isinstance(generated_file_ids, list):
-        for file_id in cast(list[object], generated_file_ids):
-            artifact_ids.add(str(file_id))
 
 
 def _collect_models_used(step_attempts: list[FlowStepAttempt]) -> list[str]:

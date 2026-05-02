@@ -156,6 +156,8 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
     flow_id = uuid4()
     tenant_id = uuid4()
     step_id = uuid4()
+    step_result_id = uuid4()
+    file_id = uuid4()
     attempt_id = uuid4()
 
     response = FlowRunEvidenceResponse.model_validate(
@@ -173,7 +175,7 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
             "definition_snapshot": {"steps": []},
             "step_results": [
                 {
-                    "id": str(uuid4()),
+                    "id": str(step_result_id),
                     "flow_run_id": str(run_id),
                     "flow_id": str(flow_id),
                     "tenant_id": str(tenant_id),
@@ -185,6 +187,26 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                     "flow_step_execution_hash": "abc123",
                     "created_at": "2026-03-20T12:00:01Z",
                     "updated_at": "2026-03-20T12:00:05Z",
+                }
+            ],
+            "result_files": [
+                {
+                    "flow_run_id": str(run_id),
+                    "flow_id": str(flow_id),
+                    "tenant_id": str(tenant_id),
+                    "step_result_id": str(step_result_id),
+                    "step_id": str(step_id),
+                    "step_order": 1,
+                    "attempt_no": 1,
+                    "file_id": str(file_id),
+                    "ordinal": 0,
+                    "source": "declared_artifact",
+                    "name": "artifact.pdf",
+                    "checksum": "artifact-checksum",
+                    "size": 4096,
+                    "mimetype": "application/pdf",
+                    "file_type": "document",
+                    "availability": "available",
                 }
             ],
             "step_attempts": [
@@ -327,6 +349,8 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
     assert response.step_results[0].effective_prompt == "Summarize the report"
     assert response.step_results[0].model_parameters_json == {"temperature": 0.2}
     assert response.step_results[0].flow_step_execution_hash == "abc123"
+    assert response.result_files[0].file_id == file_id
+    assert response.result_files[0].availability == "available"
     assert isinstance(response.debug_export.steps[0].attempts[0], FlowRunDebugAttempt)
     assert response.debug_export.steps[0].attempts[0].response_model == "gpt-4.1-mini"
     assert response.debug_export.steps[0].rag is not None

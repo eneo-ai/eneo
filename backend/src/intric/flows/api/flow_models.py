@@ -21,6 +21,7 @@ from intric.flows.enums import (
     FlowTemplateAssetStatus,
 )
 from intric.flows.flow_run_evidence_export_manifest import EvidenceExportManifest
+from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.main.exceptions import BadRequestException
 from intric.main.models import NOT_PROVIDED, NotProvided, partial_model
 
@@ -501,7 +502,7 @@ class FlowInputPolicyPublic(BaseModel):
     )
 
     flow_id: UUID
-    # Keep enum docs for known values, but allow passthrough strings for forward/legacy compatibility.
+    # Keep enum docs for known values while accepting policy strings added server-side.
     input_type: FlowInputType | str | None = None
     input_source: FlowInputSource | str | None = None
     accepts_file_upload: bool
@@ -1028,6 +1029,26 @@ FLOW_RUN_DEBUG_EXPORT_EXAMPLE: dict[str, Any] = {
 }
 
 
+FLOW_RUN_RESULT_FILE_EXAMPLE: dict[str, Any] = {
+    "flow_run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+    "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+    "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
+    "step_result_id": "00000000-0000-0000-0000-000000000401",
+    "step_id": "00000000-0000-0000-0000-000000000101",
+    "step_order": 1,
+    "attempt_no": 1,
+    "file_id": "00000000-0000-0000-0000-000000000501",
+    "ordinal": 0,
+    "source": "declared_artifact",
+    "name": "case-summary.pdf",
+    "checksum": "artifact-checksum",
+    "size": 14012,
+    "mimetype": "application/pdf",
+    "file_type": "document",
+    "availability": "available",
+}
+
+
 class FlowStepAttemptPublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -1064,6 +1085,7 @@ class FlowRunEvidenceResponse(BaseModel):
                 "definition_snapshot": {"steps": []},
                 "step_results": [FLOW_RUN_STEP_PUBLIC_EXAMPLE],
                 "step_attempts": [],
+                "result_files": [FLOW_RUN_RESULT_FILE_EXAMPLE],
                 "debug_export": FLOW_RUN_DEBUG_EXPORT_EXAMPLE,
             }
         }
@@ -1073,6 +1095,7 @@ class FlowRunEvidenceResponse(BaseModel):
     definition_snapshot: dict[str, Any]
     step_results: list[FlowRunStepPublic]
     step_attempts: list[FlowStepAttemptPublic]
+    result_files: list[FlowRunStepResultFile]
     debug_export: FlowRunDebugExport
 
 
@@ -1115,12 +1138,13 @@ class FlowRunEvidenceExportResponse(BaseModel):
                         ),
                     },
                     "artifact_availability_summary": {
-                        "tracking_state": "payload_derived",
-                        "payload_artifact_count": 1,
-                        "note": (
-                            "Canonical file availability is not yet exposed; counts "
-                            "currently come from payload-derived artifact references."
-                        ),
+                        "tracking_state": "tracked",
+                        "artifact_count": 1,
+                        "available_count": 1,
+                        "content_purged_count": 0,
+                        "total_size_bytes": 14012,
+                        "artifacts": [FLOW_RUN_RESULT_FILE_EXAMPLE],
+                        "note": "Artifact availability is derived from result-file rows joined to file metadata.",
                     },
                 },
                 "summary": {
@@ -1130,16 +1154,26 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "completed_steps": 1,
                     "failed_steps": 0,
                     "attempts_count": 1,
-                    "artifacts_count": 0,
+                    "artifacts_count": 1,
                     "artifact_names": ["case-summary.pdf"],
                     "artifact_details": [
                         {
-                            "file_id": "artifact-1",
+                            "flow_run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+                            "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+                            "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
+                            "file_id": "00000000-0000-0000-0000-000000000501",
+                            "step_id": "00000000-0000-0000-0000-000000000101",
+                            "step_result_id": "00000000-0000-0000-0000-000000000401",
+                            "step_order": 1,
+                            "attempt_no": 1,
+                            "ordinal": 0,
+                            "source": "declared_artifact",
                             "name": "case-summary.pdf",
                             "mimetype": "application/pdf",
                             "size": 14012,
                             "checksum": "artifact-checksum",
                             "file_type": "document",
+                            "availability": "available",
                         }
                     ],
                     "duration_ms": 5240,
@@ -1192,6 +1226,26 @@ class FlowRunEvidenceExportResponse(BaseModel):
                         "structured_present": False,
                         "artifact_count": 1,
                         "artifact_names": ["case-summary.pdf"],
+                        "artifact_details": [
+                            {
+                                "flow_run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+                                "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+                                "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
+                                "file_id": "00000000-0000-0000-0000-000000000501",
+                                "step_id": "00000000-0000-0000-0000-000000000101",
+                                "step_result_id": "00000000-0000-0000-0000-000000000401",
+                                "step_order": 1,
+                                "attempt_no": 1,
+                                "ordinal": 0,
+                                "source": "declared_artifact",
+                                "name": "case-summary.pdf",
+                                "mimetype": "application/pdf",
+                                "size": 14012,
+                                "checksum": "artifact-checksum",
+                                "file_type": "document",
+                                "availability": "available",
+                            }
+                        ],
                     },
                     "step_overview": [
                         {
@@ -1259,12 +1313,22 @@ class FlowRunEvidenceExportResponse(BaseModel):
                             "artifact_names": ["case-summary.pdf"],
                             "artifact_details": [
                                 {
-                                    "file_id": "artifact-1",
+                                    "flow_run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+                                    "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+                                    "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
+                                    "file_id": "00000000-0000-0000-0000-000000000501",
+                                    "step_id": "00000000-0000-0000-0000-000000000101",
+                                    "step_result_id": "00000000-0000-0000-0000-000000000401",
+                                    "step_order": 1,
+                                    "attempt_no": 1,
+                                    "ordinal": 0,
+                                    "source": "declared_artifact",
                                     "name": "case-summary.pdf",
                                     "mimetype": "application/pdf",
                                     "size": 14012,
                                     "checksum": "artifact-checksum",
                                     "file_type": "document",
+                                    "availability": "available",
                                 }
                             ],
                             "result_output_kind": "mixed",
@@ -1331,6 +1395,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "definition_snapshot": {"steps": []},
                     "step_results": [FLOW_RUN_STEP_PUBLIC_EXAMPLE],
                     "step_attempts": [],
+                    "result_files": [FLOW_RUN_RESULT_FILE_EXAMPLE],
                     "debug_export": FLOW_RUN_DEBUG_EXPORT_EXAMPLE,
                 },
             }

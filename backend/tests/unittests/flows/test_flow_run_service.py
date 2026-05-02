@@ -14,6 +14,7 @@ from intric.authentication.auth_models import (
     ResourcePermissionLevel,
     ResourcePermissions,
 )
+from intric.files.file_models import FileType
 from intric.flows.application.flow_run_service import FlowRunService
 from intric.flows.enums import (
     FlowRunTerminalSource,
@@ -29,10 +30,12 @@ from intric.flows.flow import (
     FlowStepResult,
     FlowVersion,
 )
+from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 from intric.main.exceptions import (
     BadRequestException,
     NotFoundException,
+    ResourceGoneException,
     UnauthorizedException,
 )
 from intric.roles.permissions import Permission
@@ -3197,46 +3200,61 @@ async def test_list_step_results_filters_by_run_and_flow(user):
 
 
 # ---------------------------------------------------------------------------
-# get_run_artifact_file tests
-# ---------------------------------------------------------------------------
-
-
-def _step_result_with_artifacts(
+def _result_file(
+    *,
+    user,
     run,
-    artifacts=None,
-    generated_file_ids=None,
-):
-    payload = {}
-    if artifacts is not None:
-        payload["artifacts"] = artifacts
-    if generated_file_ids is not None:
-        payload["generated_file_ids"] = generated_file_ids
-    return SimpleNamespace(
-        id=uuid4(),
+    file_id,
+    availability="available",
+) -> FlowRunStepResultFile:
+    step_id = uuid4()
+    return FlowRunStepResultFile(
         flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=user.tenant_id,
+        step_result_id=uuid4(),
+        step_id=step_id,
         step_order=1,
-        output_payload_json=payload,
+        attempt_no=1,
+        file_id=file_id,
+        ordinal=0,
+        source="declared_artifact",
+        name="artifact.docx",
+        checksum="artifact-checksum",
+        size=1024,
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        file_type=FileType.DOCUMENT,
+        availability=availability,
     )
 
 
-def _file(file_id, tenant_id, name="artifact.docx"):
+def _file(
+    file_id,
+    tenant_id,
+    name="artifact.docx",
+    *,
+    text="artifact text",
+    blob=None,
+):
     return SimpleNamespace(
         id=file_id,
         tenant_id=tenant_id,
         name=name,
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         size=1024,
+        text=text,
+        blob=blob,
     )
 
 
-def _artifact_service(user, file_repo=None, step_results=None, run=None):
+def _artifact_service(user, file_repo=None, result_file=None, run=None):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     if run is None:
         run = _run(user=user, flow_id=uuid4())
     flow_run_repo.get.return_value = run
-    flow_run_repo.list_step_results.return_value = step_results or []
+    flow_run_repo.get_result_file.return_value = result_file
     return FlowRunService(
         user=user,
         flow_repo=flow_repo,
@@ -3247,24 +3265,16 @@ def _artifact_service(user, file_repo=None, step_results=None, run=None):
 
 
 @pytest.mark.asyncio
-async def test_get_run_artifact_file_happy_path(user):
-    """File found in step artifacts is returned."""
+async def test_get_run_artifact_file_uses_result_file_row(user):
     file_id = uuid4()
     run = _run(user=user, flow_id=uuid4())
     file_repo = AsyncMock()
     file_obj = _file(file_id=file_id, tenant_id=user.tenant_id)
     file_repo.get_by_id.return_value = file_obj
-
-    step_results = [
-        _step_result_with_artifacts(
-            run,
-            artifacts=[{"file_id": str(file_id), "name": "out.docx"}],
-        )
-    ]
     service, run = _artifact_service(
         user,
         file_repo=file_repo,
-        step_results=step_results,
+        result_file=_result_file(user=user, run=run, file_id=file_id),
         run=run,
     )
 
@@ -3274,56 +3284,54 @@ async def test_get_run_artifact_file_happy_path(user):
         file_id=file_id,
     )
     assert result.id == file_id
+    service.flow_run_repo.get_result_file.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        file_id=file_id,
+    )
     file_repo.get_by_id.assert_awaited_once_with(file_id=file_id)
 
 
 @pytest.mark.asyncio
-async def test_get_run_artifact_file_from_generated_file_ids(user):
-    """File found in generated_file_ids (not artifacts) is returned."""
+async def test_get_run_artifact_file_ignores_payload_artifacts_without_result_file_row(
+    user,
+):
     file_id = uuid4()
     run = _run(user=user, flow_id=uuid4())
     file_repo = AsyncMock()
-    file_repo.get_by_id.return_value = _file(file_id=file_id, tenant_id=user.tenant_id)
-
-    step_results = [
-        _step_result_with_artifacts(
-            run,
-            generated_file_ids=[str(file_id)],
-        )
-    ]
     service, run = _artifact_service(
         user,
         file_repo=file_repo,
-        step_results=step_results,
         run=run,
     )
+    service.flow_run_repo.list_step_results.return_value = [
+        SimpleNamespace(
+            id=uuid4(),
+            flow_run_id=run.id,
+            step_order=1,
+            output_payload_json={"artifacts": [{"file_id": str(file_id)}]},
+        )
+    ]
 
-    result = await service.get_run_artifact_file(
-        run_id=run.id,
-        flow_id=run.flow_id,
-        file_id=file_id,
-    )
-    assert result.id == file_id
+    with pytest.raises(NotFoundException) as exc_info:
+        await service.get_run_artifact_file(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            file_id=file_id,
+        )
+    assert exc_info.value.code == "flow_run_artifact_not_found"
+    service.flow_run_repo.list_step_results.assert_not_awaited()
+    file_repo.get_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_get_run_artifact_file_rejects_unknown_file_id(user):
-    """NotFoundException when file_id is not in any step result."""
     file_id = uuid4()
-    other_file_id = uuid4()
     run = _run(user=user, flow_id=uuid4())
     file_repo = AsyncMock()
-
-    step_results = [
-        _step_result_with_artifacts(
-            run,
-            artifacts=[{"file_id": str(other_file_id)}],
-        )
-    ]
     service, run = _artifact_service(
         user,
         file_repo=file_repo,
-        step_results=step_results,
         run=run,
     )
 
@@ -3338,26 +3346,72 @@ async def test_get_run_artifact_file_rejects_unknown_file_id(user):
 
 
 @pytest.mark.asyncio
-async def test_get_run_artifact_file_rejects_cross_tenant(user):
-    """UnauthorizedException when file belongs to a different tenant."""
+async def test_get_run_artifact_file_rejects_content_purged_row(user):
+    file_id = uuid4()
+    run = _run(user=user, flow_id=uuid4())
+    file_repo = AsyncMock()
+    service, run = _artifact_service(
+        user,
+        file_repo=file_repo,
+        result_file=_result_file(
+            user=user,
+            run=run,
+            file_id=file_id,
+            availability="content_purged",
+        ),
+        run=run,
+    )
+
+    with pytest.raises(ResourceGoneException) as exc_info:
+        await service.get_run_artifact_file(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            file_id=file_id,
+        )
+    assert exc_info.value.code == "flow_run_artifact_content_unavailable"
+    file_repo.get_by_id.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_run_artifact_file_rechecks_file_content_before_signing(user):
     file_id = uuid4()
     run = _run(user=user, flow_id=uuid4())
     file_repo = AsyncMock()
     file_repo.get_by_id.return_value = _file(
         file_id=file_id,
-        tenant_id=uuid4(),  # different tenant
+        tenant_id=user.tenant_id,
+        text=None,
+        blob=None,
     )
-
-    step_results = [
-        _step_result_with_artifacts(
-            run,
-            artifacts=[{"file_id": str(file_id)}],
-        )
-    ]
     service, run = _artifact_service(
         user,
         file_repo=file_repo,
-        step_results=step_results,
+        result_file=_result_file(user=user, run=run, file_id=file_id),
+        run=run,
+    )
+
+    with pytest.raises(ResourceGoneException) as exc_info:
+        await service.get_run_artifact_file(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            file_id=file_id,
+        )
+    assert exc_info.value.code == "flow_run_artifact_content_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_get_run_artifact_file_rejects_cross_tenant(user):
+    file_id = uuid4()
+    run = _run(user=user, flow_id=uuid4())
+    file_repo = AsyncMock()
+    file_repo.get_by_id.return_value = _file(
+        file_id=file_id,
+        tenant_id=uuid4(),
+    )
+    service, run = _artifact_service(
+        user,
+        file_repo=file_repo,
+        result_file=_result_file(user=user, run=run, file_id=file_id),
         run=run,
     )
 
@@ -3371,8 +3425,7 @@ async def test_get_run_artifact_file_rejects_cross_tenant(user):
 
 
 @pytest.mark.asyncio
-async def test_get_run_artifact_file_empty_step_results(user):
-    """NotFoundException when run has no step results at all."""
+async def test_get_run_artifact_file_missing_result_file_row(user):
     file_id = uuid4()
     run = _run(user=user, flow_id=uuid4())
     file_repo = AsyncMock()
@@ -3380,7 +3433,6 @@ async def test_get_run_artifact_file_empty_step_results(user):
     service, run = _artifact_service(
         user,
         file_repo=file_repo,
-        step_results=[],
         run=run,
     )
 
@@ -3395,7 +3447,6 @@ async def test_get_run_artifact_file_empty_step_results(user):
 
 @pytest.mark.asyncio
 async def test_get_run_artifact_file_no_file_repo(user):
-    """BadRequestException when file_repo is None (e.g. celery worker context)."""
     service, run = _artifact_service(user, file_repo=None)
 
     with pytest.raises(BadRequestException) as exc_info:
@@ -3405,71 +3456,3 @@ async def test_get_run_artifact_file_no_file_repo(user):
             file_id=uuid4(),
         )
     assert exc_info.value.code == "file_repo_unavailable"
-
-
-@pytest.mark.asyncio
-async def test_get_run_artifact_file_collects_from_multiple_steps(user):
-    """Artifacts scattered across multiple step results are all collected."""
-    file_id_a = uuid4()
-    file_id_b = uuid4()
-    run = _run(user=user, flow_id=uuid4())
-    file_repo = AsyncMock()
-    file_repo.get_by_id.return_value = _file(
-        file_id=file_id_b, tenant_id=user.tenant_id
-    )
-
-    step_results = [
-        _step_result_with_artifacts(run, artifacts=[{"file_id": str(file_id_a)}]),
-        _step_result_with_artifacts(run, generated_file_ids=[str(file_id_b)]),
-    ]
-    service, run = _artifact_service(
-        user,
-        file_repo=file_repo,
-        step_results=step_results,
-        run=run,
-    )
-
-    # file_id_b from second step's generated_file_ids should be found
-    result = await service.get_run_artifact_file(
-        run_id=run.id,
-        flow_id=run.flow_id,
-        file_id=file_id_b,
-    )
-    assert result.id == file_id_b
-
-
-@pytest.mark.asyncio
-async def test_get_run_artifact_file_ignores_malformed_payloads(user):
-    """Steps with non-dict output_payload_json or missing artifacts are skipped."""
-    file_id = uuid4()
-    run = _run(user=user, flow_id=uuid4())
-    file_repo = AsyncMock()
-
-    step_results = [
-        SimpleNamespace(
-            id=uuid4(), flow_run_id=run.id, step_order=1, output_payload_json=None
-        ),
-        SimpleNamespace(
-            id=uuid4(),
-            flow_run_id=run.id,
-            step_order=2,
-            output_payload_json="not a dict",
-        ),
-        SimpleNamespace(
-            id=uuid4(), flow_run_id=run.id, step_order=3, output_payload_json={}
-        ),
-    ]
-    service, run = _artifact_service(
-        user,
-        file_repo=file_repo,
-        step_results=step_results,
-        run=run,
-    )
-
-    with pytest.raises(NotFoundException) as exc_info:
-        await service.get_run_artifact_file(
-            run_id=run.id,
-            flow_id=run.flow_id,
-            file_id=file_id,
-        )
-    assert exc_info.value.code == "flow_run_artifact_not_found"

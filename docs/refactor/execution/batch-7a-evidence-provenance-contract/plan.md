@@ -2,9 +2,104 @@
 
 ## Active Next Plan
 
-The active implementation slice is **7A.5 — Retention tombstones and deletion semantics**.
+The active implementation slice is **7A.6 — Artifact/file evidence ownership**.
 
-Official Batch 8 step rerun does not start until this inserted evidence/provenance foundation reaches a stable checkpoint. 7A.1 is committed at `5563bb71`, 7A.2 is committed at `d3228d83`, 7A.3 is committed at `1cd68a2d`, and 7A.4 is committed at `78506836`. 7A.5 now makes destructive retention visible in the existing evidence owners without adding a broad evidence ledger or starting a migration.
+Official Batch 8 step rerun does not start until this inserted evidence/provenance foundation reaches a stable checkpoint. 7A.1 is committed at `5563bb71`, 7A.2 is committed at `d3228d83`, 7A.3 is committed at `1cd68a2d`, 7A.4 is committed at `78506836`, and 7A.5 is committed at `1c5bc7c2`. 7A.6 makes `FlowRunStepResultFiles` plus `Files` the canonical artifact evidence owner for export, signed artifact access, and retention cleanup.
+
+## Scope For 7A.6
+
+### Goals
+
+- `FlowRunStepResultFiles` joined to `Files` is the only reader for artifact evidence availability, file metadata, and signed artifact eligibility.
+- Evidence bundles include `result_files` in the hashed bundle payload so the export proves which artifact files were associated with the run.
+- The evidence export manifest reports typed row-backed artifact availability: artifact count, available count, content-purged count, total size, and per-artifact checksum/size/mimetype/file-type/availability.
+- Artifact signed URL generation distinguishes a missing artifact row from a known artifact whose content has been purged:
+  - missing row: `404` with `flow_run_artifact_not_found`
+  - known row with purged content: `410` with `flow_run_artifact_content_unavailable`
+- Retention cleanup and display-cache pruning use result-file rows for the file-id set. JSON artifact keys are no longer evidence owners.
+- Frontend display payload keys (`output_payload_json.artifacts` and `output_payload_json.generated_file_ids`) remain only because current frontend components still read them at `frontend/apps/web/src/lib/features/flows/components/FlowRunsTable.svelte:504` and `frontend/apps/web/src/lib/features/flows/components/FlowRunEvidenceStepCard.svelte:172`. 7A.7 deletion condition: once those components read `result_files`, runtime output stops writing those keys and the display-cache pruning code is deleted.
+
+### Non-Goals
+
+- No Batch 8 step rerun lineage behavior.
+- No frontend view-model rewrite in this slice; 7A.7 owns generated/frontend evidence alignment after the backend schema change lands.
+- No broad artifact service or new interface. `FlowRunRepository` owns run-artifact row association; `FileRepository` continues to own file content retrieval.
+- No compatibility path for JSON-only Flow artifact evidence. Flow/Flow AI Builder is unreleased, so rows are required.
+- No package rename or `intric.*` namespace migration.
+
+### Canonical Ownership Map
+
+| Concept | Current location | Problem | Canonical owner for 7A.6 | Delete/merge path |
+|---|---|---|---|---|
+| Artifact row association | `backend/src/intric/flows/infrastructure/flow_repo.py:578-648` writes `FlowRunStepResultFiles`; readers still scan JSON. | Write owner exists but readers use a parallel source. | `FlowRunStepResultFiles` via `FlowRunRepository` typed projection. | Export/download/retention readers move to rows; JSON scanner helpers are deleted. |
+| Artifact file metadata | `backend/src/intric/database/tables/files_table.py:14-22` | Export currently trusts payload metadata instead of file rows. | `Files` joined from result-file rows. | Manifest and summaries derive checksum/size/mimetype/file type from `Files`. |
+| Signed artifact eligibility | `backend/src/intric/flows/application/flow_run_service.py:762-786` scans `output_payload_json`. | Payload JSON can drift from rows and cannot represent purged content cleanly. | `FlowRunRepository.get_result_file()` plus `FileRepository.get_by_id()`. | No JSON fallback; row-missing and content-purged states are distinct. |
+| Artifact retention file set | `backend/src/intric/data_retention/infrastructure/data_retention_service.py:560-727` scans/prunes JSON references. | Retention currently depends on the display payload it is supposed to prune. | `FlowRunStepResultFiles` joined to `Files`. | `_extract_generated_file_ids()` is deleted; `_prune_generated_artifact_payload()` remains only until 7A.7 removes display payload keys. |
+| Evidence artifact summary | `backend/src/intric/flows/flow_run_export_json.py:281-293`, `backend/src/intric/flows/flow_run_export_json.py:636-720` | Summary and manifest are payload-derived and under-report purged rows. | `bundle.result_files`, built from canonical rows. | Payload-derived artifact functions and `payload_derived` manifest state are deleted. |
+
+### Row Semantics
+
+1. `FlowRunStepResultFiles.ordinal` is set at write time and is canonical. `list_result_files()` orders by `step_order`, `attempt_no`, then `ordinal`.
+2. The current writer makes ordinal deterministic from sorted UUID order. 7A.6 does not change writer order; if the UI later needs authoring order, that belongs with the 7A.7 display rewrite.
+3. If a file id appears in both `generated_file_ids` and `artifacts`, the canonical source is `declared_artifact`; this preserves the current consumer-facing source decision.
+4. Summary-level `artifacts_count` deduplicates by `file_id` across all attempts.
+5. Step overview artifact details use the latest attempt per step (`max(attempt_no)`), so a retried step does not double-display stale attempt artifacts.
+6. Final-output artifact details use the latest attempt from the terminal step represented in `result_files`. If no result-file row exists for that step, final output reports no artifacts even if display payload keys remain.
+7. Availability is `available` only when `Files.blob` or `Files.text` is present. `Files.transcription` is not downloadable artifact content.
+8. `bundle.result_files` is part of the content hash input. Manifest summaries are typed derived metadata, not part of the hash input except through their source rows in the bundle.
+
+### Expected Source/Test Changes For 7A.6
+
+- Add a narrow `FlowRunStepResultFile` projection model with result-file row fields, file metadata, and `availability`.
+- Add `FlowRunRepository.list_result_files()` and `FlowRunRepository.get_result_file()` row-backed queries.
+- Add a `ResourceGoneException`/410 mapping if no existing domain exception supports Gone without raising FastAPI `HTTPException` from application code.
+- Move `FlowRunService.get_run_artifact_file()` to the row-backed lookup. Re-read file content through `FileRepository.get_by_id()` and verify content is still present before signing.
+- Add `result_files` to `EvidenceBundle`, `RedactedEvidenceBundle`, `FlowRunEvidenceResponse`, and export bundle payloads.
+- Replace artifact summary/detail builders in `flow_run_export_json.py` and `flow_run_evidence.py` with result-file-derived builders.
+- Replace `EvidenceArtifactAvailabilitySummary.tracking_state="payload_derived"` with typed `"tracked"` fields.
+- Move generated artifact retention cleanup to result-file rows. Delete `_extract_generated_file_ids()`.
+- Delete `_reconcile_missing_generated_artifact_references()` unless implementation proves a row-backed failure mode that retention itself does not already cover transactionally.
+- Update OpenAPI examples and contract tests for `result_files`, row-backed manifest fields, and 410 artifact errors.
+
+### Required Tests
+
+- Repository integration:
+  - `list_result_files()` returns all attempts ordered by `step_order`, `attempt_no`, `ordinal`.
+  - `get_result_file()` is tenant-scoped and returns no row across tenants.
+  - availability is `available` for blob/text content and `content_purged` when blob/text are both null.
+- Service/unit:
+  - JSON payload artifact references are ignored when no result-file row exists.
+  - row-backed artifacts return a signed-file candidate.
+  - content-purged rows raise `flow_run_artifact_content_unavailable`.
+  - file content cleared between result-row lookup and file fetch does not produce a signed URL.
+- Export/unit:
+  - manifest artifact availability fields are explicit typed fields, not `extra`.
+  - `bundle.result_files` is included in the hashed bundle payload.
+  - summaries, final output, and step overview use row-backed details and latest-attempt display rules.
+- Retention/integration:
+  - cleanup clears `Files` content and appends tombstones from result-file rows even when display payload artifact keys are absent.
+  - second cleanup is idempotent.
+  - if the row-backed reconciler is deleted, no test preserves it as a compatibility path.
+- Guards:
+  - `rg -n "payload-derived artifact references|payload_artifact_count|_extract_generated_file_ids|_collect_artifact_ids" backend/src backend/tests` should find no live source/test owner.
+  - staged diff contains no process comments, Claude/Codex references in source, deprecated Flow compatibility paths, or comments that restate code.
+
+### Claude Plan Review Reconciliation
+
+Claude iteration 1 returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`.
+
+Accepted before implementation:
+
+- Use 410 for known artifacts whose content was purged, with a distinct machine-readable code.
+- Pin availability as blob/text-only and re-validate file content after the row lookup before signing.
+- Delete the reconciler unless a real post-7A.6 failure mode exists.
+- Define JSON artifact keys as frontend display payload with an explicit 7A.7 deletion condition.
+- Pin row ordering, duplicate source precedence, latest-attempt display, and final-output derivation rules.
+- Declare all new manifest fields in typed models.
+- Keep `result_files` in the hashed bundle payload and document deterministic ordering.
+- Add inverse tests proving JSON payload artifact references are ignored.
+
+Proceed only after the same Claude session returns green light for the revised implementation or Codex documents any remaining disagreement with file:line evidence.
 
 ## Scope For 7A.5
 

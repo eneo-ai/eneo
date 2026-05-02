@@ -55,6 +55,7 @@ class ErrorCodes(int, Enum):
     MCP_UPSTREAM_AUTH_ERROR = 9037
     # Resource readiness
     RESOURCE_NOT_READY = 9038
+    RESOURCE_GONE = 9039
 
 
 class NotFoundException(Exception):
@@ -134,6 +135,19 @@ class AuthenticationException(Exception):
 
 
 class BadRequestException(Exception):
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        context: dict[str, object] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.context = context
+
+
+class ResourceGoneException(Exception):
     def __init__(
         self,
         message: str = "",
@@ -425,6 +439,7 @@ EXCEPTION_MAP = {
         ErrorCodes.USER_NOT_CREATED,
     ),
     BadRequestException: (400, None, ErrorCodes.BAD_REQUEST),
+    ResourceGoneException: (410, None, ErrorCodes.RESOURCE_GONE),
     QuotaExceededException: (403, None, ErrorCodes.QUOTA_EXCEEDED),
     UniqueException: (400, None, ErrorCodes.UNIQUE_ERROR),
     OpenAIException: (503, None, ErrorCodes.OPENAI_ERROR),

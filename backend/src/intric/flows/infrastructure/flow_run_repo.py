@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Sequence, TypedDict
+from typing import Any, Sequence, TypedDict, cast
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
@@ -12,14 +12,17 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.entity_types import EntityType
 from intric.authentication.principal_types import PrincipalType
+from intric.database.tables.files_table import Files
 from intric.database.tables.flow_tables import (
     FlowRunAuditOutbox,
     FlowRuns,
     FlowRunStepInputFiles,
+    FlowRunStepResultFiles,
     FlowStepAttempts,
     FlowStepResults,
 )
 from intric.database.tables.tenant_table import Tenants
+from intric.files.file_models import FileType
 from intric.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
@@ -35,6 +38,11 @@ from intric.flows.enums import (
     FlowRunTerminalSource,
 )
 from intric.flows.flow_factory import FlowFactory
+from intric.flows.flow_run_step_result_file import (
+    FlowRunStepResultFile,
+    FlowRunStepResultFileAvailability,
+    FlowRunStepResultFileSource,
+)
 from intric.flows.principal import FlowPrincipal
 from intric.main.exceptions import NotFoundException
 
@@ -349,9 +357,7 @@ class FlowRunRepository:
             return None
         return self.factory.from_flow_run_db(run_row)
 
-    async def count_active_step_results(
-        self, *, run_id: UUID, tenant_id: UUID
-    ) -> int:
+    async def count_active_step_results(self, *, run_id: UUID, tenant_id: UUID) -> int:
         count = await self.session.scalar(
             sa.select(sa.func.count())
             .select_from(FlowStepResults)
@@ -520,6 +526,55 @@ class FlowRunRepository:
         )
         return [self.factory.from_flow_step_attempt_db(row) for row in rows]
 
+    async def list_result_files(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+    ) -> list[FlowRunStepResultFile]:
+        stmt = (
+            sa.select(FlowRunStepResultFiles, Files)
+            .join(Files, Files.id == FlowRunStepResultFiles.file_id)
+            .where(FlowRunStepResultFiles.flow_run_id == run_id)
+            .where(FlowRunStepResultFiles.tenant_id == tenant_id)
+            .order_by(
+                FlowRunStepResultFiles.step_order.asc(),
+                FlowRunStepResultFiles.attempt_no.asc(),
+                FlowRunStepResultFiles.ordinal.asc(),
+            )
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [
+            _result_file_from_rows(result_file_row, file_row)
+            for result_file_row, file_row in rows
+        ]
+
+    async def get_result_file(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        file_id: UUID,
+    ) -> FlowRunStepResultFile | None:
+        stmt = (
+            sa.select(FlowRunStepResultFiles, Files)
+            .join(Files, Files.id == FlowRunStepResultFiles.file_id)
+            .where(FlowRunStepResultFiles.flow_run_id == run_id)
+            .where(FlowRunStepResultFiles.tenant_id == tenant_id)
+            .where(FlowRunStepResultFiles.file_id == file_id)
+            .order_by(
+                FlowRunStepResultFiles.step_order.asc(),
+                FlowRunStepResultFiles.attempt_no.asc(),
+                FlowRunStepResultFiles.ordinal.asc(),
+            )
+            .limit(1)
+        )
+        row = (await self.session.execute(stmt)).first()
+        if row is None:
+            return None
+        result_file_row, file_row = row
+        return _result_file_from_rows(result_file_row, file_row)
+
     async def mark_running_if_claimable(self, *, run_id: UUID, tenant_id: UUID) -> bool:
         result = await self.session.execute(
             sa.update(FlowRuns)
@@ -678,3 +733,33 @@ class FlowRunRepository:
         if row is None:
             return None
         return self.factory.from_flow_step_attempt_db(row)
+
+
+def _result_file_from_rows(
+    result_file_row: FlowRunStepResultFiles,
+    file_row: Files,
+) -> FlowRunStepResultFile:
+    return FlowRunStepResultFile(
+        flow_run_id=result_file_row.flow_run_id,
+        flow_id=result_file_row.flow_id,
+        tenant_id=result_file_row.tenant_id,
+        step_result_id=result_file_row.step_result_id,
+        step_id=result_file_row.step_id,
+        step_order=result_file_row.step_order,
+        attempt_no=result_file_row.attempt_no,
+        file_id=result_file_row.file_id,
+        ordinal=result_file_row.ordinal,
+        source=cast(FlowRunStepResultFileSource, result_file_row.source),
+        name=file_row.name,
+        checksum=file_row.checksum,
+        size=file_row.size,
+        mimetype=file_row.mimetype,
+        file_type=FileType(file_row.file_type),
+        availability=_file_availability(file_row),
+    )
+
+
+def _file_availability(file_row: Files) -> FlowRunStepResultFileAvailability:
+    if file_row.blob is not None or file_row.text is not None:
+        return "available"
+    return "content_purged"

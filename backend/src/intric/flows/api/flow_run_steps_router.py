@@ -21,8 +21,8 @@ from intric.flows.api.flow_models import FlowRunStepPublic, GraphResponse
 from intric.flows.application.flow_run_service import FlowRunService
 from intric.flows.application.flow_service import FlowService
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
-from intric.flows.published_definition import parse_published_definition
 from intric.flows.principal import FlowPrincipal
+from intric.flows.published_definition import parse_published_definition
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes, NotFoundException
 from intric.server.dependencies.container import get_container
@@ -249,7 +249,13 @@ async def get_flow_graph(
             description="Flow, run, or artifact not found.",
             message="Artifact not found for this run.",
             intric_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
+            code="flow_run_artifact_not_found",
+        ),
+        410: error_response(
+            description="Artifact content was purged by retention policy.",
+            message="Artifact content has been purged by retention policy.",
+            intric_error_code=ErrorCodes.RESOURCE_GONE,
+            code="flow_run_artifact_content_unavailable",
         ),
     },
 )
