@@ -264,29 +264,83 @@ IN_PROGRESS
   - Parser-clean green verification, artifact `.codex/artifacts/claude-peer-loop-batch-8-runtime-rerun-attempt-lineage-verification-exact-20260502T135952Z.md`
 - Reconciliation:
   - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-13.md`
-- Outcome: runtime attempt-lineage implementation green; commit pending
+- Outcome: runtime attempt-lineage implementation green and committed as `3ca48f8b flows: execute rerun attempts with lineage`
+
+### Slice 8.9 — Evidence Rerun Lineage
+
+- Plan: `docs/refactor/execution/batch-8-step-rerun/plan.md`
+- Scope:
+  - `backend/src/intric/flows/ai_builder/ai_builder_domain_models.py`
+  - `backend/src/intric/flows/infrastructure/flow_run_repo.py`
+  - `backend/src/intric/flows/application/flow_run_service.py`
+  - `backend/src/intric/flows/flow_run_evidence.py`
+  - `backend/src/intric/flows/flow_run_evidence_bundle.py`
+  - `backend/src/intric/flows/flow_run_export_json.py`
+  - `backend/src/intric/flows/flow_run_evidence_export_manifest.py`
+  - `backend/src/intric/flows/api/flow_models.py`
+  - `backend/tests/integration/flows/test_flow_evidence_api_contracts.py`
+  - `backend/tests/integration/flows/test_flow_run_rerun_repository.py`
+  - `backend/tests/unit/test_flow_openapi_contract.py`
+  - `backend/tests/unittests/flows/test_flow_models.py`
+  - `backend/tests/unittests/flows/test_flow_router.py`
+  - `backend/tests/unittests/flows/test_flow_run_evidence.py`
+  - `backend/tests/unittests/flows/test_flow_run_service.py`
+  - `frontend/packages/intric-js/src/types/schema.d.ts`
+  - `frontend/packages/intric-js/src/types/resources.d.ts`
+  - `frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts`
+- Implementation notes:
+  - Evidence bundles now include typed `rerun_operations` and `rerun_invalidated_steps` arrays beside step results, attempts, and result files.
+  - The evidence endpoint exposes field-by-field public rerun models, including request fingerprint and invalidation dependency source enums, because support/audit consumers need to trace which accepted request invalidated which step without reading database rows.
+  - Export schema moved to `flow-evidence-export.v4`; the hashed bundle now includes rerun rows and a derived rerun lineage summary.
+  - `debug_export.generated_at` now reflects the latest persisted evidence timestamp, including rerun operation and invalidated-step rows, so repeated exports of unchanged evidence keep a stable content hash. The manifest remains the wall-clock export record.
+  - `FlowRunRerunOperationPublic.request_fingerprint` carries the support/audit correlation rationale in the OpenAPI field description, and generated `intric-js` types surface that description.
+  - Generated `intric-js` types were refreshed from the backend OpenAPI after the public schema changes and type-smoke fixtures pin v4 rerun evidence.
+  - A generated-schema diff introduced old wording in `ai_builder_domain_models.py`; the touched docstring was cleaned to use neutral "older duplicated spec copies" wording.
+- Local validation:
+  - `bun run check` in `frontend/packages/intric-js` — passed
+  - `git diff --check` — passed
+  - diff-only forbidden flow wording grep over the intended slice — passed, no matches
+  - `rg -n "flow-evidence-export\\.v3" backend/src/intric/flows backend/tests frontend/packages/intric-js/src/types docs/refactor/execution/batch-8-step-rerun` — only the plan line documenting the intentional v3 to v4 schema bump matched
+- Docker validation:
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/ruff format src/intric/flows/flow_run_evidence.py src/intric/flows/flow_run_evidence_bundle.py tests/unittests/flows/test_flow_run_evidence.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/unit/test_flow_openapi_contract.py` — passed, 1 file reformatted before final checks
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/integration/flows/test_flow_evidence_api_contracts.py -k 'rerun or evidence_export_returns_redacted_json_attachment' tests/integration/flows/test_flow_run_rerun_repository.py -k 'evidence or list_rerun' tests/unit/test_flow_openapi_contract.py -k 'evidence or export_schema' tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_run_evidence.py::test_build_debug_export_uses_latest_evidence_timestamp -q` — passed, 15 tests, 56 deselected
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/ruff check src/intric/flows/ai_builder/ai_builder_domain_models.py src/intric/flows/api/flow_models.py src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_evidence.py src/intric/flows/flow_run_evidence_bundle.py src/intric/flows/flow_run_evidence_export_manifest.py src/intric/flows/flow_run_export_json.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/integration/flows/test_flow_run_rerun_repository.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_run_evidence.py tests/unittests/flows/test_flow_run_service.py` — passed
+  - `bash backend/scripts/run_pyright_in_devcontainer.sh` — passed, 0 errors
+- Claude review:
+  - Plan pass 1 returned `GREEN_LIGHT: no`, min score 6; valid changes incorporated into the slice plan, artifact `.codex/artifacts/claude-peer-loop-batch-8-evidence-rerun-lineage-plan-20260502T141717Z.md`
+  - Implementation pass returned `GREEN_LIGHT: no`, min score 8; valid changes incorporated into code/tests/docs, artifact `.codex/artifacts/claude-peer-loop-batch-8-slice-8-9-evidence-rerun-lineage-implementation-20260502T145607Z.md`
+  - Final verification returned green content but the parser rejected Markdown-bold headers, artifact `.codex/artifacts/claude-peer-loop-claude-peer-loop-20260502T150946Z.md`
+  - Parser-clean final verification returned `GREEN_LIGHT: yes`, min score 9, artifact `.codex/artifacts/claude-peer-loop-claude-peer-loop-20260502T151334Z.md`
+- Reconciliation: `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-14.md`
+- Outcome: evidence rerun-lineage implementation green and ready to commit
 
 ## Repository Gate
 
 - Branch: `feature/refactor-flows-flowai`
-- HEAD: `72fe29d1 flows: expose step rerun API`
+- HEAD: `3ca48f8b flows: execute rerun attempts with lineage`
 - Staged files: none
 - Pending Batch 8 files:
-  - `backend/alembic/versions/20260502_rerun_runtime_lineage.py`
-  - `backend/src/intric/database/tables/flow_tables.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_domain_models.py`
   - `backend/src/intric/flows/api/flow_models.py`
-  - `backend/src/intric/flows/application/flow_run_terminalization.py`
-  - `backend/src/intric/flows/infrastructure/flow_repo.py`
+  - `backend/src/intric/flows/application/flow_run_service.py`
+  - `backend/src/intric/flows/flow_run_evidence.py`
   - `backend/src/intric/flows/infrastructure/flow_run_repo.py`
-  - `backend/src/intric/flows/runtime/executor.py`
+  - `backend/src/intric/flows/flow_run_evidence_bundle.py`
+  - `backend/src/intric/flows/flow_run_export_json.py`
+  - `backend/src/intric/flows/flow_run_evidence_export_manifest.py`
+  - `backend/tests/integration/flows/test_flow_evidence_api_contracts.py`
   - `backend/tests/integration/flows/test_flow_run_rerun_repository.py`
-  - `backend/tests/integration/flows/test_flow_runtime_worker_contract.py`
-  - `backend/tests/unittests/flows/test_flow_executor_runtime.py`
+  - `backend/tests/unit/test_flow_openapi_contract.py`
   - `backend/tests/unittests/flows/test_flow_models.py`
-  - `backend/tests/unittests/flows/test_flow_rerun_data_model.py`
+  - `backend/tests/unittests/flows/test_flow_router.py`
+  - `backend/tests/unittests/flows/test_flow_run_evidence.py`
+  - `backend/tests/unittests/flows/test_flow_run_service.py`
+  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-14.md`
   - `docs/refactor/execution/batch-8-step-rerun/journal.md`
   - `docs/refactor/execution/batch-8-step-rerun/plan.md`
-  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-13.md`
+  - `frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts`
+  - `frontend/packages/intric-js/src/types/resources.d.ts`
+  - `frontend/packages/intric-js/src/types/schema.d.ts`
 - Known do-not-stage local files:
   - `frontend/packages/ui/src/icons/types.d.ts`
   - `scripts/run_codex_review.sh`

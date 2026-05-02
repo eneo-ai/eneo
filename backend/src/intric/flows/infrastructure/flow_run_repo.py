@@ -870,6 +870,55 @@ class FlowRunRepository:
         )
         return [self.factory.from_flow_step_attempt_db(row) for row in rows]
 
+    async def list_rerun_operations_for_run(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+    ) -> list[FlowRunRerunOperation]:
+        rows = (
+            (
+                await self.session.execute(
+                    sa.select(FlowRunRerunOperations)
+                    .where(FlowRunRerunOperations.flow_run_id == run_id)
+                    .where(FlowRunRerunOperations.tenant_id == tenant_id)
+                    .order_by(
+                        FlowRunRerunOperations.created_at.asc(),
+                        FlowRunRerunOperations.id.asc(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [self.factory.from_flow_run_rerun_operation_db(row) for row in rows]
+
+    async def list_rerun_invalidated_steps_for_run(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+    ) -> list[FlowRunRerunInvalidatedStep]:
+        rows = (
+            (
+                await self.session.execute(
+                    sa.select(FlowRunRerunInvalidatedSteps)
+                    .where(FlowRunRerunInvalidatedSteps.flow_run_id == run_id)
+                    .where(FlowRunRerunInvalidatedSteps.tenant_id == tenant_id)
+                    .order_by(
+                        FlowRunRerunInvalidatedSteps.operation_id.asc(),
+                        FlowRunRerunInvalidatedSteps.invalidation_order.asc(),
+                        FlowRunRerunInvalidatedSteps.id.asc(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [
+            self.factory.from_flow_run_rerun_invalidated_step_db(row) for row in rows
+        ]
+
     async def list_result_files(
         self,
         *,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi.routing import APIRoute
 
+from intric.flows.enums import RerunDependencyKind
 from intric.server.main import get_application
 
 
@@ -109,6 +110,9 @@ REQUIRED_SCHEMAS = {
     "FlowRunContractPublic",
     "FlowRunStepRerunRequest",
     "FlowRunStepRerunResponse",
+    "FlowRunRerunOperationPublic",
+    "FlowRunRerunInvalidatedStepPublic",
+    "FlowRunEvidenceResponse",
     "FlowRuntimeInputContractPublic",
     "FlowRunStepPublic",
     "FlowInputLimitsPublic",
@@ -440,6 +444,74 @@ def test_openapi_flow_public_run_and_step_expose_result_files(
         "properties", {}
     )
     assert "result_files" in evidence_properties
+
+
+def test_openapi_flow_run_evidence_response_exposes_rerun_lineage(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    evidence_schema = schemas.get("FlowRunEvidenceResponse", {})
+    evidence_properties = evidence_schema.get("properties", {})
+    step_result_properties = schemas.get("FlowRunStepPublic", {}).get("properties", {})
+
+    assert {"rerun_operations", "rerun_invalidated_steps"}.issubset(
+        evidence_schema.get("required", [])
+    )
+    assert "current_attempt_no" in step_result_properties
+    rerun_operations = _resolve_component_ref(
+        openapi_spec, evidence_properties.get("rerun_operations", {})
+    )
+    rerun_operation = _resolve_component_ref(
+        openapi_spec, rerun_operations.get("items", {})
+    )
+    assert rerun_operations.get("type") == "array"
+    assert rerun_operation.get("title") == "FlowRunRerunOperationPublic"
+    assert set(rerun_operation.get("properties", {})) >= {
+        "id",
+        "flow_run_id",
+        "rerun_step_id",
+        "root_attempt_no",
+        "root_attempt_id",
+        "status",
+        "request_fingerprint",
+        "expected_run_revision",
+        "accepted_run_revision",
+        "reason",
+        "input_payload_json",
+        "step_inputs_json",
+        "requested_by_principal_type",
+        "requested_by_user_id",
+    }
+
+    rerun_invalidated_steps = _resolve_component_ref(
+        openapi_spec, evidence_properties.get("rerun_invalidated_steps", {})
+    )
+    rerun_invalidated_step = _resolve_component_ref(
+        openapi_spec, rerun_invalidated_steps.get("items", {})
+    )
+    assert rerun_invalidated_steps.get("type") == "array"
+    assert rerun_invalidated_step.get("title") == "FlowRunRerunInvalidatedStepPublic"
+    invalidated_properties = rerun_invalidated_step.get("properties", {})
+    assert set(invalidated_properties) >= {
+        "id",
+        "operation_id",
+        "step_id",
+        "step_order",
+        "invalidation_order",
+        "role",
+        "dependency_sources_json",
+        "prior_step_result_id",
+        "prior_attempt_id",
+        "new_attempt_no",
+        "new_attempt_id",
+    }
+    dependency_sources = _resolve_component_ref(
+        openapi_spec, invalidated_properties["dependency_sources_json"]
+    )
+    dependency_source_values = _extract_enum_values(
+        openapi_spec, dependency_sources.get("items", {})
+    )
+    assert dependency_source_values == {kind.value for kind in RerunDependencyKind}
 
 
 def test_openapi_flow_pagination_response_shape_is_current(
@@ -827,7 +899,7 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
     }
     assert _extract_enum_values(
         openapi_spec, manifest_properties["schema_version"]
-    ) == {"flow-evidence-export.v3"}
+    ) == {"flow-evidence-export.v4"}
     assert _extract_enum_values(
         openapi_spec, manifest_properties["content_hash_input"]
     ) == {

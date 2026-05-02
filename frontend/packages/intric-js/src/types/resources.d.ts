@@ -195,6 +195,9 @@ export type FlowRunDebugRag = components["schemas"]["FlowRunDebugRag"];
 export type FlowRunDebugStep = components["schemas"]["FlowRunDebugStep"];
 export type FlowRunDebugAttempt = components["schemas"]["FlowRunDebugAttempt"];
 export type FlowRunDebugExport = components["schemas"]["FlowRunDebugExport"];
+export type FlowRunRerunOperation = components["schemas"]["FlowRunRerunOperationPublic"];
+export type FlowRunRerunInvalidatedStep =
+  components["schemas"]["FlowRunRerunInvalidatedStepPublic"];
 export type FlowRunEvidence = components["schemas"]["FlowRunEvidenceResponse"];
 export type FlowRunEvidenceWithTypedSteps = Omit<FlowRunEvidence, "step_results"> & {
   step_results: FlowRunStep[];

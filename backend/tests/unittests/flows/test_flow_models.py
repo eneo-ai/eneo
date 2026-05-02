@@ -10,6 +10,8 @@ from intric.flows.api.flow_models import (
     FlowRunCreateRequest,
     FlowRunDebugAttempt,
     FlowRunEvidenceResponse,
+    FlowRunRerunInvalidatedStepPublic,
+    FlowRunRerunOperationPublic,
     FlowStepAttemptPublic,
     FlowStepCreateRequest,
     FormFieldPublic,
@@ -20,7 +22,7 @@ from intric.flows.api.flow_models import (
     HttpTestResponse,
     StepRunInput,
 )
-from intric.flows.enums import FlowStepAttemptStatus
+from intric.flows.enums import FlowRunRerunOperationStatus, FlowStepAttemptStatus
 from intric.main.exceptions import BadRequestException
 
 
@@ -159,6 +161,9 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
     step_result_id = uuid4()
     file_id = uuid4()
     attempt_id = uuid4()
+    rerun_operation_id = uuid4()
+    rerun_invalidated_step_id = uuid4()
+    replacement_attempt_id = uuid4()
 
     response = FlowRunEvidenceResponse.model_validate(
         {
@@ -224,6 +229,53 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                     "finished_at": "2026-03-20T12:00:05Z",
                     "created_at": "2026-03-20T12:00:00Z",
                     "updated_at": "2026-03-20T12:00:05Z",
+                }
+            ],
+            "rerun_operations": [
+                {
+                    "id": str(rerun_operation_id),
+                    "tenant_id": str(tenant_id),
+                    "flow_id": str(flow_id),
+                    "flow_run_id": str(run_id),
+                    "rerun_step_id": str(step_id),
+                    "rerun_step_order": 1,
+                    "root_attempt_no": 2,
+                    "root_attempt_id": str(replacement_attempt_id),
+                    "status": "completed",
+                    "request_fingerprint": "rerun-fingerprint",
+                    "expected_run_revision": 1,
+                    "accepted_run_revision": 2,
+                    "reason": "Reviewer corrected the step output.",
+                    "input_payload_json": {"question": "Updated input"},
+                    "step_inputs_json": {str(step_id): {"file_ids": []}},
+                    "requested_by_principal_type": "user",
+                    "requested_by_user_id": str(uuid4()),
+                    "failure_code": None,
+                    "failure_message": None,
+                    "started_at": "2026-03-20T12:01:00Z",
+                    "finished_at": "2026-03-20T12:01:05Z",
+                    "created_at": "2026-03-20T12:01:00Z",
+                    "updated_at": "2026-03-20T12:01:05Z",
+                }
+            ],
+            "rerun_invalidated_steps": [
+                {
+                    "id": str(rerun_invalidated_step_id),
+                    "operation_id": str(rerun_operation_id),
+                    "tenant_id": str(tenant_id),
+                    "flow_id": str(flow_id),
+                    "flow_run_id": str(run_id),
+                    "step_id": str(step_id),
+                    "step_order": 1,
+                    "invalidation_order": 1,
+                    "role": "root",
+                    "dependency_sources_json": ["input_bindings.question"],
+                    "prior_step_result_id": str(step_result_id),
+                    "prior_attempt_id": str(attempt_id),
+                    "new_attempt_no": 2,
+                    "new_attempt_id": str(replacement_attempt_id),
+                    "created_at": "2026-03-20T12:01:00Z",
+                    "updated_at": "2026-03-20T12:01:05Z",
                 }
             ],
             "debug_export": {
@@ -347,6 +399,16 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
 
     assert isinstance(response.step_attempts[0], FlowStepAttemptPublic)
     assert response.step_attempts[0].status == FlowStepAttemptStatus.COMPLETED
+    assert isinstance(response.rerun_operations[0], FlowRunRerunOperationPublic)
+    assert response.rerun_operations[0].status == FlowRunRerunOperationStatus.COMPLETED
+    assert response.rerun_operations[0].root_attempt_id == replacement_attempt_id
+    assert isinstance(
+        response.rerun_invalidated_steps[0], FlowRunRerunInvalidatedStepPublic
+    )
+    assert response.rerun_invalidated_steps[0].operation_id == rerun_operation_id
+    assert response.rerun_invalidated_steps[0].dependency_sources_json == [
+        "input_bindings.question"
+    ]
     assert response.step_results[0].effective_prompt == "Summarize the report"
     assert response.step_results[0].model_parameters_json == {"temperature": 0.2}
     assert response.step_results[0].flow_step_execution_hash == "abc123"

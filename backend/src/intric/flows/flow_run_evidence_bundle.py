@@ -5,6 +5,8 @@ from typing import Any, Sequence, cast
 
 from intric.flows.domain.flow import (
     FlowRun,
+    FlowRunRerunInvalidatedStep,
+    FlowRunRerunOperation,
     FlowStepAttempt,
     FlowStepResult,
     FlowVersion,
@@ -29,12 +31,21 @@ class EvidenceBundlePayload:
 
 
 @dataclass(frozen=True)
+class RedactedEvidenceSection:
+    records: tuple[dict[str, Any], ...]
+    masked_paths: tuple[str, ...]
+    masked_fields: tuple[MaskedField, ...]
+
+
+@dataclass(frozen=True)
 class EvidenceBundle:
     run: FlowRun
     version: FlowVersion
     step_results: Sequence[FlowStepResult]
     step_attempts: Sequence[FlowStepAttempt]
     result_files: Sequence[FlowRunStepResultFile]
+    rerun_operations: Sequence[FlowRunRerunOperation]
+    rerun_invalidated_steps: Sequence[FlowRunRerunInvalidatedStep]
     debug_export: dict[str, Any]
 
     def to_export_payload(self) -> EvidenceBundlePayload:
@@ -55,6 +66,13 @@ class EvidenceBundle:
                 "result_files": [
                     item.model_dump(mode="json") for item in self.result_files
                 ],
+                "rerun_operations": [
+                    item.model_dump(mode="json") for item in self.rerun_operations
+                ],
+                "rerun_invalidated_steps": [
+                    item.model_dump(mode="json")
+                    for item in self.rerun_invalidated_steps
+                ],
                 "debug_export": dict(self.debug_export),
             },
             provenance_parse_results=tuple(provenance_parse_results),
@@ -71,6 +89,8 @@ class RedactedEvidenceBundle:
     step_results: tuple[dict[str, Any], ...]
     step_attempts: tuple[dict[str, Any], ...]
     result_files: tuple[dict[str, Any], ...]
+    rerun_operations: tuple[dict[str, Any], ...]
+    rerun_invalidated_steps: tuple[dict[str, Any], ...]
     debug_export: dict[str, Any]
     masked_paths: tuple[str, ...]
     masked_fields: tuple[MaskedField, ...]
@@ -84,6 +104,10 @@ class RedactedEvidenceBundle:
                 "step_results": [dict(item) for item in self.step_results],
                 "step_attempts": [dict(item) for item in self.step_attempts],
                 "result_files": [dict(item) for item in self.result_files],
+                "rerun_operations": [dict(item) for item in self.rerun_operations],
+                "rerun_invalidated_steps": [
+                    dict(item) for item in self.rerun_invalidated_steps
+                ],
                 "debug_export": dict(self.debug_export),
             },
             provenance_parse_results=self.provenance_parse_results,
@@ -100,6 +124,8 @@ def build_evidence_bundle(
     step_results: Sequence[FlowStepResult],
     step_attempts: Sequence[FlowStepAttempt],
     result_files: Sequence[FlowRunStepResultFile] = (),
+    rerun_operations: Sequence[FlowRunRerunOperation] = (),
+    rerun_invalidated_steps: Sequence[FlowRunRerunInvalidatedStep] = (),
 ) -> EvidenceBundle:
     return EvidenceBundle(
         run=run,
@@ -107,12 +133,16 @@ def build_evidence_bundle(
         step_results=tuple(step_results),
         step_attempts=tuple(step_attempts),
         result_files=tuple(result_files),
+        rerun_operations=tuple(rerun_operations),
+        rerun_invalidated_steps=tuple(rerun_invalidated_steps),
         debug_export=build_debug_export(
             run=run,
             version=version,
             step_results=list(step_results),
             step_attempts=list(step_attempts),
             result_files=list(result_files),
+            rerun_operations=list(rerun_operations),
+            rerun_invalidated_steps=list(rerun_invalidated_steps),
         ),
     )
 
@@ -128,36 +158,55 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
         bundle.version.definition_json,
         path="bundle.definition_snapshot",
     )
-    step_result_payloads: list[dict[str, Any]] = []
-    for index, item in enumerate(bundle.step_results):
-        result = redact_payload_with_manifest(
-            _dump_result_record(item),
-            path=f"bundle.step_results[{index}]",
-        )
-        step_result_payloads.append(cast(dict[str, Any], result.value))
-        masked_paths.extend(result.masked_paths)
-        masked_fields.extend(result.masked_fields)
-    step_attempt_payloads: list[dict[str, Any]] = []
+    step_result_section = _redact_record_payloads(
+        section_path="bundle.step_results",
+        payloads=[_dump_result_record(result) for result in bundle.step_results],
+    )
+    masked_paths.extend(step_result_section.masked_paths)
+    masked_fields.extend(step_result_section.masked_fields)
+
+    dumped_attempt_payloads: list[dict[str, Any]] = []
     provenance_parse_results: list[FlowAttemptProvenanceParseResult] = []
-    for index, item in enumerate(bundle.step_attempts):
-        dumped_attempt, parse_result = _dump_attempt_record(item)
-        result = redact_payload_with_manifest(
-            dumped_attempt,
-            path=f"bundle.step_attempts[{index}]",
-        )
-        step_attempt_payloads.append(cast(dict[str, Any], result.value))
+    for step_attempt in bundle.step_attempts:
+        dumped_attempt, parse_result = _dump_attempt_record(step_attempt)
+        dumped_attempt_payloads.append(dumped_attempt)
         provenance_parse_results.append(parse_result)
-        masked_paths.extend(result.masked_paths)
-        masked_fields.extend(result.masked_fields)
-    result_file_payloads: list[dict[str, Any]] = []
-    for index, item in enumerate(bundle.result_files):
-        result = redact_payload_with_manifest(
-            item.model_dump(mode="json"),
-            path=f"bundle.result_files[{index}]",
-        )
-        result_file_payloads.append(cast(dict[str, Any], result.value))
-        masked_paths.extend(result.masked_paths)
-        masked_fields.extend(result.masked_fields)
+    step_attempt_section = _redact_record_payloads(
+        section_path="bundle.step_attempts",
+        payloads=dumped_attempt_payloads,
+    )
+    masked_paths.extend(step_attempt_section.masked_paths)
+    masked_fields.extend(step_attempt_section.masked_fields)
+
+    result_file_section = _redact_record_payloads(
+        section_path="bundle.result_files",
+        payloads=[
+            result_file.model_dump(mode="json") for result_file in bundle.result_files
+        ],
+    )
+    masked_paths.extend(result_file_section.masked_paths)
+    masked_fields.extend(result_file_section.masked_fields)
+
+    rerun_operation_section = _redact_record_payloads(
+        section_path="bundle.rerun_operations",
+        payloads=[
+            rerun_operation.model_dump(mode="json")
+            for rerun_operation in bundle.rerun_operations
+        ],
+    )
+    masked_paths.extend(rerun_operation_section.masked_paths)
+    masked_fields.extend(rerun_operation_section.masked_fields)
+
+    rerun_invalidated_step_section = _redact_record_payloads(
+        section_path="bundle.rerun_invalidated_steps",
+        payloads=[
+            invalidated_step.model_dump(mode="json")
+            for invalidated_step in bundle.rerun_invalidated_steps
+        ],
+    )
+    masked_paths.extend(rerun_invalidated_step_section.masked_paths)
+    masked_fields.extend(rerun_invalidated_step_section.masked_fields)
+
     debug_result = redact_payload_with_manifest(
         bundle.debug_export, path="bundle.debug_export"
     )
@@ -174,9 +223,11 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
     return RedactedEvidenceBundle(
         run=cast(dict[str, Any], run_result.value),
         definition_snapshot=cast(dict[str, Any], definition_result.value),
-        step_results=tuple(step_result_payloads),
-        step_attempts=tuple(step_attempt_payloads),
-        result_files=tuple(result_file_payloads),
+        step_results=step_result_section.records,
+        step_attempts=step_attempt_section.records,
+        result_files=result_file_section.records,
+        rerun_operations=rerun_operation_section.records,
+        rerun_invalidated_steps=rerun_invalidated_step_section.records,
         debug_export=debug_export,
         masked_paths=tuple(
             dict.fromkeys(
@@ -195,6 +246,29 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
             )
         ),
         provenance_parse_results=tuple(provenance_parse_results),
+    )
+
+
+def _redact_record_payloads(
+    *,
+    section_path: str,
+    payloads: Sequence[dict[str, Any]],
+) -> RedactedEvidenceSection:
+    redacted_records: list[dict[str, Any]] = []
+    masked_paths: list[str] = []
+    masked_fields: list[MaskedField] = []
+    for index, record_payload in enumerate(payloads):
+        result = redact_payload_with_manifest(
+            record_payload,
+            path=f"{section_path}[{index}]",
+        )
+        redacted_records.append(cast(dict[str, Any], result.value))
+        masked_paths.extend(result.masked_paths)
+        masked_fields.extend(result.masked_fields)
+    return RedactedEvidenceSection(
+        records=tuple(redacted_records),
+        masked_paths=tuple(masked_paths),
+        masked_fields=tuple(masked_fields),
     )
 
 

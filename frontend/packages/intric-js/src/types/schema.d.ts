@@ -822,9 +822,33 @@ export interface paths {
     head?: never;
     /**
      * Update flow input limits
-     * @description Update tenant-level upload limits used by flow runtime input endpoints.
+     * @description Update tenant-level upload limits used by flow runtime input endpoints. Omit a field to leave it unchanged. Send null to remove that tenant override and fall back to the default policy. Send a positive integer to set a tenant override.
      */
     patch: operations["update_flow_input_limits_api_v1_settings_flow_input_limits_patch"];
+    trace?: never;
+  };
+  "/api/v1/settings/flow-document-render-limits": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get flow document render limits
+     * @description Return tenant-level guardrails for generated flow PDF/DOCX outputs.
+     */
+    get: operations["get_flow_document_render_limits_api_v1_settings_flow_document_render_limits_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update flow document render limits
+     * @description Update tenant-level guardrails for generated flow PDF/DOCX outputs. Omit a field to leave it unchanged. Send null to remove the tenant override and fall back to the product default.
+     */
+    patch: operations["update_flow_document_render_limits_api_v1_settings_flow_document_render_limits_patch"];
     trace?: never;
   };
   "/api/v1/settings/flow-evidence-policy": {
@@ -849,6 +873,30 @@ export interface paths {
      * @description Update tenant-level policy flags that control raw evidence export behavior for classification-3 spaces.
      */
     patch: operations["update_flow_evidence_policy_api_v1_settings_flow_evidence_policy_patch"];
+    trace?: never;
+  };
+  "/api/v1/settings/flow-retention-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get flow retention policy
+     * @description Return the tenant's effective layered flow retention policy defaults and class-specific overrides.
+     */
+    get: operations["get_flow_retention_policy_api_v1_settings_flow_retention_policy_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update flow retention policy
+     * @description Update tenant-level layered flow retention defaults and class-specific overrides used by Flow runtime data classes.
+     */
+    patch: operations["update_flow_retention_policy_api_v1_settings_flow_retention_policy_patch"];
     trace?: never;
   };
   "/api/v1/settings/ai-builder-budget": {
@@ -3545,7 +3593,7 @@ export interface paths {
     };
     /**
      * List Flows
-     * @description List flow definitions in a space with pagination-friendly sparse metadata. The `count` field in the paginated response reports the number of items returned in the current page, not the total number of matching flows across all pages. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin. Service-key principals may use this endpoint only for published-flow discovery in their scoped space. Draft authoring and AI Builder still require a user principal.
+     * @description List flow definitions in a space with pagination-friendly sparse metadata. The `count` field in the paginated response reports the number of items returned in the current page, not the total number of matching flows across all pages. `has_more` reports whether another page exists after this offset window. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin. Service-key principals may use this endpoint only for published-flow discovery in their scoped space. Draft authoring and AI Builder still require a user principal.
      */
     get: operations["list_flows"];
     put?: never;
@@ -3901,7 +3949,8 @@ export interface paths {
      *
      *         This is a flow-first alias for run listing to keep runtime orchestration under `/flows/{id}`.
      *         The `count` field in the paginated response reports the number of items returned in the
-     *         current page, not the total number of matching runs across all pages.
+     *         current page, not the total number of matching runs across all pages. `has_more` reports
+     *         whether another page exists after this offset window.
      *
      *         Current runtime visibility is policy-based: callers always list their own runs, tenant admins
      *         can list runs across the tenant, same-space admins and owners can list run metadata for flows
@@ -3924,7 +3973,9 @@ export interface paths {
      *
      *         `Idempotency-Key` is optional but recommended for retried writes. Reusing the same key with
      *         the same request payload returns the existing run payload. Reusing the same key with a
-     *         different payload returns `400` with code `flow_run_idempotency_conflict`.
+     *         different payload returns `400` with code `flow_run_idempotency_conflict`. Replay lasts while
+     *         the matching run row is retained; clients should keep the returned run id as the durable
+     *         polling handle.
      *
      *         Service-key principals may create published-flow runs in v1. Draft ownership and AI Builder
      *         flows still require a user principal.
@@ -3980,6 +4031,33 @@ export interface paths {
      *     principals can cancel only their own runs.
      */
     post: operations["cancel_flow_run_alias"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Rerun flow run step
+     * @description Request a rerun for one completed step in an existing flow run.
+     *
+     *     The endpoint returns `202 Accepted` for both a newly accepted rerun and an idempotent
+     *     replay of the same rerun request. Use the response `status` to track the rerun operation
+     *     lifecycle. On replay, the nested `run` is the current persisted run state, so
+     *     `run.revision` can be newer than the submitted `expected_run_revision`.
+     *
+     *     Rerun is a run lifecycle mutation and currently requires flow management access.
+     */
+    post: operations["rerun_flow_run_step"];
     delete?: never;
     options?: never;
     head?: never;
@@ -7439,6 +7517,48 @@ export interface components {
      */
     AIBuilderOutputMode: "pass_through" | "transcribe_only" | "template_fill";
     /**
+     * AIBuilderPlanEditContext
+     * @description Structured intent for revising an already proposed AI Builder plan.
+     *
+     *     The chat message remains the user's natural-language instruction. This
+     *     context tells the planner which existing proposal the instruction applies
+     *     to, so scoped edits do not depend on matching localized button text or step
+     *     names in the prompt.
+     */
+    AIBuilderPlanEditContext: {
+      /**
+       * Scope
+       * @enum {string}
+       */
+      scope: "whole_plan" | "step";
+      /**
+       * Plan Id
+       * Format: uuid
+       * @description The proposed plan currently shown to the user.
+       */
+      plan_id: string;
+      /**
+       * Target Plan Step Ref
+       * @description Stable plan step ref such as 'step_f' when scope is 'step'.
+       */
+      target_plan_step_ref?: string | null;
+      /**
+       * Target Existing Step Ref
+       * @description Existing-flow step ref when the proposal edits a saved flow.
+       */
+      target_existing_step_ref?: string | null;
+      /**
+       * Target Step Name
+       * @description User-visible step name for prompt copy and UI echoes only.
+       */
+      target_step_name?: string | null;
+      /**
+       * Target Step Number
+       * @description One-based step number from the currently displayed plan.
+       */
+      target_step_number?: number | null;
+    };
+    /**
      * ARQHealth
      * @description Parsed ARQ health metrics (clean view).
      */
@@ -10060,6 +10180,11 @@ export interface components {
     };
     /** ConversationMessage */
     ConversationMessage: {
+      /**
+       * Message Id
+       * @description Stable id for this conversation turn. Used by evidence refs that must survive conversation compaction (positional indices do not).
+       */
+      message_id?: string;
       /** Role */
       role: string;
       /** Content */
@@ -11213,7 +11338,149 @@ export interface components {
       | 9035
       | 9036
       | 9037
-      | 9038;
+      | 9038
+      | 9039;
+    /** EvidenceArtifactAvailabilitySummary */
+    EvidenceArtifactAvailabilitySummary: {
+      /**
+       * Tracking State
+       * @constant
+       */
+      tracking_state: "tracked";
+      /** Artifact Count */
+      artifact_count: number;
+      /** Available Count */
+      available_count: number;
+      /** Content Purged Count */
+      content_purged_count: number;
+      /** Total Size Bytes */
+      total_size_bytes: number;
+      /** Artifacts */
+      artifacts: components["schemas"]["EvidenceArtifactManifestItem"][];
+      /** Note */
+      note: string;
+    };
+    /** EvidenceArtifactManifestItem */
+    EvidenceArtifactManifestItem: {
+      /** Flow Run Id */
+      flow_run_id: string;
+      /** Flow Id */
+      flow_id: string;
+      /** Tenant Id */
+      tenant_id: string;
+      /** File Id */
+      file_id: string;
+      /** Step Id */
+      step_id: string;
+      /** Step Result Id */
+      step_result_id: string;
+      /** Step Order */
+      step_order: number;
+      /** Attempt No */
+      attempt_no: number;
+      /** Ordinal */
+      ordinal: number;
+      /**
+       * Source
+       * @enum {string}
+       */
+      source: "generated_output" | "declared_artifact";
+      /** Name */
+      name: string;
+      /** Checksum */
+      checksum: string;
+      /** Size */
+      size: number;
+      /** Mimetype */
+      mimetype: string | null;
+      /** File Type */
+      file_type: string;
+      /**
+       * Availability
+       * @enum {string}
+       */
+      availability: "available" | "content_purged";
+    };
+    /** EvidenceExportManifest */
+    EvidenceExportManifest: {
+      /**
+       * Schema Version
+       * @constant
+       */
+      schema_version: "flow-evidence-export.v4";
+      /** Provenance Schema Version Min */
+      provenance_schema_version_min: string;
+      /** Provenance Schema Version Current */
+      provenance_schema_version_current: string;
+      /**
+       * Provenance Persisted Version Status
+       * @enum {string}
+       */
+      provenance_persisted_version_status:
+        | "not_tracked"
+        | "tracked"
+        | "corrupt"
+        | "retention_purged";
+      /** Content Hash */
+      content_hash: string;
+      /**
+       * Content Hash Input
+       * @enum {string}
+       */
+      content_hash_input: "raw" | "redacted";
+      /**
+       * Exported At
+       * Format: date-time
+       */
+      exported_at: string;
+      /** Tenant Id */
+      tenant_id: string;
+      /** Run Id */
+      run_id: string;
+      /** Trace Id */
+      trace_id: string;
+      /** Flow Id */
+      flow_id: string;
+      /** Flow Version */
+      flow_version: number;
+      /** Exported By User Id */
+      exported_by_user_id: string | null;
+      /** Export Reason */
+      export_reason: string;
+      /**
+       * Detail Mode
+       * @enum {string}
+       */
+      detail_mode: "raw" | "redacted";
+      /** Redaction Applied */
+      redaction_applied: boolean;
+      /** Masked Fields Count */
+      masked_fields_count: number;
+      /** Redaction Policy Version */
+      redaction_policy_version: string;
+      retention_state_summary: components["schemas"]["EvidenceRetentionStateSummary"];
+      artifact_availability_summary: components["schemas"]["EvidenceArtifactAvailabilitySummary"];
+    };
+    /** EvidenceRetentionStateSummary */
+    EvidenceRetentionStateSummary: {
+      /**
+       * Tracking State
+       * @enum {string}
+       */
+      tracking_state: "not_tracked" | "tracked";
+      /** Tombstone Count */
+      tombstone_count: number;
+      /** Retention Purged Count */
+      retention_purged_count: number;
+      /** Artifact Content Purged Count */
+      artifact_content_purged_count: number;
+      /** Redacted For Deletion Count */
+      redacted_for_deletion_count: number;
+      /** Note */
+      note: string;
+    } & {
+      [key: string]: unknown;
+    };
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -11495,6 +11762,11 @@ export interface components {
       limit: components["schemas"]["Limit"];
     };
     /**
+     * FileType
+     * @enum {string}
+     */
+    FileType: "text" | "image" | "audio" | "document";
+    /**
      * FlowAssistantCreateRequest
      * @example {
      *       "name": "Flow Step Assistant"
@@ -11541,6 +11813,56 @@ export interface components {
       } | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
+    };
+    /** FlowDocumentRenderLimitsPublic */
+    FlowDocumentRenderLimitsPublic: {
+      /** Max Source Chars */
+      max_source_chars: number;
+      /** Max Blocks */
+      max_blocks: number;
+      /** Max Text Chars */
+      max_text_chars: number;
+      /** Max Table Rows */
+      max_table_rows: number;
+      /** Max Table Columns */
+      max_table_columns: number;
+      /** Max Table Cells */
+      max_table_cells: number;
+      /** Max Cell Chars */
+      max_cell_chars: number;
+      /** Max List Items */
+      max_list_items: number;
+      /** Max Structured Nodes */
+      max_structured_nodes: number;
+      /** Max Structured Depth */
+      max_structured_depth: number;
+      /** Max Object Fields */
+      max_object_fields: number;
+    };
+    /** FlowDocumentRenderLimitsUpdate */
+    FlowDocumentRenderLimitsUpdate: {
+      /** Max Source Chars */
+      max_source_chars?: number | null;
+      /** Max Blocks */
+      max_blocks?: number | null;
+      /** Max Text Chars */
+      max_text_chars?: number | null;
+      /** Max Table Rows */
+      max_table_rows?: number | null;
+      /** Max Table Columns */
+      max_table_columns?: number | null;
+      /** Max Table Cells */
+      max_table_cells?: number | null;
+      /** Max Cell Chars */
+      max_cell_chars?: number | null;
+      /** Max List Items */
+      max_list_items?: number | null;
+      /** Max Structured Nodes */
+      max_structured_nodes?: number | null;
+      /** Max Structured Depth */
+      max_structured_depth?: number | null;
+      /** Max Object Fields */
+      max_object_fields?: number | null;
     };
     /**
      * FlowDraftSpecCore
@@ -11593,52 +11915,44 @@ export interface components {
       /** Allow Service Key Raw Export Class3 */
       allow_service_key_raw_export_class3?: boolean | null;
     };
-    /** FlowRetentionPolicyPublic */
-    FlowRetentionPolicyPublic: {
-      /** Shared Default Days */
-      shared_default_days?: number | null;
-      /** Source Audio Days */
-      source_audio_days?: number | null;
-      /** Transcript Text Days */
-      transcript_text_days?: number | null;
-      /** Generated Artifact Days */
-      generated_artifact_days?: number | null;
-      /** Run Debug Evidence Days */
-      run_debug_evidence_days?: number | null;
-    };
-    /** FlowRetentionPolicyUpdate */
-    FlowRetentionPolicyUpdate: {
-      /** Shared Default Days */
-      shared_default_days?: number | null;
-      /** Source Audio Days */
-      source_audio_days?: number | null;
-      /** Transcript Text Days */
-      transcript_text_days?: number | null;
-      /** Generated Artifact Days */
-      generated_artifact_days?: number | null;
-      /** Run Debug Evidence Days */
-      run_debug_evidence_days?: number | null;
-    };
     /** FlowInputLimitsPublic */
     FlowInputLimitsPublic: {
       /** File Max Size Bytes */
       file_max_size_bytes: number;
       /** Audio Max Size Bytes */
       audio_max_size_bytes: number;
-      /** Max Files Per Run */
-      max_files_per_run?: number | null;
-      /** Audio Max Files Per Run */
-      audio_max_files_per_run?: number | null;
+      /**
+       * Max Files Per Run
+       * @description Null means no tenant-level file count ceiling.
+       */
+      max_files_per_run: number | null;
+      /**
+       * Audio Max Files Per Run
+       * @description Null means no tenant-level audio file count ceiling.
+       */
+      audio_max_files_per_run: number | null;
     };
     /** FlowInputLimitsUpdate */
     FlowInputLimitsUpdate: {
-      /** File Max Size Bytes */
+      /**
+       * File Max Size Bytes
+       * @description Set the tenant override, or send null to use the deployment default.
+       */
       file_max_size_bytes?: number | null;
-      /** Audio Max Size Bytes */
+      /**
+       * Audio Max Size Bytes
+       * @description Set the tenant override, or send null to use the deployment default.
+       */
       audio_max_size_bytes?: number | null;
-      /** Max Files Per Run */
+      /**
+       * Max Files Per Run
+       * @description Set the tenant ceiling, or send null for no tenant-level ceiling.
+       */
       max_files_per_run?: number | null;
-      /** Audio Max Files Per Run */
+      /**
+       * Audio Max Files Per Run
+       * @description Set the tenant ceiling, or send null to use the default audio ceiling.
+       */
       audio_max_files_per_run?: number | null;
     };
     /**
@@ -11803,6 +12117,32 @@ export interface components {
       updated_at?: string | null;
       /** Steps */
       steps: components["schemas"]["FlowStepPublic"][];
+    };
+    /** FlowRetentionPolicyPublic */
+    FlowRetentionPolicyPublic: {
+      /** Shared Default Days */
+      shared_default_days?: number | null;
+      /** Source Audio Days */
+      source_audio_days?: number | null;
+      /** Transcript Text Days */
+      transcript_text_days?: number | null;
+      /** Generated Artifact Days */
+      generated_artifact_days?: number | null;
+      /** Run Debug Evidence Days */
+      run_debug_evidence_days?: number | null;
+    };
+    /** FlowRetentionPolicyUpdate */
+    FlowRetentionPolicyUpdate: {
+      /** Shared Default Days */
+      shared_default_days?: number | null;
+      /** Source Audio Days */
+      source_audio_days?: number | null;
+      /** Transcript Text Days */
+      transcript_text_days?: number | null;
+      /** Generated Artifact Days */
+      generated_artifact_days?: number | null;
+      /** Run Debug Evidence Days */
+      run_debug_evidence_days?: number | null;
     };
     /**
      * FlowRunContractPublic
@@ -12396,6 +12736,26 @@ export interface components {
      *         "definition_snapshot": {
      *           "steps": []
      *         },
+     *         "result_files": [
+     *           {
+     *             "attempt_no": 1,
+     *             "availability": "available",
+     *             "checksum": "artifact-checksum",
+     *             "file_id": "00000000-0000-0000-0000-000000000501",
+     *             "file_type": "document",
+     *             "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *             "flow_run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+     *             "mimetype": "application/pdf",
+     *             "name": "case-summary.pdf",
+     *             "ordinal": 0,
+     *             "size": 14012,
+     *             "source": "declared_artifact",
+     *             "step_id": "00000000-0000-0000-0000-000000000101",
+     *             "step_order": 1,
+     *             "step_result_id": "00000000-0000-0000-0000-000000000401",
+     *             "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808"
+     *           }
+     *         ],
      *         "run": {
      *           "created_at": "2026-03-17T10:05:00Z",
      *           "flow_id": "00000000-0000-0000-0000-000000000001",
@@ -12405,6 +12765,8 @@ export interface components {
      *             "employee_name": "Alex Example"
      *           },
      *           "job_id": "00000000-0000-0000-0000-000000000401",
+     *           "result_files": [],
+     *           "revision": 1,
      *           "status": "queued",
      *           "tenant_id": "00000000-0000-0000-0000-000000000010",
      *           "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -12416,6 +12778,7 @@ export interface components {
      *           {
      *             "assistant_id": "00000000-0000-0000-0000-000000000201",
      *             "created_at": "2026-03-17T10:05:05Z",
+     *             "current_attempt_no": 1,
      *             "diagnostics": [
      *               {
      *                 "code": "runtime_input_consumed",
@@ -12437,6 +12800,7 @@ export interface components {
      *             "output_payload_json": {
      *               "text": "Hello and welcome to the annual review..."
      *             },
+     *             "result_files": [],
      *             "started_at": "2026-03-17T10:05:05Z",
      *             "status": "completed",
      *             "step_id": "00000000-0000-0000-0000-000000000101",
@@ -12449,12 +12813,31 @@ export interface components {
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
      *         "artifact_availability_summary": {
-     *           "artifact_count": 0,
-     *           "artifacts": [],
-     *           "available_count": 0,
+     *           "artifact_count": 1,
+     *           "artifacts": [
+     *             {
+     *               "attempt_no": 1,
+     *               "availability": "available",
+     *               "checksum": "artifact-checksum",
+     *               "file_id": "00000000-0000-0000-0000-000000000501",
+     *               "file_type": "document",
+     *               "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *               "flow_run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+     *               "mimetype": "application/pdf",
+     *               "name": "case-summary.pdf",
+     *               "ordinal": 0,
+     *               "size": 14012,
+     *               "source": "declared_artifact",
+     *               "step_id": "00000000-0000-0000-0000-000000000101",
+     *               "step_order": 1,
+     *               "step_result_id": "00000000-0000-0000-0000-000000000401",
+     *               "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808"
+     *             }
+     *           ],
+     *           "available_count": 1,
      *           "content_purged_count": 0,
      *           "note": "Artifact availability is derived from result-file rows joined to file metadata.",
-     *           "total_size_bytes": 0,
+     *           "total_size_bytes": 14012,
      *           "tracking_state": "tracked"
      *         },
      *         "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
@@ -12472,14 +12855,15 @@ export interface components {
      *         "redaction_applied": true,
      *         "redaction_policy_version": "flow-evidence-redaction.v3",
      *         "retention_state_summary": {
-     *           "note": "Tombstone tracking is not yet exposed; counts will populate when retention tombstones become trackable.",
+     *           "artifact_content_purged_count": 0,
+     *           "note": "No retention tombstones are present in this export; rows purged before tombstone tracking remain indistinguishable from never-tracked evidence.",
      *           "redacted_for_deletion_count": 0,
      *           "retention_purged_count": 0,
      *           "tombstone_count": 0,
      *           "tracking_state": "not_tracked"
      *         },
      *         "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
-     *         "schema_version": "flow-evidence-export.v3",
+     *         "schema_version": "flow-evidence-export.v4",
      *         "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
      *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
      *       },
@@ -12499,22 +12883,32 @@ export interface components {
      *         ],
      *         "policy_version": "flow-evidence-redaction.v3"
      *       },
-     *       "schema_version": "flow-evidence-export.v3",
+     *       "schema_version": "flow-evidence-export.v4",
      *       "summary": {
      *         "artifact_details": [
      *           {
+     *             "attempt_no": 1,
+     *             "availability": "available",
      *             "checksum": "artifact-checksum",
-     *             "file_id": "artifact-1",
+     *             "file_id": "00000000-0000-0000-0000-000000000501",
      *             "file_type": "document",
+     *             "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *             "flow_run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
      *             "mimetype": "application/pdf",
      *             "name": "case-summary.pdf",
-     *             "size": 14012
+     *             "ordinal": 0,
+     *             "size": 14012,
+     *             "source": "declared_artifact",
+     *             "step_id": "00000000-0000-0000-0000-000000000101",
+     *             "step_order": 1,
+     *             "step_result_id": "00000000-0000-0000-0000-000000000401",
+     *             "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808"
      *           }
      *         ],
      *         "artifact_names": [
      *           "case-summary.pdf"
      *         ],
-     *         "artifacts_count": 0,
+     *         "artifacts_count": 1,
      *         "attempts_count": 1,
      *         "citations": {
      *           "citation_tracked": true,
@@ -12531,6 +12925,26 @@ export interface components {
      *         "failed_steps": 0,
      *         "final_output": {
      *           "artifact_count": 1,
+     *           "artifact_details": [
+     *             {
+     *               "attempt_no": 1,
+     *               "availability": "available",
+     *               "checksum": "artifact-checksum",
+     *               "file_id": "00000000-0000-0000-0000-000000000501",
+     *               "file_type": "document",
+     *               "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *               "flow_run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+     *               "mimetype": "application/pdf",
+     *               "name": "case-summary.pdf",
+     *               "ordinal": 0,
+     *               "size": 14012,
+     *               "source": "declared_artifact",
+     *               "step_id": "00000000-0000-0000-0000-000000000101",
+     *               "step_order": 1,
+     *               "step_result_id": "00000000-0000-0000-0000-000000000401",
+     *               "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808"
+     *             }
+     *           ],
      *           "artifact_names": [
      *             "case-summary.pdf"
      *           ],
@@ -12581,12 +12995,22 @@ export interface components {
      *           {
      *             "artifact_details": [
      *               {
+     *                 "attempt_no": 1,
+     *                 "availability": "available",
      *                 "checksum": "artifact-checksum",
-     *                 "file_id": "artifact-1",
+     *                 "file_id": "00000000-0000-0000-0000-000000000501",
      *                 "file_type": "document",
+     *                 "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *                 "flow_run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
      *                 "mimetype": "application/pdf",
      *                 "name": "case-summary.pdf",
-     *                 "size": 14012
+     *                 "ordinal": 0,
+     *                 "size": 14012,
+     *                 "source": "declared_artifact",
+     *                 "step_id": "00000000-0000-0000-0000-000000000101",
+     *                 "step_order": 1,
+     *                 "step_result_id": "00000000-0000-0000-0000-000000000401",
+     *                 "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808"
      *               }
      *             ],
      *             "artifact_names": [
@@ -12718,127 +13142,6 @@ export interface components {
      *       }
      *     }
      */
-    EvidenceArtifactAvailabilitySummary: {
-      /**
-       * Tracking State
-       * @constant
-       */
-      tracking_state: "tracked";
-      /** Artifact Count */
-      artifact_count: number;
-      /** Available Count */
-      available_count: number;
-      /** Content Purged Count */
-      content_purged_count: number;
-      /** Total Size Bytes */
-      total_size_bytes: number;
-      /** Artifacts */
-      artifacts: components["schemas"]["EvidenceArtifactManifestItem"][];
-      /** Note */
-      note: string;
-    };
-    EvidenceArtifactManifestItem: {
-      /** Flow Run Id */
-      flow_run_id: string;
-      /** Flow Id */
-      flow_id: string;
-      /** Tenant Id */
-      tenant_id: string;
-      /** File Id */
-      file_id: string;
-      /** Step Id */
-      step_id: string;
-      /** Step Result Id */
-      step_result_id: string;
-      /** Step Order */
-      step_order: number;
-      /** Attempt No */
-      attempt_no: number;
-      /** Ordinal */
-      ordinal: number;
-      /**
-       * Source
-       * @enum {string}
-       */
-      source: "generated_output" | "declared_artifact";
-      /** Name */
-      name: string;
-      /** Checksum */
-      checksum: string;
-      /** Size */
-      size: number;
-      /** Mimetype */
-      mimetype: string | null;
-      /** File Type */
-      file_type: string;
-      /**
-       * Availability
-       * @enum {string}
-       */
-      availability: "available" | "content_purged";
-    };
-    EvidenceExportManifest: {
-      /** Schema Version */
-      schema_version: "flow-evidence-export.v3";
-      /** Provenance Schema Version Min */
-      provenance_schema_version_min: string;
-      /** Provenance Schema Version Current */
-      provenance_schema_version_current: string;
-      /** Provenance Persisted Version Status */
-      provenance_persisted_version_status:
-        | "not_tracked"
-        | "tracked"
-        | "corrupt"
-        | "retention_purged";
-      /** Content Hash */
-      content_hash: string;
-      /** Content Hash Input */
-      content_hash_input: "raw" | "redacted";
-      /**
-       * Exported At
-       * Format: date-time
-       */
-      exported_at: string;
-      /** Tenant Id */
-      tenant_id: string;
-      /** Run Id */
-      run_id: string;
-      /** Trace Id */
-      trace_id: string;
-      /** Flow Id */
-      flow_id: string;
-      /** Flow Version */
-      flow_version: number;
-      /** Exported By User Id */
-      exported_by_user_id: string | null;
-      /** Export Reason */
-      export_reason: string;
-      /** Detail Mode */
-      detail_mode: "raw" | "redacted";
-      /** Redaction Applied */
-      redaction_applied: boolean;
-      /** Masked Fields Count */
-      masked_fields_count: number;
-      /** Redaction Policy Version */
-      redaction_policy_version: string;
-      retention_state_summary: components["schemas"]["EvidenceRetentionStateSummary"];
-      artifact_availability_summary: components["schemas"]["EvidenceArtifactAvailabilitySummary"];
-    };
-    EvidenceRetentionStateSummary: {
-      /** Tracking State */
-      tracking_state: "not_tracked" | "tracked";
-      /** Tombstone Count */
-      tombstone_count: number;
-      /** Retention Purged Count */
-      retention_purged_count: number;
-      /** Artifact Content Purged Count */
-      artifact_content_purged_count: number;
-      /** Redacted For Deletion Count */
-      redacted_for_deletion_count: number;
-      /** Note */
-      note: string;
-      [key: string]: unknown;
-    };
     FlowRunEvidenceExportResponse: {
       /** Schema Version */
       schema_version: string;
@@ -12858,7 +13161,10 @@ export interface components {
       redaction: {
         [key: string]: unknown;
       };
-      /** Bundle */
+      /**
+       * Bundle
+       * @description Open evidence object preserved exactly as hashed; use FlowRunEvidenceResponse for the typed read-model endpoint.
+       */
       bundle: {
         [key: string]: unknown;
       };
@@ -12907,7 +13213,28 @@ export interface components {
      *       "definition_snapshot": {
      *         "steps": []
      *       },
-     *       "result_files": [],
+     *       "rerun_invalidated_steps": [],
+     *       "rerun_operations": [],
+     *       "result_files": [
+     *         {
+     *           "attempt_no": 1,
+     *           "availability": "available",
+     *           "checksum": "artifact-checksum",
+     *           "file_id": "00000000-0000-0000-0000-000000000501",
+     *           "file_type": "document",
+     *           "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
+     *           "flow_run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
+     *           "mimetype": "application/pdf",
+     *           "name": "case-summary.pdf",
+     *           "ordinal": 0,
+     *           "size": 14012,
+     *           "source": "declared_artifact",
+     *           "step_id": "00000000-0000-0000-0000-000000000101",
+     *           "step_order": 1,
+     *           "step_result_id": "00000000-0000-0000-0000-000000000401",
+     *           "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808"
+     *         }
+     *       ],
      *       "run": {
      *         "created_at": "2026-03-17T10:05:00Z",
      *         "flow_id": "00000000-0000-0000-0000-000000000001",
@@ -12918,6 +13245,7 @@ export interface components {
      *         },
      *         "job_id": "00000000-0000-0000-0000-000000000401",
      *         "result_files": [],
+     *         "revision": 1,
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -12929,6 +13257,7 @@ export interface components {
      *         {
      *           "assistant_id": "00000000-0000-0000-0000-000000000201",
      *           "created_at": "2026-03-17T10:05:05Z",
+     *           "current_attempt_no": 1,
      *           "diagnostics": [
      *             {
      *               "code": "runtime_input_consumed",
@@ -12972,6 +13301,10 @@ export interface components {
       step_attempts: components["schemas"]["FlowStepAttemptPublic"][];
       /** Result Files */
       result_files: components["schemas"]["FlowRunStepResultFile"][];
+      /** Rerun Operations */
+      rerun_operations: components["schemas"]["FlowRunRerunOperationPublic"][];
+      /** Rerun Invalidated Steps */
+      rerun_invalidated_steps: components["schemas"]["FlowRunRerunInvalidatedStepPublic"][];
       debug_export: components["schemas"]["FlowRunDebugExport"];
     };
     /**
@@ -12986,6 +13319,7 @@ export interface components {
      *       },
      *       "job_id": "00000000-0000-0000-0000-000000000401",
      *       "result_files": [],
+     *       "revision": 1,
      *       "status": "queued",
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -13019,6 +13353,11 @@ export interface components {
        * Format: uuid
        */
       trace_id: string;
+      /**
+       * Revision
+       * @description Monotonic run lifecycle compare token. Step-rerun requests use this value as `expected_run_revision`.
+       */
+      revision: number;
       status: components["schemas"]["FlowRunStatus"];
       /** Cancelled At */
       cancelled_at?: string | null;
@@ -13065,6 +13404,7 @@ export interface components {
      *         },
      *         "job_id": "00000000-0000-0000-0000-000000000401",
      *         "result_files": [],
+     *         "revision": 1,
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -13078,6 +13418,152 @@ export interface components {
       /** Redispatched Count */
       redispatched_count: number;
     };
+    /** FlowRunRerunInvalidatedStepPublic */
+    FlowRunRerunInvalidatedStepPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Operation Id
+       * Format: uuid
+       */
+      operation_id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /**
+       * Flow Run Id
+       * Format: uuid
+       */
+      flow_run_id: string;
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /** Step Order */
+      step_order: number;
+      /** Invalidation Order */
+      invalidation_order: number;
+      role: components["schemas"]["FlowRunRerunInvalidationRole"];
+      /** Dependency Sources Json */
+      dependency_sources_json: components["schemas"]["RerunDependencyKind"][];
+      /** Prior Step Result Id */
+      prior_step_result_id?: string | null;
+      /** Prior Attempt Id */
+      prior_attempt_id?: string | null;
+      /** New Attempt No */
+      new_attempt_no?: number | null;
+      /** New Attempt Id */
+      new_attempt_id?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * FlowRunRerunInvalidationRole
+     * @enum {string}
+     */
+    FlowRunRerunInvalidationRole: "root" | "downstream";
+    /** FlowRunRerunOperationPublic */
+    FlowRunRerunOperationPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /**
+       * Flow Run Id
+       * Format: uuid
+       */
+      flow_run_id: string;
+      /**
+       * Rerun Step Id
+       * Format: uuid
+       */
+      rerun_step_id: string;
+      /** Rerun Step Order */
+      rerun_step_order: number;
+      /** Root Attempt No */
+      root_attempt_no: number;
+      /** Root Attempt Id */
+      root_attempt_id?: string | null;
+      status: components["schemas"]["FlowRunRerunOperationStatus"];
+      /**
+       * Request Fingerprint
+       * @description Stable fingerprint that correlates repeated rerun requests with the accepted operation and invalidation lineage.
+       */
+      request_fingerprint: string;
+      /** Expected Run Revision */
+      expected_run_revision: number;
+      /** Accepted Run Revision */
+      accepted_run_revision: number;
+      /** Reason */
+      reason: string;
+      /** Input Payload Json */
+      input_payload_json?: {
+        [key: string]: unknown;
+      } | null;
+      /** Step Inputs Json */
+      step_inputs_json?: {
+        [key: string]: unknown;
+      } | null;
+      requested_by_principal_type: components["schemas"]["PrincipalType"];
+      /**
+       * Requested By User Id
+       * Format: uuid
+       */
+      requested_by_user_id: string;
+      /** Failure Code */
+      failure_code?: string | null;
+      /** Failure Message */
+      failure_message?: string | null;
+      /** Started At */
+      started_at?: string | null;
+      /** Finished At */
+      finished_at?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * FlowRunRerunOperationStatus
+     * @enum {string}
+     */
+    FlowRunRerunOperationStatus: "queued" | "running" | "completed" | "failed" | "cancelled";
     /**
      * FlowRunStatus
      * @enum {string}
@@ -13088,6 +13574,7 @@ export interface components {
      * @example {
      *       "assistant_id": "00000000-0000-0000-0000-000000000201",
      *       "created_at": "2026-03-17T10:05:05Z",
+     *       "current_attempt_no": 1,
      *       "diagnostics": [
      *         {
      *           "code": "runtime_input_consumed",
@@ -13141,6 +13628,8 @@ export interface components {
       output_payload_json?: {
         [key: string]: unknown;
       } | null;
+      /** Current Attempt No */
+      current_attempt_no?: number | null;
       /** Result Files */
       result_files?: components["schemas"]["FlowRunStepResultFile"][];
       /** Effective Prompt */
@@ -13176,6 +13665,99 @@ export interface components {
        */
       updated_at: string;
     };
+    /**
+     * FlowRunStepRerunRequest
+     * @example {
+     *       "expected_run_revision": 7,
+     *       "input_payload_json": {
+     *         "reviewer_note": "Use the corrected spelling of Alex."
+     *       },
+     *       "reason": "The HR reviewer corrected the transcription for step 1.",
+     *       "step_inputs": {
+     *         "00000000-0000-0000-0000-000000000101": {
+     *           "file_ids": [
+     *             "00000000-0000-0000-0000-000000000701"
+     *           ]
+     *         }
+     *       }
+     *     }
+     */
+    FlowRunStepRerunRequest: {
+      /**
+       * Expected Run Revision
+       * @description Run revision observed by the caller before requesting the rerun.
+       */
+      expected_run_revision: number;
+      /**
+       * Reason
+       * @description Human-readable reason for accepting the rerun operation.
+       */
+      reason: string;
+      /**
+       * Input Payload Json
+       * @description Optional inline payload overrides for the rerun root step.
+       */
+      input_payload_json?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Step Inputs
+       * @description Optional file inputs keyed by the rerun root step id.
+       */
+      step_inputs?: {
+        [key: string]: components["schemas"]["StepRunInput"];
+      } | null;
+    };
+    /**
+     * FlowRunStepRerunResponse
+     * @example {
+     *       "invalidated_step_ids": [
+     *         "00000000-0000-0000-0000-000000000101",
+     *         "00000000-0000-0000-0000-000000000102"
+     *       ],
+     *       "new_attempt_no": 2,
+     *       "operation_id": "00000000-0000-0000-0000-000000000801",
+     *       "rerun_step_id": "00000000-0000-0000-0000-000000000101",
+     *       "run": {
+     *         "created_at": "2026-03-17T10:05:00Z",
+     *         "flow_id": "00000000-0000-0000-0000-000000000001",
+     *         "flow_version": 3,
+     *         "id": "00000000-0000-0000-0000-000000000301",
+     *         "input_payload_json": {
+     *           "employee_name": "Alex Example"
+     *         },
+     *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "result_files": [],
+     *         "revision": 8,
+     *         "status": "queued",
+     *         "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *         "trace_id": "00000000-0000-0000-0000-000000000302",
+     *         "updated_at": "2026-03-17T10:05:00Z",
+     *         "user_id": "00000000-0000-0000-0000-000000000030"
+     *       },
+     *       "status": "queued"
+     *     }
+     */
+    FlowRunStepRerunResponse: {
+      /**
+       * Operation Id
+       * Format: uuid
+       */
+      operation_id: string;
+      /** @description Current persisted run state. On idempotent replay, `run.revision` may have advanced past the request's `expected_run_revision`. */
+      run: components["schemas"]["FlowRunPublic"];
+      /**
+       * Rerun Step Id
+       * Format: uuid
+       */
+      rerun_step_id: string;
+      /** New Attempt No */
+      new_attempt_no: number;
+      /** Invalidated Step Ids */
+      invalidated_step_ids: string[];
+      status: components["schemas"]["FlowRunRerunOperationStatus"];
+    };
+    /** FlowRunStepResultFile */
     FlowRunStepResultFile: {
       /**
        * Flow Run Id
@@ -13421,6 +14003,12 @@ export interface components {
       step_order: number;
       /** Attempt No */
       attempt_no: number;
+      /** Rerun Operation Id */
+      rerun_operation_id?: string | null;
+      /** Predecessor Attempt Id */
+      predecessor_attempt_id?: string | null;
+      /** Superseded By Attempt Id */
+      superseded_by_attempt_id?: string | null;
       /** Celery Task Id */
       celery_task_id?: string | null;
       status: components["schemas"]["FlowStepAttemptStatus"];
@@ -15428,6 +16016,42 @@ export interface components {
       /** Backend */
       backend: string;
     };
+    /** OffsetPaginatedResponse[FlowRunPublic] */
+    OffsetPaginatedResponse_FlowRunPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["FlowRunPublic"][];
+      /**
+       * Has More
+       * @description Whether another page exists after the returned offset window
+       */
+      has_more: boolean;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** OffsetPaginatedResponse[FlowSparsePublic] */
+    OffsetPaginatedResponse_FlowSparsePublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["FlowSparsePublic"][];
+      /**
+       * Has More
+       * @description Whether another page exists after the returned offset window
+       */
+      has_more: boolean;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** OpenIdConnectLogin */
     OpenIdConnectLogin: {
       /** Code */
@@ -15746,42 +16370,6 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["FilePublic"][];
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      readonly count: number;
-    };
-    /** OffsetPaginatedResponse[FlowRunPublic] */
-    OffsetPaginatedResponse_FlowRunPublic_: {
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["FlowRunPublic"][];
-      /**
-       * Has More
-       * @description Whether another page exists after the returned offset window
-       */
-      has_more: boolean;
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      readonly count: number;
-    };
-    /** OffsetPaginatedResponse[FlowSparsePublic] */
-    OffsetPaginatedResponse_FlowSparsePublic_: {
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["FlowSparsePublic"][];
-      /**
-       * Has More
-       * @description Whether another page exists after the returned offset window
-       */
-      has_more: boolean;
       /**
        * Count
        * @description Number of items returned in the response
@@ -16579,6 +17167,8 @@ export interface components {
      *               "assistant_spec": {
      *                 "instructions": "Transcribe the uploaded audio into Swedish text.",
      *                 "knowledge_refs": [],
+     *                 "mcp_server_refs": [],
+     *                 "mcp_tool_refs": [],
      *                 "model_ref": "model:gpt-5.4"
      *               },
      *               "input_source": "flow_input",
@@ -16592,6 +17182,8 @@ export interface components {
      *               "assistant_spec": {
      *                 "instructions": "Summarize the transcription into a professional PDF.",
      *                 "knowledge_refs": [],
+     *                 "mcp_server_refs": [],
+     *                 "mcp_tool_refs": [],
      *                 "model_ref": "model:gpt-5.4"
      *               },
      *               "input_bindings": {
@@ -16646,6 +17238,13 @@ export interface components {
     /**
      * PlannerPlanEnvelope
      * @description Wraps FlowDraftSpecCore with AI session metadata.
+     *
+     *     At the consumer / API / frontend layer this envelope carries the full
+     *     spec. At the storage boundary (`builder_plans.envelope_json`) the spec is
+     *     stripped before write and re-injected on read from `builder_plans.spec_json`
+     *     — `spec_json` is the single source of truth, and envelope_json is
+     *     metadata-only. Alembic migration `20260421_builder_envelope_slim` scrubs
+     *     older duplicated spec copies out of persisted rows.
      */
     PlannerPlanEnvelope: {
       spec: components["schemas"]["FlowDraftSpecCore"];
@@ -16800,6 +17399,25 @@ export interface components {
        */
       session_id: string;
     };
+    /**
+     * RerunDependencyKind
+     * @enum {string}
+     */
+    RerunDependencyKind:
+      | "input_source.previous_step"
+      | "input_source.all_previous_steps"
+      | "input_bindings.question"
+      | "input_config.url"
+      | "input_config.headers"
+      | "input_config.body_template"
+      | "input_config.body_json"
+      | "output_config.url"
+      | "output_config.headers"
+      | "output_config.body_template"
+      | "output_config.body_json"
+      | "output_config.bindings"
+      | "assistant_snapshot.instructions"
+      | "runtime_alias.previous_step";
     /**
      * ResourcePermission
      * @enum {string}
@@ -17126,6 +17744,13 @@ export interface components {
     /**
      * SendMessageRequest
      * @example {
+     *       "edit_context": {
+     *         "plan_id": "00000000-0000-0000-0000-000000000702",
+     *         "scope": "step",
+     *         "target_plan_step_ref": "step_b",
+     *         "target_step_name": "Create PDF summary",
+     *         "target_step_number": 2
+     *       },
      *       "file_ids": [
      *         "00000000-0000-0000-0000-000000000099"
      *       ],
@@ -17154,6 +17779,7 @@ export interface components {
       question_answer?: {
         [key: string]: unknown;
       } | null;
+      edit_context?: components["schemas"]["AIBuilderPlanEditContext"] | null;
       /** Ui Language */
       ui_language?: string | null;
     };
@@ -17477,6 +18103,8 @@ export interface components {
      *                   "assistant_spec": {
      *                     "instructions": "Transcribe the uploaded audio into Swedish text.",
      *                     "knowledge_refs": [],
+     *                     "mcp_server_refs": [],
+     *                     "mcp_tool_refs": [],
      *                     "model_ref": "model:gpt-5.4"
      *                   },
      *                   "input_source": "flow_input",
@@ -17490,6 +18118,8 @@ export interface components {
      *                   "assistant_spec": {
      *                     "instructions": "Summarize the transcription into a professional PDF.",
      *                     "knowledge_refs": [],
+     *                     "mcp_server_refs": [],
+     *                     "mcp_tool_refs": [],
      *                     "model_ref": "model:gpt-5.4"
      *                   },
      *                   "input_bindings": {
@@ -17541,11 +18171,13 @@ export interface components {
      *       "conversation": [
      *         {
      *           "content": "Build a flow that transcribes uploaded audio and returns a PDF summary.",
+     *           "message_id": "019db164-9eab-7843-baa1-229e595cde04",
      *           "role": "user",
      *           "timestamp": "2026-03-17T10:00:00Z"
      *         },
      *         {
      *           "content": "I need one more detail about the final PDF format.",
+     *           "message_id": "019db164-9ec0-7f11-8b2e-2a1cd92f6a3f",
      *           "role": "assistant",
      *           "timestamp": "2026-03-17T10:00:03Z"
      *         }
@@ -17555,6 +18187,27 @@ export interface components {
      *       "session_id": "00000000-0000-0000-0000-000000000701",
      *       "status": "chatting",
      *       "target_kind": "create",
+     *       "telemetry": {
+     *         "architecture_commit_count": 1,
+     *         "auxiliary_llm_call_count": 0,
+     *         "clarification_question_count": 1,
+     *         "completion_tokens_total": 240,
+     *         "last_finish_reason": "stop",
+     *         "last_model": "openai/gpt-5.4",
+     *         "last_outcome_kind": "dispatched",
+     *         "last_request_id": "req-123",
+     *         "last_token_usage_estimated": false,
+     *         "last_token_usage_source": "provider",
+     *         "llm_calls_made_total": 2,
+     *         "parse_repair_attempts_total": 0,
+     *         "planner_request_count": 2,
+     *         "prompt_tokens_total": 1200,
+     *         "repair_attempts_total": 0,
+     *         "token_usage_estimated": false,
+     *         "tool_call_count_total": 1,
+     *         "total_tokens_total": 1440,
+     *         "wall_clock_ms_total": 3200
+     *       },
      *       "updated_at": "2026-03-17T10:00:03Z"
      *     }
      */
@@ -23740,6 +24393,73 @@ export interface operations {
         };
       };
       /** @description Invalid flow input limit payload. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Caller lacks permission to update tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_flow_document_render_limits_api_v1_settings_flow_document_render_limits_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowDocumentRenderLimitsPublic"];
+        };
+      };
+    };
+  };
+  update_flow_document_render_limits_api_v1_settings_flow_document_render_limits_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowDocumentRenderLimitsUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowDocumentRenderLimitsPublic"];
+        };
+      };
+      /** @description Invalid flow document render limit payload. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -33842,7 +34562,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
-        /** @description Optional caller-supplied idempotency key. Reusing the same key with the same request payload returns the existing run payload. Reusing the same key with a different payload returns `400` with code `flow_run_idempotency_conflict`. */
+        /** @description Optional caller-supplied idempotency key. Reusing the same key with the same request payload returns the existing run payload. Reusing the same key with a different payload returns `400` with code `flow_run_idempotency_conflict`. Replay is available while the matching run row is retained; clients should keep the returned run id as the durable polling handle. */
         "Idempotency-Key"?: string | null;
       };
       path: {
@@ -34066,6 +34786,97 @@ export interface operations {
       };
     };
   };
+  rerun_flow_run_step: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the run. */
+        id: string;
+        /** @description Identifier of the run to mutate. */
+        run_id: string;
+        /** @description Identifier of the step to rerun. */
+        step_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunStepRerunRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunStepRerunResponse"];
+        };
+      };
+      /** @description Rerun request is invalid for the current run state. Representative machine-readable codes include: flow_run_rerun_stale_revision, flow_run_rerun_invalid_transition, flow_run_rerun_step_not_found, flow_run_rerun_step_incomplete, flow_run_rerun_step_inputs_invalid, flow_run_rerun_reason_required, and flow_run_rerun_reason_too_long. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow run revision is stale.",
+           *       "intric_error_code": 9007,
+           *       "code": "flow_run_rerun_stale_revision"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_tenant_permission` or `insufficient_space_permission` for callers without the required access, `flow_run_access_denied` when a caller tries to access a run outside the current visibility policy, and `flow_service_key_principal_not_supported` on flow surfaces that still require a user principal. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "You do not have permission to rerun flows.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_tenant_permission",
+           *       "context": {
+           *         "auth_layer": "tenant_role"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run not found for this flow and tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow run not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   redispatch_flow_run_alias: {
     parameters: {
       query?: never;
@@ -34244,7 +35055,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Redacted JSON evidence bundle returned as a downloadable attachment. */
       200: {
         headers: {
           /** @description Attachment filename for the JSON evidence bundle. */
@@ -34537,7 +35348,23 @@ export interface operations {
            * @example {
            *       "message": "Artifact not found for this run.",
            *       "intric_error_code": 9000,
-           *       "code": "not_found"
+           *       "code": "flow_run_artifact_not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Artifact content was purged by retention policy. */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Artifact content has been purged by retention policy.",
+           *       "intric_error_code": 9039,
+           *       "code": "flow_run_artifact_content_unavailable"
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
@@ -705,6 +705,167 @@ async def test_rerun_attempt_start_and_success_records_lineage(
         )
         assert prior_attempt is not None
         assert prior_attempt.superseded_by_attempt_id == started_attempt.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_list_rerun_lineage_for_evidence_is_tenant_scoped_and_ordered(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_completed_rerun_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        started_at = datetime(2026, 1, 1, 10, tzinfo=timezone.utc)
+        later_operation = FlowRunRerunOperations(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            rerun_step_id=scenario.step_ids[1],
+            rerun_step_order=2,
+            root_attempt_no=3,
+            status=FlowRunRerunOperationStatus.FAILED.value,
+            request_fingerprint="evidence-rerun-later",
+            expected_run_revision=2,
+            accepted_run_revision=3,
+            reason="Later evidence operation",
+            input_payload_json={"case_id": "later"},
+            step_inputs_json=None,
+            requested_by_principal_type=PrincipalType.USER.value,
+            requested_by_user_id=scenario.requested_by_user_id,
+            failure_code="step_failed",
+            failure_message="Step failed",
+            started_at=started_at + timedelta(minutes=5),
+            finished_at=started_at + timedelta(minutes=6),
+            created_at=started_at + timedelta(minutes=5),
+            updated_at=started_at + timedelta(minutes=6),
+        )
+        earlier_operation = FlowRunRerunOperations(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            rerun_step_id=scenario.step_ids[0],
+            rerun_step_order=1,
+            root_attempt_no=2,
+            status=FlowRunRerunOperationStatus.COMPLETED.value,
+            request_fingerprint="evidence-rerun-earlier",
+            expected_run_revision=1,
+            accepted_run_revision=2,
+            reason="Earlier evidence operation",
+            input_payload_json={"case_id": "earlier"},
+            step_inputs_json={"step_inputs": []},
+            requested_by_principal_type=PrincipalType.USER.value,
+            requested_by_user_id=scenario.requested_by_user_id,
+            failure_code=None,
+            failure_message=None,
+            started_at=started_at,
+            finished_at=started_at + timedelta(minutes=1),
+            created_at=started_at,
+            updated_at=started_at + timedelta(minutes=1),
+        )
+        session.add_all([later_operation, earlier_operation])
+        await session.flush()
+        session.add_all(
+            [
+                FlowRunRerunInvalidatedSteps(
+                    operation_id=later_operation.id,
+                    tenant_id=scenario.tenant_id,
+                    flow_id=scenario.flow_id,
+                    flow_run_id=scenario.flow_run_id,
+                    step_id=scenario.step_ids[2],
+                    step_order=3,
+                    invalidation_order=2,
+                    role=FlowRunRerunInvalidationRole.DOWNSTREAM.value,
+                    dependency_sources_json=[
+                        RerunDependencyKind.INPUT_SOURCE_PREVIOUS_STEP.value
+                    ],
+                    prior_step_result_id=None,
+                    prior_attempt_id=None,
+                    new_attempt_no=None,
+                    new_attempt_id=None,
+                ),
+                FlowRunRerunInvalidatedSteps(
+                    operation_id=later_operation.id,
+                    tenant_id=scenario.tenant_id,
+                    flow_id=scenario.flow_id,
+                    flow_run_id=scenario.flow_run_id,
+                    step_id=scenario.step_ids[1],
+                    step_order=2,
+                    invalidation_order=1,
+                    role=FlowRunRerunInvalidationRole.ROOT.value,
+                    dependency_sources_json=[],
+                    prior_step_result_id=None,
+                    prior_attempt_id=None,
+                    new_attempt_no=3,
+                    new_attempt_id=None,
+                ),
+                FlowRunRerunInvalidatedSteps(
+                    operation_id=earlier_operation.id,
+                    tenant_id=scenario.tenant_id,
+                    flow_id=scenario.flow_id,
+                    flow_run_id=scenario.flow_run_id,
+                    step_id=scenario.step_ids[0],
+                    step_order=1,
+                    invalidation_order=1,
+                    role=FlowRunRerunInvalidationRole.ROOT.value,
+                    dependency_sources_json=[
+                        RerunDependencyKind.INPUT_BINDINGS_QUESTION.value
+                    ],
+                    prior_step_result_id=None,
+                    prior_attempt_id=None,
+                    new_attempt_no=2,
+                    new_attempt_id=None,
+                ),
+            ]
+        )
+        await session.flush()
+
+        operations = await run_repo.list_rerun_operations_for_run(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        invalidated_steps = await run_repo.list_rerun_invalidated_steps_for_run(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        wrong_tenant_operations = await run_repo.list_rerun_operations_for_run(
+            run_id=scenario.flow_run_id,
+            tenant_id=uuid4(),
+        )
+        missing_run_invalidated_steps = (
+            await run_repo.list_rerun_invalidated_steps_for_run(
+                run_id=uuid4(),
+                tenant_id=scenario.tenant_id,
+            )
+        )
+        expected_invalidated_order = sorted(
+            [
+                (earlier_operation.id, 1),
+                (later_operation.id, 1),
+                (later_operation.id, 2),
+            ],
+            key=lambda entry: (entry[0].int, entry[1]),
+        )
+
+    assert [operation.request_fingerprint for operation in operations] == [
+        "evidence-rerun-earlier",
+        "evidence-rerun-later",
+    ]
+    assert [
+        (step.operation_id, step.invalidation_order) for step in invalidated_steps
+    ] == expected_invalidated_order
+    assert wrong_tenant_operations == []
+    assert missing_run_invalidated_steps == []
 
 
 @pytest.mark.asyncio

@@ -258,7 +258,7 @@ class PlannerPlanEnvelope(BaseModel):
     stripped before write and re-injected on read from `builder_plans.spec_json`
     — `spec_json` is the single source of truth, and envelope_json is
     metadata-only. Alembic migration `20260421_builder_envelope_slim` scrubs
-    the legacy duplicate out of existing rows.
+    older duplicated spec copies out of persisted rows.
     """
 
     spec: FlowDraftSpecCore

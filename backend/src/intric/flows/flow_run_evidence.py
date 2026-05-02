@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict
 
 from intric.flows.domain.flow import (
     FlowRun,
+    FlowRunRerunInvalidatedStep,
+    FlowRunRerunOperation,
     FlowStepAttempt,
     FlowStepResult,
     FlowVersion,
@@ -67,8 +69,18 @@ def build_debug_export(
     step_results: list[FlowStepResult] | None = None,
     step_attempts: list[FlowStepAttempt] | None = None,
     result_files: list[FlowRunStepResultFile] | None = None,
+    rerun_operations: list[FlowRunRerunOperation] | None = None,
+    rerun_invalidated_steps: list[FlowRunRerunInvalidatedStep] | None = None,
 ) -> dict[str, Any]:
     definition_snapshot = version.definition_json
+    evidence_generated_at = _latest_evidence_timestamp(
+        run=run,
+        version=version,
+        step_results=step_results or [],
+        step_attempts=step_attempts or [],
+        rerun_operations=rerun_operations or [],
+        rerun_invalidated_steps=rerun_invalidated_steps or [],
+    )
     rag_by_step_order: dict[int, dict[str, Any]] = {}
     for result in step_results or []:
         input_payload = result.input_payload_json
@@ -130,7 +142,7 @@ def build_debug_export(
 
     return {
         "schema_version": DEBUG_EXPORT_SCHEMA_VERSION,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": evidence_generated_at.isoformat(),
         "run": {
             "run_id": str(run.id),
             "flow_id": str(run.flow_id),
@@ -153,6 +165,23 @@ def build_debug_export(
             "mcp_policy_field": "mcp_policy",
         },
     }
+
+
+def _latest_evidence_timestamp(
+    *,
+    run: FlowRun,
+    version: FlowVersion,
+    step_results: list[FlowStepResult],
+    step_attempts: list[FlowStepAttempt],
+    rerun_operations: list[FlowRunRerunOperation],
+    rerun_invalidated_steps: list[FlowRunRerunInvalidatedStep],
+) -> datetime:
+    timestamps = [run.updated_at, version.updated_at]
+    timestamps.extend(result.updated_at for result in step_results)
+    timestamps.extend(attempt.updated_at for attempt in step_attempts)
+    timestamps.extend(operation.updated_at for operation in rerun_operations)
+    timestamps.extend(step.updated_at for step in rerun_invalidated_steps)
+    return max(timestamps)
 
 
 def parse_step_order(value: Any, *, default: int | None = None) -> int | None:

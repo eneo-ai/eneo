@@ -794,6 +794,109 @@ Run this guard before commit:
 git diff -- backend/src/intric/flows backend/tests/unittests/flows/test_flow_router.py backend/tests/unit/test_flow_openapi_contract.py backend/tests/unit/test_server_startup_imports.py | rg '^\+.*(deprecated|legacy|backwards compat|backward compat|compatibility shim|rerun.*redispatch|redispatch.*rerun)' || true
 ```
 
+## Slice 8.9 Evidence Rerun Lineage
+
+This slice completes the backend evidence contract for Batch 8. It makes rerun
+operation rows and invalidated-step rows visible through the same canonical
+evidence bundle/export path that already owns step results, step attempts, and
+result files.
+
+### Canonical Owners
+
+| Concept | Canonical owner | Decision |
+|---|---|---|
+| Rerun request/audit fact in evidence | `flow_run_rerun_operations` via `FlowRunRepository` | Add a tenant-scoped run query and expose rows as typed evidence payload, not as an ad hoc debug-only dict. |
+| Rerun invalidation lineage in evidence | `flow_run_rerun_invalidated_steps` via `FlowRunRepository` | Add a tenant-scoped run query ordered by operation and invalidation order. |
+| Attempt predecessor/supersession lineage | `FlowStepAttempts` | Already included in `step_attempts`; keep it there and do not duplicate attempt lineage into a second summary owner. |
+| Evidence/export payload shape | `flow_run_evidence_bundle.py` | Add `rerun_operations` and `rerun_invalidated_steps` beside `step_attempts` and `result_files` so raw/redacted export shapes stay identical. |
+| Debug export timestamp inside hashed bundle | `flow_run_evidence.py` | Derive `debug_export.generated_at` from persisted evidence timestamps so repeated exports of unchanged evidence keep a stable `content_hash`; manifest `exported_at` remains the wall-clock export time. |
+| Export summary | `flow_run_export_json.py` | Add a narrow rerun lineage summary derived from the bundle payload. The bundle remains the source of truth. |
+| Public evidence schema | `flow_models.py` | Add typed public models for rerun operation and invalidated-step rows, then add them to `FlowRunEvidenceResponse`. |
+| Export schema version | `flow_run_evidence_export_manifest.py` | Bump `flow-evidence-export.v3` to `flow-evidence-export.v4` because the hashed bundle gains two top-level arrays and the summary gains rerun lineage. |
+| Generated client contract | `frontend/packages/intric-js/src/types` | Refresh generated schema/types after the backend OpenAPI shape changes and pin rerun lineage in the package type-smoke file. |
+
+### Source Scope
+
+- `backend/src/intric/flows/infrastructure/flow_run_repo.py`
+  - Add `list_rerun_operations_for_run(...)` with `tenant_id` and `flow_run_id` filters, empty-list no-rerun behavior, and deterministic ordering by `created_at ASC, id ASC`.
+  - Add `list_rerun_invalidated_steps_for_run(...)` with `tenant_id` and `flow_run_id` filters, empty-list no-rerun behavior, and deterministic ordering by `operation_id ASC, invalidation_order ASC, id ASC`.
+- `backend/src/intric/flows/application/flow_run_service.py`
+  - Fetch rerun operations and invalidated rows in `_get_evidence_bundle(...)`.
+- `backend/src/intric/flows/flow_run_evidence_bundle.py`
+  - Extend `EvidenceBundle` and `RedactedEvidenceBundle`.
+  - Include rerun rows in raw and redacted payloads.
+  - Add the two tuple fields to `RedactedEvidenceBundle`, include them in `to_export_payload()`, and walk each row through the same redactor with paths `bundle.rerun_operations[{index}]` and `bundle.rerun_invalidated_steps[{index}]`.
+  - Reuse a narrow internal section redaction helper if it reduces repeated redaction boilerplate without hiding the evidence section path.
+  - Dump rerun rows with plain `model_dump(mode="json")`; no provenance enrichment hook is needed for these persisted audit rows.
+- `backend/src/intric/flows/flow_run_evidence.py`
+  - Make `debug_export.generated_at` deterministic from persisted evidence timestamps, including rerun operation and invalidated-step rows, so the hashed bundle does not drift between identical exports.
+- `backend/src/intric/flows/flow_run_export_json.py`
+  - Add `_build_rerun_lineage_summary(...)`.
+  - Add `summary["rerun_lineage"]` with `operations_count`, `queued_operations_count`, `running_operations_count`, `completed_operations_count`, `failed_operations_count`, `cancelled_operations_count`, `active_operations_count`, `terminal_operations_count`, `invalidated_steps_count`, and `completed_replacement_count`.
+  - Do not mirror rerun lineage into `debug_export`; `rerun_operations` and `rerun_invalidated_steps` are the canonical evidence channel.
+- `backend/src/intric/flows/flow_run_evidence_export_manifest.py`
+  - Bump `EVIDENCE_EXPORT_SCHEMA_VERSION` to `flow-evidence-export.v4`.
+- `backend/src/intric/flows/api/flow_models.py`
+  - Add `FlowRunRerunOperationPublic` and `FlowRunRerunInvalidatedStepPublic`.
+  - Add `rerun_operations` and `rerun_invalidated_steps` to `FlowRunEvidenceResponse`.
+  - Add `current_attempt_no` to `FlowRunStepPublic` so the typed evidence endpoint exposes the existing current-attempt projection already present in raw evidence records.
+  - Expose the full persisted rerun operation evidence row: id, tenant/run/flow ids, root step id/order, root attempt number/id, status, request fingerprint, expected/accepted revision, reason, `input_payload_json`, `step_inputs_json`, requesting principal/user, failure fields, and timestamps.
+  - Keep `request_fingerprint` public in evidence because it lets support and audit tooling correlate a replayed rerun request with the accepted operation row and invalidation lineage without reading database internals.
+  - Expose the full persisted invalidated-step evidence row: id, operation/tenant/run/flow ids, step id/order, invalidation order, role, `dependency_sources_json: list[RerunDependencyKind]`, prior result/attempt ids, replacement attempt number/id, and timestamps.
+- `backend/tests/integration/flows/test_flow_run_rerun_repository.py`
+  - Pin the two new repository list methods for tenant scoping, empty-list behavior, deterministic ordering, and multi-tenant isolation.
+- `backend/tests/integration/flows/test_flow_evidence_api_contracts.py`
+  - Pin redacted evidence API/export payloads with rerun operation and invalidated-step rows.
+- `backend/tests/unit/test_flow_openapi_contract.py`
+  - Pin `FlowRunEvidenceResponse` OpenAPI schema additions and the v4 export schema literal.
+- `backend/tests/unittests/flows/test_flow_models.py`
+  - Pin typed evidence response parsing for the new nested models.
+- `backend/tests/unittests/flows/test_flow_run_evidence.py`
+  - Pin the deterministic debug-export timestamp used by evidence bundle hashing.
+- `frontend/packages/intric-js/src/types/schema.d.ts`
+  - Refresh from current backend OpenAPI.
+- `frontend/packages/intric-js/src/types/resources.d.ts`
+  - Export public aliases for rerun operation and invalidated-step evidence rows.
+- `frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts`
+  - Add type-smoke fixtures for v4 evidence export and rerun lineage.
+- `backend/src/intric/flows/ai_builder/ai_builder_domain_models.py`
+  - Remove new generated-client wording that would introduce stale Flow/AI Builder release-state language into the refreshed OpenAPI output.
+
+### Tests
+
+- Evidence endpoint returns:
+  - rerun operation id, root step id/order, root attempt number/id, status, reason, actor, expected/accepted revision, failure fields, and timestamps
+  - invalidated-step role, dependency source values, prior result/attempt ids, and replacement attempt ids
+  - step-attempt predecessor/supersession fields in the existing `step_attempts` array
+- Evidence export returns the same rerun rows in `bundle`, hashes the bundle that contains them, and includes a derived rerun summary.
+- Evidence export of the same terminal run twice returns the same `content_hash` when there are no intervening writes.
+- Redaction preserves raw/redacted shape equality for rerun keys: `set(raw_bundle.keys()) == set(redacted_bundle.keys())`, rerun arrays have the same length, each row has the same key set, and sensitive inline rerun payload fields are redacted through the existing bundle redactor at manifest paths.
+- Typed response model parses rerun rows through named public schemas; JSON payload columns remain explicit JSON object fields.
+- `FlowRunStepResults.current_attempt_no` already serializes through `_dump_result_record(...)`; this slice must not add a duplicate attempt-currentness field elsewhere.
+- The generated-client impact is visible in OpenAPI contract tests and the `@intric/intric-js` type smoke check.
+
+### Validation Commands
+
+Run these before Claude implementation review:
+
+```bash
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/integration/flows/test_flow_evidence_api_contracts.py -k 'rerun or evidence_export_returns_redacted_json_attachment' -q
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/integration/flows/test_flow_run_rerun_repository.py -k 'evidence or list_rerun' -q
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/unit/test_flow_openapi_contract.py -k 'evidence or export_schema' -q
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/unittests/flows/test_flow_models.py -q
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/unittests/flows/test_flow_run_evidence.py::test_build_debug_export_uses_latest_evidence_timestamp -q
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/ruff check src/intric/flows/ai_builder/ai_builder_domain_models.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_evidence.py src/intric/flows/flow_run_evidence_bundle.py src/intric/flows/flow_run_export_json.py src/intric/flows/flow_run_evidence_export_manifest.py src/intric/flows/api/flow_models.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/integration/flows/test_flow_run_rerun_repository.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_run_evidence.py
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pyright --pythonpath .venv/bin/python src/intric/flows/ai_builder/ai_builder_domain_models.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_evidence.py src/intric/flows/flow_run_evidence_bundle.py src/intric/flows/flow_run_export_json.py src/intric/flows/flow_run_evidence_export_manifest.py src/intric/flows/api/flow_models.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/integration/flows/test_flow_run_rerun_repository.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_run_evidence.py
+cd frontend/packages/intric-js && bun run check
+git diff --check
+```
+
+Run this guard before commit:
+
+```bash
+git diff -- backend/src/intric/flows backend/tests/integration/flows/test_flow_evidence_api_contracts.py backend/tests/integration/flows/test_flow_run_rerun_repository.py backend/tests/unit/test_flow_openapi_contract.py backend/tests/unittests/flows/test_flow_models.py backend/tests/unittests/flows/test_flow_run_evidence.py frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts frontend/packages/intric-js/src/types/resources.d.ts frontend/packages/intric-js/src/types/schema.d.ts | rg '^\+.*(deprecated|legacy|backwards compat|backward compat|compatibility shim|rerun.*redispatch|redispatch.*rerun)' || true
+```
+
 ## Validation Commands
 
 Canonical Docker commands from `implementation-order.md` for Batch 8, made executable for this plan:

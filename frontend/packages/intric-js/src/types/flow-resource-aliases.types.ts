@@ -6,6 +6,8 @@ import type {
   FlowRunContract,
   FlowRunEvidenceExport,
   FlowRunEvidenceWithTypedSteps,
+  FlowRunRerunInvalidatedStep,
+  FlowRunRerunOperation,
   FlowRunResultFile,
   FlowRunStep,
   FlowRunStepInputs,
@@ -22,6 +24,7 @@ const tenantId = "00000000-0000-0000-0000-000000000010";
 const runId = "00000000-0000-0000-0000-000000000301";
 const stepResultId = "00000000-0000-0000-0000-000000000501";
 const resultFileId = "00000000-0000-0000-0000-000000000801";
+const rerunOperationId = "00000000-0000-0000-0000-000000000901";
 
 const validFlowStep: FlowStep = {
   id: stepId,
@@ -106,6 +109,7 @@ const validFlowRun: FlowRun = {
   flow_version: 3,
   tenant_id: tenantId,
   trace_id: "00000000-0000-0000-0000-000000000302",
+  revision: 1,
   status: "completed",
   input_payload_json: { case_id: "CASE-1" },
   output_payload_json: {
@@ -128,7 +132,53 @@ const validFlowRunStep: FlowRunStep = {
   output_payload_json: {
     text: "Step output"
   },
+  current_attempt_no: 1,
   result_files: [validFlowRunResultFile],
+  created_at: isoTimestamp,
+  updated_at: isoTimestamp
+};
+
+const validRerunOperation: FlowRunRerunOperation = {
+  id: rerunOperationId,
+  tenant_id: tenantId,
+  flow_id: flowId,
+  flow_run_id: runId,
+  rerun_step_id: stepId,
+  rerun_step_order: 1,
+  root_attempt_no: 2,
+  root_attempt_id: "00000000-0000-0000-0000-000000000902",
+  status: "completed",
+  request_fingerprint: "sha256:rerun",
+  expected_run_revision: 1,
+  accepted_run_revision: 2,
+  reason: "Refresh the source document.",
+  input_payload_json: { case_id: "CASE-2" },
+  step_inputs_json: { [stepId]: { file_ids: ["00000000-0000-0000-0000-000000000702"] } },
+  requested_by_principal_type: "user",
+  requested_by_user_id: "00000000-0000-0000-0000-000000000030",
+  failure_code: null,
+  failure_message: null,
+  started_at: isoTimestamp,
+  finished_at: isoTimestamp,
+  created_at: isoTimestamp,
+  updated_at: isoTimestamp
+};
+
+const validRerunInvalidatedStep: FlowRunRerunInvalidatedStep = {
+  id: "00000000-0000-0000-0000-000000000903",
+  operation_id: rerunOperationId,
+  tenant_id: tenantId,
+  flow_id: flowId,
+  flow_run_id: runId,
+  step_id: stepId,
+  step_order: 1,
+  invalidation_order: 0,
+  role: "root",
+  dependency_sources_json: ["input_bindings.question"],
+  prior_step_result_id: stepResultId,
+  prior_attempt_id: "00000000-0000-0000-0000-000000000904",
+  new_attempt_no: 2,
+  new_attempt_id: validRerunOperation.root_attempt_id,
   created_at: isoTimestamp,
   updated_at: isoTimestamp
 };
@@ -151,6 +201,8 @@ const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
   step_results: [validFlowRunStep],
   step_attempts: [],
   result_files: [validFlowRunResultFile],
+  rerun_operations: [validRerunOperation],
+  rerun_invalidated_steps: [validRerunInvalidatedStep],
   debug_export: {
     schema_version: "eneo.flow.debug-export.v2",
     generated_at: isoTimestamp,
@@ -178,11 +230,11 @@ const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
 };
 
 const validFlowEvidenceExport: FlowRunEvidenceExport = {
-  schema_version: "flow-evidence-export.v3",
+  schema_version: "flow-evidence-export.v4",
   generated_at: isoTimestamp,
   content_hash: "sha256:evidence",
   manifest: {
-    schema_version: "flow-evidence-export.v3",
+    schema_version: "flow-evidence-export.v4",
     provenance_schema_version_min: "flow-attempt-provenance.v1",
     provenance_schema_version_current: "flow-attempt-provenance.v1",
     provenance_persisted_version_status: "not_tracked",

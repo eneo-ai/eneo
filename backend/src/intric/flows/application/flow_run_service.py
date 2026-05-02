@@ -1131,6 +1131,16 @@ class FlowRunService:
             run_id=resolved_run.id,
             tenant_id=self.user.tenant_id,
         )
+        rerun_operations = await self.flow_run_repo.list_rerun_operations_for_run(
+            run_id=resolved_run.id,
+            tenant_id=self.user.tenant_id,
+        )
+        rerun_invalidated_steps = (
+            await self.flow_run_repo.list_rerun_invalidated_steps_for_run(
+                run_id=resolved_run.id,
+                tenant_id=self.user.tenant_id,
+            )
+        )
         result_files = await self.flow_run_repo.list_result_files(
             run_id=resolved_run.id,
             tenant_id=self.user.tenant_id,
@@ -1141,6 +1151,8 @@ class FlowRunService:
             step_results=step_results,
             step_attempts=step_attempts,
             result_files=result_files,
+            rerun_operations=rerun_operations,
+            rerun_invalidated_steps=rerun_invalidated_steps,
         )
 
     def _build_preseed_steps(

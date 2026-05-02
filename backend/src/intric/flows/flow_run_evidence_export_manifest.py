@@ -10,8 +10,8 @@ from intric.flows.flow_run_step_result_file import (
     FlowRunStepResultFileSource,
 )
 
-EVIDENCE_EXPORT_SCHEMA_VERSION: Literal["flow-evidence-export.v3"] = (
-    "flow-evidence-export.v3"
+EVIDENCE_EXPORT_SCHEMA_VERSION: Literal["flow-evidence-export.v4"] = (
+    "flow-evidence-export.v4"
 )
 
 EvidenceExportContentHashInput: TypeAlias = Literal["raw", "redacted"]
@@ -78,7 +78,7 @@ class EvidenceArtifactAvailabilitySummary(BaseModel):
 class EvidenceExportManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["flow-evidence-export.v3"]
+    schema_version: Literal["flow-evidence-export.v4"]
     provenance_schema_version_min: str
     provenance_schema_version_current: str
     provenance_persisted_version_status: EvidenceProvenancePersistedVersionStatus

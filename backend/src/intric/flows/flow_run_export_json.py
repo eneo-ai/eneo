@@ -319,6 +319,7 @@ def _build_summary(
     step_results = _as_json_object_list(bundle_payload.get("step_results"))
     step_attempts = _as_json_object_list(bundle_payload.get("step_attempts"))
     result_files = _result_file_records(bundle_payload)
+    rerun_lineage = _build_rerun_lineage_summary(bundle_payload)
     debug_export = _as_json_object_or_empty(bundle_payload.get("debug_export"))
     debug_run = _as_json_object_or_empty(debug_export.get("run"))
     debug_summary = _as_json_object_or_empty(debug_run.get("summary"))
@@ -365,6 +366,7 @@ def _build_summary(
             provenance_parse_results=provenance_parse_results,
         ),
         "citations": citations,
+        "rerun_lineage": rerun_lineage,
         "final_output": _build_final_output_summary(
             run.get("output_payload_json"),
             artifact_details=_collect_artifact_details(
@@ -384,6 +386,48 @@ def _collect_models_used(step_attempts: Any) -> list[str]:
                 models.append(raw_value.strip())
                 break
     return list(dict.fromkeys(models))
+
+
+def _build_rerun_lineage_summary(bundle_payload: dict[str, Any]) -> dict[str, Any]:
+    operations = _rerun_operation_records(bundle_payload)
+    invalidated_steps = _rerun_invalidated_step_records(bundle_payload)
+    operation_statuses = [
+        str(status)
+        for operation in operations
+        if (status := operation.get("status")) is not None
+    ]
+    return {
+        "operations_count": len(operations),
+        "queued_operations_count": operation_statuses.count("queued"),
+        "running_operations_count": operation_statuses.count("running"),
+        "completed_operations_count": operation_statuses.count("completed"),
+        "failed_operations_count": operation_statuses.count("failed"),
+        "cancelled_operations_count": operation_statuses.count("cancelled"),
+        "active_operations_count": sum(
+            1 for status in operation_statuses if status in {"queued", "running"}
+        ),
+        "terminal_operations_count": sum(
+            1
+            for status in operation_statuses
+            if status in {"completed", "failed", "cancelled"}
+        ),
+        "invalidated_steps_count": len(invalidated_steps),
+        "completed_replacement_count": sum(
+            1
+            for invalidated_step in invalidated_steps
+            if invalidated_step.get("new_attempt_id") is not None
+        ),
+    }
+
+
+def _rerun_operation_records(bundle_payload: dict[str, Any]) -> list[JsonObject]:
+    return _as_json_object_list(bundle_payload.get("rerun_operations"))
+
+
+def _rerun_invalidated_step_records(
+    bundle_payload: dict[str, Any],
+) -> list[JsonObject]:
+    return _as_json_object_list(bundle_payload.get("rerun_invalidated_steps"))
 
 
 def _collect_rag_sources(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]:

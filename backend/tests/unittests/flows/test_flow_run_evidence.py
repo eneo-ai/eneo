@@ -9,8 +9,19 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from intric.authentication.principal_types import PrincipalType
 from intric.files.file_models import FileType
-from intric.flows.enums import FlowStepAttemptStatus, FlowStepResultStatus
+from intric.flows.domain.flow import (
+    FlowRunRerunInvalidatedStep,
+    FlowRunRerunOperation,
+)
+from intric.flows.enums import (
+    FlowRunRerunInvalidationRole,
+    FlowRunRerunOperationStatus,
+    FlowStepAttemptStatus,
+    FlowStepResultStatus,
+    RerunDependencyKind,
+)
 from intric.flows.flow import (
     FlowRun,
     FlowRunStatus,
@@ -253,6 +264,78 @@ def _render_raw_export(
         ),
         context=_raw_export_context(),
     )
+
+
+def test_build_debug_export_uses_latest_evidence_timestamp() -> None:
+    run, version = _evidence_run_and_version()
+    run_timestamp = datetime(2026, 3, 17, 10, 5, tzinfo=timezone.utc)
+    version_timestamp = datetime(2026, 3, 17, 10, 6, tzinfo=timezone.utc)
+    result_timestamp = datetime(2026, 3, 17, 10, 7, tzinfo=timezone.utc)
+    attempt_timestamp = datetime(2026, 3, 17, 10, 8, tzinfo=timezone.utc)
+    operation_timestamp = datetime(2026, 3, 17, 10, 9, tzinfo=timezone.utc)
+    invalidation_timestamp = datetime(2026, 3, 17, 10, 10, tzinfo=timezone.utc)
+    run = run.model_copy(update={"updated_at": run_timestamp})
+    version = version.model_copy(update={"updated_at": version_timestamp})
+    result = _step_result_for_run(run).model_copy(
+        update={"updated_at": result_timestamp}
+    )
+    attempt = _attempt_with_provenance(run, {}).model_copy(
+        update={"updated_at": attempt_timestamp}
+    )
+    operation = FlowRunRerunOperation(
+        id=uuid4(),
+        tenant_id=run.tenant_id,
+        flow_id=run.flow_id,
+        flow_run_id=run.id,
+        rerun_step_id=attempt.step_id or uuid4(),
+        rerun_step_order=attempt.step_order,
+        root_attempt_no=2,
+        root_attempt_id=attempt.id,
+        status=FlowRunRerunOperationStatus.COMPLETED,
+        request_fingerprint="fingerprint",
+        expected_run_revision=1,
+        accepted_run_revision=2,
+        reason="refresh evidence",
+        input_payload_json=None,
+        step_inputs_json=None,
+        requested_by_principal_type=PrincipalType.USER,
+        requested_by_user_id=uuid4(),
+        failure_code=None,
+        failure_message=None,
+        started_at=operation_timestamp,
+        finished_at=operation_timestamp,
+        created_at=operation_timestamp,
+        updated_at=operation_timestamp,
+    )
+    invalidated_step = FlowRunRerunInvalidatedStep(
+        id=uuid4(),
+        operation_id=operation.id,
+        tenant_id=run.tenant_id,
+        flow_id=run.flow_id,
+        flow_run_id=run.id,
+        step_id=operation.rerun_step_id,
+        step_order=operation.rerun_step_order,
+        invalidation_order=0,
+        role=FlowRunRerunInvalidationRole.ROOT,
+        dependency_sources_json=[RerunDependencyKind.INPUT_BINDINGS_QUESTION],
+        prior_step_result_id=result.id,
+        prior_attempt_id=attempt.id,
+        new_attempt_no=2,
+        new_attempt_id=attempt.id,
+        created_at=invalidation_timestamp,
+        updated_at=invalidation_timestamp,
+    )
+
+    export = build_debug_export(
+        run=run,
+        version=version,
+        step_results=[result],
+        step_attempts=[attempt],
+        rerun_operations=[operation],
+        rerun_invalidated_steps=[invalidated_step],
+    )
+
+    assert export["generated_at"] == invalidation_timestamp.isoformat()
 
 
 def test_parse_step_order_handles_strings_and_bools():

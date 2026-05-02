@@ -10,7 +10,10 @@ import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
 
+from intric.authentication.principal_types import PrincipalType
 from intric.database.tables.flow_tables import (
+    FlowRunRerunInvalidatedSteps,
+    FlowRunRerunOperations,
     FlowRuns,
     FlowStepAttempts,
     FlowStepResults,
@@ -23,6 +26,11 @@ from intric.flows import (
     FlowRepository,
     FlowStep,
     FlowVersionRepository,
+)
+from intric.flows.enums import (
+    FlowRunRerunInvalidationRole,
+    FlowRunRerunOperationStatus,
+    RerunDependencyKind,
 )
 from intric.flows.flow_retention_tombstone import (
     FLOW_RETENTION_ACTOR_SOURCE,
@@ -153,6 +161,7 @@ async def _seed_flow_run_contract_data(
     assistant_factory,
     admin_user,
     attempt_provenance_json: dict[str, Any] | None = None,
+    include_rerun_lineage: bool = False,
 ) -> dict[str, str]:
     async with db_container() as container:
         session = container.session()
@@ -245,151 +254,255 @@ async def _seed_flow_run_contract_data(
         session.add(run)
         await session.flush()
 
-        session.add(
-            FlowStepResults(
-                flow_run_id=run.id,
-                flow_id=flow.id,
-                tenant_id=admin_user.tenant_id,
-                step_id=step.id,
-                step_order=1,
-                assistant_id=assistant.id,
-                input_payload_json={
-                    "question": "What happened?",
-                    "token": "super-secret",
-                    "diagnostics": [{"code": "ok"}],
-                    "runtime_input": {
-                        "file_ids": ["input-file-1"],
-                        "files_count": 1,
-                        "files": [
+        step_result = FlowStepResults(
+            flow_run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            step_id=step.id,
+            step_order=1,
+            assistant_id=assistant.id,
+            input_payload_json={
+                "question": "What happened?",
+                "token": "super-secret",
+                "diagnostics": [{"code": "ok"}],
+                "runtime_input": {
+                    "file_ids": ["input-file-1"],
+                    "files_count": 1,
+                    "files": [
+                        {
+                            "id": "input-file-1",
+                            "name": "underlag.pdf",
+                            "checksum": "input-checksum",
+                            "size": 256,
+                            "mimetype": "application/pdf",
+                            "file_type": "document",
+                            "text_length": 42,
+                            "has_text": True,
+                            "has_transcription": False,
+                        }
+                    ],
+                    "total_file_size": 256,
+                    "extracted_text_length": 42,
+                    "input_format": "document",
+                    "capture_mode": "flow_input_files",
+                },
+            },
+            effective_prompt="Authorization: Bearer super-secret",
+            output_payload_json={
+                "summary": "Looks good",
+                "url": "https://example.org/hook?token=top-secret",
+            },
+            model_parameters_json={"temperature": 0.2},
+            num_tokens_input=11,
+            num_tokens_output=7,
+            status="completed",
+            error_message=None,
+            flow_step_execution_hash="hash-1",
+            tool_calls_metadata=[],
+        )
+        session.add(step_result)
+        initial_attempt = FlowStepAttempts(
+            flow_run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            step_id=step.id,
+            step_order=1,
+            attempt_no=1,
+            celery_task_id="celery-1",
+            status="completed",
+            error_code=None,
+            error_message="Bearer super-secret",
+            requested_model="gpt-4o-mini",
+            response_model="gpt-4o-mini",
+            provider="openai",
+            finish_reason="stop",
+            provider_response_id="resp_123",
+            num_tokens_input=11,
+            num_tokens_output=7,
+            provenance_json=attempt_provenance_json
+            or {
+                "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+                "llm": {
+                    "prompt": "Authorization: Bearer super-secret",
+                    "params": {"temperature": 0.2},
+                },
+                "rag": {
+                    "attempted": True,
+                    "status": "success",
+                    "tracking": {
+                        "retrieval_tracked": True,
+                        "prompt_context_inclusion_tracked": True,
+                        "citation_tracked": False,
+                        "material_influence_tracked": False,
+                        "selection_basis": "semantic_search_ranked_chunks_grouped_by_source",
+                    },
+                    "prompt_context": {
+                        "tracked": True,
+                        "version": 2,
+                        "selection_basis": "semantic_search_ranked_chunks_grouped_by_source",
+                        "raw_source_count": 1,
+                        "raw_chunk_count": 1,
+                        "included_source_count": 1,
+                        "not_included_source_count": 0,
+                        "included_chunk_count": 1,
+                        "knowledge_tokens": 64,
+                        "truncated_by_token_budget": False,
+                        "included_source_ids": ["source-1"],
+                        "not_included_source_ids": [],
+                        "included_source_titles": [
+                            "https://kunskap.example.se/beslut/underlag"
+                        ],
+                        "included_groups": [
                             {
-                                "id": "input-file-1",
-                                "name": "underlag.pdf",
-                                "checksum": "input-checksum",
-                                "size": 256,
-                                "mimetype": "application/pdf",
-                                "file_type": "document",
-                                "text_length": 42,
-                                "has_text": True,
-                                "has_transcription": False,
+                                "source_id": "source-1",
+                                "source_id_short": "source-1",
+                                "source_title": "https://kunskap.example.se/beslut/underlag",
+                                "start_chunk": 1,
+                                "end_chunk": 1,
+                                "chunk_count": 1,
+                                "relevance_score": 0.82,
                             }
                         ],
-                        "total_file_size": 256,
-                        "extracted_text_length": 42,
-                        "input_format": "document",
-                        "capture_mode": "flow_input_files",
                     },
+                    "unique_sources": 1,
+                    "references_truncated": False,
+                    "reference_metadata_status": "success",
+                    "source_names": ["https://kunskap.example.se/beslut/underlag"],
+                    "source_display_names": ["kunskap.example.se/beslut/underlag"],
+                    "references": [
+                        {
+                            "id": "source-1",
+                            "id_short": "source-1",
+                            "title": "https://kunskap.example.se/beslut/underlag",
+                            "usage_state": "inserted_into_prompt",
+                            "hit_count": 1,
+                            "best_score": 0.82,
+                            "chunks": [],
+                        }
+                    ],
                 },
-                effective_prompt="Authorization: Bearer super-secret",
-                output_payload_json={
-                    "summary": "Looks good",
-                    "url": "https://example.org/hook?token=top-secret",
+                "http": {
+                    "request_preview": {"authorization": "Bearer super-secret"},
                 },
-                model_parameters_json={"temperature": 0.2},
-                num_tokens_input=11,
-                num_tokens_output=7,
-                status="completed",
-                error_message=None,
-                flow_step_execution_hash="hash-1",
-                tool_calls_metadata=[],
-            )
+            },
+            started_at=started_at,
+            finished_at=finished_at,
         )
-        session.add(
-            FlowStepAttempts(
+        session.add(initial_attempt)
+        await session.flush()
+
+        rerun_operation_id: str | None = None
+        rerun_invalidated_step_id: str | None = None
+        replacement_attempt_id: str | None = None
+        if include_rerun_lineage:
+            rerun_operation = FlowRunRerunOperations(
+                tenant_id=admin_user.tenant_id,
+                flow_id=flow.id,
+                flow_run_id=run.id,
+                rerun_step_id=step.id,
+                rerun_step_order=1,
+                root_attempt_no=2,
+                status=FlowRunRerunOperationStatus.COMPLETED.value,
+                request_fingerprint="rerun-fingerprint-1",
+                expected_run_revision=1,
+                accepted_run_revision=2,
+                reason="Regenerate evidence lineage.",
+                input_payload_json={
+                    "question": "What changed?",
+                    "api_key": "super-secret",
+                },
+                step_inputs_json={
+                    str(step.id): {
+                        "file_ids": ["rerun-input-file-1"],
+                        "api_key": "super-secret",
+                    }
+                },
+                requested_by_principal_type=PrincipalType.USER.value,
+                requested_by_user_id=admin_user.id,
+                failure_code=None,
+                failure_message=None,
+                started_at=started_at,
+                finished_at=finished_at,
+            )
+            session.add(rerun_operation)
+            await session.flush()
+
+            replacement_attempt = FlowStepAttempts(
                 flow_run_id=run.id,
                 flow_id=flow.id,
                 tenant_id=admin_user.tenant_id,
                 step_id=step.id,
                 step_order=1,
-                attempt_no=1,
-                celery_task_id="celery-1",
+                attempt_no=2,
+                rerun_operation_id=rerun_operation.id,
+                predecessor_attempt_id=initial_attempt.id,
+                celery_task_id="celery-rerun-2",
                 status="completed",
                 error_code=None,
-                error_message="Bearer super-secret",
+                error_message=None,
                 requested_model="gpt-4o-mini",
                 response_model="gpt-4o-mini",
                 provider="openai",
                 finish_reason="stop",
-                provider_response_id="resp_123",
-                num_tokens_input=11,
-                num_tokens_output=7,
-                provenance_json=attempt_provenance_json
-                or {
+                provider_response_id="resp_rerun_456",
+                num_tokens_input=13,
+                num_tokens_output=9,
+                provenance_json={
                     "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
                     "llm": {
-                        "prompt": "Authorization: Bearer super-secret",
-                        "params": {"temperature": 0.2},
-                    },
-                    "rag": {
-                        "attempted": True,
-                        "status": "success",
-                        "tracking": {
-                            "retrieval_tracked": True,
-                            "prompt_context_inclusion_tracked": True,
-                            "citation_tracked": False,
-                            "material_influence_tracked": False,
-                            "selection_basis": "semantic_search_ranked_chunks_grouped_by_source",
-                        },
-                        "prompt_context": {
-                            "tracked": True,
-                            "version": 2,
-                            "selection_basis": "semantic_search_ranked_chunks_grouped_by_source",
-                            "raw_source_count": 1,
-                            "raw_chunk_count": 1,
-                            "included_source_count": 1,
-                            "not_included_source_count": 0,
-                            "included_chunk_count": 1,
-                            "knowledge_tokens": 64,
-                            "truncated_by_token_budget": False,
-                            "included_source_ids": ["source-1"],
-                            "not_included_source_ids": [],
-                            "included_source_titles": [
-                                "https://kunskap.example.se/beslut/underlag"
-                            ],
-                            "included_groups": [
-                                {
-                                    "source_id": "source-1",
-                                    "source_id_short": "source-1",
-                                    "source_title": "https://kunskap.example.se/beslut/underlag",
-                                    "start_chunk": 1,
-                                    "end_chunk": 1,
-                                    "chunk_count": 1,
-                                    "relevance_score": 0.82,
-                                }
-                            ],
-                        },
-                        "unique_sources": 1,
-                        "references_truncated": False,
-                        "reference_metadata_status": "success",
-                        "source_names": ["https://kunskap.example.se/beslut/underlag"],
-                        "source_display_names": ["kunskap.example.se/beslut/underlag"],
-                        "references": [
-                            {
-                                "id": "source-1",
-                                "id_short": "source-1",
-                                "title": "https://kunskap.example.se/beslut/underlag",
-                                "usage_state": "inserted_into_prompt",
-                                "hit_count": 1,
-                                "best_score": 0.82,
-                                "chunks": [],
-                            }
-                        ],
-                    },
-                    "http": {
-                        "request_preview": {"authorization": "Bearer super-secret"},
+                        "prompt": "Rerun prompt with token super-secret",
+                        "params": {"temperature": 0.1},
                     },
                 },
+                input_payload_json={"question": "What changed?"},
+                output_payload_json={"summary": "Looks good after rerun"},
+                flow_step_execution_hash="hash-2",
                 started_at=started_at,
                 finished_at=finished_at,
             )
-        )
-        await session.flush()
+            session.add(replacement_attempt)
+            await session.flush()
 
-        return {
+            rerun_operation.root_attempt_id = replacement_attempt.id
+            initial_attempt.superseded_by_attempt_id = replacement_attempt.id
+            step_result.current_attempt_no = replacement_attempt.attempt_no
+            invalidated_step = FlowRunRerunInvalidatedSteps(
+                operation_id=rerun_operation.id,
+                tenant_id=admin_user.tenant_id,
+                flow_id=flow.id,
+                flow_run_id=run.id,
+                step_id=step.id,
+                step_order=1,
+                invalidation_order=1,
+                role=FlowRunRerunInvalidationRole.ROOT.value,
+                dependency_sources_json=[
+                    RerunDependencyKind.INPUT_BINDINGS_QUESTION.value
+                ],
+                prior_step_result_id=step_result.id,
+                prior_attempt_id=initial_attempt.id,
+                new_attempt_no=replacement_attempt.attempt_no,
+                new_attempt_id=replacement_attempt.id,
+            )
+            session.add(invalidated_step)
+            await session.flush()
+
+            rerun_operation_id = str(rerun_operation.id)
+            rerun_invalidated_step_id = str(invalidated_step.id)
+            replacement_attempt_id = str(replacement_attempt.id)
+
+        seeded: dict[str, str] = {
             "flow_id": str(flow.id),
             "run_id": str(run.id),
             "space_id": str(space.id),
             "trace_id": str(run.trace_id),
         }
+        if rerun_operation_id is not None:
+            seeded["rerun_operation_id"] = rerun_operation_id
+        if rerun_invalidated_step_id is not None:
+            seeded["rerun_invalidated_step_id"] = rerun_invalidated_step_id
+        if replacement_attempt_id is not None:
+            seeded["replacement_attempt_id"] = replacement_attempt_id
+        return seeded
 
 
 def _attempt_retention_marker_payload(
@@ -498,6 +611,180 @@ async def test_flow_run_evidence_endpoint_requires_trace_permission(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_flow_run_evidence_endpoint_includes_rerun_lineage(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded = await _seed_flow_run_contract_data(
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+        include_rerun_lineage=True,
+    )
+
+    async with db_container() as container:
+        auth_service = container.auth_service()
+        admin_token = auth_service.create_access_token_for_user(admin_user)
+
+    response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["rerun_operations"][0]["id"] == seeded["rerun_operation_id"]
+    assert payload["rerun_operations"][0]["status"] == "completed"
+    assert payload["rerun_operations"][0]["root_attempt_no"] == 2
+    assert (
+        payload["rerun_operations"][0]["root_attempt_id"]
+        == seeded["replacement_attempt_id"]
+    )
+    assert payload["rerun_operations"][0]["expected_run_revision"] == 1
+    assert payload["rerun_operations"][0]["accepted_run_revision"] == 2
+    assert payload["rerun_operations"][0]["input_payload_json"]["api_key"] == (
+        "[REDACTED]"
+    )
+    assert (
+        payload["rerun_invalidated_steps"][0]["id"]
+        == (seeded["rerun_invalidated_step_id"])
+    )
+    assert payload["rerun_invalidated_steps"][0]["role"] == "root"
+    assert payload["rerun_invalidated_steps"][0]["dependency_sources_json"] == [
+        "input_bindings.question"
+    ]
+    assert payload["rerun_invalidated_steps"][0]["new_attempt_no"] == 2
+    assert (
+        payload["rerun_invalidated_steps"][0]["new_attempt_id"]
+        == (seeded["replacement_attempt_id"])
+    )
+    assert payload["step_results"][0]["current_attempt_no"] == 2
+    assert (
+        payload["step_attempts"][0]["superseded_by_attempt_id"]
+        == (seeded["replacement_attempt_id"])
+    )
+    assert (
+        payload["step_attempts"][1]["rerun_operation_id"]
+        == (seeded["rerun_operation_id"])
+    )
+    assert (
+        payload["step_attempts"][1]["predecessor_attempt_id"]
+        == (payload["step_attempts"][0]["id"])
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_evidence_export_preserves_rerun_lineage_redaction_shape(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded = await _seed_flow_run_contract_data(
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+        include_rerun_lineage=True,
+    )
+
+    async with db_container() as container:
+        auth_service = container.auth_service()
+        admin_token = auth_service.create_access_token_for_user(admin_user)
+
+    export_path = (
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export"
+    )
+    redacted_response = await client.get(
+        f"{export_path}?format=json",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    raw_response = await client.get(
+        f"{export_path}?format=json&detail=raw&reason=rerun-lineage-audit",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    repeated_raw_response = await client.get(
+        f"{export_path}?format=json&detail=raw&reason=rerun-lineage-audit-repeat",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    repeated_redacted_response = await client.get(
+        f"{export_path}?format=json",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert redacted_response.status_code == 200, redacted_response.text
+    assert raw_response.status_code == 200, raw_response.text
+    assert repeated_raw_response.status_code == 200
+    assert repeated_redacted_response.status_code == 200
+    redacted_payload = redacted_response.json()
+    raw_payload = raw_response.json()
+    repeated_raw_payload = repeated_raw_response.json()
+    repeated_redacted_payload = repeated_redacted_response.json()
+    redacted_bundle = redacted_payload["bundle"]
+    raw_bundle = raw_payload["bundle"]
+
+    assert redacted_payload["schema_version"] == "flow-evidence-export.v4"
+    assert raw_payload["schema_version"] == "flow-evidence-export.v4"
+    assert (
+        redacted_payload["content_hash"] == (repeated_redacted_payload["content_hash"])
+    )
+    assert raw_payload["content_hash"] == repeated_raw_payload["content_hash"]
+    assert set(raw_bundle.keys()) == set(redacted_bundle.keys())
+    for section_name in ("rerun_operations", "rerun_invalidated_steps"):
+        assert len(raw_bundle[section_name]) == len(redacted_bundle[section_name])
+        assert set(raw_bundle[section_name][0].keys()) == set(
+            redacted_bundle[section_name][0].keys()
+        )
+
+    raw_operation = raw_bundle["rerun_operations"][0]
+    redacted_operation = redacted_bundle["rerun_operations"][0]
+    rerun_step_id = raw_operation["rerun_step_id"]
+    assert raw_operation["input_payload_json"]["api_key"] == "super-secret"
+    assert redacted_operation["input_payload_json"]["api_key"] == "[REDACTED]"
+    assert raw_operation["step_inputs_json"][rerun_step_id]["api_key"] == (
+        "super-secret"
+    )
+    assert redacted_operation["step_inputs_json"][rerun_step_id]["api_key"] == (
+        "[REDACTED]"
+    )
+    assert (
+        "bundle.rerun_operations[0].input_payload_json.api_key"
+        in redacted_payload["redaction"]["masked_paths"]
+    )
+    assert (
+        "bundle.rerun_operations[0].step_inputs_json."
+        f"{rerun_step_id}.api_key" in redacted_payload["redaction"]["masked_paths"]
+    )
+    assert redacted_payload["summary"]["rerun_lineage"] == {
+        "operations_count": 1,
+        "queued_operations_count": 0,
+        "running_operations_count": 0,
+        "completed_operations_count": 1,
+        "failed_operations_count": 0,
+        "cancelled_operations_count": 0,
+        "active_operations_count": 0,
+        "terminal_operations_count": 1,
+        "invalidated_steps_count": 1,
+        "completed_replacement_count": 1,
+    }
+    assert "rerun_operations" not in redacted_bundle["debug_export"]
+    assert "rerun_invalidated_steps" not in redacted_bundle["debug_export"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     client,
     db_container,
@@ -528,7 +815,7 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     assert response.headers["content-type"].startswith("application/json")
     assert "attachment;" in response.headers["content-disposition"]
     payload = response.json()
-    assert payload["schema_version"] == "flow-evidence-export.v3"
+    assert payload["schema_version"] == "flow-evidence-export.v4"
     assert payload["manifest"]["schema_version"] == payload["schema_version"]
     assert payload["manifest"]["run_id"] == seeded["run_id"]
     assert payload["manifest"]["tenant_id"] == str(admin_user.tenant_id)

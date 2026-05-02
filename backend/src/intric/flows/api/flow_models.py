@@ -14,12 +14,14 @@ from intric.flows.enums import (
     FlowMcpPolicy,
     FlowOutputMode,
     FlowOutputType,
+    FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
     FlowRunStatus,
     FlowRuntimeInputFormat,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
     FlowTemplateAssetStatus,
+    RerunDependencyKind,
 )
 from intric.flows.flow_run_evidence_export_manifest import EvidenceExportManifest
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
@@ -136,6 +138,7 @@ FLOW_RUN_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
     },
     "output_payload_json": {"text": "Hello and welcome to the annual review..."},
     "result_files": [],
+    "current_attempt_no": 1,
     "num_tokens_input": 0,
     "num_tokens_output": 0,
     "error_message": None,
@@ -569,6 +572,7 @@ class FlowRunStepPublic(BaseModel):
     status: FlowStepResultStatus
     input_payload_json: dict[str, Any] | None = None
     output_payload_json: dict[str, Any] | None = None
+    current_attempt_no: int | None = None
     result_files: list[FlowRunStepResultFile] = Field(
         default_factory=lambda: cast(list[FlowRunStepResultFile], [])
     )
@@ -1136,6 +1140,60 @@ FLOW_RUN_RESULT_FILE_EXAMPLE: dict[str, Any] = {
 }
 
 
+class FlowRunRerunOperationPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    tenant_id: UUID
+    flow_id: UUID
+    flow_run_id: UUID
+    rerun_step_id: UUID
+    rerun_step_order: int
+    root_attempt_no: int
+    root_attempt_id: UUID | None = None
+    status: FlowRunRerunOperationStatus
+    request_fingerprint: str = Field(
+        description=(
+            "Stable fingerprint that correlates repeated rerun requests with "
+            "the accepted operation and invalidation lineage."
+        )
+    )
+    expected_run_revision: int
+    accepted_run_revision: int
+    reason: str
+    input_payload_json: dict[str, Any] | None = None
+    step_inputs_json: dict[str, Any] | None = None
+    requested_by_principal_type: PrincipalType
+    requested_by_user_id: UUID
+    failure_code: str | None = None
+    failure_message: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FlowRunRerunInvalidatedStepPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    operation_id: UUID
+    tenant_id: UUID
+    flow_id: UUID
+    flow_run_id: UUID
+    step_id: UUID
+    step_order: int
+    invalidation_order: int
+    role: FlowRunRerunInvalidationRole
+    dependency_sources_json: list[RerunDependencyKind]
+    prior_step_result_id: UUID | None = None
+    prior_attempt_id: UUID | None = None
+    new_attempt_no: int | None = None
+    new_attempt_id: UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class FlowStepAttemptPublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -1176,6 +1234,8 @@ class FlowRunEvidenceResponse(BaseModel):
                 "step_results": [FLOW_RUN_STEP_PUBLIC_EXAMPLE],
                 "step_attempts": [],
                 "result_files": [FLOW_RUN_RESULT_FILE_EXAMPLE],
+                "rerun_operations": [],
+                "rerun_invalidated_steps": [],
                 "debug_export": FLOW_RUN_DEBUG_EXPORT_EXAMPLE,
             }
         }
@@ -1186,6 +1246,8 @@ class FlowRunEvidenceResponse(BaseModel):
     step_results: list[FlowRunStepPublic]
     step_attempts: list[FlowStepAttemptPublic]
     result_files: list[FlowRunStepResultFile]
+    rerun_operations: list[FlowRunRerunOperationPublic]
+    rerun_invalidated_steps: list[FlowRunRerunInvalidatedStepPublic]
     debug_export: FlowRunDebugExport
 
 
@@ -1193,11 +1255,11 @@ class FlowRunEvidenceExportResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "schema_version": "flow-evidence-export.v3",
+                "schema_version": "flow-evidence-export.v4",
                 "generated_at": "2026-03-31T12:00:00Z",
                 "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
                 "manifest": {
-                    "schema_version": "flow-evidence-export.v3",
+                    "schema_version": "flow-evidence-export.v4",
                     "provenance_schema_version_min": "flow-attempt-provenance.v1",
                     "provenance_schema_version_current": "flow-attempt-provenance.v1",
                     "provenance_persisted_version_status": "not_tracked",
