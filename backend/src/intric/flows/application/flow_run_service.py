@@ -36,6 +36,15 @@ from intric.flows.flow_run_evidence_bundle import (
 from intric.flows.flow_run_evidence_export_manifest import EvidenceExportContext
 from intric.flows.flow_run_export_json import render_evidence_json_export
 from intric.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
+from intric.flows.flow_run_rerun_graph import (
+    RerunGraphStepNotFound,
+    RerunInvalidationGraph,
+    build_rerun_invalidation_graph,
+)
+from intric.flows.flow_run_rerun_request import (
+    FlowRunRerunRequestFingerprintInput,
+    build_rerun_request_fingerprint,
+)
 from intric.flows.flow_run_step_inputs import (
     FLOW_RUN_ORCHESTRATION_INPUT_KEYS,
     build_runtime_step_input_specs,
@@ -47,15 +56,18 @@ from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import (
     FlowRunRepository,
+    FlowRunRerunCommandResult,
     PreseedStep,
     StepInputFileProjection,
 )
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.principal import FlowPrincipal
 from intric.flows.published_definition import (
+    PublishedFlowDefinition,
     parse_published_definition,
     parse_published_runtime_steps,
 )
+from intric.flows.runtime.models import RuntimeStep
 from intric.main.config import get_settings
 from intric.main.exceptions import (
     BadRequestException,
@@ -69,6 +81,8 @@ from intric.settings.setting_service import SettingService
 from intric.users.user import UserInDB
 
 logger = get_logger(__name__)
+
+_RERUN_REASON_MAX_LENGTH = 1024
 
 FlowRunAccessKind = Literal[
     "status",
@@ -399,14 +413,7 @@ class FlowRunService:
             runtime_steps = parse_published_runtime_steps(
                 runtime_version.definition_json
             )
-            settings_service = cast(
-                _SettingsServiceProtocol | None, self.settings_service
-            )
-            limits = (
-                await settings_service.get_flow_input_limits_resolved()
-                if settings_service is not None
-                else resolve_flow_input_limits(None)
-            )
+            limits = await self._resolve_flow_input_limits()
             runtime_specs = build_runtime_step_input_specs(
                 steps=runtime_steps, limits=limits
             )
@@ -447,24 +454,10 @@ class FlowRunService:
             input_payload_json=input_payload_json,
         )
 
-        if input_payload_json is not None:
-            payload_size = len(
-                json.dumps(
-                    input_payload_json,
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ).encode("utf-8")
-            )
-            if payload_size > get_settings().flow_max_inline_text_bytes:
-                raise BadRequestException(
-                    "Flow run input payload exceeds allowed size limit.",
-                    code="flow_run_input_payload_too_large",
-                    context={
-                        "flow_id": str(flow_id),
-                        "max_inline_text_bytes": get_settings().flow_max_inline_text_bytes,
-                    },
-                )
+        self._ensure_inline_payload_size_allowed(
+            flow_id=flow_id,
+            input_payload_json=input_payload_json,
+        )
 
         # Serialize run creation per tenant to prevent concurrency-limit race conditions.
         await self.flow_run_repo.acquire_tenant_run_creation_lock(
@@ -526,6 +519,193 @@ class FlowRunService:
         )
         return created
 
+    async def rerun_step(
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+        rerun_step_id: UUID,
+        expected_run_revision: int,
+        reason: str,
+        input_payload_json: dict[str, Any] | None = None,
+        step_inputs: dict[UUID, dict[str, list[UUID]]] | None = None,
+    ) -> FlowRunRerunCommandResult:
+        normalized_reason = self._normalize_rerun_reason(reason)
+        run = await self.flow_run_repo.get(
+            run_id=run_id,
+            flow_id=flow_id,
+            tenant_id=self.user.tenant_id,
+        )
+        version = await self.flow_version_repo.get(
+            flow_id=run.flow_id,
+            version=run.flow_version,
+            tenant_id=self.user.tenant_id,
+        )
+        published_definition = parse_published_definition(version.definition_json)
+        runtime_steps = published_definition.runtime_steps()
+        invalidation_graph, root_runtime_step = self._resolve_rerun_graph(
+            runtime_steps=runtime_steps,
+            rerun_step_id=rerun_step_id,
+        )
+
+        normalized_inline_payload = self._normalize_rerun_inline_payload(
+            flow_id=run.flow_id,
+            published_definition=published_definition,
+            input_payload_json=input_payload_json,
+        )
+        normalized_step_inputs = await self._normalize_and_validate_rerun_step_inputs(
+            runtime_steps=runtime_steps,
+            root_runtime_step=root_runtime_step,
+            rerun_step_id=rerun_step_id,
+            step_inputs=step_inputs,
+        )
+        serialized_step_inputs = (
+            serialize_step_inputs_payload(normalized_step_inputs)
+            if normalized_step_inputs
+            else None
+        )
+        prior_root_attempt_id = (
+            await self.flow_run_repo.get_latest_completed_attempt_id_for_step(
+                run_id=run.id,
+                flow_id=run.flow_id,
+                tenant_id=self.user.tenant_id,
+                step_id=rerun_step_id,
+            )
+        )
+        request_fingerprint = build_rerun_request_fingerprint(
+            FlowRunRerunRequestFingerprintInput(
+                tenant_id=self.user.tenant_id,
+                requested_by_user_id=self.user.id,
+                flow_id=run.flow_id,
+                flow_run_id=run.id,
+                rerun_step_id=rerun_step_id,
+                expected_run_revision=expected_run_revision,
+                prior_root_attempt_id=prior_root_attempt_id,
+                input_payload_json=normalized_inline_payload,
+                root_step_inputs=normalized_step_inputs or None,
+            )
+        )
+        return await self.flow_run_repo.accept_or_replay_rerun_operation(
+            tenant_id=self.user.tenant_id,
+            flow_id=run.flow_id,
+            flow_run_id=run.id,
+            rerun_step_id=rerun_step_id,
+            rerun_step_order=root_runtime_step.step_order,
+            request_fingerprint=request_fingerprint,
+            expected_run_revision=expected_run_revision,
+            reason=normalized_reason,
+            input_payload_json=normalized_inline_payload,
+            step_inputs_json=serialized_step_inputs,
+            requested_by_user_id=self.user.id,
+            invalidated_steps=invalidation_graph.invalidated_steps,
+        )
+
+    async def _resolve_flow_input_limits(self) -> FlowInputLimits:
+        settings_service = cast(_SettingsServiceProtocol | None, self.settings_service)
+        if settings_service is not None:
+            return await settings_service.get_flow_input_limits_resolved()
+        return resolve_flow_input_limits(None)
+
+    @staticmethod
+    def _normalize_rerun_reason(reason: str) -> str:
+        normalized_reason = reason.strip()
+        if not normalized_reason:
+            raise BadRequestException(
+                "Rerun reason is required.",
+                code="flow_run_rerun_reason_required",
+            )
+        if len(normalized_reason) > _RERUN_REASON_MAX_LENGTH:
+            raise BadRequestException(
+                "Rerun reason must be at most 1024 characters.",
+                code="flow_run_rerun_reason_too_long",
+                context={"max_length": _RERUN_REASON_MAX_LENGTH},
+            )
+        return normalized_reason
+
+    @staticmethod
+    def _resolve_rerun_graph(
+        *,
+        runtime_steps: list[RuntimeStep],
+        rerun_step_id: UUID,
+    ) -> tuple[RerunInvalidationGraph, RuntimeStep]:
+        try:
+            invalidation_graph = build_rerun_invalidation_graph(
+                steps=runtime_steps,
+                root_step_id=rerun_step_id,
+            )
+        except RerunGraphStepNotFound as exc:
+            raise BadRequestException(
+                "Rerun step is not in the published flow snapshot.",
+                code="flow_run_rerun_step_not_found",
+            ) from exc
+        root_runtime_step = next(
+            step for step in runtime_steps if step.step_id == rerun_step_id
+        )
+        return invalidation_graph, root_runtime_step
+
+    def _normalize_rerun_inline_payload(
+        self,
+        *,
+        flow_id: UUID,
+        published_definition: PublishedFlowDefinition,
+        input_payload_json: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if input_payload_json is None:
+            return None
+        normalized_inline_payload = normalize_and_validate_flow_run_payload(
+            metadata_json=published_definition.metadata_json,
+            payload=input_payload_json,
+        )
+        self._reject_reserved_input_payload_keys(normalized_inline_payload)
+        self._ensure_inline_payload_size_allowed(
+            flow_id=flow_id,
+            input_payload_json=normalized_inline_payload,
+        )
+        return normalized_inline_payload
+
+    async def _normalize_and_validate_rerun_step_inputs(
+        self,
+        *,
+        runtime_steps: list[RuntimeStep],
+        root_runtime_step: RuntimeStep,
+        rerun_step_id: UUID,
+        step_inputs: dict[UUID, dict[str, list[UUID]]] | None,
+    ) -> dict[UUID, list[UUID]]:
+        normalized_step_inputs = normalize_step_inputs_payload(step_inputs)
+        downstream_step_input_ids = [
+            str(step_id)
+            for step_id in normalized_step_inputs
+            if step_id != rerun_step_id
+        ]
+        if downstream_step_input_ids:
+            raise BadRequestException(
+                "Rerun step_inputs may only target the rerun root step.",
+                code="flow_run_rerun_step_inputs_invalid",
+                context={"step_ids": downstream_step_input_ids},
+            )
+        if not normalized_step_inputs:
+            return normalized_step_inputs
+
+        limits = await self._resolve_flow_input_limits()
+        runtime_specs = build_runtime_step_input_specs(
+            steps=runtime_steps,
+            limits=limits,
+        )
+        root_specs = (
+            {rerun_step_id: runtime_specs[rerun_step_id]}
+            if rerun_step_id in runtime_specs
+            else {}
+        )
+        await validate_submitted_step_inputs(
+            steps=[root_runtime_step],
+            specs=root_specs,
+            normalized_step_inputs=normalized_step_inputs,
+            file_repo=self.file_repo,
+            user_id=self.user.id,
+            principal=self._principal(),
+        )
+        return normalized_step_inputs
+
     @staticmethod
     def _reject_reserved_input_payload_keys(
         input_payload_json: dict[str, Any] | None,
@@ -541,6 +721,33 @@ class FlowRunService:
             "Flow run input_payload_json contains reserved orchestration keys.",
             code="flow_run_reserved_input_payload_key",
             context={"keys": reserved_keys},
+        )
+
+    @staticmethod
+    def _ensure_inline_payload_size_allowed(
+        *,
+        flow_id: UUID,
+        input_payload_json: dict[str, Any] | None,
+    ) -> None:
+        if input_payload_json is None:
+            return
+        payload_size = len(
+            json.dumps(
+                input_payload_json,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+        if payload_size <= get_settings().flow_max_inline_text_bytes:
+            return
+        raise BadRequestException(
+            "Flow run input payload exceeds allowed size limit.",
+            code="flow_run_input_payload_too_large",
+            context={
+                "flow_id": str(flow_id),
+                "max_inline_text_bytes": get_settings().flow_max_inline_text_bytes,
+            },
         )
 
     def _build_idempotency_fingerprint(

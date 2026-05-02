@@ -141,22 +141,66 @@ IN_PROGRESS
   - green verification: `.codex/artifacts/claude-peer-loop-batch-8-step-rerun-repository-command-implementation-verification-20260502T113617Z.md`
 - Reconciliation:
   - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-8.md`
-- Outcome: repository command green; commit pending
+- Outcome: repository command green and committed as `a3849c27 flows: add rerun repository command`
+
+### Slice 8.6 — Service Command Plan
+
+- Plan: `docs/refactor/execution/batch-8-step-rerun/plan.md`
+- Scope:
+  - `backend/src/intric/flows/application/flow_run_service.py`
+  - `backend/src/intric/flows/infrastructure/flow_run_repo.py`
+  - `backend/tests/unittests/flows/test_flow_run_service.py`
+- Local validation: not run yet
+- Docker validation: not run yet
+- Claude review: green with accepted nits, artifact `.codex/artifacts/claude-peer-loop-batch-8-step-rerun-service-command-plan-20260502T114903Z.md`
+- Reconciliation:
+  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-9.md`
+- Outcome: plan accepted for service-command implementation after clarification updates
+
+### Slice 8.6 — Service Command Implementation
+
+- Source:
+  - `backend/src/intric/flows/application/flow_run_service.py`
+  - `backend/src/intric/flows/infrastructure/flow_run_repo.py`
+- Tests:
+  - `backend/tests/unittests/flows/test_flow_run_service.py`
+  - `backend/tests/integration/flows/test_flow_run_rerun_repository.py`
+- Implementation notes:
+  - `FlowRunService.rerun_step(...)` now loads the run's published snapshot, builds the rerun graph, validates the reason and optional root-only inputs, fingerprints the request, and delegates mutation to `FlowRunRepository.accept_or_replay_rerun_operation(...)`.
+  - `FlowRunRepository.get_latest_completed_attempt_id_for_step(...)` supplies the fingerprint's prior-root-attempt input without making the service list attempts.
+  - The service command does not dispatch; dispatch remains for the next router/dispatch slice.
+  - A stale evidence unit-test fixture was aligned with the current `flow-attempt-provenance.v1` schema instead of adding a compatibility path for schema-less provenance.
+  - The latest completed root attempt lookup now uses the monotonic `attempt_no` contract instead of timestamp ordering.
+  - Rerun reason validation uses distinct error codes for empty and too-long values.
+- Docker validation:
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/ruff format src/intric/flows/application/flow_run_service.py src/intric/flows/infrastructure/flow_run_repo.py tests/unittests/flows/test_flow_run_service.py tests/integration/flows/test_flow_run_rerun_repository.py` — passed, 4 files left unchanged after final edits
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/unittests/flows/test_flow_run_service.py -k 'rerun_step' -q` — passed, 11 tests
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/integration/flows/test_flow_run_rerun_repository.py -k 'latest_completed_attempt' -q` — passed, 1 test
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/unittests/flows/test_flow_run_service.py tests/integration/flows/test_flow_run_rerun_repository.py -q` — passed, 111 tests
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/ruff check src/intric/flows/application/flow_run_service.py src/intric/flows/infrastructure/flow_run_repo.py tests/unittests/flows/test_flow_run_service.py tests/integration/flows/test_flow_run_rerun_repository.py` — passed
+  - `docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pyright --pythonpath .venv/bin/python src/intric/flows/application/flow_run_service.py src/intric/flows/infrastructure/flow_run_repo.py tests/unittests/flows/test_flow_run_service.py tests/integration/flows/test_flow_run_rerun_repository.py` — passed
+  - `git diff --check` — passed
+  - diff-only forbidden compatibility-language grep over the intended slice — passed, no matches
+- Claude review: green after accepted nits, artifacts:
+  - green implementation review: `.codex/artifacts/claude-peer-loop-batch-8-step-rerun-service-command-implementation-20260502T121557Z.md`
+  - green verification: `.codex/artifacts/claude-peer-loop-batch-8-step-rerun-service-command-implementation-verification-20260502T122502Z.md`
+  - final green verification: `.codex/artifacts/claude-peer-loop-batch-8-step-rerun-service-command-final-verification-20260502T122938Z.md`
+- Reconciliation:
+  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-10.md`
+- Outcome: service command green; commit pending
 
 ## Repository Gate
 
 - Branch: `feature/refactor-flows-flowai`
-- HEAD: `3b6b5517 flows: enable step rerun permission policy`
+- HEAD: `a3849c27 flows: add rerun repository command`
 - Staged files: none
 - Pending Batch 8 files:
-  - `backend/alembic/versions/20260502_rerun_ops.py`
-  - `backend/alembic/versions/20260502_flow_run_rerun_operations.py` deletion
-  - `backend/src/intric/flows/flow_factory.py`
+  - `backend/src/intric/flows/application/flow_run_service.py`
   - `backend/src/intric/flows/infrastructure/flow_run_repo.py`
   - `backend/tests/integration/flows/test_flow_run_rerun_repository.py`
-  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-6.md`
-  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-7.md`
-  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-8.md`
+  - `backend/tests/unittests/flows/test_flow_run_service.py`
+  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-9.md`
+  - `docs/refactor/execution/batch-8-step-rerun/claude-reconciliation-10.md`
   - `docs/refactor/execution/batch-8-step-rerun/journal.md`
   - `docs/refactor/execution/batch-8-step-rerun/plan.md`
 - Known do-not-stage local files:

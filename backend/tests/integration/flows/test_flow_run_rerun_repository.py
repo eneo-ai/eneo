@@ -15,6 +15,7 @@ from intric.database.tables.flow_tables import (
     FlowRunRerunInvalidatedSteps,
     FlowRunRerunOperations,
     FlowRuns,
+    FlowStepAttempts,
     FlowStepResults,
 )
 from intric.flows import (
@@ -365,6 +366,117 @@ async def _accept_rerun(
             else invalidated_steps
         ),
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_get_latest_completed_attempt_id_for_step_uses_highest_completed_attempt_number(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_completed_rerun_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        first_attempt = await session.scalar(
+            sa.select(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == scenario.flow_run_id)
+            .where(FlowStepAttempts.step_id == scenario.root_step_id)
+            .where(FlowStepAttempts.attempt_no == 1)
+        )
+        assert first_attempt is not None
+        first_attempt_id = first_attempt.id
+        second_attempt = await run_repo.create_or_get_attempt_started(
+            run_id=scenario.flow_run_id,
+            flow_id=scenario.flow_id,
+            tenant_id=scenario.tenant_id,
+            step_id=scenario.root_step_id,
+            step_order=1,
+            attempt_no=2,
+            celery_task_id="root-attempt-2",
+        )
+        finished_second_attempt = await run_repo.finish_attempt(
+            run_id=scenario.flow_run_id,
+            step_id=scenario.root_step_id,
+            attempt_no=2,
+            tenant_id=scenario.tenant_id,
+            status=FlowStepAttemptStatus.COMPLETED,
+        )
+        assert finished_second_attempt is not None
+        second_attempt_id = second_attempt.id
+        third_attempt = await run_repo.create_or_get_attempt_started(
+            run_id=scenario.flow_run_id,
+            flow_id=scenario.flow_id,
+            tenant_id=scenario.tenant_id,
+            step_id=scenario.root_step_id,
+            step_order=1,
+            attempt_no=3,
+            celery_task_id="root-attempt-3",
+        )
+        failed_third_attempt = await run_repo.finish_attempt(
+            run_id=scenario.flow_run_id,
+            step_id=scenario.root_step_id,
+            attempt_no=3,
+            tenant_id=scenario.tenant_id,
+            status=FlowStepAttemptStatus.FAILED,
+            error_code="step_failed",
+            error_message="Step failed.",
+        )
+        assert failed_third_attempt is not None
+        third_attempt_id = third_attempt.id
+        # Crossed timestamps prove attempt number, not wall-clock time, defines latest.
+        first_started_at = datetime(2026, 1, 1, 10, tzinfo=timezone.utc)
+        second_started_at = datetime(2026, 1, 1, 9, tzinfo=timezone.utc)
+        third_started_at = datetime(2026, 1, 1, 11, tzinfo=timezone.utc)
+        await session.execute(
+            sa.update(FlowStepAttempts)
+            .where(FlowStepAttempts.id == first_attempt_id)
+            .values(started_at=first_started_at, finished_at=first_started_at)
+        )
+        await session.execute(
+            sa.update(FlowStepAttempts)
+            .where(FlowStepAttempts.id == second_attempt_id)
+            .values(started_at=second_started_at, finished_at=second_started_at)
+        )
+        await session.execute(
+            sa.update(FlowStepAttempts)
+            .where(FlowStepAttempts.id == third_attempt_id)
+            .values(started_at=third_started_at, finished_at=third_started_at)
+        )
+
+        latest_attempt_id = await run_repo.get_latest_completed_attempt_id_for_step(
+            run_id=scenario.flow_run_id,
+            flow_id=scenario.flow_id,
+            tenant_id=scenario.tenant_id,
+            step_id=scenario.root_step_id,
+        )
+        wrong_flow_attempt_id = await run_repo.get_latest_completed_attempt_id_for_step(
+            run_id=scenario.flow_run_id,
+            flow_id=uuid4(),
+            tenant_id=scenario.tenant_id,
+            step_id=scenario.root_step_id,
+        )
+        missing_step_attempt_id = (
+            await run_repo.get_latest_completed_attempt_id_for_step(
+                run_id=scenario.flow_run_id,
+                flow_id=scenario.flow_id,
+                tenant_id=scenario.tenant_id,
+                step_id=uuid4(),
+            )
+        )
+
+    assert latest_attempt_id == second_attempt_id
+    assert wrong_flow_attempt_id is None
+    assert missing_step_attempt_id is None
 
 
 @pytest.mark.asyncio

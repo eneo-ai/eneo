@@ -212,6 +212,26 @@ class FlowRunRepository:
             raise NotFoundException("Flow run not found.")
         return self.factory.from_flow_run_db(run_row)
 
+    async def get_latest_completed_attempt_id_for_step(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID,
+        tenant_id: UUID,
+        step_id: UUID,
+    ) -> UUID | None:
+        attempt_id = await self.session.scalar(
+            sa.select(FlowStepAttempts.id)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.flow_id == flow_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .where(FlowStepAttempts.step_id == step_id)
+            .where(FlowStepAttempts.status == FlowStepAttemptStatus.COMPLETED.value)
+            .order_by(FlowStepAttempts.attempt_no.desc())
+            .limit(1)
+        )
+        return attempt_id
+
     async def accept_or_replay_rerun_operation(
         self,
         *,

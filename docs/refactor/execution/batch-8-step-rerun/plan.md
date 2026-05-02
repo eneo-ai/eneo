@@ -356,6 +356,8 @@ Error codes:
 - `flow_run_rerun_invalid_transition` for queued/running/cancelled runs
 - `flow_run_rerun_step_not_found` for a step absent from the run's published snapshot
 - `flow_run_rerun_step_incomplete` when an invalidated current result row is missing or the root step has no completed current result
+- `flow_run_rerun_reason_required` for empty or whitespace-only reason values
+- `flow_run_rerun_reason_too_long` for reason values over 1024 characters
 - `flow_run_rerun_step_inputs_invalid` for step input payloads outside the rerun root
 - existing permission errors from the Flow access policy
 
@@ -522,6 +524,128 @@ docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pyright --pythonp
 ```
 
 Local fallback commands use the same paths with `uv run pytest`, `uv run ruff check`, and `uv run pyright`.
+
+## Slice 8.6 Service Command Contract
+
+The service command is the application boundary for rerun acceptance. It does not add the HTTP route, executor behavior, evidence export, or frontend UI. Those slices call this command after the application contract is pinned.
+
+### Canonical Owner
+
+`FlowRunService.rerun_step(...)` owns:
+
+- loading the tenant-scoped run
+- loading the run's immutable `FlowVersion.definition_json`
+- parsing published runtime steps
+- computing the rerun invalidation graph
+- validating the rerun reason and inline payload
+- accepting only root-step `step_inputs`
+- computing the deterministic rerun request fingerprint
+- calling `FlowRunRepository.accept_or_replay_rerun_operation(...)`
+
+`FlowRunRepository` remains the canonical writer for operation rows, invalidated rows, run revision changes, and current-result resets. The service must not duplicate repository mutation logic.
+
+### Service Inputs
+
+Add this keyword-only application method:
+
+```python
+async def rerun_step(
+    *,
+    flow_id: UUID,
+    run_id: UUID,
+    rerun_step_id: UUID,
+    expected_run_revision: int,
+    reason: str,
+    input_payload_json: dict[str, Any] | None = None,
+    step_inputs: dict[UUID, dict[str, list[UUID]]] | None = None,
+) -> FlowRunRerunCommandResult: ...
+```
+
+The service returns the repository command result for now. The API response assembler slice can map it into a public model without adding a second service DTO in this slice.
+
+`flow_id` stays in the service signature because the route contains both flow and run identifiers; the service uses it when loading the run so a mismatched run id is invisible under the requested flow.
+
+### Validation And Rejection
+
+- `reason` is trimmed with `strip()`, must be non-empty after trimming, and is capped at 1024 characters. Empty or whitespace-only `reason` returns `flow_run_rerun_reason_required`; too-long `reason` returns `flow_run_rerun_reason_too_long`.
+- Service-key denial is owned by `FlowAccessPolicy` from Slice 8.4. The service does not add a duplicate principal gate; router tests must keep proving service-key rerun is denied before this command is called.
+- `input_payload_json` is normalized with the flow definition snapshot metadata only when supplied. Omitted payload means "reuse existing run input"; it must not trigger required-form-field validation.
+- Supplied `input_payload_json` is a complete replacement payload for the rerun operation. If it is missing required form fields in the published snapshot, existing payload validation errors propagate; the service does not merge it with the original run input.
+- Reserved orchestration keys remain rejected through the existing `_reject_reserved_input_payload_keys(...)`.
+- `step_inputs` is normalized through `normalize_step_inputs_payload(...)`.
+- Any `step_inputs` key other than the rerun root `rerun_step_id` returns `flow_run_rerun_step_inputs_invalid`.
+- Root `step_inputs` validation reuses `validate_submitted_step_inputs(...)` with only the root step's runtime input spec, so downstream required inputs do not block a root rerun.
+- A root absent from the published definition returns `flow_run_rerun_step_not_found`.
+
+### Fingerprint Inputs
+
+The service builds `FlowRunRerunRequestFingerprintInput` with:
+
+- tenant id
+- requesting user id
+- flow id
+- run id
+- root step id
+- expected run revision
+- latest completed root attempt id, if any
+- normalized inline payload, if supplied
+- normalized root step input file ids, if supplied
+
+The latest completed root attempt id comes from `FlowRunRepository.get_latest_completed_attempt_id_for_step(...)`. Do not list all attempts in the service just to derive one id.
+
+### Repository Call
+
+The service passes to `accept_or_replay_rerun_operation(...)`:
+
+- tenant, flow, run, root step id, root step order
+- deterministic fingerprint
+- expected run revision
+- normalized reason
+- normalized inline payload
+- serialized root step inputs or `None`
+- requesting user id
+- graph invalidated steps
+
+`rerun_step_order` is derived from the published runtime step whose `step_id == rerun_step_id`; the service must not hardcode the order.
+
+The service must not dispatch work in this slice. The router/dispatch slice will decide when to enqueue based on `result.created` and will use a rerun-aware recoverable dispatch helper.
+
+### Slice 8.6 Tests
+
+Add focused unit tests in `backend/tests/unittests/flows/test_flow_run_service.py`:
+
+- service builds a published-snapshot graph and passes root/downstream invalidation rows to the repository command
+- deterministic fingerprint includes latest completed root attempt id and is stable across equivalent root input ordering
+- deterministic fingerprint uses `None` when there is no completed root attempt
+- same repository replay result is returned without additional mutation logic
+- empty or whitespace-only reason returns `flow_run_rerun_reason_required`
+- a 1024-character reason is accepted
+- reason values over 1024 characters return `flow_run_rerun_reason_too_long`
+- root step absent from the published definition returns `flow_run_rerun_step_not_found`
+- explicit empty root `step_inputs` are preserved as a distinct fingerprint and serialized payload
+- downstream `step_inputs` are rejected with `flow_run_rerun_step_inputs_invalid`
+- omitted inline payload does not require form fields from the published snapshot
+- supplied inline payload rejects reserved orchestration keys
+- service-key denial remains covered by the Slice 8.4 access-policy tests, not a duplicate service test
+
+Add one repository integration test in `backend/tests/integration/flows/test_flow_run_rerun_repository.py`:
+
+- `get_latest_completed_attempt_id_for_step(...)` returns the latest completed root attempt by highest completed `attempt_no`, ignores attempts outside the requested flow, ignores higher failed attempts, and returns `None` when the scoped row does not exist.
+
+### Slice 8.6 Validation Commands
+
+Run these for the service-command slice before Claude implementation review:
+
+```bash
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/unittests/flows/test_flow_run_service.py -k 'rerun_step' -q
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/integration/flows/test_flow_run_rerun_repository.py -k 'latest_completed_attempt' -q
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pytest tests/unittests/flows/test_flow_run_service.py tests/integration/flows/test_flow_run_rerun_repository.py -q
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/ruff check src/intric/flows/application/flow_run_service.py src/intric/flows/infrastructure/flow_run_repo.py tests/unittests/flows/test_flow_run_service.py tests/integration/flows/test_flow_run_rerun_repository.py
+docker exec -w /workspace/backend eneo-41ae93-eneo-1 .venv/bin/pyright --pythonpath .venv/bin/python src/intric/flows/application/flow_run_service.py src/intric/flows/infrastructure/flow_run_repo.py tests/unittests/flows/test_flow_run_service.py tests/integration/flows/test_flow_run_rerun_repository.py
+git diff --check
+```
+
+The focused test names may be adjusted only if the final names remain service-command-specific and are recorded in the journal.
 
 ## Validation Commands
 
