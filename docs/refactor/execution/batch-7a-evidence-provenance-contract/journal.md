@@ -413,3 +413,127 @@ Deliberate carry-forward:
 - `cd backend && uv run lint-imports --no-cache`: 3 contracts kept, 0 broken.
 - Anti-slippage `rg` across touched source/test files: no matches.
 - `git diff --check -- ...`: passed.
+
+## Iteration 5 — 7A.4 Evidence Single-Source Normalization
+
+### Plan Draft
+
+The active 7A.4 plan narrows the slice to evidence single-source normalization:
+
+- attempt provenance becomes the export source of truth for tool-call evidence
+- runtime completed results stop copying tool calls into `FlowStepResult.tool_calls_metadata`
+- evidence bundles omit result-level tool calls, including for old branch-local result rows
+- RAG summary states distinguish `not_tracked`, `tracked_no_sources`, `tracked_with_sources`, and `unknown_corrupt`
+- no migration, table/column deletion, frontend evidence view rewrite, Batch 8 rerun work, or Batch 9 review work starts in this slice
+
+### Claude Plan Review 1
+
+Claude returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`.
+
+Accepted findings and plan fixes:
+
+- The initial single-source claim was too broad because `FlowRunStepPublic.tool_calls_metadata`, the DB column, repository persistence slot, generated schema, and public API tests still exist. The plan now calls this boundary asymmetry out explicitly: write-side and evidence-export paths migrate in 7A.4, while persisted/public readers remain Tier B and are marked deprecated.
+- RAG state aggregation was under-specified. The plan now defines precedence: `unknown_corrupt` over `tracked_with_sources` over `tracked_no_sources` over `not_tracked`.
+- Corrupt provenance markers would be invisible to a payload-only `_collect_rag_tracking` helper. The plan now requires the summary helper to consume typed `FlowAttemptProvenanceParseResult` values from `EvidenceBundlePayload`.
+- `tool_calls_metadata` export shape was ambiguous. The plan now chooses absence from evidence bundle step-result payloads and requires a test for the key contract.
+- `default_rag_tracking()` remains the per-attempt default for real RAG sections only. Export fallback uses a distinct untracked summary.
+- The surviving public result field will be marked deprecated in `FlowRunStepPublic`, with an OpenAPI assertion so generated-client consumers get a signal.
+- Data-retention cleanup was audited: `data_retention_service.py` still updates rows when non-tool debug fields are present or output payload pruning changes the payload, so no retention cleanup source change is planned.
+- The anti-slippage grep was corrected so it does not fail on the new truthful RAG note.
+
+No source implementation has started.
+
+### Claude Plan Review 2
+
+Claude returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`.
+
+Final plan tightenings applied before implementation:
+
+- Changed the stale inventory wording from "omit or null" to "omit" for `bundle.step_results[*].tool_calls_metadata`.
+- Pinned helper names: `derive_rag_usage_tracking()` for run-level RAG summary aggregation and `untracked_rag_summary()` for the no-provenance fallback.
+- Removed the conditional source-file hedge for `flow_run_provenance.py`; the summary helper belongs in `flow_run_export_json.py` because it consumes export bundle payload and parse results.
+- Enumerated the required precedence matrix tests and the old-row tool-call export regression.
+- Added a carry-forward deletion trigger for `FlowRunStepPublic.tool_calls_metadata` and the database column: remove only after human-approved SDK/frontend reader audit and persisted-row proof or migration/backfill plan.
+
+### Implementation Summary
+
+Changed source/tests:
+
+- `backend/src/intric/flows/runtime/step_result_builder.py`
+  - New completed runtime step results no longer copy `StepExecutionOutput.tool_calls_metadata` into `FlowStepResult.tool_calls_metadata`.
+- `backend/src/intric/flows/flow_run_evidence_bundle.py`
+  - Evidence bundle step-result serialization omits `tool_calls_metadata`, including for old branch-local rows that still have the field populated.
+- `backend/src/intric/flows/flow_run_export_json.py`
+  - Added `derive_rag_usage_tracking()` and `untracked_rag_summary()`.
+  - RAG summary state now derives from typed provenance parse results plus bundle source details, with precedence `unknown_corrupt/partial_corrupt > tracked_with_sources > tracked_no_sources > not_tracked`.
+- `backend/src/intric/flows/api/flow_models.py`
+  - Marked `FlowRunStepPublic.tool_calls_metadata` deprecated and pointed evidence consumers to attempt provenance.
+- `backend/tests/unittests/flows/test_flow_runtime_builders.py`
+  - Pins that completed results do not carry result-level tool-call metadata.
+- `backend/tests/unittests/flows/test_flow_run_evidence.py`
+  - Pins RAG state precedence and the old-row tool-call export contract.
+- `backend/tests/integration/flows/test_flow_evidence_api_contracts.py`
+  - Pins tracked-with-sources state through the HTTP evidence export path.
+- `backend/tests/unit/test_flow_openapi_contract.py`
+  - Pins the OpenAPI deprecation signal for the surviving public read-model field.
+
+No migration, frontend evidence UI change, Batch 8 rerun work, Batch 9 review work, package rename, or namespace rename started.
+
+### Validation Summary
+
+- `cd backend && uv run pytest tests/unittests/flows/test_flow_run_evidence.py tests/unittests/flows/test_flow_runtime_builders.py tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_returns_redacted_json_attachment tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_marks_corrupt_attempt_provenance tests/unit/test_flow_openapi_contract.py -q`: 82 passed.
+- `cd backend && uv run pyright src/intric/flows/runtime/step_result_builder.py src/intric/flows/api/flow_models.py src/intric/flows/flow_run_evidence_bundle.py src/intric/flows/flow_run_export_json.py tests/unittests/flows/test_flow_runtime_builders.py tests/unittests/flows/test_flow_run_evidence.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/unit/test_flow_openapi_contract.py`: 0 errors.
+- `cd backend && uv run ruff check ...`: all checks passed.
+- `cd backend && uv run ruff format --check ...`: 9 files already formatted after formatting the files ruff identified.
+- `cd backend && uv run lint-imports --no-cache`: 3 contracts kept, 0 broken.
+- Anti-slippage `rg` across touched source/test files: no matches.
+- `git diff --check -- ...`: passed.
+- `docker ps --format '{{.Names}}'`: blocked before Docker execution by the local Codex approval policy (`AskForApproval is set to Never`); local/testcontainers validation above passed.
+
+Warnings observed were existing deprecation warnings and not product regressions.
+
+### Carry-Forward Risks
+
+- `FlowRunStepPublic.tool_calls_metadata`, `FlowStepResult.tool_calls_metadata`, the repository persistence slot, generated schema field, and database column remain as deprecated/Tier B persisted-public surfaces. Delete only after human-approved SDK/frontend reader audit plus persisted-row proof or migration/backfill plan.
+- Run-level `partial_corrupt` now separates mixed valid/corrupt RAG evidence from all-corrupt `unknown_corrupt`. Per-attempt detail remains visible in `bundle.step_attempts[*].provenance_json`.
+- 7A.5 still owns retention tombstones, deletion semantics, and availability markers.
+- 7A.6 still owns artifact/file evidence ownership through `FlowRunStepResultFiles` + `Files`.
+- 7A.7 still owns frontend evidence generated aliases/view-model alignment if backend evidence schemas change.
+
+### Claude Implementation Review 1
+
+Claude returned `VERDICT: changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 7`.
+
+Accepted fixes:
+
+- Added HTTP boundary coverage that corrupt attempt provenance produces `summary.rag_usage_tracking.tracking_state == "unknown_corrupt"` and `retrieval_tracked is False`.
+- Added pure-corrupt unit coverage for `unknown_corrupt` with no retrieved sources.
+- Replaced the mixed corrupt-plus-valid-source run state with `partial_corrupt`, so `unknown_corrupt` no longer coexists with non-empty RAG source lists.
+- Added a runtime handshake test proving the same `StepExecutionOutput.tool_calls_metadata` value omitted from `FlowStepResult` lands in attempt provenance.
+- Removed the redundant local variable in `_merge_tracked_rag_summaries` and made `selection_basis` / `note` deterministic by keeping the first tracked summary's values.
+
+Deferred deliberately:
+
+- Dedicated typed export models for `FlowStepResult` bundle payloads are deferred to 7A.6, where artifact/file evidence ownership may add more bundle-only fields.
+- Runtime warning behavior for the deprecated API field is deferred to the public API/SDK deletion pass; this slice pins the OpenAPI/generated-client signal.
+
+### Claude Implementation Review 2
+
+Claude returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`.
+
+Claude confirmed the accepted findings were resolved:
+
+- HTTP corrupt RAG state is pinned.
+- Pure-corrupt and mixed-valid/corrupt RAG state branches are pinned.
+- `partial_corrupt` removes the previous `unknown_corrupt` plus source-list ambiguity.
+- Runtime tool-call evidence is positively pinned through the result/provenance handshake.
+- RAG tracking summary merge no longer has the redundant reassignment or last-write-wins behavior for `selection_basis` / `note`.
+
+Additional verification after Claude green:
+
+- `rg -n "tool_calls_metadata|rag_usage_tracking|tracking_state|unknown_corrupt|partial_corrupt" frontend/apps/web/src/lib/features/flows frontend/packages/intric-js/src`: no Flow UI readers for the deprecated tool-call field or new corrupt states; matches remain in generated/type package files.
+- `cd frontend/packages/intric-js && bun run check`: passed.
+
+Carry-forward added:
+
+- `frontend/packages/intric-js/src/types/schema.d.ts` remains generated-client drift for evidence tracking examples/types and the new OpenAPI deprecation marker. Do not hand-edit generated output in this backend slice; 7A.7 owns generated/frontend evidence type alignment if the backend evidence schema changes are kept.

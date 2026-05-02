@@ -53,7 +53,11 @@ def build_completed_step_input_payload(output: StepExecutionOutput) -> dict[str,
         payload["contract_validation"] = output.contract_validation
     if output.diagnostics:
         payload["diagnostics"] = [
-            {"code": diagnostic.code, "message": diagnostic.message, "severity": diagnostic.severity}
+            {
+                "code": diagnostic.code,
+                "message": diagnostic.message,
+                "severity": diagnostic.severity,
+            }
             for diagnostic in output.diagnostics
         ]
     return payload
@@ -87,7 +91,7 @@ def build_completed_step_result(
         status=FlowStepResultStatus.COMPLETED,
         error_message=None,
         flow_step_execution_hash=execution_hash,
-        tool_calls_metadata=output.tool_calls_metadata,
+        tool_calls_metadata=None,
         created_at=claimed.created_at,
         updated_at=claimed.updated_at,
     )

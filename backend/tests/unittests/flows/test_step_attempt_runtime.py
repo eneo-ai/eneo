@@ -23,6 +23,7 @@ from intric.flows.runtime.step_attempt_runtime import (
     build_step_success_plan,
     build_typed_failure_plan,
 )
+from intric.flows.runtime.step_result_builder import build_completed_step_result
 
 
 def _claimed_result(*, step_order: int = 1) -> FlowStepResult:
@@ -310,4 +311,36 @@ def test_build_attempt_provenance_round_trips_all_runtime_sections() -> None:
     }
     assert provenance_payload["artifacts"]["generated_file_ids"] == [
         str(generated_file_id)
+    ]
+
+
+def test_runtime_tool_calls_land_in_attempt_provenance_not_step_result() -> None:
+    claimed = _claimed_result()
+    step = _runtime_step()
+    output = _step_output()
+    output.tool_calls_metadata = [{"name": "lookup", "arguments": {"q": "case"}}]
+
+    step_result = build_completed_step_result(
+        claimed=claimed,
+        run_id=claimed.flow_run_id,
+        flow_id=claimed.flow_id,
+        tenant_id=claimed.tenant_id,
+        step=step,
+        output=output,
+        output_payload_json={"text": "done"},
+        execution_hash="exec-hash",
+    )
+    provenance_payload = _build_attempt_provenance(
+        step=step,
+        output=output,
+        step_result=step_result,
+    )
+
+    assert step_result.tool_calls_metadata is None
+    parse_result = parse_attempt_provenance(provenance_payload)
+    assert parse_result.provenance is not None
+    assert parse_result.provenance.llm is not None
+    assert parse_result.provenance.llm.tool_calls is not None
+    assert provenance_payload["llm"]["tool_calls"]["preview"] == [
+        {"name": "lookup", "arguments": {"q": "case"}}
     ]

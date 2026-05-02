@@ -533,7 +533,14 @@ class FlowRunStepPublic(BaseModel):
     num_tokens_output: int | None = None
     error_message: str | None = None
     flow_step_execution_hash: str | None = None
-    tool_calls_metadata: list[dict[str, Any]] | dict[str, Any] | None = None
+    tool_calls_metadata: list[dict[str, Any]] | dict[str, Any] | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "Deprecated for Flow evidence. Use step attempt provenance "
+            "`provenance_json.llm.tool_calls` as the canonical tool-call evidence."
+        ),
+    )
     diagnostics: list[dict[str, Any]] = Field(
         default_factory=lambda: cast(list[dict[str, Any]], [])
     )

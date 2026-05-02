@@ -2,9 +2,208 @@
 
 ## Active Next Plan
 
-The active implementation slice is **7A.3 — Provenance schema version and corruption behavior**.
+The active implementation slice is **7A.4 — Evidence single-source normalization**.
 
-Official Batch 8 step rerun does not start until this inserted evidence/provenance foundation reaches a stable checkpoint. 7A.1 is committed at `5563bb71` and 7A.2 is committed at `d3228d83`. 7A.3 now makes attempt provenance parsing explicit: current provenance parses as `flow-attempt-provenance.v1`, missing/unknown/corrupt provenance produces visible export markers, and export manifests report whether persisted attempt provenance was tracked or corrupt.
+Official Batch 8 step rerun does not start until this inserted evidence/provenance foundation reaches a stable checkpoint. 7A.1 is committed at `5563bb71`, 7A.2 is committed at `d3228d83`, and 7A.3 is committed at `1cd68a2d`. 7A.4 now makes evidence export truthful about tool calls and knowledge/RAG tracking without starting migrations or new evidence ledgers.
+
+## Scope For 7A.4
+
+### Goals
+
+- Treat attempt provenance as the evidence export source of truth for tool-call payloads.
+- Stop new runtime-completed step results from duplicating tool calls into `FlowStepResult.tool_calls_metadata`.
+- Ensure evidence export bundles do not expose step-result `tool_calls_metadata` as a second tool-call source.
+- Distinguish knowledge/RAG evidence states: `not_tracked`, `tracked_no_sources`, `tracked_with_sources`, `partial_corrupt`, and `unknown_corrupt`.
+- Keep RAG summary text truthful: absence of sources must not imply no knowledge was used when tracking did not happen.
+- Avoid schema/data migrations in this slice. Column deletion is a separate human-approved migration decision after readers/writers stop relying on the field.
+
+### Non-Goals
+
+- No migration or table/column deletion.
+- No raw prompt/completion retention.
+- No retention tombstones; 7A.5 owns tombstone storage and deletion semantics.
+- No artifact/file ownership migration; 7A.6 owns `FlowRunStepResultFiles` + `Files` canonical export.
+- No frontend evidence UI/view-model rewrite; 7A.7 owns frontend evidence alignment if backend schemas change.
+- No Batch 8 rerun behavior, Batch 9 human review behavior, package rename, or `intric.*` namespace migration.
+
+### Inventory
+
+| concept | current locations | shipped/persisted data need? | keep/delete/rewrite | canonical owner | deletion condition |
+|---|---|---|---|---|---|
+| Runtime tool-call source | `backend/src/intric/flows/runtime/step_execution_runtime.py:909-910`, `backend/src/intric/flows/runtime/executor.py:187-189` | Runtime completion currently captures provider tool calls once, then 7A.3 writes them into attempt provenance. | Keep writer into `StepExecutionOutput`, keep attempt provenance write. | `FlowStepAttempts.provenance_json.llm.tool_calls` via `flow_run_provenance.py` | None; this is the canonical evidence path. |
+| Step-result tool-call duplicate | `backend/src/intric/flows/runtime/step_result_builder.py:90`, `backend/src/intric/flows/domain/flow.py:170`, `backend/src/intric/flows/api/flow_models.py:536`, `backend/src/intric/flows/infrastructure/flow_repo.py:542` | No shipped Flow users. The DB/API field may exist for branch-local persisted rows and tests. | Stop new runtime writes and hide it from evidence export bundles; do not migrate/delete column in this slice. | Attempt provenance. | Human-approved migration removes DB/API field after reader audit and row proof. |
+| Public result tool-call read field | `backend/src/intric/flows/api/flow_models.py:536`, `backend/tests/unittests/flows/test_flow_models.py:186`, `backend/tests/unittests/flows/test_flow_models.py:331`, generated schema from the OpenAPI contract | No shipped Flow users, but the API/read model exists and current tests pin it. | Keep field as a Tier B public/read-model compatibility surface, mark deprecated, and point evidence readers to attempt provenance. | Attempt provenance for evidence; public result field remains a temporary read surface. | Human-approved API/schema migration removes it after SDK/frontend reader audit. |
+| Evidence export result dumping | `backend/src/intric/flows/flow_run_evidence_bundle.py:119-123` | Export currently serializes `FlowStepResult` as-is, so old/result fixture tool calls can appear beside attempt provenance. | Rewrite `_dump_result_record` to omit `tool_calls_metadata` in export payloads. | Attempt provenance in `step_attempts[].provenance_json.llm.tool_calls`. | Migration can delete the result field later. |
+| RAG default tracking | `backend/src/intric/flows/flow_run_provenance.py:183-194`, `backend/src/intric/flows/flow_run_export_json.py:323-338` | Current no-RAG path returns defaults with `retrieval_tracked=True`, which can imply tracking happened. | Add explicit export summary states. Use tracked defaults only when a RAG section exists. | `flow_run_export_json.py` export summary; `flow_run_provenance.py` normalizes per-attempt RAG payloads. | 7A.7 can expose typed frontend view-model states if needed. |
+| RAG sources | `backend/src/intric/flows/flow_run_export_json.py:272-320` | Sources are export evidence when provenance has references. | Keep source collection, add state derived from sources/tracking. | Attempt provenance RAG section. | None. |
+
+### Boundary Asymmetry
+
+7A.4 intentionally migrates the write side and evidence export side, but not the whole persisted/public API surface. New runtime writes stop populating `FlowStepResult.tool_calls_metadata`, and evidence exports omit result-level tool calls so tool-call evidence has one export owner: attempt provenance. The database column, repository persistence slot, API model field, and generated schema field remain for this slice as Tier B public/persisted readers. They must be marked deprecated, not silently deleted, because removal is a separate schema/API migration decision.
+
+### RAG Tracking State Precedence
+
+Run-level `summary.rag_usage_tracking.tracking_state` is derived from typed attempt provenance parse results, not by scanning only the serialized bundle payload. Precedence is:
+
+| precedence | state | condition |
+|---|---|---|
+| 1 | `unknown_corrupt` | Every relevant provenance signal is corrupt or absent and at least one attempt provenance parse result is corrupt. |
+| 2 | `partial_corrupt` | At least one attempt is corrupt and at least one valid current attempt has a RAG section. |
+| 3 | `tracked_with_sources` | At least one valid current attempt has a RAG section with source references and no corrupt attempt is present. |
+| 4 | `tracked_no_sources` | At least one valid current attempt has a RAG section, but no source references are present and no corrupt attempt is present. |
+| 5 | `not_tracked` | No valid current attempt has a RAG section and no corrupt attempt is present. |
+
+The per-attempt RAG normalizer keeps the current `default_rag_tracking()` behavior for actual RAG sections. Export-summary fallback uses a distinct untracked summary so absence of RAG provenance is never confused with tracked retrieval that found no sources.
+
+### Planned Shape
+
+1. Add `derive_rag_usage_tracking()` in `flow_run_export_json.py`. It takes both `bundle_payload` and `provenance_parse_results` and applies the precedence table above.
+2. Add `tracking_state` to `summary["rag_usage_tracking"]` while preserving existing boolean fields for current UI/API consumers.
+3. Add `untracked_rag_summary()` for the no-RAG default summary. It returns `tracking_state="not_tracked"` and `retrieval_tracked=False` with a note that absence of sources does not prove knowledge was unused.
+4. Preserve `default_rag_tracking()` for actual RAG sections; a RAG section without explicit tracking remains tracked evidence with zero sources.
+5. Change `build_completed_step_result` so new completed results no longer copy `output.tool_calls_metadata` into `FlowStepResult.tool_calls_metadata`.
+6. Change evidence export result dumping so `bundle.step_results[*].tool_calls_metadata` is absent. Tool-call evidence lives in `bundle.step_attempts[*].provenance_json.llm.tool_calls`.
+7. Mark `FlowRunStepPublic.tool_calls_metadata` deprecated with a description that identifies attempt provenance as the evidence owner. Add an OpenAPI assertion so the deprecation signal stays visible to generated-client consumers.
+8. Do not delete the DB/API field in this slice. That deletion requires a schema/API migration decision and should happen only after this slice proves no current export/runtime reader depends on result-level tool calls.
+9. Audit data-retention cleanup only for regression risk: `backend/src/intric/data_retention/infrastructure/data_retention_service.py:411-422` still updates rows when non-tool debug fields are present or output payload pruning changes the payload, so no retention cleanup source change is planned.
+10. Carry forward a deletion trigger: remove `FlowRunStepPublic.tool_calls_metadata` and the database column only after a human-approved SDK/frontend reader audit and persisted-row proof show zero required readers or a migration/backfill plan exists.
+
+### Behavior Pins Before And With Changes
+
+- Runtime completion with tool calls still records tool-call evidence in attempt provenance.
+- Completed step results created by the runtime no longer carry result-level `tool_calls_metadata`.
+- Evidence export bundles omit result-level `tool_calls_metadata` as a second source, including when old branch-local result rows contain populated tool-call metadata.
+- Evidence export summary reports `not_tracked` when no RAG provenance exists and does not imply knowledge was unused.
+- Evidence export summary reports `tracked_no_sources` for tracked RAG provenance with no references.
+- Evidence export summary reports `tracked_with_sources` for tracked RAG provenance with references.
+- Evidence export summary reports `unknown_corrupt` when corrupt attempt provenance is the only available signal.
+- Evidence export summary reports `partial_corrupt` when valid RAG evidence and corrupt attempt provenance coexist.
+- Mixed attempts follow precedence: unknown-corrupt/partial-corrupt beats tracked-with-sources, tracked-with-sources beats tracked-no-sources, tracked-no-sources beats not-tracked.
+- OpenAPI marks the surviving public `tool_calls_metadata` result field as deprecated.
+- Existing RAG display/source summaries remain stable for tracked RAG with sources.
+
+Required test cases:
+
+- no provenance yields `not_tracked`
+- all valid current attempts have RAG sections with zero sources yields `tracked_no_sources`
+- at least one valid current attempt has RAG sources yields `tracked_with_sources`
+- any corrupt attempt mixed with tracked-with-sources yields `partial_corrupt`
+- all corrupt attempts yield `unknown_corrupt` with `retrieval_tracked=False`
+- mixed tracked-no-sources and tracked-with-sources yields `tracked_with_sources`
+- old branch-local result row with `step_results[i].tool_calls_metadata=[...]` and attempt provenance `llm.tool_calls` yields no `tool_calls_metadata` key in `bundle.step_results[i]` while preserving `bundle.step_attempts[i].provenance_json.llm.tool_calls`
+- OpenAPI exposes `FlowRunStepPublic.properties.tool_calls_metadata.deprecated is true` and the description points evidence consumers to attempt provenance
+
+### Expected Source/Test Changes For 7A.4
+
+Expected source:
+
+- `backend/src/intric/flows/runtime/step_result_builder.py`
+- `backend/src/intric/flows/flow_run_evidence_bundle.py`
+- `backend/src/intric/flows/flow_run_export_json.py`
+- `backend/src/intric/flows/api/flow_models.py`
+
+Expected tests:
+
+- `backend/tests/unittests/flows/test_flow_runtime_builders.py`
+- `backend/tests/unittests/flows/test_flow_run_evidence.py`
+- `backend/tests/unittests/flows/test_step_attempt_runtime.py` if tool-call provenance coverage needs a focused assertion
+- `backend/tests/integration/flows/test_flow_evidence_api_contracts.py` if HTTP export summary shape changes need a public pin
+- `backend/tests/unit/test_flow_openapi_contract.py`
+
+Expected docs:
+
+- `docs/refactor/execution/batch-7a-evidence-provenance-contract/plan.md`
+- `docs/refactor/execution/batch-7a-evidence-provenance-contract/journal.md`
+- `docs/refactor/execution/batch-7a-evidence-provenance-contract/retrospective-5.md`
+- `docs/refactor/execution/batch-7a-evidence-provenance-contract/claude-reconciliation-5.md`
+
+Do not touch:
+
+- `frontend/packages/ui/src/icons/types.d.ts`
+- `scripts/run_codex_review.sh`
+- `PRODUCT.md`
+- migrations
+- frontend evidence UI
+- package names or `intric.*` namespace paths
+
+### Validation Commands For 7A.4
+
+```bash
+cd backend && uv run pytest \
+  tests/unittests/flows/test_flow_run_evidence.py \
+  tests/unittests/flows/test_flow_runtime_builders.py \
+  tests/unittests/flows/test_step_attempt_runtime.py \
+  tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_returns_redacted_json_attachment \
+  tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_marks_corrupt_attempt_provenance \
+  tests/unit/test_flow_openapi_contract.py \
+  -q
+```
+
+```bash
+cd backend && uv run pyright \
+  src/intric/flows/runtime/step_result_builder.py \
+  src/intric/flows/api/flow_models.py \
+  src/intric/flows/flow_run_evidence_bundle.py \
+  src/intric/flows/flow_run_export_json.py \
+  tests/unittests/flows/test_flow_runtime_builders.py \
+  tests/unittests/flows/test_flow_run_evidence.py \
+  tests/integration/flows/test_flow_evidence_api_contracts.py \
+  tests/unit/test_flow_openapi_contract.py
+```
+
+```bash
+cd backend && uv run ruff check \
+  src/intric/flows/runtime/step_result_builder.py \
+  src/intric/flows/api/flow_models.py \
+  src/intric/flows/flow_run_evidence_bundle.py \
+  src/intric/flows/flow_run_export_json.py \
+  tests/unittests/flows/test_flow_runtime_builders.py \
+  tests/unittests/flows/test_flow_run_evidence.py \
+  tests/integration/flows/test_flow_evidence_api_contracts.py \
+  tests/unit/test_flow_openapi_contract.py
+```
+
+```bash
+cd backend && uv run ruff format --check \
+  src/intric/flows/runtime/step_result_builder.py \
+  src/intric/flows/api/flow_models.py \
+  src/intric/flows/flow_run_evidence_bundle.py \
+  src/intric/flows/flow_run_export_json.py \
+  tests/unittests/flows/test_flow_runtime_builders.py \
+  tests/unittests/flows/test_flow_run_evidence.py \
+  tests/integration/flows/test_flow_evidence_api_contracts.py \
+  tests/unit/test_flow_openapi_contract.py
+```
+
+```bash
+cd backend && uv run lint-imports --no-cache
+```
+
+```bash
+rg -n "tool_calls_metadata=output\\.tool_calls_metadata|retrieval_tracked=True.*not_tracked|retrieval_tracked.*True.*not tracked|Batch 7A|7A\\.|/tmp/ai_builder|plan/(phases|progress|briefs|intents|reviews|codex|architecture_plan)" \
+  backend/src/intric/flows/runtime/step_result_builder.py \
+  backend/src/intric/flows/api/flow_models.py \
+  backend/src/intric/flows/flow_run_evidence_bundle.py \
+  backend/src/intric/flows/flow_run_export_json.py \
+  backend/tests/unittests/flows/test_flow_runtime_builders.py \
+  backend/tests/unittests/flows/test_flow_run_evidence.py \
+  backend/tests/integration/flows/test_flow_evidence_api_contracts.py \
+  backend/tests/unit/test_flow_openapi_contract.py
+```
+
+```bash
+git diff --check -- \
+  backend/src/intric/flows/runtime/step_result_builder.py \
+  backend/src/intric/flows/api/flow_models.py \
+  backend/src/intric/flows/flow_run_evidence_bundle.py \
+  backend/src/intric/flows/flow_run_export_json.py \
+  backend/tests/unittests/flows/test_flow_runtime_builders.py \
+  backend/tests/unittests/flows/test_flow_run_evidence.py \
+  backend/tests/integration/flows/test_flow_evidence_api_contracts.py \
+  backend/tests/unit/test_flow_openapi_contract.py \
+  docs/refactor/execution/batch-7a-evidence-provenance-contract/plan.md \
+  docs/refactor/execution/batch-7a-evidence-provenance-contract/journal.md
+```
 
 ## Scope For 7A.3
 

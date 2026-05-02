@@ -177,7 +177,7 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
 
 
 def _dump_result_record(item: FlowStepResult) -> dict[str, Any]:
-    return item.model_dump(mode="json")
+    return item.model_dump(mode="json", exclude={"tool_calls_metadata"})
 
 
 def _dump_attempt_record(

@@ -389,6 +389,20 @@ def test_openapi_flow_consumer_schemas_present(openapi_spec: dict) -> None:
     assert not missing, f"Missing OpenAPI schemas: {sorted(missing)}"
 
 
+def test_openapi_flow_run_step_tool_calls_metadata_is_deprecated(
+    openapi_spec: dict,
+) -> None:
+    schema = (
+        openapi_spec.get("components", {})
+        .get("schemas", {})
+        .get("FlowRunStepPublic", {})
+    )
+    tool_calls = schema.get("properties", {}).get("tool_calls_metadata", {})
+
+    assert tool_calls.get("deprecated") is True
+    assert "attempt provenance" in str(tool_calls.get("description", "")).lower()
+
+
 def test_openapi_flow_pagination_response_shape_is_current(
     openapi_spec: dict,
 ) -> None:

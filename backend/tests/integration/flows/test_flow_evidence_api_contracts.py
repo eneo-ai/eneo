@@ -533,6 +533,10 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     ]
     assert payload["summary"]["rag_usage_tracking"]["retrieval_tracked"] is True
     assert (
+        payload["summary"]["rag_usage_tracking"]["tracking_state"]
+        == "tracked_with_sources"
+    )
+    assert (
         payload["summary"]["rag_usage_tracking"]["prompt_context_inclusion_tracked"]
         is True
     )
@@ -661,6 +665,10 @@ async def test_flow_run_evidence_export_marks_corrupt_attempt_provenance(
     ).encode("utf-8")
     assert payload["content_hash"] == hashlib.sha256(serialized_bundle).hexdigest()
     assert payload["manifest"]["provenance_persisted_version_status"] == "corrupt"
+    assert (
+        payload["summary"]["rag_usage_tracking"]["tracking_state"] == "unknown_corrupt"
+    )
+    assert payload["summary"]["rag_usage_tracking"]["retrieval_tracked"] is False
     marker = payload["bundle"]["step_attempts"][0]["provenance_json"]
     assert marker["schema_version"] == FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION
     assert marker["status"] == "corrupt"

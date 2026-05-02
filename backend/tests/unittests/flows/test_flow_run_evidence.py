@@ -5,7 +5,7 @@ import json
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -115,6 +115,54 @@ def _attempt_with_provenance(
         finished_at=now,
         created_at=now,
         updated_at=now,
+    )
+
+
+def _step_result_for_run(
+    run: FlowRun,
+    *,
+    step_id: UUID | None = None,
+    tool_calls_metadata: list[dict[str, Any]] | dict[str, Any] | None = None,
+) -> FlowStepResult:
+    now = datetime.now(timezone.utc)
+    return FlowStepResult(
+        id=uuid4(),
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=step_id or uuid4(),
+        step_order=1,
+        assistant_id=uuid4(),
+        input_payload_json=None,
+        effective_prompt=None,
+        output_payload_json={"text": "done"},
+        model_parameters_json=None,
+        num_tokens_input=None,
+        num_tokens_output=None,
+        status=FlowStepResultStatus.COMPLETED,
+        error_message=None,
+        flow_step_execution_hash=None,
+        tool_calls_metadata=tool_calls_metadata,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _render_raw_export(
+    run: FlowRun,
+    version: FlowVersion,
+    *,
+    step_results: list[FlowStepResult] | None = None,
+    step_attempts: list[FlowStepAttempt] | None = None,
+) -> dict[str, Any]:
+    return render_evidence_json_export(
+        bundle=build_evidence_bundle(
+            run=run,
+            version=version,
+            step_results=step_results or [],
+            step_attempts=step_attempts or [],
+        ),
+        context=_raw_export_context(),
     )
 
 
@@ -692,6 +740,195 @@ def test_evidence_export_manifest_tracks_valid_and_absent_provenance() -> None:
         == FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
     )
     assert export["bundle"]["step_attempts"][1]["provenance_json"] is None
+
+
+def test_evidence_export_rag_tracking_reports_not_tracked_without_provenance() -> None:
+    run, version = _evidence_run_and_version()
+    export = _render_raw_export(
+        run,
+        version,
+        step_attempts=[_attempt_with_provenance(run, None)],
+    )
+
+    tracking = export["summary"]["rag_usage_tracking"]
+    assert tracking["tracking_state"] == "not_tracked"
+    assert tracking["retrieval_tracked"] is False
+    assert "does not prove knowledge was unused" in tracking["note"]
+
+
+def test_evidence_export_rag_tracking_reports_tracked_no_sources() -> None:
+    run, version = _evidence_run_and_version()
+    export = _render_raw_export(
+        run,
+        version,
+        step_attempts=[
+            _attempt_with_provenance(
+                run,
+                {
+                    "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+                    "rag": {"status": "success", "references": []},
+                },
+            )
+        ],
+    )
+
+    tracking = export["summary"]["rag_usage_tracking"]
+    assert tracking["tracking_state"] == "tracked_no_sources"
+    assert tracking["retrieval_tracked"] is True
+    assert export["summary"]["rag_sources"] == []
+
+
+def test_evidence_export_rag_tracking_reports_tracked_with_sources() -> None:
+    run, version = _evidence_run_and_version()
+    export = _render_raw_export(
+        run,
+        version,
+        step_attempts=[
+            _attempt_with_provenance(
+                run,
+                {
+                    "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+                    "rag": {
+                        "status": "success",
+                        "references": [
+                            {
+                                "id": "source-1",
+                                "title": "Knowledge Source",
+                                "usage_state": "retrieved_candidate",
+                            }
+                        ],
+                    },
+                },
+            )
+        ],
+    )
+
+    assert (
+        export["summary"]["rag_usage_tracking"]["tracking_state"]
+        == "tracked_with_sources"
+    )
+    assert export["summary"]["rag_sources"][0]["name"] == "Knowledge Source"
+
+
+def test_evidence_export_rag_tracking_prefers_sources_over_empty_tracked_rag() -> None:
+    run, version = _evidence_run_and_version()
+    empty_tracked = _attempt_with_provenance(
+        run,
+        {
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "rag": {"status": "success", "references": []},
+        },
+    )
+    with_sources = _attempt_with_provenance(
+        run,
+        {
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "rag": {
+                "status": "success",
+                "references": [
+                    {
+                        "id": "source-1",
+                        "title": "Knowledge Source",
+                        "usage_state": "inserted_into_prompt",
+                    }
+                ],
+            },
+        },
+    )
+
+    export = _render_raw_export(
+        run,
+        version,
+        step_attempts=[empty_tracked, with_sources],
+    )
+
+    assert (
+        export["summary"]["rag_usage_tracking"]["tracking_state"]
+        == "tracked_with_sources"
+    )
+
+
+def test_evidence_export_rag_tracking_prefers_corrupt_over_tracked_sources() -> None:
+    run, version = _evidence_run_and_version()
+    tracked = _attempt_with_provenance(
+        run,
+        {
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "rag": {
+                "status": "success",
+                "references": [
+                    {
+                        "id": "source-1",
+                        "title": "Knowledge Source",
+                        "usage_state": "inserted_into_prompt",
+                    }
+                ],
+            },
+        },
+    )
+    corrupt = _attempt_with_provenance(run, {"rag": {"status": "success"}})
+
+    export = _render_raw_export(
+        run,
+        version,
+        step_attempts=[tracked, corrupt],
+    )
+
+    tracking = export["summary"]["rag_usage_tracking"]
+    assert tracking["tracking_state"] == "partial_corrupt"
+    assert tracking["retrieval_tracked"] is True
+    assert export["summary"]["rag_sources"][0]["name"] == "Knowledge Source"
+
+
+def test_evidence_export_rag_tracking_reports_unknown_for_all_corrupt_attempts() -> (
+    None
+):
+    run, version = _evidence_run_and_version()
+
+    export = _render_raw_export(
+        run,
+        version,
+        step_attempts=[_attempt_with_provenance(run, {"rag": {"status": "success"}})],
+    )
+
+    tracking = export["summary"]["rag_usage_tracking"]
+    assert tracking["tracking_state"] == "unknown_corrupt"
+    assert tracking["retrieval_tracked"] is False
+    assert export["summary"]["rag_sources"] == []
+
+
+def test_evidence_export_omits_result_tool_calls_and_preserves_attempt_provenance() -> (
+    None
+):
+    run, version = _evidence_run_and_version()
+    step_id = uuid4()
+    result = _step_result_for_run(
+        run,
+        step_id=step_id,
+        tool_calls_metadata=[{"name": "legacy-result-copy"}],
+    )
+    attempt = _attempt_with_provenance(
+        run,
+        {
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "llm": {
+                "tool_calls": [{"name": "canonical-attempt-copy"}],
+            },
+        },
+    ).model_copy(update={"step_id": step_id})
+
+    export = _render_raw_export(
+        run,
+        version,
+        step_results=[result],
+        step_attempts=[attempt],
+    )
+
+    assert "tool_calls_metadata" not in export["bundle"]["step_results"][0]
+    tool_calls = export["bundle"]["step_attempts"][0]["provenance_json"]["llm"][
+        "tool_calls"
+    ]
+    assert tool_calls["preview"] == [{"name": "canonical-attempt-copy"}]
 
 
 def test_evidence_export_manifest_rejects_unknown_fields() -> None:

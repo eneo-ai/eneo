@@ -35,7 +35,9 @@ def _runtime_step(step_order: int, *, description: str | None = None) -> Runtime
     )
 
 
-def _step_result(step_order: int, *, status: FlowStepResultStatus, text: str) -> FlowStepResult:
+def _step_result(
+    step_order: int, *, status: FlowStepResultStatus, text: str
+) -> FlowStepResult:
     now = _now()
     return FlowStepResult(
         id=uuid4(),
@@ -65,7 +67,10 @@ def test_build_run_execution_state_keeps_only_completed_results_and_named_steps(
     failed = _step_result(2, status=FlowStepResultStatus.FAILED, text="beta")
 
     state = build_run_execution_state(
-        steps=[_runtime_step(1, description=" Step One "), _runtime_step(2, description=None)],
+        steps=[
+            _runtime_step(1, description=" Step One "),
+            _runtime_step(2, description=None),
+        ],
         persisted_results=[failed, completed],
     )
 
@@ -81,13 +86,17 @@ def test_build_failed_step_result_carries_optional_payload_and_prompt():
     failed = build_failed_step_result(
         claimed=claimed,
         error_message="typed failure",
-        input_payload_json=build_default_failed_input_payload(input_source="flow_input"),
+        input_payload_json=build_default_failed_input_payload(
+            input_source="flow_input"
+        ),
         effective_prompt="Prompt",
     )
 
     assert failed.status == FlowStepResultStatus.FAILED
     assert failed.error_message == "typed failure"
-    assert failed.input_payload_json == build_default_failed_input_payload(input_source="flow_input")
+    assert failed.input_payload_json == build_default_failed_input_payload(
+        input_source="flow_input"
+    )
     assert failed.effective_prompt == "Prompt"
 
 
@@ -134,14 +143,20 @@ def test_build_completed_step_result_includes_optional_sections_and_hash():
     assert built.input_payload_json["diagnostics"] == [
         {"code": "diag", "message": "detail", "severity": "info"}
     ]
-    assert built.output_payload_json == {"text": "answer", "structured": {"result": "ok"}}
+    assert built.output_payload_json == {
+        "text": "answer",
+        "structured": {"result": "ok"},
+    }
     assert built.flow_step_execution_hash == "abc123"
+    assert built.tool_calls_metadata is None
 
 
 def test_with_webhook_delivery_status_updates_payload_without_losing_existing_fields():
     result = _step_result(1, status=FlowStepResultStatus.COMPLETED, text="answer")
 
-    failed = with_webhook_delivery_status(step_result=result, delivered=False, error="timeout")
+    failed = with_webhook_delivery_status(
+        step_result=result, delivered=False, error="timeout"
+    )
     assert failed.output_payload_json == {
         "text": "answer",
         "webhook_delivered": False,

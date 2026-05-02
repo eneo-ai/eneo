@@ -109,7 +109,10 @@ def render_evidence_json_export(
         redaction_applied = False
 
     exported_at = datetime.now(timezone.utc)
-    summary = _build_summary(bundle_payload)
+    summary = _build_summary(
+        bundle_payload,
+        provenance_parse_results=export_payload.provenance_parse_results,
+    )
     manifest = _build_manifest(
         bundle_payload,
         content_hash,
@@ -200,7 +203,11 @@ def _provenance_persisted_version_status(
     return "not_tracked"
 
 
-def _build_summary(bundle_payload: dict[str, Any]) -> dict[str, Any]:
+def _build_summary(
+    bundle_payload: dict[str, Any],
+    *,
+    provenance_parse_results: tuple[FlowAttemptProvenanceParseResult, ...],
+) -> dict[str, Any]:
     run = _as_json_object_or_empty(bundle_payload.get("run"))
     step_results = _as_json_object_list(bundle_payload.get("step_results"))
     step_attempts = _as_json_object_list(bundle_payload.get("step_attempts"))
@@ -248,7 +255,10 @@ def _build_summary(bundle_payload: dict[str, Any]) -> dict[str, Any]:
             format_source_display_name(name) for name in rag_source_names
         ],
         "rag_sources": rag_sources,
-        "rag_usage_tracking": _collect_rag_tracking(bundle_payload),
+        "rag_usage_tracking": derive_rag_usage_tracking(
+            bundle_payload,
+            provenance_parse_results=provenance_parse_results,
+        ),
         "citations": citations,
         "final_output": _build_final_output_summary(
             run.get("output_payload_json"),
@@ -320,22 +330,93 @@ def _collect_rag_sources(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]
     return list(sources_by_key.values())
 
 
-def _collect_rag_tracking(bundle_payload: dict[str, Any]) -> dict[str, Any]:
-    step_attempts = _as_json_object_list(bundle_payload.get("step_attempts"))
-    for attempt in step_attempts:
-        provenance = _as_json_object(attempt.get("provenance_json"))
-        if provenance is None:
+def untracked_rag_summary() -> dict[str, Any]:
+    return {
+        "tracking_state": "not_tracked",
+        "retrieval_tracked": False,
+        "prompt_context_inclusion_tracked": False,
+        "citation_tracked": False,
+        "material_influence_tracked": False,
+        "selection_basis": "not_tracked",
+        "note": (
+            "Knowledge/RAG provenance was not recorded; absence of sources does "
+            "not prove knowledge was unused."
+        ),
+    }
+
+
+def derive_rag_usage_tracking(
+    bundle_payload: dict[str, Any],
+    *,
+    provenance_parse_results: tuple[FlowAttemptProvenanceParseResult, ...],
+) -> dict[str, Any]:
+    rag_payloads = _rag_payloads_from_parse_results(provenance_parse_results)
+    has_corrupt = any(result.status == "corrupt" for result in provenance_parse_results)
+    if not rag_payloads:
+        summary = untracked_rag_summary()
+        if has_corrupt:
+            summary["tracking_state"] = "unknown_corrupt"
+            summary["note"] = (
+                "One or more attempts have corrupt knowledge/RAG provenance; "
+                "source usage cannot be determined."
+            )
+        return summary
+
+    summary = _merge_tracked_rag_summaries(rag_payloads)
+    has_sources = bool(_collect_rag_sources(bundle_payload))
+    if has_corrupt:
+        summary["tracking_state"] = "partial_corrupt"
+        summary["note"] = (
+            "Some attempts have tracked knowledge/RAG provenance, but one or more "
+            "attempts are corrupt; source usage is only partially known."
+        )
+    elif has_sources:
+        summary["tracking_state"] = "tracked_with_sources"
+    else:
+        summary["tracking_state"] = "tracked_no_sources"
+    return summary
+
+
+def _rag_payloads_from_parse_results(
+    provenance_parse_results: tuple[FlowAttemptProvenanceParseResult, ...],
+) -> list[JsonObject]:
+    payloads: list[JsonObject] = []
+    for result in provenance_parse_results:
+        provenance = result.provenance
+        if result.status != "tracked" or provenance is None or provenance.rag is None:
             continue
-        rag = _as_json_object(provenance.get("rag"))
-        if rag is None:
-            continue
-        tracking = _as_json_object(rag.get("tracking"))
+        payloads.append(provenance.rag.model_dump(mode="json"))
+    return payloads
+
+
+def _merge_tracked_rag_summaries(rag_payloads: list[JsonObject]) -> dict[str, Any]:
+    summary: dict[str, Any] | None = None
+    for payload in rag_payloads:
+        tracking = _as_json_object(payload.get("tracking"))
+        current = dict(default_rag_tracking())
         if tracking is not None:
-            merged = dict(default_rag_tracking())
-            for key, value in tracking.items():
-                merged[key] = value
-            return merged
-    return default_rag_tracking()
+            current.update(tracking)
+        if summary is None:
+            summary = current
+            continue
+        for key in (
+            "retrieval_tracked",
+            "prompt_context_inclusion_tracked",
+            "citation_tracked",
+            "material_influence_tracked",
+        ):
+            value = current.get(key)
+            if isinstance(value, bool):
+                summary[key] = bool(summary.get(key)) or value
+        selection_basis = current.get("selection_basis")
+        if not isinstance(summary.get("selection_basis"), str) and isinstance(
+            selection_basis, str
+        ):
+            summary["selection_basis"] = selection_basis.strip()
+        note = current.get("note")
+        if not isinstance(summary.get("note"), str) and isinstance(note, str):
+            summary["note"] = note.strip()
+    return summary or dict(default_rag_tracking())
 
 
 def _build_final_output_summary(
