@@ -24,7 +24,7 @@ from intric.flows import (
     FlowVersionRepository,
 )
 from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
-from intric.flows.enums import FlowRunTerminalSource
+from intric.flows.enums import FlowRunLifecycleSource
 from intric.flows.flow import FlowRunStatus, FlowStepAttemptStatus, FlowStepResultStatus
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.principal import FlowPrincipal
@@ -596,7 +596,7 @@ async def test_count_active_runs_counts_only_queued_and_running_statuses(
             run_id=queued_run.id,
             tenant_id=admin_user.tenant_id,
             target_status=FlowRunStatus.CANCELLED,
-            source=FlowRunTerminalSource.USER_CANCEL,
+            source=FlowRunLifecycleSource.USER_CANCEL,
             error_code="user_cancelled",
             error_message="Run cancelled by user.",
         )
@@ -755,7 +755,7 @@ async def test_terminalization_is_idempotent_after_terminal_transition(
             run_id=run.id,
             tenant_id=admin_user.tenant_id,
             target_status=FlowRunStatus.CANCELLED,
-            source=FlowRunTerminalSource.USER_CANCEL,
+            source=FlowRunLifecycleSource.USER_CANCEL,
             error_code="user_cancelled",
             error_message="Run cancelled by user.",
         )
@@ -763,7 +763,7 @@ async def test_terminalization_is_idempotent_after_terminal_transition(
             run_id=run.id,
             tenant_id=admin_user.tenant_id,
             target_status=FlowRunStatus.COMPLETED,
-            source=FlowRunTerminalSource.EXECUTOR_COMPLETED,
+            source=FlowRunLifecycleSource.EXECUTOR_COMPLETED,
             output_payload_json={"result": "should-not-overwrite"},
         )
 
@@ -1624,7 +1624,7 @@ async def test_cancel_terminalization_only_updates_pending_or_running_steps(
             run_id=run.id,
             tenant_id=admin_user.tenant_id,
             target_status=FlowRunStatus.CANCELLED,
-            source=FlowRunTerminalSource.USER_CANCEL,
+            source=FlowRunLifecycleSource.USER_CANCEL,
             error_code="user_cancelled",
             error_message="cancelled in test",
         )

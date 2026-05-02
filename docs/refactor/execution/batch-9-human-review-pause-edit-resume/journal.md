@@ -41,6 +41,29 @@ IN_PROGRESS
 - Reconciliation: `docs/refactor/execution/batch-9-human-review-pause-edit-resume/claude-reconciliation-3.md`
 - Outcome: plan accepted for implementation after adding Claude's non-blocking data-model reviewability nits
 
+### Slice 9.0a — Lifecycle Source Rename
+
+- Source:
+  - `backend/src/intric/flows/enums.py`
+  - `backend/src/intric/database/tables/flow_tables.py`
+  - `backend/src/intric/flows/application/flow_run_terminalization.py`
+  - `backend/src/intric/flows/application/flow_dispatch.py`
+  - `backend/src/intric/flows/application/flow_run_service.py`
+  - `backend/src/intric/flows/infrastructure/flow_run_repo.py`
+  - `backend/src/intric/flows/runtime/executor.py`
+  - `backend/src/intric/flows/runtime/tasks.py`
+- Tests:
+  - `backend/tests/unittests/flows/test_celery_runtime.py`
+  - `backend/tests/unittests/flows/test_flow_run_service.py::test_cancel_run_marks_pending_steps_cancelled`
+  - `backend/tests/integration/flows/test_flow_terminalization_contract.py`
+- Local validation:
+  - `rg -n "FlowRunTerminalSource|FLOW_RUN_TERMINAL_SOURCE_VALUES" backend/src/intric backend/tests` — passed, no references
+  - `.venv/bin/ruff check` on the renamed source/test files — passed after import sorting
+  - `uv run pyright` on the renamed source/test files — passed, 0 errors
+  - `.venv/bin/pytest tests/unittests/flows/test_celery_runtime.py tests/unittests/flows/test_flow_run_service.py::test_cancel_run_marks_pending_steps_cancelled tests/integration/flows/test_flow_terminalization_contract.py -q` — passed, 16 tests
+- Docker validation: blocked before execution by this Codex process with `Rejected("approval required by policy, but AskForApproval is set to Never")`
+- Outcome: mechanical rename complete; no enum string values or runtime behavior changed
+
 ## Carry-Forward Risks
 
 - Review policy wire shape is pinned as `{"review_policy": {"mode": "view" | "edit"}}`; Slice 9.2 still needs API/schema tests before source implementation.

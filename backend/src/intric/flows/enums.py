@@ -140,7 +140,7 @@ def is_cancellable_flow_run_status(status: FlowRunStatus | str) -> bool:
     return normalize_flow_run_status(status) in CANCELLABLE_FLOW_RUN_STATUSES
 
 
-class FlowRunTerminalSource(str, Enum):
+class FlowRunLifecycleSource(str, Enum):
     EXECUTOR_COMPLETED = "executor_completed"
     EXECUTOR_FAILED = "executor_failed"
     FLOW_DELETED = "flow_deleted"

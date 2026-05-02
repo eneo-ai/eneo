@@ -16,7 +16,7 @@ from intric.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
     stable_hash,
 )
-from intric.flows.enums import FlowRunTerminalSource
+from intric.flows.enums import FlowRunLifecycleSource
 from intric.flows.flow import (
     FlowRun,
     FlowRunStatus,
@@ -1111,7 +1111,7 @@ async def test_execute_cancels_when_flow_deleted_before_step_execution(user):
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     assert (
         executor.flow_run_terminalizer.terminalize_run.await_args.kwargs["source"]
-        == FlowRunTerminalSource.FLOW_DELETED
+        == FlowRunLifecycleSource.FLOW_DELETED
     )
 
 
@@ -2073,7 +2073,7 @@ async def test_execute_cancels_when_flow_deleted_after_first_step_and_keeps_comp
     assert first_saved.status == FlowStepResultStatus.COMPLETED
     update_kwargs = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
     assert update_kwargs["target_status"] == FlowRunStatus.CANCELLED
-    assert update_kwargs["source"] == FlowRunTerminalSource.FLOW_DELETED
+    assert update_kwargs["source"] == FlowRunLifecycleSource.FLOW_DELETED
     assert update_kwargs["error_message"] == "Flow was deleted during execution."
 
 
@@ -3659,7 +3659,7 @@ async def test_execute_audits_completed_run_terminal_state(user):
     audit_service.log_async.assert_not_awaited()
     terminal_kwargs = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
     assert terminal_kwargs["target_status"] == FlowRunStatus.COMPLETED
-    assert terminal_kwargs["source"] == FlowRunTerminalSource.EXECUTOR_COMPLETED
+    assert terminal_kwargs["source"] == FlowRunLifecycleSource.EXECUTOR_COMPLETED
 
 
 @pytest.mark.asyncio
@@ -3719,7 +3719,7 @@ async def test_execute_audits_failed_run_terminal_state(user):
     audit_service.log_async.assert_not_awaited()
     terminal_kwargs = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
     assert terminal_kwargs["target_status"] == FlowRunStatus.FAILED
-    assert terminal_kwargs["source"] == FlowRunTerminalSource.EXECUTOR_FAILED
+    assert terminal_kwargs["source"] == FlowRunLifecycleSource.EXECUTOR_FAILED
 
 
 # --- Encrypted header tests for webhook delivery ---

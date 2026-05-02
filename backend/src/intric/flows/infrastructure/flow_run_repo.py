@@ -40,9 +40,9 @@ from intric.flows.domain.flow import (
 from intric.flows.enums import (
     ACTIVE_FLOW_RUN_STATUSES,
     TERMINAL_FLOW_RUN_STATUSES,
+    FlowRunLifecycleSource,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
-    FlowRunTerminalSource,
 )
 from intric.flows.flow_factory import FlowFactory
 from intric.flows.flow_run_rerun_graph import RerunInvalidatedStep
@@ -774,7 +774,7 @@ class FlowRunRepository:
         actor_id: UUID | None,
         actor_type: ActorType,
         actor_api_key_id: UUID | None,
-        source: FlowRunTerminalSource,
+        source: FlowRunLifecycleSource,
         target_status: FlowRunStatus,
         error_code: str | None,
         error_message: str | None,

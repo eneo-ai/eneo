@@ -9,7 +9,7 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.entity_types import EntityType
 from intric.flows.domain.flow import FlowRun, FlowRunStatus, JsonObject
-from intric.flows.enums import FlowRunTerminalSource, is_terminal_flow_run_status
+from intric.flows.enums import FlowRunLifecycleSource, is_terminal_flow_run_status
 from intric.flows.flow import FlowStepAttemptStatus, FlowStepResultStatus
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.principal import FlowAuditActorFields, FlowPrincipal
@@ -26,7 +26,7 @@ class FlowRunTerminalizationResult:
     run: FlowRun
     did_transition: bool
     target_status: FlowRunStatus
-    source: FlowRunTerminalSource
+    source: FlowRunLifecycleSource
     audit_outbox_id: UUID | None
 
 
@@ -40,7 +40,7 @@ class FlowRunTerminalizer:
         run_id: UUID,
         tenant_id: UUID,
         target_status: FlowRunStatus,
-        source: FlowRunTerminalSource,
+        source: FlowRunLifecycleSource,
         error_code: str | None = None,
         error_message: str | None = None,
         output_payload_json: JsonObject | None = None,
@@ -73,7 +73,7 @@ class FlowRunTerminalizer:
             run_id=run_id,
             tenant_id=tenant_id,
             target_status=FlowRunStatus.FAILED,
-            source=FlowRunTerminalSource.STALE_RUNNING_RECONCILER,
+            source=FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
             error_code=error_code,
             error_message=error_message,
             stale_before=stale_before,
@@ -85,7 +85,7 @@ class FlowRunTerminalizer:
         run_id: UUID,
         tenant_id: UUID,
         target_status: FlowRunStatus,
-        source: FlowRunTerminalSource,
+        source: FlowRunLifecycleSource,
         error_code: str | None = None,
         error_message: str | None = None,
         output_payload_json: JsonObject | None = None,
@@ -217,7 +217,7 @@ class FlowRunTerminalizer:
 
     @staticmethod
     def _audit_actor_fields(
-        *, run: FlowRun, principal: FlowPrincipal | None, source: FlowRunTerminalSource
+        *, run: FlowRun, principal: FlowPrincipal | None, source: FlowRunLifecycleSource
     ) -> FlowAuditActorFields:
         resolved = principal
         if resolved is None:

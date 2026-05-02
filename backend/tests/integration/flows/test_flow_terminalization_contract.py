@@ -23,7 +23,7 @@ from intric.flows.domain.flow import (
     FlowStepAttemptStatus,
     FlowStepResultStatus,
 )
-from intric.flows.enums import FlowRunTerminalSource
+from intric.flows.enums import FlowRunLifecycleSource
 from intric.flows.flow_factory import FlowFactory
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
@@ -235,7 +235,7 @@ async def test_terminalization_fails_run_once_and_writes_one_outbox_event(
             run_id=run.id,
             tenant_id=admin_user.tenant_id,
             target_status=FlowRunStatus.FAILED,
-            source=FlowRunTerminalSource.STALE_RUNNING_RECONCILER,
+            source=FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
             error_code="flow_worker_stalled",
             error_message="flow_worker_stalled: stale run reconciled.",
         )
@@ -243,7 +243,7 @@ async def test_terminalization_fails_run_once_and_writes_one_outbox_event(
             run_id=run.id,
             tenant_id=admin_user.tenant_id,
             target_status=FlowRunStatus.FAILED,
-            source=FlowRunTerminalSource.STALE_RUNNING_RECONCILER,
+            source=FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
             error_code="flow_worker_stalled",
             error_message="flow_worker_stalled: duplicate reconciliation.",
         )
@@ -309,7 +309,7 @@ async def test_terminalization_fails_run_once_and_writes_one_outbox_event(
             .all()
         )
         assert len(outbox_rows) == 1
-        assert outbox_rows[0].source == FlowRunTerminalSource.STALE_RUNNING_RECONCILER.value
+        assert outbox_rows[0].source == FlowRunLifecycleSource.STALE_RUNNING_RECONCILER.value
         assert outbox_rows[0].action == "flow_run_failed"
         assert outbox_rows[0].description == (
             "flow_run_failed:stale_running_reconciler"
@@ -341,7 +341,7 @@ async def test_completed_terminalization_rejects_open_runtime_rows(
                 run_id=run.id,
                 tenant_id=admin_user.tenant_id,
                 target_status=FlowRunStatus.COMPLETED,
-                source=FlowRunTerminalSource.EXECUTOR_COMPLETED,
+                source=FlowRunLifecycleSource.EXECUTOR_COMPLETED,
                 output_payload_json={"text": "done"},
             )
 
@@ -388,7 +388,7 @@ async def test_terminalization_rolls_back_when_audit_outbox_insert_fails(
                     run_id=run.id,
                     tenant_id=admin_user.tenant_id,
                     target_status=FlowRunStatus.FAILED,
-                    source=FlowRunTerminalSource.TASK_FAILURE,
+                    source=FlowRunLifecycleSource.TASK_FAILURE,
                     error_code="flow_task_failure",
                     error_message="flow_task_failure: task failed.",
                 )

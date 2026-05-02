@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.enums import FlowRunTerminalSource
+from intric.flows.enums import FlowRunLifecycleSource
 from intric.flows.runtime.celery_execution_backend import (
     FLOW_EXECUTE_TASK_NAME,
     CeleryFlowExecutionBackend,
@@ -189,7 +189,7 @@ def test_execute_flow_run_marks_failed_when_user_id_is_missing(monkeypatch):
     assert result == {"status": "failed", "reason": "missing_principal"}
     assert terminalize_failure.await_count == 1
     assert terminalize_failure.await_args.kwargs["source"] == (
-        FlowRunTerminalSource.MISSING_PRINCIPAL
+        FlowRunLifecycleSource.MISSING_PRINCIPAL
     )
     assert terminalize_failure.await_args.kwargs["error_code"] == (
         "flow_missing_principal"
@@ -256,7 +256,7 @@ def test_execute_flow_run_handles_timeout_and_marks_run_failed(monkeypatch):
     assert result == {"status": "failed", "reason": "timeout"}
     assert terminalize_failure.await_count == 1
     assert terminalize_failure.await_args.kwargs["source"] == (
-        FlowRunTerminalSource.TASK_TIMEOUT
+        FlowRunLifecycleSource.TASK_TIMEOUT
     )
     assert terminalize_failure.await_args.kwargs["error_code"] == "flow_task_timeout"
     assert terminalize_failure.await_args.kwargs["error_message"] == (
@@ -313,7 +313,7 @@ def test_execute_flow_run_handles_generic_exception(monkeypatch):
     assert result == {"status": "failed", "reason": "task_failure"}
     assert terminalize_failure.await_count == 1
     assert terminalize_failure.await_args.kwargs["source"] == (
-        FlowRunTerminalSource.TASK_FAILURE
+        FlowRunLifecycleSource.TASK_FAILURE
     )
     assert terminalize_failure.await_args.kwargs["error_code"] == "flow_task_failure"
     assert terminalize_failure.await_args.kwargs["error_message"] == (

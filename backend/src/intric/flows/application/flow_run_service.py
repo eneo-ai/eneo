@@ -16,7 +16,7 @@ from intric.flows.domain.flow import (
     FlowStepResult,
     JsonObject,
 )
-from intric.flows.enums import FlowRunTerminalSource, is_terminal_flow_run_status
+from intric.flows.enums import FlowRunLifecycleSource, is_terminal_flow_run_status
 from intric.flows.execution_backend import FlowExecutionBackend
 from intric.flows.flow_evidence_policy import (
     EvidenceCapabilityLevel,
@@ -994,7 +994,7 @@ class FlowRunService:
             run_id=run_id,
             tenant_id=self.user.tenant_id,
             target_status=FlowRunStatus.CANCELLED,
-            source=FlowRunTerminalSource.USER_CANCEL,
+            source=FlowRunLifecycleSource.USER_CANCEL,
             error_code="user_cancelled",
             error_message="Run cancelled by user.",
             cancelled_at=datetime.now(timezone.utc),

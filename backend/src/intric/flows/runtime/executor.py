@@ -37,8 +37,8 @@ from intric.flows.domain.flow import (
     JsonObject,
 )
 from intric.flows.enums import (
+    FlowRunLifecycleSource,
     FlowRunRerunInvalidationRole,
-    FlowRunTerminalSource,
     is_terminal_flow_run_status,
 )
 from intric.flows.flow_run_provenance import (
@@ -369,7 +369,7 @@ class FlowRunExecutor:
                 run_id=run_id,
                 tenant_id=tenant_id,
                 target_status=FlowRunStatus.CANCELLED,
-                source=FlowRunTerminalSource.FLOW_DELETED,
+                source=FlowRunLifecycleSource.FLOW_DELETED,
                 error_code="flow_deleted",
                 error_message=reason,
             )
@@ -388,7 +388,7 @@ class FlowRunExecutor:
                 run_id=run_id,
                 tenant_id=tenant_id,
                 target_status=FlowRunStatus.FAILED,
-                source=FlowRunTerminalSource.DEFINITION_CHECKSUM_MISMATCH,
+                source=FlowRunLifecycleSource.DEFINITION_CHECKSUM_MISMATCH,
                 error_code="definition_checksum_mismatch",
                 error_message=str(exc),
             )
@@ -401,7 +401,7 @@ class FlowRunExecutor:
                 run_id=run_id,
                 tenant_id=tenant_id,
                 target_status=FlowRunStatus.FAILED,
-                source=FlowRunTerminalSource.INVALID_FLOW_DEFINITION,
+                source=FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
                 error_code="invalid_flow_definition",
                 error_message=str(exc),
             )
@@ -429,7 +429,7 @@ class FlowRunExecutor:
                 run_id=run_id,
                 tenant_id=tenant_id,
                 target_status=FlowRunStatus.FAILED,
-                source=FlowRunTerminalSource.ASSISTANT_SNAPSHOT_DRIFT,
+                source=FlowRunLifecycleSource.ASSISTANT_SNAPSHOT_DRIFT,
                 error_code="assistant_snapshot_drift",
                 error_message=str(exc),
             )
@@ -479,7 +479,7 @@ class FlowRunExecutor:
                     run_id=run_id,
                     tenant_id=tenant_id,
                     target_status=FlowRunStatus.CANCELLED,
-                    source=FlowRunTerminalSource.FLOW_DELETED,
+                    source=FlowRunLifecycleSource.FLOW_DELETED,
                     error_code="flow_deleted",
                     error_message=preclaim_decision.run_error_message,
                 )
@@ -522,7 +522,7 @@ class FlowRunExecutor:
                         run_id=run_id,
                         tenant_id=tenant_id,
                         target_status=FlowRunStatus.FAILED,
-                        source=FlowRunTerminalSource.STEP_MISSING,
+                        source=FlowRunLifecycleSource.STEP_MISSING,
                         error_code="step_missing",
                         error_message=postclaim_decision.run_error_message,
                     )
@@ -731,9 +731,9 @@ class FlowRunExecutor:
             tenant_id=tenant_id,
             target_status=FlowRunStatus(outcome.flow_status),
             source=(
-                FlowRunTerminalSource.EXECUTOR_COMPLETED
+                FlowRunLifecycleSource.EXECUTOR_COMPLETED
                 if outcome.flow_status == FlowRunStatus.COMPLETED.value
-                else FlowRunTerminalSource.EXECUTOR_FAILED
+                else FlowRunLifecycleSource.EXECUTOR_FAILED
             ),
             error_code=outcome.reason,
             error_message=outcome.error_message,
@@ -957,7 +957,7 @@ class FlowRunExecutor:
             run_id=run_id,
             tenant_id=tenant_id,
             target_status=FlowRunStatus.FAILED,
-            source=FlowRunTerminalSource.EXECUTOR_FAILED,
+            source=FlowRunLifecycleSource.EXECUTOR_FAILED,
             error_code="step_attempt_start_failed",
             error_message=failure_plan.run_error_message,
         )
@@ -999,7 +999,7 @@ class FlowRunExecutor:
             run_id=run_id,
             tenant_id=tenant_id,
             target_status=FlowRunStatus.FAILED,
-            source=FlowRunTerminalSource.EXECUTOR_FAILED,
+            source=FlowRunLifecycleSource.EXECUTOR_FAILED,
             error_code=failure_plan.error_code,
             error_message=failure_plan.run_error_message,
         )
@@ -1035,7 +1035,7 @@ class FlowRunExecutor:
             run_id=run_id,
             tenant_id=tenant_id,
             target_status=FlowRunStatus.FAILED,
-            source=FlowRunTerminalSource.EXECUTOR_FAILED,
+            source=FlowRunLifecycleSource.EXECUTOR_FAILED,
             error_code=failure_plan.error_code,
             error_message=failure_plan.run_error_message,
         )
@@ -1139,7 +1139,7 @@ class FlowRunExecutor:
             run_id=run_id,
             tenant_id=tenant_id,
             target_status=FlowRunStatus.FAILED,
-            source=FlowRunTerminalSource.EXECUTOR_FAILED,
+            source=FlowRunLifecycleSource.EXECUTOR_FAILED,
             error_code="webhook_delivery_failed",
             error_message=f"Webhook delivery failed: {error}",
         )
@@ -1513,7 +1513,7 @@ class FlowRunExecutor:
         run_id: UUID,
         tenant_id: UUID,
         target_status: FlowRunStatus,
-        source: FlowRunTerminalSource,
+        source: FlowRunLifecycleSource,
         error_code: str | None = None,
         error_message: str | None = None,
         output_payload_json: JsonObject | None = None,

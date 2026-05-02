@@ -14,7 +14,7 @@ from intric.authentication.principal_types import PrincipalType
 from intric.authentication.service_key_user import build_service_key_user
 from intric.database.database import sessionmanager
 from intric.flows.domain.flow import FlowRunStatus
-from intric.flows.enums import FlowRunTerminalSource
+from intric.flows.enums import FlowRunLifecycleSource
 from intric.flows.flow_document_limits import resolve_flow_document_render_limits
 from intric.flows.flow_input_limits import (
     DEFAULT_MAX_AUDIO_FILES_PER_RUN,
@@ -153,7 +153,7 @@ async def terminalize_flow_run_failure(
     *,
     run_id: UUID,
     tenant_id: UUID,
-    source: FlowRunTerminalSource,
+    source: FlowRunLifecycleSource,
     error_code: str,
     error_message: str,
 ) -> None:
@@ -241,7 +241,7 @@ def _execute_flow_run_task(
             terminalize_flow_run_failure(
                 run_id=run_id_uuid,
                 tenant_id=tenant_id_uuid,
-                source=FlowRunTerminalSource.MISSING_PRINCIPAL,
+                source=FlowRunLifecycleSource.MISSING_PRINCIPAL,
                 error_code="flow_missing_principal",
                 error_message=(
                     "flow_missing_principal: "
@@ -293,7 +293,7 @@ def _execute_flow_run_task(
             terminalize_flow_run_failure(
                 run_id=run_id_uuid,
                 tenant_id=tenant_id_uuid,
-                source=FlowRunTerminalSource.TASK_TIMEOUT,
+                source=FlowRunLifecycleSource.TASK_TIMEOUT,
                 error_code="flow_task_timeout",
                 error_message=error_message,
             ),
@@ -312,7 +312,7 @@ def _execute_flow_run_task(
             terminalize_flow_run_failure(
                 run_id=run_id_uuid,
                 tenant_id=tenant_id_uuid,
-                source=FlowRunTerminalSource.TASK_FAILURE,
+                source=FlowRunLifecycleSource.TASK_FAILURE,
                 error_code="flow_task_failure",
                 error_message=error_message,
             ),

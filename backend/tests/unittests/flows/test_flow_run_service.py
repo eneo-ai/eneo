@@ -22,9 +22,9 @@ from intric.flows.domain.flow import (
     FlowRunRerunOperation,
 )
 from intric.flows.enums import (
+    FlowRunLifecycleSource,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
-    FlowRunTerminalSource,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
     RerunDependencyKind,
@@ -3168,7 +3168,7 @@ async def test_cancel_run_marks_pending_steps_cancelled(user):
     terminalizer.terminalize_run.assert_awaited_once()
     terminal_kwargs = terminalizer.terminalize_run.await_args.kwargs
     assert terminal_kwargs["target_status"] == FlowRunStatus.CANCELLED
-    assert terminal_kwargs["source"] == FlowRunTerminalSource.USER_CANCEL
+    assert terminal_kwargs["source"] == FlowRunLifecycleSource.USER_CANCEL
     assert terminal_kwargs["error_code"] == "user_cancelled"
     assert terminal_kwargs["error_message"] == "Run cancelled by user."
 

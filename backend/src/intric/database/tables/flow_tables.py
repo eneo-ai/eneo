@@ -30,10 +30,10 @@ from intric.flows.enums import (
     FlowMcpPolicy,
     FlowOutputMode,
     FlowOutputType,
+    FlowRunLifecycleSource,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
     FlowRunStatus,
-    FlowRunTerminalSource,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
     FlowTemplateAssetStatus,
@@ -51,7 +51,7 @@ FLOW_RUN_RERUN_OPERATION_STATUS_VALUES = tuple(
 FLOW_RUN_RERUN_INVALIDATION_ROLE_VALUES = tuple(
     item.value for item in FlowRunRerunInvalidationRole
 )
-FLOW_RUN_TERMINAL_SOURCE_VALUES = tuple(item.value for item in FlowRunTerminalSource)
+FLOW_RUN_LIFECYCLE_SOURCE_VALUES = tuple(item.value for item in FlowRunLifecycleSource)
 FLOW_STEP_RESULT_STATUS_VALUES = tuple(item.value for item in FlowStepResultStatus)
 FLOW_STEP_ATTEMPT_STATUS_VALUES = tuple(item.value for item in FlowStepAttemptStatus)
 FLOW_RUN_STEP_RESULT_FILE_SOURCE_VALUES = ("generated_output", "declared_artifact")
@@ -1099,7 +1099,7 @@ class FlowRunAuditOutbox(BasePublic):
             name="ck_flow_run_audit_outbox_description",
         ),
         CheckConstraint(
-            f"source IN ({_check_values(FLOW_RUN_TERMINAL_SOURCE_VALUES)})",
+            f"source IN ({_check_values(FLOW_RUN_LIFECYCLE_SOURCE_VALUES)})",
             name="ck_flow_run_audit_outbox_source",
         ),
         Index("ix_flow_run_audit_outbox_tenant_created", "tenant_id", "created_at"),
