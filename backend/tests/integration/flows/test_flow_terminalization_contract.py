@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -12,6 +15,9 @@ from intric.database.tables.flow_tables import (
     FlowRuns,
     FlowStepAttempts,
     FlowStepResults,
+)
+from intric.flows.application.flow_run_lifecycle_events import (
+    FLOW_RUN_LIFECYCLE_EVENT_NAME,
 )
 from intric.flows.application.flow_run_terminalization import (
     FlowRunTerminalizationInvariantError,
@@ -29,6 +35,38 @@ from intric.flows.flow_factory import FlowFactory
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
+
+LIFECYCLE_LOGGER = "intric.flows.application.flow_run_lifecycle_events"
+
+
+@contextmanager
+def _capture_flow_lifecycle_logs(caplog: pytest.LogCaptureFixture) -> Iterator[None]:
+    logger = logging.getLogger(LIFECYCLE_LOGGER)
+    handler = caplog.handler
+    original_disabled = logger.disabled
+    original_level = logger.level
+    original_propagate = logger.propagate
+    logger.disabled = False
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    logger.addHandler(handler)
+    try:
+        yield
+    finally:
+        logger.removeHandler(handler)
+        logger.disabled = original_disabled
+        logger.setLevel(original_level)
+        logger.propagate = original_propagate
+
+
+def _flow_lifecycle_records(
+    caplog: pytest.LogCaptureFixture,
+) -> list[logging.LogRecord]:
+    return [
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == FLOW_RUN_LIFECYCLE_EVENT_NAME
+    ]
 
 
 def _build_flow(
@@ -181,6 +219,7 @@ async def _create_running_run(
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_terminalization_fails_run_once_and_writes_one_outbox_event(
+    caplog: pytest.LogCaptureFixture,
     db_container,
     completion_model_factory,
     space_factory,
@@ -232,22 +271,23 @@ async def test_terminalization_fails_run_once_and_writes_one_outbox_event(
         )
         terminalizer = FlowRunTerminalizer(run_repo)
 
-        first = await terminalizer.terminalize_run(
-            run_id=run.id,
-            tenant_id=admin_user.tenant_id,
-            target_status=FlowRunStatus.FAILED,
-            source=FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
-            error_code="flow_worker_stalled",
-            error_message="flow_worker_stalled: stale run reconciled.",
-        )
-        second = await terminalizer.terminalize_run(
-            run_id=run.id,
-            tenant_id=admin_user.tenant_id,
-            target_status=FlowRunStatus.FAILED,
-            source=FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
-            error_code="flow_worker_stalled",
-            error_message="flow_worker_stalled: duplicate reconciliation.",
-        )
+        with _capture_flow_lifecycle_logs(caplog):
+            first = await terminalizer.terminalize_run(
+                run_id=run.id,
+                tenant_id=admin_user.tenant_id,
+                target_status=FlowRunStatus.FAILED,
+                source=FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
+                error_code="flow_worker_stalled",
+                error_message="flow_worker_stalled: stale run reconciled.",
+            )
+            second = await terminalizer.terminalize_run(
+                run_id=run.id,
+                tenant_id=admin_user.tenant_id,
+                target_status=FlowRunStatus.FAILED,
+                source=FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
+                error_code="flow_worker_stalled",
+                error_message="flow_worker_stalled: duplicate reconciliation.",
+            )
 
         assert first.did_transition is True
         assert second.did_transition is False
@@ -318,6 +358,27 @@ async def test_terminalization_fails_run_once_and_writes_one_outbox_event(
         assert outbox_rows[0].description == (
             "flow_run_failed:stale_running_reconciler"
         )
+        lifecycle_records = _flow_lifecycle_records(caplog)
+        assert [getattr(record, "outcome") for record in lifecycle_records] == [
+            "transitioned",
+            "noop_already_terminal",
+        ]
+        success_record = lifecycle_records[0]
+        assert getattr(success_record, "run_id") == str(run.id)
+        assert getattr(success_record, "tenant_id") == str(admin_user.tenant_id)
+        assert (
+            getattr(success_record, "source")
+            == FlowRunLifecycleSource.STALE_RUNNING_RECONCILER.value
+        )
+        assert getattr(success_record, "target_status") == FlowRunStatus.FAILED.value
+        assert getattr(success_record, "previous_status") == FlowRunStatus.RUNNING.value
+        assert getattr(success_record, "trace_id") == str(first.run.trace_id)
+        assert getattr(success_record, "audit_outbox_id") == str(first.audit_outbox_id)
+
+        noop_record = lifecycle_records[1]
+        assert getattr(noop_record, "target_status") == FlowRunStatus.FAILED.value
+        assert getattr(noop_record, "previous_status") == FlowRunStatus.FAILED.value
+        assert getattr(noop_record, "audit_outbox_id") is None
 
 
 @pytest.mark.asyncio
@@ -354,6 +415,65 @@ async def test_stale_running_query_excludes_awaiting_review_runs(
         )
 
     assert stale_runs == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_terminalization_lost_race_emits_noop_event(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        run, _flow, run_repo = await _create_running_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        monkeypatch.setattr(
+            run_repo,
+            "terminalize_run_status",
+            AsyncMock(return_value=None),
+        )
+        terminalizer = FlowRunTerminalizer(run_repo)
+
+        with _capture_flow_lifecycle_logs(caplog):
+            result = await terminalizer.terminalize_run(
+                run_id=run.id,
+                tenant_id=admin_user.tenant_id,
+                target_status=FlowRunStatus.FAILED,
+                source=FlowRunLifecycleSource.TASK_FAILURE,
+                error_code="flow_task_failure",
+                error_message="flow_task_failure: task failed.",
+            )
+
+        assert result.did_transition is False
+        run_row = await session.scalar(sa.select(FlowRuns).where(FlowRuns.id == run.id))
+        assert run_row is not None
+        assert run_row.status == FlowRunStatus.RUNNING.value
+        outbox_count = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowRunAuditOutbox)
+            .where(FlowRunAuditOutbox.flow_run_id == run.id)
+        )
+        assert outbox_count == 0
+
+        lifecycle_records = _flow_lifecycle_records(caplog)
+        assert len(lifecycle_records) == 1
+        record = lifecycle_records[0]
+        assert getattr(record, "outcome") == "noop_lost_race"
+        assert getattr(record, "run_id") == str(run.id)
+        assert getattr(record, "source") == FlowRunLifecycleSource.TASK_FAILURE.value
+        assert getattr(record, "target_status") == FlowRunStatus.FAILED.value
+        assert getattr(record, "previous_status") == FlowRunStatus.RUNNING.value
+        assert getattr(record, "audit_outbox_id") is None
 
 
 @pytest.mark.asyncio
@@ -399,7 +519,8 @@ async def test_completed_terminalization_rejects_open_runtime_rows(
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_terminalization_rolls_back_when_audit_outbox_insert_fails(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
     db_container,
     completion_model_factory,
     space_factory,
@@ -422,16 +543,17 @@ async def test_terminalization_rolls_back_when_audit_outbox_insert_fails(
         )
         terminalizer = FlowRunTerminalizer(run_repo)
 
-        with pytest.raises(RuntimeError, match="outbox unavailable"):
-            async with session.begin_nested():
-                await terminalizer.terminalize_run(
-                    run_id=run.id,
-                    tenant_id=admin_user.tenant_id,
-                    target_status=FlowRunStatus.FAILED,
-                    source=FlowRunLifecycleSource.TASK_FAILURE,
-                    error_code="flow_task_failure",
-                    error_message="flow_task_failure: task failed.",
-                )
+        with _capture_flow_lifecycle_logs(caplog):
+            with pytest.raises(RuntimeError, match="outbox unavailable"):
+                async with session.begin_nested():
+                    await terminalizer.terminalize_run(
+                        run_id=run.id,
+                        tenant_id=admin_user.tenant_id,
+                        target_status=FlowRunStatus.FAILED,
+                        source=FlowRunLifecycleSource.TASK_FAILURE,
+                        error_code="flow_task_failure",
+                        error_message="flow_task_failure: task failed.",
+                    )
 
         run_row = await session.scalar(sa.select(FlowRuns).where(FlowRuns.id == run.id))
         assert run_row is not None
@@ -457,3 +579,4 @@ async def test_terminalization_rolls_back_when_audit_outbox_insert_fails(
             .where(FlowRunAuditOutbox.flow_run_id == run.id)
         )
         assert outbox_count == 0
+        assert _flow_lifecycle_records(caplog) == []

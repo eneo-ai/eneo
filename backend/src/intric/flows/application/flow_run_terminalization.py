@@ -8,6 +8,9 @@ from uuid import UUID
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.entity_types import EntityType
+from intric.flows.application.flow_run_lifecycle_events import (
+    emit_flow_run_terminalization_event,
+)
 from intric.flows.domain.flow import FlowRun, FlowRunStatus, JsonObject
 from intric.flows.enums import FlowRunLifecycleSource, is_terminal_flow_run_status
 from intric.flows.flow import FlowStepAttemptStatus, FlowStepResultStatus
@@ -101,6 +104,15 @@ class FlowRunTerminalizer:
 
         existing_run = await self.flow_run_repo.get(run_id=run_id, tenant_id=tenant_id)
         if is_terminal_flow_run_status(existing_run.status):
+            emit_flow_run_terminalization_event(
+                run=existing_run,
+                outcome="noop_already_terminal",
+                source=source,
+                target_status=target_status,
+                previous_status=existing_run.status,
+                audit_outbox_id=None,
+                error_code=error_code,
+            )
             return FlowRunTerminalizationResult(
                 run=existing_run,
                 did_transition=False,
@@ -108,6 +120,7 @@ class FlowRunTerminalizer:
                 source=source,
                 audit_outbox_id=None,
             )
+        previous_status = existing_run.status
 
         if target_status == FlowRunStatus.COMPLETED:
             active_results = await self.flow_run_repo.count_active_step_results(
@@ -135,6 +148,15 @@ class FlowRunTerminalizer:
         if terminal_run is None:
             existing_run = await self.flow_run_repo.get(
                 run_id=run_id, tenant_id=tenant_id
+            )
+            emit_flow_run_terminalization_event(
+                run=existing_run,
+                outcome="noop_lost_race",
+                source=source,
+                target_status=target_status,
+                previous_status=previous_status,
+                audit_outbox_id=None,
+                error_code=error_code,
             )
             return FlowRunTerminalizationResult(
                 run=existing_run,
@@ -213,6 +235,15 @@ class FlowRunTerminalizer:
             target_status=target_status,
             error_code=error_code,
             error_message=error_message,
+        )
+        emit_flow_run_terminalization_event(
+            run=terminal_run,
+            outcome="transitioned",
+            source=source,
+            target_status=target_status,
+            previous_status=previous_status,
+            audit_outbox_id=outbox_id,
+            error_code=error_code,
         )
         return FlowRunTerminalizationResult(
             run=terminal_run,
