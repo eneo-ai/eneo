@@ -45,8 +45,12 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_new_step_draft,
     default_previous_field_label,
+    derive_new_step_output_mode,
 )
-from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+from intric.flows.ai_builder.ai_builder_new_step_models import (
+    DocumentDeliveryMode,
+    NewStepDraft,
+)
 from intric.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
     remove_primary_runtime_input_shadow_names,
@@ -393,8 +397,35 @@ def _flow_step_to_spec(
             updates["output_config"] = patch.output_config
         if updates:
             spec = spec.model_copy(update=updates)
+        if "output_mode" not in patch.model_fields_set:
+            derived_output_mode = _derive_modify_patch_output_mode(spec)
+            if derived_output_mode != spec.output_mode:
+                spec = spec.model_copy(update={"output_mode": derived_output_mode})
 
     return spec
+
+
+def _derive_modify_patch_output_mode(spec: StepSpec) -> OutputMode:
+    output_mode_draft = NewStepDraft(
+        name=spec.name or spec.plan_step_ref,
+        instructions="Derive output mode.",
+        input_source=spec.input_source,
+        input_type=spec.input_type,
+        output_type=spec.output_type,
+        document_delivery_mode=_document_delivery_mode_for_effective_step(spec),
+    )
+    return derive_new_step_output_mode(output_mode_draft)
+
+
+def _document_delivery_mode_for_effective_step(spec: StepSpec) -> DocumentDeliveryMode:
+    if (
+        spec.output_mode == OutputMode.TEMPLATE_FILL
+        and spec.output_type == OutputType.DOCX
+    ):
+        return "template_fill"
+    if spec.output_type in {OutputType.DOCX, OutputType.PDF}:
+        return "generated"
+    return "not_applicable"
 
 
 def _resolve_existing_assistant_spec(

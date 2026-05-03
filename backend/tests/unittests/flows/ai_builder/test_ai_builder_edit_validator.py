@@ -17,6 +17,8 @@ from intric.flows.ai_builder.ai_builder_edit_validator import validate_edit_draf
 from intric.flows.ai_builder.ai_builder_models import (
     InputSource,
     InputType,
+    OutputMode,
+    OutputType,
 )
 from intric.flows.flow import FlowStep
 
@@ -24,8 +26,19 @@ VALID_REFS = ["existing_step_1", "existing_step_2", "existing_step_3"]
 
 
 def _existing_step(
-    *, step_order: int, output_type: str = "text", output_contract=None
+    *,
+    step_order: int,
+    output_type: str = "text",
+    output_contract=None,
+    input_source: str | None = None,
 ) -> FlowStep:
+    resolved_input_source = (
+        input_source
+        if input_source is not None
+        else "flow_input"
+        if step_order == 1
+        else "previous_step"
+    )
     return FlowStep(
         id=uuid4(),
         flow_id=uuid4(),
@@ -33,7 +46,7 @@ def _existing_step(
         assistant_id=uuid4(),
         step_order=step_order,
         user_description=f"Step {step_order}",
-        input_source="flow_input" if step_order == 1 else "previous_step",
+        input_source=resolved_input_source,
         input_type="text",
         output_mode="pass_through",
         output_type=output_type,
@@ -293,7 +306,7 @@ class TestValidAddOperations:
             draft,
             VALID_REFS,
             current_steps=[
-                _existing_step(step_order=1),
+                _existing_step(step_order=1, input_source="previous_step"),
                 _existing_step(step_order=2),
                 _existing_step(step_order=3),
             ],
@@ -323,7 +336,7 @@ class TestValidAddOperations:
             draft,
             VALID_REFS,
             current_steps=[
-                _existing_step(step_order=1),
+                _existing_step(step_order=1, input_source="previous_step"),
                 _existing_step(step_order=2),
                 _existing_step(step_order=3),
             ],
@@ -371,6 +384,178 @@ class TestValidAddOperations:
         )
         assert result.valid
 
+    def test_add_flow_input_after_existing_first_step_is_rejected(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="add",
+                    placement=StepPlacement(position="append"),
+                    add_payload=AddStepPayload(
+                        name="Extra indata",
+                        instructions="Ta emot en extra fil.",
+                        input_source=InputSource.FLOW_INPUT,
+                        input_type=InputType.AUDIO,
+                        runtime_upload=True,
+                    ),
+                )
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+        assert not result.valid
+        assert "multiple_flow_input" in _error_codes(result)
+
+    def test_add_first_file_flow_input_accepts_filled_runtime_upload(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="add",
+                    placement=StepPlacement(
+                        position="before", anchor_ref="existing_step_1"
+                    ),
+                    add_payload=AddStepPayload(
+                        name="Ladda upp ljud",
+                        instructions="Transkribera ljudet.",
+                        input_source=InputSource.FLOW_INPUT,
+                        input_type=InputType.AUDIO,
+                        runtime_upload=True,
+                        runtime_required=True,
+                    ),
+                )
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1, input_source="previous_step"),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+        assert result.valid
+
+    def test_add_runtime_upload_requires_file_flow_input(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="add",
+                    placement=StepPlacement(position="append"),
+                    add_payload=AddStepPayload(
+                        name="Textsteg",
+                        instructions="Skriv text.",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.TEXT,
+                        runtime_upload=True,
+                    ),
+                )
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1, input_source="previous_step"),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+        assert not result.valid
+        assert "runtime_upload_requires_file_flow_input" in _error_codes(result)
+
+    def test_add_media_input_requires_flow_input_source(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="add",
+                    placement=StepPlacement(position="append"),
+                    add_payload=AddStepPayload(
+                        name="Ljudanalys",
+                        instructions="Analysera ljudet.",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.AUDIO,
+                    ),
+                )
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+        assert not result.valid
+        assert "media_source_mismatch" in _error_codes(result)
+
+    def test_add_audio_transcription_step_rejects_citations(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="add",
+                    placement=StepPlacement(
+                        position="before", anchor_ref="existing_step_1"
+                    ),
+                    add_payload=AddStepPayload(
+                        name="Transkribera ljud",
+                        instructions="Transkribera ljudet.",
+                        input_source=InputSource.FLOW_INPUT,
+                        input_type=InputType.AUDIO,
+                        runtime_upload=True,
+                        citations_requested=True,
+                    ),
+                )
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1, input_source="previous_step"),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+        assert not result.valid
+        assert "citations_require_llm_text_step" in _error_codes(result)
+
+    def test_add_template_fill_requires_docx_output(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="add",
+                    placement=StepPlacement(position="append"),
+                    add_payload=AddStepPayload(
+                        name="PDF",
+                        instructions="Skapa PDF.",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        output_type=OutputType.PDF,
+                        document_delivery_mode="template_fill",
+                    ),
+                )
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+        assert not result.valid
+        assert "template_fill_requires_docx" in _error_codes(result)
+
 
 class TestValidModifyOperations:
     def test_modify_valid(self):
@@ -407,8 +592,35 @@ class TestValidModifyOperations:
             operations=[_modify_op("existing_step_1", input_type=InputType.FILE)]
         )
         result = validate_edit_draft(draft, VALID_REFS)
-        assert result.valid  # warning, not error
+        assert result.valid
         assert "type_downgrade_risk" in _warning_codes(result)
+
+    def test_modify_explicit_template_fill_rejects_non_docx_output(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_1",
+                    patch=StepPatch(
+                        output_mode=OutputMode.TEMPLATE_FILL,
+                        output_type=OutputType.PDF,
+                    ),
+                )
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+        assert not result.valid
+        assert "unsupported_step_io_combo" in _error_codes(result)
+        assert "output_mode 'template_fill'" in result.errors[0].message
+        assert "output_type 'pdf'" in result.errors[0].message
 
     def test_modify_previous_field_reference_requires_earlier_target(self):
         draft = FlowEditDraft(

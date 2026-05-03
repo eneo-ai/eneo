@@ -65,6 +65,7 @@ from intric.flows.ai_builder.planning_state import (
     PlanningState,
     StepTriple,
 )
+from intric.flows.domain.flow import FlowStep
 
 
 def _make_processor(**overrides) -> AIBuilderProposalProcessor:
@@ -2263,6 +2264,80 @@ async def test_edit_proposal_normalizes_mechanical_refs_before_validation() -> N
         (1, "summary"),
     ]
     assert patch_payload.uses_form_fields == ["case_id"]
+
+
+@pytest.mark.asyncio
+async def test_edit_proposal_returns_validation_feedback_for_explicit_mechanics_conflict() -> (
+    None
+):
+    processor = _make_processor()
+    flow = MagicMock()
+    flow.steps = [
+        FlowStep(
+            id=uuid4(),
+            flow_id=uuid4(),
+            tenant_id=uuid4(),
+            assistant_id=uuid4(),
+            step_order=1,
+            user_description="Skapa rapport",
+            input_source="flow_input",
+            input_type="text",
+            output_mode="pass_through",
+            output_type="text",
+            mcp_policy="inherit",
+        )
+    ]
+    flow.draft_revision = 7
+    flow.name = "Rapportflöde"
+    flow.description = "Skapar rapport."
+    flow.metadata_json = {}
+    arguments = {
+        "plan_rationale": "Byt till mallfyllning.",
+        "operations": [
+            {
+                "op": "modify",
+                "target_ref": "existing_step_1",
+                "patch": {
+                    "output_mode": "template_fill",
+                    "output_type": "pdf",
+                },
+            }
+        ],
+    }
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
+        ) as compile_edit,
+        patch(
+            "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
+            new_callable=AsyncMock,
+        ) as store_plan,
+    ):
+        result = await process_edit_arguments(
+            processor=processor,
+            session_id=uuid4(),
+            conversation=[],
+            new_messages_start=0,
+            arguments=arguments,
+            assistant_content="Här är mitt förslag:",
+            tool_call_id="call_edit",
+            available_model_refs=None,
+            available_kb_refs=None,
+            flow=flow,
+            assistant_snapshots=None,
+            litellm_model="openai/gpt-4",
+            litellm_kwargs={"api_key": "sk-test"},
+            max_output_tokens=1024,
+            resource_catalog=None,
+        )
+
+    assert result.failure_kind == "validation"
+    assert result.feedback is not None
+    assert "output_mode 'template_fill'" in result.feedback
+    assert "output_type 'pdf'" in result.feedback
+    compile_edit.assert_not_called()
+    store_plan.assert_not_awaited()
 
 
 @pytest.mark.asyncio

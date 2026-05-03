@@ -23,14 +23,23 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
 from intric.flows.ai_builder.ai_builder_form_fields import (
     effective_form_field_names,
 )
+from intric.flows.ai_builder.ai_builder_models import (
+    InputType,
+)
+from intric.flows.ai_builder.ai_builder_new_step_mechanics import (
+    validate_new_step_mechanics,
+)
 from intric.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
+from intric.flows.ai_builder.ai_builder_step_capabilities import (
+    supports_step_io_mode_combo,
+)
 from intric.flows.ai_builder.ai_builder_structured_field_paths import (
     missing_structured_output_path,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationResult,
 )
-from intric.flows.flow import FlowStep
+from intric.flows.domain.flow import FlowStep
 
 
 def validate_edit_draft(
@@ -93,7 +102,6 @@ def validate_edit_draft(
 
         apply_effective_step_operation(op=op, working_steps=effective_steps)
 
-        # Check duplicate target_ref
         if op.target_ref is not None:
             if op.target_ref in seen_targets:
                 result.add_error(
@@ -157,15 +165,17 @@ def _validate_add_op(
             )
 
     if op.add_payload is not None and current_steps is not None:
-        _validate_form_field_references(
-            uses_form_fields=op.add_payload.uses_form_fields,
-            available_form_fields=available_form_fields,
+        insert_index = resolve_insert_index(op=op, working_steps=effective_steps)
+        validate_new_step_mechanics(
+            step=op.add_payload,
             step_ref=None,
+            step_index=insert_index,
+            available_form_fields=available_form_fields,
             result=result,
         )
         _validate_add_previous_field_references(
             step=op.add_payload,
-            max_prior_order=resolve_insert_index(op=op, working_steps=effective_steps),
+            max_prior_order=insert_index,
             effective_steps=effective_steps,
             step_ref=None,
             result=result,
@@ -217,10 +227,7 @@ def _validate_modify_op(
             result=result,
         )
 
-    # Warn on type downgrades
     if op.patch is not None and op.patch.input_type is not None:
-        from intric.flows.ai_builder.ai_builder_models import InputType
-
         if op.patch.input_type == InputType.FILE:
             result.add_warning(
                 step_ref=op.target_ref,
@@ -244,6 +251,12 @@ def _validate_modify_op(
                 result=result,
                 target_step_order=target_step_index + 1,
                 removed_step_orders=removed_step_orders,
+            )
+            _validate_patch_output_mode(
+                patch=op.patch,
+                current_steps=current_steps,
+                step_ref=op.target_ref,
+                result=result,
             )
 
 
@@ -297,6 +310,56 @@ def _validate_form_field_references(
                 + "."
             ),
         )
+
+
+def _validate_patch_output_mode(
+    *,
+    patch: StepPatch,
+    current_steps: list[FlowStep],
+    step_ref: str | None,
+    result: SpecValidationResult,
+) -> None:
+    if patch.output_mode is None or step_ref is None:
+        return
+
+    current_step = _current_step_for_ref(current_steps, step_ref)
+    if current_step is None:
+        return
+
+    input_type_value = _enum_value(patch.input_type or current_step.input_type)
+    output_type_value = _enum_value(patch.output_type or current_step.output_type)
+    output_mode_value = patch.output_mode.value
+    if supports_step_io_mode_combo(
+        input_type=input_type_value,
+        output_type=output_type_value,
+        output_mode=output_mode_value,
+    ):
+        return
+
+    result.add_error(
+        step_ref=step_ref,
+        code="unsupported_step_io_combo",
+        message=(
+            f"output_mode '{output_mode_value}' is not valid with "
+            f"input_type '{input_type_value}' and output_type '{output_type_value}'."
+        ),
+    )
+
+
+def _current_step_for_ref(
+    current_steps: list[FlowStep],
+    step_ref: str,
+) -> FlowStep | None:
+    step_order = _step_order_from_ref(step_ref)
+    for current_step in current_steps:
+        if current_step.step_order == step_order:
+            return current_step
+    return None
+
+
+def _enum_value(value: object) -> str:
+    raw_value = getattr(value, "value", value)
+    return str(raw_value)
 
 
 def _validate_patch_previous_field_references(

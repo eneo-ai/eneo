@@ -397,6 +397,117 @@ def test_edit_compiler_switches_knowledge_step_to_mcp_without_stale_kb_refs() ->
     assert assistant_spec.mcp_tool_refs == ["tool-1"]
 
 
+def test_edit_compiler_derives_transcribe_mode_when_modify_changes_audio_text_step() -> (
+    None
+):
+    existing_step = _make_flow_step(
+        step_order=1,
+        user_description="Transkribera",
+        input_type="audio",
+        output_mode="pass_through",
+        output_type="text",
+    )
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(name="Transkribera ljud"),
+            )
+        ]
+    )
+
+    result = compile_edit_draft(draft, [existing_step], base_flow_revision=1)
+
+    step = result.compiled_spec.steps[0]
+    assert step.name == "Transkribera ljud"
+    assert step.output_mode == OutputMode.TRANSCRIBE_ONLY
+
+
+def test_edit_compiler_derives_transcribe_mode_when_patch_changes_input_to_audio() -> (
+    None
+):
+    existing_step = _make_flow_step(
+        step_order=1,
+        user_description="Bearbeta indata",
+        input_type="text",
+        output_mode="pass_through",
+        output_type="text",
+    )
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(input_type=InputType.AUDIO),
+            )
+        ]
+    )
+
+    result = compile_edit_draft(draft, [existing_step], base_flow_revision=1)
+
+    step = result.compiled_spec.steps[0]
+    assert step.input_type == InputType.AUDIO
+    assert step.output_mode == OutputMode.TRANSCRIBE_ONLY
+
+
+def test_edit_compiler_preserves_template_fill_docx_when_patch_omits_output_mechanics() -> (
+    None
+):
+    existing_step = _make_flow_step(
+        step_order=1,
+        user_description="Fyll mall",
+        output_mode="template_fill",
+        output_type="docx",
+        output_config={"template_file_id": "template-1"},
+    )
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(name="Fyll beslutsmall"),
+            )
+        ]
+    )
+
+    result = compile_edit_draft(draft, [existing_step], base_flow_revision=1)
+
+    step = result.compiled_spec.steps[0]
+    assert step.name == "Fyll beslutsmall"
+    assert step.output_mode == OutputMode.TEMPLATE_FILL
+    assert step.output_type == OutputType.DOCX
+    assert step.output_config == {"template_file_id": "template-1"}
+
+
+def test_edit_compiler_derives_generated_pdf_when_template_fill_step_changes_to_pdf() -> (
+    None
+):
+    existing_step = _make_flow_step(
+        step_order=1,
+        user_description="Fyll mall",
+        output_mode="template_fill",
+        output_type="docx",
+        output_config={"template_file_id": "template-1"},
+    )
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(output_type=OutputType.PDF),
+            )
+        ]
+    )
+
+    result = compile_edit_draft(draft, [existing_step], base_flow_revision=1)
+
+    step = result.compiled_spec.steps[0]
+    assert step.output_mode == OutputMode.PASS_THROUGH
+    assert step.output_type == OutputType.PDF
+    assert step.output_config is None
+
+
 class TestUntouchedStepsPreserved:
     def test_modify_one_step_preserves_others(self):
         existing = [

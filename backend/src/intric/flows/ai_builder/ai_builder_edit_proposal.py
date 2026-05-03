@@ -13,6 +13,7 @@ from intric.flows.ai_builder.ai_builder_description_semantics import (
     DescriptionProvenance,
 )
 from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
+from intric.flows.ai_builder.ai_builder_edit_mechanics import fill_edit_draft_mechanics
 from intric.flows.ai_builder.ai_builder_edit_models import FlowEditDraft
 from intric.flows.ai_builder.ai_builder_edit_normalizer import (
     normalize_edit_draft_mechanics,
@@ -129,6 +130,10 @@ async def process_edit_arguments(
         draft,
         current_steps=list(flow.steps),
         current_metadata_json=flow.metadata_json,
+    )
+    draft = fill_edit_draft_mechanics(
+        draft,
+        current_steps=list(flow.steps),
     )
     valid_step_refs = [f"existing_step_{step.step_order}" for step in flow.steps]
     edit_validation = validate_edit_draft(

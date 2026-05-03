@@ -300,7 +300,8 @@ Internal split:
 
 - 11.1a: typed step slots and `materialize_step_skeleton` owner.
 - 11.1b: skeleton fill rules and compile integration.
-- 11.1c: critic invariant classification, architecture failure surface, and canary tests. Split 11.1c further before implementation if the plan exceeds the slice LOC ceiling.
+- 11.1c: critic invariant classification, architecture failure surface, and canary tests.
+- 11.1d: edit-path fill/preserve/reject mechanics. This closed the 11.1c carry-forward without mixing edit behavior into the create-path architecture-error slice.
 
 Success gate:
 
@@ -520,4 +521,6 @@ Stop and report before source changes if:
 5. `flows: add ai builder golden coverage matrix`
 6. `flows: use structured outputs for ai builder proposals`
 
-Do not combine these into one commit. Slice 11.1 may split across 11.1a, 11.1b, and 11.1c commits if a sub-slice approaches the LOC ceiling.
+Do not combine these into one commit. Slice 11.1 may split across small sub-slice
+commits when a source behavior change would otherwise mix unrelated mechanics,
+validation, or architecture-error concerns.

@@ -783,3 +783,72 @@ and remain a follow-up so create-path repair policy is reviewable on its own.
 | Delete or move `_derive_step_output_type`, `_derive_step_input_source`, `_derive_step_input_type`, `_requires_server_owned_fan_in`, `_ensure_required_server_owned_fan_in`, `_document_delivery_mode_for_step`, and `_ensure_final_artifact_step`. | Done; create-outline no longer owns those mechanics helpers. |
 | Delete equivalence tests once compiler consumes the skeleton directly. | Done; replacement tests assert behavior through the compiler and registry invariant. |
 | Watch `ai_builder_step_skeleton.py` size during integration. | Carried to 11.1c as a split trigger if more compose/materializer code is added. |
+
+## 11.1d Edit-Path Fill, Preserve, And Reject Mechanics
+
+### Scope
+
+Implemented the edit-path mechanics follow-up from 11.1c. This slice keeps
+create and edit semantics aligned without adding compatibility paths or turning
+user-authored invalid edits into architecture failures.
+
+### Source Changes
+
+| Area | Evidence | Decision |
+|---|---|---|
+| Shared new-step mechanics validation | `backend/src/intric/flows/ai_builder/ai_builder_new_step_mechanics.py:17` | Added one per-new-step mechanics validator for first-step source, runtime upload, document delivery, citations, structured output fields, output mode compatibility, and form-field references. |
+| Create validator reuse | `backend/src/intric/flows/ai_builder/ai_builder_create_validator.py:29` | Replaced duplicated create-only mechanics checks with the shared validator while keeping create-only form declaration and previous-field rules local. |
+| Edit fill owner | `backend/src/intric/flows/ai_builder/ai_builder_edit_mechanics.py:19` | Added an edit-only fill pass that defaults missing runtime upload flags for first file/audio/document `flow_input` add operations and preserves explicit choices through `model_fields_set`. |
+| Edit proposal ordering | `backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py:129` | Runs malformed/ref cleanup, then fill, then validation so user-authored conflicts remain validation feedback. |
+| Edit add validation | `backend/src/intric/flows/ai_builder/ai_builder_edit_validator.py:167` | Edit add operations now use the same per-new-step mechanics validator with the resolved insert index. |
+| Edit modify rejection | `backend/src/intric/flows/ai_builder/ai_builder_edit_validator.py:315` | Explicit modify-patch `output_mode` conflicts are rejected against the merged persisted step plus patch and return field/value feedback. |
+| Modify-patch output-mode derivation | `backend/src/intric/flows/ai_builder/ai_builder_edit_compiler.py:400` | When a modify patch omits `output_mode`, the compiler derives it through the existing `derive_new_step_output_mode` owner instead of preserving stale mechanics. Explicit output modes remain user-authored and validated. |
+| Document delivery inference | `backend/src/intric/flows/ai_builder/ai_builder_edit_compiler.py:420` | Reconstructs the `document_delivery_mode` needed by the derivation function from the effective persisted step shape. |
+
+### Test Changes
+
+| Coverage | Evidence |
+|---|---|
+| Edit fill defaults, explicit runtime preservation, and non-first no-fill behavior | `backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_mechanics.py:32`, `:61`, `:94` |
+| Edit add validation through the shared mechanics owner | `backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_validator.py:387`, `:415`, `:445`, `:473`, `:500`, `:531` |
+| Edit modify explicit mechanics conflict feedback | `backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_validator.py:598` |
+| Modify-patch output-mode derivation and preservation | `backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py:400`, `:427`, `:454`, `:483` |
+| Proposal feedback for user-authored mechanics conflict | `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py:2269` |
+
+### Claude Peer Review
+
+| Iteration | Artifact | Verdict | Green light | Minimum score | Outcome |
+|---:|---|---|---|---:|---|
+| 1 | `.codex/artifacts/claude-peer-loop-batch-11-1d-edit-path-mechanics-plan-20260503T032518Z.md` | `changes_required` | `no` | 6 | Rejected duplicate create-validator logic in edit validator and underspecified modify-patch derivation. |
+| 2 | `.codex/artifacts/claude-peer-loop-batch-11-1d-edit-path-mechanics-plan-verification-20260503T032907Z.md` | `green` | `yes` | 7 | Accepted shared validator, edit fill owner, compiler derivation helper, and validation-feedback classification. |
+| 3 | `.codex/artifacts/claude-peer-loop-batch-11-1d-edit-path-mechanics-implementation-verification-20260503T034729Z.md` | `green` | `yes` | 8 | Accepted implementation. Non-blocking coverage questions were answered with extra edit add and compiler tests before commit. |
+
+### Accepted Claude Findings
+
+| Finding | Resolution |
+|---|---|
+| Do not duplicate create-validator mechanics in edit-validator. | Added `validate_new_step_mechanics` and made create/edit add paths call it. |
+| Fill mechanics should not live in `normalize_edit_draft_mechanics`. | Added `fill_edit_draft_mechanics` as a sibling edit-only fill pass after cleanup normalization. |
+| Modify patches must derive output mode against the merged effective step, not patch fields alone. | `_derive_modify_patch_output_mode` builds a transient `NewStepDraft` from the effective step and calls `derive_new_step_output_mode`. |
+| Explicit user-authored conflicts are validation feedback, not architecture errors. | `process_edit_arguments` returns `failure_kind="validation"` before compile/store for explicit invalid `output_mode` combinations. |
+| Edit add shared-validator coverage should include more than runtime flags. | Added edit add tests for media source mismatch and audio-citation rejection. |
+| PDF delivery-mode inference needed coverage. | Added a template-fill DOCX-to-PDF modify-patch derivation test. |
+
+### Validation
+
+| Command | Result |
+|---|---|
+| `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_edit_mechanics.py tests/unittests/flows/ai_builder/test_ai_builder_edit_normalizer.py tests/unittests/flows/ai_builder/test_ai_builder_edit_validator.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_create_dataflow.py tests/unittests/flows/ai_builder/test_ai_builder_materialization_bridge.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q` | Passed: `239 passed`, one existing Starlette multipart warning. |
+| `cd backend && uv run pyright <11.1d touched source/test files>` | Passed: `0 errors, 0 warnings, 0 informations`. |
+| `cd backend && uv run ruff check <11.1d touched source/test files>` | Passed. |
+| `cd backend && uv run ruff format --check <11.1d touched source/test files>` | Passed: `10 files already formatted`. |
+| `git diff --check -- <11.1d touched paths>` | Passed. |
+| Claude implementation verification | Passed: `GREEN_LIGHT: yes`, `MIN_SCORE: 8`. |
+
+### Carry-Forward
+
+| Item | Owner slice |
+|---|---|
+| If `derive_new_step_output_mode` starts depending on additional `NewStepDraft` fields, split the derivation core into an input/output/delivery-mode function and have both create/edit call it. | Future mechanics cleanup |
+| Watch for a fourth edit operation walker before extracting shared traversal. | Future edit-path cleanup |
+| Promote manual/API smoke failures into the automated corpus before closing the 11.1 success gate. | 11.1 success gate |
