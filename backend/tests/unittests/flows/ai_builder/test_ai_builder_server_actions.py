@@ -128,12 +128,14 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
     assert {decision.topic for decision in payload.key_decisions} >= {
         "DOCX-resultat",
         "Indata vid körning",
+        "Planerad bearbetning",
         "Slutresultat",
     }
     assert {decision.decision for decision in payload.key_decisions} >= {
         "Genererad DOCX utan mall",
         "Ibland ett, ibland flera dokument",
         "Inga extra fält",
+        "dokument till text",
     }
     assert "Docx Output Mode" not in {
         decision.topic for decision in payload.key_decisions

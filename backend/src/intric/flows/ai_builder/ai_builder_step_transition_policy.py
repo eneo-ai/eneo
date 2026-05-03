@@ -19,9 +19,10 @@ from intric.flows.ai_builder.ai_builder_models import (
     StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_source_material import (
+    SourceMaterialBindingStatus,
     iter_compiled_source_material_boundaries,
     question_binding,
-    source_material_binding_is_complete,
+    source_material_binding_status,
     source_material_question_for_boundary,
 )
 from intric.flows.ai_builder.ai_builder_step_capabilities import (
@@ -177,7 +178,10 @@ def _normalize_source_material_underlag(
     changes: list[tuple[StepSpec, StepNormalizationChange]] = []
 
     for boundary in iter_compiled_source_material_boundaries(spec):
-        if source_material_binding_is_complete(boundary):
+        if (
+            source_material_binding_status(boundary)
+            is not SourceMaterialBindingStatus.NEEDS_COMPLETION
+        ):
             continue
         step_index = next(
             index

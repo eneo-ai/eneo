@@ -50,6 +50,9 @@
   );
 
   const isPublishedError = $derived(service.applyError?.code === "flow_is_published");
+  const isUnpublishedApplyFailure = $derived(
+    service.applyError?.code === "flow_unpublished_apply_failed"
+  );
   const publishedVersion = $derived(
     isPublishedError ? (service.applyError?.context?.published_version as number | null) : null
   );
@@ -75,6 +78,7 @@
 
   let isApproving = $state(false);
   let isApplying = $state(false);
+  let isUnpublishingAndApplying = $state(false);
 
   const removedStepChanges = $derived(
     getRemovedStepChanges(service.currentPlan?.edit_diff ?? null)
@@ -116,7 +120,7 @@
   }
 
   async function handleApply() {
-    if (isApplying) return;
+    if (isApplying || isUnpublishingAndApplying || isPublishedError) return;
     isApplying = true;
     try {
       const result = await service.applyPlan();
@@ -125,6 +129,20 @@
       // surfaced via service state
     } finally {
       isApplying = false;
+    }
+  }
+
+  async function handleUnpublishAndApply() {
+    if (isApplying || isUnpublishingAndApplying) return;
+    if (!window.confirm(m.ai_builder_published_flow_confirm())) return;
+    isUnpublishingAndApplying = true;
+    try {
+      const result = await service.unpublishAndApplyPlan();
+      onapplied?.({ flow_id: result.flow_id, focusStepIndex });
+    } catch {
+      // surfaced via service state
+    } finally {
+      isUnpublishingAndApplying = false;
     }
   }
 
@@ -577,9 +595,43 @@
               version: String(publishedVersion ?? "")
             })}
           </Alert.Description>
-          <div class="mt-2">
+          <div class="mt-2 flex flex-wrap gap-2">
+            <Button
+              variant="default"
+              size="sm"
+              onclick={handleUnpublishAndApply}
+              disabled={isApplying || isUnpublishingAndApplying}
+            >
+              {isUnpublishingAndApplying
+                ? m.ai_builder_applying()
+                : m.ai_builder_published_flow_unpublish()}
+            </Button>
             <Button variant="outline" size="sm" onclick={() => service.dismissApplyError()}>
               {m.ai_builder_conflict_cancel()}
+            </Button>
+          </div>
+        </div>
+      </Alert.Root>
+    {/if}
+
+    {#if isUnpublishedApplyFailure}
+      <Alert.Root
+        class="border-warning-default/40 bg-warning-dimmer shrink-0 rounded-none border-x-0 border-b-0"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="mx-auto max-w-3xl px-4 py-3 md:px-6">
+          <Alert.Title class="text-warning-stronger text-[0.8125rem] font-semibold">
+            {m.ai_builder_unpublished_apply_failed_title()}
+          </Alert.Title>
+          <Alert.Description class="text-warning-stronger/80 mt-0.5 text-xs leading-relaxed">
+            {m.ai_builder_unpublished_apply_failed_description({
+              message: service.applyError?.message ?? ""
+            })}
+          </Alert.Description>
+          <div class="mt-2">
+            <Button variant="outline" size="sm" onclick={() => service.dismissApplyError()}>
+              {m.ai_builder_dismiss()}
             </Button>
           </div>
         </div>
@@ -606,7 +658,7 @@
                   plan_id: plan.plan_id
                 }
               })}
-            disabled={isApproving || isApplying}
+            disabled={isApproving || isApplying || isUnpublishingAndApplying}
           >
             {m.ai_builder_plan_suggest_change()}
           </Button>
@@ -618,7 +670,7 @@
             size="sm"
             class="max-sm:min-h-11 max-sm:w-full"
             onclick={handleModify}
-            disabled={isApproving || isApplying}
+            disabled={isApproving || isApplying || isUnpublishingAndApplying}
           >
             {m.ai_builder_modify()}
           </Button>
@@ -630,7 +682,7 @@
             size="sm"
             class="max-sm:min-h-11 max-sm:w-full"
             onclick={handleApprove}
-            disabled={isApproving || isApplying}
+            disabled={isApproving || isApplying || isUnpublishingAndApplying}
           >
             {isApproving ? m.ai_builder_approving() : m.ai_builder_approve()}
           </Button>
@@ -642,7 +694,7 @@
             size="sm"
             class="max-sm:min-h-11 max-sm:w-full"
             onclick={handleApply}
-            disabled={isApproving || isApplying}
+            disabled={isApproving || isApplying || isUnpublishingAndApplying || isPublishedError}
           >
             {isApplying ? m.ai_builder_applying() : m.ai_builder_apply()}
           </Button>

@@ -504,6 +504,7 @@ export class FlowAIBuilderDriver {
     if (!this.#state.currentPlan) throw new Error("No plan to apply");
 
     this.#state.error = null;
+    this.#state.applyError = null;
     this.#state.isConflict = false;
     if (this.#state.session) {
       this.#state.session = { ...this.#state.session, status: "applying" };
@@ -525,6 +526,7 @@ export class FlowAIBuilderDriver {
       )) as ApplyResult;
       this.#flowId = result.flow_id;
       this.#state.applyResult = result;
+      this.#state.applyError = null;
       this.#state.currentPlan = { ...this.#state.currentPlan, status: "applied" };
       if (this.#state.session) {
         this.#state.session = {
@@ -546,6 +548,50 @@ export class FlowAIBuilderDriver {
       }
       this.#notify();
       await this.refreshSession();
+      throw e;
+    }
+  }
+
+  async unpublishAndApplyPlan(expectedRevision?: number): Promise<ApplyResult> {
+    if (!this.#state.currentPlan) throw new Error("No plan to apply");
+    const flowId = this.#publishedApplyFlowId();
+    if (!flowId) throw new Error("No published flow to unpublish");
+
+    this.#state.error = null;
+    this.#notify();
+
+    try {
+      await this.#transport.fetch(`/api/v1/flows/${flowId}/unpublish/`, {
+        method: "post",
+        params: {}
+      });
+      this.#state.applyError = null;
+      this.#state.isConflict = false;
+      this.#notify();
+    } catch (e) {
+      this.#state.error = e instanceof Error ? e.message : "Failed to unpublish flow";
+      this.#notify();
+      throw e;
+    }
+
+    try {
+      return await this.applyPlan(expectedRevision);
+    } catch (e) {
+      const parsedApplyError = this.#parseApplyError(e);
+      this.#state.applyError = {
+        code: "flow_unpublished_apply_failed",
+        message:
+          parsedApplyError?.message ??
+          (e instanceof Error ? e.message : "Failed to apply plan after unpublishing"),
+        context: {
+          flow_id: flowId,
+          original_code: parsedApplyError?.code ?? null,
+          original_context: parsedApplyError?.context ?? {}
+        }
+      };
+      this.#state.isConflict = parsedApplyError?.code === "stale_revision";
+      this.#state.error = null;
+      this.#notify();
       throw e;
     }
   }
@@ -594,6 +640,20 @@ export class FlowAIBuilderDriver {
     return null;
   }
 
+  #publishedApplyFlowId(): string | null {
+    const contextFlowId = this.#state.applyError?.context?.flow_id;
+    if (typeof contextFlowId === "string" && contextFlowId.length > 0) {
+      return contextFlowId;
+    }
+
+    if (this.#flowId) {
+      return this.#flowId;
+    }
+
+    const sessionFlowId = this.#state.session?.flow_id;
+    return sessionFlowId ?? null;
+  }
+
   async revisePlan(type: PlanRevisionType): Promise<void> {
     if (!this.#state.currentPlan) return;
 
@@ -631,12 +691,17 @@ export class FlowAIBuilderDriver {
 
   async confirmRequirements(): Promise<void> {
     const latestSummary = this.#getLatestRequirementsSummary();
-    if (!latestSummary?.requirements_version) return;
+    if (!latestSummary) return;
 
-    await this.sendMessage(m.ai_builder_requirements_confirm_message(), {
-      requirements_confirmed: true,
-      requirements_version: latestSummary.requirements_version
-    });
+    await this.sendMessage(
+      m.ai_builder_requirements_confirm_message(),
+      latestSummary.requirements_version
+        ? {
+            requirements_confirmed: true,
+            requirements_version: latestSummary.requirements_version
+          }
+        : { requirements_confirmed: true }
+    );
   }
 
   async changeRequirements(feedback?: string): Promise<void> {
@@ -834,8 +899,8 @@ export class FlowAIBuilderDriver {
         timestamp: this.#parseTimestamp(message.timestamp)
       };
 
-      const metadataRequirementsSummary = this.#parseRequirementsSummary(
-        message.metadata?.requirements_summary
+      const metadataRequirementsSummary = this.#parseRequirementsSummaryFromMetadata(
+        message.metadata
       );
       if (metadataRequirementsSummary) {
         assistantMessage.requirementsSummary = metadataRequirementsSummary;
@@ -863,8 +928,8 @@ export class FlowAIBuilderDriver {
         }
 
         if (requirementsToolCall?.id && toolMessage.tool_call_id === requirementsToolCall.id) {
-          const requirementsSummary = this.#parseRequirementsSummary(
-            toolMessage.metadata?.requirements_summary
+          const requirementsSummary = this.#parseRequirementsSummaryFromMetadata(
+            toolMessage.metadata
           );
           if (requirementsSummary) {
             assistantMessage.requirementsSummary = requirementsSummary;
@@ -946,6 +1011,22 @@ export class FlowAIBuilderDriver {
         ? summary.manual_setup_notes.filter((note): note is string => typeof note === "string")
         : []
     };
+  }
+
+  #parseRequirementsSummaryFromMetadata(
+    metadata: AIBuilderConversationMessage["metadata"] | undefined | null
+  ): RequirementsSummary | undefined {
+    if (!metadata || typeof metadata !== "object") return undefined;
+    const summaryPayload = metadata.requirements_summary;
+    if (!summaryPayload || typeof summaryPayload !== "object") {
+      return undefined;
+    }
+    const version = metadata.requirements_version;
+    const payload =
+      typeof version === "string" && !("requirements_version" in summaryPayload)
+        ? { ...summaryPayload, requirements_version: version }
+        : summaryPayload;
+    return this.#parseRequirementsSummary(payload);
   }
 
   #parseTimestamp(timestamp?: string | null): number {

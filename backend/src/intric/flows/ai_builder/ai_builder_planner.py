@@ -1328,13 +1328,17 @@ class AIBuilderPlanner:
                     requirements_payload = RequirementsSummaryPayload.model_validate(
                         action.payload.model_dump()
                     )
+                    requirements_version = build_requirements_version(
+                        requirements_payload
+                    )
+                    requirements_payload = requirements_payload.model_copy(
+                        update={"requirements_version": requirements_version}
+                    )
                     base_metadata = {
                         "requirements_summary": requirements_payload.model_dump(
                             mode="json"
                         ),
-                        "requirements_version": build_requirements_version(
-                            requirements_payload
-                        ),
+                        "requirements_version": requirements_version,
                     }
                 planner_telemetry = build_planner_telemetry_from_turn(
                     telemetry,

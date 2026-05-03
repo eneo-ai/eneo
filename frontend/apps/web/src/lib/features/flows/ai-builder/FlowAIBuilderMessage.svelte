@@ -16,6 +16,7 @@
     question?: StructuredQuestion;
     questionAnswered?: boolean;
     requirementsSummary?: RequirementsSummary;
+    requirementsUserRequest?: string | null;
     requirementsConfirmed?: boolean;
     requirementsActive?: boolean;
     onQuestionAnswer?: (answer: StructuredQuestionAnswerPayload) => void;
@@ -31,6 +32,7 @@
     question = undefined,
     questionAnswered = false,
     requirementsSummary = undefined,
+    requirementsUserRequest = null,
     requirementsConfirmed = false,
     requirementsActive = true,
     onQuestionAnswer = undefined,
@@ -76,6 +78,7 @@
       {#if requirementsSummary}
         <FlowAIBuilderRequirementsSummary
           summary={requirementsSummary}
+          userRequest={requirementsUserRequest}
           confirmed={requirementsConfirmed}
           active={requirementsActive}
           onconfirm={requirementsActive ? onRequirementsConfirm : undefined}

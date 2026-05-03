@@ -12,8 +12,9 @@ from intric.flows.ai_builder.ai_builder_models import (
     StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_source_material import (
+    SourceMaterialBindingStatus,
     iter_compiled_source_material_boundaries,
-    source_material_binding_is_complete,
+    source_material_binding_status,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.template_reference_analyzer import (
@@ -287,7 +288,10 @@ def lint_source_material_underlag_boundaries(
     spec: FlowDraftSpecCore, result: SpecValidationResult
 ) -> None:
     for boundary in iter_compiled_source_material_boundaries(spec):
-        if source_material_binding_is_complete(boundary):
+        if (
+            source_material_binding_status(boundary)
+            is not SourceMaterialBindingStatus.NEEDS_COMPLETION
+        ):
             continue
         result.add_warning(
             step_ref=boundary.step.plan_step_ref,

@@ -90,6 +90,34 @@ class TestResolveRequirementsStateFromAssistantMetadata:
         assert state.confirmed_version == version
         assert state.confirmed is True
 
+    def test_legacy_user_confirmation_without_version_confirms_latest_summary(
+        self,
+    ) -> None:
+        payload = _summary_payload()
+        version = build_requirements_version(payload)
+        conversation = [
+            ConversationMessage(role="user", content="Build a PDF extractor"),
+            ConversationMessage(
+                role="assistant",
+                content="Here is the summary I have so far.",
+                metadata={
+                    "requirements_summary": payload.model_dump(mode="json"),
+                    "requirements_version": version,
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="Yes, proceed with the plan",
+                metadata={"requirements_confirmed": True},
+            ),
+        ]
+
+        state = resolve_requirements_state(conversation)
+
+        assert state.latest_version == version
+        assert state.confirmed_version == version
+        assert state.confirmed is True
+
     def test_version_drift_on_user_confirmation_blocks_confirmed_flag(self) -> None:
         payload = _summary_payload()
         version = build_requirements_version(payload)

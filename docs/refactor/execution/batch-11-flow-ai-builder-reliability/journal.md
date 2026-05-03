@@ -2086,3 +2086,59 @@ while approval is disabled. Local validation was used as the fallback.
 |---|---|
 | Re-run Docker validation in an environment where Docker commands are not approval-blocked. | Next implementation operator |
 | Promote any additional live debug-export failure into the source-material boundary tests before changing prompt wording. | Batch 11 reliability |
+
+## 11.6c Edit Confirmation, Source-Material Status, And Published-Flow Apply UX
+
+### Trigger
+
+The user supplied a live debug export and screenshots from an edited Swedish
+audio-to-DOCX flow. The flow transcribed the audio but generated a DOCX that
+claimed no substantive transcription was available, while downstream steps had
+visible variable chips that were not reliably mapped into `Underlag till text`.
+The user also reported that existing-flow edits could stall after clicking
+`Gå vidare till planen`, that the requirements summary card was too shallow,
+and that published flows failed to apply edits without a clear unpublish path.
+
+### Claude Gate
+
+| Iteration | Artifact | Verdict | Green light | Minimum score | Outcome |
+|---:|---|---|---|---:|---|
+| 1 | `.codex/artifacts/claude-peer-loop-ai-builder-edit-confirmation-source-material-and-requirements-summary-plan-20260503T142948Z.md` | `changes_required` | `no` | n/a | Required stronger ownership around source-material binding status, edit confirmation, and published-flow UX before implementation. |
+| 2 | `.codex/artifacts/claude-peer-loop-ai-builder-edit-confirmation-source-material-published-apply-ux-and-requirements-summary-verification-20260503T150947Z.md` | `changes_required` | `no` | n/a | Accepted the broad direction but required confirmation before unpublish, frontend-owned latest-request display, bounded legacy bridge, and one binding-status accessor. |
+| 3 | `.codex/artifacts/claude-peer-loop-ai-builder-edit-confirmation-source-material-published-apply-ux-and-requirements-summary-verification-20260503T152556Z.md` | `green` | `yes` | 8 | Verified fixes and left only low-severity follow-ups: design-system dialog polish, Python i18n debt, and live DOCX smoke testing. |
+
+### Implementation Result
+
+| Area | Outcome |
+|---|---|
+| Source-material status | `backend/src/intric/flows/ai_builder/ai_builder_source_material.py:58-151` now exposes `SourceMaterialBindingStatus` so callers distinguish complete, intentionally partial, and missing underlag. |
+| Normalizer and lint callers | `ai_builder_step_transition_policy.py:182-183`, `ai_builder_validation_quality.py:292-293`, and `manual_api_scoring.py:133` use the same status instead of duplicate boolean predicates. |
+| Existing prompt order | `ai_builder_source_material.py:151-194` keeps the existing user prompt first and appends missing structured/source references after it. |
+| Requirements versioning | `ai_builder_planner.py:1331-1341` persists `requirements_version`; `ai_builder_requirements_state.py:101-106` bridges version-less pre-2026-05-03 draft confirmations with a documented deletion trigger. |
+| Requirements card | `FlowAIBuilderRequirementsSummary.svelte:82-88` shows the latest real user request; `FlowAIBuilderChat.svelte:49-56` derives that request from client-owned conversation state. |
+| Height warning | `FlowAIBuilderRequirementsSummary.svelte` no longer uses the collapsible height animation that produced `Invalid keyframe value for property height: NaNpx`. |
+| Published-flow edit UX | `FlowAIBuilderPlanPane.svelte:137-140` requires explicit confirmation before `unpublishAndApplyPlan`; `FlowAIBuilderDriver.ts:555-590` unpublishes, applies, and records `flow_unpublished_apply_failed` if apply fails after unpublish succeeds. |
+| Route verification | Backend authoring route is `POST /api/v1/flows/{id}/unpublish/` from `backend/src/intric/flows/api/flow_authoring_router.py:563-598`, matching the frontend call. |
+
+### Validation Result
+
+| Command | Result |
+|---|---|
+| `cd backend && uv run pytest tests/unittests/flows/ai_builder -q` | Passed: `1823 passed, 4 skipped`, existing warnings only. |
+| `cd backend && uv run pytest tests/integration/flows/ai_builder -q` | Passed: `111 passed, 20 deselected`, existing warnings only. |
+| `cd backend && uv run pyright <11.6c touched source and test files>` | Passed: `0 errors, 0 warnings, 0 informations`. |
+| `cd backend && uv run ruff check <11.6c touched source and test files>` | Passed. |
+| `cd frontend/apps/web && bun test src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts` | Passed: `32 pass`. |
+| `cd frontend/apps/web && bun run i18n:compile` | Passed. |
+| `cd frontend/apps/web && bunx prettier --check <11.6c touched frontend files>` | Passed. |
+| `cd frontend/apps/web && bunx svelte-check --tsconfig ./tsconfig.json` | Failed on pre-existing generated-client, Spaces, chat, dashboard, and FlowsTable typing errors; no `FlowAIBuilderDriver.ts` errors remained. |
+| `git diff --check` | Passed. |
+
+### Carry-Forward
+
+| Item | Owner |
+|---|---|
+| Replace the browser-native confirmation with the design-system `AlertDialog` when the next UX polish slice touches published-flow destructive actions. | Frontend polish |
+| Move backend-rendered Swedish/English requirement-summary labels out of Python if a third locale or cataloged server-rendered message format lands. | AI Builder i18n follow-up |
+| Run a live DOCX-output smoke test for the new "user prompt first, data appended" source-material ordering in an environment with the full app and provider credentials. | Manual eval |
+| Re-run Docker validation in an environment where Docker commands are not approval-blocked. | Next implementation operator |

@@ -574,11 +574,67 @@ def test_normalize_ai_builder_spec_preserves_existing_source_material_question_t
 
     assert normalized.steps[2].input_bindings == {
         "question": (
+            "audience: {{ audience }}\n\n"
             "{{ step_b.output.structured }}\n\n"
-            "Källmaterial: {{ step_a.output.text }}\n\n"
-            "audience: {{ audience }}"
+            "Källmaterial: {{ step_a.output.text }}"
         )
     }
+
+
+def test_normalize_ai_builder_spec_preserves_intentional_structured_field_underlag() -> (
+    None
+):
+    spec = FlowDraftSpecCore(
+        flow_name="IBIC till DOCX",
+        form_fields=[
+            FormFieldSpec(
+                name="Brukarens namn",
+                type="text",
+                label="Brukarens namn",
+            )
+        ],
+        steps=[
+            _step(
+                ref="step_a",
+                name="Transkribera ljud",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.AUDIO,
+                output_type=OutputType.TEXT,
+                output_mode=OutputMode.TRANSCRIBE_ONLY,
+            ),
+            _step(
+                ref="step_b",
+                name="Extrahera IBIC",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_c",
+                name="Skapa genomförandeplan",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.DOCX,
+                input_bindings={
+                    "question": (
+                        "Brukare: {{ Brukarens namn }}\n"
+                        "Behov: {{ step_b.output.structured.brukare.kan_uttrycka_behov_sjalv }}"
+                    )
+                },
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.DOCX,
+    )
+
+    assert normalized.steps[2].input_bindings == spec.steps[2].input_bindings
+    assert not any(
+        change.code == "source_material_underlag_completed"
+        for _step_spec, change in changes
+    )
 
 
 def test_normalize_ai_builder_spec_prefers_primary_audio_source_over_prior_text_step() -> (

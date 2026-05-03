@@ -153,6 +153,9 @@ def _confirm_requirements_payload(
         )
         for slot_name in sorted(resolved)
     ]
+    architecture_decision = _architecture_decision(session_state, locale)
+    if architecture_decision is not None:
+        key_decisions.append(architecture_decision)
     input_description = _input_description(resolved, locale)
     output_description = _output_description(resolved, locale)
     return ConfirmRequirementsPayload(
@@ -261,6 +264,71 @@ def _assumptions(locale: Locale) -> list[str]:
         "The plan should follow the requirements and source material in the conversation.",
         "The user can review and change the plan before it is applied.",
     ]
+
+
+def _architecture_decision(
+    session_state: PlanningState,
+    locale: Locale,
+) -> KeyDecisionPayload | None:
+    commit = session_state.architecture_commit
+    if commit is None or not commit.tuples_chain:
+        return None
+    topic = "Planerad bearbetning" if locale == "sv" else "Planned processing"
+    steps = [
+        _triple_summary(
+            input_type=triple.input_type,
+            output_type=triple.output_type,
+            output_mode=triple.output_mode,
+            locale=locale,
+        )
+        for triple in commit.tuples_chain
+    ]
+    return KeyDecisionPayload(topic=topic, decision=" → ".join(steps))
+
+
+def _triple_summary(
+    *,
+    input_type: str,
+    output_type: str,
+    output_mode: str,
+    locale: Locale,
+) -> str:
+    if output_mode == "transcribe_only":
+        return "Transkribera ljud" if locale == "sv" else "Transcribe audio"
+    if output_type == "json":
+        return "Strukturera underlag" if locale == "sv" else "Structure source material"
+    if output_type == "docx":
+        return "Skapa DOCX" if locale == "sv" else "Create DOCX"
+    if output_type == "pdf":
+        return "Skapa PDF" if locale == "sv" else "Create PDF"
+    if input_type == output_type:
+        return _step_type_label(output_type, locale)
+    if locale == "sv":
+        return f"{_step_type_label(input_type, locale)} till {_step_type_label(output_type, locale)}"
+    return f"{_step_type_label(input_type, locale)} to {_step_type_label(output_type, locale)}"
+
+
+def _step_type_label(value: str, locale: Locale) -> str:
+    labels_sv = {
+        "audio": "ljud",
+        "document": "dokument",
+        "file": "fil",
+        "json": "struktur",
+        "text": "text",
+        "docx": "DOCX",
+        "pdf": "PDF",
+    }
+    labels_en = {
+        "audio": "audio",
+        "document": "document",
+        "file": "file",
+        "json": "structured data",
+        "text": "text",
+        "docx": "DOCX",
+        "pdf": "PDF",
+    }
+    labels = labels_sv if locale == "sv" else labels_en
+    return labels.get(value, _slot_value(value))
 
 
 def _resolved_value(resolved: Mapping[str, object], slot_name: str) -> str:

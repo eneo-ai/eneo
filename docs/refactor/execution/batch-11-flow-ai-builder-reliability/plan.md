@@ -1242,6 +1242,78 @@ cd backend && uv run pytest tests/integration/flows/ai_builder/benchmark -q
 git diff --check -- <11.6b touched paths>
 ```
 
+#### 11.6c — Edit Confirmation And Published-Flow Apply UX
+
+Goal:
+Make AI Builder edits to existing flows reliable enough to trust when
+requirements confirmation, source-material binding, or published-flow state is
+involved.
+
+Problem:
+
+- Existing-flow confirmation could lose the active `requirements_version`, so
+  clicking "Go to plan" could appear to do nothing even when the interpreted
+  card was correct.
+- Source-material binding still treated every partial template binding as
+  incomplete, so intentional structured subfield references could be broadened
+  into larger injected underlag.
+- Published flows cannot be mutated directly; the UI exposed an apply path that
+  ended in a backend error instead of a clear unpublish-and-apply action.
+- The "Så här tolkade jag det" card showed mechanics but not the latest user
+  request that caused the plan or edit.
+
+Canonical owners:
+
+| Concept | Owner | 11.6c decision |
+|---|---|---|
+| Source-material binding completeness | `backend/src/intric/flows/ai_builder/ai_builder_source_material.py` | Use one enum status so normalizer, validator, and scoring distinguish complete, intentional partial, and missing bindings. |
+| Requirements confirmation versioning | `backend/src/intric/flows/ai_builder/ai_builder_requirements_state.py` | Preserve versioned confirmation; bridge only version-less pre-2026-05-03 draft sessions with a dated deletion trigger. |
+| Latest user request shown in confirmation card | `frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderChat.svelte` | Derive from client conversation state; do not make deterministic server actions depend on mutable chat history. |
+| Published-flow edit action | `frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte` and `FlowAIBuilderDriver.ts` | Require explicit confirmation, unpublish, then apply. If apply fails after unpublish succeeds, show a distinct recovery state. |
+
+Acceptance:
+
+- `SourceMaterialBindingStatus` is the only source-material binding completeness
+  accessor used by normalizer, validator, and manual scoring.
+- Source-material question construction preserves the existing user prompt first
+  and appends only missing structured/source refs.
+- Requirements summaries carry `requirements_version` in both nested and sibling
+  metadata for hydration compatibility.
+- Requirements summary UI shows the latest real user request and no longer uses
+  the collapsible height animation that produced `NaNpx` warnings.
+- Published-flow apply CTA is explicit: confirm, unpublish, apply, and surface
+  partial-failure recovery if unpublish succeeds but apply fails.
+
+Do not:
+
+- silently unpublish a flow without user confirmation
+- add a second source-material detector
+- move conversation-derived text into backend deterministic server actions
+- weaken the JSON/source-material contract into prompt wording only
+
+Validation:
+
+```bash
+cd backend && uv run pytest tests/unittests/flows/ai_builder -q
+cd backend && uv run pytest tests/integration/flows/ai_builder -q
+cd backend && uv run pyright <11.6c touched source and test files>
+cd backend && uv run ruff check <11.6c touched source and test files>
+cd frontend/apps/web && bun test src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts
+cd frontend/apps/web && bun run i18n:compile
+cd frontend/apps/web && bunx prettier --check <11.6c touched frontend files>
+cd frontend/apps/web && bunx svelte-check --tsconfig ./tsconfig.json
+git diff --check
+```
+
+Exit gate:
+
+- Claude green-lights the patched owner boundaries after the published-flow UX
+  and requirements summary changes.
+- `svelte-check` has no new AI Builder errors; pre-existing repository-wide
+  errors may remain documented.
+- Docker validation remains a carry-forward if the current tool environment
+  still blocks Docker process creation.
+
 ## Behavior And Quality Gates
 
 | Gate | Required result |

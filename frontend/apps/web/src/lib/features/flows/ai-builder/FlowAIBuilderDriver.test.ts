@@ -162,6 +162,46 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.isLatestRequirementsSummary(newSummary)).toBe(true);
   });
 
+  it("confirms a hydrated requirements summary whose version is stored on metadata", async () => {
+    const { driver, stream } = makeDriver({
+      streamImpl: vi.fn(async (_path, init, handlers) => {
+        expect(init.requestBody["application/json"].question_answer).toEqual({
+          requirements_confirmed: true,
+          requirements_version: "req-persisted"
+        });
+        handlers.onClose();
+      })
+    });
+    driver.seedState({
+      session: makeSession(),
+      messages: [
+        {
+          role: "assistant",
+          content: "Jag har tillräckligt med information.",
+          requirementsSummary: {
+            summary: "Bygg ett dokumentflöde",
+            key_decisions: [],
+            input_description: "PDF-filer",
+            output_description: "DOCX-rapport",
+            requirements_version: "req-persisted"
+          },
+          timestamp: 1
+        }
+      ]
+    });
+
+    await driver.confirmRequirements();
+
+    expect(stream).toHaveBeenCalledOnce();
+    expect(driver.state.messages[1]).toMatchObject({
+      role: "user",
+      metadata: {
+        requirements_confirmed: true,
+        requirements_version: "req-persisted"
+      }
+    });
+  });
+
   it("initializes create mode by waiting for an explicit choice when a matching draft exists", async () => {
     const draft = makeDraft({ target_kind: "create", flow_id: null });
     const fetch = vi.fn().mockResolvedValueOnce({ sessions: [draft] });
@@ -639,6 +679,124 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.currentPlan?.status).toBe("applied");
   });
 
+  it("keeps a published-flow apply error actionable after refreshing state", async () => {
+    const publishedError = {
+      body: {
+        code: "flow_is_published",
+        message: "Flow is published",
+        context: { flow_id: "flow-1", published_version: 3 }
+      }
+    };
+    const fetch = vi
+      .fn()
+      .mockRejectedValueOnce(publishedError)
+      .mockResolvedValueOnce(makeSession({ status: "awaiting_approval", latest_plan_id: "plan-1" }))
+      .mockResolvedValueOnce(makePlan({ status: "approved" }));
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: makeSession({ status: "awaiting_approval", latest_plan_id: "plan-1" }),
+      currentPlan: makePlan({ status: "approved" })
+    });
+
+    await expect(driver.applyPlan()).rejects.toBe(publishedError);
+
+    expect(driver.state.applyError).toEqual({
+      code: "flow_is_published",
+      message: "Flow is published",
+      context: { flow_id: "flow-1", published_version: 3 }
+    });
+    expect(driver.state.currentPlan?.status).toBe("approved");
+    expect(driver.state.session?.status).toBe("awaiting_approval");
+  });
+
+  it("unpublishes a published flow before retrying plan apply", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce({ flow_id: "flow-1" })
+      .mockResolvedValueOnce({
+        flow_id: "flow-1",
+        flow_name: "Flow",
+        steps_created: 0,
+        steps_updated: 2,
+        steps_removed: 0
+      })
+      .mockResolvedValueOnce(makeSession({ status: "applied", latest_plan_id: "plan-1" }))
+      .mockResolvedValueOnce(makePlan({ status: "applied" }));
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: makeSession({ status: "awaiting_approval", latest_plan_id: "plan-1" }),
+      currentPlan: makePlan({ status: "approved" }),
+      applyError: {
+        code: "flow_is_published",
+        message: "Flow is published",
+        context: { flow_id: "flow-1", published_version: 3 }
+      }
+    });
+
+    const result = await driver.unpublishAndApplyPlan(12);
+
+    expect(result.flow_id).toBe("flow-1");
+    expect(fetch).toHaveBeenNthCalledWith(1, "/api/v1/flows/flow-1/unpublish/", {
+      method: "post",
+      params: {}
+    });
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/flows/ai-builder/plans/plan-1/apply",
+      expect.objectContaining({
+        method: "post",
+        requestBody: {
+          "application/json": {
+            expected_revision: 12
+          }
+        }
+      })
+    );
+    expect(driver.state.applyError).toBeNull();
+    expect(driver.state.applyResult?.steps_updated).toBe(2);
+    expect(driver.state.session?.status).toBe("applied");
+  });
+
+  it("surfaces when apply fails after unpublishing succeeds", async () => {
+    const staleError = {
+      body: {
+        code: "stale_revision",
+        message: "Flow was modified",
+        context: { latest_revision: 9 }
+      }
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce({ flow_id: "flow-1" })
+      .mockRejectedValueOnce(staleError)
+      .mockResolvedValueOnce(makeSession({ status: "awaiting_approval", latest_plan_id: "plan-1" }))
+      .mockResolvedValueOnce(makePlan({ status: "approved" }));
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: makeSession({ status: "awaiting_approval", latest_plan_id: "plan-1" }),
+      currentPlan: makePlan({ status: "approved" }),
+      applyError: {
+        code: "flow_is_published",
+        message: "Flow is published",
+        context: { flow_id: "flow-1", published_version: 3 }
+      }
+    });
+
+    await expect(driver.unpublishAndApplyPlan()).rejects.toBe(staleError);
+
+    expect(driver.state.applyError).toEqual({
+      code: "flow_unpublished_apply_failed",
+      message: "Flow was modified",
+      context: {
+        flow_id: "flow-1",
+        original_code: "stale_revision",
+        original_context: { latest_revision: 9 }
+      }
+    });
+    expect(driver.state.isConflict).toBe(true);
+    expect(driver.state.applyResult).toBeNull();
+  });
+
   it("revises a plan with keep_current_description and refreshes current plan state", async () => {
     const fetch = vi
       .fn()
@@ -822,9 +980,9 @@ describe("FlowAIBuilderDriver", () => {
                   summary: "Analysera dokument och skapa rapport",
                   key_decisions: [{ topic: "Indata", decision: "PDF-dokument" }],
                   input_description: "PDF-filer",
-                  output_description: "DOCX-rapport",
-                  requirements_version: "req-2"
-                }
+                  output_description: "DOCX-rapport"
+                },
+                requirements_version: "req-2"
               }
             }
           ]
@@ -839,6 +997,7 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.messages[1]?.requirementsSummary?.summary).toBe(
       "Analysera dokument och skapa rapport"
     );
+    expect(driver.state.messages[1]?.requirementsSummary?.requirements_version).toBe("req-2");
     expect(driver.derivePhase()).toBe("confirming");
   });
 });

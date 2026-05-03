@@ -97,9 +97,15 @@ def resolve_requirements_state(
         if (
             isinstance(metadata, dict)
             and metadata.get("requirements_confirmed") is True
-            and metadata.get("requirements_version") == latest_version
         ):
-            confirmed_version = latest_version
+            confirmed_metadata_version = metadata.get("requirements_version")
+            # Compatibility bridge for draft sessions persisted before
+            # requirements_version was added. Delete after all pre-2026-05-03
+            # AI Builder draft sessions have expired or been migrated.
+            if confirmed_metadata_version in (None, latest_version):
+                confirmed_version = latest_version
+                continue
+            confirmed_version = None
             continue
 
         # After a plan was proposed, preserve requirements unless the user

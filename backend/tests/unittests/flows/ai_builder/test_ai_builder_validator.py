@@ -1227,6 +1227,61 @@ class TestQualityLint:
             for warning in result.warnings
         )
 
+    def test_source_material_boundary_allows_structured_subfield_underlag(self) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="Transkribera ljud",
+                        input_source=InputSource.FLOW_INPUT,
+                        input_type=InputType.AUDIO,
+                        output_mode=OutputMode.TRANSCRIBE_ONLY,
+                        output_type=OutputType.TEXT,
+                    ),
+                    _step(
+                        ref="step_b",
+                        name="Extrahera IBIC",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.TEXT,
+                        output_type=OutputType.JSON,
+                        output_contract={
+                            "type": "object",
+                            "properties": {
+                                "brukare": {
+                                    "type": "object",
+                                    "properties": {
+                                        "kan_uttrycka_behov_sjalv": {
+                                            "type": "string"
+                                        }
+                                    },
+                                }
+                            },
+                        },
+                    ),
+                    _step(
+                        ref="step_c",
+                        name="Skapa DOCX",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.JSON,
+                        output_type=OutputType.DOCX,
+                        input_bindings={
+                            "question": (
+                                "Behov: "
+                                "{{ step_b.output.structured.brukare.kan_uttrycka_behov_sjalv }}"
+                            )
+                        },
+                    ),
+                ]
+            )
+        )
+
+        assert result.valid
+        assert not any(
+            warning.code == "source_material_boundary_missing_underlag"
+            for warning in result.warnings
+        )
+
     def test_runtime_input_without_binding_does_not_warn_for_transcribe_only_step(
         self,
     ) -> None:

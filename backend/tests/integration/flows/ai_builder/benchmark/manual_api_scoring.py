@@ -11,9 +11,10 @@ from intric.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
 )
 from intric.flows.ai_builder.ai_builder_source_material import (
+    SourceMaterialBindingStatus,
     iter_compiled_source_material_boundaries,
     question_binding,
-    source_material_binding_is_complete,
+    source_material_binding_status,
 )
 from intric.flows.enums import (
     AIBuilderInputSource,
@@ -129,7 +130,7 @@ def uses_underlag_till_text_correctly(spec: FlowDraftSpecCore) -> bool | None:
     if not required_boundaries:
         return None
     return all(
-        source_material_binding_is_complete(boundary)
+        source_material_binding_status(boundary) is SourceMaterialBindingStatus.COMPLETE
         for boundary in required_boundaries
     )
 

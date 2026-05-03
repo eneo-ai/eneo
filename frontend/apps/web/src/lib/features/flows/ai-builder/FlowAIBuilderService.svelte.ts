@@ -209,6 +209,10 @@ export class FlowAIBuilderService {
     return await this.#driver.applyPlan(expectedRevision);
   }
 
+  async unpublishAndApplyPlan(expectedRevision?: number): Promise<ApplyResult> {
+    return await this.#driver.unpublishAndApplyPlan(expectedRevision);
+  }
+
   async confirmRequirements(): Promise<void> {
     await this.#driver.confirmRequirements();
   }
