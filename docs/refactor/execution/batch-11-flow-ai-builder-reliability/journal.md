@@ -2,7 +2,7 @@
 
 ## Status
 
-11.3b IMPLEMENTATION COMPLETE
+11.4a IMPLEMENTATION COMPLETE
 
 ## Starting Point
 
@@ -1477,3 +1477,138 @@ Accepted notes:
 |---|---|
 | Exact binding equality in the intermediate-chain test is the most formatting-sensitive assertion. | Keep it intentionally strict; a binding-shape change should update this golden deliberately. |
 | Optional docstrings were not necessary. | Test names carry the invariant and no restating comments were added. |
+
+## 11.4a Golden Coverage Matrix Harness Plan
+
+### Scope
+
+This slice starts the 11.4 matrix work with a test-only umbrella harness. It
+does not move existing behavior fixtures into a new registry. Instead, it makes
+their ownership explicit and validates that the referenced owner tests still
+exist, their FCM tuple chains are legal, Pattern Registry ids resolve, create
+goldens have edit twins or explicit exceptions, and form-field lifecycle rows
+meet the initial coverage target.
+
+### Claude Plan Review Iteration 1
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-11-4a-golden-coverage-matrix-plan-20260503T065957Z.md`
+- Verdict: `changes_required`
+- Green light: `no`
+- Minimum score: `7`
+
+Accepted findings:
+
+| Finding | Resolution |
+|---|---|
+| Domain-neutrality scope was undefined. | Limit 11.4a neutrality to matrix metadata and new lifecycle test names; existing fixture-body cleanup is a follow-up. |
+| The 30% form-field-chain denominator was not concrete. | Row unit is now a coverage owner; planned denominator is 5 owner rows with 4 form-field-chain rows. |
+| Edit exceptions had no expiration policy. | Exceptions now require `reason` and `retire_when`. |
+| Owner-by-reference mechanism was unspecified. | Use static AST owner resolution, not sibling test imports. |
+| `concerns` would have been stringly typed. | Use `CoverageConcern` enum values. |
+
+### Claude Plan Verification Iteration 2
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-11-4a-golden-coverage-matrix-plan-verification-20260503T070329Z.md`
+- Verdict: `green`
+- Green light: `yes`
+- Minimum score: `8`
+
+Accepted polish:
+
+| Finding | Resolution |
+|---|---|
+| Percentage gates are fragile with a 5-row denominator. | Added that new non-chain/non-edit rows must backfill counterpart rows instead of lowering gates. |
+| Aggregate-row semantics needed a rule beyond the bridge example. | Added that aggregate rows are allowed only when their owner test already fails on missing internal fixtures. |
+| `retire_when` string could rot. | Implementation will reject short values and placeholder words. |
+| Metadata neutrality should use a named token set. | Implementation will use a named municipality-only token constant. |
+
+### Canonical Owners
+
+| Concept | Current owner | 11.4a decision |
+|---|---|---|
+| Pattern Registry / FCM archetype round-trip coverage | `backend/tests/unittests/flows/ai_builder/test_ai_builder_materialization_bridge.py` | Reuse as `registry_bridge` row owner; do not duplicate `_ARCHETYPE_CASES`. |
+| Form-field lifecycle behavior | `backend/tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py` | Extend with one edit-path multi-reference twin and reference its create/edit tests from the matrix. |
+| Edit compiler form-field bindings | `backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py` and lifecycle file | Keep existing edit compiler tests; add only the missing multi-reference lifecycle twin. |
+| Golden coverage metadata | New `test_ai_builder_golden_coverage_matrix.py` | Owns metadata rows and gates, not behavior fixtures. |
+
+### Planned Matrix Rows
+
+| Row | Owner test | Surface | Edit parity |
+|---|---|---|---|
+| `create_form_field_declare_only` | `test_declared_input_field_without_step_use_attaches_to_final_step` | create | Exception with retire trigger: remove when edit-mode field inference lands. |
+| `create_form_field_intermediate_chain` | `test_intermediate_form_field_use_flows_through_structured_previous_field` | create | Exception with retire trigger: remove when edit mode can materialize create-time intermediate chains. |
+| `create_form_field_multi_reference` | `test_one_input_field_can_feed_two_step_bindings_once_each` | create | Twin: `edit_form_field_multi_reference`. |
+| `edit_form_field_multi_reference` | new edit lifecycle test | edit | Edit twin row. |
+| `pattern_registry_materialization_bridge` | `TestArchetypeCoverage.test_every_positive_pattern_has_a_fixture` | registry_bridge | Not a create row. |
+
+Initial denominator:
+
+- 5 owner rows total.
+- 4 rows carry `CoverageConcern.FORM_FIELD_CHAIN`, so the initial
+  form-field-chain ratio is 80%.
+- 1 row has `surface=edit`, so the initial edit-row ratio is 20%.
+- Adding a non-chain or non-edit row must backfill a counterpart row in the
+  same slice; do not lower the percentage gates to absorb denominator growth.
+
+### Planned Gates
+
+| Gate | Acceptance |
+|---|---|
+| Owner existence | Resolve each `owner_module` with `find_spec`, parse its source with AST, and assert `test_name` exists without importing sibling test modules. |
+| Pattern ids | Every listed pattern exists in `PATTERN_REGISTRY`. |
+| FCM legality | Every typed step tuple resolves and each row chain passes `validate_step_chain`. |
+| Edit parity | Every create row has an edit twin or an exception with `reason` and `retire_when`; at least 20% of rows are edit rows. |
+| Form-field coverage | At least 30% of owner rows include `CoverageConcern.FORM_FIELD_CHAIN`; planned start is 4/5 rows. |
+| Metadata neutrality | Matrix metadata and new lifecycle test names avoid domain-specific Swedish municipal/legal/procurement vocabulary; existing fixture bodies are out of 11.4a scope. |
+
+### Validation Plan
+
+```bash
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py tests/unittests/flows/ai_builder/test_ai_builder_materialization_bridge.py -q
+cd backend && uv run pytest tests/unittests/flows/ai_builder -q
+cd backend && uv run pyright tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py
+cd backend && uv run ruff check tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py
+cd backend && uv run ruff format --check tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py
+./scripts/gate-local/anti_slippage.sh --worktree
+git diff --check -- backend/tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py backend/tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py docs/refactor/execution/batch-11-flow-ai-builder-reliability
+```
+
+### Implementation Result
+
+| Area | Outcome |
+|---|---|
+| Matrix owner | Added `backend/tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py`. |
+| Coverage row typing | Added enum-typed `CoverageSurface` / `CoverageConcern` and frozen row value objects. |
+| Owner existence | Matrix uses `find_spec` plus AST checks for module-level tests and class-method tests. |
+| FCM legality | Matrix rows use enum-typed step tuples and validate both tuple support and chain legality. |
+| Edit parity | Create rows require an edit twin or retiring exception; starting denominator is 5 rows with 1 edit row. |
+| Form-field ratio | 4 of 5 rows carry `FORM_FIELD_CHAIN`, above the 30% gate. |
+| Edit lifecycle twin | Added `test_edit_form_field_multi_reference_feeds_two_step_bindings_once_each`. |
+| Metadata neutrality | Added named municipality-only token guard over matrix metadata. |
+| Source scope | No `backend/src` files changed. |
+
+### Validation Result
+
+| Command | Result |
+|---|---|
+| `uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py tests/unittests/flows/ai_builder/test_ai_builder_materialization_bridge.py -q` | Passed: `46 passed`. |
+| `uv run pytest tests/unittests/flows/ai_builder -q` | Passed: `1751 passed, 4 skipped`, 12 existing warnings. |
+| `uv run pyright tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py` | Passed: `0 errors, 0 warnings, 0 informations`. |
+| `uv run ruff check tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py` | Passed. |
+| `uv run ruff format --check tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py` | Passed: `2 files already formatted`. |
+
+### Claude Implementation Review
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-11-4a-golden-coverage-matrix-implementation-20260503T071148Z.md`
+- Verdict: `green`
+- Green light: `yes`
+- Minimum score: `8`
+
+Accepted polish:
+
+| Finding | Resolution |
+|---|---|
+| AST owner lookup should support async tests. | Added `ast.AsyncFunctionDef` support for module-level and class-method owner tests. |
+| Edit twin/exception XOR was hard to read. | Added named booleans and an assertion message. |
+| Percentage gates used naked numeric thresholds. | Added named `MIN_EDIT_ROW_PERCENTAGE` and `MIN_FORM_FIELD_CHAIN_PERCENTAGE` constants. |
+| Edit twins could drift to unrelated concerns. | Added a twin concern superset assertion. |

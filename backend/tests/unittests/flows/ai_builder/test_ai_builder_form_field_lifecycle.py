@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
 from intric.flows.ai_builder.ai_builder_create_models import (
     CreateFormFieldDraft,
@@ -11,7 +13,14 @@ from intric.flows.ai_builder.ai_builder_create_outline import (
     compile_outline_to_create_draft,
     parse_outline_flow_arguments,
 )
+from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
+from intric.flows.ai_builder.ai_builder_edit_models import (
+    FlowEditDraft,
+    StepEditOperation,
+    StepPatch,
+)
 from intric.flows.ai_builder.ai_builder_validator import validate_spec
+from intric.flows.flow import FlowStep
 
 
 def test_declared_input_field_without_step_use_attaches_to_final_step() -> None:
@@ -167,6 +176,60 @@ def test_one_input_field_can_feed_two_step_bindings_once_each() -> None:
     assert validate_spec(compiled).valid
 
 
+def test_edit_form_field_multi_reference_feeds_two_step_bindings_once_each() -> None:
+    existing = [
+        _flow_step(
+            step_order=1,
+            user_description="Classify request",
+            input_source="flow_input",
+            input_type="text",
+            output_type="json",
+            output_contract={
+                "type": "object",
+                "properties": {"category": {"type": "string"}},
+            },
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Draft answer",
+            input_source="previous_step",
+            input_type="json",
+            output_type="text",
+        ),
+    ]
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(uses_form_fields=["audience"]),
+            ),
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_2",
+                patch=StepPatch(uses_form_fields=["audience"]),
+            ),
+        ],
+    )
+
+    result = compile_edit_draft(
+        draft,
+        existing,
+        base_flow_revision=1,
+        current_metadata_json=_form_metadata(
+            variable_name="audience", label="Audience"
+        ),
+    )
+    first_question = _question_binding(result.compiled_spec.steps[0].input_bindings)
+    final_question = _question_binding(result.compiled_spec.steps[-1].input_bindings)
+
+    assert result.compiled_spec.form_fields is not None
+    assert [field.name for field in result.compiled_spec.form_fields] == ["audience"]
+    assert first_question.count("{{ audience }}") == 1
+    assert final_question.count("{{ audience }}") == 1
+    assert validate_spec(result.compiled_spec).valid
+
+
 def _form_field(*, variable_name: str, label: str) -> CreateFormFieldDraft:
     return CreateFormFieldDraft(
         variable_name=variable_name,
@@ -194,3 +257,43 @@ def _question_binding(input_bindings: dict[str, object] | None) -> str:
     question = input_bindings["question"]
     assert isinstance(question, str)
     return question
+
+
+def _flow_step(
+    *,
+    step_order: int,
+    user_description: str,
+    input_source: str,
+    input_type: str,
+    output_type: str,
+    output_contract: dict[str, object] | None = None,
+) -> FlowStep:
+    return FlowStep(
+        id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=uuid4(),
+        assistant_id=uuid4(),
+        step_order=step_order,
+        user_description=user_description,
+        input_source=input_source,
+        input_type=input_type,
+        output_type=output_type,
+        output_mode="pass_through",
+        mcp_policy="inherit",
+        output_contract=output_contract,
+    )
+
+
+def _form_metadata(*, variable_name: str, label: str) -> dict[str, object]:
+    return {
+        "form_schema": {
+            "fields": [
+                {
+                    "name": variable_name,
+                    "type": "text",
+                    "label": label,
+                    "required": False,
+                }
+            ]
+        }
+    }

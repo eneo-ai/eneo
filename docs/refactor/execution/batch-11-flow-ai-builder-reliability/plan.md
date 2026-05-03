@@ -679,18 +679,72 @@ cd backend && uv run pytest tests/unittests/flows/ai_builder -q
 Goal:
 Make coverage gaps visible and prevent future Pattern Registry / FCM drift. Goldens are coverage gates, not the baseline reliability corpus.
 
+#### 11.4a — Golden Coverage Matrix Harness
+
+Scope:
+
+- Add a compact coverage-matrix owner in
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py`.
+- Reuse existing canonical behavior owners instead of duplicating their fixture
+  bodies:
+  - Pattern Registry / FCM composition coverage remains in
+    `test_ai_builder_materialization_bridge.py`.
+  - Form-field lifecycle behavior remains in
+    `test_ai_builder_form_field_lifecycle.py`.
+  - Edit compiler behavior remains in edit compiler/lifecycle tests.
+- Add one edit-path lifecycle twin for multi-reference form-field usage in
+  `test_ai_builder_form_field_lifecycle.py`; declare-only and intermediate
+  chain create goldens get explicit matrix exceptions because edit mode does
+  not infer unreferenced form fields or re-materialize create-time intermediate
+  chains implicitly.
+- Keep this as a test-only slice. Source bugs found by the matrix become a
+  separate bug slice.
+- The matrix row unit is a coverage owner, not every fixture inside that
+  owner. The materialization bridge remains one aggregate row because it
+  already fails when any positive Pattern Registry archetype lacks a fixture.
+  Future aggregate rows are allowed only when the referenced owner test already
+  fails on missing internal fixtures for that whole aggregate surface.
+- Owner-test existence is resolved with `importlib.util.find_spec` plus AST
+  inspection of `def` and class method names. The matrix must not import
+  sibling test modules just to verify ownership.
+- Domain-neutrality in 11.4a applies to matrix metadata and new lifecycle test
+  names only. Existing municipality-flavoured fixture bodies outside that
+  metadata are a follow-up cleanup, not a hidden pass/fail rule here.
+
+Planned matrix row contract:
+
+| Field | Purpose |
+|---|---|
+| `row_id` | Stable coverage row id. |
+| `owner_module` / `test_name` | Path-backed owner test that must exist. |
+| `surface` | `create`, `edit`, or `registry_bridge`. |
+| `concerns` | `frozenset[CoverageConcern]`, with enum values such as `FORM_FIELD_CHAIN`, `PATTERN_REGISTRY`, and `FCM_CHAIN`. |
+| `pattern_ids` | Optional Pattern Registry ids; every listed id must exist in `PATTERN_REGISTRY`. Aggregate bridge coverage does not duplicate every registry id here because the bridge owner already enforces that set. |
+| `fcm_steps` | Typed FCM step tuple chain; every tuple and chain must validate. |
+| `edit_twin_id` / `edit_exception` | Required for create rows. Exceptions include both `reason` and `retire_when`. |
+
 Deliverables:
 
 - matrix harness across FCM capabilities, Pattern Registry compositions, and create/edit paths
 - domain-neutral goldens for simple and complex flows
 - edit-path twin or explicit exception for each create golden
-- anti-bias guard against fixtures/prompts that drift into one domain
+- metadata neutrality guard for row ids, owner references, concerns, and
+  exception text
 
 Success gate:
 
 - missing supported cells fail the test suite
 - at least 20% of goldens exercise edit-path parity initially
 - form-field chain coverage target begins at 30% after 11.3 lands
+- matrix rows reference existing test owners by module/function so row drift
+  fails at collection time
+- no broad new fixture registry duplicates the reliability corpus or the
+  materialization bridge archetype cases
+- initial denominator is 5 owner rows: 4 carry `FORM_FIELD_CHAIN` and 1 is an
+  edit row, satisfying the 30% form-field and 20% edit-row gates
+- adding a non-chain or non-edit owner row requires backfilling a counterpart
+  row in the same slice; do not lower percentage gates to absorb denominator
+  growth
 
 ### 11.5 — LiteLLM Structured Output Rail
 
