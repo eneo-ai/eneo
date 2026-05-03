@@ -28,6 +28,7 @@ from intric.flows.ai_builder.question_catalog import (
     QuestionTemplate,
     RenderedOption,
     RenderedQuestion,
+    legal_slot_values,
     question_ids_for_slot,
     render_question,
 )
@@ -332,6 +333,16 @@ class TestCatalogInvariants:
             assert key == template.id, (
                 f"Catalog key {key!r} does not match template.id {template.id!r}"
             )
+
+    def test_legal_slot_values_are_derived_from_catalog_options(self) -> None:
+        for slot_name, template in QUESTION_CATALOG.items():
+            assert legal_slot_values(slot_name) == frozenset(
+                option.value for option in template.options
+            )
+
+    def test_legal_slot_values_fails_loudly_for_unknown_slot(self) -> None:
+        with pytest.raises(KeyError):
+            legal_slot_values("unknown_slot")
 
 
 class TestBilingualContract:

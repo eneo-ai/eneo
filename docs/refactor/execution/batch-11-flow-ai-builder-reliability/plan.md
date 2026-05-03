@@ -316,6 +316,13 @@ Success gate:
 Goal:
 Use a typed resolver to understand Swedish and English intent without brittle keyword gates.
 
+Slice split:
+
+- 11.2a: freeze the Swedish corpus and existing slot contract before adding a
+  model-backed resolver.
+- 11.2b: implement the resolver, follow-up behavior, telemetry, and the final
+  accuracy gate against the frozen corpus.
+
 Plan requirements before implementation:
 
 - inventory current slot values from `ai_builder_slot_vocabulary.py`
@@ -339,6 +346,38 @@ Success gate:
 - no corpus shrinkage without explicit test failure or review note
 - no hardcoded transcription/document-summary special cases
 - keyword prior deletion criterion is written before implementation, starting from: resolver matches or improves on keyword decisions for at least 95% of the corpus and no reviewed production sample over seven days shows a resolver/keyword disagreement on an architecture-class slot
+
+#### 11.2a — Swedish Corpus And Existing Slot Contract
+
+Goal:
+Freeze the corpus and legal-value contract before introducing model behavior.
+
+Implemented:
+
+- `planning_state.py` accepts `source="model"` and `confidence="low"` on
+  `ResolvedSlot`.
+- `question_catalog.py` exposes `legal_slot_values()` from the existing
+  question catalog rather than duplicating slot-value lists.
+- `benchmark/cases.py` owns `SLOT_RESOLVER_CORPUS_CASES` with 80 labeled
+  Swedish prompts and `SlotCoverageTag` distribution tags.
+- `test_slot_resolver_corpus.py` validates stable IDs, Swedish prompts,
+  expected slot names, catalog-backed legal values or `unknown`, per-tag
+  coverage, domain neutrality, and keyword-prior baseline measurement through
+  `build_planning_state_from_conversation`.
+
+Observed baseline:
+
+- current keyword prior: `229/276 = 0.830`
+- guard floor: `0.70`
+- final 11.2 resolver target remains at least `0.85` on the frozen corpus
+
+Carry-forward to 11.2b:
+
+- model-backed resolver result model and parser
+- follow-up behavior for unknown or low-confidence architecture slots
+- resolver telemetry for model, tenant, confidence, capability path, and latency
+- JSONB round-trip test for model/low slot persistence
+- keyword-prior deletion criterion and disagreement measurement
 
 ### 11.3 — Form Fields And Resource Semantics
 

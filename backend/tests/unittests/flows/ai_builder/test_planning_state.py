@@ -243,15 +243,17 @@ class TestSignalValidation:
 
 
 class TestResolvedSlotValidation:
-    def test_resolved_slot_low_confidence_rejected(self) -> None:
-        with pytest.raises(ValidationError):
-            ResolvedSlot(
-                name="document_kind",
-                value="case_documents",
-                source="structured_answer",
-                evidence=["msg_1"],
-                confidence="low",  # type: ignore[arg-type]
-            )
+    def test_resolved_slot_accepts_low_confidence_for_model_resolution(self) -> None:
+        slot = ResolvedSlot(
+            name="document_kind",
+            value="case_documents",
+            source="model",
+            evidence=["msg_1"],
+            confidence="low",
+        )
+
+        assert slot.source == "model"
+        assert slot.confidence == "low"
 
 
 class TestStepTripleValidation:

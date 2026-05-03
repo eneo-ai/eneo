@@ -572,6 +572,11 @@ def _build_catalog() -> Mapping[str, QuestionTemplate]:
 QUESTION_CATALOG: Mapping[str, QuestionTemplate] = _build_catalog()
 
 
+def legal_slot_values(slot_name: str) -> frozenset[str]:
+    template = QUESTION_CATALOG[slot_name]
+    return frozenset(option.value for option in template.options)
+
+
 @dataclass(frozen=True, slots=True)
 class RenderedOption:
     """Locale-resolved option snapshot — what a UI surface displays."""

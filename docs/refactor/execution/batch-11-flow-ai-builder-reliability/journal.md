@@ -2,7 +2,7 @@
 
 ## Status
 
-11.1b IMPLEMENTATION COMPLETE
+11.2a IMPLEMENTATION COMPLETE
 
 ## Starting Point
 
@@ -15,8 +15,9 @@
   - `PRODUCT.md`
   - `docs/refactor/goals.md`
 - Slices recorded in this journal: 11.0a reliability corpus, 11.0b proposal
-  measurement, 11.1a step skeleton ownership, and 11.1b skeleton fill
-  integration.
+  measurement, 11.1a step skeleton ownership, 11.1b skeleton fill
+  integration, 11.1c architecture error classification, 11.1d edit-path
+  mechanics, and 11.2a Swedish slot resolver corpus.
 
 ## 11.0a Slice Plan
 
@@ -852,3 +853,94 @@ user-authored invalid edits into architecture failures.
 | If `derive_new_step_output_mode` starts depending on additional `NewStepDraft` fields, split the derivation core into an input/output/delivery-mode function and have both create/edit call it. | Future mechanics cleanup |
 | Watch for a fourth edit operation walker before extracting shared traversal. | Future edit-path cleanup |
 | Promote manual/API smoke failures into the automated corpus before closing the 11.1 success gate. | 11.1 success gate |
+
+## 11.2a Swedish Slot Resolver Corpus And Existing Slot Contract
+
+### Scope
+
+Implemented the corpus-first part of 11.2. This slice freezes the Swedish
+resolver evaluation target, derives legal expected values from the existing
+question catalog, and measures the current keyword prior through the real
+planning-state builder. It does not implement model-backed resolution or claim
+the final 11.2 accuracy target.
+
+### Source Changes
+
+| Area | Evidence | Decision |
+|---|---|---|
+| Planning-state slot contract | `backend/src/intric/flows/ai_builder/planning_state.py:61`, `:70` | Extended the existing `ResolvedSlot` contract for future model output by adding `source="model"` and `confidence="low"` rather than creating another resolver decision type. |
+| Legal slot values | `backend/src/intric/flows/ai_builder/question_catalog.py:575` | Added `legal_slot_values()` so corpus labels and future resolver validation use the question catalog as the value owner. |
+| Slot corpus tags | `backend/tests/integration/flows/ai_builder/benchmark/cases.py:64` | Added closed coverage tags for material type, output/API shape, structured extraction, comparison, multi-step, and ambiguous prompts. |
+| Slot corpus case type | `backend/tests/integration/flows/ai_builder/benchmark/cases.py:114` | Added `SlotResolverCorpusCase` next to the existing benchmark and reliability corpus types. |
+| Frozen corpus | `backend/tests/integration/flows/ai_builder/benchmark/cases.py:599` | Added 80 Swedish, domain-neutral prompts with catalog-backed expected slots and coverage tags. |
+
+### Test Changes
+
+| Coverage | Evidence |
+|---|---|
+| Model/low slot contract | `backend/tests/unittests/flows/ai_builder/test_planning_state.py:246` |
+| Catalog-derived legal slot values | `backend/tests/unittests/flows/ai_builder/test_question_catalog.py:337`, `:343` |
+| Corpus count, unique IDs, and no overlap with existing benchmark IDs | `backend/tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py:55` |
+| Swedish prompts, non-empty labels, and non-empty coverage tags | `backend/tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py:66` |
+| Expected slot names and values use known slots plus catalog legal values or `unknown` | `backend/tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py:77` |
+| Per-tag minimum distribution | `backend/tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py:88` |
+| Domain-neutral prompt guard | `backend/tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py:98` |
+| Keyword-prior baseline through `build_planning_state_from_conversation` | `backend/tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py:106` |
+
+### Baseline
+
+| Metric | Value |
+|---|---:|
+| Corpus cases | 80 |
+| Expected slot labels | 276 |
+| Keyword-prior matches | 229 |
+| Observed keyword-prior score | 0.830 |
+| Guard floor in test | 0.70 |
+| Final 11.2 resolver target | >= 0.85 |
+
+The guard floor protects against accidental baseline collapse only. It is not
+the Batch 11.2 resolver success target.
+
+### Claude Peer Review
+
+| Iteration | Artifact | Verdict | Green light | Minimum score | Outcome |
+|---:|---|---|---|---:|---|
+| 1 | `.codex/artifacts/claude-peer-loop-batch-11-2a-swedish-slot-resolver-plan-20260503T040339Z.md` | `changes_required` | `no` | 5 | Rejected a parallel resolver contract, prompt-only baseline, third taxonomy, missing domain-neutrality guard, and speculative model telemetry. |
+| 2 | `.codex/artifacts/claude-peer-loop-batch-11-2a-swedish-slot-resolver-plan-verification-20260503T040804Z.md` | `green` | `yes` | 8 | Accepted the existing-contract corpus split and baseline measurement through the real planning-state builder. |
+| 3 | `.codex/artifacts/claude-peer-loop-batch-11-2a-swedish-slot-resolver-implementation-20260503T042153Z.md` | `green` | `yes` | 8 | Accepted implementation; non-blocking notes were handled with exact baseline documentation and two intent comments. |
+
+### Accepted Claude Findings
+
+| Finding | Resolution |
+|---|---|
+| Do not create a parallel `SlotResolverDecision` contract. | Extended the existing `ResolvedSlot` source/confidence literals. |
+| Do not measure a prompt-only projection. | Baseline test calls `build_planning_state_from_conversation`. |
+| Do not duplicate slot legal values in a resolver taxonomy. | Added `legal_slot_values()` from `QUESTION_CATALOG`. |
+| Add domain-neutrality enforcement. | Added a prompt denylist test for municipal-domain terms. |
+| Record exact baseline instead of only a soft floor. | Recorded `229/276 = 0.830` here and in the retrospective. |
+| Explain `unknown` baseline scoring and `HTTP_API` coverage semantics. | Added two focused test/data comments that document non-obvious corpus decisions. |
+| JSONB round-trip for model/low belongs with persisted resolver writes. | Carried to 11.2b. |
+
+### Validation
+
+| Command | Result |
+|---|---|
+| `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_planning_state.py tests/unittests/flows/ai_builder/test_question_catalog.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py -q` | Passed: `99 passed`, 17 warnings from existing deprecations and one existing serializer warning. |
+| `cd backend && uv run pyright src/intric/flows/ai_builder/planning_state.py src/intric/flows/ai_builder/question_catalog.py tests/integration/flows/ai_builder/benchmark/cases.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py tests/unittests/flows/ai_builder/test_planning_state.py tests/unittests/flows/ai_builder/test_question_catalog.py` | Passed: `0 errors, 0 warnings, 0 informations`. |
+| `cd backend && uv run ruff check src/intric/flows/ai_builder/planning_state.py src/intric/flows/ai_builder/question_catalog.py tests/integration/flows/ai_builder/benchmark/cases.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py tests/unittests/flows/ai_builder/test_planning_state.py tests/unittests/flows/ai_builder/test_question_catalog.py` | Passed. |
+| `cd backend && uv run ruff format --check src/intric/flows/ai_builder/planning_state.py src/intric/flows/ai_builder/question_catalog.py tests/integration/flows/ai_builder/benchmark/cases.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py tests/unittests/flows/ai_builder/test_planning_state.py tests/unittests/flows/ai_builder/test_question_catalog.py` | Passed: `6 files already formatted`. |
+| `cd backend && uv run lint-imports --no-cache` | Passed: 3 contracts kept, 0 broken. |
+| `git diff --check -- <11.2a touched paths>` | Passed. |
+| `./scripts/gate-local/anti_slippage.sh --worktree` | Passed: `anti-slippage: worktree clean`. |
+| Added-line slop grep for `deprecated`, `legacy`, source-control/session/tooling comments, and TODO/FIXME markers | Passed with no matches. |
+
+### Carry-Forward
+
+| Item | Owner slice |
+|---|---|
+| Model-backed resolver result model and parser. | 11.2b |
+| Follow-up behavior for unknown or low-confidence architecture slots. | 11.2b |
+| Resolver accuracy gate of at least 85% on the frozen 80-case corpus. | 11.2b |
+| Keyword-prior deletion criterion and disagreement measurement. | 11.2b |
+| Resolver telemetry for model, tenant, confidence, capability path, and latency. | 11.2b |
+| JSONB round-trip coverage for `source="model"` and `confidence="low"`. | 11.2b |

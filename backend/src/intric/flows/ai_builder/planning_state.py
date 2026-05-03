@@ -64,9 +64,10 @@ SlotSource = Literal[
     "flow_default",
     "policy_default",
     "heuristic",
+    "model",
 ]
 
-SlotConfidence = Literal["high", "medium"]
+SlotConfidence = Literal["high", "medium", "low"]
 
 InvariantResult = Literal["pass", "fail", "warning"]
 
