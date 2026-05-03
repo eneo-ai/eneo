@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from intric.flows.domain.flow import FlowStepResult
 from intric.flows.flow_review_policy import FlowStepReviewPolicy
+
+if TYPE_CHECKING:
+    from intric.files.file_models import File
 
 
 def _empty_step_diagnostics() -> list["StepDiagnostic"]:
@@ -85,7 +88,7 @@ class StepExecutionOutput:
 class StepInputValue:
     text: str
     source_text: str = ""
-    files: list[Any] | None = None
+    files: list[File] | None = None
     structured: dict[str, Any] | list[Any] | None = None
     raw_extracted_text: str = ""
     input_source: str = "flow_input"

@@ -4,17 +4,22 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Protocol, cast
+from typing import Any, Awaitable, Protocol, cast
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import Completion
+from intric.completion_models.infrastructure.completion_service import CompletionService
+from intric.completion_models.infrastructure.tenant_model_capabilities import (
+    get_supported_openai_params,
+)
+from intric.files.file_models import File
 from intric.flows.citation_sidecar import (
     CITATION_MODE_INLINE_INREF_SIDECAR,
     build_citation_sidecar,
     resolve_citation_mode,
     strip_inline_reference_tags,
 )
-from intric.flows.domain.flow import FlowRun, FlowStepResultStatus
+from intric.flows.domain.flow import FlowRun, FlowStepResult, FlowStepResultStatus
 from intric.flows.output_modes import transcribe_only_violation
 from intric.flows.runtime.inherited_citations import (
     build_inherited_citation_prompt_appendix,
@@ -27,26 +32,14 @@ from intric.flows.runtime.models import (
     StepExecutionOutput,
     StepInputValue,
 )
+from intric.flows.runtime.protocols import RuntimeAssistantProtocol
 from intric.flows.runtime.step_input_validation import (
     validate_input_contract,
     validate_runtime_input_policy,
 )
 from intric.flows.runtime.step_result_builder import build_transcribe_only_rag_metadata
+from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.main.exceptions import TypedIOValidationException
-
-try:
-    from litellm import (
-        get_supported_openai_params as _litellm_get_supported_openai_params,  # pyright: ignore[reportPrivateImportUsage,reportUnknownVariableType]
-    )
-except Exception:  # pragma: no cover - defensive import guard
-    _litellm_get_supported_openai_params = None
-
-_LiteLLMGetSupportedParams = Callable[..., list[str] | None]
-if _litellm_get_supported_openai_params is not None:
-    _litellm_get_supported_openai_params = cast(
-        _LiteLLMGetSupportedParams,
-        _litellm_get_supported_openai_params,
-    )
 
 
 def _string_key_dict(value: object) -> dict[str, Any]:
@@ -63,7 +56,7 @@ class VariableResolverProtocol(Protocol):
     def build_context(
         self,
         flow_input: dict[str, Any] | None,
-        prior_results: list[Any],
+        prior_results: list[FlowStepResult],
         *,
         current_step_order: int | None = None,
         step_names_by_order: dict[int, str] | None = None,
@@ -82,7 +75,7 @@ class LoadAssistantFn(Protocol):
         self,
         assistant_id: UUID,
         state: RunExecutionState | None = None,
-    ) -> Awaitable[Any]: ...
+    ) -> Awaitable[RuntimeAssistantProtocol]: ...
 
 
 class ResolveStepInputFn(Protocol):
@@ -92,7 +85,7 @@ class ResolveStepInputFn(Protocol):
         step: RuntimeStep,
         context: dict[str, Any],
         run: FlowRun,
-        prior_results: list[Any],
+        prior_results: list[FlowStepResult],
         assistant_prompt_text: str | None,
         state: RunExecutionState,
         version_metadata: dict[str, Any] | None,
@@ -103,11 +96,17 @@ class RetrieveRagChunksFn(Protocol):
     def __call__(
         self,
         *,
-        assistant: Any,
+        assistant: RuntimeAssistantProtocol,
         question: str,
         run_id: UUID,
         step_order: int,
-    ) -> Awaitable[tuple[list[str], dict[str, Any] | None, list[StepDiagnostic]]]: ...
+    ) -> Awaitable[
+        tuple[
+            list[InfoBlobChunkInDBWithScore],
+            dict[str, Any] | None,
+            list[StepDiagnostic],
+        ]
+    ]: ...
 
 
 class ProcessTypedOutputFn(Protocol):
@@ -143,11 +142,11 @@ class AttachTypedFailureContextFn(Protocol):
 
 
 class EffectiveModelParametersFn(Protocol):
-    def __call__(self, assistant: Any) -> dict[str, Any]: ...
+    def __call__(self, assistant: RuntimeAssistantProtocol) -> dict[str, Any]: ...
 
 
 class JsonModeCacheKeyFn(Protocol):
-    def __call__(self, assistant: Any) -> str: ...
+    def __call__(self, assistant: RuntimeAssistantProtocol) -> str: ...
 
 
 class JsonModeRejectionFn(Protocol):
@@ -156,19 +155,19 @@ class JsonModeRejectionFn(Protocol):
 
 @dataclass
 class PreparedStepExecution:
-    assistant: Any
+    assistant: RuntimeAssistantProtocol
     step_input: StepInputValue
     effective_prompt: str
     input_payload_for_result: dict[str, Any]
     contract_validation: dict[str, Any] | None
     diagnostics: list[StepDiagnostic]
-    llm_files: list[Any]
+    llm_files: list[File]
 
 
 @dataclass(frozen=True)
 class StepExecutionRuntimeDeps:
     variable_resolver: VariableResolverProtocol
-    completion_service: Any
+    completion_service: CompletionService
     load_assistant: LoadAssistantFn
     resolve_step_input: ResolveStepInputFn
     retrieve_rag_chunks: RetrieveRagChunksFn
@@ -179,50 +178,41 @@ class StepExecutionRuntimeDeps:
     json_mode_cache_key: JsonModeCacheKeyFn
     is_json_mode_rejection: JsonModeRejectionFn
     count_tokens: CountTokensFn
-    logger: Any | None = None
+    logger: logging.Logger | None = None
     rag_retrieval_timeout_seconds: float = 30
 
 
-def _resolve_litellm_model_name(assistant: Any) -> str | None:
-    completion_model = getattr(assistant, "completion_model", None)
+def _resolve_litellm_model_name(assistant: RuntimeAssistantProtocol) -> str | None:
+    completion_model = assistant.completion_model
     if completion_model is None:
         return None
 
-    explicit_name = getattr(completion_model, "litellm_model_name", None)
-    if isinstance(explicit_name, str) and explicit_name.strip():
+    explicit_name = completion_model.litellm_model_name
+    if explicit_name and explicit_name.strip():
         return explicit_name.strip()
 
-    provider = getattr(completion_model, "provider_type", None)
-    name = getattr(completion_model, "name", None)
-    if (
-        isinstance(provider, str)
-        and provider.strip()
-        and isinstance(name, str)
-        and name.strip()
-    ):
+    provider = completion_model.provider_type
+    name = completion_model.name
+    if provider and provider.strip() and name and name.strip():
         return f"{provider.strip()}/{name.strip()}"
     return None
 
 
-def detect_native_json_output_support(assistant: Any) -> bool | None:
+def detect_native_json_output_support(
+    assistant: RuntimeAssistantProtocol,
+) -> bool | None:
     """
     Return whether LiteLLM reports native response_format support for this model.
 
     None means capability could not be determined, so callers should preserve the
     previous optimistic behavior instead of tightening compatibility.
     """
-    if _litellm_get_supported_openai_params is None:
-        return None
-
     litellm_model_name = _resolve_litellm_model_name(assistant)
     if not litellm_model_name:
         return None
 
     try:
-        supported = cast(
-            _LiteLLMGetSupportedParams,
-            _litellm_get_supported_openai_params,
-        )(model=litellm_model_name)
+        supported = get_supported_openai_params(model=litellm_model_name)
     except Exception:
         logger.warning(
             "Failed to detect native JSON output support for flow step execution.",
@@ -234,14 +224,16 @@ def detect_native_json_output_support(assistant: Any) -> bool | None:
     if not supported:
         return None
 
-    return "response_format" in {str(item) for item in supported}
+    return "response_format" in supported
 
 
-def json_mode_cache_key(assistant: Any) -> str:
+def json_mode_cache_key(assistant: RuntimeAssistantProtocol) -> str:
     cm = assistant.completion_model
-    provider = getattr(cm, "provider_type", "unknown") or "unknown"
-    name = cm.name if cm else "unknown"
-    mid = str(cm.id) if cm and cm.id else "none"
+    if cm is None:
+        return "unknown:unknown:none"
+    provider = cm.provider_type or "unknown"
+    name = cm.name or "unknown"
+    mid = str(cm.id) if cm.id else "none"
     return f"{provider}:{name}:{mid}"
 
 
@@ -283,9 +275,9 @@ def build_output_payload(output: StepExecutionOutput) -> dict[str, Any]:
     return payload
 
 
-def effective_model_parameters(assistant: Any) -> dict[str, Any]:
-    kwargs = assistant.completion_model_kwargs.model_dump(exclude_none=False)  # type: ignore[attr-defined]
-    completion_model = assistant.completion_model  # type: ignore[attr-defined]
+def effective_model_parameters(assistant: RuntimeAssistantProtocol) -> dict[str, Any]:
+    kwargs = assistant.completion_model_kwargs.model_dump(exclude_none=False)
+    completion_model = assistant.completion_model
     parameter_semantics = {
         key: {"mode": "configured" if kwargs.get(key) is not None else "model_default"}
         for key in ("temperature", "top_p", "reasoning_effort", "verbosity")
@@ -295,7 +287,7 @@ def effective_model_parameters(assistant: Any) -> dict[str, Any]:
         if completion_model and completion_model.id
         else None,
         "model_name": completion_model.name if completion_model else None,
-        "provider": getattr(completion_model, "provider_type", None),
+        "provider": completion_model.provider_type if completion_model else None,
         **kwargs,
         "parameter_semantics": parameter_semantics,
     }
@@ -386,12 +378,11 @@ def apply_prompt_context_trace(
     return payload
 
 
-def requested_model_name(assistant: Any) -> str | None:
-    completion_model = getattr(assistant, "completion_model", None)
+def requested_model_name(assistant: RuntimeAssistantProtocol) -> str | None:
+    completion_model = assistant.completion_model
     if completion_model is None:
         return None
-    model_name = getattr(completion_model, "name", None)
-    return model_name if isinstance(model_name, str) and model_name else None
+    return completion_model.name or None
 
 
 def citation_mode_for_step(step: RuntimeStep) -> str:
@@ -716,7 +707,7 @@ async def prepare_step_execution(
                 contract_validation["candidate_type"],
             )
 
-    llm_files: list[Any] = []
+    llm_files: list[File] = []
     if policy is not None and policy.channel == "files_only":
         llm_files = step_input.files or []
 

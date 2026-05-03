@@ -99,6 +99,7 @@ from intric.flows.runtime.output_runtime import (
 from intric.flows.runtime.output_runtime import (
     process_typed_output as process_typed_output_runtime,
 )
+from intric.flows.runtime.protocols import RuntimeAssistantProtocol
 from intric.flows.runtime.rag_retrieval import RagRetrievalDeps, retrieve_rag_chunks
 from intric.flows.runtime.run_outcome import determine_run_outcome
 from intric.flows.runtime.step_attempt_runtime import (
@@ -134,6 +135,7 @@ from intric.flows.runtime.template_fill_runtime import (
     execute_template_fill_step,
 )
 from intric.flows.variable_resolver import FlowVariableResolver
+from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException, TypedIOValidationException
 from intric.settings.encryption_service import EncryptionService
@@ -918,11 +920,11 @@ class FlowRunExecutor:
     async def _retrieve_rag_chunks(
         self,
         *,
-        assistant: Any,
+        assistant: RuntimeAssistantProtocol,
         question: str,
         run_id: UUID,
         step_order: int,
-    ) -> tuple[list[Any], dict[str, Any], list[StepDiagnostic]]:
+    ) -> tuple[list[InfoBlobChunkInDBWithScore], dict[str, Any], list[StepDiagnostic]]:
         deps = RagRetrievalDeps(
             references_service=self.references_service,
             rag_retrieval_timeout_seconds=self.rag_retrieval_timeout_seconds,
@@ -1318,7 +1320,7 @@ class FlowRunExecutor:
 
     async def _load_assistant(
         self, assistant_id: UUID, state: RunExecutionState | None = None
-    ) -> Any:
+    ) -> RuntimeAssistantProtocol:
         if state and assistant_id in state.assistant_cache:
             return state.assistant_cache[assistant_id]
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)

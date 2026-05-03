@@ -181,7 +181,7 @@ def test_detect_native_json_output_support_uses_litellm_model_name(
         return ["response_format", "temperature"]
 
     monkeypatch.setattr(
-        "intric.flows.runtime.step_execution_runtime._litellm_get_supported_openai_params",
+        "intric.flows.runtime.step_execution_runtime.get_supported_openai_params",
         fake_supported_params,
     )
     assistant = SimpleNamespace(
@@ -208,7 +208,7 @@ def test_detect_native_json_output_support_falls_back_to_provider_prefixed_name(
         return ["temperature"]
 
     monkeypatch.setattr(
-        "intric.flows.runtime.step_execution_runtime._litellm_get_supported_openai_params",
+        "intric.flows.runtime.step_execution_runtime.get_supported_openai_params",
         fake_supported_params,
     )
     assistant = SimpleNamespace(
@@ -230,7 +230,7 @@ def test_detect_native_json_output_support_logs_lookup_failures(
     caplog: pytest.LogCaptureFixture,
 ):
     monkeypatch.setattr(
-        "intric.flows.runtime.step_execution_runtime._litellm_get_supported_openai_params",
+        "intric.flows.runtime.step_execution_runtime.get_supported_openai_params",
         MagicMock(side_effect=RuntimeError("lookup failed")),
     )
     assistant = SimpleNamespace(

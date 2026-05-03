@@ -1,34 +1,40 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, cast
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, cast
 from uuid import UUID
 
 from intric.flows.flow_run_provenance import default_rag_tracking
 from intric.flows.runtime.models import StepDiagnostic
+from intric.flows.runtime.protocols import RuntimeAssistantProtocol
 from intric.flows.runtime.rag_metadata import build_rag_references
+from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
+
+if TYPE_CHECKING:
+    from intric.assistants.references import ReferencesService
 
 
 @dataclass(frozen=True)
 class RagRetrievalDeps:
-    references_service: Any | None
+    references_service: ReferencesService | None
     rag_retrieval_timeout_seconds: float
     rag_max_reference_sources: int
     rag_max_chunks_per_source: int
-    logger: Any
+    logger: logging.Logger
 
 
 async def retrieve_rag_chunks(
     *,
-    assistant: Any,
+    assistant: RuntimeAssistantProtocol,
     question: str,
     run_id: UUID,
     step_order: int,
     deps: RagRetrievalDeps,
-) -> tuple[list[Any], dict[str, Any], list[StepDiagnostic]]:
-    info_blob_chunks: list[Any] = []
+) -> tuple[list[InfoBlobChunkInDBWithScore], dict[str, Any], list[StepDiagnostic]]:
+    info_blob_chunks: list[InfoBlobChunkInDBWithScore] = []
     rag_diagnostics: list[StepDiagnostic] = []
     rag_metadata: dict[str, Any] = {
         "attempted": False,
