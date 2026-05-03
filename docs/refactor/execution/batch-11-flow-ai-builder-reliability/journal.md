@@ -2,7 +2,7 @@
 
 ## Status
 
-11.4a IMPLEMENTATION COMPLETE
+11.5b IMPLEMENTATION COMPLETE
 
 ## Starting Point
 
@@ -14,11 +14,9 @@
   - `scripts/run_codex_review.sh`
   - `PRODUCT.md`
   - `docs/refactor/goals.md`
-- Slices recorded in this journal: 11.0a reliability corpus, 11.0b proposal
-  measurement, 11.1a step skeleton ownership, 11.1b skeleton fill
-  integration, 11.1c architecture error classification, 11.1d edit-path
-  mechanics, 11.2a Swedish slot resolver corpus, and 11.2b model slot resolver
-  runtime overlay.
+- Slices recorded in this journal: 11.0 through 11.5b Flow AI Builder
+  reliability, slot resolution, skeleton, form-field/resource, structured-output,
+  and local smoke-validation slices.
 
 ## 11.0a Slice Plan
 
@@ -1802,96 +1800,3 @@ Accepted implementation findings:
 | Extend the typed rail to `outline_flow`, `edit_flow`, and parse repair only where the contract is a typed JSON object. | 11.5b |
 | Run a live provider smoke for the actual tenant/model Anthropic Haiku alias instead of assuming LiteLLM metadata from memory. | 11.5b / provider eval |
 | Consider removing the pre-existing `resolve_planner_params` introspection hedge in a separate planner cleanup slice. | Later Batch 11 cleanup |
-
-## 11.5b Proposal Boundary And Document Artifact Body Hardening
-
-### Scope
-
-This slice closed two related reliability issues found while testing Swedish
-audio-to-DOCX flows:
-
-1. Proposal tool-call completions must not inherit planner-only structured
-   output kwargs.
-2. A final DOCX/PDF artifact step must receive the actual document body, not a
-   small metadata JSON object from the preceding semantic step.
-
-The live failure that motivated the second item was the local
-`utvecklingssamtal.mp3` smoke path. The generated flow created a metadata step
-named "Generera DOCX-dokument" with output fields such as `docx_title` and
-`document_sections_count`, followed by "Skapa DOCX". The final DOCX step then
-had too little material and produced a generic document unrelated to the
-transcript. The fix belongs in StepSkeleton/input-binding mechanics, not in the
-repair path.
-
-### Canonical Owners
-
-| Concept | Owner | 11.5b decision |
-|---|---|---|
-| Proposal LiteLLM tool-call boundary | `AIBuilderProposalProcessor.call_proposal_completion` | Rename from repair wording and strip `response_format` once at the central proposal seam. |
-| Final semantic document body step | `ai_builder_step_skeleton.py` | Keep final semantic body planning as `text` before terminal DOCX/PDF artifact rendering. |
-| Multi-phase document body fan-in | `StepSkeletonPlan` / step skeleton input source selection | Route the final semantic body step to `all_previous_steps` for multi-phase DOCX/PDF synthesis. |
-| JSON-to-text underlag bridge | `AIBuilderNewStepCompiler.compile_input_bindings` | Add explicit `{{ previous.output.structured }}` bindings at JSON-to-text boundaries when selected field bindings do not already supply the needed material. |
-| Runtime input/form-field/manual smoke semantics | `manual-eval-runbook.md` | Record the distinction between primary runtime input, `Inmatningsfält`, and `Underlag till text`. |
-
-### Implementation Result
-
-| Area | Outcome |
-|---|---|
-| Proposal completion naming | Replaced repair-oriented `call_repair_completion` naming with `call_proposal_completion` in create/edit proposal paths. |
-| Proposal kwargs | Proposal tool-call calls now drop caller-provided `response_format` and `drop_params` while preserving provider kwargs such as `api_base`; `drop_params=True` remains owned by the proposal call itself. |
-| Final semantic output | Final multi-phase DOCX/PDF body synthesis no longer becomes JSON merely because the proposal suggested metadata output fields. Dropped proposal fields are recorded in `StepSkeletonOutputTypeDrift`. |
-| Document fan-in | Final semantic body synthesis for DOCX/PDF flows with at least three semantic phases reads `all_previous_steps` so the writer can see the transcript, extraction, structure, and synthesis material. |
-| JSON-to-text bridge | Text steps following structured JSON receive explicit underlag bindings to the prior structured object unless the proposal selected specific fields. |
-| Smoke runbook | Added the local audio fixture, evidence endpoints, API key/curl setup, and concrete runtime input/form-field/underlag semantics. |
-
-### Live Local Smoke
-
-| Check | Result |
-|---|---|
-| API base | `http://localhost:8123`. |
-| Space | `0d429172-9de4-43b4-b5d6-d6a817c0a734`. |
-| Prompt | Swedish municipal-meeting audio-to-Word prompt. |
-| Session | `13cfd0e1-6aad-475f-b6ec-8efd30d0c516`. |
-| Plan | `ae3f289c-6c3a-46c9-b52a-8a4a02446706`. |
-| Applied Flow | `6d31e3f5-a004-4432-9424-c69b285dbd44`, published version `1`. |
-| Run | `78f4599b-dae8-4c0d-9c43-a012e2cac338`, completed. |
-| Artifact | `step_6_output.docx`, file id `33f34175-acda-4b37-becc-ca0fb3f697c1`, size `37587`. |
-| Graph shape | 6 steps; step 5 is `all_previous_steps` and outputs `text`; step 6 consumes previous `text` and outputs `docx`. |
-| Run evidence | `/steps/`, `/evidence/`, `/evidence/export`, and artifact signed-url endpoints returned successfully. |
-| Raw local captures | Stored outside git under `/tmp/ai-builder-final-smoke-audio-docx*.json`. |
-
-The generated document body used the actual transcript sections rather than the
-metadata-only JSON body. The builder still asked two avoidable questions about
-input material and final output mode; that is a follow-up for conversation
-quality, not an artifact-body data-loss blocker.
-
-### Validation Result
-
-| Command | Result |
-|---|---|
-| `uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py tests/unittests/flows/ai_builder/test_ai_builder_response_format.py -q` | Passed: `187 passed`, 1 existing warning. |
-| `uv run ruff check <11.5b touched source and test files>` | Passed. |
-| `uv run ruff format --check <11.5b touched source and test files>` | Passed. |
-| `uv run pyright <11.5b touched source and test files>` | Passed: `0 errors, 0 warnings, 0 informations`. |
-| Docker container validation | Not run: current tool policy rejected `docker exec ...` as approval-required even though the user had permitted Docker access and approval mode is `never`. |
-
-### Claude Implementation Review
-
-| Iteration | Artifact | Verdict | Green light | Minimum score | Outcome |
-|---:|---|---|---|---:|---|
-| 1 | `.codex/artifacts/claude-peer-loop-batch-11-flow-builder-reliability-architecture-20260503T084034Z.md` | `changes_required` | `no` | 6 | Rejected adding a new compose step; pointed the fix at skeleton output/input mechanics. |
-| 2 | `.codex/artifacts/claude-peer-loop-batch-11-flow-builder-reliability-architecture-20260503T085003Z.md` | `green` | `yes` | 8 | Approved the revised plan before live-smoke fan-in refinement. |
-| 3 | `.codex/artifacts/claude-peer-loop-batch-11-flow-ai-builder-final-verification-after-live-smoke-20260503T090402Z.md` | `GREEN-LIGHT-WITH-FOLLOWUPS` | `yes` | 7.5 | Approved the implementation shape and requested PDF/four-phase coverage plus named threshold cleanup. |
-
-Accepted follow-ups were implemented in the same slice: the fan-in threshold is
-named, PDF body-planning is covered, and a four-phase multi-step DOCX flow pins
-the `all_previous_steps` body-synthesis behavior.
-
-### Carry-Forward
-
-| Item | Owner |
-|---|---|
-| Improve follow-up question policy so obvious audio/DOCX facts from the Swedish prompt are not asked again. | Later Batch 11 conversation-quality slice. |
-| Decide whether the fan-in predicates should become one shared chain-analysis value object if another artifact pattern needs the same rule. | Later StepSkeleton cleanup. |
-| Add manual scorecard automation that records graph/evidence/artifact checks without committing raw transcripts or artifacts. | Manual eval harness slice. |
-| Keep `utvecklingssamtal.mp3` as a local fixture only; do not commit it. | Local smoke workflow. |
