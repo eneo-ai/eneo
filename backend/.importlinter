@@ -19,13 +19,16 @@ source_modules =
     intric.flows.enums
     intric.flows.execution_backend
     intric.flows.flow
+    intric.flows.flow_access_policy
     intric.flows.flow_capability_manifest
     intric.flows.flow_care_data_policy
+    intric.flows.flow_document_limits
     intric.flows.flow_evidence_policy
     intric.flows.flow_factory
     intric.flows.flow_file_upload_service
     intric.flows.flow_input_limits
     intric.flows.flow_permissions
+    intric.flows.flow_review_policy
     intric.flows.flow_retention_policy
     intric.flows.flow_retention_tombstone
     intric.flows.flow_run_evidence
@@ -35,7 +38,10 @@ source_modules =
     intric.flows.flow_run_input_payload
     intric.flows.flow_run_provenance
     intric.flows.flow_run_redaction
+    intric.flows.flow_run_rerun_graph
+    intric.flows.flow_run_rerun_request
     intric.flows.flow_run_step_inputs
+    intric.flows.flow_run_step_result_file
     intric.flows.flow_security_classification
     intric.flows.flow_template_asset_repo
     intric.flows.flow_template_asset_service
@@ -50,6 +56,7 @@ source_modules =
     intric.flows.output_modes
     intric.flows.output_processing
     intric.flows.principal
+    intric.flows.published_definition
     intric.flows.runtime
     intric.flows.runtime_input
     intric.flows.source_display

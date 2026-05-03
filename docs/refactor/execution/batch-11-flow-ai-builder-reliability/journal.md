@@ -2,7 +2,7 @@
 
 ## Status
 
-11.2b IMPLEMENTATION COMPLETE
+11.2c IMPLEMENTATION COMPLETE
 
 ## Starting Point
 
@@ -1028,3 +1028,199 @@ corpus baseline on the sync builder path.
 | Keyword-prior deletion criterion and disagreement measurement. | Later 11.2 follow-up |
 | Unify discovery question-id and PlanningState slot-name namespaces so classifier cache sharing works across both surfaces more often. | Future cleanup |
 | If another weak slot source is introduced, lift the weak-source set used by runtime gating and merge priority into one named owner. | Future slot-source extension |
+
+## 11.2c Slot Resolver Provider Evaluation Harness Plan
+
+### Scope
+
+Implement a local, opt-in provider evaluation harness for the frozen 80-case
+slot resolver corpus. The harness measures the live runtime PlanningState path
+introduced in 11.2b while keeping normal tests deterministic and avoiding raw
+provider-response artifacts in git.
+
+### Reuse-Before-Inventing
+
+| Existing candidate | Decision |
+|---|---|
+| `backend/tests/integration/flows/ai_builder/benchmark/cases.py` | Reuse as the only slot prompt corpus owner. |
+| `backend/tests/integration/flows/ai_builder/benchmark/runner.py` | Do not extend; it measures discovery benchmark archetypes and baseline JSON, not provider-backed runtime slot overlay. |
+| `backend/tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py` scoring helper | Extract into `slot_resolver_scoring.py` so deterministic baseline and provider eval use identical `unknown` match semantics. |
+| `manual-eval-runbook.md` | Keep as API create/revise/edit smoke-suite owner; 11.2c is narrower and scores slot resolver corpus values. |
+| `build_runtime_planning_state()` | Reuse the runtime path under test instead of adding a second resolver execution path. |
+
+### Planned Files
+
+| File | Purpose |
+|---|---|
+| `backend/tests/integration/flows/ai_builder/benchmark/slot_resolver_scoring.py` | Shared per-slot scoring, corpus hash, and keyword/runtime agreement helpers. |
+| `backend/tests/integration/flows/ai_builder/benchmark/slot_resolver_provider_eval.py` | Local CLI and pure scorecard helpers for provider-backed slot corpus eval. |
+| `backend/tests/integration/flows/ai_builder/benchmark/test_slot_resolver_provider_eval.py` | Deterministic tests for scoring, config validation, dry-run behavior, and fake-provider live guardrails. |
+| `backend/tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py` | Import shared scoring helpers so the baseline floor and provider eval cannot diverge. |
+| `docs/refactor/execution/batch-11-flow-ai-builder-reliability/retrospective-9.md` | Retrospective for 11.2c. |
+| `docs/refactor/execution/batch-11-flow-ai-builder-reliability/claude-reconciliation-9.md` | Claude reconciliation for 11.2c. |
+
+### Acceptance Criteria
+
+- The live scorecard is generated only with explicit `--live` and
+  `ENEO_AI_BUILDER_SLOT_EVAL_MODEL` plus
+  `ENEO_AI_BUILDER_SLOT_EVAL_TENANT_ID`.
+- Dry-run mode validates corpus/config and writes no live provider results.
+- The gated metric is per-slot LLM-resolvable score on provider-success cases.
+  Full runtime score and keyword-prior score are context, not gates.
+- Target claim requires zero provider errors and a provider-success path for
+  every corpus case.
+- Score calculation exposes keyword-vs-runtime agreement/disagreement counts
+  by slot name for the future keyword-prior deletion decision.
+- Scorecards contain allow-listed model/config metadata and slot
+  values/sources/confidence, but no raw provider response, completion text,
+  reason fields, API key, full API base URL, tenant id, or prompt copy outside
+  existing corpus ids.
+- Normal pytest uses a fake LiteLLM client only.
+- The `>= 0.85` target is recorded as unclaimed unless an actual live scorecard
+  is produced.
+- The harness uses bare `litellm` configured through the existing
+  `configure_litellm_runtime(litellm)` function; it does not use
+  `TenantModelAdapter` or database model lookup.
+- Scorecards use `scorecard_schema_version=1`; meaning changes require a
+  schema-version bump.
+- The corpus hash covers case id, language, prompt, expected slots, and
+  coverage tags.
+- Valid live scorecards are produced from a fresh CLI process so the
+  process-local classifier cache does not turn repeated in-process runs into
+  cache hits. `provider_call_count` is a sanity counter, not a quality metric.
+
+### Validation Commands
+
+```bash
+cd backend && uv run pytest tests/integration/flows/ai_builder/benchmark/test_slot_resolver_provider_eval.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py -q
+cd backend && uv run pytest tests/unittests/flows/ai_builder -q
+cd backend && uv run pyright tests/integration/flows/ai_builder/benchmark/slot_resolver_scoring.py tests/integration/flows/ai_builder/benchmark/slot_resolver_provider_eval.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_provider_eval.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py
+cd backend && uv run ruff check tests/integration/flows/ai_builder/benchmark/slot_resolver_scoring.py tests/integration/flows/ai_builder/benchmark/slot_resolver_provider_eval.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_provider_eval.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py
+cd backend && uv run ruff format --check tests/integration/flows/ai_builder/benchmark/slot_resolver_scoring.py tests/integration/flows/ai_builder/benchmark/slot_resolver_provider_eval.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_provider_eval.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py
+git diff --check -- backend/tests/integration/flows/ai_builder/benchmark/slot_resolver_scoring.py backend/tests/integration/flows/ai_builder/benchmark/slot_resolver_provider_eval.py backend/tests/integration/flows/ai_builder/benchmark/test_slot_resolver_provider_eval.py backend/tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py docs/refactor/execution/batch-11-flow-ai-builder-reliability
+```
+
+Optional live command when provider config exists:
+
+```bash
+cd backend && uv run python -m tests.integration.flows.ai_builder.benchmark.slot_resolver_provider_eval --live --output .codex/artifacts/slot-resolver-provider-eval-$(date -u +%Y%m%dT%H%M%SZ).json
+```
+
+### Local Provider Fixture Check
+
+The current shell does not expose `ENEO_AI_BUILDER_SLOT_EVAL_*`,
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AZURE_OPENAI_API_KEY`, or
+`ENEO_LOCAL_*` variable names. The slice can add and validate the harness, but
+cannot claim the provider-backed target in this environment without additional
+model configuration.
+
+`.codex/artifacts/` is ignored by repo `.gitignore` and local
+`.git/info/exclude`, so optional live scorecards written there remain local
+unless explicitly promoted.
+
+### Claude Plan Review Iteration 1
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-11-2c-slot-resolver-provider-eval-plan-20260503T053808Z.md`
+- Verdict: `changes_required`
+- Green light: `no`
+- Minimum score: `6`
+
+Accepted findings:
+
+| Finding | Resolution |
+|---|---|
+| The `>= 0.85` gate metric was ambiguous. | Made the gated metric per-slot LLM-resolvable score on provider-success cases; full score and keyword-prior score are context only. |
+| Existing `unknown` match semantics could drift. | Planned `slot_resolver_scoring.py` and updated `test_slot_resolver_corpus.py` to share the same helper as provider eval. |
+| Tenant id handling was unspecified. | Made `ENEO_AI_BUILDER_SLOT_EVAL_TENANT_ID` required for `--live` and excluded it from scorecards. |
+| LiteLLM client construction owner was undefined. | Planned bare `litellm` plus existing runtime configuration, with no `TenantModelAdapter` or DB lookup. |
+| Process-local classifier cache could skew repeated in-process live runs. | Made valid live scorecards fresh-CLI-process artifacts and documented `provider_call_count` as a sanity counter. |
+| Scorecard schema and corpus hash were vague. | Pinned `scorecard_schema_version=1`, bump policy, and corpus hash inputs. |
+| Provider failures could distort model accuracy. | Target claim now requires zero provider errors and every case reaching provider-success. |
+| Redaction list missed API base and tenant id. | Added both to the banned scorecard data list and required allow-listed config metadata. |
+| Validation set was too narrow. | Added full `tests/unittests/flows/ai_builder -q` to validation. |
+
+### Plan Verification Iteration 2
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-11-2c-slot-resolver-provider-eval-plan-verification-20260503T054232Z.md`
+- Verdict: `green`
+- Green light: `yes`
+- Minimum score: `8`
+
+Accepted non-blocking findings:
+
+| Finding | Resolution |
+|---|---|
+| `.git/info/exclude` is per-clone. | Verified repo `.gitignore` already excludes `.codex/*`; no source change needed. |
+| Provider conservatism should be visible separately from wrong values. | Added unresolved counts by slot name in the agreement summary. |
+| Schema bump policy should say how additive fields behave. | Scorecard includes a policy string: additive fields keep the version; removal, rename, or semantic change bumps it. |
+
+## 11.2c Implementation Result
+
+### Source And Test Changes
+
+| Area | Evidence | Decision |
+|---|---|---|
+| Shared scoring owner | `backend/tests/integration/flows/ai_builder/benchmark/slot_resolver_scoring.py:1` | Added one scoring module for slot match semantics, `unknown` handling, summaries, agreement breakdown, and corpus hash. |
+| Provider eval runner | `backend/tests/integration/flows/ai_builder/benchmark/slot_resolver_provider_eval.py:1` | Added safe dry-run default plus explicit `--live` mode using bare LiteLLM and the runtime PlanningState path. |
+| Existing corpus test | `backend/tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py:1` | Reused shared scoring helpers so the deterministic baseline and provider harness cannot diverge. |
+| Provider eval tests | `backend/tests/integration/flows/ai_builder/benchmark/test_slot_resolver_provider_eval.py:1` | Added deterministic tests for scoring, hash input, config validation, redaction, fake-provider success, fake-provider error, and serialized score fields. |
+| Broad validation drift | `backend/.importlinter:13`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_service.py:1383`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_server_actions.py:122`, `backend/tests/unittests/flows/ai_builder/test_deterministic_signals_extractor.py:22` | Updated import-linter source coverage for existing Flow siblings, made stale assertions match current committed behavior, and skipped host PDF fixture tests when WeasyPrint system libraries are absent. |
+
+### Scorecard Behavior
+
+| Item | Value |
+|---|---|
+| Scorecard schema version | `1` |
+| Gated metric | Per-slot LLM-resolvable score on provider-success cases |
+| Context metrics | Deterministic keyword-prior score and full runtime score |
+| Target claim conditions | Zero provider errors and provider-success path for every corpus case |
+| Dry-run result in this environment | `live=false`, `target_claimable=false`, `case_count=80`, keyword prior score `0.8297101449275363` |
+| Live-provider status in this environment | Not run; required `ENEO_AI_BUILDER_SLOT_EVAL_MODEL` and `ENEO_AI_BUILDER_SLOT_EVAL_TENANT_ID` are absent |
+| Raw output handling | Dry-run scorecard written to ignored `.codex/artifacts/slot-resolver-provider-eval-dry-run.json` for local verification only |
+
+### Claude Implementation Review
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-11-2c-slot-resolver-provider-eval-implementation-20260503T055655Z.md`
+- Verdict: `green`
+- Green light: `yes`
+- Minimum score: `8`
+
+Accepted low-risk polish:
+
+| Finding | Resolution |
+|---|---|
+| The server-action summary assertion had become too weak. | Replaced substring checks with the exact Swedish committed summary. |
+| Cache-hit/no-call status was conservative but easy to misread. | Added a why-comment explaining that no provider call cannot claim a fresh live target. |
+| Prompt-redaction coverage should inspect the scorecard shape, not only one phrase. | Added an assertion that serialized per-case scorecards do not include a `prompt` field. |
+
+Final verification:
+
+| Item | Value |
+|---|---|
+| Artifact | `.codex/artifacts/claude-peer-loop-batch-11-2c-slot-resolver-provider-eval-final-verification-20260503T060427Z.md` |
+| Verdict | `green` |
+| Green light | `yes` |
+| Minimum score | `9` |
+
+### Validation
+
+| Command | Result |
+|---|---|
+| `cd backend && uv run pytest tests/integration/flows/ai_builder/benchmark/test_slot_resolver_provider_eval.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py tests/unittests/flows/ai_builder/test_ai_builder_server_actions.py::test_server_builds_confirm_requirements_checkpoint_after_commit -q` | Passed: `15 passed`, 16 existing warnings. |
+| `cd backend && uv run pytest tests/unittests/flows/ai_builder -q` | Passed after validation fixes: `1735 passed, 4 skipped`, 12 existing warnings. The skipped tests require host WeasyPrint system libraries. |
+| `cd backend && uv run pyright tests/integration/flows/ai_builder/benchmark/slot_resolver_scoring.py tests/integration/flows/ai_builder/benchmark/slot_resolver_provider_eval.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_provider_eval.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py tests/unittests/flows/ai_builder/test_ai_builder_server_actions.py tests/unittests/flows/ai_builder/test_ai_builder_service.py tests/unittests/flows/ai_builder/test_deterministic_signals_extractor.py` | Passed: `0 errors, 0 warnings, 0 informations`. |
+| `cd backend && uv run ruff check <11.2c touched Python files>` | Passed. |
+| `cd backend && uv run ruff format --check <11.2c touched Python files>` | Passed: `7 files already formatted`. |
+| `cd backend && uv run lint-imports --no-cache` | Passed: 3 contracts kept, 0 broken. |
+| `git diff --check -- <11.2c touched paths>` | Passed. |
+| `cd backend && uv run python -m tests.integration.flows.ai_builder.benchmark.slot_resolver_provider_eval --output ../.codex/artifacts/slot-resolver-provider-eval-dry-run.json` | Passed; wrote ignored dry-run scorecard. |
+| `cd backend && uv run python -m tests.integration.flows.ai_builder.benchmark.slot_resolver_provider_eval --live` | Failed as expected with exit code `2`; required model and tenant env vars are missing. |
+| Added-line slop grep for source/test `deprecated`, `legacy`, `backwards compatibility`, source-control/session/tooling comments, and TODO/FIXME markers | Passed with no matches. |
+
+### Carry-Forward
+
+| Item | Owner slice |
+|---|---|
+| Run the live provider command with a real `ENEO_AI_BUILDER_SLOT_EVAL_MODEL` and `ENEO_AI_BUILDER_SLOT_EVAL_TENANT_ID`; record the redacted scorecard before claiming the `>= 0.85` target. | 11.2 provider eval follow-up |
+| Use the agreement/disagreement breakdown to decide keyword-prior deletion criteria from real model behavior. | Later 11.2 follow-up |
+| Avoid in-process repeated live eval runs unless the classifier cache gets an explicit runtime guard. Valid scorecards should come from fresh CLI processes. | Future eval harness hardening |

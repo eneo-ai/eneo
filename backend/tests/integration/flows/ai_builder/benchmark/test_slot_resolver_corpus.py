@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_slot_classifier import UNKNOWN_SLOT_VALUE
 from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
 )
@@ -17,11 +18,15 @@ from tests.integration.flows.ai_builder.benchmark.cases import (
     SlotCoverageTag,
     SlotResolverCorpusCase,
 )
+from tests.integration.flows.ai_builder.benchmark.slot_resolver_scoring import (
+    observations_from_resolved_slots,
+    score_expected_slots,
+    summarize_slot_scores,
+)
 
 MINIMUM_SLOT_RESOLVER_CASES = 80
 MINIMUM_CASES_PER_COVERAGE_TAG = 5
 KEYWORD_PRIOR_OBSERVED_FLOOR = 0.70
-UNKNOWN_SLOT_VALUE = "unknown"
 DOMAIN_SPECIFIC_DENYLIST = (
     "tjänsteskrivelse",
     "ärende",
@@ -32,27 +37,17 @@ DOMAIN_SPECIFIC_DENYLIST = (
 )
 
 
-def _keyword_prior_slots(corpus_case: SlotResolverCorpusCase) -> dict[str, str]:
+def _slot_match_score(corpus_case: SlotResolverCorpusCase) -> tuple[int, int]:
     state = build_planning_state_from_conversation(
         [ConversationMessage(role="user", content=corpus_case.prompt)]
     )
-    return {name: slot.value for name, slot in state.resolved_slots.items()}
-
-
-def _slot_match_score(corpus_case: SlotResolverCorpusCase) -> tuple[int, int]:
-    resolved_slots = _keyword_prior_slots(corpus_case)
-    matches = 0
-    for expected_slot in corpus_case.expected_slots:
-        resolved_value = resolved_slots.get(expected_slot.name)
-        if expected_slot.value == UNKNOWN_SLOT_VALUE:
-            # The current planning-state path expresses unresolved slots by
-            # omitting them; the model-backed resolver may return `unknown`.
-            matches += int(
-                resolved_value is None or resolved_value == UNKNOWN_SLOT_VALUE
-            )
-        else:
-            matches += int(resolved_value == expected_slot.value)
-    return matches, len(corpus_case.expected_slots)
+    summary = summarize_slot_scores(
+        score_expected_slots(
+            corpus_case.expected_slots,
+            observations_from_resolved_slots(state.resolved_slots),
+        )
+    )
+    return summary.matching_slots, summary.expected_slots
 
 
 def test_case_count_and_ids_are_stable() -> None:

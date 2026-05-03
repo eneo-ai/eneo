@@ -119,7 +119,10 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
     assert output.planner_action.kind == "confirm_requirements"
     assert output.planning_state_delta.architecture_commit is None
     payload = output.planner_action.payload
-    assert "tillräckligt med information" in payload.summary
+    assert (
+        payload.summary
+        == "Flödet ska ta emot Dokument vid körning och leverera DOCX-dokument."
+    )
     assert payload.input_description == "Primär indata vid körning: Dokument."
     assert payload.output_description == "Huvudsakligt slutresultat: DOCX-dokument."
     assert {decision.topic for decision in payload.key_decisions} >= {

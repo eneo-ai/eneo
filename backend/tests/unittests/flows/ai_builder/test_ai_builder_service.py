@@ -1380,8 +1380,13 @@ class TestSendMessageToolCall:
                 )
             )
 
-        # Confirmed requirements → proposal phase → planner temperature (0.4)
-        assert mock_litellm.acompletion.await_args_list[0].kwargs["temperature"] == 0.4
+        proposal_calls = [
+            call
+            for call in mock_litellm.acompletion.await_args_list
+            if call.kwargs.get("tools")
+        ]
+        assert proposal_calls
+        assert proposal_calls[0].kwargs["temperature"] == 0.4
 
     @pytest.mark.anyio
     async def test_self_correction_bail_without_question_mark_emits_error_not_text(

@@ -431,6 +431,108 @@ Carry-forward:
 - keep discovery question-id and PlanningState slot-name namespace unification
   as a future cleanup candidate
 
+#### 11.2c — Slot Resolver Provider Evaluation Harness
+
+Goal:
+Make the `>= 0.85` Swedish slot resolver target measurable against a real
+provider without adding live-provider calls to CI or committing raw model
+responses.
+
+Canonical owners:
+
+| Concept | Owner | Decision |
+|---|---|---|
+| Frozen slot corpus | `backend/tests/integration/flows/ai_builder/benchmark/cases.py` | Reuse `SLOT_RESOLVER_CORPUS_CASES`; do not create a second prompt manifest. |
+| Deterministic baseline guard | `backend/tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py` | Keep the existing sync-builder floor as the non-provider CI gate. |
+| Slot scoring semantics | new `backend/tests/integration/flows/ai_builder/benchmark/slot_resolver_scoring.py` | Extract the current `unknown` matching semantics so the deterministic test and provider harness cannot drift. |
+| Provider eval runner | new `backend/tests/integration/flows/ai_builder/benchmark/slot_resolver_provider_eval.py` | Create a narrow benchmark module because existing `runner.py` measures discovery questions/archetypes, not runtime model slot overlay. |
+| Runtime path under evaluation | `backend/src/intric/flows/ai_builder/ai_builder_discovery_runtime.py` | Evaluate `build_runtime_planning_state()` so the score includes deterministic priors plus the model overlay used by planner runtime. |
+
+Deliverables:
+
+- local CLI module for the slot corpus with safe `--dry-run` default and
+  explicit `--live` mode for provider calls
+- shared slot scoring helper used by both `test_slot_resolver_corpus.py` and
+  the provider-eval runner; `expected="unknown"` matches absent or explicit
+  `unknown` observations
+- typed scorecard dataclasses for:
+  - `scorecard_schema_version=1`
+  - corpus hash over `(case_id, ui_language, prompt, expected_slots,
+    coverage_tags)`
+  - model/config metadata from a fixed allow-list
+  - deterministic keyword-prior score
+  - runtime full-score after model overlay
+  - runtime LLM-resolvable-slot score
+  - keyword-vs-runtime agreement/disagreement counts by slot name
+  - per-case expected/observed slot values, source, confidence, and match flags
+  - provider call count and provider error count
+- gate semantics:
+  - the authoritative `>= 0.85` metric is per-slot LLM-resolvable-slot score
+    on provider-success cases
+  - full runtime score and keyword-prior score are reported context only
+  - target claim is allowed only when provider errors are zero and every corpus
+    case reached the provider-success path
+- environment contract for live runs:
+  - required `ENEO_AI_BUILDER_SLOT_EVAL_MODEL`
+  - required `ENEO_AI_BUILDER_SLOT_EVAL_TENANT_ID`
+  - optional `ENEO_AI_BUILDER_SLOT_EVAL_API_KEY`
+  - optional `ENEO_AI_BUILDER_SLOT_EVAL_API_BASE`
+  - optional `ENEO_AI_BUILDER_SLOT_EVAL_API_VERSION`
+  - optional `ENEO_AI_BUILDER_SLOT_EVAL_API_TYPE`
+- deterministic unit tests for score calculation, corpus hashing, dry-run
+  behavior, config validation, redacted output shape, and live-run guardrails
+  using a fake LiteLLM client
+- journal entry that records whether a live provider run was available in this
+  session; do not claim the threshold without a real provider scorecard
+
+Do not:
+
+- commit raw provider responses, prompts outside the existing corpus, response
+  reasons, transcripts, API keys, full API base URLs, tenant ids, or unredacted
+  local artifacts
+- make provider calls in normal pytest
+- add feature flags or runtime product behavior
+- add another corpus owner or JSON/YAML prompt manifest
+- hardcode model-specific behavior for the 80 cases
+- delete keyword priors in this slice
+- use `TenantModelAdapter` or database tenant model resolution; the harness uses
+  the bare `litellm` module with `configure_litellm_runtime(litellm)` and
+  `classify_slots(... drop_params=True ...)` through the runtime path
+- add a production cache-clearing API for eval; valid live scorecards are
+  produced by invoking the CLI as a fresh process, and `provider_call_count` is
+  a sanity counter rather than a quality metric
+
+Validation:
+
+```bash
+cd backend && uv run pytest tests/integration/flows/ai_builder/benchmark/test_slot_resolver_provider_eval.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py -q
+cd backend && uv run pytest tests/unittests/flows/ai_builder -q
+cd backend && uv run pyright tests/integration/flows/ai_builder/benchmark/slot_resolver_scoring.py tests/integration/flows/ai_builder/benchmark/slot_resolver_provider_eval.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_provider_eval.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py
+cd backend && uv run ruff check tests/integration/flows/ai_builder/benchmark/slot_resolver_scoring.py tests/integration/flows/ai_builder/benchmark/slot_resolver_provider_eval.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_provider_eval.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py
+cd backend && uv run ruff format --check tests/integration/flows/ai_builder/benchmark/slot_resolver_scoring.py tests/integration/flows/ai_builder/benchmark/slot_resolver_provider_eval.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_provider_eval.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py
+git diff --check -- backend/tests/integration/flows/ai_builder/benchmark/slot_resolver_scoring.py backend/tests/integration/flows/ai_builder/benchmark/slot_resolver_provider_eval.py backend/tests/integration/flows/ai_builder/benchmark/test_slot_resolver_provider_eval.py backend/tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py docs/refactor/execution/batch-11-flow-ai-builder-reliability
+```
+
+Optional live validation, only when the local provider fixture is explicitly
+configured:
+
+```bash
+cd backend && uv run python -m tests.integration.flows.ai_builder.benchmark.slot_resolver_provider_eval --live --output .codex/artifacts/slot-resolver-provider-eval-$(date -u +%Y%m%dT%H%M%SZ).json
+```
+
+Exit gate:
+
+- dry-run and deterministic fake-provider tests pass
+- live mode refuses to run without explicit model and tenant id config
+- redacted scorecard includes `scorecard_schema_version=1`; field meaning
+  changes require a schema-version bump
+- `.codex/artifacts/` is verified as ignored before using it for optional live
+  scorecards
+- if live provider config is unavailable, the journal says the target is still
+  unclaimed and records the exact command needed
+- if live provider config is available, the scorecard records whether the
+  LLM-resolvable provider-success per-slot score meets `>= 0.85`
+
 ### 11.3 — Form Fields And Resource Semantics
 
 Goal:

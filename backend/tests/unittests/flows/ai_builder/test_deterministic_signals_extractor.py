@@ -20,6 +20,7 @@ from html import escape
 from io import BytesIO
 
 import numpy as np
+import pytest
 import soundfile
 from docx import Document
 from openpyxl import Workbook
@@ -365,7 +366,10 @@ def _build_pdf(*, pages: list[str]) -> bytes:
     keeps PDF fixtures on the same generation stack as flow PDF outputs
     instead of retaining a second PDF writer only for tests.
     """
-    from weasyprint import HTML
+    try:
+        from weasyprint import HTML
+    except (ImportError, OSError) as exc:
+        pytest.skip(f"WeasyPrint system libraries unavailable: {exc}")
 
     sections: list[str] = []
     for index, text in enumerate(pages):
