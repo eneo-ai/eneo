@@ -1224,3 +1224,154 @@ Final verification:
 | Run the live provider command with a real `ENEO_AI_BUILDER_SLOT_EVAL_MODEL` and `ENEO_AI_BUILDER_SLOT_EVAL_TENANT_ID`; record the redacted scorecard before claiming the `>= 0.85` target. | 11.2 provider eval follow-up |
 | Use the agreement/disagreement breakdown to decide keyword-prior deletion criteria from real model behavior. | Later 11.2 follow-up |
 | Avoid in-process repeated live eval runs unless the classifier cache gets an explicit runtime guard. Valid scorecards should come from fresh CLI processes. | Future eval harness hardening |
+
+## 11.3a Proposal Resource Reference Material Owner Plan
+
+### Scope
+
+Batch 10 is complete in this branch through `832f4c1b`, and Batch 11 is active
+through `e55f2be3`. This slice continues Batch 11 with form-field and enabled
+resource reliability. After Claude plan review, 11.3a is narrowed to the
+proposal resource-material owner. Form-field lifecycle goldens and the Pattern
+Registry decision move to 11.3b.
+
+| Concept | Evidence | Decision |
+|---|---|---|
+| Model/knowledge/MCP refs | `backend/src/intric/flows/ai_builder/ai_builder_resource_catalog.py` canonicalizes submitted refs and returns typed issues. | Extend this owner to produce typed proposal resource material. |
+| Selected MCP refs | `backend/src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py` currently renders selected tools from normalized MCP input separately from the available-resource block. | Keep policy text in the proposal task, but render selected server/tool refs from the same catalog material. |
+| Discovery resource rendering | `backend/src/intric/flows/ai_builder/ai_builder_prompts.py` has localized discovery prompt rendering. | Explicitly defer until proposal rendering stabilizes; proposal is the path that emits create/edit draft refs. |
+| Existing-flow assistants in edit mode | `backend/src/intric/flows/ai_builder/ai_builder_flow_context.py` renders assistant snapshots for existing steps. | Keep as context. Do not add a selectable assistant-ref field in this slice. |
+
+### Planned Source Shape
+
+| File | Change |
+|---|---|
+| `backend/src/intric/flows/ai_builder/ai_builder_resource_catalog.py` | Add typed proposal resource material for exact refs, selected MCP refs, and bounded descriptions. |
+| `backend/src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py` | Render proposal resource material from `AIBuilderResourceCatalog` instead of local dict helpers. |
+| `backend/tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py` | Pin exact resource-material rendering, selected MCP grouping, description clamp, and malformed resource omission. |
+| `backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py` | Pin proposal prompt resource material and selected MCP tool material. |
+
+### Non-Goals
+
+- No selectable `assistant_ref` field. Current create/edit contracts define
+  inline `AssistantSpec` and flow-managed assistants; selecting existing
+  assistants needs a separate API/product contract with tenant/workspace
+  allow-listing, permissions, and materializer behavior.
+- No form-field goldens in 11.3a; they move to 11.3b with a non-overlapping
+  scenario matrix and a Pattern Registry decision.
+- No discovery-time rendering change in 11.3a; it gets a follow-up after the
+  proposal renderer shape is proven.
+- No compatibility, legacy, or deprecated paths for never-shipped Flow behavior.
+- No generic helper files or comments that restate code.
+
+### Claude Plan Review Iteration 1
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-11-3a-form-field-resource-plan-20260503T061515Z.md`
+- Verdict: `changes_required`
+- Green light: `no`
+- Minimum score: `6`
+
+Accepted findings:
+
+| Finding | Resolution |
+|---|---|
+| Pattern Registry sufficiency was under-proved for multi-reference form-field lifecycle. | Split form-field goldens and Pattern Registry decision into 11.3b. |
+| Available-resource and selected-MCP rendering could still drift. | 11.3a now routes both through one catalog-owned typed material shape. |
+| Planned form-field goldens overlapped existing tests. | 11.3b now has a scenario matrix naming existing overlap and required new assertions. |
+| Discovery-time resource rendering was unscoped. | Explicitly deferred with rationale because proposal rendering is the draft-emitting path. |
+| Resource descriptions need a prompt-budget policy. | 11.3a now includes a catalog-owned description clamp. |
+| Assistant-ref deferral needed a trigger condition. | Added the future trigger: tenant/workspace allow-list plus permission/materializer rules. |
+
+### Plan Verification Iteration 2
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-11-3a-resource-plan-verification-20260503T061940Z.md`
+- Verdict: `green`
+- Green light: `yes`
+- Minimum score: `8`
+
+Accepted tightening notes:
+
+| Finding | Resolution |
+|---|---|
+| The typed material shape needed a concrete name. | Planned frozen `AIBuilderResourceReferenceMaterial` / entry value objects in `ai_builder_resource_catalog.py`. |
+| Prompt-local resource helpers should be deleted, not bypassed. | Added acceptance criteria for deleting `_resource_ref`, `_resource_display_name`, and `_resource_description`. |
+| The description clamp needed a number. | Set `RESOURCE_DESCRIPTION_MAX_CHARS = 240` in the plan and test target. |
+| Selected-MCP rendering should not normalize MCP resources in the proposal task after the move. | Added acceptance criteria for zero `normalize_ai_builder_mcp_resources` references in `ai_builder_plan_proposal_task.py`. |
+| Assistant refs should be explicitly absent, not silently omitted. | Added that acceptance criterion until the allow-list/materializer/permission trigger exists. |
+| Anti-slippage validation should be explicit. | Added `./scripts/gate-local/anti_slippage.sh --worktree` to the validation plan. |
+
+### Validation Plan
+
+```bash
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py -q
+cd backend && uv run pytest tests/unittests/flows/ai_builder -q
+cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_resource_catalog.py src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py
+cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_resource_catalog.py src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py
+cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_resource_catalog.py src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py
+cd backend && uv run lint-imports --no-cache
+./scripts/gate-local/anti_slippage.sh --worktree
+git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_resource_catalog.py backend/src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py backend/tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py docs/refactor/execution/batch-11-flow-ai-builder-reliability
+```
+
+Docker status: `docker ps --format '{{.Names}}'` is blocked in this tool
+profile before Docker runs. Use local `uv` commands unless Docker becomes
+available later in the slice.
+
+### Implementation Result
+
+| Area | Evidence | Decision |
+|---|---|---|
+| Typed resource material | `backend/src/intric/flows/ai_builder/ai_builder_resource_catalog.py` | Added frozen resource-reference value objects and a material builder from the validation catalog. |
+| Description budget | `backend/src/intric/flows/ai_builder/ai_builder_resource_catalog.py` | Added `RESOURCE_DESCRIPTION_MAX_CHARS = 240` and bounded rendered descriptions. |
+| Proposal prompt rendering | `backend/src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py` | Available resources and selected MCP refs now consume the same catalog material; prompt-local resource dict helpers were deleted. |
+| Resource tests | `backend/tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py` | Pinned exact refs, selected MCP server/tool grouping, malformed resource omission, truncation, and clamp-boundary behavior. |
+| Prompt tests | `backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py` | Pinned assistant-ref absence in proposal material while existing resource/MCP prompt assertions continue to pass. |
+
+### Claude Implementation Review
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-11-3a-resource-implementation-20260503T062808Z.md`
+- Verdict: `green`
+- Green light: `yes`
+- Minimum score: `9`
+
+Accepted tightening:
+
+| Finding | Resolution |
+|---|---|
+| Unknown selected MCP refs are now dropped by the catalog intersection; this should be explicit. | Added `test_plan_proposal_prompt_drops_selected_mcp_ref_that_is_not_in_catalog`. |
+
+### Claude Final Verification
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-11-3a-resource-final-verification-20260503T063337Z.md`
+- Verdict: `green`
+- Green light: `yes`
+- Minimum score: `9`
+
+Non-blocking note:
+
+| Finding | Resolution |
+|---|---|
+| Unrelated dirty files remain in the worktree. | Stage only the 11.3a backend files and Batch 11 docs; do not bulk-add. |
+
+### Validation Result
+
+| Command | Result |
+|---|---|
+| `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py -q` | Passed: `15 passed`. |
+| `cd backend && uv run pytest tests/unittests/flows/ai_builder -q` | Passed: `1738 passed, 4 skipped`, 12 existing warnings. |
+| `cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_resource_catalog.py src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py` | Passed: `0 errors, 0 warnings, 0 informations`. |
+| `cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_resource_catalog.py src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py` | Passed. |
+| `cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_resource_catalog.py src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py` | Passed: `4 files already formatted`. |
+| `cd backend && uv run lint-imports --no-cache` | Passed: 3 contracts kept, 0 broken. |
+| `./scripts/gate-local/anti_slippage.sh --worktree` | Passed: `anti-slippage: worktree clean`. |
+| `git diff --check -- <11.3a touched paths>` | Passed. |
+| Exact grep for deleted proposal helpers and direct MCP normalization in `ai_builder_plan_proposal_task.py` | Passed with no matches. |
+| Claude final verification | Passed: `green`, minimum score `9`. |
+
+### Carry-Forward
+
+| Item | Owner slice |
+|---|---|
+| Decide whether discovery-time resource prompt rendering should consume `AIBuilderResourceReferenceMaterial`. | 11.3 follow-up after proposal resource material is stable |
+| Add form-field lifecycle goldens and decide whether the Pattern Registry needs an explicit form-field chain shape. | 11.3b |
+| Revisit selectable assistant refs only after AI Builder has a tenant/workspace-scoped allow-list plus permission and materializer rules. | Future resource-contract slice |

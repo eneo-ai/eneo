@@ -24,6 +24,40 @@ from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 ResourceKind = Literal["knowledge_base", "mcp_server", "mcp_tool", "model"]
 
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+RESOURCE_DESCRIPTION_MAX_CHARS = 240
+
+
+@dataclass(frozen=True, slots=True)
+class AIBuilderResourceReferenceEntry:
+    ref: str
+    display_name: str
+    description: str = ""
+    parent_ref: str | None = None
+
+    def prompt_fields(
+        self,
+        *,
+        ref_label: str,
+        include_parent_ref: bool = False,
+    ) -> str:
+        fields = [f"{ref_label}=`{self.ref}`"]
+        if include_parent_ref and self.parent_ref is not None:
+            fields.append(f"server_ref=`{self.parent_ref}`")
+        fields.append(f"name=`{self.display_name}`")
+        rendered = " | ".join(fields)
+        if self.description:
+            rendered += f" - {self.description}"
+        return rendered
+
+
+@dataclass(frozen=True, slots=True)
+class AIBuilderResourceReferenceMaterial:
+    models: tuple[AIBuilderResourceReferenceEntry, ...]
+    knowledge_bases: tuple[AIBuilderResourceReferenceEntry, ...]
+    mcp_servers: tuple[AIBuilderResourceReferenceEntry, ...]
+    mcp_tools: tuple[AIBuilderResourceReferenceEntry, ...]
+    selected_mcp_servers: tuple[AIBuilderResourceReferenceEntry, ...]
+    selected_mcp_tools: tuple[AIBuilderResourceReferenceEntry, ...]
 
 
 @dataclass(frozen=True)
@@ -205,6 +239,36 @@ def build_ai_builder_resource_catalog(
         _kb_alias_index=_build_alias_index(knowledge_bases),
         _mcp_server_alias_index=_build_alias_index(mcp_servers),
         _mcp_tool_alias_index=_build_alias_index(mcp_tools),
+    )
+
+
+def build_ai_builder_resource_reference_material(
+    *,
+    catalog: AIBuilderResourceCatalog,
+    selected_mcp_server_refs: Iterable[str] | None = None,
+) -> AIBuilderResourceReferenceMaterial:
+    selected_servers = set(selected_mcp_server_refs or ())
+    return AIBuilderResourceReferenceMaterial(
+        models=tuple(_resource_reference_entry(entry) for entry in catalog.models),
+        knowledge_bases=tuple(
+            _resource_reference_entry(entry) for entry in catalog.knowledge_bases
+        ),
+        mcp_servers=tuple(
+            _resource_reference_entry(entry) for entry in catalog.mcp_servers
+        ),
+        mcp_tools=tuple(
+            _resource_reference_entry(entry) for entry in catalog.mcp_tools
+        ),
+        selected_mcp_servers=tuple(
+            _resource_reference_entry(entry)
+            for entry in catalog.mcp_servers
+            if entry.ref in selected_servers
+        ),
+        selected_mcp_tools=tuple(
+            _resource_reference_entry(entry)
+            for entry in catalog.mcp_tools
+            if entry.parent_ref in selected_servers
+        ),
     )
 
 
@@ -512,6 +576,23 @@ def _build_entries(
             )
         )
     return entries
+
+
+def _resource_reference_entry(
+    entry: AIBuilderResourceCatalogEntry,
+) -> AIBuilderResourceReferenceEntry:
+    return AIBuilderResourceReferenceEntry(
+        ref=entry.ref,
+        display_name=entry.display_name,
+        description=_bounded_description(entry.description),
+        parent_ref=entry.parent_ref,
+    )
+
+
+def _bounded_description(description: str) -> str:
+    if len(description) <= RESOURCE_DESCRIPTION_MAX_CHARS:
+        return description
+    return description[: RESOURCE_DESCRIPTION_MAX_CHARS - 3].rstrip() + "..."
 
 
 def _build_mcp_tool_entries(

@@ -15,7 +15,11 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
 )
 from intric.flows.ai_builder.ai_builder_mcp_resources import (
     AIBuilderMCPResourceInput,
-    normalize_ai_builder_mcp_resources,
+)
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderResourceReferenceMaterial,
+    build_ai_builder_resource_catalog,
+    build_ai_builder_resource_reference_material,
 )
 from intric.flows.ai_builder.planning_state import PlanningState
 
@@ -36,7 +40,17 @@ def build_plan_proposal_system_prompt(
     """Build a compact task prompt for create/edit flow proposal."""
 
     submission_tool = "edit_flow" if is_edit_mode else "outline_flow"
-    normalized_mcps = normalize_ai_builder_mcp_resources(available_mcps)
+    selected_mcp_server_refs = mcp_selected_server_refs_from_values(
+        set(mcp_selection_values or ())
+    )
+    resource_material = build_ai_builder_resource_reference_material(
+        catalog=build_ai_builder_resource_catalog(
+            available_models=available_models,
+            available_kbs=available_kbs,
+            available_mcps=available_mcps,
+        ),
+        selected_mcp_server_refs=selected_mcp_server_refs,
+    )
     create_mode_rules = (
         [
             "- In create mode, describe semantic flow intent in outline_flow; do not choose Flow mechanics.",
@@ -76,16 +90,12 @@ def build_plan_proposal_system_prompt(
     ]
     if flow_context:
         lines.extend(["", "Existing flow context:", flow_context])
-    resource_context = _resource_context_block(
-        available_models=available_models,
-        available_kbs=available_kbs,
-        available_mcps=normalized_mcps,
-    )
+    resource_context = _resource_context_block(resource_material)
     if resource_context:
         lines.extend(["", "Available resources:", resource_context])
     mcp_decision_context = _mcp_selection_context_block(
         mcp_selection_values,
-        available_mcps=normalized_mcps,
+        resource_material=resource_material,
     )
     if mcp_decision_context:
         lines.extend(["", "MCP selection decision:", mcp_decision_context])
@@ -160,46 +170,39 @@ def _confirmed_requirements_block(
 
 
 def _resource_context_block(
-    *,
-    available_models: list[dict[str, Any]] | None,
-    available_kbs: list[dict[str, Any]] | None,
-    available_mcps: AIBuilderMCPResourceInput,
+    material: AIBuilderResourceReferenceMaterial,
 ) -> str:
     sections: list[str] = []
-    if available_models:
+    if material.models:
         sections.append("Models:")
-        sections.extend(_model_resource_lines(available_models))
-    if available_kbs:
+        sections.extend(
+            f"- {entry.prompt_fields(ref_label='ref')}" for entry in material.models
+        )
+    if material.knowledge_bases:
         sections.append("Knowledge bases:")
-        sections.extend(_kb_resource_lines(available_kbs))
-    normalized_mcps = normalize_ai_builder_mcp_resources(available_mcps)
-    if normalized_mcps:
+        sections.extend(
+            f"- {entry.prompt_fields(ref_label='ref')}"
+            for entry in material.knowledge_bases
+        )
+    if material.mcp_servers:
         sections.append("MCP metadata:")
         sections.append(
             "- Planning may read this metadata but must not execute MCP tools. "
             "Use MCP refs only when a step needs external tools or live data."
         )
-        for server in normalized_mcps:
-            description = f" — {server['description']}" if server["description"] else ""
-            sections.append(
-                f"- server_ref=`{server['ref']}` | name=`{server['display_name']}`"
-                f"{description}"
-            )
-            for tool in server["tools"]:
-                tool_description = (
-                    f" — {tool['description']}" if tool["description"] else ""
-                )
-                sections.append(
-                    f"  - tool_ref=`{tool['ref']}` | name=`{tool['display_name']}`"
-                    f"{tool_description}"
-                )
+        for server in material.mcp_servers:
+            sections.append(f"- {server.prompt_fields(ref_label='server_ref')}")
+            for tool in material.mcp_tools:
+                if tool.parent_ref != server.ref:
+                    continue
+                sections.append(f"  - {tool.prompt_fields(ref_label='tool_ref')}")
     return "\n".join(sections)
 
 
 def _mcp_selection_context_block(
     mcp_selection_values: set[str] | frozenset[str] | None,
     *,
-    available_mcps: AIBuilderMCPResourceInput = None,
+    resource_material: AIBuilderResourceReferenceMaterial,
 ) -> str | None:
     values = set(mcp_selection_values or set())
     if not values:
@@ -212,7 +215,9 @@ def _mcp_selection_context_block(
             "data by itself. If the task needs live data, collect it as runtime input "
             "or make the limitation explicit in the step instructions."
         )
-    selected_server_refs = sorted(mcp_selected_server_refs_from_values(values))
+    selected_server_refs = sorted(
+        entry.ref for entry in resource_material.selected_mcp_servers
+    )
     if not selected_server_refs:
         return None
     refs = ", ".join(f"`{ref}`" for ref in selected_server_refs)
@@ -222,8 +227,7 @@ def _mcp_selection_context_block(
         "- Prefer specific `mcp_tool_refs` over attaching a whole server; do not attach MCP refs to unrelated analysis or formatting steps.",
     ]
     selected_tool_lines = _selected_mcp_tool_lines(
-        selected_server_refs=selected_server_refs,
-        available_mcps=available_mcps,
+        resource_material=resource_material,
     )
     if selected_tool_lines:
         lines.append("- Selected MCP tools available for step-level use:")
@@ -233,59 +237,12 @@ def _mcp_selection_context_block(
 
 def _selected_mcp_tool_lines(
     *,
-    selected_server_refs: list[str],
-    available_mcps: AIBuilderMCPResourceInput,
+    resource_material: AIBuilderResourceReferenceMaterial,
 ) -> list[str]:
-    selected = set(selected_server_refs)
-    if not selected:
-        return []
-    lines: list[str] = []
-    for server in normalize_ai_builder_mcp_resources(available_mcps):
-        if server["ref"] not in selected:
-            continue
-        for tool in server["tools"]:
-            description = f" — {tool['description']}" if tool["description"] else ""
-            lines.append(
-                f"  - tool_ref=`{tool['ref']}` | server_ref=`{server['ref']}` "
-                f"| name=`{tool['display_name']}`{description}"
-            )
-    return lines
-
-
-def _model_resource_lines(resources: list[dict[str, Any]]) -> list[str]:
     return [
-        f"- ref=`{_resource_ref(resource)}` | name=`{_resource_display_name(resource)}`"
-        for resource in resources
-        if _resource_ref(resource)
+        f"  - {tool.prompt_fields(ref_label='tool_ref', include_parent_ref=True)}"
+        for tool in resource_material.selected_mcp_tools
     ]
-
-
-def _kb_resource_lines(resources: list[dict[str, Any]]) -> list[str]:
-    lines: list[str] = []
-    for resource in resources:
-        ref = _resource_ref(resource)
-        if not ref:
-            continue
-        description = _resource_description(resource)
-        lines.append(
-            f"- ref=`{ref}` | name=`{_resource_display_name(resource)}`"
-            + (f" — {description}" if description else "")
-        )
-    return lines
-
-
-def _resource_ref(resource: dict[str, Any]) -> str:
-    return str(resource.get("ref") or resource.get("id") or "").strip()
-
-
-def _resource_display_name(resource: dict[str, Any]) -> str:
-    return str(
-        resource.get("display_name") or resource.get("name") or _resource_ref(resource)
-    ).strip()
-
-
-def _resource_description(resource: dict[str, Any]) -> str:
-    return str(resource.get("description") or "").strip()
 
 
 __all__ = ["build_plan_proposal_system_prompt"]

@@ -552,6 +552,113 @@ Success gate:
 - missing or stale form-field refs fail with typed diagnostics
 - resource refs are exact, enabled, and tenant/workspace-safe
 
+#### 11.3a — Proposal Resource Reference Material Owner
+
+Scope:
+
+- Make `AIBuilderResourceCatalog` the proposal-time owner for exact resource
+  material as well as resource canonicalization. The proposal prompt should be
+  rendered from the same catalog that later resolves/rejects submitted refs.
+- Route both the available-resource block and the selected-MCP block through
+  the same catalog-owned typed material so MCP rendering cannot drift inside the
+  proposal task.
+- Clamp rendered descriptions in the catalog material so free-form resource
+  descriptions cannot silently consume the proposal prompt budget.
+- Do not add `assistant_ref` to the create/edit contract in this slice. Current
+  AI Builder drafts define inline `AssistantSpec` per step and materialize
+  flow-managed assistants; selecting pre-existing assistants would be a separate
+  product/API contract with permission and materializer implications.
+- Do not change discovery-time resource rendering in this commit. Discovery
+  prompt material is localized phase policy; proposal-time rendering is the
+  draft-emitting path that must first share the validation catalog. Discovery
+  rendering gets its own follow-up after the proposal renderer shape is stable.
+
+Owner inventory:
+
+| Concept | Existing owner | 11.3a decision |
+|---|---|---|
+| Exact model/knowledge/MCP ref allow-list | `backend/src/intric/flows/ai_builder/ai_builder_resource_catalog.py` | Extend this owner with typed proposal resource material so prompt material and validation cannot drift. |
+| Proposal prompt resource block | `backend/src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py` | Replace local dict rendering with catalog-rendered exact refs. |
+| Selected MCP prompt block | `backend/src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py` | Keep policy text in the task, but render selected server/tool refs from the same catalog material used by the available-resource block. |
+| Discovery-time resource prompt material | `backend/src/intric/flows/ai_builder/ai_builder_prompts.py` | Explicitly defer; add a follow-up instead of broadening this resource slice. |
+| Existing flow assistant state in edit mode | `backend/src/intric/flows/ai_builder/ai_builder_flow_context.py` | Leave as context snapshots; do not introduce a selectable assistant-ref field. |
+
+Planned files:
+
+| File | Purpose |
+|---|---|
+| `backend/src/intric/flows/ai_builder/ai_builder_resource_catalog.py` | Add frozen `AIBuilderResourceReferenceMaterial` / entry value objects for exact refs, selected MCP refs, and descriptions bounded by `RESOURCE_DESCRIPTION_MAX_CHARS = 240`. |
+| `backend/src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py` | Consume catalog resource material, delete prompt-local `_resource_ref` / `_resource_display_name` / `_resource_description`, and stop normalizing MCP resources directly. |
+| `backend/tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py` | Pin exact resource-material rendering, selected MCP grouping, description clamp, and omission of malformed refs. |
+| `backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py` | Pin proposal prompt resource material and MCP selection material after the renderer move. |
+| `docs/refactor/execution/batch-11-flow-ai-builder-reliability/journal.md` | Record plan review, decisions, validation, and carry-forward items. |
+| `docs/refactor/execution/batch-11-flow-ai-builder-reliability/retrospective-10.md` | Retrospective for 11.3a. |
+| `docs/refactor/execution/batch-11-flow-ai-builder-reliability/claude-reconciliation-10.md` | Claude reconciliation for 11.3a. |
+
+Acceptance criteria:
+
+- Proposal resource material lists only exact refs from the catalog used for
+  validation: model refs, knowledge refs, MCP server refs, and enabled MCP tool
+  refs.
+- Proposal selected-MCP material lists selected server/tool refs from the same
+  catalog material, not a second normalized-MCP iteration path.
+- Resource description rendering is bounded by a catalog-owned max length.
+- The slice does not add selectable assistant refs, compatibility/deprecation
+  paths, generic helper modules, or comments that restate code.
+- The assistant-ref deferral has an explicit trigger: add it only when AI
+  Builder has a tenant/workspace-scoped allow-list for selectable existing
+  assistants plus materializer and permission rules for using them.
+- Assistant refs are intentionally absent from 11.3a proposal material until
+  that deferral trigger is met.
+- `ai_builder_plan_proposal_task.py` has no remaining
+  `_resource_ref`, `_resource_display_name`, `_resource_description`, or
+  `normalize_ai_builder_mcp_resources` references after the move.
+
+Validation commands:
+
+```bash
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py -q
+cd backend && uv run pytest tests/unittests/flows/ai_builder -q
+cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_resource_catalog.py src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py
+cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_resource_catalog.py src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py
+cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_resource_catalog.py src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py
+cd backend && uv run lint-imports --no-cache
+./scripts/gate-local/anti_slippage.sh --worktree
+git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_resource_catalog.py backend/src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py backend/tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py docs/refactor/execution/batch-11-flow-ai-builder-reliability
+```
+
+#### 11.3b — Form-Field Lifecycle Goldens And Pattern Registry Decision
+
+Scope:
+
+- Decide with source evidence whether `form_field_runtime_inputs` needs an
+  explicit chain shape for declare → use → re-reference flows, or whether the
+  existing `sectioned_form_intake` and `form_field_runtime_inputs` pair is
+  sufficient once behavior goldens are pinned.
+- Add only non-overlapping create/compiler goldens. Existing
+  `test_ai_builder_create_compiler.py` already covers form-field normalization,
+  server-derived runtime hints, primary-input shadow drops, direct
+  `uses_form_fields`, and leading-step usage.
+- Treat edit stale-ref behavior as already pinned by
+  `test_ai_builder_edit_validator.py`; add no duplicate edit test unless the
+  11.3b plan identifies a missing edit lifecycle.
+
+Scenario matrix:
+
+| Scenario | Existing overlap to avoid | Required 11.3b assertion |
+|---|---|---|
+| Declare-only | `_attach_unreferenced_form_fields_to_final_step` path is partly covered by server-derived runtime hints. | User-declared `input_fields` with zero explicit `uses_input_fields` survive as `form_fields` and bind to the final compiled step. |
+| Chain | Existing leading-step form-field usage covers a single step. | A field used by an intermediate JSON-producing step flows downstream through the previous-step output contract without requiring the final step to re-reference the field. |
+| Multi-reference | Existing tests mostly assert one consumer. | One declared field can be referenced by two separate steps; both compiled bindings include the field exactly once. |
+| Pattern Registry expression | Existing rendered-pack tests verify `runtime_metadata_fields` only. | The knowledge pack either exposes a form-field chain shape or the plan records a concrete follow-up and keeps 11.3b behavior-only. |
+
+Validation commands will include:
+
+```bash
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_pattern_registry.py tests/unittests/flows/ai_builder/test_ai_builder_edit_validator.py -q
+cd backend && uv run pytest tests/unittests/flows/ai_builder -q
+```
+
 ### 11.4 — Goldens Matrix And Edit Parity
 
 Goal:

@@ -17,7 +17,9 @@ from intric.flows.ai_builder.ai_builder_models import (
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    RESOURCE_DESCRIPTION_MAX_CHARS,
     build_ai_builder_resource_catalog,
+    build_ai_builder_resource_reference_material,
     canonicalize_assistant_spec_resources,
     canonicalize_edit_draft_resources,
     canonicalize_flow_spec_resources,
@@ -303,3 +305,67 @@ def test_malformed_mcp_resources_do_not_enter_catalog() -> None:
 
     assert catalog.mcp_server_refs == {"server-uuid-1"}
     assert catalog.mcp_tool_refs == {"tool-uuid-1"}
+
+
+def test_resource_reference_material_uses_catalog_refs_and_selected_mcp_tools() -> None:
+    long_description = "x" * (RESOURCE_DESCRIPTION_MAX_CHARS + 20)
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[
+            {"id": "model-uuid-1", "name": "gpt-5.4-nano"},
+        ],
+        available_kbs=[
+            {
+                "id": "kb-uuid-1",
+                "name": "Risk KB",
+                "description": long_description,
+            },
+        ],
+        available_mcps=[
+            {
+                "id": "server-uuid-1",
+                "name": "Ärendesystem",
+                "description": "Läser ärendedata.",
+                "tools": [
+                    {
+                        "id": "tool-uuid-1",
+                        "name": "lookup_case",
+                        "description": "Hämtar ett ärende.",
+                    },
+                    {"id": "", "name": "ignored"},
+                ],
+            },
+            {"id": "", "name": "ignored", "tools": [{"id": "ignored-tool"}]},
+        ],
+    )
+
+    material = build_ai_builder_resource_reference_material(
+        catalog=catalog,
+        selected_mcp_server_refs={"server-uuid-1"},
+    )
+
+    assert material.models[0].ref == "model-uuid-1"
+    assert material.models[0].display_name == "gpt-5.4-nano"
+    assert material.knowledge_bases[0].ref == "kb-uuid-1"
+    assert (
+        len(material.knowledge_bases[0].description) == RESOURCE_DESCRIPTION_MAX_CHARS
+    )
+    assert material.knowledge_bases[0].description.endswith("...")
+    assert material.mcp_servers[0].ref == "server-uuid-1"
+    assert material.mcp_tools[0].ref == "tool-uuid-1"
+    assert material.mcp_tools[0].parent_ref == "server-uuid-1"
+    assert material.selected_mcp_servers == material.mcp_servers
+    assert material.selected_mcp_tools == material.mcp_tools
+
+
+def test_resource_reference_material_keeps_description_at_clamp_boundary() -> None:
+    description = "x" * RESOURCE_DESCRIPTION_MAX_CHARS
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[
+            {"id": "kb-uuid-1", "name": "Risk KB", "description": description},
+        ],
+    )
+
+    material = build_ai_builder_resource_reference_material(catalog=catalog)
+
+    assert material.knowledge_bases[0].description == description

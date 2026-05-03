@@ -78,6 +78,7 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
     assert "mcp_policy" not in prompt
     assert "must not execute MCP tools" in prompt
     assert "input_schema" not in prompt
+    assert "assistant_ref" not in prompt
 
 
 def test_plan_proposal_prompt_honors_continue_without_mcp_decision():
@@ -128,3 +129,26 @@ def test_plan_proposal_prompt_honors_selected_mcp_server():
     assert "Selected MCP tools available for step-level use" in prompt
     assert "tool_ref=`current-time`" in prompt
     assert "server_ref=`time-server`" in prompt
+
+
+def test_plan_proposal_prompt_drops_selected_mcp_ref_that_is_not_in_catalog():
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=PlanningState.empty(),
+        confirmed_requirements={"summary": "Use an enabled MCP for live data."},
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        available_mcps=[
+            {
+                "ref": "time-server",
+                "display_name": "Time MCP",
+                "tools": [{"ref": "current-time", "display_name": "get_current_time"}],
+            }
+        ],
+        mcp_selection_values={"use_mcp_server:missing-server"},
+    )
+
+    assert "Available resources:" in prompt
+    assert "server_ref=`time-server`" in prompt
+    assert "MCP selection decision:" not in prompt
+    assert "missing-server" not in prompt
