@@ -179,6 +179,42 @@ async def test_classify_slots_reuses_shared_cache_for_identical_targets() -> Non
 
 
 @pytest.mark.asyncio
+async def test_classify_slots_requests_json_response_format() -> None:
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps({"slots": [], "assumptions": [], "contradictions": []})
+    )
+
+    await classify_slots(
+        litellm_client=litellm_client,
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        text=f"json-format-target-{uuid4()}",
+        allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
+        tenant_id=uuid4(),
+        ui_language="sv",
+    )
+
+    assert litellm_client.acompletion.await_args.kwargs["response_format"] == {
+        "type": "json_object"
+    }
+
+
+def test_slot_classification_prompt_separates_source_material_from_artifacts() -> None:
+    messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
+        text="Ladda upp en ljudfil och få ett Word-dokument.",
+        allowed_slot_values={
+            "primary_runtime_input": frozenset({"audio", "documents"}),
+        },
+        ui_language="sv",
+    )
+
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "final DOCX/PDF/Word document is not document input" in prompt
+    assert "recorded audio for transcription is audio input" in prompt
+
+
+@pytest.mark.asyncio
 async def test_classify_slots_logs_tenant_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

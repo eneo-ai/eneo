@@ -524,6 +524,9 @@ def looks_like_case_document_family(text: str) -> bool:
 
 
 def explicit_structured_reuse_preference(text: str) -> bool:
+    pattern = detect_planner_pattern_signals(text)
+    if pattern.rich_document_workflow and pattern.prefers_structured_intermediate:
+        return True
     return mentions_any(
         text,
         (

@@ -23,6 +23,10 @@ from intric.flows.ai_builder.ai_builder_create_models import (
     CreateFormFieldDraft,
     FlowCreateDraft,
 )
+from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
+    contains_any_token_prefix,
+    normalize_discovery_text,
+)
 from intric.flows.ai_builder.ai_builder_flow_name import MAX_FLOW_NAME_LENGTH
 from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_input_type_values,
@@ -52,14 +56,20 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
 )
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
+    NO_EXTRA_RUNTIME_METADATA,
     RuntimeInputFieldHint,
+    RuntimeMetadataState,
+    normalize_runtime_metadata_state,
 )
 from intric.flows.ai_builder.ai_builder_step_skeleton import (
     StepSkeletonOutputTypeDrift,
     StepSkeletonSemanticContent,
     materialize_step_skeleton,
 )
-from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
+from intric.flows.ai_builder.pattern_registry import (
+    FLOW_INPUT_AUDIO_TRANSCRIPTION,
+    PATTERN_REGISTRY,
+)
 from intric.flows.ai_builder.planning_state import (
     AggregationIntent,
     ArchitectureCommit,
@@ -92,6 +102,7 @@ _OUTLINE_STEP_BACKEND_OWNED_KEYS = frozenset(
         "runtime_required",
         "runtime_upload",
         "uses_previous_fields",
+        "uses_previous_outputs",
     }
 )
 logger = logging.getLogger(__name__)
@@ -122,6 +133,7 @@ class OutlineCompileContext:
     pattern_ids: tuple[str, ...] = ()
     pattern_chain_steps: tuple[str, ...] = ()
     ui_language: str | None = None
+    runtime_metadata_state: RuntimeMetadataState | None = None
     runtime_input_field_hints: tuple[RuntimeInputFieldHint, ...] = ()
     aggregation_intent: AggregationIntent = "linear"
 
@@ -486,6 +498,7 @@ def outline_compile_context_from_planning_state(
             runtime_input_field_hints=runtime_input_field_hints,
         )
     architecture = _architecture_envelope_from_planning_state(planning_state)
+    runtime_metadata_state = runtime_metadata_state_from_planning_state(planning_state)
     return OutlineCompileContext(
         runtime_input_type=(
             _runtime_input_type_from_architecture(architecture)
@@ -499,12 +512,22 @@ def outline_compile_context_from_planning_state(
         pattern_ids=_pattern_ids_from_architecture(architecture),
         pattern_chain_steps=_pattern_chain_steps_from_architecture(architecture),
         ui_language=ui_language,
+        runtime_metadata_state=runtime_metadata_state,
         runtime_input_field_hints=runtime_input_field_hints,
         aggregation_intent=_aggregation_intent_for_compile_context(
             planning_state,
             architecture,
         ),
     )
+
+
+def runtime_metadata_state_from_planning_state(
+    planning_state: PlanningState | None,
+) -> RuntimeMetadataState | None:
+    if planning_state is None:
+        return None
+    slot = planning_state.resolved_slots.get("runtime_metadata_fields")
+    return normalize_runtime_metadata_state(slot.value if slot is not None else None)
 
 
 def compile_outline_to_create_draft(
@@ -530,8 +553,19 @@ def compile_outline_to_create_draft(
     known_field_order = [field.variable_name for field in form_fields]
     known_field_names = set(known_field_order)
 
-    outline_steps = _fold_leading_zero_contract_text_steps(
+    final_output_mode = context.final_output_mode if context is not None else None
+    pattern_ids = context.pattern_ids if context is not None else ()
+    chain_steps = context.pattern_chain_steps if context is not None else ()
+    outline_steps = _normalize_leading_audio_transcription_step(
         steps=list(outline.steps),
+        runtime_input_type=runtime_input_type,
+        backend_audio_transcription_inserted=_backend_audio_transcription_inserted(
+            pattern_ids=pattern_ids,
+            chain_steps=chain_steps,
+        ),
+    )
+    outline_steps = _fold_leading_zero_contract_text_steps(
+        steps=outline_steps,
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
     )
@@ -562,9 +596,6 @@ def compile_outline_to_create_draft(
             )
         )
 
-    final_output_mode = context.final_output_mode if context is not None else None
-    pattern_ids = context.pattern_ids if context is not None else ()
-    chain_steps = context.pattern_chain_steps if context is not None else ()
     try:
         skeleton_plan = materialize_step_skeleton(
             runtime_input_type=runtime_input_type,
@@ -1072,6 +1103,22 @@ def _compile_form_fields(
     context: OutlineCompileContext | None,
     runtime_input_type: InputType | None,
 ) -> tuple[list[CreateFormFieldDraft], list[str]]:
+    runtime_metadata_state = (
+        context.runtime_metadata_state if context is not None else None
+    )
+    runtime_input_field_hints = (
+        context.runtime_input_field_hints if context is not None else ()
+    )
+    if runtime_metadata_state == NO_EXTRA_RUNTIME_METADATA:
+        _log_dropped_runtime_metadata_input_fields(
+            field_names=[
+                *(field.variable_name for field in outline_fields),
+                *(hint.variable_name for hint in runtime_input_field_hints),
+            ],
+            runtime_metadata_state=NO_EXTRA_RUNTIME_METADATA,
+        )
+        return [], []
+
     fields: list[CreateFormFieldDraft] = []
     dropped_primary_input_field_names: list[str] = []
     for field in outline_fields:
@@ -1106,6 +1153,23 @@ def _compile_form_fields(
         )
         seen.add(hint.variable_name)
     return fields, dropped_primary_input_field_names
+
+
+def _log_dropped_runtime_metadata_input_fields(
+    *,
+    field_names: list[str],
+    runtime_metadata_state: RuntimeMetadataState,
+) -> None:
+    unique_names = sorted(set(field_names))
+    if not unique_names:
+        return
+    logger.info(
+        "ai_builder_runtime_metadata_input_fields_dropped",
+        extra={
+            "field_names": unique_names,
+            "runtime_metadata_state": runtime_metadata_state,
+        },
+    )
 
 
 def _log_dropped_primary_input_shadow_fields(
@@ -1166,6 +1230,117 @@ def _fold_leading_zero_contract_text_steps(
         },
     )
     return [merged, *steps[target_index + 1 :]]
+
+
+def _normalize_leading_audio_transcription_step(
+    *,
+    steps: list["OutlineStep"],
+    runtime_input_type: InputType,
+    backend_audio_transcription_inserted: bool,
+) -> list["OutlineStep"]:
+    if (
+        runtime_input_type != InputType.AUDIO
+        or not backend_audio_transcription_inserted
+        or len(steps) < 2
+    ):
+        return steps
+    first_step = steps[0]
+    if not _is_redundant_audio_transcription_step(first_step):
+        return steps
+    if not _has_no_external_step_refs(first_step):
+        return steps
+    if (
+        not first_step.output_fields
+        and _declared_output_type(first_step) == OutputType.JSON
+    ):
+        return steps
+    if not _is_plain_text_semantic_step(first_step):
+        rewritten = first_step.model_copy(
+            update={
+                "name": _structured_transcript_step_name(first_step),
+                "task": _structured_transcript_step_task(first_step),
+            }
+        )
+        logger.info(
+            "ai_builder_redundant_audio_transcription_outline_step_rewritten",
+            extra={"step_name": first_step.name},
+        )
+        return [rewritten, *steps[1:]]
+
+    logger.info(
+        "ai_builder_redundant_audio_transcription_outline_step_dropped",
+        extra={"step_name": first_step.name},
+    )
+    return steps[1:]
+
+
+def _backend_audio_transcription_inserted(
+    *,
+    pattern_ids: tuple[str, ...],
+    chain_steps: tuple[str, ...],
+) -> bool:
+    return (
+        "audio_to_artifact_report" in pattern_ids
+        or FLOW_INPUT_AUDIO_TRANSCRIPTION in chain_steps
+    )
+
+
+def _is_redundant_audio_transcription_step(step: "OutlineStep") -> bool:
+    normalized = normalize_discovery_text(f"{step.name} {step.task}")
+    return contains_any_token_prefix(
+        normalized,
+        ("transkrib", "transcrib"),
+    ) or any(
+        phrase in normalized
+        for phrase in (
+            "audio to text",
+            "speech to text",
+            "ljud till text",
+            "tal till text",
+        )
+    )
+
+
+def _structured_transcript_step_name(step: "OutlineStep") -> str:
+    normalized = normalize_discovery_text(f"{step.name} {step.task}")
+    if contains_any_token_prefix(normalized, ("transkrib", "ljud", "möte")):
+        return "Strukturera transkription"
+    return "Structure transcript"
+
+
+def _structured_transcript_step_task(step: "OutlineStep") -> str:
+    normalized = normalize_discovery_text(f"{step.name} {step.task}")
+    if contains_any_token_prefix(normalized, ("transkrib", "ljud", "möte")):
+        prefix = (
+            "Strukturera den redan transkriberade texten från föregående steg. "
+            "Begär inte en ny ljudtranskribering; bevara tider och talarbyten "
+            "endast när de finns i texten."
+        )
+    else:
+        prefix = (
+            "Structure the already transcribed text from the previous step. "
+            "Do not request a new audio transcription; preserve timestamps and "
+            "speaker turns only when they are present in the text."
+        )
+    return f"{prefix}\n\n{step.task}"
+
+
+def _is_plain_text_semantic_step(step: "OutlineStep") -> bool:
+    return (
+        _declared_output_type(step) == OutputType.TEXT
+        and not step.output_fields
+        and not step.uses_input_fields
+        and _has_no_external_step_refs(step)
+    )
+
+
+def _has_no_external_step_refs(step: "OutlineStep") -> bool:
+    return (
+        not step.knowledge_refs
+        and not step.mcp_server_refs
+        and not step.mcp_tool_refs
+        and not step.citations_requested
+    )
 
 
 def _leading_fold_target_index(
@@ -1514,5 +1689,6 @@ __all__ = [
     "outline_compile_context_from_planning_state",
     "outline_runtime_input_type_values",
     "parse_outline_flow_arguments",
+    "runtime_metadata_state_from_planning_state",
     "safe_validation_issues",
 ]

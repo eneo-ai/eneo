@@ -187,6 +187,27 @@ def test_materialize_structured_quality_skeleton() -> None:
     assert skeleton[3].document_delivery_mode == "generated"
 
 
+def test_materialize_structured_quality_skeleton_uses_swedish_fixed_step_names() -> (
+    None
+):
+    plan = materialize_step_skeleton(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.PDF,
+        final_output_mode=OutputMode.PASS_THROUGH,
+        pattern_ids=("multi_step_quality_chain",),
+        chain_steps=_chain_steps("multi_step_quality_chain"),
+        ui_language="sv",
+    )
+    skeleton = plan.minimum_slots
+
+    assert [slot.default_name for slot in skeleton] == [
+        "Extrahera strukturerad grund",
+        "Analysera strukturerat underlag",
+        "Granska kvalitet och luckor",
+        "Skapa PDF",
+    ]
+
+
 def test_materialize_text_to_json_skeleton() -> None:
     plan = materialize_step_skeleton(
         runtime_input_type=InputType.TEXT,

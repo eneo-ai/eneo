@@ -35,6 +35,8 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     canonicalize_create_draft_resources,
 )
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
+    DETAILED_CASE_METADATA,
+    NO_EXTRA_RUNTIME_METADATA,
     RuntimeInputFieldHint,
     extract_runtime_input_field_hints,
 )
@@ -255,6 +257,115 @@ def test_compile_create_draft_uses_previous_fields_to_generate_field_level_bindi
     )
 
 
+def test_compile_create_draft_keeps_previous_json_when_field_ref_is_non_adjacent() -> (
+    None
+):
+    draft = FlowCreateDraft(
+        flow_name="Protokoll",
+        plan_rationale="Kombinera transkription och metadata.",
+        steps=[
+            CreateStepDraft(
+                name="Strukturera transkription",
+                instructions="Strukturera transkriptionen.",
+                input_source="flow_input",
+                input_type="text",
+                output_type="json",
+                output_fields=[
+                    _field(
+                        "transcription_text",
+                        "string",
+                        description="Full transkription.",
+                    )
+                ],
+            ),
+            CreateStepDraft(
+                name="Identifiera metadata",
+                instructions="Identifiera metadata.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="json",
+                output_fields=[
+                    _field("meeting_title", "string", description="Titel."),
+                ],
+            ),
+            CreateStepDraft(
+                name="Skapa protokoll",
+                instructions="Skapa protokoll från metadata och transkription.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+                uses_previous_fields=[
+                    {
+                        "from_step": 1,
+                        "field_path": "transcription_text",
+                        "label": "Transkription",
+                    }
+                ],
+            ),
+        ],
+    )
+
+    compiled = compile_create_draft(draft)
+
+    third_step = compiled.steps[2]
+    assert third_step.input_bindings is not None
+    assert third_step.input_bindings["question"] == (
+        "{{ step_b.output.structured }}\n\n"
+        "Transkription: {{ step_a.output.structured.transcription_text }}"
+    )
+
+
+def test_compile_create_draft_keeps_previous_json_when_output_ref_is_non_adjacent() -> (
+    None
+):
+    draft = FlowCreateDraft(
+        flow_name="Protokoll",
+        plan_rationale="Kombinera källtext och metadata.",
+        steps=[
+            CreateStepDraft(
+                name="Transkribera ljud",
+                instructions="Transkribera ljud.",
+                input_source="flow_input",
+                input_type="audio",
+                output_type="text",
+                runtime_upload=True,
+                runtime_required=True,
+            ),
+            CreateStepDraft(
+                name="Identifiera metadata",
+                instructions="Identifiera metadata.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+                output_fields=[
+                    _field("meeting_title", "string", description="Titel."),
+                ],
+            ),
+            CreateStepDraft(
+                name="Skapa protokoll",
+                instructions="Skapa protokoll från metadata och källtext.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+                uses_previous_outputs=[
+                    {
+                        "from_step": 1,
+                        "label": "Source material",
+                    }
+                ],
+            ),
+        ],
+    )
+
+    compiled = compile_create_draft(draft)
+
+    third_step = compiled.steps[2]
+    assert third_step.input_bindings is not None
+    assert third_step.input_bindings["question"] == (
+        "{{ step_b.output.structured }}\n\nSource material: {{ step_a.output.text }}"
+    )
+
+
 def test_compile_create_draft_all_previous_owns_source_over_previous_field_refs() -> (
     None
 ):
@@ -448,6 +559,41 @@ def test_validate_create_draft_rejects_non_json_previous_field_source() -> None:
     )
 
 
+def test_validate_create_draft_rejects_non_text_previous_output_source() -> None:
+    draft = FlowCreateDraft(
+        flow_name="Ogiltig textkälla",
+        plan_rationale="Testar icke-text källa.",
+        steps=[
+            CreateStepDraft(
+                name="Extrahera fält",
+                instructions="Extrahera fält.",
+                input_source="flow_input",
+                input_type="text",
+                output_type="json",
+                output_fields=[_field("titel", "string")],
+            ),
+            CreateStepDraft(
+                name="Skriv rapport",
+                instructions="Skriv rapport.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+                uses_previous_outputs=[
+                    {"from_step": 1, "label": "Källmaterial"},
+                ],
+            ),
+        ],
+    )
+
+    validation = validate_create_draft(draft)
+
+    assert not validation.valid
+    assert any(
+        error.code == "previous_output_source_requires_text_output"
+        for error in validation.errors
+    )
+
+
 def test_validate_create_draft_rejects_file_flow_input_without_runtime_upload() -> None:
     draft = FlowCreateDraft(
         flow_name="Ogiltig filindata",
@@ -586,6 +732,7 @@ def test_outline_flow_schema_hides_low_level_flow_mechanics() -> None:
     assert "runtime_upload" not in step_props
     assert "output_mode" not in step_props
     assert "uses_previous_fields" not in step_props
+    assert "uses_previous_outputs" not in step_props
     assert "uses_input_fields" in step_props
     assert "input_strategy" not in step_props
 
@@ -1640,6 +1787,196 @@ def test_compile_outline_flow_keeps_secondary_text_metadata_for_text_input() -> 
     assert validation.valid
 
 
+def test_compile_outline_flow_drops_runtime_fields_when_metadata_is_disabled(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Kommunstyrelsemöte till DOCX",
+            "plan_rationale": "Transkribera och strukturera mötet innan DOCX skapas.",
+            "runtime_input": {"input_type": "audio", "required": True},
+            "final_output_type": "docx",
+            "input_fields": [
+                {
+                    "variable_name": "language",
+                    "label": "Språk",
+                    "field_type": "text",
+                    "required": False,
+                },
+                {
+                    "variable_name": "output_style",
+                    "label": "Dokumentstil",
+                    "field_type": "text",
+                    "required": False,
+                },
+                {
+                    "variable_name": "include_timestamps",
+                    "label": "Inkludera tidsstämplar",
+                    "field_type": "text",
+                    "required": False,
+                },
+            ],
+            "steps": [
+                {
+                    "name": "Transkribera ljud",
+                    "task": "Transkribera den uppladdade ljudfilen.",
+                    "output_type": "text",
+                    "uses_input_fields": ["language"],
+                },
+                {
+                    "name": "Identifiera rubriker",
+                    "task": "Dela in mötet i kommunstyrelserubriker.",
+                    "output_fields": [
+                        {
+                            "name": "sections",
+                            "field_type": "object",
+                            "description": "Rubrikindelat mötesinnehåll.",
+                            "required": True,
+                        }
+                    ],
+                    "uses_input_fields": ["output_style"],
+                },
+                {
+                    "name": "Skriv dokumenttext",
+                    "task": "Skriv slutlig dokumenttext.",
+                    "output_type": "text",
+                    "uses_input_fields": ["include_timestamps"],
+                },
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="audio",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="docx_document",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "runtime_metadata_fields": ResolvedSlot(
+            name="runtime_metadata_fields",
+            value=NO_EXTRA_RUNTIME_METADATA,
+            source="policy_default",
+            confidence="medium",
+        ),
+    }
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="intric.flows.ai_builder.ai_builder_create_outline",
+    ):
+        draft = compile_outline_to_create_draft(
+            outline,
+            context=outline_compile_context_from_planning_state(state),
+        )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    metadata_records = [
+        record
+        for record in caplog.records
+        if record.message == "ai_builder_runtime_metadata_input_fields_dropped"
+    ]
+    assert metadata_records
+    assert getattr(metadata_records[0], "field_names") == [
+        "include_timestamps",
+        "language",
+        "output_style",
+    ]
+    assert getattr(metadata_records[0], "runtime_metadata_state") == (
+        NO_EXTRA_RUNTIME_METADATA
+    )
+    assert draft.form_fields == []
+    assert all(step.uses_form_fields == [] for step in draft.steps)
+    assert compiled.form_fields is None
+    question_bindings = [
+        step.input_bindings["question"]
+        for step in compiled.steps
+        if step.input_bindings is not None
+    ]
+    assert not any("{{ language }}" in binding for binding in question_bindings)
+    assert not any("{{ output_style }}" in binding for binding in question_bindings)
+    assert not any(
+        "{{ include_timestamps }}" in binding for binding in question_bindings
+    )
+    assert validation.valid
+
+
+def test_compile_outline_flow_keeps_runtime_fields_when_metadata_is_detailed() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Audience aware reply",
+            "plan_rationale": "Classify the request and adapt the response.",
+            "input_fields": [
+                {
+                    "variable_name": "audience",
+                    "label": "Audience",
+                    "field_type": "text",
+                    "required": False,
+                }
+            ],
+            "steps": [
+                {
+                    "name": "Classify request",
+                    "task": "Classify the incoming customer request.",
+                    "output_fields": [
+                        {
+                            "name": "category",
+                            "field_type": "string",
+                            "description": "Request category.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Draft reply",
+                    "task": "Draft a concise reply for the selected audience.",
+                    "output_type": "text",
+                    "uses_input_fields": ["audience"],
+                },
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="text",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="structured_text",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "runtime_metadata_fields": ResolvedSlot(
+            name="runtime_metadata_fields",
+            value=DETAILED_CASE_METADATA,
+            source="structured_answer",
+            confidence="high",
+        ),
+    }
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state),
+    )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert [field.variable_name for field in draft.form_fields] == ["audience"]
+    assert draft.steps[1].uses_form_fields == ["audience"]
+    assert compiled.form_fields is not None
+    assert validation.valid
+
+
 def test_compile_outline_flow_folds_leading_zero_contract_text_step(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -1994,14 +2331,13 @@ def test_compile_outline_flow_uses_server_architecture_context_for_core_shape() 
     assert [step.output_type.value for step in draft.steps] == [
         "text",
         "text",
-        "text",
         "pdf",
     ]
     assert draft.steps[0].input_type.value == "audio"
     assert draft.steps[0].runtime_upload is True
-    assert draft.steps[3].document_delivery_mode == "generated"
+    assert draft.steps[2].document_delivery_mode == "generated"
     assert compiled.steps[0].input_config["runtime_input"]["input_format"] == "audio"
-    assert compiled.steps[3].output_type.value == "pdf"
+    assert compiled.steps[2].output_type.value == "pdf"
     assert validation.valid
 
 
@@ -2057,6 +2393,176 @@ def test_compile_outline_flow_inserts_audio_transcription_for_single_artifact_st
     assert draft.steps[2].output_type.value == "pdf"
     assert compiled.steps[0].output_mode.value == "transcribe_only"
     assert compiled.steps[2].output_type.value == "pdf"
+    assert validation.valid
+
+
+def test_compile_outline_flow_drops_redundant_leading_audio_transcription_step(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Audio DOCX report",
+            "plan_rationale": "Create a DOCX report from uploaded audio.",
+            "steps": [
+                {
+                    "name": "Transkribera ljud",
+                    "task": "Transkribera den uppladdade ljudinspelningen till text.",
+                    "model_ref": "default_small_model",
+                },
+                {
+                    "name": "Strukturera innehållet",
+                    "task": "Dela transkriptionen i tydliga rubriker.",
+                    "output_fields": [
+                        {
+                            "name": "sections",
+                            "field_type": "array",
+                            "description": "Rubrikindelat innehåll.",
+                            "required": True,
+                            "item_fields": [
+                                {
+                                    "name": "heading",
+                                    "field_type": "string",
+                                    "description": "Rubrik.",
+                                    "required": True,
+                                },
+                                {
+                                    "name": "body",
+                                    "field_type": "string",
+                                    "description": "Avsnittets text.",
+                                    "required": True,
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv dokumenttext",
+                    "task": "Skriv ett sammanhängande dokument från rubrikerna.",
+                },
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="audio",
+                    output_type="docx",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["audio_to_artifact_report"],
+            required_capabilities=["input_audio", "output_mode_pass_through"],
+        )
+    )
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="intric.flows.ai_builder.ai_builder_create_outline",
+    ):
+        draft = compile_outline_to_create_draft(
+            outline,
+            context=outline_compile_context_from_planning_state(state),
+        )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert [step.name for step in draft.steps] == [
+        "Transcribe audio",
+        "Strukturera innehållet",
+        "Skriv dokumenttext",
+        "Create DOCX",
+    ]
+    drop_records = [
+        record
+        for record in caplog.records
+        if record.message
+        == "ai_builder_redundant_audio_transcription_outline_step_dropped"
+    ]
+    assert drop_records
+    assert getattr(drop_records[0], "step_name") == "Transkribera ljud"
+    assert compiled.steps[0].output_mode.value == "transcribe_only"
+    assert validation.valid
+
+
+def test_compile_outline_flow_rewrites_structured_audio_transcription_step(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Audio DOCX report",
+            "plan_rationale": "Create a DOCX report from uploaded audio.",
+            "steps": [
+                {
+                    "name": "Transkribera mötesljud",
+                    "task": "Transkribera uppladdade ljudinspelningar till text.",
+                    "output_fields": [
+                        {
+                            "name": "transcript",
+                            "field_type": "string",
+                            "description": "Sammanställd transkription.",
+                            "required": True,
+                        },
+                        {
+                            "name": "segments",
+                            "field_type": "array",
+                            "description": "Segmenterad transkription.",
+                            "required": True,
+                            "item_fields": [
+                                {
+                                    "name": "text",
+                                    "field_type": "string",
+                                    "description": "Segmenttext.",
+                                    "required": True,
+                                }
+                            ],
+                        },
+                    ],
+                },
+                {
+                    "name": "Extrahera beslut",
+                    "task": "Identifiera beslut och åtgärder från transkriptionen.",
+                },
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="audio",
+                    output_type="docx",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["audio_to_artifact_report"],
+            required_capabilities=["input_audio", "output_mode_pass_through"],
+        )
+    )
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="intric.flows.ai_builder.ai_builder_create_outline",
+    ):
+        draft = compile_outline_to_create_draft(
+            outline,
+            context=outline_compile_context_from_planning_state(state),
+        )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert draft.steps[1].name == "Strukturera transkription"
+    assert "redan transkriberade texten" in draft.steps[1].instructions
+    assert "Transkribera mötesljud" not in [step.name for step in draft.steps]
+    rewrite_records = [
+        record
+        for record in caplog.records
+        if record.message
+        == "ai_builder_redundant_audio_transcription_outline_step_rewritten"
+    ]
+    assert rewrite_records
     assert validation.valid
 
 
@@ -2346,6 +2852,220 @@ def test_compile_outline_audio_docx_four_phase_body_step_fans_in_prior_work() ->
     assert body_step.input_type.value == "text"
     assert body_step.output_type.value == "text"
     assert compiled.steps[-2].input_contract is None
+    assert validation.valid
+
+
+def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Mötesprotokoll från ljud till Word",
+            "plan_rationale": "Transkribera ljud och skapa DOCX-protokoll.",
+            "steps": [
+                {
+                    "name": "Strukturera transkription",
+                    "task": "Strukturera den redan transkriberade texten.",
+                    "output_fields": [
+                        {
+                            "name": "transcription_text",
+                            "field_type": "string",
+                            "description": "Fullständig transkription.",
+                            "required": True,
+                        },
+                        {
+                            "name": "speaker_turns",
+                            "field_type": "array",
+                            "description": "Talarsegment i ordning.",
+                            "required": False,
+                            "item_fields": [
+                                {
+                                    "name": "segment_text",
+                                    "field_type": "string",
+                                    "description": "Text för segmentet.",
+                                    "required": True,
+                                }
+                            ],
+                        },
+                    ],
+                },
+                {
+                    "name": "Identifiera mötesmetadata",
+                    "task": "Identifiera titel, organisation och sekreterare.",
+                    "output_fields": [
+                        {
+                            "name": "meeting_title",
+                            "field_type": "string",
+                            "description": "Mötestitel.",
+                            "required": True,
+                        },
+                        {
+                            "name": "organization_name",
+                            "field_type": "string",
+                            "description": "Organisation.",
+                            "required": True,
+                        },
+                    ],
+                },
+                {
+                    "name": "Skapa mötesprotokoll med fasta rubriker",
+                    "task": "Skapa protokollsektioner från metadata och transkription.",
+                    "output_fields": [
+                        {
+                            "name": "protocol_sections",
+                            "field_type": "object",
+                            "description": "Innehåll per rubrik.",
+                            "required": True,
+                            "fields": [
+                                {
+                                    "name": "Sammanfattning",
+                                    "field_type": "string",
+                                    "description": "Sammanfattning.",
+                                    "required": True,
+                                },
+                                {
+                                    "name": "Diskussion",
+                                    "field_type": "string",
+                                    "description": "Diskussion.",
+                                    "required": True,
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Förbered DOCX-innehåll",
+                    "task": "Skriv dokumentets fullständiga text från tidigare steg.",
+                },
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="audio",
+                    output_type="docx",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["audio_to_artifact_report"],
+            required_capabilities=["input_audio", "output_mode_pass_through"],
+        )
+    )
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state, ui_language="sv"),
+    )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    metadata_step = draft.steps[2]
+    assert metadata_step.input_type.value == "text"
+    assert [
+        (ref.from_step, ref.label) for ref in metadata_step.uses_previous_outputs
+    ] == [(1, "Källmaterial")]
+    assert compiled.steps[2].input_bindings is not None
+    assert compiled.steps[2].input_bindings["question"] == (
+        "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+    )
+
+    protocol_step = draft.steps[3]
+    assert protocol_step.name == "Skapa mötesprotokoll med fasta rubriker"
+    assert protocol_step.input_source.value == "previous_step"
+    assert protocol_step.input_type.value == "text"
+    assert protocol_step.uses_previous_fields == []
+    assert [
+        (ref.from_step, ref.label) for ref in protocol_step.uses_previous_outputs
+    ] == [(1, "Källmaterial")]
+
+    compiled_protocol_step = compiled.steps[3]
+    assert compiled_protocol_step.input_bindings is not None
+    assert compiled_protocol_step.input_bindings["question"] == (
+        "{{ step_c.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+    )
+    assert validation.valid
+
+
+def test_compile_outline_audio_pdf_protocol_step_uses_all_previous_fan_in() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Mötesprotokoll från ljud till PDF",
+            "plan_rationale": "Transkribera ljud och skapa PDF-protokoll.",
+            "steps": [
+                {
+                    "name": "Strukturera transkription",
+                    "task": "Strukturera den redan transkriberade texten.",
+                    "output_fields": [
+                        {
+                            "name": "transcription_text",
+                            "field_type": "string",
+                            "description": "Fullständig transkription.",
+                            "required": True,
+                        },
+                    ],
+                },
+                {
+                    "name": "Identifiera mötesmetadata",
+                    "task": "Identifiera titel, organisation och sekreterare.",
+                    "output_fields": [
+                        {
+                            "name": "meeting_title",
+                            "field_type": "string",
+                            "description": "Mötestitel.",
+                            "required": True,
+                        },
+                    ],
+                },
+                {
+                    "name": "Skapa mötesprotokoll med fasta rubriker",
+                    "task": "Skapa protokollsektioner från metadata och transkription.",
+                    "output_fields": [
+                        {
+                            "name": "protocol_sections",
+                            "field_type": "object",
+                            "description": "Innehåll per rubrik.",
+                            "required": True,
+                            "fields": [
+                                {
+                                    "name": "Sammanfattning",
+                                    "field_type": "string",
+                                    "description": "Sammanfattning.",
+                                    "required": True,
+                                },
+                            ],
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="audio",
+                    output_type="pdf",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["audio_to_artifact_report"],
+            required_capabilities=["input_audio", "output_mode_pass_through"],
+        )
+    )
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state, ui_language="sv"),
+    )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    protocol_step = draft.steps[3]
+    assert protocol_step.input_source.value == "all_previous_steps"
+    assert protocol_step.uses_previous_outputs == []
+    assert compiled.steps[3].input_bindings is None
     assert validation.valid
 
 

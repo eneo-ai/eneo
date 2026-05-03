@@ -1015,6 +1015,68 @@ cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_
 git diff --check -- <11.5c touched paths>
 ```
 
+#### 11.5d — Runtime Metadata Minimality And Source-Material Underlag Dataflow
+
+Problem:
+
+The live audio-to-DOCX flow can still compile into a valid-looking graph that
+does the wrong work. A metadata step may produce JSON, and a later protocol/body
+step then receives only that JSON as underlag. The original transcript exists in
+step 1, but there is no typed create-draft contract that says later semantic
+steps still need that earlier text output. The same planner run may also invent
+optional runtime metadata fields such as language, style, or timestamps even
+when the user says the workflow should derive those values from the transcript.
+
+Why it matters:
+
+- `Underlag till text` is the canonical input-binding surface for step
+  material. Instructions should not become a string-concatenated substitute for
+  dataflow.
+- `Inmatningsfält` are user-supplied secondary runtime variables. They should
+  not be inferred from fields the workflow must extract from source material.
+- Adding more prompt wording would create another brittle loop; the compiler
+  needs typed mechanics, validation, and normalization.
+
+Canonical owners:
+
+| Concept | Owner | 11.5d decision |
+|---|---|---|
+| Prior text-output dependencies | `NewStepDraft.uses_previous_outputs` | Add a typed backend-owned reference for non-adjacent text outputs such as transcripts. |
+| Underlag rendering | `compile_input_bindings` in `ai_builder_new_step_compiler.py` | Render immediate previous JSON and explicit prior text outputs together in `input_bindings.question`. |
+| Invalid previous-output refs | `ai_builder_create_validator.py` and `ai_builder_create_dataflow.py` | Reject/prune future, duplicate, and non-text refs before spec compilation. |
+| Audio source-material foundation | `StepSkeletonPlan` | Attach the audio transcription text as a source foundation to downstream non-terminal semantic document steps. |
+| Runtime metadata policy | `PlanningState.runtime_metadata_fields` plus `ai_builder_runtime_input_fields.py` | Default resolved primary runtime inputs to `no_extra_metadata` unless the user clearly asks for secondary metadata fields. |
+| Outline form-field compilation | `compile_outline_to_create_draft` | Drop outline `input_fields` when the committed runtime metadata state says no extra metadata. |
+
+Acceptance:
+
+- Audio-to-DOCX protocol generation can feed a later structured protocol step
+  with both `{{ step_c.output.structured }}` and `Källmaterial:
+  {{ step_a.output.text }}`.
+- Non-adjacent text output refs preserve the immediate previous JSON instead of
+  replacing it.
+- `uses_previous_outputs` is hidden from the LLM-facing outline schema and is
+  treated as backend-owned mechanics.
+- Invalid previous-output refs are validator errors and are pruned by dataflow
+  normalization.
+- Runtime form fields are dropped when `runtime_metadata_fields` resolves to
+  `no_extra_metadata`; detailed metadata keeps fields.
+- Explicit Swedish prompts that say rubrics/metadata derive from the
+  transcript do not create user-facing `Inmatningsfält`.
+- Redundant LLM-authored audio transcription steps are dropped or rewritten when
+  the backend already owns the audio transcription prefix step.
+
+Validation:
+
+```bash
+cd backend && uv run pytest tests/unittests/flows/ai_builder -q
+cd backend && uv run pytest tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py tests/integration/flows/ai_builder/benchmark/test_baseline_benchmark.py -q
+cd backend && uv run pyright <11.5d touched source and test files>
+cd backend && uv run ruff check <11.5d touched source and test files>
+cd backend && uv run ruff format --check <11.5d touched source and test files>
+git diff --check -- <11.5d touched paths>
+```
+
 ## Behavior And Quality Gates
 
 | Gate | Required result |

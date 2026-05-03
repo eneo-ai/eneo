@@ -686,6 +686,26 @@ def test_extract_answer_signals_infers_structured_analysis_and_metadata_needs() 
     assert "detailed_case_metadata" in signals["runtime_metadata_fields"]
 
 
+def test_extract_answer_signals_infers_structured_analysis_from_rich_docx_workflow() -> (
+    None
+):
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "Bygg ett flöde där användaren laddar upp flera underlagsfiler "
+                    "och en Word-mall. Flödet ska läsa underlaget, extrahera "
+                    "huvudfakta, jämföra motstridiga uppgifter och fylla mallen."
+                ),
+            }
+        ]
+    )
+
+    assert "documents" in signals["input_material_mode"]
+    assert "use_structured_analysis" in signals["structured_analysis_need"]
+
+
 def test_extract_answer_signals_infers_common_runtime_metadata_field_names() -> None:
     signals = extract_answer_signals(
         [
@@ -773,6 +793,26 @@ def test_extract_answer_signals_reads_confirmed_requirements_summary_output_mode
         ]
     )
 
+    assert signals["final_output_mode"] == {"docx_document"}
+
+
+def test_extract_answer_signals_reads_confirmed_audio_requirements_summary() -> None:
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "tool",
+                "content": "Requirements presented to user.",
+                "metadata": {
+                    "requirements_summary": {
+                        "input_description": "Användaren laddar upp en ljudfil vid körning.",
+                        "output_description": "Ett genererat DOCX-dokument.",
+                    }
+                },
+            }
+        ]
+    )
+
+    assert signals["input_material_mode"] == {"audio"}
     assert signals["final_output_mode"] == {"docx_document"}
 
 

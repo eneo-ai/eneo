@@ -56,6 +56,8 @@ def build_plan_proposal_system_prompt(
             "- In create mode, describe semantic flow intent in outline_flow; do not choose Flow mechanics.",
             "- Use input_fields only for secondary inmatningsfält/input variables the user fills in at runtime.",
             "- Do not add an input_field for the primary text, document, file, or audio material being processed; the backend supplies that from the committed architecture.",
+            "- Runtime metadata policy is enforced by the compiler; leave input_fields empty unless resolved slots or confirmed requirements clearly ask for runtime metadata.",
+            "- For committed audio input, the backend inserts the first transcription/upload step; start outline_flow steps with the analysis, structuring, or synthesis work after transcription.",
             "- The backend compiles step topology, underlag/input_bindings, runtime uploads, step refs, output modes, and document delivery.",
         ]
         if not is_edit_mode

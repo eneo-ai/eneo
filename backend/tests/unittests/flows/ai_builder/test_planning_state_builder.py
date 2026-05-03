@@ -269,6 +269,40 @@ class TestPolicyDefaults:
         assert slot.value == "no_extra_metadata"
         assert slot.source == "policy_default"
 
+    def test_audio_input_defaults_to_no_extra_runtime_metadata(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Jag vill bygga ett flöde som tar emot en ljudfil, "
+                        "transkriberar samtalet och skapar ett Word-dokument."
+                    ),
+                )
+            ]
+        )
+
+        slot = state.resolved_slots["runtime_metadata_fields"]
+        assert slot.value == "no_extra_metadata"
+        assert slot.source == "policy_default"
+
+    def test_text_input_defaults_to_no_extra_runtime_metadata(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Skapa ett flöde som tar emot text från användaren, "
+                        "klassificerar ärendet och skriver ett svar."
+                    ),
+                )
+            ]
+        )
+
+        slot = state.resolved_slots["runtime_metadata_fields"]
+        assert slot.value == "no_extra_metadata"
+        assert slot.source == "policy_default"
+
     def test_runtime_input_fields_are_not_overwritten_by_no_metadata_default(
         self,
     ) -> None:
@@ -307,6 +341,58 @@ class TestPolicyDefaults:
         assert state.resolved_slots["primary_runtime_input"].value == "audio"
         assert state.resolved_slots["terminal_output"].value == "docx_document"
         assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
+        assert state.resolved_slots["runtime_metadata_fields"].value == (
+            "no_extra_metadata"
+        )
+
+    def test_swedish_audio_recording_prompt_with_terminal_word_file_resolves_core_slots(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Jag vill kunna skicka in en ljudinspelning och få ett "
+                        "bra Word-dokument tillbaka."
+                    ),
+                )
+            ]
+        )
+
+        assert state.resolved_slots["primary_runtime_input"].value == "audio"
+        assert state.resolved_slots["terminal_output"].value == "docx_document"
+        assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
+        assert state.resolved_slots["runtime_metadata_fields"].value == (
+            "no_extra_metadata"
+        )
+
+    def test_explicit_audio_meeting_docx_prompt_resolves_audio_with_high_confidence(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Bygg ett flöde där användaren laddar upp en ljudfil vid "
+                        "körning. Ljudfilen är en inspelning från ett "
+                        "kommunfullmäktigemöte. Flödet ska först transkribera "
+                        "ljudfilen till svensk text. Rubrikerna ska inte vara "
+                        "inmatningsfält för användaren, utan ska skapas och fyllas "
+                        "i utifrån transkriptionen. Slutresultatet ska vara ett "
+                        "Word-dokument. Användaren ska bara behöva lämna in "
+                        "ljudfilen vid körning."
+                    ),
+                )
+            ]
+        )
+
+        slot = state.resolved_slots["primary_runtime_input"]
+        assert slot.value == "audio"
+        assert slot.source == "heuristic"
+        assert slot.confidence == "high"
+        assert state.resolved_slots["terminal_output"].value == "docx_document"
 
 
 class TestModelSlotMerge:
@@ -439,6 +525,39 @@ class TestModelSlotMerge:
         assert state.resolved_slots["terminal_output"].value == "pdf_document"
         assert state.resolved_slots["primary_runtime_input"].value == "text"
         assert state.phase == "discovering"
+
+    def test_model_output_cannot_displace_high_confidence_input_heuristic(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Bygg ett flöde där användaren laddar upp en ljudfil vid "
+                        "körning. Slutresultatet ska vara ett Word-dokument. "
+                        "Användaren ska bara behöva lämna in ljudfilen vid körning."
+                    ),
+                )
+            ]
+        )
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(
+                    _classified(
+                        "primary_runtime_input",
+                        "text_and_documents",
+                        "high",
+                    ),
+                )
+            ),
+            prompt_hash="d" * 64,
+        )
+
+        assert state.resolved_slots["primary_runtime_input"].value == "audio"
+        assert state.resolved_slots["primary_runtime_input"].confidence == "high"
 
     def test_low_model_slot_is_not_persisted(self) -> None:
         state = _state()

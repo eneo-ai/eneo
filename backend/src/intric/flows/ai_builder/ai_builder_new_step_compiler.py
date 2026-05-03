@@ -113,6 +113,10 @@ def compile_input_bindings(
 
     source_reference = _resolve_source_reference(step_draft, prior_steps)
     explicit_previous_fields = _compile_previous_field_sections(step_draft, prior_steps)
+    explicit_previous_outputs = _compile_previous_output_sections(
+        step_draft,
+        prior_steps,
+    )
     structured_previous_text_input = (
         step_draft.input_source.value == "previous_step"
         and step_draft.input_type.value == "text"
@@ -121,6 +125,7 @@ def compile_input_bindings(
     )
     needs_explicit_underlag = bool(
         explicit_previous_fields
+        or explicit_previous_outputs
         or step_draft.uses_form_fields
         or structured_previous_text_input
     )
@@ -128,15 +133,24 @@ def compile_input_bindings(
     if step_draft.input_source.value == "previous_step" and not needs_explicit_underlag:
         return None
 
-    if source_reference is None and not explicit_previous_fields:
+    if (
+        source_reference is None
+        and not explicit_previous_fields
+        and not explicit_previous_outputs
+    ):
         return None
 
+    explicit_previous_sections = [*explicit_previous_fields, *explicit_previous_outputs]
     sections: list[str] = []
-    if source_reference is not None and not (
-        explicit_previous_fields and source_reference.endswith(".output.structured }}")
+    if source_reference is not None and not _should_suppress_source_reference(
+        step_draft=step_draft,
+        prior_steps=prior_steps,
+        source_reference=source_reference,
+        explicit_previous_sections=explicit_previous_sections,
     ):
         sections.append(source_reference)
     sections.extend(explicit_previous_fields)
+    sections.extend(explicit_previous_outputs)
     if step_draft.uses_form_fields:
         form_field_lines = [
             f"{field_name}: {{{{ {field_name} }}}}"
@@ -146,6 +160,49 @@ def compile_input_bindings(
     if not sections:
         return None
     return {"question": "\n\n".join(sections)}
+
+
+def _should_suppress_source_reference(
+    *,
+    step_draft: NewStepDraft,
+    prior_steps: list[StepSpec],
+    source_reference: str,
+    explicit_previous_sections: list[str],
+) -> bool:
+    if not explicit_previous_sections:
+        return False
+    if not _is_immediate_structured_source_reference(
+        step_draft=step_draft,
+        prior_steps=prior_steps,
+        source_reference=source_reference,
+    ):
+        return False
+    immediate_previous_order = len(prior_steps)
+    refs = [
+        *(field_ref.from_step for field_ref in step_draft.uses_previous_fields),
+        *(output_ref.from_step for output_ref in step_draft.uses_previous_outputs),
+    ]
+    return bool(refs) and all(
+        from_step == immediate_previous_order for from_step in refs
+    )
+
+
+def _is_immediate_structured_source_reference(
+    *,
+    step_draft: NewStepDraft,
+    prior_steps: list[StepSpec],
+    source_reference: str,
+) -> bool:
+    if step_draft.input_source.value != "previous_step":
+        return False
+    if not prior_steps:
+        return False
+    previous_step = prior_steps[-1]
+    if previous_step.output_type != OutputType.JSON:
+        return False
+    return (
+        source_reference == f"{{{{ {previous_step.plan_step_ref}.output.structured }}}}"
+    )
 
 
 def compile_assistant_instructions(
@@ -247,6 +304,20 @@ def _compile_previous_field_sections(
         sections.append(
             f"{label}: {{{{ {source_step.plan_step_ref}.output.structured.{field_ref.field_path} }}}}"
         )
+    return sections
+
+
+def _compile_previous_output_sections(
+    step_draft: NewStepDraft,
+    prior_steps: list[StepSpec],
+) -> list[str]:
+    sections: list[str] = []
+    for output_ref in step_draft.uses_previous_outputs:
+        if output_ref.from_step < 1 or output_ref.from_step > len(prior_steps):
+            continue
+        source_step = prior_steps[output_ref.from_step - 1]
+        label = output_ref.label or f"Step {output_ref.from_step} output"
+        sections.append(f"{label}: {{{{ {source_step.plan_step_ref}.output.text }}}}")
     return sections
 
 

@@ -82,6 +82,51 @@ def test_resolve_input_intent_treats_word_file_at_end_as_output_not_document_inp
     assert intent.needs_architecture_clarification is False
 
 
+def test_resolve_input_intent_treats_uploaded_ljudinspelning_as_audio() -> None:
+    intent = resolve_input_intent(
+        "Jag vill kunna skicka in en ljudinspelning och få ett bra Word-dokument tillbaka.",
+        {},
+    )
+
+    assert intent.primary_runtime_input == "audio"
+    assert intent.audio_requested is True
+    assert intent.document_runtime_input_requested is False
+    assert intent.needs_architecture_clarification is False
+
+
+def test_resolve_input_intent_keeps_explicit_audio_meeting_docx_prompt_as_audio() -> (
+    None
+):
+    intent = resolve_input_intent(
+        (
+            "Bygg ett flöde där användaren laddar upp en ljudfil vid körning. "
+            "Ljudfilen är en inspelning från ett kommunfullmäktigemöte. "
+            "Flödet ska först transkribera ljudfilen till svensk text. "
+            "Rubrikerna ska inte vara inmatningsfält för användaren, utan ska "
+            "skapas och fyllas i utifrån transkriptionen. DOCX-resultatet ska "
+            "innehålla rubriker i angiven ordning. Slutresultatet ska vara ett "
+            "Word-dokument. Användaren ska bara behöva lämna in ljudfilen vid körning."
+        ),
+        {},
+    )
+
+    assert intent.primary_runtime_input == "audio"
+    assert intent.audio_requested is True
+    assert intent.document_runtime_input_requested is False
+    assert intent.needs_architecture_clarification is False
+
+
+def test_resolve_input_intent_treats_record_meeting_as_audio() -> None:
+    intent = resolve_input_intent(
+        "Jag vill spela in ett möte och få ett protokoll i Word.",
+        {},
+    )
+
+    assert intent.primary_runtime_input == "audio"
+    assert intent.audio_requested is True
+    assert intent.document_runtime_input_requested is False
+
+
 def test_resolve_input_intent_still_requires_architecture_for_audio_and_document_file() -> (
     None
 ):
@@ -118,6 +163,20 @@ def test_resolve_input_intent_keeps_terse_terminal_pdf_upload_as_document_input(
 def test_resolve_input_intent_uses_role_scoped_input_clause_for_uploaded_pdf() -> None:
     intent = resolve_input_intent(
         "Bygg ett flöde som tar ett uppladdat PDF-dokument och genererar en DOCX-rapport.",
+        {},
+    )
+
+    assert intent.primary_runtime_input == "documents"
+    assert intent.document_runtime_input_requested is True
+    assert intent.audio_requested is False
+
+
+def test_resolve_input_intent_treats_uploaded_underlagsfiler_as_documents() -> None:
+    intent = resolve_input_intent(
+        (
+            "Bygg ett flöde där användaren laddar upp flera underlagsfiler "
+            "och en Word-mall."
+        ),
         {},
     )
 

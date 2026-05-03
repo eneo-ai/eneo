@@ -5,6 +5,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
+from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
+    contains_any_token_prefix,
+    normalize_discovery_text,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -26,6 +30,16 @@ _TEMPLATE_FILL_ONLY_KEYS = frozenset(
     {"bindings", "template_asset_id", "template_file_id"}
 )
 _UNFOLDABLE = object()
+_ARTIFACT_GENERATION_PREFIXES = (
+    "create",
+    "generate",
+    "format",
+    "render",
+    "skapa",
+    "generera",
+    "formattera",
+)
+_SWEDISH_ARTIFACT_GENERATION_PREFIXES = ("skapa", "generera", "formattera")
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +92,10 @@ def normalize_ai_builder_step_topology(
         spec,
         terminal_output_type=terminal_output_type,
     )
+    spec, artifact_body_changes = _normalize_pre_terminal_artifact_body_step(
+        spec,
+        terminal_output_type=terminal_output_type,
+    )
     step_refs = {step.plan_step_ref: index + 1 for index, step in enumerate(spec.steps)}
     form_fields = {
         field.name.strip() for field in (spec.form_fields or []) if field.name.strip()
@@ -91,10 +109,11 @@ def normalize_ai_builder_step_topology(
         all_previous_indexes[-1] if len(all_previous_indexes) > 1 else None
     )
     normalized_steps: list[StepSpec] = []
-    changes: list[tuple[StepSpec, StepNormalizationChange]] = list(
-        artifact_tail_changes
-    )
-    mutated = bool(artifact_tail_changes)
+    changes: list[tuple[StepSpec, StepNormalizationChange]] = [
+        *artifact_tail_changes,
+        *artifact_body_changes,
+    ]
+    mutated = bool(changes)
 
     for index, step in enumerate(spec.steps):
         if _can_rewire_all_previous_to_previous_step(
@@ -129,6 +148,135 @@ def normalize_ai_builder_step_topology(
     if not mutated:
         return spec, changes
     return spec.model_copy(update={"steps": normalized_steps}), changes
+
+
+def _normalize_pre_terminal_artifact_body_step(
+    spec: FlowDraftSpecCore,
+    *,
+    terminal_output_type: OutputType | None,
+) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
+    if terminal_output_type not in {OutputType.PDF, OutputType.DOCX}:
+        return spec, []
+    output_type = cast(OutputType, terminal_output_type)
+    if len(spec.steps) < 2:
+        return spec, []
+
+    terminal_step = spec.steps[-1]
+    if terminal_step.output_type != output_type:
+        return spec, []
+
+    normalized_steps: list[StepSpec] = []
+    changes: list[tuple[StepSpec, StepNormalizationChange]] = []
+    for step in spec.steps[:-1]:
+        if not _looks_like_artifact_body_step(step, output_type=output_type):
+            normalized_steps.append(step)
+            continue
+
+        normalized_body = step.model_copy(
+            update={
+                "name": _artifact_body_step_name(
+                    output_type=output_type,
+                    source_text=_step_instruction_text(step),
+                ),
+                "assistant_spec": _artifact_body_step_assistant(
+                    step=step,
+                    output_type=output_type,
+                ),
+            }
+        )
+        normalized_steps.append(normalized_body)
+        changes.append(
+            (
+                normalized_body,
+                StepNormalizationChange(
+                    code="pre_terminal_artifact_body_step_renamed",
+                    field_suffix="name",
+                    message=(
+                        "Renamed a non-terminal artifact-generation helper so "
+                        "it prepares document content while the terminal step "
+                        "owns file creation."
+                    ),
+                ),
+            )
+        )
+
+    if not changes:
+        return spec, []
+
+    return spec.model_copy(
+        update={"steps": [*normalized_steps, terminal_step]}
+    ), changes
+
+
+def _looks_like_artifact_body_step(
+    step: StepSpec,
+    *,
+    output_type: OutputType,
+) -> bool:
+    if step.output_type != OutputType.TEXT:
+        return False
+    if step.output_mode != OutputMode.PASS_THROUGH:
+        return False
+    normalized = normalize_discovery_text(_step_instruction_text(step))
+    if not _mentions_artifact_type(normalized, output_type=output_type):
+        return False
+    return contains_any_token_prefix(normalized, _ARTIFACT_GENERATION_PREFIXES)
+
+
+def _mentions_artifact_type(text: str, *, output_type: OutputType) -> bool:
+    if output_type == OutputType.DOCX:
+        return contains_any_token_prefix(text, ("docx", "word"))
+    if output_type == OutputType.PDF:
+        return contains_any_token_prefix(text, ("pdf",))
+    return False
+
+
+def _artifact_body_step_name(*, output_type: OutputType, source_text: str) -> str:
+    normalized = normalize_discovery_text(source_text)
+    artifact_name = output_type.value.upper()
+    if contains_any_token_prefix(normalized, _SWEDISH_ARTIFACT_GENERATION_PREFIXES):
+        return f"Förbered {artifact_name}-innehåll"
+    return f"Prepare {artifact_name} content"
+
+
+def _artifact_body_step_assistant(
+    *,
+    step: StepSpec,
+    output_type: OutputType,
+) -> AssistantSpec:
+    source_text = _step_instruction_text(step)
+    prefix = _artifact_body_step_instruction_prefix(
+        output_type=output_type,
+        source_text=source_text,
+    )
+    instructions = step.assistant_spec.instructions.strip()
+    return step.assistant_spec.model_copy(
+        update={
+            "instructions": (f"{prefix}\n\n{instructions}" if instructions else prefix)
+        }
+    )
+
+
+def _artifact_body_step_instruction_prefix(
+    *,
+    output_type: OutputType,
+    source_text: str,
+) -> str:
+    artifact_name = output_type.value.upper()
+    normalized = normalize_discovery_text(source_text)
+    if contains_any_token_prefix(normalized, _SWEDISH_ARTIFACT_GENERATION_PREFIXES):
+        return (
+            f"Förbered textinnehållet som terminalsteget ska rendera till "
+            f"{artifact_name}. Terminalsteget skapar själva {artifact_name}-filen."
+        )
+    return (
+        f"Prepare the text content that the terminal step will render as "
+        f"{artifact_name}. The terminal step creates the actual {artifact_name} file."
+    )
+
+
+def _step_instruction_text(step: StepSpec) -> str:
+    return f"{step.name} {step.assistant_spec.instructions}"
 
 
 def _normalize_terminal_artifact_tail(

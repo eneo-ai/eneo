@@ -222,6 +222,11 @@ def _model_slot_can_replace(
     if existing_slot.source == "policy_default":
         return model_confidence == "high"
     if existing_slot.source == "heuristic":
+        if (
+            existing_slot.name == "primary_runtime_input"
+            and existing_slot.confidence == "high"
+        ):
+            return False
         return model_confidence in {"high", "medium"}
     return False
 
@@ -348,7 +353,7 @@ def _resolve_slots(
     )
     if (
         runtime_metadata_fields is None
-        and primary_runtime_input in {"documents", "text_and_documents"}
+        and primary_runtime_input != "unknown"
         and not mentions_runtime_metadata(freeform_text)
     ):
         runtime_metadata_fields = "no_extra_metadata"
@@ -464,7 +469,50 @@ def _resolve_slot_origin(
         if freeform_text
         else "heuristic:no explicit evidence"
     )
-    return ("heuristic", (heuristic_evidence,), "medium")
+    return (
+        "heuristic",
+        (heuristic_evidence,),
+        _heuristic_slot_confidence(
+            question_id=question_id,
+            slot_value=slot_value,
+            freeform_text=freeform_text,
+        ),
+    )
+
+
+def _heuristic_slot_confidence(
+    *,
+    question_id: str,
+    slot_value: str,
+    freeform_text: str,
+) -> SlotConfidence:
+    if question_id != "input_material_mode" or not freeform_text:
+        return "medium"
+
+    input_intent = resolve_input_intent(freeform_text, {})
+    if (
+        input_intent.primary_runtime_input != slot_value
+        or input_intent.needs_architecture_clarification
+    ):
+        return "medium"
+
+    if slot_value == "audio":
+        return (
+            "high"
+            if input_intent.audio_requested
+            and not input_intent.document_runtime_input_requested
+            else "medium"
+        )
+    if slot_value in {"documents", "text_and_documents"}:
+        return (
+            "high"
+            if input_intent.document_runtime_input_requested
+            and not input_intent.audio_requested
+            else "medium"
+        )
+    if slot_value == "text":
+        return "high"
+    return "medium"
 
 
 def _is_policy_default_slot(

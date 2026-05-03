@@ -88,23 +88,46 @@ _DOCUMENT_REFERENCE_PREFIXES: tuple[str, ...] = (
     "word",
     "dokument",
     "document",
+    "underlag",
     "fil",
     "file",
     "bilag",
     "attachment",
 )
 
+_AUDIO_REFERENCE_PREFIXES: tuple[str, ...] = (
+    "audio",
+    "ljud",
+    "inspelning",
+    "recording",
+    "samtal",
+    "möte",
+    "mote",
+    "meeting",
+    "intervju",
+    "interview",
+)
+
 _RUNTIME_FILE_ACTION_PREFIXES: tuple[str, ...] = (
     "uppladd",
+    "ladd",
     "upload",
     "bifog",
     "attach",
     "receiv",
+    "skick",
 )
 
 _RUNTIME_FILE_ACTION_PHRASES: tuple[str, ...] = (
     "ladda upp",
     "skicka in",
+    "lämna in",
+    "lamna in",
+    "spela in",
+    "spelar in",
+    "record",
+    "ta emot",
+    "tar emot",
     "send in",
     "runtime input",
     "primary input",
@@ -148,7 +171,6 @@ _TEXT_REFERENCE_PREFIXES: tuple[str, ...] = (
 )
 
 _RUNTIME_TEXT_ACTION_PREFIXES: tuple[str, ...] = (
-    "skriv",
     "paste",
     "klistra",
     "ange",
@@ -160,10 +182,10 @@ _RUNTIME_TEXT_ACTION_PREFIXES: tuple[str, ...] = (
 _RUNTIME_TEXT_ACTION_PHRASES: tuple[str, ...] = (
     "ta emot",
     "tar emot",
+    "skriv in",
+    "skriva in",
     "text input",
     "runtime input",
-    "vid körning",
-    "vid korning",
     "input field",
 )
 
@@ -475,7 +497,11 @@ def _document_requested(
 
 
 def _audio_runtime_input_requested(text: str) -> bool:
-    if not text or _text_runtime_input_requested(text):
+    if not text:
+        return False
+    if _mentions_runtime_audio_input(text):
+        return True
+    if _text_runtime_input_requested(text):
         return False
     has_transcription_semantics = contains_any_token_prefix(
         text,
@@ -488,6 +514,15 @@ def _audio_runtime_input_requested(text: str) -> bool:
     return contains_any_token_prefix(text, _AUDIO_PREFIX_MARKERS) or _contains_any(
         text,
         ("one on one",),
+    )
+
+
+def _mentions_runtime_audio_input(text: str) -> bool:
+    return _reference_has_nearby_runtime_action(
+        text,
+        reference_prefixes=_AUDIO_REFERENCE_PREFIXES,
+        action_prefixes=_RUNTIME_FILE_ACTION_PREFIXES,
+        action_phrases=_RUNTIME_FILE_ACTION_PHRASES,
     )
 
 
@@ -524,18 +559,11 @@ def _document_runtime_input_requested(text: str) -> bool:
         ),
     ):
         return True
-    if _contains_any(text, _DOCUMENT_INPUT_MARKERS):
-        return True
-    return _contains_any(text, _DOCUMENT_UPLOAD_MARKERS) and _contains_any(
+    return _reference_has_nearby_runtime_action(
         text,
-        (
-            "pdf",
-            "docx",
-            "word",
-            "document",
-            "documents",
-            "dokument",
-        ),
+        reference_prefixes=_DOCUMENT_REFERENCE_PREFIXES,
+        action_prefixes=_RUNTIME_FILE_ACTION_PREFIXES,
+        action_phrases=_RUNTIME_FILE_ACTION_PHRASES,
     )
 
 
@@ -548,18 +576,12 @@ def _mentions_runtime_document_input(text: str) -> bool:
     with generic document/file references.
     """
 
-    if not _mentions_document_reference(text):
-        return False
-    if contains_any_token_prefix(text, _RUNTIME_FILE_ACTION_PREFIXES):
-        return True
-    if _contains_any(text, _RUNTIME_FILE_ACTION_PHRASES):
-        return True
-    tokens = text.split()
-    return "emot" in tokens and any(token in {"ta", "tar"} for token in tokens)
-
-
-def _mentions_document_reference(text: str) -> bool:
-    return contains_any_token_prefix(text, _DOCUMENT_REFERENCE_PREFIXES)
+    return _reference_has_nearby_runtime_action(
+        text,
+        reference_prefixes=_DOCUMENT_REFERENCE_PREFIXES,
+        action_prefixes=_RUNTIME_FILE_ACTION_PREFIXES,
+        action_phrases=_RUNTIME_FILE_ACTION_PHRASES,
+    )
 
 
 def _text_runtime_input_requested(text: str) -> bool:
@@ -569,11 +591,12 @@ def _text_runtime_input_requested(text: str) -> bool:
 
 
 def _mentions_runtime_text_input(text: str) -> bool:
-    if not contains_any_token_prefix(text, _TEXT_REFERENCE_PREFIXES):
-        return False
-    if contains_any_token_prefix(text, _RUNTIME_TEXT_ACTION_PREFIXES):
-        return True
-    return _contains_any(text, _RUNTIME_TEXT_ACTION_PHRASES)
+    return _reference_has_nearby_runtime_action(
+        text,
+        reference_prefixes=_TEXT_REFERENCE_PREFIXES,
+        action_prefixes=_RUNTIME_TEXT_ACTION_PREFIXES,
+        action_phrases=_RUNTIME_TEXT_ACTION_PHRASES,
+    )
 
 
 def _has_explicit_input_resolution(explicit_question_ids: set[str] | None) -> bool:
@@ -588,3 +611,85 @@ def _has_explicit_input_resolution(explicit_question_ids: set[str] | None) -> bo
 
 def _mentions_source_material_underlag(text: str) -> bool:
     return contains_any_phrase(text, ("underlag",))
+
+
+def _reference_has_nearby_runtime_action(
+    text: str,
+    *,
+    reference_prefixes: tuple[str, ...],
+    action_prefixes: tuple[str, ...],
+    action_phrases: tuple[str, ...],
+    window: int = 6,
+) -> bool:
+    tokens = text.split()
+    if not tokens:
+        return False
+
+    reference_indexes = tuple(
+        index
+        for index, token in enumerate(tokens)
+        if _token_matches_any_prefix(token, reference_prefixes)
+    )
+    if not reference_indexes:
+        return False
+
+    action_indexes = tuple(
+        index
+        for index, token in enumerate(tokens)
+        if _token_matches_any_prefix(token, action_prefixes)
+    )
+    for reference_index in reference_indexes:
+        if any(
+            abs(reference_index - action_index) <= window
+            for action_index in action_indexes
+        ):
+            return True
+        if _has_nearby_action_phrase(
+            tokens,
+            reference_index=reference_index,
+            action_phrases=action_phrases,
+            window=window,
+        ):
+            return True
+    return False
+
+
+def _has_nearby_action_phrase(
+    tokens: list[str],
+    *,
+    reference_index: int,
+    action_phrases: tuple[str, ...],
+    window: int,
+) -> bool:
+    for phrase in action_phrases:
+        phrase_tokens = normalize_discovery_text(phrase).split()
+        if not phrase_tokens:
+            continue
+        for start_index in _find_token_sequence_indexes(tokens, phrase_tokens):
+            end_index = start_index + len(phrase_tokens) - 1
+            if start_index - window <= reference_index <= end_index + window:
+                return True
+    return False
+
+
+def _find_token_sequence_indexes(
+    tokens: list[str],
+    needle: list[str],
+) -> tuple[int, ...]:
+    if not tokens or not needle or len(needle) > len(tokens):
+        return ()
+    last_start = len(tokens) - len(needle)
+    return tuple(
+        start
+        for start in range(last_start + 1)
+        if tokens[start : start + len(needle)] == needle
+    )
+
+
+def _token_matches_any_prefix(token: str, prefixes: tuple[str, ...]) -> bool:
+    return any(
+        normalized_prefix and token.startswith(normalized_prefix)
+        for normalized_prefix in (
+            normalize_discovery_text(prefix) for prefix in prefixes
+        )
+    )

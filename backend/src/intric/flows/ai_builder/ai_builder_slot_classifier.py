@@ -18,6 +18,7 @@ SlotClassificationConfidence = Literal["high", "medium", "low"]
 _SLOT_CLASSIFICATION_CACHE: dict[str, "SlotClassificationResult"] = {}
 _MAX_CACHE_ENTRIES = 128
 UNKNOWN_SLOT_VALUE = "unknown"
+_SLOT_CLASSIFICATION_RESPONSE_FORMAT: dict[str, object] = {"type": "json_object"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +71,10 @@ async def classify_slots(
         return replace(cached, cached=True)
 
     started_at = time.perf_counter()
+    completion_kwargs = {
+        "response_format": _SLOT_CLASSIFICATION_RESPONSE_FORMAT,
+        **litellm_kwargs,
+    }
     try:
         response = await litellm_client.acompletion(
             model=litellm_model,
@@ -82,7 +87,7 @@ async def classify_slots(
             drop_params=True,
             max_tokens=500,
             temperature=0.0,
-            **litellm_kwargs,
+            **completion_kwargs,
         )
     except Exception:
         logger.warning(
@@ -233,7 +238,14 @@ def _build_slot_classification_prompt(
         "You classify unresolved flow-builder intent into constrained slot values. "
         "Return JSON only. Never explain outside the schema. "
         "Use a slot only when the conversation provides real evidence. "
-        "If still ambiguous, use value `unknown` with confidence `low`."
+        "Separate runtime source material from intermediate work and final artifacts. "
+        "A final DOCX/PDF/Word document is not document input. "
+        "Uploaded or recorded audio for transcription is audio input, even when the "
+        "final output is a Word/PDF document. "
+        "If the user says values must be derived from source material or that the "
+        "builder should not ask the user, do not classify that as runtime form fields. "
+        "If still ambiguous, use value `unknown` with confidence `low` and explain "
+        "what question should be asked in contradictions."
     )
     user = (
         f"{language_hint}\n\n"

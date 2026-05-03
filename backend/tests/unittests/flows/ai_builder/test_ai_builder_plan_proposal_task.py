@@ -100,6 +100,35 @@ def test_plan_proposal_prompt_honors_continue_without_mcp_decision():
     assert "collect it as runtime input" in prompt
 
 
+def test_plan_proposal_prompt_identifies_runtime_metadata_as_compiler_policy():
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=PlanningState.empty(),
+        confirmed_requirements={"summary": "Skapa ett svenskt ljud till DOCX-flöde."},
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+    )
+
+    assert "input_fields" in prompt
+    assert "Runtime metadata policy" in prompt
+    assert "compiler" in prompt
+    assert "clearly ask for runtime metadata" in prompt
+
+
+def test_plan_proposal_prompt_scopes_audio_transcription_to_backend():
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=PlanningState.empty(),
+        confirmed_requirements={"summary": "Skapa ett svenskt ljud till DOCX-flöde."},
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+    )
+
+    assert "committed audio input" in prompt
+    assert "backend inserts the first transcription/upload step" in prompt
+    assert "after transcription" in prompt
+
+
 def test_plan_proposal_prompt_honors_selected_mcp_server():
     prompt = build_plan_proposal_system_prompt(
         planning_state=PlanningState.empty(),

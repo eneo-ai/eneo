@@ -1743,6 +1743,65 @@ class TestRichWorkflowInvariants:
             "formulärfält" in issue or "form_fields" in issue for issue in issues
         )
 
+    def test_transcript_derived_headings_do_not_require_form_fields(self) -> None:
+        prompt = (
+            "Bygg ett flöde där användaren laddar upp en ljudfil vid körning. "
+            "Ljudfilen är en inspelning från ett kommunfullmäktigemöte. Flödet "
+            "ska först transkribera ljudfilen till svensk text. Därefter ska "
+            "transkriptionen analyseras och struktureras till ett "
+            "mötesprotokoll. Rubrikerna ska inte vara inmatningsfält för "
+            "användaren, utan ska skapas och fyllas i utifrån transkriptionen. "
+            "Om mötestitel, organisationsnamn eller sekreterare inte framgår "
+            "tydligt av transkriptionen ska flödet skriva “Ej angivet i "
+            "transkriptionen” i rätt sektion, inte fråga användaren om det vid "
+            "körning. Slutresultatet ska vara ett Word-dokument."
+        )
+        spec = FlowDraftSpecCore(
+            flow_name="Mötesprotokoll",
+            steps=[
+                _step(
+                    "step_audio",
+                    "Transkribera ljud",
+                    "Transkribera ljudfilen till svensk text.",
+                    input_type=InputType.AUDIO,
+                    output_type=OutputType.TEXT,
+                    output_mode=OutputMode.TRANSCRIBE_ONLY,
+                ),
+                _step(
+                    "step_protocol",
+                    "Strukturera mötesprotokoll",
+                    (
+                        "Skapa rubriker från transkriptionen och skriv "
+                        "Ej angivet i transkriptionen när uppgift saknas."
+                    ),
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "required": ["protocol_sections"],
+                        "properties": {"protocol_sections": {"type": "object"}},
+                        "additionalProperties": False,
+                    },
+                ),
+                _step(
+                    "step_docx",
+                    "Skapa DOCX",
+                    "Skapa ett Word-dokument från mötesprotokollet.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                    output_type=OutputType.DOCX,
+                ),
+            ],
+        )
+
+        feedback = build_conversation_aware_quality_feedback(
+            [{"role": "user", "content": prompt}],
+            spec,
+        )
+
+        assert feedback is None
+
     def test_rich_workflow_requires_json_contract_step_fires_when_missing(
         self,
     ) -> None:

@@ -14,6 +14,7 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
     NewStepDraft,
+    PreviousOutputRef,
     StructuredFieldDraft,
 )
 from intric.flows.ai_builder.pattern_registry import (
@@ -147,6 +148,53 @@ _COMPILED_CHAIN_STEP_TEMPLATES = MappingProxyType(
             task=(
                 "Create the final output from the reviewed analysis. Preserve "
                 "the user's requested scope, ordering, and constraints."
+            ),
+        ),
+    }
+)
+
+_SWEDISH_COMPILED_CHAIN_STEP_TEMPLATES = MappingProxyType(
+    {
+        FLOW_INPUT_AUDIO_TRANSCRIPTION: CompiledChainStepTemplate(
+            name="Transkribera ljud",
+            task=(
+                "Transkribera det uppladdade ljudet till text innan analys "
+                "eller artefaktgenerering."
+            ),
+        ),
+        EXTRACT_TEMPLATE_VARIABLES_STEP: CompiledChainStepTemplate(
+            name="Extrahera mallvariabler",
+            task=(
+                "Extrahera stabila fält och källfakta som behövs innan "
+                "DOCX-mallen fylls."
+            ),
+        ),
+        STRUCTURED_EXTRACTION_STEP: CompiledChainStepTemplate(
+            name="Extrahera strukturerad grund",
+            task=(
+                "Extrahera källfakta, huvudpunkter och osäkerheter som behövs "
+                "för den fortsatta analysen."
+            ),
+        ),
+        ANALYSIS_OR_QUALITY_REVIEW_STEP: CompiledChainStepTemplate(
+            name="Granska kvalitet och luckor",
+            task=(
+                "Granska analysen för saknad information, osäkerhet och "
+                "kvalitetsproblem innan slutresultatet skapas."
+            ),
+        ),
+        TEMPLATE_FILL_DOCX_STEP: CompiledChainStepTemplate(
+            name="Fyll DOCX-mall",
+            task=(
+                "Fyll DOCX-mallen med det förberedda innehållet. Bevara "
+                "användarens önskade omfattning och terminologi."
+            ),
+        ),
+        TERMINAL_ARTIFACT_STEP: CompiledChainStepTemplate(
+            name="Skapa slutresultat",
+            task=(
+                "Skapa slutresultatet från den granskade analysen. Bevara "
+                "användarens önskade omfattning, ordning och begränsningar."
             ),
         ),
     }
@@ -319,6 +367,12 @@ class StepSkeletonPlan:
                 allow_json_output=True,
             )
             steps.append(terminal_step)
+        steps = _attach_audio_source_foundation_refs(
+            steps=steps,
+            prefix_slots=self.prefix_slots,
+            final_output_type=self.final_output_type,
+            ui_language=self.ui_language,
+        )
 
         return StepSkeletonComposition(
             steps=tuple(steps),
@@ -526,8 +580,105 @@ def compiled_chain_step_template(
     return _COMPILED_CHAIN_STEP_TEMPLATES[chain_token]
 
 
+def _compiled_chain_step_template(
+    chain_token: ChainStepToken,
+    *,
+    ui_language: str | None,
+) -> CompiledChainStepTemplate:
+    if ui_language == "sv":
+        return _SWEDISH_COMPILED_CHAIN_STEP_TEMPLATES[chain_token]
+    return _COMPILED_CHAIN_STEP_TEMPLATES[chain_token]
+
+
 def materialized_compiled_pattern_ids() -> frozenset[str]:
     return _COMPILED_PATTERN_MATERIALIZER_IDS
+
+
+def _attach_audio_source_foundation_refs(
+    *,
+    steps: list[NewStepDraft],
+    prefix_slots: tuple[StepSkeleton, ...],
+    final_output_type: OutputType,
+    ui_language: str | None,
+) -> list[NewStepDraft]:
+    if final_output_type not in _DOCUMENT_OUTPUT_TYPES:
+        return steps
+    if not any(
+        slot.chain_token == FLOW_INPUT_AUDIO_TRANSCRIPTION for slot in prefix_slots
+    ):
+        return steps
+
+    source_ref = _audio_transcription_output_ref(
+        prefix_slots,
+        ui_language=ui_language,
+    )
+    if source_ref is None:
+        return steps
+
+    updated_steps = list(steps)
+    changed = False
+    for step_index, step in enumerate(steps):
+        if not _needs_source_foundation_ref(
+            steps=steps,
+            step=step,
+            step_index=step_index,
+            source_ref=source_ref,
+        ):
+            continue
+
+        updated_steps[step_index] = step.model_copy(
+            update={
+                # Foundation refs must render alongside the immediate previous JSON.
+                "input_type": InputType.TEXT,
+                "uses_previous_outputs": [*step.uses_previous_outputs, source_ref],
+            }
+        )
+        changed = True
+
+    return updated_steps if changed else steps
+
+
+def _audio_transcription_output_ref(
+    prefix_slots: tuple[StepSkeleton, ...],
+    *,
+    ui_language: str | None,
+) -> PreviousOutputRef | None:
+    for step_index, slot in enumerate(prefix_slots):
+        if slot.chain_token == FLOW_INPUT_AUDIO_TRANSCRIPTION:
+            return PreviousOutputRef(
+                from_step=step_index + 1,
+                label=_source_material_label(ui_language),
+            )
+    return None
+
+
+def _source_material_label(ui_language: str | None) -> str:
+    if ui_language == "sv":
+        return "Källmaterial"
+    return "Source material"
+
+
+def _needs_source_foundation_ref(
+    *,
+    steps: list[NewStepDraft],
+    step: NewStepDraft,
+    step_index: int,
+    source_ref: PreviousOutputRef,
+) -> bool:
+    if step.input_source != InputSource.PREVIOUS_STEP:
+        return False
+    if step.output_type in _DOCUMENT_OUTPUT_TYPES:
+        return False
+    if step_index == 0:
+        return False
+    if source_ref.from_step >= step_index:
+        return False
+    if any(
+        output_ref.from_step == source_ref.from_step
+        for output_ref in step.uses_previous_outputs
+    ):
+        return False
+    return True
 
 
 def _compose_step_skeleton_slot(
@@ -890,6 +1041,7 @@ def _materialize_docx_template_skeleton(
                 runtime_required=runtime_required,
                 runtime_max_files=runtime_max_files,
                 output_fields=tuple(default_structured_output_fields()),
+                ui_language=ui_language,
             ),
         ),
         semantic_slot=_semantic_required_slot(
@@ -918,6 +1070,7 @@ def _materialize_docx_template_skeleton(
                 output_type=OutputType.DOCX,
                 output_mode=OutputMode.TEMPLATE_FILL,
                 document_delivery_mode="template_fill",
+                ui_language=ui_language,
             ),
         ),
         final_output_type=OutputType.DOCX,
@@ -963,6 +1116,7 @@ def _materialize_structured_quality_skeleton(
                 runtime_required=runtime_required,
                 runtime_max_files=runtime_max_files,
                 output_fields=tuple(default_structured_output_fields()),
+                ui_language=ui_language,
             ),
         ),
         semantic_slot=_semantic_required_slot(
@@ -992,6 +1146,7 @@ def _materialize_structured_quality_skeleton(
                 output_type=OutputType.TEXT,
                 output_mode=OutputMode.PASS_THROUGH,
                 document_delivery_mode="not_applicable",
+                ui_language=ui_language,
             ),
             _terminal_artifact_slot(
                 slot_ordinal=3,
@@ -1036,6 +1191,7 @@ def _materialize_audio_artifact_skeleton(
                 document_delivery_mode="not_applicable",
                 runtime_required=runtime_required,
                 runtime_max_files=runtime_max_files,
+                ui_language=ui_language,
             ),
         ),
         semantic_slot=_semantic_required_slot(
@@ -1256,6 +1412,7 @@ def _terminal_artifact_slot(
         default_instructions=default_final_step_instructions(
             ui_language=ui_language,
         ),
+        ui_language=ui_language,
     )
 
 
@@ -1273,8 +1430,9 @@ def _backend_fixed_slot(
     output_fields: tuple[StructuredFieldDraft, ...] = (),
     default_name: str | None = None,
     default_instructions: str | None = None,
+    ui_language: str | None = None,
 ) -> StepSkeleton:
-    template = _COMPILED_CHAIN_STEP_TEMPLATES[chain_token]
+    template = _compiled_chain_step_template(chain_token, ui_language=ui_language)
     return StepSkeleton(
         slot_ordinal=slot_ordinal,
         slot_id=chain_token,

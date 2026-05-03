@@ -6,6 +6,9 @@ from typing import Any, Mapping
 from intric.flows.ai_builder.ai_builder_form_intake_signals import (
     mentions_form_field_needs,
 )
+from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
+    runtime_input_fields_declared_absent,
+)
 
 _DOCUMENT_INPUT_MARKERS: tuple[str, ...] = (
     "uppladdade dokument",
@@ -72,8 +75,6 @@ _MULTI_STEP_PREFERENCE_MARKERS: tuple[str, ...] = (
 )
 
 _FORM_COMPLEMENT_MARKERS: tuple[str, ...] = (
-    "formulärfält",
-    "inmatningsfält",
     "kompletterande formulärfält",
     "kompletterande fält",
     "komplettera med",
@@ -82,6 +83,21 @@ _FORM_COMPLEMENT_MARKERS: tuple[str, ...] = (
     "metadatafält",
     "metadata fields",
 )
+_DERIVE_FROM_INPUT_ONLY_MARKERS: tuple[str, ...] = (
+    "baserat på transkriptionen",
+    "utifrån transkriptionen",
+    "från transkriptionen",
+    "framgår av transkriptionen",
+    "framgår tydligt av transkriptionen",
+    "ej angivet i transkriptionen",
+    "inte fråga användaren",
+    "fråga inte användaren",
+    "ska inte vara inmatningsfält",
+    "derive from the transcript",
+    "based on the transcript",
+    "do not ask the user",
+    "don't ask the user",
+)
 
 _RICH_DOCUMENT_WORKFLOW_SIGNAL = "rich_document_workflow"
 
@@ -89,6 +105,7 @@ _RICH_DOCUMENT_WORKFLOW_SIGNAL = "rich_document_workflow"
 @dataclass(frozen=True, slots=True)
 class PlannerPatternSignals:
     needs_form_fields: bool = False
+    derive_from_input_only: bool = False
     prefers_structured_intermediate: bool = False
     prefers_quality_step: bool = False
     rich_document_workflow: bool = False
@@ -150,9 +167,16 @@ def detect_planner_pattern_signals(text: str) -> PlannerPatternSignals:
     prefers_quality_step = _contains_any(
         normalized, _QUALITY_STEP_MARKERS + _MULTI_STEP_PREFERENCE_MARKERS
     )
-    needs_form_fields = mentions_form_field_needs(normalized) or _contains_any(
-        normalized, _FORM_COMPLEMENT_MARKERS
+    derive_from_input_only = runtime_input_fields_declared_absent(
+        normalized
+    ) or _contains_any(
+        normalized,
+        _DERIVE_FROM_INPUT_ONLY_MARKERS,
     )
+    needs_form_fields = (
+        mentions_form_field_needs(normalized)
+        or _contains_any(normalized, _FORM_COMPLEMENT_MARKERS)
+    ) and not derive_from_input_only
     rich_document_workflow = (
         document_like_input
         and document_like_output
@@ -162,6 +186,7 @@ def detect_planner_pattern_signals(text: str) -> PlannerPatternSignals:
     )
     return PlannerPatternSignals(
         needs_form_fields=needs_form_fields,
+        derive_from_input_only=derive_from_input_only,
         prefers_structured_intermediate=prefers_structured_intermediate,
         prefers_quality_step=prefers_quality_step,
         rich_document_workflow=rich_document_workflow,

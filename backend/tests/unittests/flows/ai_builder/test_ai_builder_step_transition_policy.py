@@ -226,6 +226,93 @@ def test_normalize_ai_builder_spec_promotes_trailing_text_after_requested_pdf() 
     ] == ["terminal_artifact_helper_folded"]
 
 
+def test_normalize_ai_builder_spec_renames_pre_terminal_docx_body_step() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Audio DOCX",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Identifiera struktur",
+                input_source=InputSource.FLOW_INPUT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_b",
+                name="Formatera och generera DOCX",
+                instructions="Bygg ett DOCX-dokument med rubriker och brödtext.",
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+            _step(
+                ref="step_c",
+                name="Skapa DOCX",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.DOCX,
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.DOCX,
+    )
+
+    body_step = normalized.steps[-2]
+    assert body_step.name == "Förbered DOCX-innehåll"
+    assert body_step.output_type == OutputType.TEXT
+    assert normalized.steps[-1].name == "Skapa DOCX"
+    assert normalized.steps[-1].output_type == OutputType.DOCX
+    assert "terminalsteget ska rendera" in body_step.assistant_spec.instructions
+    assert [
+        change.code
+        for _step_spec, change in changes
+        if change.code == "pre_terminal_artifact_body_step_renamed"
+    ] == ["pre_terminal_artifact_body_step_renamed"]
+
+
+def test_normalize_ai_builder_spec_renames_non_adjacent_pdf_body_step() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="PDF report",
+        steps=[
+            _step(ref="step_a", name="Extract", input_source=InputSource.FLOW_INPUT),
+            _step(
+                ref="step_b",
+                name="Skapa PDF-rapport",
+                instructions="Skapa en PDF-rapport med slutsats och risker.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.TEXT,
+            ),
+            _step(
+                ref="step_c",
+                name="Granska kvalitet",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.TEXT,
+            ),
+            _step(
+                ref="step_d",
+                name="Skapa PDF",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.PDF,
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.PDF,
+    )
+
+    assert normalized.steps[1].name == "Förbered PDF-innehåll"
+    assert normalized.steps[2].name == "Granska kvalitet"
+    assert normalized.steps[-1].name == "Skapa PDF"
+    assert [
+        change.code
+        for _step_spec, change in changes
+        if change.code == "pre_terminal_artifact_body_step_renamed"
+    ] == ["pre_terminal_artifact_body_step_renamed"]
+
+
 def test_normalize_ai_builder_spec_preserves_artifact_tail_without_output_intent() -> (
     None
 ):

@@ -10,6 +10,7 @@ from intric.flows.ai_builder.ai_builder_models import InputSource, InputType, Ou
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     PreviousFieldRef,
+    PreviousOutputRef,
 )
 from intric.flows.ai_builder.ai_builder_structured_field_paths import (
     missing_draft_field_path,
@@ -94,8 +95,14 @@ def normalize_create_draft_mechanics(draft: FlowCreateDraft) -> FlowCreateDraft:
             for field_name in step.uses_form_fields
             if field_name in known_form_fields
         ]
+        normalized_output_refs = _compile_safe_previous_output_refs(
+            steps=mechanically_normalized_steps,
+            step_index=step_index,
+            refs=step.uses_previous_outputs,
+        )
         if (
             normalized_refs == step.uses_previous_fields
+            and normalized_output_refs == step.uses_previous_outputs
             and normalized_form_fields == step.uses_form_fields
         ):
             updated_steps.append(step)
@@ -106,6 +113,7 @@ def normalize_create_draft_mechanics(draft: FlowCreateDraft) -> FlowCreateDraft:
                 update={
                     "uses_form_fields": normalized_form_fields,
                     "uses_previous_fields": normalized_refs,
+                    "uses_previous_outputs": normalized_output_refs,
                 }
             )
         )
@@ -191,6 +199,28 @@ def _compile_safe_previous_field_refs(
             continue
         seen.add(key)
         safe_refs.append(field_ref)
+    return safe_refs
+
+
+def _compile_safe_previous_output_refs(
+    *,
+    steps: list[NewStepDraft],
+    step_index: int,
+    refs: list[PreviousOutputRef],
+) -> list[PreviousOutputRef]:
+    safe_refs: list[PreviousOutputRef] = []
+    seen: set[int] = set()
+    for output_ref in refs:
+        target_index = output_ref.from_step - 1
+        if target_index < 0 or target_index >= step_index:
+            continue
+        target_step = steps[target_index]
+        if target_step.output_type != OutputType.TEXT:
+            continue
+        if output_ref.from_step in seen:
+            continue
+        seen.add(output_ref.from_step)
+        safe_refs.append(output_ref)
     return safe_refs
 
 

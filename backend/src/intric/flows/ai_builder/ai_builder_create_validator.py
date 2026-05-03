@@ -40,6 +40,11 @@ def validate_create_draft(draft: FlowCreateDraft) -> SpecValidationResult:
             step_index=index,
             result=result,
         )
+        _validate_previous_output_references(
+            draft=draft,
+            step_index=index,
+            result=result,
+        )
 
     return result
 
@@ -108,5 +113,37 @@ def _validate_previous_field_references(
                 message=(
                     f"uses_previous_fields references unknown structured field path '{field_ref.field_path}' "
                     f"on step {field_ref.from_step}."
+                ),
+            )
+
+
+def _validate_previous_output_references(
+    *,
+    draft: FlowCreateDraft,
+    step_index: int,
+    result: SpecValidationResult,
+) -> None:
+    step = draft.steps[step_index]
+    step_ref = f"steps[{step_index}]"
+    for output_ref in step.uses_previous_outputs:
+        target_index = output_ref.from_step - 1
+        if target_index < 0 or target_index >= step_index:
+            result.add_error(
+                step_ref=step_ref,
+                code="invalid_previous_output_source",
+                message=(
+                    "uses_previous_outputs must point at an earlier step in the "
+                    "create draft."
+                ),
+            )
+            continue
+        target_step = draft.steps[target_index]
+        if target_step.output_type != OutputType.TEXT:
+            result.add_error(
+                step_ref=step_ref,
+                code="previous_output_source_requires_text_output",
+                message=(
+                    "uses_previous_outputs can only reference earlier steps that "
+                    "produce text output."
                 ),
             )

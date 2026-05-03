@@ -3,10 +3,33 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from typing import Literal, TypeAlias
 
 from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_phrase,
     normalize_discovery_text,
+)
+
+RuntimeMetadataState: TypeAlias = Literal[
+    "no_extra_metadata",
+    "basic_case_metadata",
+    "detailed_case_metadata",
+]
+NO_EXTRA_RUNTIME_METADATA: RuntimeMetadataState = "no_extra_metadata"
+BASIC_CASE_METADATA: RuntimeMetadataState = "basic_case_metadata"
+DETAILED_CASE_METADATA: RuntimeMetadataState = "detailed_case_metadata"
+_RUNTIME_METADATA_STATES: frozenset[RuntimeMetadataState] = frozenset(
+    (
+        NO_EXTRA_RUNTIME_METADATA,
+        BASIC_CASE_METADATA,
+        DETAILED_CASE_METADATA,
+    )
+)
+_RUNTIME_METADATA_STATES_ALLOWING_FIELDS: frozenset[RuntimeMetadataState] = frozenset(
+    (
+        BASIC_CASE_METADATA,
+        DETAILED_CASE_METADATA,
+    )
 )
 
 
@@ -249,25 +272,27 @@ def extract_runtime_input_field_hints(text: str) -> tuple[RuntimeInputFieldHint,
     return tuple(hints)
 
 
-def extract_runtime_input_field_hints_for_metadata_state(
-    text: str,
-    *,
-    runtime_metadata_state: str | None,
-) -> tuple[RuntimeInputFieldHint, ...]:
-    """Extract field hints only when the server policy allows secondary fields."""
-
-    if runtime_metadata_state == "no_extra_metadata":
-        return ()
-    return extract_runtime_input_field_hints(text)
+def normalize_runtime_metadata_state(
+    value: str | None,
+) -> RuntimeMetadataState | None:
+    if value in _RUNTIME_METADATA_STATES:
+        return value
+    return None
 
 
-def infer_runtime_metadata_slot(text: str) -> str | None:
+def runtime_metadata_allows_input_fields(
+    state: RuntimeMetadataState | None,
+) -> bool:
+    return state in _RUNTIME_METADATA_STATES_ALLOWING_FIELDS
+
+
+def infer_runtime_metadata_slot(text: str) -> RuntimeMetadataState | None:
     if runtime_input_fields_declared_absent(text):
-        return "no_extra_metadata"
+        return NO_EXTRA_RUNTIME_METADATA
     if extract_runtime_input_field_hints(text):
-        return "detailed_case_metadata"
+        return DETAILED_CASE_METADATA
     if runtime_input_fields_requested(text):
-        return "basic_case_metadata"
+        return BASIC_CASE_METADATA
     return None
 
 

@@ -58,6 +58,55 @@ def test_normalize_create_draft_mechanics_prunes_unknown_previous_field_refs() -
     ]
 
 
+def test_normalize_create_draft_mechanics_prunes_invalid_previous_output_refs() -> None:
+    draft = FlowCreateDraft(
+        flow_name="Robust rapport",
+        plan_rationale="Återanvänd tidigare textutdata.",
+        steps=[
+            {
+                "name": "Transkribera",
+                "instructions": "Transkribera.",
+                "input_source": "flow_input",
+                "input_type": "audio",
+                "output_type": "text",
+                "runtime_upload": True,
+                "runtime_required": True,
+            },
+            {
+                "name": "Extrahera metadata",
+                "instructions": "Extrahera metadata.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "json",
+                "output_fields": [_field("titel")],
+            },
+            {
+                "name": "Skriv rapport",
+                "instructions": "Skriv rapport.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "text",
+                "uses_previous_outputs": [
+                    {"from_step": 1, "label": "Transkription"},
+                    {"from_step": 2, "label": "Strukturerad metadata"},
+                    {"from_step": 3, "label": "Eget steg"},
+                    {"from_step": 9, "label": "Okänt"},
+                    {"from_step": 1, "label": "Dublett"},
+                ],
+            },
+        ],
+    )
+
+    assert not validate_create_draft(draft).valid
+
+    normalized = normalize_create_draft_mechanics(draft)
+
+    assert validate_create_draft(normalized).valid
+    assert [
+        (ref.from_step, ref.label) for ref in normalized.steps[2].uses_previous_outputs
+    ] == [(1, "Transkription")]
+
+
 def test_normalize_create_draft_mechanics_prunes_unknown_form_field_refs() -> None:
     draft = FlowCreateDraft(
         flow_name="Robust formulärflöde",

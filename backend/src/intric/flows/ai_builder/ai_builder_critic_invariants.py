@@ -355,6 +355,7 @@ def _rich_workflow_requires_form_fields_evidence(context: CriticContext) -> bool
     return (
         patterns.rich_document_workflow
         and patterns.needs_form_fields
+        and not patterns.derive_from_input_only
         and not context.spec.form_fields
     )
 

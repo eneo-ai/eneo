@@ -3,11 +3,31 @@ from __future__ import annotations
 import pytest
 
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
+    BASIC_CASE_METADATA,
+    DETAILED_CASE_METADATA,
+    NO_EXTRA_RUNTIME_METADATA,
     extract_runtime_input_field_hints,
-    extract_runtime_input_field_hints_for_metadata_state,
     infer_runtime_metadata_slot,
+    normalize_runtime_metadata_state,
     runtime_input_fields_declared_absent,
+    runtime_metadata_allows_input_fields,
 )
+from intric.flows.ai_builder.question_catalog import legal_slot_values
+
+
+def test_runtime_metadata_state_constants_match_question_catalog() -> None:
+    assert {
+        NO_EXTRA_RUNTIME_METADATA,
+        BASIC_CASE_METADATA,
+        DETAILED_CASE_METADATA,
+    } == legal_slot_values("runtime_metadata_fields")
+
+
+def test_runtime_metadata_policy_allows_fields_only_for_metadata_states() -> None:
+    assert not runtime_metadata_allows_input_fields(NO_EXTRA_RUNTIME_METADATA)
+    assert runtime_metadata_allows_input_fields(BASIC_CASE_METADATA)
+    assert runtime_metadata_allows_input_fields(DETAILED_CASE_METADATA)
+    assert normalize_runtime_metadata_state("unknown") is None
 
 
 def test_runtime_input_field_extraction_understands_explicit_absence() -> None:
@@ -18,7 +38,7 @@ def test_runtime_input_field_extraction_understands_explicit_absence() -> None:
 
     assert runtime_input_fields_declared_absent(text)
     assert extract_runtime_input_field_hints(text) == ()
-    assert infer_runtime_metadata_slot(text) == "no_extra_metadata"
+    assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
 
 
 def test_runtime_input_field_extraction_understands_bare_absence() -> None:
@@ -26,7 +46,7 @@ def test_runtime_input_field_extraction_understands_bare_absence() -> None:
 
     assert runtime_input_fields_declared_absent(text)
     assert extract_runtime_input_field_hints(text) == ()
-    assert infer_runtime_metadata_slot(text) == "no_extra_metadata"
+    assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
 
 
 def test_runtime_input_field_extraction_understands_bare_metadata_absence() -> None:
@@ -34,7 +54,7 @@ def test_runtime_input_field_extraction_understands_bare_metadata_absence() -> N
 
     assert runtime_input_fields_declared_absent(text)
     assert extract_runtime_input_field_hints(text) == ()
-    assert infer_runtime_metadata_slot(text) == "no_extra_metadata"
+    assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
 
 
 def test_runtime_input_field_extraction_understands_english_bare_absence() -> None:
@@ -42,7 +62,7 @@ def test_runtime_input_field_extraction_understands_english_bare_absence() -> No
 
     assert runtime_input_fields_declared_absent(text)
     assert extract_runtime_input_field_hints(text) == ()
-    assert infer_runtime_metadata_slot(text) == "no_extra_metadata"
+    assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
 
 
 def test_runtime_input_field_extraction_does_not_match_partial_words() -> None:
@@ -66,7 +86,7 @@ def test_runtime_input_field_extraction_keeps_explicit_secondary_fields() -> Non
         infer_runtime_metadata_slot(
             "Använd inmatningsfält för målgrupp och rapportnivå vid körning."
         )
-        == "detailed_case_metadata"
+        == DETAILED_CASE_METADATA
     )
 
 
@@ -86,14 +106,14 @@ def test_runtime_input_field_extraction_understands_user_provided_metadata() -> 
         ("roll", "roll"),
         ("nuvarande_lon", "nuvarande lön"),
     ]
-    assert infer_runtime_metadata_slot(text) == "detailed_case_metadata"
+    assert infer_runtime_metadata_slot(text) == DETAILED_CASE_METADATA
 
 
 def test_runtime_input_field_extraction_keeps_bare_metadata_as_basic_intent() -> None:
     text = "Skapa ett rapportflöde med grundläggande metadata vid körning."
 
     assert extract_runtime_input_field_hints(text) == ()
-    assert infer_runtime_metadata_slot(text) == "basic_case_metadata"
+    assert infer_runtime_metadata_slot(text) == BASIC_CASE_METADATA
 
 
 def test_runtime_input_field_extraction_does_not_treat_bare_metadata_as_runtime_intent() -> (
@@ -149,7 +169,7 @@ def test_runtime_input_field_extraction_understands_english_user_metadata() -> N
     ],
 )
 def test_detailed_runtime_metadata_always_has_field_hints(text: str) -> None:
-    assert infer_runtime_metadata_slot(text) == "detailed_case_metadata"
+    assert infer_runtime_metadata_slot(text) == DETAILED_CASE_METADATA
     assert extract_runtime_input_field_hints(text)
 
 
@@ -198,10 +218,13 @@ def test_runtime_input_field_extraction_uses_text_order_across_trigger_words() -
     ]
 
 
-def test_runtime_metadata_policy_can_disable_free_text_hints() -> None:
-    hints = extract_runtime_input_field_hints_for_metadata_state(
-        "Use input fields for audience and detail level at runtime.",
-        runtime_metadata_state="no_extra_metadata",
+def test_runtime_metadata_state_normalizes_catalog_values() -> None:
+    assert normalize_runtime_metadata_state("no_extra_metadata") == (
+        NO_EXTRA_RUNTIME_METADATA
     )
-
-    assert hints == ()
+    assert normalize_runtime_metadata_state("basic_case_metadata") == (
+        BASIC_CASE_METADATA
+    )
+    assert normalize_runtime_metadata_state("detailed_case_metadata") == (
+        DETAILED_CASE_METADATA
+    )

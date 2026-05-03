@@ -2,7 +2,7 @@
 
 ## Status
 
-11.5b IMPLEMENTATION COMPLETE
+11.5d IMPLEMENTATION COMPLETE
 
 ## Starting Point
 
@@ -14,7 +14,7 @@
   - `scripts/run_codex_review.sh`
   - `PRODUCT.md`
   - `docs/refactor/goals.md`
-- Slices recorded in this journal: 11.0 through 11.5b Flow AI Builder
+- Slices recorded in this journal: 11.0 through 11.5d Flow AI Builder
   reliability, slot resolution, skeleton, form-field/resource, structured-output,
   and local smoke-validation slices.
 
@@ -246,6 +246,89 @@ Live smoke follow-up observation:
 | Observation | Disposition |
 |---|---|
 | The live planner added optional runtime fields for language, document style, and timestamps. They are valid form fields and the binding references resolve, but they were inferred rather than requested. | Track in a later runtime-field minimality slice; this 11.5c slice fixed avoidable discovery questions and terminal output scoping. |
+
+## 11.5d Runtime Metadata Minimality And Source-Material Underlag Dataflow
+
+### Scope
+
+This slice closes the runtime-field and underlag gaps exposed by the latest
+debug export:
+
+- the generated flow accepted only an audio file at runtime, but the planner
+  still inferred optional form fields for language/style/timestamps;
+- step 4 generated protocol sections from step 3 metadata JSON and did not
+  receive the original transcript as `Underlag till text`;
+- step 6 rendered DOCX content from whatever previous text it saw, while the
+  effective prompt showed only generic terminal instructions.
+
+The fix stays out of prompt repair. `Underlag till text` remains the
+step-input/dataflow owner, and `Inmatningsfält` remains secondary user-supplied
+runtime metadata.
+
+### Claude Review
+
+| Iteration | Artifact | Verdict | Green light | Minimum score | Outcome |
+|---:|---|---|---|---:|---|
+| 1 | `.codex/artifacts/claude-peer-loop-batch-11-5d-runtime-field-gating-plan-20260503T101054Z.md` | `changes_required` | `no` | n/a | Pushed the runtime-field fix away from prompt text and toward resolved metadata state. |
+| 2 | `.codex/artifacts/claude-peer-loop-batch-11-5d-runtime-field-gating-revised-plan-20260503T101533Z.md` | `green` | `yes` | n/a | Approved compiler-gated runtime fields. |
+| 3 | `.codex/artifacts/claude-peer-loop-batch-11-5e-swedish-audio-input-architecture-brittleness-20260503T110606Z.md` | `changes_required` | `no` | n/a | Identified that audio/document confusion needed architectural input resolution, not more Swedish prompt wording. |
+| 4 | `.codex/artifacts/claude-peer-loop-batch-11-5e-long-term-llm-first-flow-ai-builder-architecture-20260503T111809Z.md` | `changes_required` | `no` | n/a | Rejected an LLM-first workaround and asked for deterministic slot/source-material ownership. |
+| 5 | `.codex/artifacts/claude-peer-loop-batch-11-5f-flow-ai-builder-underlag-dataflow-plan-20260503T113034Z.md` | `changes_required` | `no` | n/a | Required a smaller typed source-scope contract. |
+| 6 | `.codex/artifacts/claude-peer-loop-batch-11-5f-revised-source-scope-dataflow-plan-20260503T114010Z.md` | `changes_required` | `no` | n/a | Approved the direction but asked to keep it in skeleton/compiler mechanics. |
+| 7 | `.codex/artifacts/claude-peer-loop-batch-11-5f-underlag-dataflow-implementation-verification-20260503T115438Z.md` | `green` | `yes` | 7 | Verified the implementation with small follow-ups. |
+| 8 | `.codex/artifacts/claude-peer-loop-batch-11-5d-underlag-runtime-final-verdict-format-20260503T121823Z.md` | `green` | `yes` | 8 | Re-verified final follow-ups, docs, typed runtime metadata gating, and parser-readable green light. |
+
+Accepted final-review follow-ups:
+
+| Finding | Resolution |
+|---|---|
+| `uses_previous_outputs` should be backend-owned and hidden from the outline tool schema. | Added it to `_OUTLINE_STEP_BACKEND_OWNED_KEYS` and schema coverage. |
+| Previous-output refs should target text producers only. | Validator and dataflow normalization reject/prune non-text references. |
+| Dead previous-output instruction branch should be removed. | Kept source-material references in `input_bindings.question`; removed the unused instruction branch. |
+| Source-material label should localize. | Swedish skeleton compilation uses `Källmaterial`; English uses `Source material`. |
+| The input-type override needed a reason. | Added a short invariant comment where source foundation refs force text input. |
+| PDF parity should be explicit. | Added PDF coverage showing all-previous fan-in remains the PDF-safe shape. |
+
+### Implementation Result
+
+| Area | Outcome |
+|---|---|
+| Previous text-output refs | Added `PreviousOutputRef` and `NewStepDraft.uses_previous_outputs` for typed non-adjacent text dependencies. |
+| Underlag rendering | `compile_input_bindings` now renders immediate previous JSON plus explicit prior text outputs in one `question` binding. |
+| Validation and normalization | Invalid/future/duplicate/non-text previous-output refs are rejected or pruned before compilation. |
+| Audio source foundation | Audio-to-document skeletons attach the first transcription text as `Källmaterial` / `Source material` to downstream semantic document steps. |
+| Runtime metadata minimality | Resolved primary runtime inputs default to `no_extra_metadata`; outline `input_fields` are dropped unless metadata is explicitly allowed. |
+| Audio input resolution | Runtime audio upload phrasing wins when explicit, and final Word/PDF/DOCX artifact language no longer displaces the source material type. |
+| Redundant transcription steps | LLM-authored leading transcription steps are dropped or rewritten because the backend owns the transcribe-only prefix. |
+| Artifact body naming | Pre-terminal DOCX/PDF text steps are renamed to prepare content so terminal artifact steps remain the file creators. |
+
+### Validation Result
+
+| Command | Result |
+|---|---|
+| `uv run pytest tests/unittests/flows/ai_builder -q` | Passed: `1811 passed, 4 skipped`, 12 existing warnings. |
+| `uv run pytest tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py tests/integration/flows/ai_builder/benchmark/test_baseline_benchmark.py -q` | Passed: `69 passed`, 16 existing warnings. |
+| `uv run ruff check <11.5d touched source and test files>` | Passed after deleting one unused helper found by Pyright/Ruff review. |
+| `uv run pyright <11.5d touched source and test files>` | Passed after deleting `_mentions_document_reference`, which the proximity-based runtime-file helper replaced. |
+| `git diff --check -- <11.5d touched paths>` | Passed. |
+| `docker exec -w /workspace/backend eneo-41ae93-eneo-1 ...` | Blocked before Docker ran by tool policy: `approval required by policy, but AskForApproval is set to Never`. |
+
+### Regression Evidence
+
+| Failure mode from debug export | Guard now covering it |
+|---|---|
+| Protocol step saw only metadata JSON and not the transcript. | `test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag` pins `{{ step_c.output.structured }}` plus `Källmaterial: {{ step_a.output.text }}`. |
+| Optional runtime fields were inferred from likely preferences instead of requested metadata. | `test_compile_outline_flow_drops_runtime_fields_when_metadata_is_disabled` drops language/style/timestamps under `no_extra_metadata`. |
+| LLM-generated transcription step duplicated backend transcribe-only mechanics. | Outline compiler tests cover dropping plain duplicate transcription steps and rewriting structured transcript extraction steps. |
+| Final artifact phrasing made intermediate text steps sound like file creators. | Step-transition tests rename pre-terminal DOCX/PDF body text steps to content preparation. |
+
+### Carry-Forward
+
+| Item | Owner |
+|---|---|
+| Add live local API smoke for this exact reported debug-export flow when the local API is reachable in a non-blocked tool path. | Manual eval harness / next smoke slice. |
+| Consider an explicit source-scope enum if a second source-material pattern needs more than prior text-output refs. | Later skeleton/compiler cleanup, only with another concrete use case. |
+| Promote the exact Swedish audio prompt into the benchmark expectation corpus if it recurs outside unit-level compile coverage. | Benchmark corpus slice. |
 
 ## 11.0a Claude Plan Review Iteration 1
 

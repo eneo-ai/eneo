@@ -28,6 +28,9 @@ from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_phrase,
     contains_phrase,
 )
+from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
+    resolve_input_intent,
+)
 from intric.flows.ai_builder.ai_builder_keywords import (
     DOCX_CONTEXT_MARKERS,
     DOCX_GENERATED_MODE_MARKERS,
@@ -513,47 +516,16 @@ def _extract_requirements_summary_signals(
     input_description = normalize_signal_text(
         str(requirements_summary.get("input_description") or "")
     )
-    if contains_any_phrase(
-        input_description,
-        (
-            "upload",
-            "uploads",
-            "uploaded",
-            "file",
-            "files",
-            "document",
-            "documents",
-            "ladda upp",
-            "uppladd",
-            "fil",
-            "filer",
-            "dokument",
-        ),
-    ):
-        signals["input_material_mode"] = {"documents"}
+    input_intent = resolve_input_intent(input_description, {})
+    if input_intent.primary_runtime_input != "unknown":
+        signals["input_material_mode"] = {input_intent.primary_runtime_input}
 
     output_description = normalize_signal_text(
         str(requirements_summary.get("output_description") or "")
     )
-    if "docx" in output_description or "word" in output_description:
-        signals["final_output_mode"] = {"docx_document"}
-    elif "pdf" in output_description:
-        signals["final_output_mode"] = {"pdf_document"}
-    elif _looks_like_final_json_output(output_description):
-        signals["final_output_mode"] = {"structured_json"}
-    elif contains_any_phrase(
-        output_description,
-        (
-            "text",
-            "result",
-            "results",
-            "structured result",
-            "structured analysis",
-            "analysresultat",
-            "strukturerat resultat",
-        ),
-    ):
-        signals["final_output_mode"] = {"structured_text"}
+    output_intent = resolve_output_intent(output_description, {})
+    if output_intent.terminal_output is not None:
+        signals["final_output_mode"] = {output_intent.terminal_output}
     return signals
 
 

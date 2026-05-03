@@ -15,6 +15,9 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
 from intric.flows.ai_builder.ai_builder_keywords import (
     PDF_OUTPUT_CONTEXT_MARKERS,
 )
+from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+    detect_planner_pattern_signals,
+)
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     infer_runtime_metadata_slot,
 )
@@ -198,7 +201,22 @@ def _infer_document_material_scope(text: str) -> str | None:
 
 def _infer_input_material_mode(text: str) -> str | None:
     primary = resolve_input_intent(text, {}).primary_runtime_input
-    return None if primary == "unknown" else primary
+    if primary != "unknown":
+        return primary
+    if _contains_any(
+        text,
+        (
+            "pdf",
+            "dokument",
+            "document",
+            "documents",
+            "fil",
+            "file",
+            "files",
+        ),
+    ):
+        return "documents"
+    return None
 
 
 def _infer_flow_input_architecture(text: str) -> str | None:
@@ -292,6 +310,9 @@ def _infer_processing_scope(text: str) -> str | None:
 
 
 def _infer_structured_analysis_need(text: str) -> str | None:
+    pattern = detect_planner_pattern_signals(text)
+    if pattern.rich_document_workflow and pattern.prefers_structured_intermediate:
+        return "use_structured_analysis"
     if "strukturerad data" in text and "förbättrar kvaliteten" in text:
         return "use_structured_analysis"
     if "structured data" in text and "improves quality" in text:

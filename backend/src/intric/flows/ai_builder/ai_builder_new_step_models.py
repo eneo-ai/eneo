@@ -48,6 +48,28 @@ class PreviousFieldRef(BaseModel):
         return normalized or None
 
 
+class PreviousOutputRef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    from_step: int
+    label: str | None = None
+
+    @field_validator("from_step")
+    @classmethod
+    def _validate_from_step(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("uses_previous_outputs.from_step must be at least 1.")
+        return value
+
+    @field_validator("label")
+    @classmethod
+    def _normalize_label(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
 class StructuredFieldDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -100,6 +122,9 @@ class NewStepDraft(BaseModel):
     uses_form_fields: list[str] = Field(default_factory=list)
     uses_previous_fields: list[PreviousFieldRef] = Field(
         default_factory=lambda: cast(list[PreviousFieldRef], [])
+    )
+    uses_previous_outputs: list[PreviousOutputRef] = Field(
+        default_factory=lambda: cast(list[PreviousOutputRef], [])
     )
     document_delivery_mode: DocumentDeliveryMode = "not_applicable"
     citations_requested: bool = False

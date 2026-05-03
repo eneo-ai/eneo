@@ -34,6 +34,7 @@ from intric.flows.ai_builder.ai_builder_create_outline import (
     attach_selected_mcp_refs_to_explicit_outline_steps,
     compile_outline_to_create_draft,
     outline_compile_context_from_planning_state,
+    runtime_metadata_state_from_planning_state,
     safe_validation_issues,
 )
 from intric.flows.ai_builder.ai_builder_create_validator import validate_create_draft
@@ -144,7 +145,8 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     format_resource_resolution_feedback,
 )
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
-    extract_runtime_input_field_hints_for_metadata_state,
+    extract_runtime_input_field_hints,
+    runtime_metadata_allows_input_fields,
 )
 from intric.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
@@ -523,11 +525,15 @@ class AIBuilderProposalProcessor:
                     ),
                     catalog=resource_catalog,
                 )
+            runtime_metadata_state = runtime_metadata_state_from_planning_state(
+                planning_state
+            )
             runtime_input_field_hints = (
-                extract_runtime_input_field_hints_for_metadata_state(
-                    aggregate_freeform_user_text(conversation),
-                    runtime_metadata_state=_runtime_metadata_state(planning_state),
+                extract_runtime_input_field_hints(
+                    aggregate_freeform_user_text(conversation)
                 )
+                if runtime_metadata_allows_input_fields(runtime_metadata_state)
+                else ()
             )
             compile_context = outline_compile_context_from_planning_state(
                 planning_state,
@@ -2485,13 +2491,6 @@ class AIBuilderProposalProcessor:
 
 def _active_submission_tool_name(flow: "Flow | None") -> str:
     return EDIT_FLOW_TOOL_NAME if flow is not None else OUTLINE_FLOW_TOOL_NAME
-
-
-def _runtime_metadata_state(planning_state: PlanningState | None) -> str | None:
-    if planning_state is None:
-        return None
-    slot = planning_state.resolved_slots.get("runtime_metadata_fields")
-    return slot.value if slot is not None else None
 
 
 def _active_submission_tool_schemas(
