@@ -91,14 +91,16 @@ def test_resolve_input_source_text_strips_runtime_orchestration_metadata_from_se
 
 def test_resolve_input_source_text_all_previous_steps_prefers_state_accumulator():
     run = SimpleNamespace(id=uuid4(), input_payload_json=None)
+    cached_result = SimpleNamespace(
+        step_order=1, output_payload_json={"text": "from-state"}
+    )
     prior_results = [
         SimpleNamespace(step_order=1, output_payload_json={"text": "older"}),
         SimpleNamespace(step_order=2, output_payload_json={"text": "newer"}),
     ]
     state = RunExecutionState(
-        completed_by_order={},
-        prior_results=[],
-        all_previous_segments=["<step_1_output>\nfrom-state\n</step_1_output>\n"],
+        completed_by_order={1: cached_result},
+        prior_results=[cached_result],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
@@ -114,3 +116,31 @@ def test_resolve_input_source_text_all_previous_steps_prefers_state_accumulator(
     )
 
     assert resolved == "<step_1_output>\nfrom-state\n</step_1_output>\n"
+
+
+def test_resolve_input_source_text_all_previous_state_excludes_current_and_future():
+    run = SimpleNamespace(id=uuid4(), input_payload_json=None)
+    state = RunExecutionState(
+        completed_by_order={
+            1: SimpleNamespace(step_order=1, output_payload_json={"text": "ONE"}),
+            3: SimpleNamespace(step_order=3, output_payload_json={"text": "CURRENT"}),
+            4: SimpleNamespace(step_order=4, output_payload_json={"text": "FUTURE"}),
+        },
+        prior_results=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+
+    resolved = resolve_input_source_text(
+        input_source="all_previous_steps",
+        run=run,
+        step_order=3,
+        prior_results=[],
+        state=state,
+        logger=MagicMock(),
+    )
+
+    assert "<step_1_output>\nONE\n</step_1_output>" in resolved
+    assert "CURRENT" not in resolved
+    assert "FUTURE" not in resolved

@@ -665,10 +665,16 @@ async def test_resolve_step_input_all_previous_steps_prefers_state_accumulator(u
             text="fallback",
         )
     ]
+    cached = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text="cached",
+    )
     state = RunExecutionState(
-        completed_by_order={},
-        prior_results=[],
-        all_previous_segments=["<step_1_output>\ncached\n</step_1_output>\n"],
+        completed_by_order={1: cached},
+        prior_results=[cached],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
@@ -1358,7 +1364,6 @@ async def test_audio_input_previous_step_rejected_runtime(user):
     run_state = RunExecutionState(
         completed_by_order={1: prev},
         prior_results=[prev],
-        all_previous_segments=["<step_1_output>\nprior output\n</step_1_output>\n"],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
@@ -1484,7 +1489,6 @@ async def test_document_previous_step_rejected_with_specific_code(user):
     run_state = RunExecutionState(
         completed_by_order={1: prev},
         prior_results=[prev],
-        all_previous_segments=["<step_1_output>\nprior output\n</step_1_output>\n"],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},

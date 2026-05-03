@@ -89,6 +89,12 @@ class StepSkeletonSemanticContent:
 
 
 @dataclass(frozen=True, slots=True)
+class StepSkeletonPatternResolution:
+    pattern_ids: tuple[str, ...]
+    chain_steps: tuple[ChainStepToken, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class StepSkeletonOutputTypeDrift:
     slot_id: str
     slot_ordinal: int
@@ -504,14 +510,14 @@ def materialize_step_skeleton(
     runtime_max_files: int | None = None,
     ui_language: str | None = None,
 ) -> StepSkeletonPlan:
-    skeleton_pattern_ids = _pattern_ids_for_skeleton(
+    pattern_resolution = resolve_step_skeleton_patterns(
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
         final_output_mode=final_output_mode,
         pattern_ids=pattern_ids,
         chain_steps=chain_steps,
     )
-    compiled_pattern_ids = compiled_chain_pattern_ids(skeleton_pattern_ids)
+    compiled_pattern_ids = compiled_chain_pattern_ids(pattern_resolution.pattern_ids)
     if len(compiled_pattern_ids) > 1:
         raise ValueError(
             "Only one compiler-backed pattern chain can be materialized at a time; "
@@ -544,7 +550,7 @@ def materialize_step_skeleton(
             ui_language=ui_language,
         )
     if _requires_comparison_skeleton(
-        pattern_ids=skeleton_pattern_ids,
+        pattern_ids=pattern_resolution.pattern_ids,
         aggregation_intent=aggregation_intent,
     ):
         return _materialize_comparison_skeleton(
@@ -656,7 +662,11 @@ def _compose_output_type(
         return slot.output_type, None
 
     if _semantic_content_requests_json(content):
-        if allow_json_output and slot.output_type not in _DOCUMENT_OUTPUT_TYPES:
+        if (
+            allow_json_output
+            and slot.output_type not in _DOCUMENT_OUTPUT_TYPES
+            and not _flow_input_audio_text_slot(slot)
+        ):
             return OutputType.JSON, None
         if slot.output_type != OutputType.JSON:
             return (
@@ -719,6 +729,14 @@ def _backend_fixed_text_consumer(slot: StepSkeleton) -> bool:
 def _semantic_content_requests_json(content: StepSkeletonSemanticContent) -> bool:
     return (
         bool(content.output_fields) or content.requested_output_type == OutputType.JSON
+    )
+
+
+def _flow_input_audio_text_slot(slot: StepSkeleton) -> bool:
+    return (
+        slot.input_source == InputSource.FLOW_INPUT
+        and slot.input_type == InputType.AUDIO
+        and slot.output_type == OutputType.TEXT
     )
 
 
@@ -864,14 +882,14 @@ def _semantic_default_instructions(*, slot_id: str, ui_language: str | None) -> 
     }.get(slot_id, "Analyze the material according to the request.")
 
 
-def _pattern_ids_for_skeleton(
+def resolve_step_skeleton_patterns(
     *,
     runtime_input_type: InputType,
     final_output_type: OutputType,
     final_output_mode: OutputMode | None,
     pattern_ids: tuple[str, ...],
     chain_steps: tuple[str, ...],
-) -> tuple[str, ...]:
+) -> StepSkeletonPatternResolution:
     skeleton_pattern_ids = list(pattern_ids)
     skeleton_chain_steps = list(chain_steps)
     for pattern_id in pattern_ids:
@@ -891,7 +909,20 @@ def _pattern_ids_for_skeleton(
         skeleton_pattern_ids.append(pattern.id)
         _extend_missing_chain_steps(skeleton_chain_steps, pattern.chain_steps)
 
-    return tuple(skeleton_pattern_ids)
+    if _should_materialize_audio_artifact(
+        runtime_input_type=runtime_input_type,
+        final_output_type=final_output_type,
+        pattern_ids=tuple(skeleton_pattern_ids),
+        chain_steps=tuple(skeleton_chain_steps),
+    ):
+        pattern = PATTERN_REGISTRY[_AUDIO_ARTIFACT_PATTERN_ID]
+        skeleton_pattern_ids.append(pattern.id)
+        _extend_missing_chain_steps(skeleton_chain_steps, pattern.chain_steps)
+
+    return StepSkeletonPatternResolution(
+        pattern_ids=tuple(skeleton_pattern_ids),
+        chain_steps=tuple(skeleton_chain_steps),
+    )
 
 
 def _extend_missing_chain_steps(
@@ -920,6 +951,24 @@ def _should_materialize_template_fill(
         runtime_input_type in {InputType.DOCUMENT, InputType.FILE}
         and final_output_type == OutputType.DOCX
         and final_output_mode == OutputMode.TEMPLATE_FILL
+    )
+
+
+def _should_materialize_audio_artifact(
+    *,
+    runtime_input_type: InputType,
+    final_output_type: OutputType,
+    pattern_ids: tuple[str, ...],
+    chain_steps: tuple[str, ...],
+) -> bool:
+    if _chain_requests_audio_artifact(
+        pattern_ids=pattern_ids,
+        chain_steps=chain_steps,
+    ):
+        return False
+    return (
+        runtime_input_type == InputType.AUDIO
+        and final_output_type in _DOCUMENT_OUTPUT_TYPES
     )
 
 
@@ -1505,4 +1554,15 @@ def _chain_requests_docx_template_fill(
     return (
         _DOCX_TEMPLATE_PATTERN_ID in pattern_ids
         and TEMPLATE_FILL_DOCX_STEP in chain_steps
+    )
+
+
+def _chain_requests_audio_artifact(
+    *,
+    pattern_ids: tuple[str, ...],
+    chain_steps: tuple[str, ...],
+) -> bool:
+    return (
+        _AUDIO_ARTIFACT_PATTERN_ID in pattern_ids
+        or FLOW_INPUT_AUDIO_TRANSCRIPTION in chain_steps
     )

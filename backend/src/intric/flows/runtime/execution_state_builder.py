@@ -16,15 +16,9 @@ def build_run_execution_state(
         if result.status == FlowStepResultStatus.COMPLETED
     }
     sorted_completed = sorted(completed.values(), key=lambda result: result.step_order)
-    segments = [
-        f"<step_{result.step_order}_output>\n{str((result.output_payload_json or {}).get('text', ''))}\n"
-        f"</step_{result.step_order}_output>\n"
-        for result in sorted_completed
-    ]
     return RunExecutionState(
         completed_by_order=completed,
         prior_results=list(sorted_completed),
-        all_previous_segments=segments,
         assistant_cache={},
         json_mode_supported={},
         file_cache={},

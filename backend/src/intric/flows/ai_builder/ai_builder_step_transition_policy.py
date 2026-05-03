@@ -670,6 +670,22 @@ def normalize_ai_builder_step(
         if normalized_output_config != step.output_config:
             updates["output_config"] = normalized_output_config
 
+    if (
+        step.input_source == InputSource.ALL_PREVIOUS_STEPS
+        and step.input_contract is not None
+    ):
+        updates["input_contract"] = None
+        changes.append(
+            StepNormalizationChange(
+                code="all_previous_input_contract_cleared",
+                field_suffix="input_contract",
+                message=(
+                    "Removed input_contract because all_previous_steps provides "
+                    "concatenated text, not one contract-shaped input object."
+                ),
+            )
+        )
+
     if not updates:
         return step, changes
     return step.model_copy(update=updates), changes

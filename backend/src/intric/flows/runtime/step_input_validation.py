@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 from typing import Any, cast
 
-from intric.flows.output_processing import validate_against_contract
+from intric.flows.output_processing import (
+    schema_expects_structured,
+    validate_against_contract,
+)
 from intric.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
 from intric.main.exceptions import TypedIOValidationException
 
@@ -149,25 +152,12 @@ def _schema_type_hint(schema: dict[str, Any]) -> str:
     return "unknown"
 
 
-def _schema_expects_structured(schema: dict[str, Any]) -> bool:
-    raw_type = schema.get("type")
-    if isinstance(raw_type, str):
-        return raw_type in {"object", "array"}
-    if isinstance(raw_type, list):
-        return any(
-            item in {"object", "array"}
-            for item in cast(list[object], raw_type)
-            if isinstance(item, str)
-        )
-    return isinstance(schema.get("properties"), dict) or "items" in schema
-
-
 def _prepare_text_contract_candidate(
     *,
     text: str,
     schema: dict[str, Any],
 ) -> tuple[Any, dict[str, Any]]:
-    parse_attempted = _schema_expects_structured(schema)
+    parse_attempted = schema_expects_structured(schema)
     parse_succeeded = False
     candidate: Any = text
     if parse_attempted:

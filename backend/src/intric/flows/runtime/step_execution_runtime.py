@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -179,6 +180,7 @@ class StepExecutionRuntimeDeps:
     is_json_mode_rejection: JsonModeRejectionFn
     count_tokens: CountTokensFn
     logger: logging.Logger | None = None
+    llm_request_timeout_seconds: float = 600
     rag_retrieval_timeout_seconds: float = 30
 
 
@@ -261,6 +263,50 @@ def attach_typed_failure_context(
 def is_json_mode_rejection(exc: Exception) -> bool:
     msg = str(exc).lower()
     return any(term in msg for term in ("response_format", "json_object", "json mode"))
+
+
+async def call_assistant_with_timeout(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    prepared: PreparedStepExecution,
+    deps: StepExecutionRuntimeDeps,
+    model_kwargs: Any,
+    info_blob_chunks: list[InfoBlobChunkInDBWithScore],
+    prompt_override: str,
+    version: int,
+) -> Any:
+    try:
+        return await asyncio.wait_for(
+            prepared.assistant.get_response(
+                question=prepared.step_input.text,
+                completion_service=deps.completion_service,
+                model_kwargs=model_kwargs,
+                files=prepared.llm_files,
+                info_blob_chunks=info_blob_chunks,
+                stream=False,
+                prompt_override=prompt_override,
+                version=version,
+            ),
+            timeout=deps.llm_request_timeout_seconds,
+        )
+    except TimeoutError as exc:
+        if deps.logger is not None:
+            deps.logger.warning(
+                "flow_executor.llm_timeout run_id=%s step_order=%d timeout=%s",
+                run.id,
+                step.step_order,
+                deps.llm_request_timeout_seconds,
+            )
+        raise deps.attach_typed_failure_context(
+            TypedIOValidationException(
+                f"Step {step.step_order}: LLM request exceeded "
+                f"{deps.llm_request_timeout_seconds:g}s timeout.",
+                code="flow_llm_request_timeout",
+            ),
+            input_payload_for_result=prepared.input_payload_for_result,
+            effective_prompt=prepared.effective_prompt,
+        ) from exc
 
 
 def build_output_payload(output: StepExecutionOutput) -> dict[str, Any]:
@@ -848,26 +894,26 @@ async def complete_step_execution(
                 else inherited_appendix
             )
     try:
-        response = await prepared.assistant.get_response(
-            question=prepared.step_input.text,
-            completion_service=deps.completion_service,
+        response = await call_assistant_with_timeout(
+            step=step,
+            run=run,
+            prepared=prepared,
+            deps=deps,
             model_kwargs=model_kwargs,
-            files=prepared.llm_files,
             info_blob_chunks=info_blob_chunks,
-            stream=False,
             prompt_override=prompt_override,
             version=2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1,
         )
     except Exception as model_exc:
         if native_json_object_requested and deps.is_json_mode_rejection(model_exc):
             state.json_mode_supported[cache_key] = False
-            response = await prepared.assistant.get_response(
-                question=prepared.step_input.text,
-                completion_service=deps.completion_service,
+            response = await call_assistant_with_timeout(
+                step=step,
+                run=run,
+                prepared=prepared,
+                deps=deps,
                 model_kwargs=original_kwargs,
-                files=prepared.llm_files,
                 info_blob_chunks=info_blob_chunks,
-                stream=False,
                 prompt_override=prompt_override,
                 version=2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1,
             )

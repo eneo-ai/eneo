@@ -288,7 +288,6 @@ def _empty_execution_state() -> RunExecutionState:
     return RunExecutionState(
         completed_by_order={},
         prior_results=[],
-        all_previous_segments=[],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
@@ -325,6 +324,7 @@ def test_executor_accepts_grouped_config(user):
         http_request_timeout_seconds=11.0,
         http_max_timeout_seconds=22.0,
         http_allow_private_networks=True,
+        llm_request_timeout_seconds=33.0,
         rag_retrieval_timeout_seconds=44.0,
         rag_max_reference_sources=12,
         rag_max_chunks_per_source=6,
@@ -351,6 +351,7 @@ def test_executor_accepts_grouped_config(user):
     assert executor.http_request_timeout_seconds == 11.0
     assert executor.http_max_timeout_seconds == 22.0
     assert executor.http_allow_private_networks is True
+    assert executor.llm_request_timeout_seconds == 33.0
     assert executor.rag_retrieval_timeout_seconds == 44.0
     assert executor.rag_max_reference_sources == 12
     assert executor.rag_max_chunks_per_source == 6
@@ -2623,7 +2624,6 @@ def test_run_execution_state_append_completed():
     state = RunExecutionState(
         completed_by_order={},
         prior_results=[],
-        all_previous_segments=[],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
@@ -2652,17 +2652,17 @@ def test_run_execution_state_append_completed():
 
     assert 1 in state.completed_by_order
     assert len(state.prior_results) == 1
-    assert "<step_1_output>" in state.all_previous_text
-    assert "hello" in state.all_previous_text
+    accumulated_text = state.all_previous_text_before(2)
+    assert "<step_1_output>" in accumulated_text
+    assert "hello" in accumulated_text
 
 
-def test_run_execution_state_all_previous_text_accumulates():
-    """Multiple appends build up all_previous_text correctly."""
+def test_run_execution_state_all_previous_text_before_accumulates():
+    """Multiple appends build up ordered all_previous text before a step."""
     now = datetime.now(timezone.utc)
     state = RunExecutionState(
         completed_by_order={},
         prior_results=[],
-        all_previous_segments=[],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
@@ -2690,10 +2690,11 @@ def test_run_execution_state_all_previous_text_accumulates():
         )
         state.append_completed(result)
 
-    assert "<step_1_output>" in state.all_previous_text
-    assert "<step_2_output>" in state.all_previous_text
-    assert "first" in state.all_previous_text
-    assert "second" in state.all_previous_text
+    accumulated_text = state.all_previous_text_before(3)
+    assert "<step_1_output>" in accumulated_text
+    assert "<step_2_output>" in accumulated_text
+    assert "first" in accumulated_text
+    assert "second" in accumulated_text
 
 
 # --- Assistant cache ---
@@ -2711,7 +2712,6 @@ async def test_assistant_cache_hit(user):
     state = RunExecutionState(
         completed_by_order={},
         prior_results=[],
-        all_previous_segments=[],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
@@ -2869,7 +2869,6 @@ async def test_execute_step_uses_rag_chunks_when_knowledge_present(user):
     state = RunExecutionState(
         completed_by_order={},
         prior_results=[],
-        all_previous_segments=[],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
@@ -2937,7 +2936,6 @@ async def test_execute_step_skips_rag_when_assistant_has_no_knowledge(user):
     state = RunExecutionState(
         completed_by_order={},
         prior_results=[],
-        all_previous_segments=[],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
@@ -2972,7 +2970,6 @@ async def test_execute_step_rag_timeout_appends_diagnostic_and_continues(user):
     state = RunExecutionState(
         completed_by_order={},
         prior_results=[],
-        all_previous_segments=[],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
@@ -3010,7 +3007,6 @@ async def test_execute_step_rag_failure_appends_diagnostic_and_continues(user):
     state = RunExecutionState(
         completed_by_order={},
         prior_results=[],
-        all_previous_segments=[],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
@@ -3048,7 +3044,6 @@ async def test_execute_step_skips_rag_when_input_is_whitespace(user):
     state = RunExecutionState(
         completed_by_order={},
         prior_results=[],
-        all_previous_segments=[],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
@@ -3411,7 +3406,6 @@ async def test_file_cache_hit(user):
     state = RunExecutionState(
         completed_by_order={},
         prior_results=[],
-        all_previous_segments=[],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
@@ -3784,7 +3778,6 @@ async def test_validate_runtime_step_security_rejects_write_down(user):
     state = RunExecutionState(
         completed_by_order={},
         prior_results=[],
-        all_previous_segments=[],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},

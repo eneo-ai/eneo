@@ -100,7 +100,6 @@ def _state(*, result: FlowStepResult) -> RunExecutionState:
     return RunExecutionState(
         completed_by_order={1: result},
         prior_results=[result],
-        all_previous_segments=[],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
@@ -305,7 +304,6 @@ async def test_execute_template_fill_step_strips_duplicate_leading_heading_from_
     state = RunExecutionState(
         completed_by_order={1: result},
         prior_results=[result],
-        all_previous_segments=[],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
@@ -372,7 +370,6 @@ async def test_execute_template_fill_step_reports_failed_upstream_step_clearly()
     state = RunExecutionState(
         completed_by_order={},
         prior_results=[failed_result],
-        all_previous_segments=[],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},

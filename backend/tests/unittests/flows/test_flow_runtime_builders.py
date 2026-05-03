@@ -75,7 +75,9 @@ def test_build_run_execution_state_keeps_only_completed_results_and_named_steps(
 
     assert list(state.completed_by_order) == [1]
     assert [result.step_order for result in state.prior_results] == [1]
-    assert state.all_previous_text == "<step_1_output>\nalpha\n</step_1_output>\n"
+    assert state.all_previous_text_before(2) == (
+        "<step_1_output>\nalpha\n</step_1_output>\n"
+    )
     assert state.step_names_by_order == {1: "Step One"}
 
 

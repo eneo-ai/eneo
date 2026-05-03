@@ -88,6 +88,19 @@ def validate_schema_syntax(schema: dict[str, Any], *, label: str) -> None:
         ) from exc
 
 
+def schema_expects_structured(schema: dict[str, Any]) -> bool:
+    raw_type = schema.get("type")
+    if isinstance(raw_type, str):
+        return raw_type in {"object", "array"}
+    if isinstance(raw_type, list):
+        return any(
+            item in {"object", "array"}
+            for item in cast(list[object], raw_type)
+            if isinstance(item, str)
+        )
+    return isinstance(schema.get("properties"), dict) or "items" in schema
+
+
 def compile_validators(
     runtime_steps: list[Any],
 ) -> dict[tuple[str, int], jsonschema.Draft202012Validator]:

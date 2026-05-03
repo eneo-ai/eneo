@@ -109,6 +109,12 @@ def compile_edit_draft(
         elif op.op == "add":
             _apply_add(op, working)
 
+    _repair_leading_audio_document_extraction(
+        working=working,
+        modified_refs=modified_refs,
+        warnings=warnings,
+    )
+
     # Build compiled StepSpec list from working order
     compiled_steps: list[StepSpec] = []
     for i, (ref, item) in enumerate(working):
@@ -294,6 +300,96 @@ def _apply_add(
 
     # Fallback: append
     working.append(new_entry)
+
+
+def _repair_leading_audio_document_extraction(
+    *,
+    working: list[tuple[str | None, FlowStep | NewStepDraft]],
+    modified_refs: dict[str, StepPatch],
+    warnings: list[str],
+) -> None:
+    if len(working) < 2:
+        return
+    first_ref, first_item = working[0]
+    if not isinstance(first_item, FlowStep) or first_ref is None:
+        return
+    if not _is_bad_leading_audio_document_extraction(first_item, working):
+        return
+
+    working.insert(
+        0,
+        (
+            None,
+            NewStepDraft(
+                name="Transkribera ljud",
+                instructions="Transkribera uppladdat ljud till text.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.AUDIO,
+                output_type=OutputType.TEXT,
+                runtime_upload=True,
+                runtime_required=_runtime_input_required(first_item.input_config),
+                runtime_max_files=_runtime_input_max_files(first_item.input_config),
+            ),
+        ),
+    )
+    modified_refs[first_ref] = _merge_step_patch(
+        modified_refs.get(first_ref),
+        StepPatch(
+            input_source=InputSource.PREVIOUS_STEP,
+            input_type=InputType.TEXT,
+            input_bindings=None,
+            input_contract=None,
+            input_config=None,
+        ),
+    )
+    warnings.append(
+        "Inserted a dedicated audio transcription step before the existing "
+        "structured analysis step."
+    )
+
+
+def _is_bad_leading_audio_document_extraction(
+    step: FlowStep,
+    working: list[tuple[str | None, FlowStep | NewStepDraft]],
+) -> bool:
+    terminal = working[-1][1]
+    terminal_output_type = (
+        terminal.output_type
+        if isinstance(terminal, NewStepDraft)
+        else OutputType(terminal.output_type)
+    )
+    return (
+        step.input_source == InputSource.FLOW_INPUT.value
+        and step.input_type == InputType.AUDIO.value
+        and step.output_type != OutputType.TEXT.value
+        and terminal_output_type in {OutputType.DOCX, OutputType.PDF}
+    )
+
+
+def _merge_step_patch(existing: StepPatch | None, repair: StepPatch) -> StepPatch:
+    if existing is None:
+        return repair
+    return existing.model_copy(update=repair.model_dump(exclude_unset=True))
+
+
+def _runtime_input_required(input_config: dict[str, Any] | None) -> bool:
+    runtime_input = _runtime_input_config(input_config)
+    if isinstance(runtime_input.get("required"), bool):
+        return cast(bool, runtime_input["required"])
+    return True
+
+
+def _runtime_input_max_files(input_config: dict[str, Any] | None) -> int | None:
+    runtime_input = _runtime_input_config(input_config)
+    max_files = runtime_input.get("max_files")
+    return max_files if isinstance(max_files, int) else None
+
+
+def _runtime_input_config(input_config: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(input_config, dict):
+        return {}
+    runtime_input = input_config.get("runtime_input")
+    return cast(dict[str, Any], runtime_input) if isinstance(runtime_input, dict) else {}
 
 
 def _flow_step_to_spec(

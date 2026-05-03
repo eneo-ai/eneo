@@ -25,6 +25,7 @@ def _step(
     output_type: OutputType = OutputType.TEXT,
     output_mode: OutputMode = OutputMode.PASS_THROUGH,
     input_bindings: dict[str, object] | None = None,
+    input_contract: dict[str, object] | None = None,
     output_config: dict[str, object] | None = None,
 ) -> StepSpec:
     return StepSpec(
@@ -36,6 +37,7 @@ def _step(
         output_mode=output_mode,
         output_type=output_type,
         input_bindings=input_bindings,
+        input_contract=input_contract,
         output_config=output_config,
     )
 
@@ -120,6 +122,35 @@ def test_normalize_ai_builder_spec_keeps_explicit_multi_step_fan_in() -> None:
     assert normalized.steps[2].input_source == InputSource.ALL_PREVIOUS_STEPS
     assert not any(
         change.code == "input_source_all_previous_rewired"
+        for _step_spec, change in changes
+    )
+
+
+def test_normalize_ai_builder_spec_clears_all_previous_input_contract() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Final structured synthesis",
+        steps=[
+            _step(ref="step_a", name="Extract", input_source=InputSource.FLOW_INPUT),
+            _step(
+                ref="step_b",
+                name="Synthesize",
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                input_type=InputType.TEXT,
+                output_type=OutputType.JSON,
+                input_contract={
+                    "type": "object",
+                    "properties": {"summary": {"type": "string"}},
+                },
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(spec)
+
+    assert normalized.steps[1].input_source == InputSource.ALL_PREVIOUS_STEPS
+    assert normalized.steps[1].input_contract is None
+    assert any(
+        change.code == "all_previous_input_contract_cleared"
         for _step_spec, change in changes
     )
 

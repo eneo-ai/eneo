@@ -37,7 +37,10 @@ from intric.flows.flow_validators_template import (
     validate_template_fill_output_config,
 )
 from intric.flows.output_modes import transcribe_only_violation
-from intric.flows.output_processing import validate_schema_syntax
+from intric.flows.output_processing import (
+    schema_expects_structured,
+    validate_schema_syntax,
+)
 from intric.flows.runtime_input import build_runtime_input_config
 from intric.flows.step_chain_rules import find_first_step_chain_violation
 from intric.flows.template_reference_analyzer import (
@@ -147,6 +150,7 @@ def validate_steps(
                 )
             except TypedIOValidationException as exc:
                 raise BadRequestException(str(exc)) from exc
+            _validate_input_contract_source_compatibility(step=step)
         if step.output_contract is not None:
             try:
                 validate_schema_syntax(
@@ -165,6 +169,7 @@ def validate_steps(
             )
         _validate_runtime_input_publish_rules(step=step)
 
+    _validate_audio_document_transcript_chain(steps=sorted_steps)
     _validate_audio_transcription_settings(
         steps=sorted_steps,
         metadata_json=metadata_json,
@@ -244,6 +249,22 @@ def _validate_output_contract_compatibility(*, step: FlowStep) -> None:
             )
 
 
+def _validate_input_contract_source_compatibility(*, step: FlowStep) -> None:
+    if step.input_contract is None:
+        return
+    if step.input_source != "all_previous_steps":
+        return
+    if step.input_type != "text":
+        return
+    if not schema_expects_structured(step.input_contract):
+        return
+    raise BadRequestException(
+        f"Step {step.step_order}: structured input_contract is not supported with "
+        "input_source 'all_previous_steps' because concatenated prior step text "
+        "is not a single JSON value."
+    )
+
+
 def _schema_type_hint(schema: dict[str, Any]) -> str:
     raw_type = schema.get("type")
     if isinstance(raw_type, str):
@@ -290,6 +311,26 @@ def _validate_audio_transcription_settings(
         raise BadRequestException(
             "A transcription model must be selected when using audio input steps."
         )
+
+
+def _validate_audio_document_transcript_chain(*, steps: list[FlowStep]) -> None:
+    if not steps:
+        return
+    first_step = steps[0]
+    terminal_step = steps[-1]
+    if first_step.input_source != "flow_input" or first_step.input_type != "audio":
+        return
+    if terminal_step.output_type not in {"pdf", "docx"}:
+        return
+    if (
+        first_step.output_type == "text"
+        and first_step.output_mode == "transcribe_only"
+    ):
+        return
+    raise BadRequestException(
+        "Audio document flows must start with a dedicated transcribe_only "
+        "audio-to-text step before analysis or document generation."
+    )
 
 
 def _validate_binding_references(

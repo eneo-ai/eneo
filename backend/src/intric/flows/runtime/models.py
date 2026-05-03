@@ -112,7 +112,6 @@ class StepInputResolution:
 class RunExecutionState:
     completed_by_order: dict[int, FlowStepResult]
     prior_results: list[FlowStepResult]
-    all_previous_segments: list[str]
     assistant_cache: dict[UUID, Any]
     json_mode_supported: dict[str, bool]
     file_cache: dict[frozenset[UUID], list[Any]]
@@ -121,14 +120,23 @@ class RunExecutionState:
     )
     step_ref_mapping: dict[str, int] = field(default_factory=_empty_step_ref_mapping)
 
-    @property
-    def all_previous_text(self) -> str:
-        return "".join(self.all_previous_segments)
+    def all_previous_text_before(self, step_order: int) -> str:
+        segments: list[str] = []
+        for completed_order in sorted(self.completed_by_order):
+            if completed_order >= step_order:
+                continue
+            segments.append(
+                format_all_previous_step_segment(
+                    self.completed_by_order[completed_order]
+                )
+            )
+        return "".join(segments)
 
     def append_completed(self, result: FlowStepResult) -> None:
         self.completed_by_order[result.step_order] = result
         self.prior_results.append(result)
-        text = str((result.output_payload_json or {}).get("text", ""))
-        self.all_previous_segments.append(
-            f"<step_{result.step_order}_output>\n{text}\n</step_{result.step_order}_output>\n"
-        )
+
+
+def format_all_previous_step_segment(result: FlowStepResult) -> str:
+    text = str((result.output_payload_json or {}).get("text", ""))
+    return f"<step_{result.step_order}_output>\n{text}\n</step_{result.step_order}_output>\n"

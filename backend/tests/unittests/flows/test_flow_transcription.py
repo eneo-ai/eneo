@@ -11,12 +11,16 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
 from intric.flows.flow import FlowRun, FlowRunStatus
-from intric.flows.runtime.executor import FlowRunExecutor, RunExecutionState, RuntimeStep
+from intric.flows.runtime.executor import (
+    FlowRunExecutor,
+    RunExecutionState,
+    RuntimeStep,
+)
 from intric.flows.runtime.transcription import FlowTranscriptionResult
 from intric.flows.runtime.transcription_runtime import (
+    FLOW_INPUT_TRANSCRIPTION_KEY,
     AudioRuntimeDeps,
     AudioRuntimeRequest,
-    FLOW_INPUT_TRANSCRIPTION_KEY,
     resolve_transcribe_and_attach_audio_input,
 )
 from intric.main.exceptions import TypedIOValidationException
@@ -52,6 +56,17 @@ def _run(*, user, payload: dict | None = None) -> FlowRun:
 
 
 def _runtime_step(*, input_type: str = "audio", input_source: str = "flow_input") -> RuntimeStep:
+    input_config = (
+        {
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "audio",
+                "required": True,
+            }
+        }
+        if input_type == "audio" and input_source == "flow_input"
+        else None
+    )
     return RuntimeStep(
         step_id=uuid4(),
         step_order=1,
@@ -59,7 +74,7 @@ def _runtime_step(*, input_type: str = "audio", input_source: str = "flow_input"
         user_description=None,
         input_source=input_source,
         input_bindings=None,
-        input_config=None,
+        input_config=input_config,
         output_mode="pass_through",
         output_config=None,
         output_type="text",
@@ -103,7 +118,6 @@ def _state() -> RunExecutionState:
     return RunExecutionState(
         completed_by_order={},
         prior_results=[],
-        all_previous_segments=[],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},

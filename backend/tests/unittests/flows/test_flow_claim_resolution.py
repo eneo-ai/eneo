@@ -38,7 +38,6 @@ def _state(
     return RunExecutionState(
         completed_by_order=completed_by_order or {},
         prior_results=[],
-        all_previous_segments=[],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},

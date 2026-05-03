@@ -136,6 +136,33 @@ def test_materialize_audio_artifact_skeleton() -> None:
     assert skeleton[2].document_delivery_mode == "generated"
 
 
+def test_materialize_audio_document_without_pattern_infers_transcript_chain() -> None:
+    plan = materialize_step_skeleton(
+        runtime_input_type=InputType.AUDIO,
+        final_output_type=OutputType.PDF,
+        final_output_mode=OutputMode.PASS_THROUGH,
+        pattern_ids=(),
+        chain_steps=(),
+    )
+    skeleton = plan.minimum_slots
+
+    assert [slot.role for slot in skeleton] == [
+        "backend_fixed",
+        "semantic_required",
+        "backend_fixed",
+    ]
+    assert [slot.chain_token for slot in skeleton] == [
+        FLOW_INPUT_AUDIO_TRANSCRIPTION,
+        None,
+        TERMINAL_ARTIFACT_STEP,
+    ]
+    assert _skeleton_type_modes(skeleton) == [
+        ("audio", "text", "transcribe_only"),
+        ("text", "text", "pass_through"),
+        ("text", "pdf", "pass_through"),
+    ]
+
+
 def test_materialize_template_fill_mode_without_pattern_uses_docx_chain() -> None:
     plan = materialize_step_skeleton(
         runtime_input_type=InputType.DOCUMENT,

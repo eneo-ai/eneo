@@ -147,6 +147,13 @@ async def resolve_step_input(
             )
             runtime_input_text = audio_resolution.text
             transcription_metadata = audio_resolution.transcription_metadata
+            if audio_resolution.near_inline_limit_message is not None:
+                diagnostics.append(
+                    StepDiagnostic(
+                        code="typed_io_transcript_near_limit",
+                        message=audio_resolution.near_inline_limit_message,
+                    )
+                )
         else:
             runtime_input_text = _extract_text_from_files(files)
             if runtime_input_text:
@@ -301,6 +308,8 @@ def _resolve_runtime_requested_ids(*, run: FlowRun, step: RuntimeStep) -> list[A
             return parse_requested_file_ids(
                 raw_file_ids=cast(dict[str, Any], raw_step_input).get("file_ids")
             )
+    if step.step_order == 1 and step.input_source == "flow_input":
+        return parse_requested_file_ids(raw_file_ids=payload.get("file_ids"))
     return []
 
 
@@ -484,7 +493,7 @@ def resolve_input_source_text(
         return ""
     if input_source == "all_previous_steps":
         if state:
-            return state.all_previous_text
+            return state.all_previous_text_before(step_order)
         parts: list[str] = []
         for previous in sorted(prior_results, key=lambda item: item.step_order):
             if previous.step_order >= step_order:

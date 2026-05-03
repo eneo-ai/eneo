@@ -42,6 +42,7 @@ def _make_flow_step(
     output_type: str = "text",
     mcp_policy: str = "inherit",
     input_bindings: dict | None = None,
+    input_contract: dict | None = None,
     output_contract: dict | None = None,
     output_config: dict | None = None,
 ) -> FlowStep:
@@ -57,6 +58,7 @@ def _make_flow_step(
         output_mode=output_mode,
         output_type=output_type,
         input_bindings=input_bindings,
+        input_contract=input_contract,
         output_contract=output_contract,
         output_config=output_config,
         mcp_policy=mcp_policy,
@@ -92,6 +94,272 @@ def _make_add_payload(
         output_type=output_type,
         runtime_upload=runtime_upload,
         runtime_required=runtime_required,
+    )
+
+
+def test_compile_edit_draft_clears_all_previous_input_contract() -> None:
+    stale_contract = {
+        "type": "object",
+        "properties": {"meeting_context": {"type": "string"}},
+    }
+    existing = [
+        _make_flow_step(
+            step_order=1,
+            user_description="Extrahera",
+            output_type="json",
+            output_contract=stale_contract,
+        ),
+        _make_flow_step(
+            step_order=2,
+            user_description="Sammanställ",
+            input_source="all_previous_steps",
+            input_type="text",
+            output_type="json",
+            input_contract=stale_contract,
+            output_contract=stale_contract,
+        ),
+    ]
+    draft = FlowEditDraft(operations=[], plan_rationale="Behåll flödet.")
+
+    result = compile_edit_draft(draft, existing, base_flow_revision=1)
+
+    assert result.compiled_spec.steps[1].input_source == InputSource.ALL_PREVIOUS_STEPS
+    assert result.compiled_spec.steps[1].input_contract is None
+    assert any(
+        advisory.code == "all_previous_input_contract_cleared"
+        for advisory in result.advisories
+    )
+
+
+def test_compile_edit_draft_repairs_audio_document_flow_missing_transcript_step() -> None:
+    meeting_contract = {
+        "type": "object",
+        "properties": {"meeting_context": {"type": "string"}},
+    }
+    existing = [
+        _make_flow_step(
+            step_order=1,
+            user_description="Etablera gemensam möteskontext",
+            input_source="flow_input",
+            input_type="audio",
+            output_type="json",
+            input_bindings={"question": "{{ step_input.text }}"},
+            input_contract=None,
+            output_contract=meeting_contract,
+        ),
+        _make_flow_step(
+            step_order=2,
+            user_description="Analysera bakgrund",
+            input_source="previous_step",
+            input_type="json",
+            output_type="json",
+            input_contract=meeting_contract,
+            output_contract={
+                "type": "object",
+                "properties": {"background_points": {"type": "array"}},
+            },
+        ),
+        _make_flow_step(
+            step_order=3,
+            user_description="Skriv strukturerad mötesrapport",
+            input_source="all_previous_steps",
+            input_type="text",
+            output_type="text",
+        ),
+        _make_flow_step(
+            step_order=4,
+            user_description="Skapa PDF",
+            input_source="previous_step",
+            input_type="text",
+            output_type="pdf",
+        ),
+    ]
+    draft = FlowEditDraft(operations=[], plan_rationale="Behåll flödet.")
+
+    result = compile_edit_draft(draft, existing, base_flow_revision=1)
+
+    assert [
+        (step.input_source, step.input_type, step.output_type, step.output_mode)
+        for step in result.compiled_spec.steps
+    ] == [
+        (
+            InputSource.FLOW_INPUT,
+            InputType.AUDIO,
+            OutputType.TEXT,
+            OutputMode.TRANSCRIBE_ONLY,
+        ),
+        (
+            InputSource.PREVIOUS_STEP,
+            InputType.TEXT,
+            OutputType.JSON,
+            OutputMode.PASS_THROUGH,
+        ),
+        (
+            InputSource.PREVIOUS_STEP,
+            InputType.TEXT,
+            OutputType.JSON,
+            OutputMode.PASS_THROUGH,
+        ),
+        (
+            InputSource.ALL_PREVIOUS_STEPS,
+            InputType.TEXT,
+            OutputType.TEXT,
+            OutputMode.PASS_THROUGH,
+        ),
+        (
+            InputSource.PREVIOUS_STEP,
+            InputType.TEXT,
+            OutputType.PDF,
+            OutputMode.PASS_THROUGH,
+        ),
+    ]
+    assert result.compiled_spec.steps[1].input_bindings is None
+    assert result.compiled_spec.steps[1].input_contract is None
+    assert [step.plan_step_ref for step in result.compiled_spec.steps[:3]] == [
+        "step_a",
+        "step_b",
+        "step_c",
+    ]
+    assert result.compiled_spec.steps[1].existing_step_ref == "existing_step_1"
+    assert result.compiled_spec.steps[2].input_bindings == {
+        "question": "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+    }
+    assert any(
+        change.kind == "added" and change.step_name == "Transkribera ljud"
+        for change in result.diff.step_changes
+    )
+
+
+def test_compile_edit_draft_does_not_repair_existing_audio_transcript_flow() -> None:
+    existing = [
+        _make_flow_step(
+            step_order=1,
+            user_description="Transkribera ljud",
+            input_source="flow_input",
+            input_type="audio",
+            output_type="text",
+            output_mode="transcribe_only",
+        ),
+        _make_flow_step(
+            step_order=2,
+            user_description="Skapa PDF",
+            input_source="previous_step",
+            input_type="text",
+            output_type="pdf",
+        ),
+    ]
+    draft = FlowEditDraft(operations=[], plan_rationale="Behåll flödet.")
+
+    result = compile_edit_draft(draft, existing, base_flow_revision=1)
+
+    assert [
+        (step.name, step.input_source, step.input_type, step.output_type)
+        for step in result.compiled_spec.steps
+    ] == [
+        (
+            "Transkribera ljud",
+            InputSource.FLOW_INPUT,
+            InputType.AUDIO,
+            OutputType.TEXT,
+        ),
+        (
+            "Skapa PDF",
+            InputSource.PREVIOUS_STEP,
+            InputType.TEXT,
+            OutputType.PDF,
+        ),
+    ]
+    assert not any(
+        change.kind == "added" and change.step_name == "Transkribera ljud"
+        for change in result.diff.step_changes
+    )
+
+
+def test_compile_edit_draft_does_not_repair_audio_flow_without_document_terminal() -> None:
+    existing = [
+        _make_flow_step(
+            step_order=1,
+            user_description="Analysera ljud",
+            input_source="flow_input",
+            input_type="audio",
+            output_type="json",
+        ),
+        _make_flow_step(
+            step_order=2,
+            user_description="Skriv svar",
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+        ),
+    ]
+    draft = FlowEditDraft(operations=[], plan_rationale="Behåll flödet.")
+
+    result = compile_edit_draft(draft, existing, base_flow_revision=1)
+
+    assert [
+        (step.name, step.input_source, step.input_type, step.output_type)
+        for step in result.compiled_spec.steps
+    ] == [
+        (
+            "Analysera ljud",
+            InputSource.FLOW_INPUT,
+            InputType.AUDIO,
+            OutputType.JSON,
+        ),
+        (
+            "Skriv svar",
+            InputSource.PREVIOUS_STEP,
+            InputType.TEXT,
+            OutputType.TEXT,
+        ),
+    ]
+    assert not any(
+        change.kind == "added" and change.step_name == "Transkribera ljud"
+        for change in result.diff.step_changes
+    )
+
+
+def test_compile_edit_draft_does_not_repair_non_audio_document_flow() -> None:
+    existing = [
+        _make_flow_step(
+            step_order=1,
+            user_description="Analysera dokument",
+            input_source="flow_input",
+            input_type="document",
+            output_type="json",
+        ),
+        _make_flow_step(
+            step_order=2,
+            user_description="Skapa PDF",
+            input_source="previous_step",
+            input_type="text",
+            output_type="pdf",
+        ),
+    ]
+    draft = FlowEditDraft(operations=[], plan_rationale="Behåll flödet.")
+
+    result = compile_edit_draft(draft, existing, base_flow_revision=1)
+
+    assert [
+        (step.name, step.input_source, step.input_type, step.output_type)
+        for step in result.compiled_spec.steps
+    ] == [
+        (
+            "Analysera dokument",
+            InputSource.FLOW_INPUT,
+            InputType.DOCUMENT,
+            OutputType.JSON,
+        ),
+        (
+            "Skapa PDF",
+            InputSource.PREVIOUS_STEP,
+            InputType.TEXT,
+            OutputType.PDF,
+        ),
+    ]
+    assert not any(
+        change.kind == "added" and change.step_name == "Transkribera ljud"
+        for change in result.diff.step_changes
     )
 
 

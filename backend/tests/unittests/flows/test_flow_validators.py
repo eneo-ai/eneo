@@ -34,6 +34,16 @@ def _step(step_order: int = 1, **updates) -> FlowStep:
     return step.model_copy(update=updates)
 
 
+def _audio_metadata() -> dict:
+    return {
+        "wizard": {
+            "transcription_enabled": True,
+            "transcription_model": {"id": str(uuid4())},
+            "transcription_language": "sv",
+        }
+    }
+
+
 def test_validate_steps_rejects_unsupported_enum_values():
     with pytest.raises(BadRequestException, match="unsupported input_type 'banana'"):
         validate_steps([_step(input_type="banana")])
@@ -160,6 +170,88 @@ def test_validate_steps_allows_runtime_step_input_reference_in_bindings():
                 },
                 input_bindings={"value": "{{step_input.text}}"},
             )
+        ]
+    )
+
+
+def test_validate_steps_rejects_audio_document_flow_without_transcript_step():
+    with pytest.raises(
+        BadRequestException,
+        match="Audio document flows must start with a dedicated transcribe_only",
+    ):
+        validate_steps(
+            [
+                _step(
+                    1,
+                    input_source="flow_input",
+                    input_type="audio",
+                    output_type="json",
+                ),
+                _step(
+                    2,
+                    input_source="previous_step",
+                    input_type="text",
+                    output_type="pdf",
+                ),
+            ],
+            metadata_json=_audio_metadata(),
+        )
+
+
+def test_validate_steps_allows_audio_document_flow_with_transcript_step():
+    validate_steps(
+        [
+            _step(
+                1,
+                input_source="flow_input",
+                input_type="audio",
+                output_type="text",
+                output_mode="transcribe_only",
+            ),
+            _step(
+                2,
+                input_source="previous_step",
+                input_type="text",
+                output_type="pdf",
+            ),
+        ],
+        metadata_json=_audio_metadata(),
+    )
+
+
+def test_validate_steps_rejects_structured_contract_for_all_previous_text_input():
+    with pytest.raises(
+        BadRequestException,
+        match="structured input_contract is not supported with input_source 'all_previous_steps'",
+    ):
+        validate_steps(
+            [
+                _step(1, output_type="text"),
+                _step(
+                    2,
+                    input_source="all_previous_steps",
+                    input_type="text",
+                    output_type="text",
+                    input_contract={
+                        "type": "object",
+                        "properties": {"meeting_context": {"type": "string"}},
+                    },
+                ),
+            ]
+        )
+
+
+def test_validate_steps_allows_string_contract_for_all_previous_text_input():
+    validate_steps(
+        [
+            _step(1, output_type="text"),
+            _step(
+                2,
+                input_source="all_previous_steps",
+                input_type="text",
+                output_type="text",
+                input_contract={"type": "string"},
+            ),
         ]
     )
 

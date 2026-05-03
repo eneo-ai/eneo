@@ -156,6 +156,7 @@ class FlowRunExecutorConfig:
     http_request_timeout_seconds: float = 30.0
     http_max_timeout_seconds: float = 30.0
     http_allow_private_networks: bool = False
+    llm_request_timeout_seconds: float = 600.0
     rag_retrieval_timeout_seconds: float = 30.0
     rag_max_reference_sources: int = 25
     rag_max_chunks_per_source: int = 5
@@ -182,6 +183,9 @@ class FlowRunExecutorConfig:
             ),
             http_max_timeout_seconds=float(settings.flow_http_max_timeout_seconds),
             http_allow_private_networks=bool(settings.flow_http_allow_private_networks),
+            llm_request_timeout_seconds=float(
+                settings.flow_llm_request_timeout_seconds
+            ),
             document_render_limits=document_render_limits,
         )
 
@@ -315,6 +319,7 @@ class FlowRunExecutor:
             max_timeout_seconds=self.http_max_timeout_seconds,
             allow_private_networks=self.http_allow_private_networks,
         )
+        self.llm_request_timeout_seconds = resolved_config.llm_request_timeout_seconds
         self.rag_retrieval_timeout_seconds = (
             resolved_config.rag_retrieval_timeout_seconds
         )
@@ -851,7 +856,6 @@ class FlowRunExecutor:
             state = RunExecutionState(
                 completed_by_order={},
                 prior_results=[],
-                all_previous_segments=[],
                 assistant_cache={},
                 json_mode_supported={},
                 file_cache={},
@@ -899,6 +903,7 @@ class FlowRunExecutor:
             is_json_mode_rejection=is_json_mode_rejection,
             count_tokens=count_tokens,
             logger=logger,
+            llm_request_timeout_seconds=self.llm_request_timeout_seconds,
             rag_retrieval_timeout_seconds=self.rag_retrieval_timeout_seconds,
         )
         prepared = await prepare_step_execution(

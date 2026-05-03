@@ -65,6 +65,7 @@ from intric.flows.ai_builder.ai_builder_step_skeleton import (
     StepSkeletonOutputTypeDrift,
     StepSkeletonSemanticContent,
     materialize_step_skeleton,
+    resolve_step_skeleton_patterns,
 )
 from intric.flows.ai_builder.pattern_registry import (
     FLOW_INPUT_AUDIO_TRANSCRIPTION,
@@ -556,12 +557,19 @@ def compile_outline_to_create_draft(
     final_output_mode = context.final_output_mode if context is not None else None
     pattern_ids = context.pattern_ids if context is not None else ()
     chain_steps = context.pattern_chain_steps if context is not None else ()
+    pattern_resolution = resolve_step_skeleton_patterns(
+        runtime_input_type=runtime_input_type,
+        final_output_type=final_output_type,
+        final_output_mode=final_output_mode,
+        pattern_ids=pattern_ids,
+        chain_steps=chain_steps,
+    )
     outline_steps = _normalize_leading_audio_transcription_step(
         steps=list(outline.steps),
         runtime_input_type=runtime_input_type,
         backend_audio_transcription_inserted=_backend_audio_transcription_inserted(
-            pattern_ids=pattern_ids,
-            chain_steps=chain_steps,
+            pattern_ids=pattern_resolution.pattern_ids,
+            chain_steps=pattern_resolution.chain_steps,
         ),
     )
     outline_steps = _fold_leading_zero_contract_text_steps(
@@ -1249,11 +1257,6 @@ def _normalize_leading_audio_transcription_step(
         return steps
     if not _has_no_external_step_refs(first_step):
         return steps
-    if (
-        not first_step.output_fields
-        and _declared_output_type(first_step) == OutputType.JSON
-    ):
-        return steps
     if not _is_plain_text_semantic_step(first_step):
         rewritten = first_step.model_copy(
             update={
@@ -1286,11 +1289,25 @@ def _backend_audio_transcription_inserted(
 
 
 def _is_redundant_audio_transcription_step(step: "OutlineStep") -> bool:
+    normalized_name = normalize_discovery_text(step.name)
+    if contains_any_token_prefix(normalized_name, ("transkrib", "transcrib")):
+        return True
+
     normalized = normalize_discovery_text(f"{step.name} {step.task}")
+    if contains_any_token_prefix(normalized, ("transkrib", "transcrib")) and any(
+        phrase in normalized
+        for phrase in (
+            "till text",
+            "to text",
+            "into text",
+        )
+    ):
+        return True
+
     return contains_any_token_prefix(
         normalized,
-        ("transkrib", "transcrib"),
-    ) or any(
+        ("audio", "ljud", "tal", "speech"),
+    ) and any(
         phrase in normalized
         for phrase in (
             "audio to text",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -61,7 +62,6 @@ def _state() -> RunExecutionState:
     return RunExecutionState(
         completed_by_order={},
         prior_results=[],
-        all_previous_segments=[],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
@@ -398,6 +398,69 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
     assert state.json_mode_supported["provider:model:1"] is False
     assert output.structured_output == {"ok": True}
     assert output.full_text == '{"ok": true}'
+
+
+@pytest.mark.asyncio
+async def test_complete_step_execution_times_out_llm_request():
+    run = _run()
+    state = _state()
+    step = _step(output_type="text")
+
+    async def slow_response(**_kwargs: object) -> object:
+        await asyncio.sleep(0.05)
+        return SimpleNamespace(total_token_count=4, completion="too late")
+
+    assistant = MagicMock()
+    assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
+    assistant.get_response = AsyncMock(side_effect=slow_response)
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello",
+            source_text="hello",
+            input_source="all_previous_steps",
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={
+            "text": "hello",
+            "source_text": "hello",
+            "input_source": "all_previous_steps",
+        },
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(
+            return_value=([], {"status": "skipped_no_service"}, [])
+        ),
+        process_typed_output=AsyncMock(return_value=(None, None)),
+        apply_output_cap=AsyncMock(return_value=("too late", [])),
+        attach_typed_failure_context=attach_typed_failure_context,
+        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
+        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
+        is_json_mode_rejection=lambda exc: False,
+        count_tokens=lambda text: len(text),
+        llm_request_timeout_seconds=0.001,
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await complete_step_execution(
+            step=step,
+            run=run,
+            state=state,
+            prepared=prepared,
+            deps=deps,
+        )
+
+    assert exc_info.value.code == "flow_llm_request_timeout"
+    assert getattr(exc_info.value, "effective_prompt") == "Prompt"
+    failed_input_payload = getattr(exc_info.value, "input_payload_json")
+    assert failed_input_payload["input_source"] == "all_previous_steps"
 
 
 @pytest.mark.asyncio
@@ -1233,9 +1296,6 @@ async def test_complete_step_execution_tracks_inherited_citations_for_synthesis_
     state = RunExecutionState(
         completed_by_order={2: prior_result},
         prior_results=[prior_result],
-        all_previous_segments=[
-            "<step_2_output>\nGrounded step output\n</step_2_output>\n"
-        ],
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
