@@ -2,7 +2,7 @@
 
 ## Status
 
-11.2c IMPLEMENTATION COMPLETE
+11.3b IMPLEMENTATION COMPLETE
 
 ## Starting Point
 
@@ -1375,3 +1375,105 @@ Non-blocking note:
 | Decide whether discovery-time resource prompt rendering should consume `AIBuilderResourceReferenceMaterial`. | 11.3 follow-up after proposal resource material is stable |
 | Add form-field lifecycle goldens and decide whether the Pattern Registry needs an explicit form-field chain shape. | 11.3b |
 | Revisit selectable assistant refs only after AI Builder has a tenant/workspace-scoped allow-list plus permission and materializer rules. | Future resource-contract slice |
+
+## 11.3b Form-Field Lifecycle Goldens Plan
+
+### Scope
+
+This slice is test-only. It adds non-overlapping create/compiler goldens for
+form-field lifecycle behavior and one Pattern Registry canonical-owner
+invariant. If a golden exposes a source bug, the bug becomes 11.3c instead of
+expanding this slice.
+
+### Claude Plan Review Iteration 1
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-11-3b-form-field-lifecycle-plan-20260503T064226Z.md`
+- Verdict: `changes_required`
+- Green light: `no`
+- Minimum score: `6`
+
+Accepted findings:
+
+| Finding | Resolution |
+|---|---|
+| Chain scenario was under-specified. | Plan now pins exact post-conditions for intermediate use, final-step non-reference, structured previous-field binding, and valid compiled spec. |
+| Pattern Registry guard duplicated membership tests. | Replace the proposed guard with a single-owner invariant for `runtime_metadata_fields`. |
+| 11.4 discoverability would be weak in the large create-compiler file. | Add lifecycle goldens in a dedicated `test_ai_builder_form_field_lifecycle.py`. |
+| Edit-path twin was not explicitly carried forward. | 11.4 owns edit-path lifecycle twins; 11.3b remains create-path only. |
+| Source-change exception could expand scope. | Any source bug found by these goldens becomes 11.3c; this slice stays test-only. |
+
+### Planned Test Shape
+
+| Scenario | Test owner | Key assertions |
+|---|---|---|
+| Declare-only input field | `test_ai_builder_form_field_lifecycle.py` | Explicitly declared field with no `uses_input_fields` attaches to the final draft step and appears exactly once in final-step bindings. |
+| Intermediate chain | `test_ai_builder_form_field_lifecycle.py` | Intermediate step consumes the form field; final step references the intermediate structured field and does not contain the form-field marker. |
+| Multi-reference | `test_ai_builder_form_field_lifecycle.py` | Two steps consume the same field; each binding contains the marker exactly once; the compiled form-field contract has one field. |
+| Pattern Registry single owner | `test_pattern_registry.py` | `runtime_metadata_fields` belongs only to `form_field_runtime_inputs` across positive pattern required slots and question template ids. |
+
+### Validation Plan
+
+```bash
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py tests/unittests/flows/ai_builder/test_pattern_registry.py tests/unittests/flows/ai_builder/test_ai_builder_edit_validator.py -q
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q
+cd backend && uv run pytest tests/unittests/flows/ai_builder -q
+cd backend && uv run pyright tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py tests/unittests/flows/ai_builder/test_pattern_registry.py
+cd backend && uv run ruff check tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py tests/unittests/flows/ai_builder/test_pattern_registry.py
+cd backend && uv run ruff format --check tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py tests/unittests/flows/ai_builder/test_pattern_registry.py
+./scripts/gate-local/anti_slippage.sh --worktree
+git diff --check -- backend/tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py backend/tests/unittests/flows/ai_builder/test_pattern_registry.py docs/refactor/execution/batch-11-flow-ai-builder-reliability
+```
+
+### Claude Plan Verification Iteration 2
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-11-3b-form-field-lifecycle-plan-verification-20260503T064602Z.md`
+- Verdict: `green`
+- Green light: `yes`
+- Minimum score: `8`
+
+Accepted polish:
+
+| Finding | Resolution |
+|---|---|
+| Split the single-owner invariant for clearer failures. | Added separate required-slot and question-template owner tests. |
+| Keep names generic and behavior-oriented. | Lifecycle tests use neutral `priority`, `case_id`, and `audience` fields. |
+| Make 11.4 discovery explicit. | The dedicated lifecycle file is the path marker for the future matrix harness. |
+
+### Implementation Result
+
+| Area | Outcome |
+|---|---|
+| Lifecycle test owner | Added `backend/tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py`. |
+| Declare-only field golden | User-declared `priority` attaches to the final step and renders one binding marker. |
+| Intermediate chain golden | `case_id` is consumed by the intermediate scoring step; the final step references `step_a.output.structured.risk_score` and does not re-render `case_id`. |
+| Multi-reference golden | `audience` can feed two separate step bindings, once per step. |
+| Pattern Registry owner invariant | `runtime_metadata_fields` now has one positive required-slot owner and one positive question-template owner: `form_field_runtime_inputs`. |
+| Source scope | No source behavior changes were made. |
+
+### Validation Result
+
+| Command | Result |
+|---|---|
+| `uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py tests/unittests/flows/ai_builder/test_pattern_registry.py tests/unittests/flows/ai_builder/test_ai_builder_edit_validator.py -q` | Passed: `90 passed`. |
+| `uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q` | Passed: `75 passed`. |
+| `uv run pytest tests/unittests/flows/ai_builder -q` | Passed: `1743 passed, 4 skipped`, 12 existing warnings. |
+| `uv run pyright tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py tests/unittests/flows/ai_builder/test_pattern_registry.py` | Passed: `0 errors, 0 warnings, 0 informations`. |
+| `uv run ruff check tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py tests/unittests/flows/ai_builder/test_pattern_registry.py` | Passed. |
+| `uv run ruff format --check tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py tests/unittests/flows/ai_builder/test_pattern_registry.py` | Passed: `2 files already formatted`. |
+| `./scripts/gate-local/anti_slippage.sh --worktree` | Passed: `anti-slippage: worktree clean`. |
+| `git diff --check -- <11.3b touched paths>` | Passed. |
+| `docker exec -w /workspace/backend eneo-41ae93-eneo-1 uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py -q` | Blocked before Docker ran by tool policy: `approval required by policy, but AskForApproval is set to Never`. |
+
+### Claude Implementation Review
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-11-3b-form-field-lifecycle-implementation-20260503T065235Z.md`
+- Verdict: `green`
+- Green light: `yes`
+- Minimum score: `8`
+
+Accepted notes:
+
+| Finding | Resolution |
+|---|---|
+| Exact binding equality in the intermediate-chain test is the most formatting-sensitive assertion. | Keep it intentionally strict; a binding-shape change should update this golden deliberately. |
+| Optional docstrings were not necessary. | Test names carry the invariant and no restating comments were added. |

@@ -631,6 +631,8 @@ git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_resource_cata
 
 Scope:
 
+- This is a test-only slice. If a golden reveals a source bug, record it and
+  open 11.3c rather than expanding this slice.
 - Decide with source evidence whether `form_field_runtime_inputs` needs an
   explicit chain shape for declare → use → re-reference flows, or whether the
   existing `sectioned_form_intake` and `form_field_runtime_inputs` pair is
@@ -647,15 +649,28 @@ Scenario matrix:
 
 | Scenario | Existing overlap to avoid | Required 11.3b assertion |
 |---|---|---|
-| Declare-only | `_attach_unreferenced_form_fields_to_final_step` path is partly covered by server-derived runtime hints. | User-declared `input_fields` with zero explicit `uses_input_fields` survive as `form_fields` and bind to the final compiled step. |
-| Chain | Existing leading-step form-field usage covers a single step. | A field used by an intermediate JSON-producing step flows downstream through the previous-step output contract without requiring the final step to re-reference the field. |
-| Multi-reference | Existing tests mostly assert one consumer. | One declared field can be referenced by two separate steps; both compiled bindings include the field exactly once. |
-| Pattern Registry expression | Existing rendered-pack tests verify `runtime_metadata_fields` only. | The knowledge pack either exposes a form-field chain shape or the plan records a concrete follow-up and keeps 11.3b behavior-only. |
+| Declare-only | `_attach_unreferenced_form_fields_to_final_step` path is partly covered by server-derived runtime hints. | User-declared `input_fields` with zero explicit `uses_input_fields` survive as `form_fields`; `draft.steps[-1].uses_form_fields == ["priority"]`; compiled final-step `input_bindings.question` contains `priority: {{ priority }}` exactly once; validation is valid. |
+| Chain | Existing leading-step form-field usage covers one direct consumer. | The intermediate step uses the field; the final step does not re-reference it; final-step bindings reference the intermediate structured field (`step_a.output.structured.<path>`) and do not contain the original form-field marker; validation is valid. |
+| Multi-reference | Existing tests mostly assert one consumer. | One declared field is referenced by two separate steps; each compiled binding contains the field marker exactly once; `compiled.form_fields` contains one field; validation is valid. |
+| Pattern Registry expression | Existing rendered-pack tests verify `runtime_metadata_fields` membership only. | Add a single-owner invariant: exactly `form_field_runtime_inputs` owns `runtime_metadata_fields` in positive pattern required slots and question template ids. Keep 11.3b behavior-only; no new form-field chain archetype is earned. |
+
+Test ownership:
+
+- Put lifecycle goldens in
+  `backend/tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py`
+  so 11.4 can discover the seed by path instead of retrofitting markers into
+  the large create-compiler test file.
+- Keep the Pattern Registry single-owner invariant in
+  `backend/tests/unittests/flows/ai_builder/test_pattern_registry.py`.
+- Edit-path twins for form-field lifecycle belong to the 11.4 matrix slice;
+  11.3b stays create-path only because edit stale-ref behavior is already
+  covered by `test_ai_builder_edit_validator.py`.
 
 Validation commands will include:
 
 ```bash
-cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_pattern_registry.py tests/unittests/flows/ai_builder/test_ai_builder_edit_validator.py -q
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py tests/unittests/flows/ai_builder/test_pattern_registry.py tests/unittests/flows/ai_builder/test_ai_builder_edit_validator.py -q
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q
 cd backend && uv run pytest tests/unittests/flows/ai_builder -q
 ```
 

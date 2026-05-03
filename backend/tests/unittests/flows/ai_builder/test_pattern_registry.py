@@ -758,6 +758,30 @@ class TestPatternRegistryPublicApi:
             "question_template_ids"
         )
 
+    def test_runtime_metadata_fields_has_one_positive_required_slot_owner(
+        self,
+    ) -> None:
+        owners = tuple(
+            pattern.id
+            for pattern in PATTERN_REGISTRY.values()
+            if pattern.polarity == "positive"
+            and "runtime_metadata_fields" in pattern.required_architectural_slots
+        )
+
+        assert owners == ("form_field_runtime_inputs",)
+
+    def test_runtime_metadata_fields_has_one_positive_question_template_owner(
+        self,
+    ) -> None:
+        owners = tuple(
+            pattern.id
+            for pattern in PATTERN_REGISTRY.values()
+            if pattern.polarity == "positive"
+            and "runtime_metadata_fields" in pattern.question_template_ids
+        )
+
+        assert owners == ("form_field_runtime_inputs",)
+
     def test_render_knowledge_pack_exposes_runtime_metadata_for_form_field_pattern(
         self,
     ) -> None:
