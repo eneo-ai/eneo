@@ -10,8 +10,9 @@ does not need null-valued keys.
 `recoverable_parse` receives one extra self-correction attempt, so the repair
 loop can distinguish malformed input from validation and quality feedback.
 `ProposalFailureKind` is the sanitized proposal telemetry taxonomy: it maps
-`recoverable_parse` to `parse` and adds `missing_submission_tool` for responses
-that did not call the required proposal tool.
+`recoverable_parse` to `parse`, adds `missing_submission_tool` for responses
+that did not call the required proposal tool, and records backend-owned
+architecture failures without treating them as repair invocations.
 """
 
 from __future__ import annotations
@@ -39,8 +40,14 @@ ProposalFailureKind = Literal[
     "validation",
     "quality",
     "missing_submission_tool",
+    "architecture",
 ]
-ProposalRepairReason = ProposalFailureKind
+ProposalRepairReason = Literal[
+    "parse",
+    "validation",
+    "quality",
+    "missing_submission_tool",
+]
 
 PROPOSAL_TELEMETRY_LOG_KEY = "ai_builder_proposal_telemetry"
 PROPOSAL_TELEMETRY_SCHEMA_VERSION = 1
@@ -62,9 +69,9 @@ def _completion_text_from_response(response: Any) -> str:
     return "\n".join(parts)
 
 
-def proposal_failure_kind_from_tool_failure(
+def proposal_repair_reason_from_tool_failure(
     failure_kind: ToolProcessingFailureKind | None,
-) -> ProposalFailureKind:
+) -> ProposalRepairReason:
     if failure_kind in {"parse", "recoverable_parse"}:
         return "parse"
     if failure_kind == "validation":

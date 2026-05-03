@@ -2,6 +2,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+
+from intric.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
+from intric.flows.ai_builder.ai_builder_critic_invariants import (
+    CRITIC_INVARIANTS,
+    enforce_architecture_critic_invariants,
+    evaluate_critic_invariants,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -14,6 +24,8 @@ from intric.flows.ai_builder.ai_builder_models import (
 )
 from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_aware_quality_feedback,
+    build_conversation_critic_context,
+    build_quality_feedback_from_critic_context,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
@@ -21,6 +33,31 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_critic_invariants import CriticContext
+
+
+EXPECTED_CRITIC_INVARIANT_KINDS = {
+    "runtime_metadata_requires_form_fields": "semantic",
+    "sectioned_form_intake_requires_form_fields": "semantic",
+    "rich_workflow_requires_form_fields": "semantic",
+    "rich_workflow_requires_json_contract_step": "semantic",
+    "rich_workflow_requires_multiple_steps": "semantic",
+    "pdf_terminal_output_alignment": "architecture",
+    "docx_terminal_output_alignment": "architecture",
+    "non_terminal_step_document_conversion_forbidden": "architecture",
+    "non_terminal_step_template_fill_forbidden": "architecture",
+    "structured_extraction_requires_json_contract_step": "semantic",
+    "explicit_json_contract_request_without_step": "semantic",
+    "standalone_audio_requires_transcription_step": "architecture",
+    "field_reuse_requires_input_bindings": "semantic",
+    "multi_document_compare_requires_all_previous_steps": "architecture",
+    "mcp_selection_requires_semantic_support": "semantic",
+    "json_input_rejects_all_previous_steps_source": "architecture",
+    "template_fill_docx_requires_template_fill_step": "architecture",
+    "generated_docx_rejects_template_fill": "architecture",
+    "mixed_audio_doc_rejects_file_degradation": "architecture",
+    "mixed_audio_doc_rejects_pseudo_transcription": "architecture",
+    "mixed_audio_doc_requires_real_transcription_step": "architecture",
+}
 
 
 def _step(
@@ -44,6 +81,113 @@ def _step(
         output_type=output_type,
         output_contract=output_contract,
     )
+
+
+def _pdf_mismatch_context() -> "CriticContext":
+    conversation = [
+        {
+            "role": "user",
+            "content": "PDF document",
+            "metadata": {
+                "question_answer": {
+                    "question_id": "final_output_mode",
+                    "selected_values": ["pdf_document"],
+                }
+            },
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Rapport",
+        steps=[
+            _step(
+                "step_a",
+                "Skriv rapport",
+                "Skriv en rapport.",
+                output_type=OutputType.TEXT,
+            )
+        ],
+    )
+    return build_conversation_critic_context(conversation, spec)
+
+
+def test_critic_invariant_registry_has_stable_kind_map() -> None:
+    assert {invariant.id: invariant.kind for invariant in CRITIC_INVARIANTS} == (
+        EXPECTED_CRITIC_INVARIANT_KINDS
+    )
+
+
+def test_evaluate_critic_invariants_returns_issue_metadata() -> None:
+    issues = evaluate_critic_invariants(_pdf_mismatch_context())
+
+    assert [(issue.id, issue.kind) for issue in issues] == [
+        ("pdf_terminal_output_alignment", "architecture")
+    ]
+    assert "PDF" in issues[0].remediation
+
+
+def test_enforce_architecture_critic_invariants_raises_typed_error() -> None:
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        enforce_architecture_critic_invariants(_pdf_mismatch_context())
+
+    assert exc_info.value.public_code == "architecture_critic_invariant_failed"
+    assert (
+        exc_info.value.log_context["critic_issue_ids"]
+        == "pdf_terminal_output_alignment"
+    )
+
+
+def test_quality_feedback_from_context_can_exclude_architecture_issues() -> None:
+    context = _pdf_mismatch_context()
+
+    assert (
+        build_quality_feedback_from_critic_context(
+            context,
+            include_architecture=False,
+        )
+        is None
+    )
+    assert (
+        build_quality_feedback_from_critic_context(
+            context,
+            include_architecture=True,
+        )
+        is not None
+    )
+
+
+def test_quality_feedback_from_context_keeps_semantic_issues() -> None:
+    conversation = [
+        {
+            "role": "user",
+            "content": "Add basic metadata",
+            "metadata": {
+                "question_answer": {
+                    "question_id": "runtime_metadata_fields",
+                    "selected_values": ["basic_case_metadata"],
+                }
+            },
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Dokumentanalys",
+        steps=[
+            _step(
+                "step_a",
+                "Analysera dokument",
+                "Sammanfatta ärendet.",
+                input_type=InputType.DOCUMENT,
+            )
+        ],
+    )
+    context = build_conversation_critic_context(conversation, spec)
+
+    feedback = build_quality_feedback_from_critic_context(
+        context,
+        include_architecture=False,
+    )
+
+    assert feedback is not None
+    assert "form_fields" in feedback
 
 
 def test_flags_missing_form_fields_when_runtime_metadata_was_requested() -> None:

@@ -54,6 +54,9 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
+from intric.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
@@ -78,15 +81,20 @@ from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.planning_state import ArchitectureCommit
 
 
-class MaterializationError(ValueError):
+class MaterializationError(AIBuilderArchitectureError):
     """Raised when the draft envelope cannot be materialized against the commit.
 
-    Distinct from generic ``ValueError`` so callers can differentiate
-    bridge-detected drift (step-count mismatch, per-step tuple divergence,
-    envelope-shape hallucination, unsupported commit output_mode, or
-    semantic rejection from ``validate_create_draft``) from unrelated
-    value errors raised by downstream compilers.
+    The bridge turns commit/envelope drift and create-path semantic rejection
+    into the shared architecture-error surface while preserving a bridge-specific
+    exception name for callers that care where materialization failed.
     """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(
+            public_code="architecture_materialization_failed",
+            detail=detail,
+            log_context={"materialization_surface": "bridge"},
+        )
 
 
 @dataclass(frozen=True, slots=True)

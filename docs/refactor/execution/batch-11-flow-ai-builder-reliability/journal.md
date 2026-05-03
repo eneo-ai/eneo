@@ -696,6 +696,85 @@ module and the duplicate create-outline mechanics helpers.
 | Potential split of `ai_builder_step_skeleton.py` if 11.1c adds substantial materializer/compose code. | 11.1c |
 | Generalize `StepSkeletonOutputTypeDrift` only if 11.1c needs additional drift classes. | 11.1c |
 
+## 11.1c Architecture Error Surface And Critic Classification
+
+### Scope
+
+Implemented the create-path architecture-error surface and critic invariant
+classification. Edit-path fill/preserve/reject mechanics stay out of this slice
+and remain a follow-up so create-path repair policy is reviewable on its own.
+
+### Source Changes
+
+| Area | Evidence | Decision |
+|---|---|---|
+| Shared architecture error contract | `backend/src/intric/flows/ai_builder/ai_builder_architecture_errors.py:7`, `:14` | Added `ArchitectureErrorCode` and `AIBuilderArchitectureError(Exception)` with scalar log context. |
+| Create-outline skeleton boundary | `backend/src/intric/flows/ai_builder/ai_builder_create_outline.py:565`, `:583` | Wrap only skeleton materialization/composition `ValueError`s as `architecture_materialization_failed`; outline argument validation still follows the existing parse path. |
+| Critic invariant classification | `backend/src/intric/flows/ai_builder/ai_builder_critic_invariants.py:855`, `:880`, `:907` | Kept one `CRITIC_INVARIANTS` registry, added typed issue evaluation, and added architecture enforcement for backend-owned mechanics failures. |
+| Create proposal strict critic path | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:473`, `:481`, `:488` | Create proposals build one critic context, enforce architecture issues, then render semantic-only quality feedback. |
+| Proposal error translation | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:245`, `:262`, `:1377`, `:1626`, `:1727` | Direct submission, repair processing, and forced-tool retry paths record first-attempt `architecture` failures and yield one sanitized SSE error event without self-correction. |
+| Telemetry taxonomy | `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py:37`, `:45`, `:74` | `ProposalFailureKind` includes `architecture`; `ProposalRepairReason` excludes it. Tool-processing failures still map only to repairable reasons. |
+| Bridge materialization error | `backend/src/intric/flows/ai_builder/ai_builder_materialization_bridge.py:84` | `MaterializationError` now subclasses the shared architecture error without keeping a `ValueError` parent. |
+| SSE error code mapping | `backend/src/intric/flows/ai_builder/ai_builder_events.py:104` | Architecture error codes map to the existing bad-request error family. Frontend SSE handling was checked and treats unknown AI Builder error codes as strings. |
+
+### Test Changes
+
+| Coverage | Evidence |
+|---|---|
+| Critic kind map and typed issue evaluation | `backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py:105`, `:112` |
+| Architecture critic enforcement | `backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py:121` |
+| Semantic-only feedback rendering | `backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py:132`, `:153` |
+| Direct architecture error bypasses repair and keeps repair count zero | `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py:1180` |
+| Self-correction and forced-tool architecture errors use sanitized SSE events | `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py:1248`, `:1304` |
+| Audio-to-DOCX proposal canary returns a plan without self-correction | `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py:1348` |
+| Skeleton materialization `ValueError` wraps as `AIBuilderArchitectureError` | `backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py:2118` |
+| `MaterializationError` public parent | `backend/tests/unittests/flows/ai_builder/test_ai_builder_materialization_bridge.py:724` |
+| `architecture` is not a repair reason | `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py:136` |
+
+### Claude Peer Review
+
+| Iteration | Artifact | Verdict | Green light | Minimum score | Outcome |
+|---:|---|---|---|---:|---|
+| 1 | `.codex/artifacts/claude-peer-loop-batch-11-1c-architecture-error-plan-20260503T024035Z.md` | `changes_required` | `no` | 6 | Required telemetry policy, explicit parent class, invariant classification, and critic split. |
+| 2 | `.codex/artifacts/claude-peer-loop-batch-11-1c-architecture-error-plan-verification-20260503T024513Z.md` | `changes_required` | `no` | 7 | Found the broad `_process_outline_arguments` catch would swallow architecture errors and that repair reasons still aliased failure kinds. |
+| 3 | `.codex/artifacts/claude-peer-loop-batch-11-1c-architecture-error-plan-verification-3-20260503T024858Z.md` | `green` | `yes` | 7 | Approved the revised plan. Non-blocking edit-path catch was dropped before implementation to keep scope create-path focused. |
+| 4 | `.codex/artifacts/claude-peer-loop-batch-11-1c-architecture-error-implementation-20260503T030741Z.md` | `green` | `yes` | 8 | Content green; wrapper parse failed because the response used bold output-contract labels. |
+| 5 | `.codex/artifacts/claude-peer-loop-batch-11-1c-architecture-error-final-verification-contract-20260503T031047Z.md` | `green` | `yes` | 9 | Parser-clean final verification after renaming repair-reason conversion. |
+
+### Accepted Claude Findings
+
+| Finding | Resolution |
+|---|---|
+| Architecture failures need telemetry but must not invoke repair. | Added `architecture` to `ProposalFailureKind`, split `ProposalRepairReason`, and added zero-repair assertions. |
+| `AIBuilderArchitectureError` must not inherit `ValueError`. | Added a shared `Exception` subclass and reparented `MaterializationError`. |
+| Critic invariants need explicit semantic/architecture policy. | Added `kind` to every invariant and tests for the complete id map. |
+| `render_critic_issues` must not become a parallel evaluator. | Added `evaluate_critic_invariants` and made render/enforce consume it. |
+| `_process_outline_arguments` broad catch would swallow the new error. | Added an explicit re-raise before the broad fallback. |
+| Edit-flow catch was speculative in this create-path slice. | Dropped it; edit-path mechanics remain a follow-up slice. |
+| Repair conversion helper name was stale after the repair-reason split. | Renamed it to `proposal_repair_reason_from_tool_failure` and renamed local variables at call sites. |
+
+### Validation
+
+| Command | Result |
+|---|---|
+| `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_materialization_bridge.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py -q` | Passed: `206 passed`, one existing Starlette multipart warning. |
+| `cd backend && uv run pyright <11.1c touched source/test files>` | Passed: `0 errors, 0 warnings, 0 informations`. |
+| `cd backend && uv run ruff check <11.1c touched source/test files>` | Passed. |
+| `cd backend && uv run ruff format --check <11.1c touched source/test files>` | Passed: `13 files already formatted`. |
+| `cd backend && uv run lint-imports --no-cache` | Passed: 3 contracts kept, 0 broken. |
+| `git diff --check -- <11.1c touched paths>` | Passed. |
+| `./scripts/gate-local/anti_slippage.sh --worktree` | Passed: `anti-slippage: worktree clean`. |
+| Added-line slop grep for `deprecated`, `legacy`, `backwards compatibility`, session/tooling references, and TODO/FIXME markers | Passed with no matches. |
+| Claude final implementation verification | Passed: parser-clean `GREEN_LIGHT: yes`, `MIN_SCORE: 9`. |
+
+### Carry-Forward
+
+| Item | Owner slice |
+|---|---|
+| Edit-path fill/preserve/reject mechanics. | Next 11.1 follow-up slice |
+| Promote any manual audio-to-DOCX API smoke failures into the automated corpus. | 11.1 success gate |
+| Watch `ai_builder_step_skeleton.py` size if edit mechanics add more policy. | Next 11.1 follow-up slice |
+
 ### 11.1a Carry-Forward Closed In 11.1b
 
 | Item | 11.1b closure |

@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from intric.flows.ai_builder.ai_builder_critic_invariants import (
     CriticContext,
-    render_critic_issues,
+    evaluate_critic_invariants,
 )
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
@@ -44,6 +44,27 @@ def build_conversation_aware_quality_feedback(
     aggregation_intent: AggregationIntent = "linear",
     resource_catalog: "AIBuilderResourceCatalog | None" = None,
 ) -> str | None:
+    context = build_conversation_critic_context(
+        conversation,
+        spec,
+        flow=flow,
+        aggregation_intent=aggregation_intent,
+        resource_catalog=resource_catalog,
+    )
+    return build_quality_feedback_from_critic_context(
+        context,
+        include_architecture=True,
+    )
+
+
+def build_conversation_critic_context(
+    conversation: list[ConversationMessage] | list[Mapping[str, Any]],
+    spec: FlowDraftSpecCore,
+    *,
+    flow: Flow | None = None,
+    aggregation_intent: AggregationIntent = "linear",
+    resource_catalog: "AIBuilderResourceCatalog | None" = None,
+) -> CriticContext:
     answer_signals = extract_answer_signals(conversation)
     text = aggregate_freeform_user_text(conversation)
     requirements_state = resolve_requirements_state(
@@ -63,7 +84,7 @@ def build_conversation_aware_quality_feedback(
     planner_patterns = detect_planner_pattern_signals(signal_text)
     output_intent = resolve_output_intent(text, answer_signals)
 
-    context = CriticContext(
+    return CriticContext(
         spec=spec,
         flow=flow,
         answer_signals=answer_signals,
@@ -76,8 +97,18 @@ def build_conversation_aware_quality_feedback(
         aggregation_intent=aggregation_intent,
         resource_catalog=resource_catalog,
     )
-    issues = render_critic_issues(context)
 
+
+def build_quality_feedback_from_critic_context(
+    context: CriticContext,
+    *,
+    include_architecture: bool = False,
+) -> str | None:
+    issues = [
+        issue.remediation
+        for issue in evaluate_critic_invariants(context)
+        if include_architecture or issue.kind == "semantic"
+    ]
     if not issues:
         return None
     return format_revision_feedback("Quality issues", issues)

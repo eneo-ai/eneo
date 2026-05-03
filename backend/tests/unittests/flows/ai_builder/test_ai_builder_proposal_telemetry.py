@@ -11,11 +11,13 @@ from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_N
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     PROPOSAL_TELEMETRY_LOG_KEY,
     PROPOSAL_TELEMETRY_SCHEMA_VERSION,
+    ProposalFailureKind,
+    ProposalRepairReason,
     ProposalTurnTelemetry,
     ToolProcessingFailureKind,
     log_proposal_first_attempt,
     log_proposal_repair_invoked,
-    proposal_failure_kind_from_tool_failure,
+    proposal_repair_reason_from_tool_failure,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
@@ -123,12 +125,17 @@ def test_proposal_turn_telemetry_first_attempt_is_first_write_wins() -> None:
     assert payload["proposal_first_attempt_failure_kind"] == "missing_submission_tool"
 
 
-def test_proposal_failure_kind_sanitizes_recoverable_parse() -> None:
-    assert proposal_failure_kind_from_tool_failure("recoverable_parse") == "parse"
-    assert proposal_failure_kind_from_tool_failure("parse") == "parse"
-    assert proposal_failure_kind_from_tool_failure("validation") == "validation"
-    assert proposal_failure_kind_from_tool_failure("quality") == "quality"
-    assert proposal_failure_kind_from_tool_failure(None) == "validation"
+def test_proposal_repair_reason_sanitizes_recoverable_parse() -> None:
+    assert proposal_repair_reason_from_tool_failure("recoverable_parse") == "parse"
+    assert proposal_repair_reason_from_tool_failure("parse") == "parse"
+    assert proposal_repair_reason_from_tool_failure("validation") == "validation"
+    assert proposal_repair_reason_from_tool_failure("quality") == "quality"
+    assert proposal_repair_reason_from_tool_failure(None) == "validation"
+
+
+def test_architecture_failure_kind_is_not_a_repair_reason() -> None:
+    assert "architecture" in get_args(ProposalFailureKind)
+    assert "architecture" not in get_args(ProposalRepairReason)
 
 
 def test_proposal_first_attempt_log_uses_nested_payload() -> None:

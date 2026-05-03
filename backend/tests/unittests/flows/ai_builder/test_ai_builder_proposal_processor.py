@@ -8,6 +8,12 @@ from uuid import uuid4
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_architecture_commit import (
+    finalize_architecture_commit,
+)
+from intric.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_edit_models import FlowEditDraft
 from intric.flows.ai_builder.ai_builder_edit_proposal import process_edit_arguments
@@ -54,6 +60,11 @@ from intric.flows.ai_builder.ai_builder_tools import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from intric.flows.ai_builder.planning_state import (
+    ArchitectureCommitDraft,
+    PlanningState,
+    StepTriple,
+)
 
 
 def _make_processor(**overrides) -> AIBuilderProposalProcessor:
@@ -1163,6 +1174,248 @@ async def test_handle_submission_tool_call_omits_flow_context_by_default() -> No
     assert events == [{"event": "plan", "data": "{}"}]
     process_tool_arguments.assert_awaited_once()
     assert "flow" not in process_tool_arguments.await_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_handle_submission_tool_call_returns_architecture_error_without_repair() -> (
+    None
+):
+    processor = _make_processor()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-architecture",
+        model="openai/gpt-5.4-nano",
+    )
+    tool_call = _make_tool_call(
+        OUTLINE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Audio report",
+            "plan_rationale": "Create a report from audio.",
+            "steps": [{"name": "Summarize", "task": "Summarize the recording."}],
+        },
+        tool_call_id="call-architecture",
+    )
+    ctx = _make_context(
+        conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
+        usage_tracker=tracker,
+        request_id="req-architecture",
+        text_content="",
+    )
+    process_tool_arguments = AsyncMock(
+        side_effect=AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            detail="invalid skeleton",
+            log_context={"surface": "test"},
+        )
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
+            return_value=SimpleNamespace(confirmed=True),
+        ),
+        patch.object(processor, "_request_tool_self_correction") as repair,
+    ):
+        events = [
+            event
+            async for event in processor._handle_submission_tool_call(
+                ctx=ctx,
+                tool_call=tool_call,
+                config=SubmissionToolHandlerConfig(
+                    target_tool_name=OUTLINE_FLOW_TOOL_NAME,
+                    requirements_not_confirmed_message="Requirements must be confirmed before creating a flow.",
+                    parse_error_prefix="Invalid outline_flow arguments",
+                    invalid_result_message="Invalid outline_flow draft.",
+                    forced_tool_prompt="Now call outline_flow.",
+                    process_tool_arguments=process_tool_arguments,
+                ),
+            )
+        ]
+
+    repair.assert_not_called()
+    assert [event["event"] for event in events] == ["error"]
+    payload = json.loads(events[0]["data"])
+    assert payload["code"] == "architecture_materialization_failed"
+    assert payload["phase"] == "proposal"
+
+    telemetry = tracker.build_planner_telemetry()
+    assert telemetry["proposal_first_attempt_success"] is False
+    assert telemetry["proposal_first_attempt_failure_kind"] == "architecture"
+    assert telemetry["proposal_repair_invocation_count"] == 0
+    assert telemetry["proposal_repair_invocation_reasons"] == []
+
+
+@pytest.mark.asyncio
+async def test_self_correction_architecture_error_uses_sanitized_event() -> None:
+    processor = _make_processor()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-repair-architecture",
+        model="openai/gpt-5.4-nano",
+    )
+    tool_call = _make_tool_call(
+        OUTLINE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Broken",
+            "plan_rationale": "Broken.",
+            "steps": [{"name": "Broken", "task": "Broken."}],
+        },
+        tool_call_id="call-repair-architecture",
+    )
+    ctx = _make_context(
+        usage_tracker=tracker,
+        request_id="req-repair-architecture",
+    )
+
+    async def _raise_architecture_error(**_kwargs):
+        raise AIBuilderArchitectureError(
+            public_code="architecture_critic_invariant_failed",
+            detail="critic invariant failed",
+            log_context={"critic_issue_ids": "pdf_terminal_output_alignment"},
+        )
+        yield {"event": "unused", "data": "{}"}
+
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_processor.run_request_self_correction",
+        new=_raise_architecture_error,
+    ):
+        events = [
+            event
+            async for event in processor._request_tool_self_correction(
+                ctx=ctx,
+                error_message="Invalid flow",
+                tool_call=tool_call,
+                retry_config=ToolRetryConfig(
+                    target_tool_name=OUTLINE_FLOW_TOOL_NAME,
+                    forced_tool_prompt="Now call outline_flow.",
+                    process_tool_arguments=AsyncMock(),
+                    process_tool_kwargs={},
+                ),
+            )
+        ]
+
+    assert [event["event"] for event in events] == ["error"]
+    payload = json.loads(events[0]["data"])
+    assert payload["code"] == "architecture_critic_invariant_failed"
+    telemetry = tracker.build_planner_telemetry()
+    assert telemetry["proposal_first_attempt_failure_kind"] == "architecture"
+    assert telemetry["proposal_repair_invocation_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_forced_tool_architecture_error_uses_sanitized_event() -> None:
+    processor = _make_processor()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-forced-architecture",
+        model="openai/gpt-5.4-nano",
+    )
+
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_processor.run_retry_forced_tool_after_text",
+        new=AsyncMock(
+            side_effect=AIBuilderArchitectureError(
+                public_code="architecture_materialization_failed",
+                detail="invalid skeleton",
+            )
+        ),
+    ):
+        events = await processor.retry_forced_tool_after_text(
+            correction_messages=[{"role": "user", "content": "Build"}],
+            assistant_text="Här är planen.",
+            tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            session_id=uuid4(),
+            conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
+            new_messages_start=1,
+            available_model_refs=None,
+            available_kb_refs=None,
+            max_output_tokens=4096,
+            target_tool_name=OUTLINE_FLOW_TOOL_NAME,
+            forced_tool_prompt="Now call outline_flow.",
+            process_tool_arguments=AsyncMock(),
+            usage_tracker=tracker,
+            request_id="req-forced-architecture",
+        )
+
+    assert events is not None
+    assert [event["event"] for event in events] == ["error"]
+    payload = json.loads(events[0]["data"])
+    assert payload["code"] == "architecture_materialization_failed"
+    telemetry = tracker.build_planner_telemetry()
+    assert telemetry["proposal_first_attempt_failure_kind"] == "architecture"
+    assert telemetry["proposal_repair_invocation_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_outline_audio_to_docx_returns_plan_without_self_correction() -> None:
+    processor = _make_processor()
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="audio",
+                    output_type="docx",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["audio_to_artifact_report"],
+            required_capabilities=["input_audio", "output_mode_pass_through"],
+        )
+    )
+    tool_call = _make_tool_call(
+        OUTLINE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Ljudrapport",
+            "plan_rationale": "Skapa en DOCX-rapport från uppladdat ljud.",
+            "steps": [
+                {
+                    "name": "Sammanfatta inspelningen",
+                    "task": "Sammanfatta den transkriberade inspelningen.",
+                }
+            ],
+        },
+        tool_call_id="call-audio-docx",
+    )
+    ctx = _make_context(
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="Bygg ett flöde som transkriberar ljud och skapar DOCX.",
+            )
+        ],
+        request_id="req-audio-docx",
+        planning_state=state,
+        text_content="",
+    )
+
+    async def _store_plan(**kwargs):
+        spec = kwargs["spec"]
+        return _make_plan(spec), PlannerPlanEnvelope(spec=spec)
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
+            return_value=SimpleNamespace(confirmed=True),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+            new=AsyncMock(side_effect=_store_plan),
+        ),
+        patch.object(processor, "_request_tool_self_correction") as repair,
+    ):
+        events = [
+            event
+            async for event in processor._handle_outline_flow_tool_call(
+                ctx=ctx,
+                tool_call=tool_call,
+            )
+        ]
+
+    repair.assert_not_called()
+    assert [event["event"] for event in events] == ["plan"]
+    payload = json.loads(events[0]["data"])
+    assert payload["envelope"]["spec"]["steps"][0]["input_type"] == "audio"
+    assert payload["envelope"]["spec"]["steps"][-1]["output_type"] == "docx"
 
 
 @pytest.mark.asyncio

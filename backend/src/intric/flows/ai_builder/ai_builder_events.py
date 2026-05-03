@@ -101,6 +101,8 @@ def build_error_event(
 
 def _resolve_intric_error_code(*, code: str, phase: str) -> int | None:
     bad_request_codes = {
+        "architecture_critic_invariant_failed",
+        "architecture_materialization_failed",
         "planner_output_too_long",
         "self_correction_invalid_payload",
         "self_correction_quality_failure",

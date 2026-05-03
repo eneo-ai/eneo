@@ -33,6 +33,9 @@ from uuid import uuid4
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import (
     AssistantSpec,
     InputSource,
@@ -718,7 +721,8 @@ class TestPublicSurface:
         assert hasattr(bridge, "apply_to_draft")
         assert hasattr(bridge, "MaterializationError")
         assert hasattr(bridge, "MaterializedDraft")
-        assert issubclass(bridge.MaterializationError, ValueError)
+        assert issubclass(bridge.MaterializationError, AIBuilderArchitectureError)
+        assert not issubclass(bridge.MaterializationError, ValueError)
 
 
 # ---------------------------------------------------------------------------

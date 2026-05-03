@@ -14,6 +14,9 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
+from intric.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
@@ -34,6 +37,9 @@ from intric.flows.ai_builder.ai_builder_create_outline import (
     safe_validation_issues,
 )
 from intric.flows.ai_builder.ai_builder_create_validator import validate_create_draft
+from intric.flows.ai_builder.ai_builder_critic_invariants import (
+    enforce_architecture_critic_invariants,
+)
 from intric.flows.ai_builder.ai_builder_discovery import (
     build_registry_question_followup,
 )
@@ -97,6 +103,8 @@ from intric.flows.ai_builder.ai_builder_plan_edit_context import (
 )
 from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_aware_quality_feedback,
+    build_conversation_critic_context,
+    build_quality_feedback_from_critic_context,
 )
 from intric.flows.ai_builder.ai_builder_plan_store import (
     format_revision_feedback,
@@ -117,7 +125,7 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ToolProcessingFailureKind,
     log_proposal_first_attempt,
     log_proposal_repair_invoked,
-    proposal_failure_kind_from_tool_failure,
+    proposal_repair_reason_from_tool_failure,
 )
 from intric.flows.ai_builder.ai_builder_repair_transport import (
     append_tool_retry_feedback_turn,
@@ -231,6 +239,48 @@ def _record_proposal_repair_invocation(
         request_id=request_id,
         tool_name=tool_name,
         reason=reason,
+    )
+
+
+def _record_proposal_architecture_failure(
+    usage_tracker: ProposalTurnTelemetry | None,
+    *,
+    request_id: str | None,
+    tool_name: str,
+) -> None:
+    if usage_tracker is None:
+        return
+    _record_proposal_first_attempt(
+        usage_tracker,
+        request_id=request_id or usage_tracker.request_id,
+        tool_name=tool_name,
+        success=False,
+        failure_kind="architecture",
+    )
+
+
+def _build_architecture_error_event(
+    error: AIBuilderArchitectureError,
+    *,
+    request_id: str | None,
+    tool_name: str,
+) -> dict[str, str]:
+    log_extra = error.log_extra()
+    log_extra["tool_name"] = tool_name
+    if request_id is not None:
+        log_extra["request_id"] = request_id
+    logger.error(
+        "ai_builder_architecture_error",
+        extra=log_extra,
+    )
+    return build_error_event(
+        message=(
+            "The AI planner could not build a valid flow from the confirmed "
+            "requirements. Please adjust the requirements and try again."
+        ),
+        code=error.public_code,
+        phase="proposal",
+        request_id=request_id,
     )
 
 
@@ -420,6 +470,27 @@ class AIBuilderProposalProcessor:
             resource_catalog=resource_catalog,
         )
 
+    def _format_create_contextual_quality_feedback(
+        self,
+        *,
+        conversation: list[ConversationMessage],
+        spec: FlowDraftSpecCore,
+        aggregation_intent: AggregationIntent,
+        resource_catalog: AIBuilderResourceCatalog | None,
+    ) -> str | None:
+        context = build_conversation_critic_context(
+            conversation,
+            spec,
+            flow=None,
+            aggregation_intent=aggregation_intent,
+            resource_catalog=resource_catalog,
+        )
+        enforce_architecture_critic_invariants(context)
+        return build_quality_feedback_from_critic_context(
+            context,
+            include_architecture=False,
+        )
+
     async def _process_outline_arguments(
         self,
         *,
@@ -478,6 +549,8 @@ class AIBuilderProposalProcessor:
                 feedback=f"Invalid outline_flow arguments: {error}",
                 failure_kind="parse",
             )
+        except AIBuilderArchitectureError:
+            raise
         except Exception as error:
             issues = (
                 list(safe_validation_issues(error))
@@ -675,10 +748,9 @@ class AIBuilderProposalProcessor:
 
         if not validation.valid:
             quality_hint = self.format_quality_feedback(validation)
-            contextual_hint = self.format_contextual_quality_feedback(
+            contextual_hint = self._format_create_contextual_quality_feedback(
                 conversation=conversation,
                 spec=spec,
-                flow=None,
                 aggregation_intent=aggregation_intent,
                 resource_catalog=resource_catalog,
             )
@@ -703,10 +775,9 @@ class AIBuilderProposalProcessor:
             )
 
         quality_feedback = self.format_quality_feedback(validation)
-        contextual_quality_feedback = self.format_contextual_quality_feedback(
+        contextual_quality_feedback = self._format_create_contextual_quality_feedback(
             conversation=conversation,
             spec=spec,
-            flow=None,
             aggregation_intent=aggregation_intent,
             resource_catalog=resource_catalog,
         )
@@ -1303,9 +1374,22 @@ class AIBuilderProposalProcessor:
             submission_kwargs["planning_state"] = ctx.planning_state
             submission_kwargs["plan_edit_context"] = ctx.plan_edit_context
             submission_kwargs["prior_plan_for_revision"] = ctx.prior_plan_for_revision
-        submission_result = await config.process_tool_arguments(**submission_kwargs)
+        try:
+            submission_result = await config.process_tool_arguments(**submission_kwargs)
+        except AIBuilderArchitectureError as error:
+            _record_proposal_architecture_failure(
+                ctx.usage_tracker,
+                request_id=ctx.request_id,
+                tool_name=config.target_tool_name,
+            )
+            yield _build_architecture_error_event(
+                error,
+                request_id=ctx.request_id,
+                tool_name=config.target_tool_name,
+            )
+            return
         if not submission_result.has_events:
-            proposal_failure_kind = proposal_failure_kind_from_tool_failure(
+            proposal_repair_reason = proposal_repair_reason_from_tool_failure(
                 submission_result.failure_kind
             )
             _record_proposal_first_attempt(
@@ -1313,13 +1397,13 @@ class AIBuilderProposalProcessor:
                 request_id=ctx.request_id,
                 tool_name=config.target_tool_name,
                 success=False,
-                failure_kind=proposal_failure_kind,
+                failure_kind=proposal_repair_reason,
             )
             _record_proposal_repair_invocation(
                 ctx.usage_tracker,
                 request_id=ctx.request_id,
                 tool_name=config.target_tool_name,
-                reason=proposal_failure_kind,
+                reason=proposal_repair_reason,
             )
             async for event in self._request_tool_self_correction(
                 ctx=ctx,
@@ -1536,35 +1620,52 @@ class AIBuilderProposalProcessor:
             return await self.retry_forced_tool_after_text(
                 **kwargs,
                 usage_tracker=ctx.usage_tracker,
+                request_id=ctx.request_id,
             )
 
-        async for event in run_request_self_correction(
-            session_id=ctx.session_id,
-            conversation=ctx.conversation,
-            new_messages_start=ctx.new_messages_start,
-            error_message=error_message,
-            llm_messages=ctx.llm_messages,
-            tool_call=tool_call,
-            tool_schemas=ctx.tool_schemas,
-            litellm_model=ctx.litellm_model,
-            litellm_kwargs=ctx.litellm_kwargs,
-            available_model_refs=ctx.available_model_refs,
-            available_kb_refs=ctx.available_kb_refs,
-            max_output_tokens=ctx.max_output_tokens,
-            self_correction_temperature=self.self_correction_temperature,
-            self_correction_bumped_temperature=self.self_correction_bumped_temperature,
-            max_self_correction_retries=MAX_SELF_CORRECTION_RETRIES,
-            call_repair_completion=_call_repair_completion,
-            process_tool_arguments=retry_config.process_tool_arguments,
-            target_tool_name=retry_config.target_tool_name,
-            forced_tool_prompt=retry_config.forced_tool_prompt,
-            build_self_correction_error_event=self._build_self_correction_error_event,
-            retry_forced_tool_after_text=_retry_forced_tool_after_text,
-            process_tool_kwargs=merged_process_kwargs,
-            flow=ctx.flow,
-            build_assistant_metadata=_build_assistant_metadata,
-        ):
-            yield event
+        try:
+            async for event in run_request_self_correction(
+                session_id=ctx.session_id,
+                conversation=ctx.conversation,
+                new_messages_start=ctx.new_messages_start,
+                error_message=error_message,
+                llm_messages=ctx.llm_messages,
+                tool_call=tool_call,
+                tool_schemas=ctx.tool_schemas,
+                litellm_model=ctx.litellm_model,
+                litellm_kwargs=ctx.litellm_kwargs,
+                available_model_refs=ctx.available_model_refs,
+                available_kb_refs=ctx.available_kb_refs,
+                max_output_tokens=ctx.max_output_tokens,
+                self_correction_temperature=self.self_correction_temperature,
+                self_correction_bumped_temperature=(
+                    self.self_correction_bumped_temperature
+                ),
+                max_self_correction_retries=MAX_SELF_CORRECTION_RETRIES,
+                call_repair_completion=_call_repair_completion,
+                process_tool_arguments=retry_config.process_tool_arguments,
+                target_tool_name=retry_config.target_tool_name,
+                forced_tool_prompt=retry_config.forced_tool_prompt,
+                build_self_correction_error_event=(
+                    self._build_self_correction_error_event
+                ),
+                retry_forced_tool_after_text=_retry_forced_tool_after_text,
+                process_tool_kwargs=merged_process_kwargs,
+                flow=ctx.flow,
+                build_assistant_metadata=_build_assistant_metadata,
+            ):
+                yield event
+        except AIBuilderArchitectureError as error:
+            _record_proposal_architecture_failure(
+                ctx.usage_tracker,
+                request_id=ctx.request_id,
+                tool_name=retry_config.target_tool_name,
+            )
+            yield _build_architecture_error_event(
+                error,
+                request_id=ctx.request_id,
+                tool_name=retry_config.target_tool_name,
+            )
 
     async def retry_forced_tool_after_text(
         self,
@@ -1587,6 +1688,7 @@ class AIBuilderProposalProcessor:
         flow: "Flow | None" = None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
         usage_tracker: ProposalTurnTelemetry | None = None,
+        request_id: str | None = None,
         build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
     ) -> EventBatch | None:
         merged_process_kwargs = dict(process_tool_kwargs or {})
@@ -1600,27 +1702,44 @@ class AIBuilderProposalProcessor:
                 counts_as_repair=True,
             )
 
-        return await run_retry_forced_tool_after_text(
-            correction_messages=correction_messages,
-            assistant_text=assistant_text,
-            tool_schemas=tool_schemas,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            session_id=session_id,
-            conversation=conversation,
-            new_messages_start=new_messages_start,
-            available_model_refs=available_model_refs,
-            available_kb_refs=available_kb_refs,
-            max_output_tokens=max_output_tokens,
-            target_tool_name=target_tool_name,
-            forced_tool_prompt=forced_tool_prompt,
-            forced_proposal_temperature=self.forced_proposal_temperature,
-            call_repair_completion=_call_repair_completion,
-            process_tool_arguments=process_tool_arguments,
-            process_tool_kwargs=merged_process_kwargs,
-            flow=flow,
-            build_assistant_metadata=build_assistant_metadata,
-        )
+        try:
+            return await run_retry_forced_tool_after_text(
+                correction_messages=correction_messages,
+                assistant_text=assistant_text,
+                tool_schemas=tool_schemas,
+                litellm_model=litellm_model,
+                litellm_kwargs=litellm_kwargs,
+                session_id=session_id,
+                conversation=conversation,
+                new_messages_start=new_messages_start,
+                available_model_refs=available_model_refs,
+                available_kb_refs=available_kb_refs,
+                max_output_tokens=max_output_tokens,
+                target_tool_name=target_tool_name,
+                forced_tool_prompt=forced_tool_prompt,
+                forced_proposal_temperature=self.forced_proposal_temperature,
+                call_repair_completion=_call_repair_completion,
+                process_tool_arguments=process_tool_arguments,
+                process_tool_kwargs=merged_process_kwargs,
+                flow=flow,
+                build_assistant_metadata=build_assistant_metadata,
+            )
+        except AIBuilderArchitectureError as error:
+            resolved_request_id = request_id or (
+                usage_tracker.request_id if usage_tracker is not None else None
+            )
+            _record_proposal_architecture_failure(
+                usage_tracker,
+                request_id=resolved_request_id,
+                tool_name=target_tool_name,
+            )
+            return (
+                _build_architecture_error_event(
+                    error,
+                    request_id=resolved_request_id,
+                    tool_name=target_tool_name,
+                ),
+            )
 
     async def retry_forced_proposal_after_text(
         self,
@@ -1677,6 +1796,7 @@ class AIBuilderProposalProcessor:
             resource_catalog=resource_catalog,
             flow=flow,
             usage_tracker=usage_tracker,
+            request_id=usage_tracker.request_id if usage_tracker is not None else None,
             build_assistant_metadata=(
                 lambda: _assistant_metadata_with_usage(
                     conversation=conversation,
@@ -2229,7 +2349,7 @@ class AIBuilderProposalProcessor:
             prior_plan_for_revision=ctx.prior_plan_for_revision,
         )
         if edit_result.event is None:
-            proposal_failure_kind = proposal_failure_kind_from_tool_failure(
+            proposal_repair_reason = proposal_repair_reason_from_tool_failure(
                 edit_result.failure_kind
             )
             _record_proposal_first_attempt(
@@ -2237,13 +2357,13 @@ class AIBuilderProposalProcessor:
                 request_id=ctx.request_id,
                 tool_name=EDIT_FLOW_TOOL_NAME,
                 success=False,
-                failure_kind=proposal_failure_kind,
+                failure_kind=proposal_repair_reason,
             )
             _record_proposal_repair_invocation(
                 ctx.usage_tracker,
                 request_id=ctx.request_id,
                 tool_name=EDIT_FLOW_TOOL_NAME,
-                reason=proposal_failure_kind,
+                reason=proposal_repair_reason,
             )
             async for event in self._request_tool_self_correction(
                 ctx=ctx,

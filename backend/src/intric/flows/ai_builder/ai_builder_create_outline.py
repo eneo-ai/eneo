@@ -16,6 +16,9 @@ from pydantic import (
 from intric.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
+from intric.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from intric.flows.ai_builder.ai_builder_create_models import (
     CreateFormFieldDraft,
     FlowCreateDraft,
@@ -559,20 +562,39 @@ def compile_outline_to_create_draft(
             )
         )
 
-    skeleton_plan = materialize_step_skeleton(
-        runtime_input_type=runtime_input_type,
-        final_output_type=final_output_type,
-        final_output_mode=(context.final_output_mode if context is not None else None),
-        pattern_ids=context.pattern_ids if context is not None else (),
-        chain_steps=context.pattern_chain_steps if context is not None else (),
-        aggregation_intent=(
-            context.aggregation_intent if context is not None else "linear"
-        ),
-        runtime_required=outline.runtime_input.required,
-        runtime_max_files=outline.runtime_input.max_files,
-        ui_language=context.ui_language if context is not None else None,
-    )
-    composition = skeleton_plan.compose(semantic_steps)
+    final_output_mode = context.final_output_mode if context is not None else None
+    pattern_ids = context.pattern_ids if context is not None else ()
+    chain_steps = context.pattern_chain_steps if context is not None else ()
+    try:
+        skeleton_plan = materialize_step_skeleton(
+            runtime_input_type=runtime_input_type,
+            final_output_type=final_output_type,
+            final_output_mode=final_output_mode,
+            pattern_ids=pattern_ids,
+            chain_steps=chain_steps,
+            aggregation_intent=(
+                context.aggregation_intent if context is not None else "linear"
+            ),
+            runtime_required=outline.runtime_input.required,
+            runtime_max_files=outline.runtime_input.max_files,
+            ui_language=context.ui_language if context is not None else None,
+        )
+        composition = skeleton_plan.compose(semantic_steps)
+    except ValueError as error:
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            detail=str(error),
+            log_context={
+                "runtime_input_type": runtime_input_type.value,
+                "final_output_type": final_output_type.value,
+                "final_output_mode": (
+                    final_output_mode.value if final_output_mode is not None else None
+                ),
+                "pattern_ids": ",".join(pattern_ids),
+                "chain_steps": ",".join(chain_steps),
+                "semantic_step_count": len(semantic_steps),
+            },
+        ) from error
     _log_skeleton_output_type_drifts(composition.output_type_drifts)
     steps = list(composition.steps)
     steps = _attach_unreferenced_form_fields_to_final_step(

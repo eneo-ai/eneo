@@ -7,6 +7,9 @@ import pytest
 from intric.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
+from intric.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
 from intric.flows.ai_builder.ai_builder_create_models import (
     CreateFormFieldDraft,
@@ -2110,6 +2113,35 @@ def test_compile_outline_flow_audio_to_docx_uses_skeleton_terminal_artifact() ->
     assert compiled.steps[0].output_mode.value == "transcribe_only"
     assert compiled.steps[-1].output_type.value == "docx"
     assert validation.valid
+
+
+def test_compile_outline_wraps_skeleton_materialization_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Broken skeleton",
+            "plan_rationale": "Compile a broken skeleton.",
+            "steps": [{"name": "Analyze", "task": "Analyze the input."}],
+        }
+    )
+
+    def _raise_value_error(**_kwargs: object) -> None:
+        raise ValueError("invalid skeleton tuple")
+
+    monkeypatch.setattr(
+        "intric.flows.ai_builder.ai_builder_create_outline.materialize_step_skeleton",
+        _raise_value_error,
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_outline_to_create_draft(outline)
+
+    assert exc_info.value.public_code == "architecture_materialization_failed"
+    assert exc_info.value.detail == "invalid skeleton tuple"
+    assert exc_info.value.log_context["runtime_input_type"] == "text"
+    assert exc_info.value.log_context["final_output_type"] == "text"
+    assert exc_info.value.log_context["semantic_step_count"] == 1
 
 
 def test_compile_outline_flow_audio_artifact_aggregate_fan_in_lands_on_terminal() -> (
