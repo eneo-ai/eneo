@@ -74,6 +74,8 @@ async def process_edit_arguments(
     litellm_kwargs: dict[str, Any],
     max_output_tokens: int,
     assistant_metadata: dict[str, Any] | None = None,
+    assistant_metadata_builder: Callable[[], dict[str, Any] | None] | None = None,
+    proposal_success_recorder: Callable[[], None] | None = None,
     resource_catalog: AIBuilderResourceCatalog | None = None,
     lease_request_id: UUID | None = None,
     lease_lock_token: UUID | None = None,
@@ -84,6 +86,18 @@ async def process_edit_arguments(
         ToolProcessingResult,
         terminal_output_type_for_conversation,
     )
+
+    metadata_built = False
+
+    def _accepted_proposal_metadata() -> dict[str, Any] | None:
+        nonlocal assistant_metadata, metadata_built
+        if not metadata_built:
+            if proposal_success_recorder is not None:
+                proposal_success_recorder()
+            if assistant_metadata_builder is not None:
+                assistant_metadata = assistant_metadata_builder()
+            metadata_built = True
+        return assistant_metadata
 
     if flow is None:
         return ToolProcessingResult(
@@ -215,7 +229,7 @@ async def process_edit_arguments(
         spec=compiled_spec,
         resource_catalog=resource_catalog,
         flow=flow,
-        assistant_metadata=assistant_metadata,
+        assistant_metadata_builder=_accepted_proposal_metadata,
         lease_request_id=lease_request_id,
         lease_lock_token=lease_lock_token,
     )
@@ -301,7 +315,7 @@ async def process_edit_arguments(
         conversation=conversation,
         new_messages_start=new_messages_start,
         assistant_content=assistant_content,
-        assistant_metadata=assistant_metadata,
+        assistant_metadata=_accepted_proposal_metadata(),
         tool_call_id=tool_call_id,
         tool_name=EDIT_FLOW_TOOL_NAME,
         arguments=arguments,

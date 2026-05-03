@@ -58,9 +58,19 @@ def build_planner_telemetry(
     repair_attempts: int = 0,
     parse_repair_attempts: int = 0,
     architecture_commit_populated: bool = False,
+    proposal_first_attempt_tool: str | None = None,
+    proposal_first_attempt_success: bool | None = None,
+    proposal_first_attempt_failure_kind: str | None = None,
+    proposal_repair_invocation_count: int | None = None,
+    proposal_repair_invocation_reasons: Sequence[str] | None = None,
 ) -> dict[str, Any]:
+    """Build the persisted assistant-message telemetry payload.
+
+    Proposal fields stay string-typed here so this canonical builder does not
+    import proposal-specific Literal taxonomies.
+    """
     total = _safe_int(total_tokens)
-    return {
+    telemetry: dict[str, Any] = {
         "request_id": request_id,
         "model": model,
         "finish_reason": _safe_str(finish_reason),
@@ -79,6 +89,22 @@ def build_planner_telemetry(
         "parse_repair_attempts": parse_repair_attempts,
         "architecture_commit_populated": architecture_commit_populated,
     }
+    if proposal_first_attempt_success is not None:
+        telemetry["proposal_first_attempt_tool"] = _safe_str(
+            proposal_first_attempt_tool
+        )
+        telemetry["proposal_first_attempt_success"] = proposal_first_attempt_success
+        telemetry["proposal_first_attempt_failure_kind"] = _safe_str(
+            proposal_first_attempt_failure_kind
+        )
+    if proposal_repair_invocation_count is not None:
+        telemetry["proposal_repair_invocation_count"] = _non_negative_int(
+            proposal_repair_invocation_count
+        )
+        telemetry["proposal_repair_invocation_reasons"] = list(
+            proposal_repair_invocation_reasons or ()
+        )
+    return telemetry
 
 
 def build_planner_telemetry_from_turn(
@@ -89,10 +115,9 @@ def build_planner_telemetry_from_turn(
 ) -> dict[str, Any]:
     """Render a `TurnTelemetry` dataclass into the persisted dict shape.
 
-    The per-turn record on assistant-message metadata has lived as a
-    dict since the legacy function-calling transport. This helper
-    keeps that shape stable across the orchestrator migration while
-    adding the new per-turn fields (`wall_clock_ms`, `llm_calls_made`,
+    The per-turn record on assistant-message metadata is a persisted
+    dict owned by this module. This helper keeps that shape stable
+    while adding the per-turn fields (`wall_clock_ms`, `llm_calls_made`,
     `repair_attempts`, `parse_repair_attempts`,
     `architecture_commit_populated`, `outcome_kind`) so the session
     aggregator can reason about commit-populated rate, repair-loop
@@ -107,8 +132,8 @@ def build_planner_telemetry_from_turn(
     PlannerOutput at all). Conflating the two would obscure whether a
     session is hitting schema drift vs. transport-level malformation.
 
-    `used_auxiliary_llm` and `tool_call_count` carry their legacy
-    meaning — they are set by the caller's own bookkeeping (auxiliary
+    `used_auxiliary_llm` and `tool_call_count` are set by the caller's
+    own bookkeeping (auxiliary
     adjudication LLM for free-form answers, and any structured-question
     assistant messages the caller materializes from ask_question
     actions). Both default to ``False`` / ``0`` when the caller does

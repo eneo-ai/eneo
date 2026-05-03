@@ -4,7 +4,7 @@ import inspect
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Protocol, cast
 from uuid import UUID, uuid4
 
 from intric.flows.ai_builder.ai_builder_events import (
@@ -15,11 +15,25 @@ from intric.flows.ai_builder.ai_builder_events import (
 from intric.flows.ai_builder.ai_builder_interaction_utils import (
     looks_like_information_request,
 )
+from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+    ToolProcessingFailureKind,
+)
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
-_EXTRA_RETRY_FAILURE_KINDS = frozenset({"recoverable_parse"})
+_EXTRA_RETRY_FAILURE_KINDS: frozenset[ToolProcessingFailureKind] = frozenset(
+    {"recoverable_parse"}
+)
 EventBatch = tuple[dict[str, str], ...]
+
+
+class BuildSelfCorrectionErrorEvent(Protocol):
+    def __call__(
+        self,
+        *,
+        feedback: str | None,
+        failure_kind: ToolProcessingFailureKind | None,
+    ) -> dict[str, str]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,12 +54,14 @@ class _ProposalRepairRetryState:
     def next_retry_count(self) -> int:
         return self.retry_count + 1
 
-    def can_retry(self, *, failure_kind: str | None) -> bool:
+    def can_retry(self, *, failure_kind: ToolProcessingFailureKind | None) -> bool:
         return self.attempts_remaining > 0 or (
             failure_kind in _EXTRA_RETRY_FAILURE_KINDS and self.extra_retry_available
         )
 
-    def consume(self, *, failure_kind: str | None) -> "_ProposalRepairRetryState":
+    def consume(
+        self, *, failure_kind: ToolProcessingFailureKind | None
+    ) -> "_ProposalRepairRetryState":
         if self.attempts_remaining > 0:
             return _ProposalRepairRetryState(
                 attempts_remaining=self.attempts_remaining - 1,
@@ -168,7 +184,7 @@ def _build_retry_feedback(
     *,
     target_tool_name: str,
     feedback: str,
-    failure_kind: str | None,
+    failure_kind: ToolProcessingFailureKind | None,
     retry_count: int = 1,
 ) -> str:
     suffix = f"Keep valid parts and fix only the listed issues. Return one complete {target_tool_name} call."
@@ -217,7 +233,7 @@ async def request_self_correction(
     process_tool_arguments: Callable[..., Awaitable[Any]],
     target_tool_name: str,
     forced_tool_prompt: str,
-    build_self_correction_error_event: Callable[..., dict[str, str]],
+    build_self_correction_error_event: BuildSelfCorrectionErrorEvent,
     retry_forced_tool_after_text: Callable[..., Awaitable[EventBatch | None]],
     process_tool_kwargs: dict[str, Any] | None = None,
     flow: Any = None,

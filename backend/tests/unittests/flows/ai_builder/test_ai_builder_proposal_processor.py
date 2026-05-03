@@ -37,12 +37,14 @@ from intric.flows.ai_builder.ai_builder_plan_edit_context import (
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
     ProposalContext,
-    ProposalUsageTracker,
     SubmissionToolHandlerConfig,
     ToolProcessingResult,
     ToolRetryConfig,
     _active_submission_tool_schemas,
     terminal_output_type_for_conversation,
+)
+from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+    ProposalTurnTelemetry,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
@@ -112,6 +114,36 @@ def _make_response_with_tool_calls(
                 message=SimpleNamespace(
                     tool_calls=list(tool_calls),
                     content=None,
+                ),
+            )
+        ],
+        usage=usage,
+    )
+
+
+def _make_response_with_text(
+    content: str,
+    *,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+    total_tokens: int | None = None,
+) -> SimpleNamespace:
+    usage = (
+        None
+        if prompt_tokens is None and completion_tokens is None and total_tokens is None
+        else SimpleNamespace(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+        )
+    )
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(
+                    tool_calls=None,
+                    content=content,
                 ),
             )
         ],
@@ -247,8 +279,8 @@ def test_create_submission_schema_keeps_mcp_refs_free_form() -> None:
     assert "enum" not in step_props["mcp_tool_refs"]["items"]
 
 
-def test_proposal_usage_tracker_counts_only_explicit_repair_calls() -> None:
-    tracker = ProposalUsageTracker(
+def test_proposal_turn_telemetry_counts_only_explicit_repair_calls() -> None:
+    tracker = ProposalTurnTelemetry(
         request_id="req-tracker",
         model="openai/gpt-5.4-nano",
     )
@@ -965,6 +997,90 @@ async def test_outline_processing_enforces_without_mcp_selection() -> None:
 
 
 @pytest.mark.asyncio
+async def test_outline_quality_failure_records_failed_first_attempt() -> None:
+    processor = _make_processor()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-outline-quality",
+        model="openai/gpt-5.4-nano",
+    )
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "time-server",
+                "name": "Time MCP",
+                "tools": [{"id": "current-time", "name": "get_current_time"}],
+            }
+        ],
+    )
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Fortsätt utan MCP",
+            metadata={
+                "question_answer": {
+                    "question_id": MCP_RESOURCE_SELECTION_QUESTION_ID,
+                    "selected_values": [MCP_SELECTION_WITHOUT],
+                }
+            },
+        )
+    ]
+    tool_call = _make_tool_call(
+        OUTLINE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Time flow",
+            "plan_rationale": "Use MCP despite the user's decline.",
+            "steps": [
+                {
+                    "name": "Hämta tid",
+                    "task": "Hämta aktuell tid via Time MCP.",
+                    "mcp_tool_refs": ["current-time"],
+                }
+            ],
+        },
+        tool_call_id="call-outline-quality",
+    )
+    ctx = _make_context(
+        conversation=conversation,
+        resource_catalog=catalog,
+        usage_tracker=tracker,
+        request_id="req-outline-quality",
+        text_content="",
+    )
+
+    async def _repair_events(**_kwargs):
+        yield {"event": "status", "data": '{"status":"repairing"}'}
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
+            return_value=SimpleNamespace(confirmed=True),
+        ),
+        patch.object(
+            processor,
+            "_request_tool_self_correction",
+            side_effect=_repair_events,
+        ),
+    ):
+        events = [
+            event
+            async for event in processor._handle_outline_flow_tool_call(
+                ctx=ctx,
+                tool_call=tool_call,
+            )
+        ]
+
+    assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
+    telemetry = tracker.build_planner_telemetry()
+    assert telemetry["proposal_first_attempt_tool"] == OUTLINE_FLOW_TOOL_NAME
+    assert telemetry["proposal_first_attempt_success"] is False
+    assert telemetry["proposal_first_attempt_failure_kind"] == "quality"
+    assert telemetry["proposal_repair_invocation_count"] == 1
+    assert telemetry["proposal_repair_invocation_reasons"] == ["quality"]
+
+
+@pytest.mark.asyncio
 async def test_handle_submission_tool_call_runs_processor_once_with_flow_context() -> (
     None
 ):
@@ -1050,6 +1166,49 @@ async def test_handle_submission_tool_call_omits_flow_context_by_default() -> No
 
 
 @pytest.mark.asyncio
+async def test_edit_flow_parse_failure_records_proposal_repair_reason() -> None:
+    processor = _make_processor()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-edit-parse",
+        model="openai/gpt-5.4-nano",
+    )
+    tool_call = MagicMock()
+    tool_call.id = "call-edit"
+    tool_call.function.name = EDIT_FLOW_TOOL_NAME
+    tool_call.function.arguments = "{not-json"
+    ctx = _make_context(
+        usage_tracker=tracker,
+        request_id="req-edit-parse",
+        text_content="",
+        flow=SimpleNamespace(id=uuid4()),
+    )
+
+    async def _repair_events(**_kwargs):
+        yield {"event": "error", "data": "{}"}
+
+    with patch.object(
+        processor,
+        "_request_tool_self_correction",
+        side_effect=_repair_events,
+    ):
+        events = [
+            event
+            async for event in processor._handle_edit_flow(
+                ctx=ctx,
+                tool_call=tool_call,
+            )
+        ]
+
+    assert events == [{"event": "error", "data": "{}"}]
+    telemetry = tracker.build_planner_telemetry()
+    assert telemetry["proposal_first_attempt_tool"] == EDIT_FLOW_TOOL_NAME
+    assert telemetry["proposal_first_attempt_success"] is False
+    assert telemetry["proposal_first_attempt_failure_kind"] == "parse"
+    assert telemetry["proposal_repair_invocation_count"] == 1
+    assert telemetry["proposal_repair_invocation_reasons"] == ["parse"]
+
+
+@pytest.mark.asyncio
 async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
     processor = _make_processor()
     tool_call = _make_tool_call(
@@ -1067,6 +1226,12 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
         completion_tokens=7,
         total_tokens=17,
     )
+    captured_metadata: list[dict[str, object] | None] = []
+
+    async def process_outline(**kwargs) -> ToolProcessingResult:
+        kwargs["proposal_success_recorder"]()
+        captured_metadata.append(kwargs["assistant_metadata_builder"]())
+        return ToolProcessingResult(event={"event": "plan", "data": "{}"})
 
     with (
         patch(
@@ -1076,10 +1241,8 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
         patch.object(
             processor,
             "_process_outline_arguments",
-            new=AsyncMock(
-                return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
-            ),
-        ) as process_outline,
+            new=process_outline,
+        ),
     ):
         events = [
             event
@@ -1104,7 +1267,8 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
         ]
 
     assert events == [{"event": "plan", "data": "{}"}]
-    metadata = process_outline.await_args.kwargs["assistant_metadata"]
+    metadata = captured_metadata[0]
+    assert isinstance(metadata, dict)
     planner_telemetry = metadata["planner_telemetry"]
     assert planner_telemetry["request_id"] == "req-proposal-usage"
     assert planner_telemetry["model"] == "openai/gpt-5.4-nano"
@@ -1114,6 +1278,11 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
     assert planner_telemetry["llm_calls_made"] == 1
     assert planner_telemetry["token_usage_source"] == "provider"
     assert planner_telemetry["token_usage_estimated"] is False
+    assert planner_telemetry["proposal_first_attempt_tool"] == OUTLINE_FLOW_TOOL_NAME
+    assert planner_telemetry["proposal_first_attempt_success"] is True
+    assert planner_telemetry["proposal_first_attempt_failure_kind"] is None
+    assert planner_telemetry["proposal_repair_invocation_count"] == 0
+    assert planner_telemetry["proposal_repair_invocation_reasons"] == []
     session_telemetry = metadata["session_telemetry"]
     assert session_telemetry["total_tokens_total"] == 17
     assert session_telemetry["last_token_usage_source"] == "provider"
@@ -1203,8 +1372,98 @@ async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> Non
     assert planner_telemetry["total_tokens"] == 24
     assert planner_telemetry["llm_calls_made"] == 2
     assert planner_telemetry["repair_attempts"] == 1
+    assert planner_telemetry["proposal_first_attempt_tool"] == OUTLINE_FLOW_TOOL_NAME
+    assert planner_telemetry["proposal_first_attempt_success"] is False
+    assert planner_telemetry["proposal_first_attempt_failure_kind"] == "parse"
+    assert planner_telemetry["proposal_repair_invocation_count"] == 1
+    assert planner_telemetry["proposal_repair_invocation_reasons"] == ["parse"]
     assert planner_telemetry["token_usage_source"] == "provider"
     assert metadata["session_telemetry"]["total_tokens_total"] == 24
+
+
+@pytest.mark.asyncio
+async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_retry() -> (
+    None
+):
+    processor = _make_processor()
+    repaired_tool_call = _make_tool_call(
+        OUTLINE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Recovered flow",
+            "plan_rationale": "Classify incoming text.",
+            "steps": [{"name": "Classify", "task": "Classify the request."}],
+        },
+        tool_call_id="call-outline-recovered",
+    )
+    processor.litellm_client.acompletion.side_effect = [
+        _make_response_with_text(
+            "Här är ett förslag i text.",
+            prompt_tokens=11,
+            completion_tokens=5,
+            total_tokens=16,
+        ),
+        _make_response_with_tool_calls(
+            repaired_tool_call,
+            prompt_tokens=6,
+            completion_tokens=4,
+            total_tokens=10,
+        ),
+    ]
+    captured_metadata: list[dict[str, object] | None] = []
+
+    async def process_outline(**kwargs) -> ToolProcessingResult:
+        captured_metadata.append(kwargs.get("assistant_metadata"))
+        return ToolProcessingResult(event={"event": "plan", "data": "{}"})
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
+            return_value=SimpleNamespace(confirmed=True),
+        ),
+        patch.object(
+            processor,
+            "_process_outline_arguments",
+            new=process_outline,
+        ),
+    ):
+        events = [
+            event
+            async for event in processor.propose_plan(
+                session_id=uuid4(),
+                conversation=[
+                    ConversationMessage(role="user", content="Bygg ett flöde")
+                ],
+                new_messages_start=1,
+                llm_messages=[{"role": "user", "content": "Bygg ett flöde"}],
+                litellm_model="openai/gpt-5.4-nano",
+                litellm_kwargs={},
+                available_models=None,
+                available_kbs=None,
+                available_model_refs=None,
+                available_kb_refs=None,
+                resource_catalog=None,
+                max_output_tokens=4096,
+                proposal_temperature=0.2,
+                request_id="req-proposal-missing-tool",
+            )
+        ]
+
+    assert [event["event"] for event in events] == ["plan"]
+    metadata = captured_metadata[0]
+    assert isinstance(metadata, dict)
+    planner_telemetry = metadata["planner_telemetry"]
+    assert planner_telemetry["llm_calls_made"] == 2
+    assert planner_telemetry["repair_attempts"] == 1
+    assert planner_telemetry["proposal_first_attempt_tool"] == OUTLINE_FLOW_TOOL_NAME
+    assert planner_telemetry["proposal_first_attempt_success"] is False
+    assert (
+        planner_telemetry["proposal_first_attempt_failure_kind"]
+        == "missing_submission_tool"
+    )
+    assert planner_telemetry["proposal_repair_invocation_count"] == 1
+    assert planner_telemetry["proposal_repair_invocation_reasons"] == [
+        "missing_submission_tool"
+    ]
 
 
 @pytest.mark.asyncio
@@ -1496,6 +1755,8 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
     )
     edit_result = MagicMock(compiled_spec=compiled_spec, advisories=[])
     compiled_validation = MagicMock(valid=True, errors=[])
+    proposal_success_recorder = MagicMock()
+    assistant_metadata_builder = MagicMock(return_value={"planner_telemetry": {}})
 
     with (
         patch(
@@ -1546,12 +1807,16 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
             litellm_kwargs={"api_key": "sk-test"},
             max_output_tokens=1024,
             resource_catalog=catalog,
+            assistant_metadata_builder=assistant_metadata_builder,
+            proposal_success_recorder=proposal_success_recorder,
         )
 
     assert result.event is None
     assert result.failure_kind == "quality"
     assert result.feedback is not None
     assert "continue without MCP" in result.feedback
+    proposal_success_recorder.assert_not_called()
+    assistant_metadata_builder.assert_not_called()
     store_plan.assert_not_awaited()
 
 

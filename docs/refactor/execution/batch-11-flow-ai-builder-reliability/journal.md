@@ -2,7 +2,7 @@
 
 ## Status
 
-11.0a PLAN
+11.0b IMPLEMENTATION
 
 ## Starting Point
 
@@ -167,6 +167,194 @@ Accepted polish after green:
 Codex explicitly did not add Claude's optional duplicate-shape comment because
 the duplicate reported/vague audio-to-DOCX shape is already pinned by typed tests
 and an added comment would be easy to turn into restating noise.
+
+## 11.0b Slice Plan
+
+Problem:
+11.0a pinned the reliability corpus, but the proposal task still lacked a
+typed measurement contract for first-attempt proposal outcomes and repair
+reasons. The create path had a string-form first-attempt log, while edit and
+missing-tool forced retry paths did not have equivalent proposal telemetry.
+
+Canonical owners:
+
+| Concept | Owner | Decision |
+|---|---|---|
+| Per-turn `planner_telemetry` dict shape | `backend/src/intric/flows/ai_builder/ai_builder_telemetry.py` | Keep this as the only owner of the telemetry dict fields. |
+| Proposal turn token/attempt accounting | `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py` | Move the processor-local tracker into a narrow proposal telemetry module and rename it to `ProposalTurnTelemetry`. |
+| Tool-result failure taxonomy | `ToolProcessingFailureKind` | Type internal repair-loop values: `parse`, `recoverable_parse`, `validation`, and `quality`. |
+| Sanitized proposal failure taxonomy | `ProposalFailureKind` | Expose proposal measurement values: `parse`, `validation`, `quality`, and `missing_submission_tool`. |
+
+Implementation:
+
+- Extend canonical `build_planner_telemetry` with optional proposal fields.
+- Add `ProposalTurnTelemetry` for one proposal turn.
+- Record first-attempt proposal outcome and repair reason for:
+  - create `outline_flow`
+  - edit `edit_flow`
+  - missing required proposal tool followed by forced retry
+- Keep `confirm_requirements` and discovery-question repair out of proposal
+  compile telemetry.
+- Tighten `ToolProcessingResult.failure_kind` and proposal repair signatures to
+  the internal typed taxonomy.
+- Add unit coverage for telemetry payloads, structured log payloads,
+  first-attempt idempotency, no-tool forced retry, edit parse failure, and
+  failure-kind taxonomy drift.
+- Write deterministic baseline numbers before starting 11.1.
+
+Acceptance criteria:
+
+- A successful initial create proposal stores `proposal_first_attempt_success=true`
+  on planner telemetry.
+- A repaired proposal stores the original first-attempt failure kind and repair
+  reason.
+- A missing-tool first attempt remains `missing_submission_tool` even if forced
+  retry succeeds.
+- Edit proposal parse/process failures produce the same measurement shape.
+- No public API telemetry shape or frontend generated type changes are required.
+
+Risk / trade-off:
+The live LLM first-attempt success rate is not measured by this deterministic
+slice. The manual API baseline remains governed by `manual-eval-runbook.md`
+until a local API run is performed with the required workspace/model fixture.
+
+Human reviewability impact:
+Reviewers can see proposal measurement as a narrow telemetry extraction plus
+recording calls. Behavior changes are intentionally out of scope.
+
+Confidence: high after Claude plan iteration 3.
+
+## 11.0b Claude Plan Review
+
+### Iteration 1
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-11-0b-proposal-reliability-measurement-plan-20260503T000534Z.md`
+- Verdict: `changes_required`
+- Green light: `no`
+- Minimum score: `6`
+
+Accepted findings and changes:
+
+| Finding | Change |
+|---|---|
+| Proposal telemetry fields would split the `planner_telemetry` schema if added directly by the new module. | Kept `build_planner_telemetry` as the only telemetry dict owner and made the proposal module pass optional values into it. |
+| First-attempt idempotency was unspecified for missing-tool followed by forced retry success. | Defined first attempt as the first model proposal behavior and added first-write-wins coverage for the no-tool forced-retry path. |
+| `ToolProcessingResult.failure_kind` was still free-form. | Tightened failure kinds to typed literals and added a source drift test. |
+| `ProposalUsageTracker` would become a misleading name after adding attempt outcome state. | Renamed it to `ProposalTurnTelemetry`; no compatibility alias was preserved. |
+| Baseline numbers could become placeholders. | Required actual deterministic numbers in the journal before commit. |
+
+### Iteration 2
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-11-0b-proposal-reliability-measurement-plan-verification-20260503T000947Z.md`
+- Verdict: `changes_required`
+- Green light: `no`
+- Minimum score: `8`
+
+Accepted findings and changes:
+
+| Finding | Change |
+|---|---|
+| Tightening `ToolProcessingResult.failure_kind` also affects `ai_builder_proposal_repair.py`. | Added the repair module and `_build_self_correction_error_event` to the typed surface. |
+| `missing_submission_tool` is not a valid tool-result failure. | Split `ToolProcessingFailureKind` from sanitized `ProposalFailureKind`. |
+| JSON logging strips top-level `None` extras. | Used a nested `ai_builder_proposal_telemetry` log payload and omitted failure fields on success rows. |
+| Failure-kind drift test wording was mechanism-focused. | Implemented a fixed-file AST test named by the taxonomy contract. |
+| Deterministic vs live LLM baselines could be confused. | The baseline section below separates deterministic numbers from deferred live LLM first-attempt rate. |
+
+### Iteration 3
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-11-0b-proposal-reliability-measurement-plan-verification-2-20260503T001225Z.md`
+- Verdict: `green`
+- Green light: `yes`
+- Minimum score: `9`
+
+Accepted polish after green:
+
+| Finding | Change |
+|---|---|
+| `recoverable_parse` is a tested-but-currently-unproduced internal contract. | Documented the distinction in `ai_builder_proposal_telemetry.py`. |
+| The injected self-correction error event callable was too loose. | Added a typed protocol for the callback in `ai_builder_proposal_repair.py`. |
+| `ProposalRepairReason` could drift from `ProposalFailureKind`. | Made it an alias of `ProposalFailureKind`, not a separate literal. |
+| The source drift test needed a fixed source set. | Pinned the AST scan to proposal processor and edit proposal production files. |
+
+## 11.0b Implementation Result
+
+Implemented:
+
+- `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py`
+  now owns `ProposalTurnTelemetry`, proposal failure taxonomies, and structured
+  proposal log payload helpers.
+- `backend/src/intric/flows/ai_builder/ai_builder_telemetry.py` remains the
+  canonical `planner_telemetry` dict owner and accepts optional proposal fields.
+- `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py`
+  records first-attempt outcome and repair reason for create proposals, edit
+  proposals, and missing-tool forced retry.
+- `backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py` and create
+  proposal processing now separate proposal success recording from metadata
+  building, so successful first-attempt telemetry is persisted only on accepted
+  proposal paths.
+- `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py` now shares
+  the typed failure-kind contract used by `ToolProcessingResult`.
+- `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py`
+  covers the proposal telemetry payload, structured log shape, first-write-wins
+  behavior, taxonomy mapping, and failure-kind drift.
+- `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py`
+  covers initial proposal success, repaired proposal metadata, missing-tool
+  forced retry success, quality-failure first-attempt recording, and edit parse
+  failure telemetry.
+
+Behavior changes:
+
+- none intended. The proposal, compile, validation, and repair behavior remains
+  unchanged; this slice records measurement data around existing paths.
+
+## 11.0b Claude Implementation Review
+
+### Iteration 4
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-11-0b-proposal-telemetry-implementation-20260503T003537Z.md`
+- Verdict: `changes_required`
+- Green light: `no`
+- Minimum score: `5`
+
+Accepted finding:
+
+| Finding | Change |
+|---|---|
+| Success telemetry was recorded through a metadata-builder side effect before downstream validation and quality checks completed. First-write-wins could therefore hide a real validation or quality failure. | Split success recording from metadata construction, made MCP clarification metadata lazy, and added quality-failure regression coverage for create and edit paths. |
+
+### Iteration 5
+
+- Artifact: `.codex/artifacts/claude-peer-loop-batch-11-0b-proposal-telemetry-verification-20260503T004709Z.md`
+- Verdict: `GREEN_LIGHT`
+- Green light: `yes`
+- Minimum score: `8.5`
+
+Accepted verification:
+
+| Finding | Resolution |
+|---|---|
+| The eager success-recording blocker was fixed structurally. | `proposal_success_recorder` and `assistant_metadata_builder` are separate callables; success is recorded only from accepted proposal persistence or MCP-question persistence paths. |
+| Regression tests now protect the invariant. | Added real outline quality-failure telemetry coverage and edit quality-failure no-success-callback coverage. |
+| No code/comment/compatibility blocker remained. | Proceeded with validation and commit preparation. |
+
+## 11.0b Deterministic Baseline
+
+Included in this committed baseline:
+
+| Surface | Baseline result |
+|---|---|
+| Proposal telemetry focused tests | `58 passed`; pre-existing `python_multipart` warning only. |
+| Reliability corpus + benchmark integrity tests | `75 passed`; 7 reliability cases; 5 `BehavioralRisk` values covered. |
+| AI Builder integration suite | `79 passed, 20 deselected`; pre-existing deprecation warnings only. |
+| Benchmark runner case count | 17 benchmark cases. |
+| Benchmark runner diff vs frozen `baseline.json` | 0 added, 0 removed, 10 changed cases: `attachment_heavy_01_sv`, `audio_01_sv`, `audio_02_en`, `json_pipeline_01_sv`, `mixed_runtime_input_01_sv`, `rich_01_sv`, `template_fill_02_en`, `text_only_01_sv`, `text_only_02_en`, `vague_01_sv`. |
+
+Not included:
+
+- Live LLM first-attempt success rate. That number requires the manual API
+  workflow in `manual-eval-runbook.md` with the pinned workspace/model fixture,
+  three runs per prompt/mode, and redacted scorecards.
+- Any frontend UI quality score.
 
 ## User Requirement
 

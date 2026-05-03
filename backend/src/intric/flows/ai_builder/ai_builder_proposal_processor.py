@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -110,6 +110,15 @@ from intric.flows.ai_builder.ai_builder_proposal_repair import (
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     retry_forced_tool_after_text as run_retry_forced_tool_after_text,
 )
+from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+    ProposalFailureKind,
+    ProposalRepairReason,
+    ProposalTurnTelemetry,
+    ToolProcessingFailureKind,
+    log_proposal_first_attempt,
+    log_proposal_repair_invoked,
+    proposal_failure_kind_from_tool_failure,
+)
 from intric.flows.ai_builder.ai_builder_repair_transport import (
     append_tool_retry_feedback_turn,
     build_persisted_tool_call_stub,
@@ -131,12 +140,6 @@ from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
 )
 from intric.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
-    build_planner_telemetry,
-)
-from intric.flows.ai_builder.ai_builder_token_usage import (
-    CompletionTokenUsage,
-    combine_token_usage,
-    completion_token_usage_from_response,
 )
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
@@ -172,25 +175,11 @@ def _tool_calls_contain_submission(tool_calls: list[Any]) -> bool:
     )
 
 
-def _safe_str(value: object) -> str | None:
-    return value if isinstance(value, str) else None
-
-
-def _completion_text_from_response(response: Any) -> str:
-    parts: list[str] = []
-    for choice in getattr(response, "choices", []) or []:
-        message = getattr(choice, "message", None)
-        content = getattr(message, "content", None)
-        if isinstance(content, str) and content:
-            parts.append(content)
-    return "\n".join(parts)
-
-
 def _assistant_metadata_with_usage(
     *,
     conversation: list[ConversationMessage],
     base_metadata: dict[str, Any] | None,
-    usage_tracker: ProposalUsageTracker | None,
+    usage_tracker: ProposalTurnTelemetry | None,
     tool_calls: list[Any] | None = None,
 ) -> dict[str, Any] | None:
     if usage_tracker is None:
@@ -202,6 +191,46 @@ def _assistant_metadata_with_usage(
         ),
         base_metadata=base_metadata,
         tool_calls=tool_calls,
+    )
+
+
+def _record_proposal_first_attempt(
+    usage_tracker: ProposalTurnTelemetry | None,
+    *,
+    request_id: str,
+    tool_name: str,
+    success: bool,
+    failure_kind: ProposalFailureKind | None = None,
+) -> None:
+    if usage_tracker is None:
+        return
+    if usage_tracker.record_first_attempt(
+        tool_name=tool_name,
+        success=success,
+        failure_kind=failure_kind,
+    ):
+        log_proposal_first_attempt(
+            request_id=request_id,
+            tool_name=tool_name,
+            success=success,
+            failure_kind=failure_kind,
+        )
+
+
+def _record_proposal_repair_invocation(
+    usage_tracker: ProposalTurnTelemetry | None,
+    *,
+    request_id: str,
+    tool_name: str,
+    reason: ProposalRepairReason,
+) -> None:
+    if usage_tracker is None:
+        return
+    usage_tracker.record_repair_invocation(reason=reason)
+    log_proposal_repair_invoked(
+        request_id=request_id,
+        tool_name=tool_name,
+        reason=reason,
     )
 
 
@@ -285,7 +314,7 @@ class ToolProcessingResult:
     event: dict[str, str] | None = None
     events: tuple[dict[str, str], ...] = ()
     feedback: str | None = None
-    failure_kind: str | None = None
+    failure_kind: ToolProcessingFailureKind | None = None
 
     @property
     def has_events(self) -> bool:
@@ -295,66 +324,6 @@ class ToolProcessingResult:
         if self.event is None:
             return self.events
         return (self.event, *self.events)
-
-
-def _empty_token_usages() -> list[CompletionTokenUsage]:
-    return []
-
-
-@dataclass
-class ProposalUsageTracker:
-    request_id: str
-    model: str
-    token_usages: list[CompletionTokenUsage] = field(
-        default_factory=_empty_token_usages
-    )
-    finish_reason: str | None = None
-    repair_attempts: int = 0
-
-    @property
-    def llm_calls_made(self) -> int:
-        return len(self.token_usages)
-
-    def record_response(
-        self,
-        response: Any,
-        *,
-        messages: list[dict[str, Any]],
-        counts_as_repair: bool = False,
-    ) -> None:
-        choice = response.choices[0] if getattr(response, "choices", None) else None
-        self.finish_reason = _safe_str(getattr(choice, "finish_reason", None))
-        if counts_as_repair:
-            self.repair_attempts += 1
-        self.token_usages.append(
-            completion_token_usage_from_response(
-                response,
-                model_name=self.model,
-                messages=messages,
-                completion_text=_completion_text_from_response(response),
-            )
-        )
-
-    def build_planner_telemetry(self, *, tool_call_count: int = 0) -> dict[str, Any]:
-        usage = combine_token_usage(self.token_usages)
-        return build_planner_telemetry(
-            request_id=self.request_id,
-            model=self.model,
-            finish_reason=self.finish_reason,
-            prompt_tokens=usage.prompt_tokens,
-            completion_tokens=usage.completion_tokens,
-            total_tokens=usage.total_tokens,
-            tool_call_count=tool_call_count,
-            used_auxiliary_llm=False,
-            token_usage_source=usage.source if usage.has_tokens else None,
-            token_usage_estimated=usage.estimated,
-            outcome_kind="dispatched",
-            wall_clock_ms=0,
-            llm_calls_made=self.llm_calls_made,
-            repair_attempts=self.repair_attempts,
-            parse_repair_attempts=0,
-            architecture_commit_populated=False,
-        )
 
 
 @dataclass(frozen=True)
@@ -378,7 +347,7 @@ class ProposalContext:
     text_content: str | None = None
     assistant_metadata: dict[str, Any] | None = None
     planning_state: PlanningState | None = None
-    usage_tracker: ProposalUsageTracker | None = None
+    usage_tracker: ProposalTurnTelemetry | None = None
     plan_edit_context: AIBuilderPlanEditContext | None = None
     prior_plan_for_revision: BuilderPlan | None = None
 
@@ -470,6 +439,8 @@ class AIBuilderProposalProcessor:
         planning_state: PlanningState | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
+        assistant_metadata_builder: Callable[[], dict[str, Any] | None] | None = None,
+        proposal_success_recorder: Callable[[], None] | None = None,
     ) -> ToolProcessingResult:
         try:
             outline = parse_outline_flow_arguments(arguments)
@@ -549,6 +520,8 @@ class AIBuilderProposalProcessor:
             ),
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
+            assistant_metadata_builder=assistant_metadata_builder,
+            proposal_success_recorder=proposal_success_recorder,
         )
 
     async def _process_create_draft(
@@ -572,7 +545,21 @@ class AIBuilderProposalProcessor:
         aggregation_intent: AggregationIntent = "linear",
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
+        assistant_metadata_builder: Callable[[], dict[str, Any] | None] | None = None,
+        proposal_success_recorder: Callable[[], None] | None = None,
     ) -> ToolProcessingResult:
+        metadata_built = False
+
+        def _accepted_proposal_metadata() -> dict[str, Any] | None:
+            nonlocal assistant_metadata, metadata_built
+            if not metadata_built:
+                if proposal_success_recorder is not None:
+                    proposal_success_recorder()
+                if assistant_metadata_builder is not None:
+                    assistant_metadata = assistant_metadata_builder()
+                metadata_built = True
+            return assistant_metadata
+
         if resource_catalog is not None:
             draft, resolution_issues = canonicalize_create_draft_resources(
                 draft,
@@ -660,7 +647,7 @@ class AIBuilderProposalProcessor:
             spec=spec,
             resource_catalog=resource_catalog,
             flow=flow,
-            assistant_metadata=assistant_metadata,
+            assistant_metadata_builder=_accepted_proposal_metadata,
             lease_request_id=lease_request_id,
             lease_lock_token=lease_lock_token,
         )
@@ -751,7 +738,7 @@ class AIBuilderProposalProcessor:
             conversation=conversation,
             new_messages_start=new_messages_start,
             assistant_content=assistant_content,
-            assistant_metadata=assistant_metadata,
+            assistant_metadata=_accepted_proposal_metadata(),
             tool_call_id=tool_call_id,
             tool_name=tool_name,
             arguments=arguments,
@@ -777,9 +764,10 @@ class AIBuilderProposalProcessor:
         spec: FlowDraftSpecCore,
         resource_catalog: AIBuilderResourceCatalog | None,
         flow: "Flow | None",
-        assistant_metadata: dict[str, Any] | None,
         lease_request_id: UUID | None,
         lease_lock_token: UUID | None,
+        assistant_metadata: dict[str, Any] | None = None,
+        assistant_metadata_builder: Callable[[], dict[str, Any] | None] | None = None,
     ) -> list[dict[str, str]]:
         if resource_catalog is None or mcp_selection_answer_allows_planning(
             conversation
@@ -799,6 +787,11 @@ class AIBuilderProposalProcessor:
         if issue is None:
             return []
 
+        metadata = (
+            assistant_metadata_builder()
+            if assistant_metadata_builder is not None
+            else assistant_metadata
+        )
         question_data, assistant_text = build_mcp_resource_selection_question(
             issue=issue,
             catalog=resource_catalog,
@@ -821,7 +814,7 @@ class AIBuilderProposalProcessor:
             new_messages_start=new_messages_start,
             question_data=question_data,
             assistant_text=assistant_text,
-            assistant_metadata=assistant_metadata,
+            assistant_metadata=metadata,
             tool_content=(
                 "MCP selection question presented because MCP usage requires explicit "
                 "user selection from enabled space resources."
@@ -835,7 +828,7 @@ class AIBuilderProposalProcessor:
     def _build_self_correction_error_event(
         *,
         feedback: str | None,
-        failure_kind: str | None,
+        failure_kind: ToolProcessingFailureKind | None,
     ) -> dict[str, str]:
         if failure_kind in {"parse", "recoverable_parse"}:
             return build_error_event(
@@ -880,7 +873,7 @@ class AIBuilderProposalProcessor:
         flow: "Flow | None" = None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
         planning_state: PlanningState | None = None,
-        usage_tracker: ProposalUsageTracker | None = None,
+        usage_tracker: ProposalTurnTelemetry | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
@@ -974,7 +967,7 @@ class AIBuilderProposalProcessor:
             available_kbs=available_kbs,
             available_mcps=available_mcps,
         )
-        usage_tracker = ProposalUsageTracker(
+        usage_tracker = ProposalTurnTelemetry(
             request_id=request_id,
             model=litellm_model,
         )
@@ -1036,6 +1029,19 @@ class AIBuilderProposalProcessor:
             if yielded:
                 return
 
+        _record_proposal_first_attempt(
+            usage_tracker,
+            request_id=request_id,
+            tool_name=submission_tool_name,
+            success=False,
+            failure_kind="missing_submission_tool",
+        )
+        _record_proposal_repair_invocation(
+            usage_tracker,
+            request_id=request_id,
+            tool_name=submission_tool_name,
+            reason="missing_submission_tool",
+        )
         forced_events = await self.retry_forced_proposal_after_text(
             correction_messages=llm_messages,
             assistant_text=message.content or "",
@@ -1217,10 +1223,18 @@ class AIBuilderProposalProcessor:
         try:
             arguments = json.loads(tool_call.function.arguments)
         except json.JSONDecodeError as error:
-            logger.info(
-                "ai_builder_submission_first_attempt tool=%s request_id=%s success=false failure_kind=parse",
-                config.target_tool_name,
-                ctx.request_id,
+            _record_proposal_first_attempt(
+                ctx.usage_tracker,
+                request_id=ctx.request_id,
+                tool_name=config.target_tool_name,
+                success=False,
+                failure_kind="parse",
+            )
+            _record_proposal_repair_invocation(
+                ctx.usage_tracker,
+                request_id=ctx.request_id,
+                tool_name=config.target_tool_name,
+                reason="parse",
             )
             parse_retry_kwargs: dict[str, Any] = {}
             if config.target_tool_name == OUTLINE_FLOW_TOOL_NAME:
@@ -1251,18 +1265,31 @@ class AIBuilderProposalProcessor:
                 ctx.prior_plan_for_revision
             )
 
+        def _record_successful_proposal() -> None:
+            _record_proposal_first_attempt(
+                ctx.usage_tracker,
+                request_id=ctx.request_id,
+                tool_name=config.target_tool_name,
+                success=True,
+            )
+
+        def _build_assistant_metadata() -> dict[str, Any] | None:
+            return _assistant_metadata_with_usage(
+                conversation=ctx.conversation,
+                base_metadata=ctx.assistant_metadata,
+                usage_tracker=ctx.usage_tracker,
+                tool_calls=[tool_call],
+            )
+
         submission_kwargs = self._build_submission_processing_kwargs(
             session_id=ctx.session_id,
             conversation=ctx.conversation,
             new_messages_start=ctx.new_messages_start,
             arguments=arguments,
             assistant_content="Här är mitt förslag:",
-            assistant_metadata=_assistant_metadata_with_usage(
-                conversation=ctx.conversation,
-                base_metadata=ctx.assistant_metadata,
-                usage_tracker=ctx.usage_tracker,
-                tool_calls=[tool_call],
-            ),
+            assistant_metadata=None,
+            assistant_metadata_builder=_build_assistant_metadata,
+            proposal_success_recorder=_record_successful_proposal,
             tool_call_id=tool_call.id,
             available_model_refs=ctx.available_model_refs,
             available_kb_refs=ctx.available_kb_refs,
@@ -1277,14 +1304,23 @@ class AIBuilderProposalProcessor:
             submission_kwargs["plan_edit_context"] = ctx.plan_edit_context
             submission_kwargs["prior_plan_for_revision"] = ctx.prior_plan_for_revision
         submission_result = await config.process_tool_arguments(**submission_kwargs)
-        logger.info(
-            "ai_builder_submission_first_attempt tool=%s request_id=%s success=%s failure_kind=%s",
-            config.target_tool_name,
-            ctx.request_id,
-            str(submission_result.has_events).lower(),
-            submission_result.failure_kind or "none",
-        )
         if not submission_result.has_events:
+            proposal_failure_kind = proposal_failure_kind_from_tool_failure(
+                submission_result.failure_kind
+            )
+            _record_proposal_first_attempt(
+                ctx.usage_tracker,
+                request_id=ctx.request_id,
+                tool_name=config.target_tool_name,
+                success=False,
+                failure_kind=proposal_failure_kind,
+            )
+            _record_proposal_repair_invocation(
+                ctx.usage_tracker,
+                request_id=ctx.request_id,
+                tool_name=config.target_tool_name,
+                reason=proposal_failure_kind,
+            )
             async for event in self._request_tool_self_correction(
                 ctx=ctx,
                 error_message=submission_result.feedback
@@ -1300,6 +1336,7 @@ class AIBuilderProposalProcessor:
                 yield event
             return
 
+        _record_successful_proposal()
         for event in submission_result.iter_events():
             yield event
 
@@ -1312,6 +1349,8 @@ class AIBuilderProposalProcessor:
         arguments: dict[str, Any],
         assistant_content: str,
         assistant_metadata: dict[str, Any] | None = None,
+        assistant_metadata_builder: Callable[[], dict[str, Any] | None] | None = None,
+        proposal_success_recorder: Callable[[], None] | None = None,
         tool_call_id: str,
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
@@ -1328,6 +1367,8 @@ class AIBuilderProposalProcessor:
             "arguments": arguments,
             "assistant_content": assistant_content,
             "assistant_metadata": assistant_metadata,
+            "assistant_metadata_builder": assistant_metadata_builder,
+            "proposal_success_recorder": proposal_success_recorder,
             "tool_call_id": tool_call_id,
             "available_model_refs": available_model_refs,
             "available_kb_refs": available_kb_refs,
@@ -1395,7 +1436,7 @@ class AIBuilderProposalProcessor:
         litellm_kwargs: dict[str, Any],
         max_output_tokens: int,
         temperature: float,
-        usage_tracker: ProposalUsageTracker | None,
+        usage_tracker: ProposalTurnTelemetry | None,
         tool_choice: dict[str, Any] | None = None,
         counts_as_repair: bool = False,
     ) -> Any:
@@ -1545,7 +1586,7 @@ class AIBuilderProposalProcessor:
         process_tool_kwargs: dict[str, Any] | None = None,
         flow: "Flow | None" = None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
-        usage_tracker: ProposalUsageTracker | None = None,
+        usage_tracker: ProposalTurnTelemetry | None = None,
         build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
     ) -> EventBatch | None:
         merged_process_kwargs = dict(process_tool_kwargs or {})
@@ -1603,7 +1644,7 @@ class AIBuilderProposalProcessor:
         prior_plan_for_revision: BuilderPlan | None = None,
         lease_request_id: UUID | None = None,
         lease_lock_token: UUID | None = None,
-        usage_tracker: ProposalUsageTracker | None = None,
+        usage_tracker: ProposalTurnTelemetry | None = None,
         assistant_metadata: dict[str, Any] | None = None,
     ) -> EventBatch | None:
         retry_config = self._submission_retry_config(
@@ -1663,7 +1704,7 @@ class AIBuilderProposalProcessor:
         flow: "Flow | None" = None,
         original_question_id: str | None = None,
         assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
-        usage_tracker: ProposalUsageTracker | None = None,
+        usage_tracker: ProposalTurnTelemetry | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         submission_tool_name = _active_submission_tool_name(flow)
         filtered_tool_schemas = [
@@ -2118,6 +2159,19 @@ class AIBuilderProposalProcessor:
         try:
             raw_args = json.loads(tool_call.function.arguments)
         except json.JSONDecodeError as error:
+            _record_proposal_first_attempt(
+                ctx.usage_tracker,
+                request_id=ctx.request_id,
+                tool_name=EDIT_FLOW_TOOL_NAME,
+                success=False,
+                failure_kind="parse",
+            )
+            _record_proposal_repair_invocation(
+                ctx.usage_tracker,
+                request_id=ctx.request_id,
+                tool_name=EDIT_FLOW_TOOL_NAME,
+                reason="parse",
+            )
             async for event in self._request_tool_self_correction(
                 ctx=ctx,
                 error_message=f"Invalid edit_flow arguments: {error}",
@@ -2136,6 +2190,22 @@ class AIBuilderProposalProcessor:
                 yield event
             return
 
+        def _record_successful_proposal() -> None:
+            _record_proposal_first_attempt(
+                ctx.usage_tracker,
+                request_id=ctx.request_id,
+                tool_name=EDIT_FLOW_TOOL_NAME,
+                success=True,
+            )
+
+        def _build_assistant_metadata() -> dict[str, Any] | None:
+            return _assistant_metadata_with_usage(
+                conversation=ctx.conversation,
+                base_metadata=ctx.assistant_metadata,
+                usage_tracker=ctx.usage_tracker,
+                tool_calls=[tool_call],
+            )
+
         edit_result = await process_edit_arguments(
             processor=self,
             session_id=ctx.session_id,
@@ -2151,17 +2221,30 @@ class AIBuilderProposalProcessor:
             litellm_model=ctx.litellm_model,
             litellm_kwargs=ctx.litellm_kwargs,
             max_output_tokens=ctx.max_output_tokens,
-            assistant_metadata=_assistant_metadata_with_usage(
-                conversation=ctx.conversation,
-                base_metadata=ctx.assistant_metadata,
-                usage_tracker=ctx.usage_tracker,
-                tool_calls=[tool_call],
-            ),
+            assistant_metadata=None,
+            assistant_metadata_builder=_build_assistant_metadata,
+            proposal_success_recorder=_record_successful_proposal,
             resource_catalog=ctx.resource_catalog,
             plan_edit_context=ctx.plan_edit_context,
             prior_plan_for_revision=ctx.prior_plan_for_revision,
         )
         if edit_result.event is None:
+            proposal_failure_kind = proposal_failure_kind_from_tool_failure(
+                edit_result.failure_kind
+            )
+            _record_proposal_first_attempt(
+                ctx.usage_tracker,
+                request_id=ctx.request_id,
+                tool_name=EDIT_FLOW_TOOL_NAME,
+                success=False,
+                failure_kind=proposal_failure_kind,
+            )
+            _record_proposal_repair_invocation(
+                ctx.usage_tracker,
+                request_id=ctx.request_id,
+                tool_name=EDIT_FLOW_TOOL_NAME,
+                reason=proposal_failure_kind,
+            )
             async for event in self._request_tool_self_correction(
                 ctx=ctx,
                 error_message=edit_result.feedback or "Invalid edit_flow arguments.",
@@ -2180,6 +2263,7 @@ class AIBuilderProposalProcessor:
                 yield event
             return
 
+        _record_successful_proposal()
         yield edit_result.event
 
     async def emit_discovery_followup_if_needed(

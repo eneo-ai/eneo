@@ -204,6 +204,70 @@ Exit gate:
 - no source behavior changes are mixed into the corpus commit
 - Flow enum exclusion lists are typed to enum members, include one-line rationales, and cannot reference removed enum values
 
+#### 11.0b — Proposal Reliability Measurement Hooks
+
+Goal:
+Measure proposal first-attempt compile outcomes and repair reasons without
+changing proposal behavior.
+
+Canonical owners:
+
+| Concept | Canonical owner | Decision |
+|---|---|---|
+| Per-turn `planner_telemetry` dict shape | `backend/src/intric/flows/ai_builder/ai_builder_telemetry.py` | Extend `build_planner_telemetry` with optional proposal fields; do not mutate telemetry dicts in proposal code. |
+| Proposal task token/attempt accounting | `backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py` | Move and rename the old processor-local usage tracker to `ProposalTurnTelemetry`. |
+| Tool-result failure taxonomy | `ToolProcessingFailureKind` in `ai_builder_proposal_telemetry.py` | Keep internal repair-loop values typed, including the tested `recoverable_parse` subtype. |
+| Sanitized proposal failure taxonomy | `ProposalFailureKind` in `ai_builder_proposal_telemetry.py` | Expose only `parse`, `validation`, `quality`, and `missing_submission_tool`; map `recoverable_parse` to `parse`. |
+
+Deliverables:
+
+- `ProposalTurnTelemetry` records token usage, LLM repair-call count,
+  first-attempt proposal outcome, and proposal repair reasons for one proposal
+  turn.
+- Structured proposal logs use one nested `ai_builder_proposal_telemetry`
+  payload with a documented schema-version bump policy.
+- Create proposal path records:
+  - first-attempt success for valid initial `outline_flow`
+  - parse / validation / quality first-attempt failures
+  - repair reasons for parse / validation / quality failures
+- Edit proposal path records the same first-attempt and repair-reason fields.
+- Missing-submission-tool path records `missing_submission_tool` and preserves it
+  when the forced retry later succeeds.
+- `ToolProcessingResult.failure_kind` is tightened to the internal typed
+  taxonomy.
+- Deterministic baseline numbers are written to the journal before 11.1 starts.
+
+Do not:
+
+- change proposal, compiler, validator, repair, or runtime behavior
+- add public `SessionTelemetrySummary` fields
+- touch frontend or generated client files
+- record `confirm_requirements` or discovery-question repair as proposal compile
+  telemetry
+- add a generic metrics manager
+
+Validation:
+
+```bash
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q
+cd backend && uv run pytest tests/integration/flows/ai_builder/benchmark/test_reliability_corpus.py tests/integration/flows/ai_builder/benchmark/test_baseline_benchmark.py -q
+cd backend && uv run pytest tests/integration/flows/ai_builder -q
+cd backend && uv run pyright <touched files>
+cd backend && uv run ruff check <touched files>
+cd backend && uv run ruff format --check <touched files>
+cd backend && uv run lint-imports --no-cache
+git diff --check -- <touched paths>
+```
+
+Exit gate:
+
+- journal contains concrete deterministic baseline numbers
+- journal explicitly states that live LLM first-attempt pass rate is not part of
+  this deterministic baseline
+- no proposal behavior change is mixed into the measurement commit
+- Claude implementation review reaches green or any disagreement is documented
+  with file:line evidence
+
 ### 11.1 — StepSkeleton Materialization
 
 Goal:
