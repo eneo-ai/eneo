@@ -269,6 +269,29 @@ class TestRepairParseFailure:
         assert "Expecting value: line 1 column 1" in corrective_user["content"]
         assert "markdown code fences" in corrective_user["content"]
 
+    @pytest.mark.asyncio
+    async def test_parse_repair_inherits_structured_output_kwargs(self) -> None:
+        litellm_client = AsyncMock()
+        litellm_client.acompletion.return_value = _litellm_response(
+            _valid_ask_question_raw()
+        )
+
+        await repair_parse_failure(
+            litellm_client=litellm_client,
+            litellm_model="openai/gpt-5.4-mini",
+            litellm_kwargs={
+                "response_format": {"type": "json_object"},
+                "drop_params": True,
+            },
+            base_messages=[{"role": "user", "content": "build a flow"}],
+            failed_output_raw="not json at all",
+            parse_error_message="Expecting value: line 1 column 1",
+        )
+
+        call_kwargs = litellm_client.acompletion.call_args.kwargs
+        assert call_kwargs["response_format"] == {"type": "json_object"}
+        assert call_kwargs["drop_params"] is True
+
 
 class TestPipelineParseRepair:
     @pytest.mark.asyncio

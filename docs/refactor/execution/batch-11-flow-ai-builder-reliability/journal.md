@@ -1612,3 +1612,88 @@ Accepted polish:
 | Edit twin/exception XOR was hard to read. | Added named booleans and an assertion message. |
 | Percentage gates used naked numeric thresholds. | Added named `MIN_EDIT_ROW_PERCENTAGE` and `MIN_FORM_FIELD_CHAIN_PERCENTAGE` constants. |
 | Edit twins could drift to unrelated concerns. | Added a twin concern superset assertion. |
+
+## 11.5a Planner Provider Capability Rail
+
+### Scope
+
+This slice starts the structured-output rail at the provider-capability and
+planner JSON boundary. It does not touch `outline_flow` / `edit_flow` tool-call
+contracts, semantic repair, or proposal architecture behavior.
+
+Canonical owners:
+
+| Concept | Owner | Decision |
+|---|---|---|
+| Provider structured-output capability | `backend/src/intric/completion_models/infrastructure/tenant_model_capabilities.py` | New typed owner for strict schema, JSON object, and prompt-validation decisions. |
+| Tenant model capability resolution | `TenantModelAdapter` and `CompletionService` | Adapter delegates to the capability owner; service exposes the typed async method to AI Builder. |
+| Planner request response format | `backend/src/intric/flows/ai_builder/ai_builder_response_format.py` | Converts one capability decision into one planner request selection. |
+| Planner call kwargs and telemetry | `backend/src/intric/flows/ai_builder/ai_builder_planner.py` | Main and chained planner turns reuse the same selection and emit compact structured-output telemetry. |
+| Message-context prefetch | `backend/src/intric/flows/ai_builder/ai_builder_service.py` | Computes the capability decision once before SSE streaming. |
+
+### Claude Plan Review
+
+| Iteration | Artifact | Verdict | Green light | Minimum score | Outcome |
+|---:|---|---|---|---:|---|
+| 1 | `.codex/artifacts/claude-peer-loop-batch-11-5-structured-output-rail-plan-20260503T072546Z.md` | `changes_required` | `no` | 6 | Strict `PlannerOutput` schema feasibility, capability override scope, chained planner kwargs, and telemetry keys needed tightening. |
+| 2 | `.codex/artifacts/claude-peer-loop-batch-11-5-structured-output-rail-revised-plan-20260503T073127Z.md` | `green` | `yes` | 8 | Approved the 11.5a planner-only slice after local strict-schema and LiteLLM support probes. |
+
+Accepted plan constraints:
+
+| Finding | Resolution |
+|---|---|
+| `PlannerOutput` is not strict-schema ready. | 11.5a downgrades strict-capable providers to `json_object` for planner turns and logs `planner_output_strict_blocked=true`. |
+| Capability ownership should not fork between AI Builder and adapters. | Added one completion-model capability owner and delegated through `TenantModelAdapter` / `CompletionService`. |
+| Explicit model overrides were too speculative. | No override surface was added; LiteLLM metadata is the capability evidence for this slice. |
+| Proposal tool calls are orthogonal. | `outline_flow` / `edit_flow` prompts do not receive planner `response_format` kwargs in 11.5a. |
+| Chained server actions must not rebuild capability state. | `send_message` builds one selection and passes it to both primary and chained planner paths. |
+
+### Implementation Result
+
+| Area | Outcome |
+|---|---|
+| Capability contract | Added `StructuredOutputCapabilityDecision`, `StructuredOutputMode`, `StructuredOutputDecisionSource`, and `unsupported_structured_output_decision`. |
+| Adapter/service handoff | `TenantModelAdapter.resolve_structured_output_capability()` and `CompletionService.resolve_structured_output_capability()` now expose typed provider capability. |
+| Planner response-format selection | Added `PlannerResponseFormatSelection` and blocker detection against the live `PlannerOutput.model_json_schema()`. |
+| Strict downgrade | Strict-capable providers use `json_object` while `PlannerOutput` has union/default/optional-object blockers. |
+| Planner kwargs | Main and chained planner calls share `_build_planner_litellm_kwargs(...)` and keep `drop_params=True` as a real LiteLLM kwarg. |
+| Telemetry | Planner metrics now emit seven structured-output keys and no old JSON-mode compatibility keys. |
+| Proposal separation | Proposal tool-call prompts are pinned to avoid planner `response_format` kwargs. |
+| Tests | Added provider-capability, response-format, service-context, planner, chained-dispatch, parse-repair, proposal, and router coverage. |
+
+### Claude Implementation Review
+
+| Iteration | Artifact | Verdict | Green light | Minimum score | Outcome |
+|---:|---|---|---|---:|---|
+| 3 | `.codex/artifacts/claude-peer-loop-batch-11-5a-structured-output-implementation-20260503T075748Z.md` | `GREEN_LIGHT` | `yes` | 7.5 | Approved ship-with-follow-ups; flagged a typed-dependency `getattr` hedge, redundant telemetry keys, and missing same-selection chain assertion. |
+| 4 | `.codex/artifacts/claude-peer-loop-batch-11-5a-structured-output-implementation-follow-up-20260503T080716Z.md` | `green` | `yes` | 8 | Verified the cleanup and cleared the slice for documentation and commit. |
+
+Accepted implementation findings:
+
+| Finding | Resolution |
+|---|---|
+| `resolve_planner_structured_output_capability` hedged a typed dependency with `getattr` / `isawaitable`. | Replaced it with a direct typed async call to `CompletionService.resolve_structured_output_capability`. |
+| Planner telemetry carried old JSON-mode keys. | Removed `response_format_requested`, `drop_params`, and `json_mode_requested` from metrics; `drop_params=True` remains only as a LiteLLM kwarg. |
+| No test proved the same selection reached chained dispatch. | Added `test_send_message_reuses_one_planner_response_format_selection_for_chain` with identity assertion. |
+
+### Validation Result
+
+| Command | Result |
+|---|---|
+| `uv run pytest tests/unit/test_tenant_model_capabilities.py tests/unit/test_tenant_model_adapter_prepare_kwargs.py tests/unittests/flows/ai_builder/test_ai_builder_response_format.py tests/unittests/flows/ai_builder/test_ai_builder_service.py::TestPlannerContextPreparation tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_router.py -q` | Passed: `164 passed`. |
+| `uv run pytest tests/unittests/flows/ai_builder -q` | Passed: `1761 passed, 4 skipped`, 12 existing warnings. |
+| `uv run pytest tests/integration/flows/ai_builder -q` | Passed: `93 passed, 20 deselected`, 16 existing warnings. |
+| `uv run pyright <11.5a touched source and test files>` | Passed: `0 errors, 0 warnings, 0 informations`. |
+| `uv run ruff check <11.5a touched source and test files>` | Passed. |
+| `uv run ruff format --check <11.5a touched source and test files>` | Passed: `15 files already formatted`. |
+| `uv run lint-imports --no-cache` | Passed: 3 import contracts kept, 0 broken. |
+| `./scripts/gate-local/anti_slippage.sh --worktree` | Passed: `anti-slippage: worktree clean`. |
+
+### Carry-Forward
+
+| Item | Owner |
+|---|---|
+| Make `PlannerOutput` strict-schema compatible or document why strict schema is not maintainable. | 11.5b |
+| Extend the typed rail to `outline_flow`, `edit_flow`, and parse repair only where the contract is a typed JSON object. | 11.5b |
+| Run a live provider smoke for the actual tenant/model Anthropic Haiku alias instead of assuming LiteLLM metadata from memory. | 11.5b / provider eval |
+| Consider removing the pre-existing `resolve_planner_params` introspection hedge in a separate planner cleanup slice. | Later Batch 11 cleanup |

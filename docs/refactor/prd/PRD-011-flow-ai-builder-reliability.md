@@ -63,7 +63,7 @@ The durable fix is to make Flow mechanics impossible for the LLM to get wrong:
 | FCM is engine truth | `backend/src/intric/flows/flow_capability_manifest.py:1-20` says FCM is the engine truth; `is_output_mode_compatible` makes `transcribe_only` legal only for audio-to-text in `backend/src/intric/flows/flow_capability_manifest.py:516-557`; chain compatibility is validated in `backend/src/intric/flows/flow_capability_manifest.py:970-978`. | AI Builder should compile against FCM, not ask the model to rediscover legal mechanics. |
 | PlanningState is typed but intent resolution is keyword-heavy | PlanningState is the typed JSONB source of truth in `backend/src/intric/flows/ai_builder/planning_state.py:1-24`; current input intent resolution depends on bilingual keyword markers and text checks in `backend/src/intric/flows/ai_builder/ai_builder_input_architecture_policy.py:32-248` and `:443-488`. | Swedish coverage depends on hand-maintained phrases and can miss semantically equivalent wording. |
 | LLM final proposal should be semantic-only | `OutlineCompileContext` says architecture facts are server-owned in `backend/src/intric/flows/ai_builder/ai_builder_create_outline.py:110-127`; `compile_outline_to_create_draft` folds outline steps into backend-derived mechanics in `backend/src/intric/flows/ai_builder/ai_builder_create_outline.py:510-619`. | The intended contract is correct, but it is not enforced as a skeleton-first compile contract. |
-| LiteLLM adapter has parameter support checks but no AI Builder structured-output rail | `TenantModelAdapter` checks supported OpenAI params in `backend/src/intric/completion_models/infrastructure/adapters/tenant_model_adapter.py:214-236` and calls LiteLLM with `drop_params=True` in `backend/src/intric/completion_models/infrastructure/adapters/tenant_model_adapter.py:578-607`. AI Builder calls `acompletion` with `litellm_kwargs` in `backend/src/intric/flows/ai_builder/ai_builder_orchestration_pipeline.py:127-155`. | The transport can likely carry `response_format`, but there is no typed AI Builder strategy for `strict_json_schema`, `json_object`, or `prompt_with_pydantic_validation`. |
+| LiteLLM adapter now has a planner structured-output rail | `backend/src/intric/completion_models/infrastructure/tenant_model_capabilities.py` owns typed capability decisions; `TenantModelAdapter.resolve_structured_output_capability` and `CompletionService.resolve_structured_output_capability` expose the provider path; `backend/src/intric/flows/ai_builder/ai_builder_response_format.py` selects planner request mode. | 11.5a covers planner JSON turns only. Proposal tool calls, parse repair, and strict-schema cleanup remain open 11.5 work. |
 | Enabled MCP resources are normalized and refs are enforced | MCP resources are normalized before planner exposure in `backend/src/intric/flows/ai_builder/ai_builder_mcp_resources.py:29-88`; MCP selection and selected refs are enforced in `backend/src/intric/flows/ai_builder/ai_builder_mcp_intent.py:388-433`. | Batch 11 should reuse this owner and make refs enum-bound in LLM materials, not invent another resource layer. |
 | Capability reference already renders typed Flow materials for the LLM | `backend/src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py:18-75` renders a structured reference from typed Flow sources and Swedish copy. | Batch 11 should strengthen this material, not create a parallel manifest. |
 
@@ -208,6 +208,15 @@ Tool calls remain orthogonal to structured output capability. Existing
 `outline_flow` and `edit_flow` tool contracts should not become a separate
 fallback rung; they can be combined with the selected output mode only when the
 provider supports that combination.
+
+Batch 11.5a status:
+
+- implemented the provider-capability owner and planner JSON selection path;
+- kept `outline_flow` and `edit_flow` proposal tool calls separate from planner
+  `response_format` kwargs;
+- downgraded strict-capable planner turns to `json_object` while
+  `PlannerOutput` still has strict-schema blockers;
+- left proposal and parse-repair expansion to 11.5b.
 
 ## Implementation Slices
 

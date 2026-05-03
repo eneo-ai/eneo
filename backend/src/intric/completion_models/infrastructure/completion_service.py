@@ -16,6 +16,9 @@ from intric.completion_models.infrastructure.adapters.tenant_model_adapter impor
     TenantModelAdapter,
 )
 from intric.completion_models.infrastructure.context_builder import ContextBuilder
+from intric.completion_models.infrastructure.tenant_model_capabilities import (
+    StructuredOutputCapabilityDecision,
+)
 from intric.files.file_models import File
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.main.config import SETTINGS, Settings, get_settings
@@ -162,6 +165,13 @@ class CompletionService:
         """Resolve the LiteLLM model name and provider kwargs for a model."""
         adapter = await self._get_adapter(model)
         return adapter.resolve_litellm_params()
+
+    async def resolve_structured_output_capability(
+        self,
+        model: CompletionModel,
+    ) -> StructuredOutputCapabilityDecision:
+        adapter = await self._get_adapter(model)
+        return adapter.resolve_structured_output_capability()
 
     @staticmethod
     def is_valid_arguments(arguments: str):

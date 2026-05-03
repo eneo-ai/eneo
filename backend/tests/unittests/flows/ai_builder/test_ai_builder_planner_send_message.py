@@ -19,6 +19,8 @@ pipeline internals (those are exhaustively covered in
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any, Callable
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -26,6 +28,11 @@ from uuid import uuid4
 
 import pytest
 
+from intric.completion_models.infrastructure.tenant_model_capabilities import (
+    StructuredOutputCapabilityDecision,
+    StructuredOutputDecisionSource,
+    StructuredOutputMode,
+)
 from intric.flows.ai_builder.ai_builder_action_policy import (
     PlannerActionPolicy,
     build_planner_action_policy,
@@ -53,6 +60,9 @@ from intric.flows.ai_builder.ai_builder_planner_turn import (
     TurnTelemetry,
 )
 from intric.flows.ai_builder.ai_builder_repair import CompletionMetadata
+from intric.flows.ai_builder.ai_builder_response_format import (
+    build_planner_request_response_format,
+)
 from intric.flows.ai_builder.ai_builder_server_actions import (
     build_server_planner_output,
 )
@@ -170,9 +180,35 @@ def _send_kwargs() -> dict[str, Any]:
     }
 
 
+def _structured_decision(
+    mode: StructuredOutputMode,
+) -> StructuredOutputCapabilityDecision:
+    if mode is StructuredOutputMode.JSON_OBJECT:
+        return StructuredOutputCapabilityDecision(
+            mode=mode,
+            source=StructuredOutputDecisionSource.LITELLM_RESPONSE_FORMAT,
+            supports_response_schema=False,
+            supports_response_format=True,
+        )
+    if mode is StructuredOutputMode.STRICT_JSON_SCHEMA:
+        return StructuredOutputCapabilityDecision(
+            mode=mode,
+            source=StructuredOutputDecisionSource.LITELLM_RESPONSE_SCHEMA,
+            supports_response_schema=True,
+            supports_response_format=True,
+        )
+    return StructuredOutputCapabilityDecision(
+        mode=mode,
+        source=StructuredOutputDecisionSource.NO_PROVIDER_SUPPORT,
+        supports_response_schema=False,
+        supports_response_format=False,
+    )
+
+
+@contextmanager
 def _patched_send(
     turn_result: PlannerTurnResult | Callable[..., Any],
-) -> Any:
+) -> Iterator[dict[str, AsyncMock]]:
     """Return a context manager patching `run_planner_turn` at the planner's import site.
 
     Each test hand-crafts the `PlannerTurnResult` it wants the planner
@@ -184,10 +220,11 @@ def _patched_send(
         if callable(turn_result) and not isinstance(turn_result, PlannerTurnResult)
         else AsyncMock(return_value=turn_result)
     )
-    return patch.multiple(
-        "intric.flows.ai_builder.ai_builder_planner",
-        run_planner_turn=run_mock,
-    )
+    with patch(
+        "intric.flows.ai_builder.ai_builder_planner.run_planner_turn",
+        new=run_mock,
+    ):
+        yield {"run_planner_turn": run_mock}
 
 
 @pytest.mark.asyncio
@@ -239,6 +276,166 @@ async def test_send_message_dispatched_ask_question_emits_text_plus_done() -> No
 
 
 @pytest.mark.asyncio
+async def test_send_message_downgrades_strict_capability_to_json_object_for_planner_output() -> (
+    None
+):
+    planner = _make_planner()
+    prepared = _make_prepared_request()
+    output = _planner_output(
+        AskQuestionAction(
+            kind="ask_question",
+            payload=AskQuestionPayload(
+                question_id="primary_runtime_input",
+                slot_name="primary_runtime_input",
+                prompt="Input?",
+            ),
+        )
+    )
+    turn_result = _dispatched_result(action_kind="ask_question", planner_output=output)
+    send_kwargs = _send_kwargs()
+    send_kwargs["structured_output_decision"] = _structured_decision(
+        StructuredOutputMode.STRICT_JSON_SCHEMA
+    )
+
+    with (
+        patch.object(
+            planner,
+            "_resolve_message_metadata",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    metadata=None,
+                    is_requirements_confirmation=False,
+                    used_auxiliary_llm=False,
+                )
+            ),
+        ),
+        patch.object(
+            planner,
+            "_prepare_planner_request",
+            new=AsyncMock(return_value=prepared),
+        ),
+        _patched_send(turn_result) as patched,
+    ):
+        await _collect_events(planner, **send_kwargs)
+
+    call_kwargs = patched["run_planner_turn"].await_args.kwargs
+    assert call_kwargs["litellm_kwargs"]["response_format"] == {"type": "json_object"}
+    assert call_kwargs["litellm_kwargs"]["drop_params"] is True
+
+
+@pytest.mark.asyncio
+async def test_send_message_omits_response_format_when_provider_has_no_support() -> (
+    None
+):
+    planner = _make_planner()
+    prepared = _make_prepared_request()
+    output = _planner_output(
+        AskQuestionAction(
+            kind="ask_question",
+            payload=AskQuestionPayload(
+                question_id="primary_runtime_input",
+                slot_name="primary_runtime_input",
+                prompt="Input?",
+            ),
+        )
+    )
+    turn_result = _dispatched_result(action_kind="ask_question", planner_output=output)
+    send_kwargs = _send_kwargs()
+    send_kwargs["structured_output_decision"] = _structured_decision(
+        StructuredOutputMode.PROMPT_WITH_PYDANTIC_VALIDATION
+    )
+
+    with (
+        patch.object(
+            planner,
+            "_resolve_message_metadata",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    metadata=None,
+                    is_requirements_confirmation=False,
+                    used_auxiliary_llm=False,
+                )
+            ),
+        ),
+        patch.object(
+            planner,
+            "_prepare_planner_request",
+            new=AsyncMock(return_value=prepared),
+        ),
+        _patched_send(turn_result) as patched,
+    ):
+        await _collect_events(planner, **send_kwargs)
+
+    call_kwargs = patched["run_planner_turn"].await_args.kwargs
+    assert "response_format" not in call_kwargs["litellm_kwargs"]
+    assert call_kwargs["litellm_kwargs"]["drop_params"] is True
+
+
+@pytest.mark.asyncio
+async def test_send_message_reuses_one_planner_response_format_selection_for_chain() -> (
+    None
+):
+    planner = _make_planner()
+    prepared = _make_prepared_request()
+    output = _planner_output(
+        CommitArchitectureAction(
+            kind="commit_architecture",
+            payload=CommitArchitecturePayload(note="All clear."),
+        )
+    )
+    turn_result = _dispatched_result(
+        action_kind="commit_architecture",
+        planner_output=output,
+        populated=True,
+    )
+    decision = _structured_decision(StructuredOutputMode.STRICT_JSON_SCHEMA)
+    response_format_selection = build_planner_request_response_format(decision)
+    send_kwargs = _send_kwargs()
+    send_kwargs["structured_output_decision"] = decision
+
+    with (
+        patch.object(
+            planner,
+            "_resolve_message_metadata",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    metadata=None,
+                    is_requirements_confirmation=False,
+                    used_auxiliary_llm=False,
+                )
+            ),
+        ),
+        patch.object(
+            planner,
+            "_prepare_planner_request",
+            new=AsyncMock(return_value=prepared),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_planner_request_response_format",
+            return_value=response_format_selection,
+        ) as build_selection,
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.run_planner_turn",
+            new=AsyncMock(return_value=turn_result),
+        ) as run_turn,
+        patch.object(
+            planner,
+            "_dispatch_chained_server_action_after_commit",
+            new=AsyncMock(return_value=None),
+        ) as chained_dispatch,
+    ):
+        await _collect_events(planner, **send_kwargs)
+
+    build_selection.assert_called_once_with(decision)
+    primary_kwargs = run_turn.await_args.kwargs["litellm_kwargs"]
+    assert primary_kwargs["response_format"] == {"type": "json_object"}
+    assert (
+        chained_dispatch.await_args.kwargs["response_format_selection"]
+        is response_format_selection
+    )
+
+
+@pytest.mark.asyncio
 async def test_send_message_dispatched_commit_architecture_emits_status_plus_done() -> (
     None
 ):
@@ -286,6 +483,55 @@ async def test_send_message_dispatched_commit_architecture_emits_status_plus_don
 
     assert [event["event"] for event in events] == ["status", "done"]
     assert json.loads(events[0]["data"])["status"] == "architecture_committed"
+
+
+@pytest.mark.asyncio
+async def test_chained_server_action_uses_planner_response_format_selection() -> None:
+    planner = _make_planner()
+    server_output = _planner_output(
+        ConfirmRequirementsAction(
+            kind="confirm_requirements",
+            payload=ConfirmRequirementsPayload(summary="Ready", key_decisions=[]),
+        )
+    )
+    turn_result = _dispatched_result(
+        action_kind="confirm_requirements",
+        planner_output=server_output,
+    )
+    response_format_selection = build_planner_request_response_format(
+        _structured_decision(StructuredOutputMode.STRICT_JSON_SCHEMA)
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_server_planner_output",
+            return_value=server_output,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.run_planner_turn",
+            new=AsyncMock(return_value=turn_result),
+        ) as run_turn,
+    ):
+        result = await planner._dispatch_chained_server_action_after_commit(
+            session_id=uuid4(),
+            conversation=[],
+            litellm_model="openai/gpt-4o-mini",
+            litellm_kwargs={"api_key": "sk-test"},
+            response_format_selection=response_format_selection,
+            flow=None,
+            base_planning_state_version=1,
+            requirements_confirmed=False,
+            ui_language="en",
+            request_id="request-id",
+            request_uuid=uuid4(),
+            lock_token=uuid4(),
+        )
+
+    assert result is turn_result
+    call_kwargs = run_turn.await_args.kwargs
+    assert call_kwargs["litellm_kwargs"]["api_key"] == "sk-test"
+    assert call_kwargs["litellm_kwargs"]["response_format"] == {"type": "json_object"}
+    assert call_kwargs["litellm_kwargs"]["drop_params"] is True
 
 
 @pytest.mark.asyncio

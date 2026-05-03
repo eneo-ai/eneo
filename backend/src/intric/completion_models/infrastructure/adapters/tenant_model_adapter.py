@@ -38,6 +38,11 @@ from intric.completion_models.infrastructure.adapters.base_adapter import (
 from intric.completion_models.infrastructure.provider_response_ids import (
     extract_provider_response_id,
 )
+from intric.completion_models.infrastructure.tenant_model_capabilities import (
+    StructuredOutputCapabilityDecision,
+    get_supported_openai_params,
+    resolve_structured_output_capability,
+)
 from intric.files.file_models import File
 from intric.logging.logging import LoggingDetails
 from intric.main.exceptions import APIKeyNotConfiguredException, OpenAIException
@@ -135,12 +140,6 @@ class _AccumulatedToolCall(TypedDict):
     function: _AccumulatedToolFunction
 
 
-def _get_supported_openai_params(model: str) -> list[str] | None:
-    return cast(
-        list[str] | None, getattr(litellm, "get_supported_openai_params")(model=model)
-    )
-
-
 def _acompletion_call(**kwargs: Any) -> Any:
     return cast(Callable[..., Any], getattr(litellm, "acompletion"))(**kwargs)
 
@@ -225,7 +224,10 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         try:
             # Get supported params for this model
-            supported = _get_supported_openai_params(self.litellm_model)
+            supported = get_supported_openai_params(
+                model=self.litellm_model,
+                custom_llm_provider=self.provider_type,
+            )
             if supported is None:
                 logger.debug(
                     f"Could not determine supported params for {self.litellm_model}"
@@ -462,6 +464,14 @@ class TenantModelAdapter(CompletionModelAdapter):
     def resolve_litellm_params(self) -> tuple[str, dict[str, object]]:
         return self.litellm_model, cast(dict[str, object], self._prepare_kwargs())
 
+    def resolve_structured_output_capability(
+        self,
+    ) -> StructuredOutputCapabilityDecision:
+        return resolve_structured_output_capability(
+            litellm_model=self.litellm_model,
+            provider_type=self.provider_type,
+        )
+
     def _prepare_kwargs(
         self,
         model_kwargs: ModelKwargs | dict[str, Any] | None = None,
@@ -519,7 +529,11 @@ class TenantModelAdapter(CompletionModelAdapter):
             # (per LiteLLM's supported_openai_params) and the value is meaningful
             if "reasoning_effort" in model_kwargs_dict:
                 supported_params = (
-                    _get_supported_openai_params(self.litellm_model) or []
+                    get_supported_openai_params(
+                        model=self.litellm_model,
+                        custom_llm_provider=self.provider_type,
+                    )
+                    or ()
                 )
                 if "reasoning_effort" not in supported_params or model_kwargs_dict[
                     "reasoning_effort"

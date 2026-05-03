@@ -1,7 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-
 from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
     TenantModelAdapter,
 )
@@ -41,7 +40,9 @@ class TestPrepareKwargsMaxTokens:
     def test_injects_default_max_tokens_for_non_anthropic_with_reasoning(self):
         """Non-Anthropic provider with reasoning_effort → still inject max_tokens."""
         adapter = _make_adapter("openai", token_limit=64000)
-        with patch("intric.completion_models.infrastructure.adapters.tenant_model_adapter.litellm") as mock_litellm:
+        with patch(
+            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+        ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "high"})
         assert result["max_tokens"] == 12000
@@ -49,7 +50,9 @@ class TestPrepareKwargsMaxTokens:
     def test_skips_max_tokens_for_anthropic_with_reasoning(self):
         """Anthropic + reasoning_effort → defer to LiteLLM (no max_tokens injected)."""
         adapter = _make_adapter("anthropic", token_limit=64000)
-        with patch("intric.completion_models.infrastructure.adapters.tenant_model_adapter.litellm") as mock_litellm:
+        with patch(
+            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+        ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "high"})
         assert "max_tokens" not in result
@@ -57,7 +60,9 @@ class TestPrepareKwargsMaxTokens:
     def test_skips_max_tokens_for_anthropic_with_reasoning_low(self):
         """Anthropic + reasoning_effort=low → also defer to LiteLLM."""
         adapter = _make_adapter("anthropic", token_limit=64000)
-        with patch("intric.completion_models.infrastructure.adapters.tenant_model_adapter.litellm") as mock_litellm:
+        with patch(
+            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+        ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "low"})
         assert "max_tokens" not in result
@@ -65,7 +70,9 @@ class TestPrepareKwargsMaxTokens:
     def test_preserves_explicit_max_tokens_for_anthropic_with_reasoning(self):
         """Anthropic + reasoning + explicit max_tokens → pass through unchanged."""
         adapter = _make_adapter("anthropic", token_limit=64000)
-        with patch("intric.completion_models.infrastructure.adapters.tenant_model_adapter.litellm") as mock_litellm:
+        with patch(
+            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+        ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(
                 model_kwargs={"reasoning_effort": "high", "max_tokens": 16000}
@@ -75,7 +82,9 @@ class TestPrepareKwargsMaxTokens:
     def test_preserves_explicit_max_completion_tokens(self):
         """Anthropic + reasoning + explicit max_completion_tokens → pass through."""
         adapter = _make_adapter("anthropic", token_limit=64000)
-        with patch("intric.completion_models.infrastructure.adapters.tenant_model_adapter.litellm") as mock_litellm:
+        with patch(
+            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+        ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(
                 model_kwargs={"reasoning_effort": "high", "max_completion_tokens": 8000}
@@ -86,7 +95,9 @@ class TestPrepareKwargsMaxTokens:
     def test_injects_max_tokens_when_anthropic_reasoning_unsupported(self):
         """Anthropic model that doesn't support reasoning → inject default max_tokens."""
         adapter = _make_adapter("anthropic", token_limit=64000)
-        with patch("intric.completion_models.infrastructure.adapters.tenant_model_adapter.litellm") as mock_litellm:
+        with patch(
+            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+        ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = []
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "high"})
         # reasoning_effort removed by guard → normal max_tokens injection
@@ -96,7 +107,9 @@ class TestPrepareKwargsMaxTokens:
     def test_injects_max_tokens_when_reasoning_effort_empty(self):
         """Anthropic + empty reasoning_effort → guard removes it, inject max_tokens."""
         adapter = _make_adapter("anthropic", token_limit=64000)
-        with patch("intric.completion_models.infrastructure.adapters.tenant_model_adapter.litellm") as mock_litellm:
+        with patch(
+            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+        ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": ""})
         assert result["max_tokens"] == 12000

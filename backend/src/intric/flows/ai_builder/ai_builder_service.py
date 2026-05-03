@@ -15,6 +15,9 @@ from uuid import UUID
 
 import litellm
 
+from intric.completion_models.infrastructure.tenant_model_capabilities import (
+    StructuredOutputCapabilityDecision,
+)
 from intric.files.file_models import File
 from intric.flows.ai_builder.ai_builder_attachment_context import (
     readable_attachment_text,
@@ -143,6 +146,7 @@ class PreparedMessageContext:
     planner_context: AIBuilderPlannerContext
     litellm_model: str
     litellm_kwargs: dict[str, object]
+    structured_output_decision: StructuredOutputCapabilityDecision
     flow: "Flow | None"
     assistant_snapshots: dict[UUID, dict[str, Any]] | None
     attachment_files: list[File]
@@ -372,6 +376,12 @@ class AIBuilderService:
             litellm_kwargs
         )
 
+    async def resolve_planner_structured_output_capability(
+        self,
+        model: Any,
+    ) -> StructuredOutputCapabilityDecision:
+        return await self.completion_service.resolve_structured_output_capability(model)
+
     async def prepare_message_context(
         self,
         *,
@@ -394,6 +404,11 @@ class AIBuilderService:
         resolve_planner_params = planner_params_resolver or self.resolve_planner_params
         litellm_model, litellm_kwargs = await resolve_planner_params(
             planner_context.model
+        )
+        structured_output_decision = (
+            await self.resolve_planner_structured_output_capability(
+                planner_context.model
+            )
         )
 
         flow = None
@@ -443,6 +458,7 @@ class AIBuilderService:
             planner_context=planner_context,
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
+            structured_output_decision=structured_output_decision,
             flow=flow,
             assistant_snapshots=assistant_snapshots,
             attachment_files=attachment_files,
@@ -467,6 +483,7 @@ class AIBuilderService:
         ui_language: str | None = None,
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
+        structured_output_decision: StructuredOutputCapabilityDecision | None = None,
         available_models: list[dict[str, Any]] | None = None,
         available_kbs: list[dict[str, Any]] | None = None,
         available_mcps: AIBuilderMCPResourceInput = None,
@@ -486,6 +503,7 @@ class AIBuilderService:
             ui_language=ui_language,
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
+            structured_output_decision=structured_output_decision,
             available_models=available_models,
             available_kbs=available_kbs,
             available_mcps=available_mcps,

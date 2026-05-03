@@ -516,6 +516,9 @@ async def send_message(
                     ui_language=body.ui_language,
                     litellm_model=prepared_context.litellm_model,
                     litellm_kwargs=prepared_context.litellm_kwargs,
+                    structured_output_decision=(
+                        prepared_context.structured_output_decision
+                    ),
                     available_models=prepared_context.planner_context.available_models,
                     available_kbs=prepared_context.planner_context.available_kbs,
                     available_mcps=prepared_context.planner_context.available_mcps,

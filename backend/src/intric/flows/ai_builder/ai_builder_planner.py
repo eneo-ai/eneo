@@ -7,6 +7,10 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, AsyncGenerator, cast
 from uuid import UUID, uuid4
 
+from intric.completion_models.infrastructure.tenant_model_capabilities import (
+    StructuredOutputCapabilityDecision,
+    unsupported_structured_output_decision,
+)
 from intric.files.file_models import File
 from intric.flows.ai_builder.ai_builder_action_policy import (
     PlannerActionPolicy,
@@ -102,6 +106,10 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
+)
+from intric.flows.ai_builder.ai_builder_response_format import (
+    PlannerResponseFormatSelection,
+    build_planner_request_response_format,
 )
 from intric.flows.ai_builder.ai_builder_semantic_adjudication import (
     adjudicate_pending_question_answer,
@@ -250,6 +258,49 @@ class PlannerPreparedRequest:
     # model's revision against the same stable target.
     plan_edit_context: AIBuilderPlanEditContext | None = None
     prior_plan_for_revision: BuilderPlan | None = None
+
+
+def _default_structured_output_decision() -> StructuredOutputCapabilityDecision:
+    return unsupported_structured_output_decision()
+
+
+def _build_planner_litellm_kwargs(
+    *,
+    litellm_kwargs: dict[str, Any],
+    max_tokens: int,
+    temperature: float,
+    response_format_selection: PlannerResponseFormatSelection,
+) -> dict[str, Any]:
+    return {
+        **litellm_kwargs,
+        **response_format_selection.litellm_kwargs,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "drop_params": True,
+    }
+
+
+def _structured_output_log_fields(
+    response_format_selection: PlannerResponseFormatSelection,
+) -> dict[str, Any]:
+    capability = response_format_selection.capability_decision
+    return {
+        "structured_output_capability_path": capability.mode.value,
+        "structured_output_request_mode": response_format_selection.request_mode.value,
+        "structured_output_decision_source": capability.source.value,
+        "structured_output_response_schema_supported": (
+            capability.supports_response_schema
+        ),
+        "structured_output_response_format_supported": (
+            capability.supports_response_format
+        ),
+        "planner_output_strict_blocked": (
+            response_format_selection.planner_output_strict_blocked
+        ),
+        "planner_output_strict_blocker_count": len(
+            response_format_selection.planner_output_strict_blockers
+        ),
+    }
 
 
 class AIBuilderPlanner:
@@ -786,6 +837,7 @@ class AIBuilderPlanner:
         conversation: list[ConversationMessage],
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
+        response_format_selection: PlannerResponseFormatSelection,
         flow: "Flow | None",
         base_planning_state_version: int,
         requirements_confirmed: bool,
@@ -884,13 +936,12 @@ class AIBuilderPlanner:
             repo=self.repo,
             litellm_client=self.litellm_client,
             litellm_model=litellm_model,
-            litellm_kwargs={
-                **litellm_kwargs,
-                "max_tokens": 1,
-                "temperature": self.planner_temperature,
-                "response_format": {"type": "json_object"},
-                "drop_params": True,
-            },
+            litellm_kwargs=_build_planner_litellm_kwargs(
+                litellm_kwargs=litellm_kwargs,
+                max_tokens=1,
+                temperature=self.planner_temperature,
+                response_format_selection=response_format_selection,
+            ),
             session_id=session_id,
             tenant_id=self.user.tenant_id,
             flow=flow,
@@ -959,6 +1010,7 @@ class AIBuilderPlanner:
         ui_language: str | None = None,
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
+        structured_output_decision: StructuredOutputCapabilityDecision | None = None,
         available_models: list[dict[str, Any]] | None = None,
         available_kbs: list[dict[str, Any]] | None = None,
         available_mcps: AIBuilderMCPResourceInput = None,
@@ -987,6 +1039,10 @@ class AIBuilderPlanner:
                 "AI Builder planner budget settings are missing.",
                 code="planner_budget_missing",
             )
+
+        response_format_selection = build_planner_request_response_format(
+            structured_output_decision or _default_structured_output_decision()
+        )
 
         session = await self.repo.get_session(
             session_id=session_id,
@@ -1304,23 +1360,16 @@ class AIBuilderPlanner:
                     repo=self.repo,
                     litellm_client=self.litellm_client,
                     litellm_model=litellm_model,
-                    litellm_kwargs={
-                        **litellm_kwargs,
-                        "max_tokens": max_output_tokens,
-                        "temperature": (
+                    litellm_kwargs=_build_planner_litellm_kwargs(
+                        litellm_kwargs=litellm_kwargs,
+                        max_tokens=max_output_tokens,
+                        temperature=(
                             self.discovery_temperature
                             if not requirements_state.confirmed
                             else self.planner_temperature
                         ),
-                        "response_format": {"type": "json_object"},
-                        # `drop_params=True` lets litellm silently strip
-                        # `response_format` for providers that don't support
-                        # JSON mode, turning an unsupported-param provider
-                        # error into a plain completion the pipeline still
-                        # parses. Without this the v1 fallback path was
-                        # lost.
-                        "drop_params": True,
-                    },
+                        response_format_selection=response_format_selection,
+                    ),
                     session_id=session_id,
                     tenant_id=self.user.tenant_id,
                     flow=flow,
@@ -1412,9 +1461,7 @@ class AIBuilderPlanner:
                     "planner_contract_version": PLANNER_CONTRACT_VERSION,
                     "builder_schema_version": BUILDER_SCHEMA_VERSION,
                     "planning_state_version": session.planning_state_version,
-                    "response_format_requested": "json_object",
-                    "drop_params": True,
-                    "json_mode_requested": True,
+                    **_structured_output_log_fields(response_format_selection),
                     **parse_failure_diagnostics,
                 },
             )
@@ -1480,6 +1527,7 @@ class AIBuilderPlanner:
                             conversation=conversation,
                             litellm_model=litellm_model,
                             litellm_kwargs=litellm_kwargs,
+                            response_format_selection=response_format_selection,
                             flow=flow,
                             base_planning_state_version=(
                                 turn_result.dispatch_result.new_planning_state_version

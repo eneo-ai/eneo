@@ -776,6 +776,91 @@ Success gate:
 - tenants without structured output support do not regress
 - architecture-class success does not depend on structured outputs
 
+#### 11.5a — Planner Provider Capability Rail
+
+Scope:
+
+- Add the provider capability decision owner before expanding structured-output
+  hints into proposal tools. This slice wires the planner JSON turn and chained
+  server-action planner turn only.
+- Use `TenantModelAdapter` and `CompletionService` as the capability path, with
+  `AIBuilderService.prepare_message_context` resolving the decision once before
+  SSE streaming starts.
+- Use LiteLLM metadata as evidence:
+  `supports_response_schema(...)` for `strict_json_schema`, and
+  `get_supported_openai_params(..., custom_llm_provider=...)` for
+  `json_object`.
+- Keep `drop_params=True` on planner calls so provider-specific unsupported
+  params are stripped by LiteLLM instead of turning into tenant-visible planner
+  failures.
+- Do not add explicit model overrides in this slice. Tenant/model metadata is
+  the canonical capability source until a concrete configuration requirement is
+  designed.
+- Do not send `response_format` to proposal tool-call prompts in this slice.
+  Tool calls remain orthogonal to planner JSON structured-output mode.
+
+Planner strict-schema finding:
+
+- `PlannerOutput.model_json_schema()` is not currently strict-output ready.
+  Local inspection found nested union/default/optional-object blockers. For a
+  strict-schema-capable provider, 11.5a therefore downgrades the planner request
+  to `json_object` and logs `planner_output_strict_blocked=true`.
+- 11.5b may make `PlannerOutput` strict-ready by changing the actual typed
+  contract. Do not hide this by adding a parallel schema or a compatibility
+  wrapper.
+
+Telemetry:
+
+- New keys:
+  - `structured_output_capability_path`
+  - `structured_output_request_mode`
+  - `structured_output_decision_source`
+  - `structured_output_response_schema_supported`
+  - `structured_output_response_format_supported`
+  - `planner_output_strict_blocked`
+  - `planner_output_strict_blocker_count`
+- The old planner-turn JSON-mode telemetry keys are not preserved in 11.5a.
+  Flow AI Builder is unreleased, and the structured-output fields are the new
+  canonical log contract for this slice.
+
+Acceptance:
+
+- Capability resolution is typed, immutable, and has consistency checks.
+- The planner computes one structured-output decision per prepared message
+  context and passes it to both the main planner turn and chained server-action
+  planner turn.
+- Providers with strict schema support use `json_object` for current
+  `PlannerOutput` until the schema blockers are removed.
+- Providers with only `response_format` support use `json_object`.
+- Providers without structured-output support omit `response_format` and keep
+  Pydantic validation as the contract boundary.
+- Proposal tool-call prompts do not receive planner `response_format` kwargs.
+
+Validation:
+
+```bash
+cd backend && uv run pytest tests/unit/test_tenant_model_capabilities.py tests/unit/test_tenant_model_adapter_prepare_kwargs.py tests/unittests/flows/ai_builder/test_ai_builder_response_format.py tests/unittests/flows/ai_builder/test_ai_builder_service.py::TestPlannerContextPreparation tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_router.py -q
+cd backend && uv run pytest tests/unittests/flows/ai_builder -q
+cd backend && uv run pytest tests/integration/flows/ai_builder -q
+cd backend && uv run pyright <11.5a touched source and test files>
+cd backend && uv run ruff check <11.5a touched source and test files>
+cd backend && uv run ruff format --check <11.5a touched source and test files>
+cd backend && uv run lint-imports --no-cache
+git diff --check -- <11.5a touched paths>
+```
+
+11.5b follow-up:
+
+- Make the planner contract strict-schema compatible or explicitly document why
+  a strict schema is not a maintainable fit.
+- Extend the same typed rail to `outline_flow`, `edit_flow`, and parse repair
+  only where the output contract is a typed JSON object.
+- Verify real tenant Anthropic Haiku behavior in a provider smoke run, because
+  LiteLLM metadata can differ across model aliases and custom providers.
+- Keep structured-output telemetry compact; add new fields only when a
+  dashboard, alert, or support workflow has a named question the existing keys
+  cannot answer.
+
 ## Behavior And Quality Gates
 
 | Gate | Required result |

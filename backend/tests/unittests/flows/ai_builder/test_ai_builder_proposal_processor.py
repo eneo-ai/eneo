@@ -877,6 +877,9 @@ async def test_propose_plan_continues_after_user_declines_mcp_usage() -> None:
 
     assert events == [{"event": "plan", "data": "{}"}]
     processor.litellm_client.acompletion.assert_awaited_once()
+    assert "response_format" not in (
+        processor.litellm_client.acompletion.await_args.kwargs
+    )
     assert handle_tool_call.call_args.kwargs["tool_calls"] == [outline_call]
 
 
