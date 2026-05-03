@@ -2,7 +2,7 @@
 
 ## Status
 
-11.0b IMPLEMENTATION
+11.1a IMPLEMENTATION COMPLETE
 
 ## Starting Point
 
@@ -548,3 +548,81 @@ Completed after final manual-eval polish:
 
 - `git diff --check -- docs/refactor/prd/PRD-011-flow-ai-builder-reliability.md docs/refactor/execution/batch-11-flow-ai-builder-reliability docs/refactor/implementation-order.md` passed.
 - Anti-stale-doc grep passed with only historical journal entries documenting resolved Claude findings.
+
+## 11.1a StepSkeleton Materialization
+
+### Scope
+
+Implemented the typed skeleton/materialization owner without changing create
+proposal behavior or wiring `compile_outline_to_create_draft` to consume the
+skeleton yet.
+
+### Source Changes
+
+| Area | Evidence | Decision |
+|---|---|---|
+| Skeleton contract | `backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py:116`, `backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py:187` | Added `StepSkeleton` and `StepSkeletonPlan` as typed dataclasses. The plan owns backend prefix/suffix slots plus a repeatable semantic slot template. |
+| Materialization function | `backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py:333` | Added `materialize_step_skeleton` as the deterministic owner for architecture-derived skeleton plans. |
+| Variable semantic count | `backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py:212` | `slots_for_semantic_count` expands the semantic template for outline step counts instead of hardcoding comparison or linear step counts. |
+| Pattern-chain templates | `backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py:411` | Moved backend-added step template/default structured fields into the skeleton owner and reused them from the existing chain realizer. |
+| Current compiler behavior | `backend/src/intric/flows/ai_builder/ai_builder_create_outline.py:1551`, `backend/src/intric/flows/ai_builder/ai_builder_create_outline.py:1696` | Left the existing compiler mechanics helpers in place for 11.1b integration/deletion instead of mixing behavior changes into 11.1a. |
+| Step chain owner split | `backend/src/intric/flows/ai_builder/ai_builder_outline_pattern_chains.py:1` | Kept pattern-chain realization narrow; it now consumes skeleton-owned defaults rather than owning skeleton materialization. |
+| Chain-step token type | `backend/src/intric/flows/ai_builder/pattern_registry.py:49` | Added `ChainStepToken` alias so skeleton fields do not use an anonymous `str` for registry chain tokens. |
+
+### Test Changes
+
+| Coverage | Evidence |
+|---|---|
+| Closed policy tuples | `backend/tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py:78` |
+| Audio, template-fill, structured-quality, text-to-JSON skeletons | `backend/tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py:88`, `:107`, `:134`, `:159`, `:185` |
+| Multi-step linear expansion | `backend/tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py:204` |
+| Comparison fan-in expansion for 2, 3, and 4 semantic steps | `backend/tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py:227`, `:359` |
+| Compiler mechanics equivalence for audio, linear, DOCX template, and comparison paths | `backend/tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py:254`, `:292`, `:324`, `:359` |
+
+### Claude Peer Review
+
+| Iteration | Artifact | Verdict | Green light | Minimum score | Outcome |
+|---:|---|---|---|---:|---|
+| 1 | `.codex/artifacts/claude-peer-loop-batch-11-1a-step-skeleton-plan-20260503T005555Z.md` | `changes_required` | `no` | 6 | Rejected early fixed-shape/owner plan. |
+| 2 | `.codex/artifacts/claude-peer-loop-batch-11-1a-step-skeleton-revised-plan-20260503T010206Z.md` | `green` | `yes` | 8 | Approved typed schema and owner direction with implementation follow-ups. |
+| 3 | `.codex/artifacts/claude-peer-loop-batch-11-1a-step-skeleton-implementation-20260503T012233Z.md` | `changes_required` | `no` | 6 | Found fixed comparison/linear skeleton shapes and tautological tests. |
+| 4 | `.codex/artifacts/claude-peer-loop-batch-11-1a-step-skeleton-verification-20260503T013423Z.md` | `green` | `yes` | 8 | Accepted variable-count `StepSkeletonPlan` shape. |
+| 5 | `.codex/artifacts/claude-peer-loop-batch-11-1a-step-skeleton-final-verification-20260503T013954Z.md` | `green` | `yes` | 4/5 | Accepted final polish and wider equivalence tests. |
+
+### Accepted Claude Findings
+
+| Finding | Resolution |
+|---|---|
+| Fixed comparison skeleton invented a 3-step shape. | Replaced fixed comparison slots with a repeatable semantic slot and `fan_in_policy="last_semantic"`. |
+| Linear skeleton was one-slot only. | `StepSkeletonPlan.slots_for_semantic_count` expands linear mechanics for arbitrary semantic step counts. |
+| Equivalence tests were tautological. | Added variable-count comparison coverage and parametrized audio/linear equivalence tests. |
+| Terminal-step defaults leaked into non-terminal semantic slots. | Added slot-id-specific semantic default names/instructions for audio, structured, template, comparison, and linear semantic templates. |
+| Pattern-chain owner would become too large if skeleton stayed there. | Split the skeleton owner into `ai_builder_step_skeleton.py` and kept `ai_builder_outline_pattern_chains.py` focused on chain realization. |
+| Returned chain-step context was unused. | Simplified the skeleton context helper to return only augmented pattern ids. |
+
+### Validation
+
+| Command | Result |
+|---|---|
+| `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_pattern_registry.py -q` | Passed: `132 passed`. |
+| `cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_step_skeleton.py src/intric/flows/ai_builder/ai_builder_outline_pattern_chains.py src/intric/flows/ai_builder/ai_builder_create_outline.py src/intric/flows/ai_builder/pattern_registry.py tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_pattern_registry.py` | Passed: `0 errors, 0 warnings, 0 informations`. |
+| `cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_step_skeleton.py src/intric/flows/ai_builder/ai_builder_outline_pattern_chains.py src/intric/flows/ai_builder/ai_builder_create_outline.py src/intric/flows/ai_builder/pattern_registry.py tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_pattern_registry.py` | Passed. |
+| `cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_step_skeleton.py src/intric/flows/ai_builder/ai_builder_outline_pattern_chains.py src/intric/flows/ai_builder/ai_builder_create_outline.py src/intric/flows/ai_builder/pattern_registry.py tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_pattern_registry.py` | Passed: `7 files already formatted`. |
+| `cd backend && uv run lint-imports --no-cache` | Passed: 3 contracts kept, 0 broken. |
+| `git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py backend/src/intric/flows/ai_builder/ai_builder_outline_pattern_chains.py backend/src/intric/flows/ai_builder/ai_builder_create_outline.py backend/src/intric/flows/ai_builder/pattern_registry.py backend/tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py` | Passed. |
+| `./scripts/gate-local/anti_slippage.sh --worktree` | Passed: `anti-slippage: worktree clean`. |
+
+Broader `cd backend && uv run pytest tests/unittests/flows/ai_builder -q`
+was run during the slice and failed on pre-existing surfaces outside this
+change: one server-action assertion, missing local WeasyPrint native
+libraries (`libgobject-2.0-0`), and import-linter source-module drift. Focused
+tests for the touched owner and existing compiler/pattern behavior pass.
+
+### Carry-Forward To 11.1b
+
+| Item | Reason |
+|---|---|
+| Make `compile_outline_to_create_draft` consume `materialize_step_skeleton`. | 11.1a intentionally introduces the typed owner without changing proposal behavior. |
+| Delete or move `_derive_step_output_type`, `_derive_step_input_source`, `_derive_step_input_type`, `_requires_server_owned_fan_in`, `_ensure_required_server_owned_fan_in`, `_document_delivery_mode_for_step`, and `_ensure_final_artifact_step`. | These helpers still own mechanics in the old compiler path and should collapse into the skeleton owner in 11.1b. |
+| Delete equivalence tests once compiler consumes the skeleton directly. | They are transition guards between independent old/new derivations; after integration they become same-source assertions. |
+| Watch `ai_builder_step_skeleton.py` size during integration. | The file is responsibility-coherent but large; if 11.1b moves more helper logic into it, split defaults/helpers by ownership tier rather than letting the module grow unbounded. |

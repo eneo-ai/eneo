@@ -57,6 +57,10 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     RuntimeInputFieldHint,
 )
+from intric.flows.ai_builder.ai_builder_step_skeleton import (
+    default_final_step_instructions,
+    default_final_step_name,
+)
 from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from intric.flows.ai_builder.planning_state import (
     AggregationIntent,
@@ -385,11 +389,11 @@ def safe_validation_issues(error: ValidationError) -> tuple[str, ...]:
 
 
 def _normalize_outline_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Strip legacy low-level mechanics from outline-flow tool arguments.
+    """Strip backend-owned mechanics from outline-flow tool arguments.
 
-    Outline mode is semantic. Weak or stale models may still emit fields from
-    the old create-flow contract, but those fields must never become the source
-    of truth for Flow wiring.
+    Outline mode is semantic. Some model outputs may still include fields
+    outside that contract, but those fields must never become the source of
+    truth for Flow wiring.
     """
 
     normalized = {
@@ -1713,11 +1717,11 @@ def _ensure_final_artifact_step(
     return [
         *steps,
         NewStepDraft(
-            name=_default_final_step_name(
+            name=default_final_step_name(
                 final_output_type,
                 ui_language=context.ui_language if context is not None else None,
             ),
-            instructions=_default_final_step_instructions(
+            instructions=default_final_step_instructions(
                 ui_language=context.ui_language if context is not None else None,
             ),
             input_source=InputSource.PREVIOUS_STEP,
@@ -1734,41 +1738,6 @@ def _ensure_final_artifact_step(
             ),
         ),
     ]
-
-
-def _default_final_step_name(
-    output_type: OutputType,
-    *,
-    ui_language: str | None,
-) -> str:
-    if ui_language == "sv":
-        if output_type == OutputType.DOCX:
-            return "Skapa DOCX"
-        if output_type == OutputType.PDF:
-            return "Skapa PDF"
-        if output_type == OutputType.JSON:
-            return "Skapa strukturerad JSON"
-        return "Skapa slutresultat"
-
-    if output_type == OutputType.DOCX:
-        return "Create DOCX"
-    if output_type == OutputType.PDF:
-        return "Create PDF"
-    if output_type == OutputType.JSON:
-        return "Create structured JSON"
-    return "Create final answer"
-
-
-def _default_final_step_instructions(*, ui_language: str | None) -> str:
-    if ui_language == "sv":
-        return (
-            "Skapa slutresultatet från föregående strukturerade arbete. "
-            "Bevara användarens önskade omfattning, ordning och begränsningar."
-        )
-    return (
-        "Create the final output from the previous structured work. "
-        "Preserve the user's requested scope, ordering, and constraints."
-    )
 
 
 def _attach_unreferenced_form_fields_to_final_step(

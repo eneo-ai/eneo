@@ -7,6 +7,10 @@ from typing import Any, Protocol, TypeVar, cast
 
 from intric.flows.ai_builder.ai_builder_models import InputType, OutputType
 from intric.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
+from intric.flows.ai_builder.ai_builder_step_skeleton import (
+    compiled_chain_step_template,
+    default_structured_output_fields,
+)
 from intric.flows.ai_builder.pattern_registry import (
     ANALYSIS_OR_QUALITY_REVIEW_STEP,
     EXTRACT_TEMPLATE_VARIABLES_STEP,
@@ -22,62 +26,6 @@ StepFactory = Callable[
     [str, str, str | None, list[StructuredFieldDraft] | None],
     StepT,
 ]
-
-
-@dataclass(frozen=True, slots=True)
-class CompiledChainStepTemplate:
-    """Compiler-owned default step text for backend-added chain steps."""
-
-    name: str
-    task: str
-
-
-_COMPILED_CHAIN_STEP_TEMPLATES = MappingProxyType(
-    {
-        FLOW_INPUT_AUDIO_TRANSCRIPTION: CompiledChainStepTemplate(
-            name="Transcribe audio",
-            task=(
-                "Transcribe the uploaded audio into text before downstream "
-                "analysis or artifact generation."
-            ),
-        ),
-        EXTRACT_TEMPLATE_VARIABLES_STEP: CompiledChainStepTemplate(
-            name="Extract template variables",
-            task=(
-                "Extract the stable fields and source facts needed before "
-                "filling the DOCX template."
-            ),
-        ),
-        STRUCTURED_EXTRACTION_STEP: CompiledChainStepTemplate(
-            name="Extract structured foundation",
-            task=(
-                "Extract source facts, key points, and uncertainties needed "
-                "for the downstream analysis."
-            ),
-        ),
-        ANALYSIS_OR_QUALITY_REVIEW_STEP: CompiledChainStepTemplate(
-            name="Review quality and gaps",
-            task=(
-                "Review the analysis for missing information, uncertainty, "
-                "and quality issues before the final output is created."
-            ),
-        ),
-        TEMPLATE_FILL_DOCX_STEP: CompiledChainStepTemplate(
-            name="Fill DOCX template",
-            task=(
-                "Fill the DOCX template from the prepared content. Preserve "
-                "the user's requested scope and terminology."
-            ),
-        ),
-        TERMINAL_ARTIFACT_STEP: CompiledChainStepTemplate(
-            name="Create final output",
-            task=(
-                "Create the final output from the reviewed analysis. Preserve "
-                "the user's requested scope, ordering, and constraints."
-            ),
-        ),
-    }
-)
 
 
 class OutlineStepLike(Protocol):
@@ -215,7 +163,7 @@ def _build_docx_template_chain(
         _make_compiled_chain_step(
             request,
             token=EXTRACT_TEMPLATE_VARIABLES_STEP,
-            output_fields=_default_structured_output_fields(),
+            output_fields=default_structured_output_fields(),
         ),
         *[_as_text_step(step) for step in semantic_steps],
         _make_compiled_chain_step(
@@ -242,7 +190,7 @@ def _build_structured_quality_chain(
         _make_compiled_chain_step(
             request,
             token=STRUCTURED_EXTRACTION_STEP,
-            output_fields=_default_structured_output_fields(),
+            output_fields=default_structured_output_fields(),
         ),
         *[_as_text_step(step) for step in semantic_steps],
         _make_compiled_chain_step(
@@ -354,7 +302,7 @@ def _make_compiled_chain_step(
     output_type: str | None = None,
     output_fields: list[StructuredFieldDraft] | None = None,
 ) -> OutlineStepLike:
-    template = _COMPILED_CHAIN_STEP_TEMPLATES[token]
+    template = compiled_chain_step_template(token)
     return _make_step(
         request,
         name=template.name,
@@ -362,42 +310,6 @@ def _make_compiled_chain_step(
         output_type=output_type,
         output_fields=output_fields,
     )
-
-
-def _default_structured_output_fields() -> list[StructuredFieldDraft]:
-    return [
-        StructuredFieldDraft(
-            name="source_facts",
-            field_type="array",
-            description="Important source facts extracted from the input material.",
-            item_fields=[
-                StructuredFieldDraft(
-                    name="fact",
-                    field_type="string",
-                    description="A concise source fact.",
-                ),
-                StructuredFieldDraft(
-                    name="source_note",
-                    field_type="string",
-                    description="Where the fact came from or why it matters.",
-                    required=False,
-                ),
-            ],
-        ),
-        StructuredFieldDraft(
-            name="uncertainties",
-            field_type="array",
-            description="Missing, ambiguous, or uncertain information.",
-            item_fields=[
-                StructuredFieldDraft(
-                    name="issue",
-                    field_type="string",
-                    description="A missing or uncertain point.",
-                )
-            ],
-            required=False,
-        ),
-    ]
 
 
 _CHAIN_REALIZER_BY_PATTERN_ID = MappingProxyType(

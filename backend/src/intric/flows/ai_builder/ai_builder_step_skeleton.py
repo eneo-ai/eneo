@@ -1,0 +1,1104 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+from types import MappingProxyType
+from typing import Literal
+
+from intric.flows.ai_builder.ai_builder_models import (
+    InputSource,
+    InputType,
+    OutputMode,
+    OutputType,
+)
+from intric.flows.ai_builder.ai_builder_new_step_models import (
+    DocumentDeliveryMode,
+    StructuredFieldDraft,
+)
+from intric.flows.ai_builder.pattern_registry import (
+    ANALYSIS_OR_QUALITY_REVIEW_STEP,
+    EXTRACT_TEMPLATE_VARIABLES_STEP,
+    FLOW_INPUT_AUDIO_TRANSCRIPTION,
+    PATTERN_REGISTRY,
+    STRUCTURED_EXTRACTION_STEP,
+    TEMPLATE_FILL_DOCX_STEP,
+    TERMINAL_ARTIFACT_STEP,
+    ChainStepToken,
+    compiled_chain_pattern_ids,
+)
+from intric.flows.ai_builder.planning_state import AggregationIntent
+
+StepSkeletonRole = Literal[
+    "backend_fixed",
+    "semantic_required",
+    "semantic_optional",
+]
+MechanicsPolicy = Literal["locked", "fill_missing", "reject_if_conflicting"]
+SemanticPolicy = Literal[
+    "backend_default",
+    "required_from_outline",
+    "optional_from_outline",
+]
+SemanticOutputPolicy = Literal["final_output_on_last_semantic", "text_for_all_semantic"]
+SemanticFanInPolicy = Literal["none", "last_semantic"]
+
+_DOCX_TEMPLATE_PATTERN_ID = "document_to_docx_template"
+_STRUCTURED_QUALITY_PATTERN_ID = "multi_step_quality_chain"
+_AUDIO_ARTIFACT_PATTERN_ID = "audio_to_artifact_report"
+_COMPARISON_PATTERN_ID = "comparison"
+_FILE_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
+_DOCUMENT_OUTPUT_TYPES = {OutputType.DOCX, OutputType.PDF}
+_LEGAL_STEP_SKELETON_POLICIES = frozenset(
+    {
+        ("backend_fixed", "locked", "backend_default"),
+        ("semantic_required", "fill_missing", "required_from_outline"),
+        ("semantic_optional", "reject_if_conflicting", "optional_from_outline"),
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledChainStepTemplate:
+    """Default step text for backend-added skeleton and chain steps."""
+
+    name: str
+    task: str
+
+
+_COMPILED_CHAIN_STEP_TEMPLATES = MappingProxyType(
+    {
+        FLOW_INPUT_AUDIO_TRANSCRIPTION: CompiledChainStepTemplate(
+            name="Transcribe audio",
+            task=(
+                "Transcribe the uploaded audio into text before downstream "
+                "analysis or artifact generation."
+            ),
+        ),
+        EXTRACT_TEMPLATE_VARIABLES_STEP: CompiledChainStepTemplate(
+            name="Extract template variables",
+            task=(
+                "Extract the stable fields and source facts needed before "
+                "filling the DOCX template."
+            ),
+        ),
+        STRUCTURED_EXTRACTION_STEP: CompiledChainStepTemplate(
+            name="Extract structured foundation",
+            task=(
+                "Extract source facts, key points, and uncertainties needed "
+                "for the downstream analysis."
+            ),
+        ),
+        ANALYSIS_OR_QUALITY_REVIEW_STEP: CompiledChainStepTemplate(
+            name="Review quality and gaps",
+            task=(
+                "Review the analysis for missing information, uncertainty, "
+                "and quality issues before the final output is created."
+            ),
+        ),
+        TEMPLATE_FILL_DOCX_STEP: CompiledChainStepTemplate(
+            name="Fill DOCX template",
+            task=(
+                "Fill the DOCX template from the prepared content. Preserve "
+                "the user's requested scope and terminology."
+            ),
+        ),
+        TERMINAL_ARTIFACT_STEP: CompiledChainStepTemplate(
+            name="Create final output",
+            task=(
+                "Create the final output from the reviewed analysis. Preserve "
+                "the user's requested scope, ordering, and constraints."
+            ),
+        ),
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class StepSkeleton:
+    """Backend mechanics contract that leaves semantic content to the outline.
+
+    Mechanics and semantic policies stay separate because create mode fills
+    empty slots, while edit mode must preserve valid user-authored mechanics
+    and reject conflicting mechanics instead of overwriting them silently.
+    Expanded semantic slots share a template `slot_id`; use `slot_ordinal`
+    when matching a concrete outline step to a concrete skeleton slot.
+    """
+
+    slot_ordinal: int
+    slot_id: str
+    role: StepSkeletonRole
+    mechanics_policy: MechanicsPolicy
+    semantic_policy: SemanticPolicy
+    chain_token: ChainStepToken | None
+    default_name: str
+    default_instructions: str
+    input_source: InputSource
+    input_type: InputType
+    output_type: OutputType
+    output_mode: OutputMode
+    document_delivery_mode: DocumentDeliveryMode
+    runtime_upload: bool
+    runtime_required: bool
+    runtime_max_files: int | None
+    output_fields: tuple[StructuredFieldDraft, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.slot_ordinal < 0:
+            raise ValueError("StepSkeleton.slot_ordinal must be non-negative")
+        if not self.slot_id.strip():
+            raise ValueError("StepSkeleton.slot_id must be non-empty")
+        if not self.default_name.strip():
+            raise ValueError("StepSkeleton.default_name must be non-empty")
+        if not self.default_instructions.strip():
+            raise ValueError("StepSkeleton.default_instructions must be non-empty")
+        policy = (self.role, self.mechanics_policy, self.semantic_policy)
+        if policy not in _LEGAL_STEP_SKELETON_POLICIES:
+            raise ValueError(
+                "Illegal StepSkeleton policy tuple: "
+                f"{self.role}/{self.mechanics_policy}/{self.semantic_policy}"
+            )
+        if self.role == "backend_fixed" and self.chain_token is None:
+            raise ValueError("Backend-fixed skeleton slots require a chain token")
+        if self.role != "backend_fixed" and self.chain_token is not None:
+            raise ValueError("Only backend-fixed skeleton slots may carry chain tokens")
+        if self.slot_ordinal > 0 and (
+            self.runtime_upload
+            or self.runtime_required
+            or self.runtime_max_files is not None
+        ):
+            raise ValueError(
+                "Only the first skeleton slot may own runtime upload fields"
+            )
+        if self.runtime_required and not self.runtime_upload:
+            raise ValueError("runtime_required requires runtime_upload")
+        if self.runtime_max_files is not None and not self.runtime_upload:
+            raise ValueError("runtime_max_files requires runtime_upload")
+        if self.runtime_upload and self.input_type not in _FILE_INPUT_TYPES:
+            raise ValueError("runtime_upload requires a file-capable input type")
+        if (
+            self.document_delivery_mode == "template_fill"
+            and self.output_type != OutputType.DOCX
+        ):
+            raise ValueError("template_fill document delivery requires DOCX output")
+        if self.output_fields and self.output_type != OutputType.JSON:
+            raise ValueError("output_fields require JSON output")
+
+
+@dataclass(frozen=True, slots=True)
+class StepSkeletonPlan:
+    prefix_slots: tuple[StepSkeleton, ...]
+    semantic_slot: StepSkeleton
+    suffix_slots: tuple[StepSkeleton, ...]
+    final_output_type: OutputType
+    final_output_mode: OutputMode | None
+    semantic_output_policy: SemanticOutputPolicy
+    fan_in_policy: SemanticFanInPolicy = "none"
+    minimum_semantic_slots: int = 1
+    runtime_required: bool = True
+    runtime_max_files: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.minimum_semantic_slots < 1:
+            raise ValueError("StepSkeletonPlan requires at least one semantic slot")
+        for slot in (*self.prefix_slots, *self.suffix_slots):
+            if slot.role != "backend_fixed":
+                raise ValueError("Prefix and suffix skeleton slots must be fixed")
+        if self.semantic_slot.role != "semantic_required":
+            raise ValueError("StepSkeletonPlan.semantic_slot must be semantic_required")
+
+    @property
+    def minimum_slots(self) -> tuple[StepSkeleton, ...]:
+        return self.slots_for_semantic_count(self.minimum_semantic_slots)
+
+    def slots_for_semantic_count(
+        self,
+        semantic_count: int,
+    ) -> tuple[StepSkeleton, ...]:
+        if semantic_count < self.minimum_semantic_slots:
+            raise ValueError(
+                "semantic_count must be at least "
+                f"{self.minimum_semantic_slots}; got {semantic_count}"
+            )
+
+        semantic_slots = tuple(
+            self._semantic_slot_at(index=index, semantic_count=semantic_count)
+            for index in range(semantic_count)
+        )
+        return _renumber_slots(
+            (
+                *self.prefix_slots,
+                *semantic_slots,
+                *self.suffix_slots,
+            ),
+            runtime_required=self.runtime_required,
+            runtime_max_files=self.runtime_max_files,
+        )
+
+    def _semantic_slot_at(
+        self,
+        *,
+        index: int,
+        semantic_count: int,
+    ) -> StepSkeleton:
+        ordinal = len(self.prefix_slots) + index
+        is_last = index == semantic_count - 1
+        input_source = self._semantic_input_source(
+            ordinal=ordinal,
+            is_last=is_last,
+            semantic_count=semantic_count,
+        )
+        input_type = self._semantic_input_type(
+            index=index,
+            input_source=input_source,
+        )
+        output_type = self._semantic_output_type(is_last=is_last)
+        runtime_upload = ordinal == 0 and input_type in _FILE_INPUT_TYPES
+        return replace(
+            self.semantic_slot,
+            slot_ordinal=ordinal,
+            input_source=input_source,
+            input_type=input_type,
+            output_type=output_type,
+            output_mode=self._semantic_output_mode(
+                index=index,
+                input_type=input_type,
+                output_type=output_type,
+                is_last=is_last,
+            ),
+            document_delivery_mode=_document_delivery_mode_for_output(
+                output_type=output_type,
+                final_output_mode=self.final_output_mode if is_last else None,
+            ),
+            runtime_upload=runtime_upload,
+            runtime_required=runtime_upload and self.runtime_required,
+            runtime_max_files=self.runtime_max_files if runtime_upload else None,
+        )
+
+    def _semantic_input_source(
+        self,
+        *,
+        ordinal: int,
+        is_last: bool,
+        semantic_count: int,
+    ) -> InputSource:
+        if (
+            self.fan_in_policy == "last_semantic"
+            and is_last
+            and (ordinal > 0 or semantic_count > 1)
+        ):
+            return InputSource.ALL_PREVIOUS_STEPS
+        if ordinal == 0:
+            return InputSource.FLOW_INPUT
+        return InputSource.PREVIOUS_STEP
+
+    def _semantic_input_type(
+        self,
+        *,
+        index: int,
+        input_source: InputSource,
+    ) -> InputType:
+        if input_source == InputSource.ALL_PREVIOUS_STEPS:
+            return InputType.TEXT
+        if index == 0:
+            return self.semantic_slot.input_type
+        return InputType.TEXT
+
+    def _semantic_output_type(self, *, is_last: bool) -> OutputType:
+        if self.semantic_output_policy == "final_output_on_last_semantic" and is_last:
+            return self.final_output_type
+        return OutputType.TEXT
+
+    def _semantic_output_mode(
+        self,
+        *,
+        index: int,
+        input_type: InputType,
+        output_type: OutputType,
+        is_last: bool,
+    ) -> OutputMode:
+        if (
+            index == 0
+            and input_type == InputType.AUDIO
+            and output_type == OutputType.TEXT
+        ):
+            return OutputMode.TRANSCRIBE_ONLY
+        if self.semantic_output_policy == "final_output_on_last_semantic" and is_last:
+            return _final_output_mode(
+                input_type=input_type,
+                final_output_type=output_type,
+                final_output_mode=self.final_output_mode,
+            )
+        return OutputMode.PASS_THROUGH
+
+
+def materialize_step_skeleton(
+    *,
+    runtime_input_type: InputType,
+    final_output_type: OutputType,
+    final_output_mode: OutputMode | None,
+    pattern_ids: tuple[str, ...],
+    chain_steps: tuple[str, ...],
+    aggregation_intent: AggregationIntent = "linear",
+    runtime_required: bool = True,
+    runtime_max_files: int | None = None,
+    ui_language: str | None = None,
+) -> StepSkeletonPlan:
+    skeleton_pattern_ids = _pattern_ids_for_skeleton(
+        runtime_input_type=runtime_input_type,
+        final_output_type=final_output_type,
+        final_output_mode=final_output_mode,
+        pattern_ids=pattern_ids,
+        chain_steps=chain_steps,
+    )
+    compiled_pattern_ids = compiled_chain_pattern_ids(skeleton_pattern_ids)
+    if len(compiled_pattern_ids) > 1:
+        raise ValueError(
+            "Only one compiler-backed pattern chain can be materialized at a time; "
+            f"got {sorted(compiled_pattern_ids)}"
+        )
+
+    if _DOCX_TEMPLATE_PATTERN_ID in compiled_pattern_ids:
+        return _materialize_docx_template_skeleton(
+            runtime_input_type=runtime_input_type,
+            runtime_required=runtime_required,
+            runtime_max_files=runtime_max_files,
+            aggregation_intent=aggregation_intent,
+            ui_language=ui_language,
+        )
+    if _STRUCTURED_QUALITY_PATTERN_ID in compiled_pattern_ids:
+        return _materialize_structured_quality_skeleton(
+            runtime_input_type=runtime_input_type,
+            final_output_type=final_output_type,
+            runtime_required=runtime_required,
+            runtime_max_files=runtime_max_files,
+            aggregation_intent=aggregation_intent,
+            ui_language=ui_language,
+        )
+    if _AUDIO_ARTIFACT_PATTERN_ID in compiled_pattern_ids:
+        return _materialize_audio_artifact_skeleton(
+            final_output_type=final_output_type,
+            runtime_required=runtime_required,
+            runtime_max_files=runtime_max_files,
+            ui_language=ui_language,
+        )
+    if _requires_comparison_skeleton(
+        pattern_ids=skeleton_pattern_ids,
+        aggregation_intent=aggregation_intent,
+    ):
+        return _materialize_comparison_skeleton(
+            runtime_input_type=runtime_input_type,
+            final_output_type=final_output_type,
+            final_output_mode=final_output_mode,
+            runtime_required=runtime_required,
+            runtime_max_files=runtime_max_files,
+            ui_language=ui_language,
+        )
+    return _materialize_linear_skeleton(
+        runtime_input_type=runtime_input_type,
+        final_output_type=final_output_type,
+        final_output_mode=final_output_mode,
+        runtime_required=runtime_required,
+        runtime_max_files=runtime_max_files,
+        ui_language=ui_language,
+    )
+
+
+def compiled_chain_step_template(
+    chain_token: ChainStepToken,
+) -> CompiledChainStepTemplate:
+    return _COMPILED_CHAIN_STEP_TEMPLATES[chain_token]
+
+
+def default_structured_output_fields() -> list[StructuredFieldDraft]:
+    return [
+        StructuredFieldDraft(
+            name="source_facts",
+            field_type="array",
+            description="Important source facts extracted from the input material.",
+            item_fields=[
+                StructuredFieldDraft(
+                    name="fact",
+                    field_type="string",
+                    description="A concise source fact.",
+                ),
+                StructuredFieldDraft(
+                    name="source_note",
+                    field_type="string",
+                    description="Where the fact came from or why it matters.",
+                    required=False,
+                ),
+            ],
+        ),
+        StructuredFieldDraft(
+            name="uncertainties",
+            field_type="array",
+            description="Missing, ambiguous, or uncertain information.",
+            item_fields=[
+                StructuredFieldDraft(
+                    name="issue",
+                    field_type="string",
+                    description="A missing or uncertain point.",
+                )
+            ],
+            required=False,
+        ),
+    ]
+
+
+def default_final_step_name(
+    output_type: OutputType,
+    *,
+    ui_language: str | None,
+) -> str:
+    if ui_language == "sv":
+        if output_type == OutputType.DOCX:
+            return "Skapa DOCX"
+        if output_type == OutputType.PDF:
+            return "Skapa PDF"
+        if output_type == OutputType.JSON:
+            return "Skapa strukturerad JSON"
+        return "Skapa slutresultat"
+
+    if output_type == OutputType.DOCX:
+        return "Create DOCX"
+    if output_type == OutputType.PDF:
+        return "Create PDF"
+    if output_type == OutputType.JSON:
+        return "Create structured JSON"
+    return "Create final answer"
+
+
+def default_final_step_instructions(*, ui_language: str | None) -> str:
+    if ui_language == "sv":
+        return (
+            "Skapa slutresultatet från föregående strukturerade arbete. "
+            "Bevara användarens önskade omfattning, ordning och begränsningar."
+        )
+    return (
+        "Create the final output from the previous structured work. "
+        "Preserve the user's requested scope, ordering, and constraints."
+    )
+
+
+def _semantic_default_name(*, slot_id: str, ui_language: str | None) -> str:
+    if ui_language == "sv":
+        return {
+            "audio_analysis": "Analysera transkript",
+            "comparison_semantic_step": "Analysera jämförelsematerial",
+            "final_response": "Bearbeta svarsinnehåll",
+            "structured_analysis": "Analysera strukturerat underlag",
+            "template_content": "Förbered mallinnehåll",
+        }.get(slot_id, "Analysera underlag")
+    return {
+        "audio_analysis": "Analyze transcript",
+        "comparison_semantic_step": "Analyze comparison material",
+        "final_response": "Draft response content",
+        "structured_analysis": "Analyze structured material",
+        "template_content": "Prepare template content",
+    }.get(slot_id, "Analyze material")
+
+
+def _semantic_default_instructions(*, slot_id: str, ui_language: str | None) -> str:
+    if ui_language == "sv":
+        return {
+            "audio_analysis": (
+                "Analysera det transkriberade ljudet och skapa önskat resultat."
+            ),
+            "comparison_semantic_step": (
+                "Analysera jämförelsematerialet och bevara önskad omfattning."
+            ),
+            "final_response": (
+                "Bearbeta underlaget till ett svar enligt användarens önskemål."
+            ),
+            "structured_analysis": (
+                "Analysera det strukturerade underlaget enligt användarens önskemål."
+            ),
+            "template_content": ("Förbered innehållet som ska placeras i DOCX-mallen."),
+        }.get(slot_id, "Analysera underlaget enligt användarens önskemål.")
+    return {
+        "audio_analysis": (
+            "Analyze the transcribed audio and create the requested output."
+        ),
+        "comparison_semantic_step": (
+            "Analyze the comparison material and preserve the requested scope."
+        ),
+        "final_response": ("Draft response content according to the user's request."),
+        "structured_analysis": (
+            "Analyze the structured source material according to the request."
+        ),
+        "template_content": (
+            "Prepare the content that should be placed in the DOCX template."
+        ),
+    }.get(slot_id, "Analyze the material according to the request.")
+
+
+def _pattern_ids_for_skeleton(
+    *,
+    runtime_input_type: InputType,
+    final_output_type: OutputType,
+    final_output_mode: OutputMode | None,
+    pattern_ids: tuple[str, ...],
+    chain_steps: tuple[str, ...],
+) -> tuple[str, ...]:
+    skeleton_pattern_ids = list(pattern_ids)
+    skeleton_chain_steps = list(chain_steps)
+    for pattern_id in pattern_ids:
+        pattern = PATTERN_REGISTRY.get(pattern_id)
+        if pattern is None:
+            continue
+        _extend_missing_chain_steps(skeleton_chain_steps, pattern.chain_steps)
+
+    if _should_materialize_template_fill(
+        runtime_input_type=runtime_input_type,
+        final_output_type=final_output_type,
+        final_output_mode=final_output_mode,
+        pattern_ids=tuple(skeleton_pattern_ids),
+        chain_steps=tuple(skeleton_chain_steps),
+    ):
+        pattern = PATTERN_REGISTRY[_DOCX_TEMPLATE_PATTERN_ID]
+        skeleton_pattern_ids.append(pattern.id)
+        _extend_missing_chain_steps(skeleton_chain_steps, pattern.chain_steps)
+
+    return tuple(skeleton_pattern_ids)
+
+
+def _extend_missing_chain_steps(
+    target: list[ChainStepToken],
+    chain_steps: tuple[ChainStepToken, ...],
+) -> None:
+    for chain_step in chain_steps:
+        if chain_step not in target:
+            target.append(chain_step)
+
+
+def _should_materialize_template_fill(
+    *,
+    runtime_input_type: InputType,
+    final_output_type: OutputType,
+    final_output_mode: OutputMode | None,
+    pattern_ids: tuple[str, ...],
+    chain_steps: tuple[str, ...],
+) -> bool:
+    if _chain_requests_docx_template_fill(
+        pattern_ids=pattern_ids,
+        chain_steps=chain_steps,
+    ):
+        return False
+    return (
+        runtime_input_type in {InputType.DOCUMENT, InputType.FILE}
+        and final_output_type == OutputType.DOCX
+        and final_output_mode == OutputMode.TEMPLATE_FILL
+    )
+
+
+def _materialize_docx_template_skeleton(
+    *,
+    runtime_input_type: InputType,
+    runtime_required: bool,
+    runtime_max_files: int | None,
+    aggregation_intent: AggregationIntent,
+    ui_language: str | None,
+) -> StepSkeletonPlan:
+    if runtime_input_type not in {InputType.DOCUMENT, InputType.FILE}:
+        raise ValueError("DOCX template skeleton requires document or file input")
+    return _skeleton_plan(
+        prefix_slots=(
+            _backend_fixed_slot(
+                slot_ordinal=0,
+                chain_token=EXTRACT_TEMPLATE_VARIABLES_STEP,
+                input_source=InputSource.FLOW_INPUT,
+                input_type=runtime_input_type,
+                output_type=OutputType.JSON,
+                output_mode=OutputMode.PASS_THROUGH,
+                document_delivery_mode="not_applicable",
+                runtime_required=runtime_required,
+                runtime_max_files=runtime_max_files,
+                output_fields=tuple(default_structured_output_fields()),
+            ),
+        ),
+        semantic_slot=_semantic_required_slot(
+            slot_ordinal=1,
+            slot_id="template_content",
+            input_source=InputSource.PREVIOUS_STEP,
+            input_type=InputType.JSON,
+            output_type=OutputType.TEXT,
+            output_mode=OutputMode.PASS_THROUGH,
+            document_delivery_mode="not_applicable",
+            default_name=_semantic_default_name(
+                slot_id="template_content",
+                ui_language=ui_language,
+            ),
+            default_instructions=_semantic_default_instructions(
+                slot_id="template_content",
+                ui_language=ui_language,
+            ),
+        ),
+        suffix_slots=(
+            _backend_fixed_slot(
+                slot_ordinal=2,
+                chain_token=TEMPLATE_FILL_DOCX_STEP,
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.DOCX,
+                output_mode=OutputMode.TEMPLATE_FILL,
+                document_delivery_mode="template_fill",
+            ),
+        ),
+        final_output_type=OutputType.DOCX,
+        final_output_mode=OutputMode.TEMPLATE_FILL,
+        semantic_output_policy="text_for_all_semantic",
+        fan_in_policy=(
+            "last_semantic"
+            if aggregation_intent in {"aggregate", "compare"}
+            else "none"
+        ),
+        runtime_required=runtime_required,
+        runtime_max_files=runtime_max_files,
+    )
+
+
+def _materialize_structured_quality_skeleton(
+    *,
+    runtime_input_type: InputType,
+    final_output_type: OutputType,
+    runtime_required: bool,
+    runtime_max_files: int | None,
+    aggregation_intent: AggregationIntent,
+    ui_language: str | None,
+) -> StepSkeletonPlan:
+    if runtime_input_type not in {InputType.DOCUMENT, InputType.FILE}:
+        raise ValueError("Structured quality skeleton requires document or file input")
+    terminal_input_source = (
+        InputSource.ALL_PREVIOUS_STEPS
+        if aggregation_intent in {"aggregate", "compare"}
+        else InputSource.PREVIOUS_STEP
+    )
+    return _skeleton_plan(
+        prefix_slots=(
+            _backend_fixed_slot(
+                slot_ordinal=0,
+                chain_token=STRUCTURED_EXTRACTION_STEP,
+                input_source=InputSource.FLOW_INPUT,
+                input_type=runtime_input_type,
+                output_type=OutputType.JSON,
+                output_mode=OutputMode.PASS_THROUGH,
+                document_delivery_mode="not_applicable",
+                runtime_required=runtime_required,
+                runtime_max_files=runtime_max_files,
+                output_fields=tuple(default_structured_output_fields()),
+            ),
+        ),
+        semantic_slot=_semantic_required_slot(
+            slot_ordinal=1,
+            slot_id="structured_analysis",
+            input_source=InputSource.PREVIOUS_STEP,
+            input_type=InputType.JSON,
+            output_type=OutputType.TEXT,
+            output_mode=OutputMode.PASS_THROUGH,
+            document_delivery_mode="not_applicable",
+            default_name=_semantic_default_name(
+                slot_id="structured_analysis",
+                ui_language=ui_language,
+            ),
+            default_instructions=_semantic_default_instructions(
+                slot_id="structured_analysis",
+                ui_language=ui_language,
+            ),
+            ui_language=ui_language,
+        ),
+        suffix_slots=(
+            _backend_fixed_slot(
+                slot_ordinal=2,
+                chain_token=ANALYSIS_OR_QUALITY_REVIEW_STEP,
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                document_delivery_mode="not_applicable",
+            ),
+            _terminal_artifact_slot(
+                slot_ordinal=3,
+                input_source=terminal_input_source,
+                final_output_type=final_output_type,
+                final_output_mode=None,
+                ui_language=ui_language,
+            ),
+        ),
+        final_output_type=final_output_type,
+        final_output_mode=None,
+        semantic_output_policy="text_for_all_semantic",
+        runtime_required=runtime_required,
+        runtime_max_files=runtime_max_files,
+    )
+
+
+def _materialize_audio_artifact_skeleton(
+    *,
+    final_output_type: OutputType,
+    runtime_required: bool,
+    runtime_max_files: int | None,
+    ui_language: str | None,
+) -> StepSkeletonPlan:
+    return _skeleton_plan(
+        prefix_slots=(
+            _backend_fixed_slot(
+                slot_ordinal=0,
+                chain_token=FLOW_INPUT_AUDIO_TRANSCRIPTION,
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.AUDIO,
+                output_type=OutputType.TEXT,
+                output_mode=OutputMode.TRANSCRIBE_ONLY,
+                document_delivery_mode="not_applicable",
+                runtime_required=runtime_required,
+                runtime_max_files=runtime_max_files,
+            ),
+        ),
+        semantic_slot=_semantic_required_slot(
+            slot_ordinal=1,
+            slot_id="audio_analysis",
+            input_source=InputSource.PREVIOUS_STEP,
+            input_type=InputType.TEXT,
+            output_type=final_output_type,
+            output_mode=OutputMode.PASS_THROUGH,
+            document_delivery_mode=_document_delivery_mode_for_output(
+                output_type=final_output_type,
+                final_output_mode=None,
+            ),
+            default_name=_semantic_default_name(
+                slot_id="audio_analysis",
+                ui_language=ui_language,
+            ),
+            default_instructions=_semantic_default_instructions(
+                slot_id="audio_analysis",
+                ui_language=ui_language,
+            ),
+            ui_language=ui_language,
+        ),
+        suffix_slots=(),
+        final_output_type=final_output_type,
+        final_output_mode=None,
+        semantic_output_policy="final_output_on_last_semantic",
+        runtime_required=runtime_required,
+        runtime_max_files=runtime_max_files,
+    )
+
+
+def _requires_comparison_skeleton(
+    *,
+    pattern_ids: tuple[str, ...],
+    aggregation_intent: AggregationIntent,
+) -> bool:
+    return aggregation_intent in {"aggregate", "compare"} or (
+        _COMPARISON_PATTERN_ID in pattern_ids
+    )
+
+
+def _materialize_comparison_skeleton(
+    *,
+    runtime_input_type: InputType,
+    final_output_type: OutputType,
+    final_output_mode: OutputMode | None,
+    runtime_required: bool,
+    runtime_max_files: int | None,
+    ui_language: str | None,
+) -> StepSkeletonPlan:
+    return _skeleton_plan(
+        prefix_slots=(),
+        semantic_slot=_semantic_required_slot(
+            slot_ordinal=0,
+            slot_id="comparison_semantic_step",
+            input_source=InputSource.FLOW_INPUT,
+            input_type=runtime_input_type,
+            output_type=final_output_type,
+            output_mode=_final_output_mode(
+                input_type=runtime_input_type,
+                final_output_type=final_output_type,
+                final_output_mode=final_output_mode,
+            ),
+            document_delivery_mode=_document_delivery_mode_for_output(
+                output_type=final_output_type,
+                final_output_mode=final_output_mode,
+            ),
+            runtime_required=runtime_required,
+            runtime_max_files=runtime_max_files,
+            default_name=_semantic_default_name(
+                slot_id="comparison_semantic_step",
+                ui_language=ui_language,
+            ),
+            default_instructions=_semantic_default_instructions(
+                slot_id="comparison_semantic_step",
+                ui_language=ui_language,
+            ),
+            ui_language=ui_language,
+        ),
+        suffix_slots=(),
+        final_output_type=final_output_type,
+        final_output_mode=final_output_mode,
+        semantic_output_policy="final_output_on_last_semantic",
+        fan_in_policy="last_semantic",
+        runtime_required=runtime_required,
+        runtime_max_files=runtime_max_files,
+    )
+
+
+def _materialize_linear_skeleton(
+    *,
+    runtime_input_type: InputType,
+    final_output_type: OutputType,
+    final_output_mode: OutputMode | None,
+    runtime_required: bool,
+    runtime_max_files: int | None,
+    ui_language: str | None,
+) -> StepSkeletonPlan:
+    return _skeleton_plan(
+        prefix_slots=(),
+        semantic_slot=_semantic_required_slot(
+            slot_ordinal=0,
+            slot_id="final_response",
+            input_source=InputSource.FLOW_INPUT,
+            input_type=runtime_input_type,
+            output_type=final_output_type,
+            output_mode=_final_output_mode(
+                input_type=runtime_input_type,
+                final_output_type=final_output_type,
+                final_output_mode=final_output_mode,
+            ),
+            document_delivery_mode=_document_delivery_mode_for_output(
+                output_type=final_output_type,
+                final_output_mode=final_output_mode,
+            ),
+            runtime_required=runtime_required,
+            runtime_max_files=runtime_max_files,
+            default_name=_semantic_default_name(
+                slot_id="final_response",
+                ui_language=ui_language,
+            ),
+            default_instructions=_semantic_default_instructions(
+                slot_id="final_response",
+                ui_language=ui_language,
+            ),
+            ui_language=ui_language,
+        ),
+        suffix_slots=(),
+        final_output_type=final_output_type,
+        final_output_mode=final_output_mode,
+        semantic_output_policy="final_output_on_last_semantic",
+        runtime_required=runtime_required,
+        runtime_max_files=runtime_max_files,
+    )
+
+
+def _terminal_artifact_slot(
+    *,
+    slot_ordinal: int,
+    input_source: InputSource,
+    final_output_type: OutputType,
+    final_output_mode: OutputMode | None,
+    ui_language: str | None,
+) -> StepSkeleton:
+    return _backend_fixed_slot(
+        slot_ordinal=slot_ordinal,
+        chain_token=TERMINAL_ARTIFACT_STEP,
+        input_source=input_source,
+        input_type=InputType.TEXT,
+        output_type=final_output_type,
+        output_mode=_final_output_mode(
+            input_type=InputType.TEXT,
+            final_output_type=final_output_type,
+            final_output_mode=final_output_mode,
+        ),
+        document_delivery_mode=_document_delivery_mode_for_output(
+            output_type=final_output_type,
+            final_output_mode=final_output_mode,
+        ),
+        default_name=default_final_step_name(
+            final_output_type,
+            ui_language=ui_language,
+        ),
+        default_instructions=default_final_step_instructions(
+            ui_language=ui_language,
+        ),
+    )
+
+
+def _backend_fixed_slot(
+    *,
+    slot_ordinal: int,
+    chain_token: ChainStepToken,
+    input_source: InputSource,
+    input_type: InputType,
+    output_type: OutputType,
+    output_mode: OutputMode,
+    document_delivery_mode: DocumentDeliveryMode,
+    runtime_required: bool = False,
+    runtime_max_files: int | None = None,
+    output_fields: tuple[StructuredFieldDraft, ...] = (),
+    default_name: str | None = None,
+    default_instructions: str | None = None,
+) -> StepSkeleton:
+    template = _COMPILED_CHAIN_STEP_TEMPLATES[chain_token]
+    return StepSkeleton(
+        slot_ordinal=slot_ordinal,
+        slot_id=chain_token,
+        role="backend_fixed",
+        mechanics_policy="locked",
+        semantic_policy="backend_default",
+        chain_token=chain_token,
+        default_name=default_name or template.name,
+        default_instructions=default_instructions or template.task,
+        input_source=input_source,
+        input_type=input_type,
+        output_type=output_type,
+        output_mode=output_mode,
+        document_delivery_mode=document_delivery_mode,
+        runtime_upload=slot_ordinal == 0 and input_type in _FILE_INPUT_TYPES,
+        runtime_required=(
+            slot_ordinal == 0 and input_type in _FILE_INPUT_TYPES and runtime_required
+        ),
+        runtime_max_files=(
+            runtime_max_files
+            if slot_ordinal == 0 and input_type in _FILE_INPUT_TYPES
+            else None
+        ),
+        output_fields=output_fields,
+    )
+
+
+def _semantic_required_slot(
+    *,
+    slot_ordinal: int,
+    slot_id: str,
+    input_source: InputSource,
+    input_type: InputType,
+    output_type: OutputType,
+    output_mode: OutputMode,
+    document_delivery_mode: DocumentDeliveryMode,
+    runtime_required: bool = False,
+    runtime_max_files: int | None = None,
+    default_name: str | None = None,
+    default_instructions: str | None = None,
+    ui_language: str | None = None,
+) -> StepSkeleton:
+    return StepSkeleton(
+        slot_ordinal=slot_ordinal,
+        slot_id=slot_id,
+        role="semantic_required",
+        mechanics_policy="fill_missing",
+        semantic_policy="required_from_outline",
+        chain_token=None,
+        default_name=default_name
+        or default_final_step_name(output_type, ui_language=ui_language),
+        default_instructions=default_instructions
+        or default_final_step_instructions(ui_language=ui_language),
+        input_source=input_source,
+        input_type=input_type,
+        output_type=output_type,
+        output_mode=output_mode,
+        document_delivery_mode=document_delivery_mode,
+        runtime_upload=slot_ordinal == 0 and input_type in _FILE_INPUT_TYPES,
+        runtime_required=(
+            slot_ordinal == 0 and input_type in _FILE_INPUT_TYPES and runtime_required
+        ),
+        runtime_max_files=(
+            runtime_max_files
+            if slot_ordinal == 0 and input_type in _FILE_INPUT_TYPES
+            else None
+        ),
+    )
+
+
+def _skeleton_plan(
+    *,
+    prefix_slots: tuple[StepSkeleton, ...],
+    semantic_slot: StepSkeleton,
+    suffix_slots: tuple[StepSkeleton, ...],
+    final_output_type: OutputType,
+    final_output_mode: OutputMode | None,
+    semantic_output_policy: SemanticOutputPolicy,
+    fan_in_policy: SemanticFanInPolicy = "none",
+    runtime_required: bool,
+    runtime_max_files: int | None,
+) -> StepSkeletonPlan:
+    return StepSkeletonPlan(
+        prefix_slots=prefix_slots,
+        semantic_slot=semantic_slot,
+        suffix_slots=suffix_slots,
+        final_output_type=final_output_type,
+        final_output_mode=final_output_mode,
+        semantic_output_policy=semantic_output_policy,
+        fan_in_policy=fan_in_policy,
+        runtime_required=runtime_required,
+        runtime_max_files=runtime_max_files,
+    )
+
+
+def _renumber_slots(
+    slots: tuple[StepSkeleton, ...],
+    *,
+    runtime_required: bool,
+    runtime_max_files: int | None,
+) -> tuple[StepSkeleton, ...]:
+    return tuple(
+        _slot_with_ordinal(
+            slot=slot,
+            slot_ordinal=slot_ordinal,
+            runtime_required=runtime_required,
+            runtime_max_files=runtime_max_files,
+        )
+        for slot_ordinal, slot in enumerate(slots)
+    )
+
+
+def _slot_with_ordinal(
+    *,
+    slot: StepSkeleton,
+    slot_ordinal: int,
+    runtime_required: bool,
+    runtime_max_files: int | None,
+) -> StepSkeleton:
+    runtime_upload = slot_ordinal == 0 and slot.input_type in _FILE_INPUT_TYPES
+    return replace(
+        slot,
+        slot_ordinal=slot_ordinal,
+        runtime_upload=runtime_upload,
+        runtime_required=runtime_upload and runtime_required,
+        runtime_max_files=runtime_max_files if runtime_upload else None,
+    )
+
+
+def _final_output_mode(
+    *,
+    input_type: InputType,
+    final_output_type: OutputType,
+    final_output_mode: OutputMode | None,
+) -> OutputMode:
+    if input_type == InputType.AUDIO and final_output_type == OutputType.TEXT:
+        return OutputMode.TRANSCRIBE_ONLY
+    if (
+        final_output_type == OutputType.DOCX
+        and final_output_mode == OutputMode.TEMPLATE_FILL
+    ):
+        return OutputMode.TEMPLATE_FILL
+    return OutputMode.PASS_THROUGH
+
+
+def _document_delivery_mode_for_output(
+    *,
+    output_type: OutputType,
+    final_output_mode: OutputMode | None,
+) -> DocumentDeliveryMode:
+    if output_type == OutputType.DOCX and final_output_mode == OutputMode.TEMPLATE_FILL:
+        return "template_fill"
+    if output_type in _DOCUMENT_OUTPUT_TYPES:
+        return "generated"
+    return "not_applicable"
+
+
+def _chain_requests_docx_template_fill(
+    *,
+    pattern_ids: tuple[str, ...],
+    chain_steps: tuple[str, ...],
+) -> bool:
+    return (
+        _DOCX_TEMPLATE_PATTERN_ID in pattern_ids
+        and TEMPLATE_FILL_DOCX_STEP in chain_steps
+    )

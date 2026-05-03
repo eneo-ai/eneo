@@ -46,6 +46,7 @@ from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY, FlowCapab
 PATTERN_REGISTRY_VERSION: int = 6
 
 PatternId = str
+ChainStepToken = str
 FLOW_INPUT_AUDIO_TRANSCRIPTION = "flow_input_audio_transcription"
 FLOW_INPUT_DOCUMENT_UPLOAD = "flow_input_document_upload"
 FLOW_INPUT_SECTIONED_FORM_FIELDS = "flow_input_sectioned_form_fields"
