@@ -28,7 +28,7 @@ automated corpus so it does not become a parallel source of truth.
 | 11.0 reliability corpus | Canonical reliability gate for known production/manual failures. | AI Builder benchmark case owner under `backend/tests/integration/flows/ai_builder/benchmark/`. |
 | 11.2 Swedish resolver corpus | Canonical slot-resolution accuracy gate. | Backend resolver tests. |
 | 11.4 golden matrix | Coverage gate across FCM, Pattern Registry, create, and edit. | Backend golden tests. |
-| This runbook | Local manual smoke suite and before/after quality comparison. | Batch 11 execution docs and local manual-eval harness. |
+| This runbook | Local manual smoke suite and before/after quality comparison. | Batch 11 execution docs and the AI Builder benchmark manual API eval harness. |
 
 If this runbook finds a new failure, the implementation agent must promote it
 into the 11.0 reliability corpus, a resolver case, or a golden test in
@@ -54,19 +54,13 @@ Space id:
 0d429172-9de4-43b4-b5d6-d6a817c0a734
 ```
 
-Local development API key:
-
-```text
-sk_cbe4f888078049ec567845e46e3cea4a1be105f34e1b38e4a97209d6b93cff477d707dee9697efc82f87e3d06e82ea9709631524c3ff8e77075754a94c466ba4
-```
-
 Exact smoke-check curl:
 
 ```bash
 curl -X 'GET' \
   'http://localhost:8123/api/v1/flows/ai-builder/sessions' \
   -H 'accept: application/json' \
-  -H 'X-API-Key: sk_cbe4f888078049ec567845e46e3cea4a1be105f34e1b38e4a97209d6b93cff477d707dee9697efc82f87e3d06e82ea9709631524c3ff8e77075754a94c466ba4'
+  -H "X-API-Key: $ENEO_LOCAL_API_KEY"
 ```
 
 Recommended local environment variables for scripts:
@@ -74,14 +68,13 @@ Recommended local environment variables for scripts:
 ```bash
 export ENEO_LOCAL_API_BASE='http://localhost:8123'
 export ENEO_LOCAL_SPACE_ID='0d429172-9de4-43b4-b5d6-d6a817c0a734'
-export ENEO_LOCAL_API_KEY='sk_cbe4f888078049ec567845e46e3cea4a1be105f34e1b38e4a97209d6b93cff477d707dee9697efc82f87e3d06e82ea9709631524c3ff8e77075754a94c466ba4'
+export ENEO_LOCAL_API_KEY='<local-dev-api-key>'
 ```
 
-The literal key above is intentionally included because this runbook targets the
-user's local development environment and the user explicitly asked for the exact
-curl and key to be available to later agents. Do not generalize this into a rule
-for production credentials or shared environments. If the key stops working,
-replace it with the current local development key in the same runbook section.
+Create or retrieve the local development API key outside git, for example from
+the local database or admin UI used by the current dev environment. Do not store
+the literal key in this runbook, committed scorecards, shell history snippets, or
+review artifacts.
 
 Harness implementations must use the `ENEO_LOCAL_*` variable names above. Do not
 introduce `AI_BUILDER_EVAL_*`, `LOCAL_*`, or per-script aliases.
@@ -144,6 +137,36 @@ runbook age silently.
 | GET | `/api/v1/flows/{id}/runs/{run_id}/evidence/export` | Export the local evidence bundle for manual inspection outside git. |
 | POST | `/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/` | Fetch generated artifacts for local visual/manual QA when a run produces a file. |
 
+The harness validates endpoints through OpenAPI `operation_id`, not by trusting
+this table. Create/revise/edit plan checks require:
+
+```text
+create_ai_builder_session
+list_ai_builder_sessions
+send_ai_builder_message
+get_ai_builder_session
+get_ai_builder_models
+get_ai_builder_plan
+list_ai_builder_session_plans
+cancel_ai_builder_session
+approve_ai_builder_plan
+apply_ai_builder_plan
+revise_ai_builder_plan
+detach_ai_builder_attachment
+```
+
+Executed-run scoring additionally requires these operation ids when that mode is
+enabled:
+
+```text
+create_flow_run
+get_flow_graph
+list_flow_run_steps
+get_flow_run_evidence_alias
+export_flow_run_evidence_alias
+generate_flow_run_artifact_signed_url
+```
+
 ## Runtime Input, Form Fields, And Underlag
 
 Use these terms consistently in manual evaluation:
@@ -162,20 +185,27 @@ should verify that the structured data is bridged intentionally.
 
 ## Planned Harness Shape
 
-Batch 11.0 should add a small local harness if the implementation agent proves
-the API shape is stable enough:
+The local harness follows the existing AI Builder benchmark-eval pattern instead
+of creating a separate scripts tree:
 
 ```text
-backend/scripts/manual_eval/ai_builder/prompts.yaml
-backend/scripts/manual_eval/ai_builder/run.py
-backend/scripts/manual_eval/ai_builder/scorecard.schema.json
-docs/refactor/execution/batch-11-flow-ai-builder-reliability/manual-eval-results/README.md
+backend/tests/integration/flows/ai_builder/benchmark/cases.py
+backend/tests/integration/flows/ai_builder/benchmark/manual_api_scoring.py
+backend/tests/integration/flows/ai_builder/benchmark/manual_api_eval.py
+backend/tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py
+backend/tests/integration/flows/ai_builder/benchmark/test_manual_api_eval.py
 ```
 
 The harness must:
 
 - read API base, API key, and space id from environment variables;
-- support `--dry-run` that validates prompt manifest and endpoint config without calling the LLM;
+- support `--dry-run` that validates typed prompt cases and endpoint
+  configuration without calling the LLM;
+- validate required OpenAPI `operation_id` values before live runs, and validate
+  executed-run endpoints only when the evaluation mode runs an applied Flow;
+- parse AI Builder SSE streams through the harness SSE reader, which must handle
+  multi-line `data:` frames, comments/pings, terminal `done`, error-before-done,
+  and unknown-event warnings;
 - record model id, model name, provider, and workspace fixture summary for every run;
 - run each prompt three times per relevant slice;
 - write only redacted scorecards to committed paths;
@@ -188,7 +218,9 @@ The harness must:
 
 ## Six Stable Swedish Prompts
 
-Use these prompt ids exactly so before/after results remain comparable.
+Use these prompt ids exactly so before/after results remain comparable. The
+canonical typed owner is the AI Builder benchmark case module; this table is a
+human-readable copy for local operators.
 
 | Prompt id | Prompt |
 |---|---|
@@ -203,33 +235,17 @@ Do not hardcode behavior for these prompts. They are examples that pressure-test
 general Flow AI Builder mechanics: user intent, runtime input type, intermediate
 step compatibility, output type, resource use, and follow-up quality.
 
-## Prompt Manifest Shape
+## Typed Case Shape
 
-The future `prompts.yaml` should make typed expectations explicit instead of
-duplicating the prose table in harness code:
+The benchmark case module should make expectations explicit instead of
+duplicating the prose table in harness code. The typed cases own prompt text,
+expected runtime input/output mechanics, required step roles, disallowed
+follow-up topics, and create/revise/edit mode coverage. The prose table below is
+commentary for reviewers.
 
-```yaml
-- prompt_id: vague_audio_docx_sv
-  prompt: "Jag vill kunna skicka in en ljudinspelning och få ett bra Word-dokument tillbaka."
-  expected:
-    first_runtime_input_type: audio
-    terminal_output_type: docx
-    terminal_output_mode: create
-    required_step_roles:
-      - transcribe
-      - render_docx
-    disallowed_follow_up_topics:
-      - asks_if_input_is_audio
-    required_follow_up_topics:
-      any_of:
-        - document_sections
-        - speaker_labels
-        - timestamps
-```
-
-The prose table below is commentary for reviewers. The manifest is the typed
-source for `typed_pass_count`, `typed_fail_count`, and
-`regressions_vs_previous_baseline`.
+The six stable prompt ids are already present in `RELIABILITY_CORPUS_CASES` with
+`CorpusSource.MANUAL_RUNBOOK`; the harness must reference those entries instead
+of adding a second prompt manifest.
 
 ## Expected Behavior By Prompt
 
@@ -251,7 +267,7 @@ Evaluation modes:
 | Mode | What it tests | Required checks |
 |---|---|---|
 | `create_plan` | Initial prompt creates a proposed plan. | Follow-up quality, input/output mechanics, step chain, resource refs, no repair-as-happy-path. |
-| `revise_plan` | User changes the proposed plan before apply through `/plans/{plan_id}/revise`. | The revision obeys the requested change without losing already-correct mechanics or unrelated plan decisions. |
+| `revise_plan` | User changes the proposed plan before apply through the currently supported builder-edit path. Content-changing revisions use follow-up builder messages until `/plans/{plan_id}/revise` supports more than `keep_current_description`. | The revision obeys the requested change without losing already-correct mechanics or unrelated plan decisions. |
 | `edit_existing_flow` | User edits an already applied or existing Flow through the AI Builder edit path. | The edit preserves stable Flow structure, updates only the scoped concept, and keeps create/edit parity. |
 
 Every relevant Batch 11 slice should run at least one `revise_plan` scenario for
@@ -295,7 +311,9 @@ Failure signals:
 
 ## Typed Scorecard Shape
 
-The harness should emit one JSON scorecard per prompt run with these fields:
+The harness should emit one JSON scorecard per prompt run by serializing frozen
+Python dataclasses. Dataclass fields are the scorecard contract; meaning changes
+must bump `scorecard_schema_version`.
 
 ```json
 {
@@ -303,20 +321,22 @@ The harness should emit one JSON scorecard per prompt run with these fields:
   "evaluation_mode": "create_plan",
   "run_index": 1,
   "model": {
-    "id": "uuid-or-null",
+    "id_hash": "sha256-or-null",
     "name": "gpt-5.4-nano",
     "provider": "openai",
     "temperature": 0
   },
   "workspace_fixture": {
-    "space_id": "0d429172-9de4-43b4-b5d6-d6a817c0a734",
+    "space_id_hash": "sha256-or-null",
     "enabled_resource_fingerprint": "sha256-or-null"
   },
+  "live_call_status": "completed",
+  "live_call_error": null,
   "observed": {
-    "session_id": "uuid-or-null",
-    "plan_id": "uuid-or-null",
-    "flow_id_if_applied": "uuid-or-null",
-    "run_id_if_executed": "uuid-or-null",
+    "session_id_hash": "sha256-or-null",
+    "plan_id_hash": "sha256-or-null",
+    "flow_id_if_applied_hash": "sha256-or-null",
+    "run_id_if_executed_hash": "sha256-or-null",
     "asked_follow_up": true,
     "follow_up_topics": ["sections"],
     "disallowed_follow_up_topics": [],
@@ -329,7 +349,7 @@ The harness should emit one JSON scorecard per prompt run with these fields:
     "step_outputs_fetched": true,
     "evidence_trace_fetched": true,
     "evidence_export_available": true,
-    "generated_artifact_file_ids": ["uuid"],
+    "generated_artifact_file_id_hashes": ["sha256"],
     "repair_invoked": false
   },
   "derived": {
@@ -341,11 +361,10 @@ The harness should emit one JSON scorecard per prompt run with these fields:
     "uses_underlag_till_text_correctly": true,
     "uses_runtime_input_fields_correctly": true,
     "all_step_input_output_pairs_compatible": true,
-    "selected_refs_are_enabled": true,
     "revision_preserved_unrelated_mechanics": null,
     "revision_applied_requested_change": null
   },
-  "typed_pass_count": 12,
+  "typed_pass_count": 7,
   "typed_fail_count": 0,
   "manual_scores": {
     "question_relevance": 2,
@@ -365,23 +384,44 @@ If a field cannot be known from the API response, set it to `null` and record
 which endpoint or schema would need to expose it. Do not infer hidden state from
 free text when a typed API value should exist.
 
-Derived fields must have deterministic rules in `scorecard.schema.json` or the
-harness README. For example, `all_step_input_output_pairs_compatible` should be
-computed from typed step input/output metadata, not from step prose. If a rule
-requires natural-language judgment, move it to `manual_scores` instead of
-pretending it is typed.
+Derived fields must have deterministic rules in the scoring module. For example,
+`all_step_input_output_pairs_compatible` should be computed from typed step
+input/output metadata, not from step prose. If a rule requires natural-language
+judgment, move it to `manual_scores` instead of pretending it is typed.
+
+`uses_underlag_till_text_correctly` has a narrow deterministic meaning:
+structured-JSON-to-text boundaries that need earlier source material must bind
+the immediate structured JSON and at least one real prior text-producing step in
+`input_bindings.question`. For Swedish audio/document cases this includes a
+source-material clause such as `Källmaterial: {{ step_X.output.text }}` when a
+later semantic text step consumes metadata JSON. The deterministic scorer checks
+the typed variable references, not the exact label wording.
+
+`uses_runtime_input_fields_correctly` has a narrow deterministic meaning:
+primary uploaded audio/document/file inputs must not be duplicated as form
+fields, and inferred optional metadata fields fail unless the typed case says
+secondary runtime fields are expected.
 
 `enabled_resource_fingerprint` should hash a sorted, stable list of enabled
 model ids, assistant ids, knowledge ids, MCP server ids, and MCP tool refs. The
-exact algorithm belongs in `scorecard.schema.json` or the harness README.
+exact algorithm belongs in the scoring module and should be covered by tests.
 
 When `derivation_rules_version` increases, prior baselines are invalid for
 derived-field regression comparison. Observed-field comparison can still apply
 when prompt id, evaluation mode, model, and workspace fixture match.
 
+When `scorecard_schema_version` increases, previous scorecards are not
+comparable by the harness. A `derivation_rules_version` increase invalidates only
+derived-field comparison; observed fields can still be compared when prompt id,
+evaluation mode, model, and workspace fixture fingerprints match.
+
 `revision_preserved_unrelated_mechanics`, `revision_applied_requested_change`,
 and `manual_scores.edit_or_revision_adherence` are `null` for `create_plan`.
 They are required for `revise_plan` and `edit_existing_flow`.
+
+`repair_invoked` means session telemetry reported at least one planner repair
+attempt for the proposal-producing turn. Median repair rate is computed across
+scorecards; the boolean is not a substitute for the aggregate gate.
 
 ## Manual 0/1/2 Rubric
 

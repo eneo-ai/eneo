@@ -330,6 +330,76 @@ Accepted final-review follow-ups:
 | Consider an explicit source-scope enum if a second source-material pattern needs more than prior text-output refs. | Later skeleton/compiler cleanup, only with another concrete use case. |
 | Promote the exact Swedish audio prompt into the benchmark expectation corpus if it recurs outside unit-level compile coverage. | Benchmark corpus slice. |
 
+## 11.6 Local Manual API Smoke Harness
+
+### Scope
+
+This slice adds the long-term measurement loop for the 11.5d
+`Underlag till text` and `Inmatningsfält` fixes. It deliberately reuses the
+existing AI Builder benchmark owner instead of adding a new `scripts/manual_eval`
+path.
+
+The slice is local-only by default:
+
+- dry-run scorecards validate typed prompt cases without calling the API or LLM;
+- live mode is opt-in through `ENEO_LOCAL_API_BASE`,
+  `ENEO_LOCAL_SPACE_ID`, and `ENEO_LOCAL_API_KEY`;
+- committed scorecards are redacted and never include raw prompts, API keys,
+  transcripts, uploaded files, raw SSE streams, or unredacted UUIDs.
+
+### Claude Review
+
+| Iteration | Artifact | Verdict | Green light | Minimum score | Outcome |
+|---:|---|---|---|---:|---|
+| 1 | `.codex/artifacts/claude-peer-loop-batch-11-6-manual-api-smoke-harness-plan-20260503T123145Z.md` | `changes_required` | `no` | 4 | Rejected a parallel scripts/YAML/JSON-Schema harness and flagged the committed local API key. |
+| 2 | `.codex/artifacts/claude-peer-loop-batch-11-6-manual-api-smoke-harness-revised-plan-20260503T123747Z.md` | `green` | `yes` | 7 | Approved the benchmark-owner plan with implementation clarifications. |
+| 3 | `.codex/artifacts/claude-peer-loop-batch-11-6-manual-api-smoke-harness-implementation-review-20260503T125738Z.md` | `changes_required` | `no` | 5 | Blocked audio-only underlag scoring, runtime-field false positives, missing live model provenance, and untested live HTTP path. |
+| 4 | `.codex/artifacts/claude-peer-loop-batch-11-6-manual-api-smoke-harness-final-implementation-20260503T131550Z.md` | `green` | `yes` | 8 | Substantively approved the structural fixes; wrapper failed parsing because Claude emitted Markdown-bold headers. |
+| 5 | `.codex/artifacts/claude-peer-loop-batch-11-6-manual-api-smoke-harness-final-green-confirmation-20260503T131704Z.md` | `green` | `yes` | 8 | Exact output-contract confirmation cleared the wrapper gate. |
+| 6 | `.codex/artifacts/claude-peer-loop-batch-11-6-manual-api-smoke-harness-post-green-cleanup-20260503T132425Z.md` | `green` | `yes` | 8 | Verified post-green cleanup for exact case-id validation, provider-disambiguated model matching, and redacted live failure status. |
+
+Accepted plan changes:
+
+| Finding | Resolution |
+|---|---|
+| New `backend/scripts/manual_eval` path would duplicate the benchmark eval pattern. | Harness lives under `backend/tests/integration/flows/ai_builder/benchmark/`. |
+| `prompts.yaml` would create a second prompt owner. | Harness references existing `RELIABILITY_CORPUS_CASES` manual-runbook entries. |
+| `scorecard.schema.json` would duplicate serializer/dataclass state. | Frozen dataclasses own the scorecard contract and version policy. |
+| Literal local API key contradicted redaction rules. | Replaced with `ENEO_LOCAL_API_KEY` placeholder and removed the key from current docs. |
+| `uses_underlag_till_text_correctly` was subjective. | Added deterministic source-material boundary scoring and bad/good fixtures. |
+| AI Builder SSE parsing was undeclared. | Added a harness SSE parser with tests for multiline data, ping/comment lines, error, and done events. |
+| Endpoint snapshot could drift. | Live mode validates required OpenAPI `operationId` values. |
+
+### Implementation Result
+
+| Area | Outcome |
+|---|---|
+| Shared eval primitives | Added `eval_support.py` for redaction hashes, ISO timestamps, dataclass scorecard serialization, and stable JSON fingerprints. |
+| Manual API scenarios | Added typed manual API scenario metadata to the existing benchmark case owner without duplicating the six prompts. |
+| Deterministic scoring | Added `manual_api_scoring.py` for typed plan observations, source-material underlag predicates, runtime-field minimality, and chain compatibility. |
+| Local harness | Added `manual_api_eval.py` with dry-run scorecards, env-gated live config, OpenAPI operation-id validation, SSE streaming parse, model provenance, redacted IDs, prompt/mode filters, unsupported-scenario filtering, redacted live failure status, and output directory writing. |
+| Regression fixtures | Added bad/good plan-shape tests for the reported metadata-only JSON plus invented runtime-field failure, the 11.5d post-fix shape, document source-material boundaries, allowed secondary runtime fields, live MockTransport happy path, and redacted live failure handling. |
+| Runbook and storage | Removed the literal local key, documented dataclass scorecards, hashed IDs, operation ids, SSE parser responsibility, version precedence, and manual-eval result storage rules. |
+
+### Validation Result
+
+| Command | Result |
+|---|---|
+| `uv run pytest tests/integration/flows/ai_builder/benchmark/test_manual_api_eval.py -q` | Passed: `13 passed`, 16 existing warnings. |
+| `uv run pytest tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py -q` | Passed: `4 passed`, 16 existing warnings. |
+| `uv run pytest tests/integration/flows/ai_builder/benchmark -q` | Passed: `106 passed`, 16 existing warnings. |
+| `uv run ruff check <11.6 touched benchmark files>` | Passed after import cleanup. |
+| `uv run ruff format --check <11.6 touched benchmark files>` | Passed after formatting. |
+| `uv run pyright <11.6 touched benchmark files>` | Passed: `0 errors`. |
+
+### Carry-Forward
+
+| Item | Owner |
+|---|---|
+| Live local API scorecards still need to be run outside this tool environment once the local API key is set in the shell. | Manual eval operator |
+| Content-changing `revise_plan` scenarios are represented but marked unsupported until the API supports a real content revision path beyond `keep_current_description`. | AI Builder API/edit parity slice |
+| Executed-run artifact/evidence scoring is operation-id-gated but not called by dry-run. | Future manual eval execution slice |
+
 ## 11.0a Claude Plan Review Iteration 1
 
 - Artifact: `.codex/artifacts/claude-peer-loop-batch-11-production-failure-corpus-plan-20260502T232903Z.md`

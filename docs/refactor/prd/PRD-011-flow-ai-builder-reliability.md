@@ -228,7 +228,7 @@ Deliverables:
 - Baseline report in the Batch 11 journal before behavior changes.
 - Frozen reliability corpus in the existing AI Builder benchmark case owner, with the reported audio-to-DOCX scenario plus at least five captured Swedish prompts tagged by `CorpusSource` values: `reported_failure`, `manual_runbook`, `captured_telemetry`, or `manual_reproduction`.
 - Corpus integrity test with minimum case count, closed provenance/domain tags, typed expected Flow shape, FCM tuple legality, behavioral-risk coverage, enum-typed exclusions, and content-based reported-failure detection so hard cases cannot disappear silently.
-- Manual API smoke-suite runbook and harness plan for the six stable Swedish prompts, proposed-plan revisions, and existing-Flow edits, including local curl setup, dry-run validation, typed scorecard schema, workspace/model fixture rules, redaction rules, and before/after comparison procedure.
+- Manual API smoke-suite runbook and harness plan for the six stable Swedish prompts, proposed-plan revisions, and existing-Flow edits, including local curl setup, dry-run validation, typed scorecard contract, workspace/model fixture rules, redaction rules, and before/after comparison procedure.
 - No behavior change unless necessary to expose measurement.
 
 Validation:

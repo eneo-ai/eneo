@@ -8,12 +8,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
-import json
 import os
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -31,6 +28,11 @@ from intric.model_providers.infrastructure.litellm_runtime_config import (
 from tests.integration.flows.ai_builder.benchmark.cases import (
     SLOT_RESOLVER_CORPUS_CASES,
     SlotResolverCorpusCase,
+)
+from tests.integration.flows.ai_builder.benchmark.eval_support import (
+    redacted_sha256,
+    serialize_dataclass_scorecard,
+    utc_now_iso,
 )
 from tests.integration.flows.ai_builder.benchmark.slot_resolver_scoring import (
     ScoreSummary,
@@ -179,7 +181,7 @@ def load_live_eval_config(
             model=env_values[ENV_MODEL],
             tenant_id_present=True,
             api_key_present=bool(env_values.get(ENV_API_KEY)),
-            api_base_sha256=_redacted_sha256(env_values.get(ENV_API_BASE)),
+            api_base_sha256=redacted_sha256(env_values.get(ENV_API_BASE)),
             api_version=env_values.get(ENV_API_VERSION),
             api_type=env_values.get(ENV_API_TYPE),
         ),
@@ -200,7 +202,7 @@ def build_dry_run_scorecard(
     return SlotResolverProviderScorecard(
         scorecard_schema_version=SCORECARD_SCHEMA_VERSION,
         schema_bump_policy=_schema_bump_policy(),
-        generated_at=_utc_now_iso(),
+        generated_at=utc_now_iso(),
         live=False,
         target_score=SLOT_RESOLVER_PROVIDER_TARGET,
         target_metric=_target_metric(),
@@ -301,7 +303,7 @@ async def build_live_scorecard(
     return SlotResolverProviderScorecard(
         scorecard_schema_version=SCORECARD_SCHEMA_VERSION,
         schema_bump_policy=_schema_bump_policy(),
-        generated_at=_utc_now_iso(),
+        generated_at=utc_now_iso(),
         live=True,
         target_score=SLOT_RESOLVER_PROVIDER_TARGET,
         target_metric=_target_metric(),
@@ -329,15 +331,7 @@ def sorted_cases(
 
 
 def serialize_scorecard(scorecard: SlotResolverProviderScorecard) -> str:
-    return (
-        json.dumps(
-            asdict(scorecard),
-            ensure_ascii=False,
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n"
-    )
+    return serialize_dataclass_scorecard(scorecard)
 
 
 def write_scorecard(
@@ -458,12 +452,6 @@ def _provider_status(
     return "not_attempted"
 
 
-def _redacted_sha256(value: str | None) -> str | None:
-    if not value:
-        return None
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
 def _schema_bump_policy() -> str:
     return (
         "Additive fields keep the version; field removal, rename, or semantic "
@@ -476,10 +464,6 @@ def _target_metric() -> str:
         "per-slot LLM-resolvable score on provider-success cases; full runtime "
         "score and keyword-prior score are context only"
     )
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 if __name__ == "__main__":

@@ -154,7 +154,7 @@ Exit gate:
 - baseline numbers are written to the journal before 11.1 starts
 - reliability corpus exists and has an integrity/minimum-count test
 - later reliability pass-rate targets use the reliability corpus, not goldens authored later in the batch
-- manual smoke-suite harness shape, dry-run validation, redacted scorecard schema, workspace/model fixture requirements, create/revise/edit coverage, and initial baseline procedure are documented before behavior changes
+- manual smoke-suite harness shape, dry-run validation, redacted scorecard contract, workspace/model fixture requirements, create/revise/edit coverage, and initial baseline procedure are documented before behavior changes
 - manual smoke-suite regressions are either fixed or promoted into automated corpus/tests before a slice commits
 
 #### 11.0a — Frozen Reliability Corpus
@@ -1075,6 +1075,123 @@ cd backend && uv run pyright <11.5d touched source and test files>
 cd backend && uv run ruff check <11.5d touched source and test files>
 cd backend && uv run ruff format --check <11.5d touched source and test files>
 git diff --check -- <11.5d touched paths>
+```
+
+#### 11.6 — Local Manual API Smoke Harness
+
+Problem:
+
+The 11.5d compiler/dataflow fix closes the reported `Underlag till text` and
+`Inmatningsfält` failure at unit/integration-test level, but the product still
+needs a repeatable local API smoke path. The latest debug export showed a
+completed run whose DOCX looked plausible while the plan quality was wrong:
+metadata-only JSON displaced the transcript, optional runtime fields were
+inferred, and the final artifact step hid the upstream grounding problem. A
+manual screenshot or one-off API run is too weak to guard that class of
+regression.
+
+Why it matters:
+
+- The harness is the long-term feedback loop for whether Batch 11 actually
+  improves generated Flows, not just the compiler's local tests.
+- The runbook already defines six stable Swedish prompts, create/revise/edit
+  modes, redaction rules, and typed scorecard fields. Leaving that as prose
+  means future slices can drift into subjective manual testing.
+- The harness must measure mechanics from typed API responses where possible:
+  primary runtime input, form fields, step input/output compatibility, repair
+  count, and explicit underlag bindings. It must not score by reading free-text
+  explanations when the API should expose structured state.
+
+Canonical owners:
+
+| Concept | Owner | 11.6 decision |
+|---|---|---|
+| Manual eval cases | `backend/tests/integration/flows/ai_builder/benchmark/cases.py` | Reuse the existing AI Builder benchmark case owner for the six Swedish prompts, revisions, edit scenarios, and expected mechanics. |
+| Harness execution | `backend/tests/integration/flows/ai_builder/benchmark/manual_api_eval.py` | Local-only CLI owns dry-run validation, optional live API calls, OpenAPI operation checks, redaction, and scorecard serialization. |
+| Deterministic scoring | `backend/tests/integration/flows/ai_builder/benchmark/manual_api_scoring.py` | Typed scoring rules own underlag, runtime-field, chain-compatibility, redaction, and before/after comparison predicates. |
+| Redacted scorecard contract | frozen dataclasses in the benchmark harness | Dataclasses own the committed scorecard shape and `scorecard_schema_version`; no parallel JSON Schema. |
+| Local result storage policy | `docs/refactor/execution/batch-11-flow-ai-builder-reliability/manual-eval-results/README.md` plus `.gitignore` | Docs explain committed redacted scorecards; ignore rules enforce raw/local artifact exclusion. |
+| Automated safety net | focused benchmark tests | Tests pin typed cases, redaction, dry-run output, env-gated live mode, operation-id validation, and bad/good underlag fixture scoring. |
+
+Acceptance:
+
+- `--dry-run` validates typed cases, selected prompt/mode filters, scorecard
+  serialization, and local endpoint operation ids without calling the LLM. If
+  the local API is unreachable, it records endpoint validation as skipped rather
+  than claiming live API readiness.
+- The manifest includes exactly the six stable prompt ids from
+  `manual-eval-runbook.md`, plus typed revision/edit scenarios where the
+  current API can actually exercise them.
+- No new prompt text is introduced for the six stable prompts; the harness
+  references the existing `RELIABILITY_CORPUS_CASES` entries with
+  `CorpusSource.MANUAL_RUNBOOK`.
+- Serialized scorecards never include raw prompt text, API keys, uploaded file
+  contents, raw response bodies, transcripts, unredacted UUIDs, or unredacted
+  local artifacts.
+- Live mode is explicit and requires `ENEO_LOCAL_API_BASE`,
+  `ENEO_LOCAL_SPACE_ID`, and `ENEO_LOCAL_API_KEY`.
+- `uses_underlag_till_text_correctly` is deterministic: structured-JSON-to-text
+  boundaries that need earlier source material must bind both the immediate
+  structured JSON and at least one real prior text-producing step in
+  `input_bindings.question`.
+- `uses_runtime_input_fields_correctly` is deterministic: primary uploaded
+  audio/document/file inputs must not be duplicated as form fields, and inferred
+  optional metadata fields fail unless the typed case expects secondary runtime
+  fields.
+- The scorer includes one bad fixture matching the reported failure shape
+  (metadata JSON reaches a semantic text/protocol step without transcript
+  underlag and optional runtime fields are inferred) and one good fixture for
+  the 11.5d post-fix shape. Because no full plan envelope artifact is committed
+  for the user's live debug export, the bad fixture is a minimal synthesized
+  `PlannerPlanEnvelope.spec` fixture whose provenance cites the 11.5d journal
+  failure modes and mirrors only the relevant mechanics.
+- The harness can write one redacted JSON scorecard per prompt run and can
+  filter by prompt id and evaluation mode for small local reproductions.
+- The harness has one small SSE reader in `manual_api_eval.py`; tests cover
+  multi-line `data:` frames, comments/pings, terminal `done`, error-before-done,
+  and unknown-event warnings.
+- The harness validates required `operation_id` values against `/openapi.json`
+  in live mode before running prompts. Create/revise/edit checks require
+  `create_ai_builder_session`, `list_ai_builder_sessions`,
+  `send_ai_builder_message`, `get_ai_builder_session`,
+  `get_ai_builder_models`, `get_ai_builder_plan`,
+  `list_ai_builder_session_plans`, `cancel_ai_builder_session`,
+  `approve_ai_builder_plan`, `apply_ai_builder_plan`,
+  `revise_ai_builder_plan`, and `detach_ai_builder_attachment`. Executed-run
+  scoring additionally validates `create_flow_run`, `get_flow_graph`,
+  `list_flow_run_steps`, `get_flow_run_evidence_alias`,
+  `export_flow_run_evidence_alias`, and
+  `generate_flow_run_artifact_signed_url`.
+- Revision prompt scenarios do not use `/plans/{plan_id}/revise` for arbitrary
+  content changes while `RevisePlanRequest` only supports
+  `keep_current_description`; they are modeled as follow-up builder messages or
+  explicitly marked unsupported by the current API.
+- `scorecard_schema_version` changes invalidate prior baseline comparison
+  entirely. `derivation_rules_version` changes invalidate derived-field
+  comparison while still allowing observed-field comparison for matching prompt,
+  mode, model, and workspace fingerprints.
+- `repair_invoked` means at least one planner repair attempt was observed for
+  the proposal-producing turn, as surfaced through session telemetry; aggregate
+  repair rate is computed across scorecards.
+
+Non-goals:
+
+- No CI execution, production keys, production tenant data, committed raw
+  transcripts, committed uploaded files, or committed unredacted API payloads.
+- No hardcoded behavior for the six prompts.
+- No Flow runtime, Celery, migration, evidence-export, or frontend changes.
+- No attempt to make subjective prose scoring look typed. Natural-language
+  judgment stays in manual scores.
+- No literal local API key in committed docs, commands, scorecards, or artifacts.
+
+Validation:
+
+```bash
+cd backend && uv run pytest tests/integration/flows/ai_builder/benchmark/test_manual_api_eval.py tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py -q
+cd backend && uv run pyright tests/integration/flows/ai_builder/benchmark/manual_api_eval.py tests/integration/flows/ai_builder/benchmark/manual_api_scoring.py tests/integration/flows/ai_builder/benchmark/test_manual_api_eval.py tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py tests/integration/flows/ai_builder/benchmark/cases.py
+cd backend && uv run ruff check tests/integration/flows/ai_builder/benchmark/manual_api_eval.py tests/integration/flows/ai_builder/benchmark/manual_api_scoring.py tests/integration/flows/ai_builder/benchmark/test_manual_api_eval.py tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py tests/integration/flows/ai_builder/benchmark/cases.py
+cd backend && uv run ruff format --check tests/integration/flows/ai_builder/benchmark/manual_api_eval.py tests/integration/flows/ai_builder/benchmark/manual_api_scoring.py tests/integration/flows/ai_builder/benchmark/test_manual_api_eval.py tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py tests/integration/flows/ai_builder/benchmark/cases.py
+git diff --check -- backend/tests/integration/flows/ai_builder/benchmark docs/refactor/execution/batch-11-flow-ai-builder-reliability
 ```
 
 ## Behavior And Quality Gates

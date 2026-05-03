@@ -77,6 +77,12 @@ class SlotCoverageTag(str, Enum):
     AMBIGUOUS = "ambiguous"
 
 
+class ManualApiEvaluationMode(str, Enum):
+    CREATE_PLAN = "create_plan"
+    REVISE_PLAN = "revise_plan"
+    EDIT_EXISTING_FLOW = "edit_existing_flow"
+
+
 @dataclass(frozen=True, slots=True)
 class ExpectedSlot:
     name: str
@@ -107,6 +113,7 @@ class ReliabilityCorpusCase:
     expected_slots: tuple[ExpectedSlot, ...]
     expected_flow_shape: ExpectedFlowShape
     behavioral_risks: frozenset[BehavioralRisk]
+    expected_secondary_runtime_field_names: frozenset[str] = frozenset()
     domain_coupling: DomainCoupling = DomainCoupling.NEUTRAL
 
 
@@ -117,6 +124,15 @@ class SlotResolverCorpusCase:
     prompt: str
     expected_slots: tuple[ExpectedSlot, ...]
     coverage_tags: frozenset[SlotCoverageTag]
+
+
+@dataclass(frozen=True, slots=True)
+class ManualApiEvalScenario:
+    scenario_id: str
+    case_id: str
+    evaluation_mode: ManualApiEvaluationMode
+    follow_up_prompt: str | None = None
+    supported_by_current_api: bool = True
 
 
 def _expected_slots(*pairs: tuple[str, str]) -> tuple[ExpectedSlot, ...]:
@@ -594,6 +610,74 @@ RELIABILITY_CORPUS_CASES: tuple[ReliabilityCorpusCase, ...] = (
         ),
     ),
 )
+
+
+MANUAL_API_EVAL_CASE_IDS: tuple[str, ...] = (
+    "vague_audio_docx_sv",
+    "vague_multi_file_docx_sv",
+    "vague_report_pdf_sv",
+    "advanced_audio_meeting_docx_sv",
+    "advanced_multi_file_template_docx_sv",
+    "advanced_report_pdf_sections_sv",
+)
+
+MANUAL_API_EVAL_SCENARIOS: tuple[ManualApiEvalScenario, ...] = (
+    *(
+        ManualApiEvalScenario(
+            scenario_id=f"{case_id}__create_plan",
+            case_id=case_id,
+            evaluation_mode=ManualApiEvaluationMode.CREATE_PLAN,
+        )
+        for case_id in MANUAL_API_EVAL_CASE_IDS
+    ),
+    ManualApiEvalScenario(
+        scenario_id="vague_audio_docx_sv__revise_plan",
+        case_id="vague_audio_docx_sv",
+        evaluation_mode=ManualApiEvaluationMode.REVISE_PLAN,
+        follow_up_prompt=(
+            "Ändra planen så att Word-dokumentet också innehåller talare "
+            "och ungefärliga tidsmarkörer om det går."
+        ),
+        supported_by_current_api=False,
+    ),
+    ManualApiEvalScenario(
+        scenario_id="vague_multi_file_docx_sv__revise_plan",
+        case_id="vague_multi_file_docx_sv",
+        evaluation_mode=ManualApiEvaluationMode.REVISE_PLAN,
+        follow_up_prompt=(
+            "Lägg till att motsägande uppgifter mellan underlagen ska "
+            "markeras tydligt i dokumentet."
+        ),
+        supported_by_current_api=False,
+    ),
+    ManualApiEvalScenario(
+        scenario_id="vague_report_pdf_sv__revise_plan",
+        case_id="vague_report_pdf_sv",
+        evaluation_mode=ManualApiEvaluationMode.REVISE_PLAN,
+        follow_up_prompt=(
+            "Dela upp sammanfattningen efter rapportens rubriker och skriv "
+            "en kort slutsats per del."
+        ),
+        supported_by_current_api=False,
+    ),
+    ManualApiEvalScenario(
+        scenario_id="advanced_multi_file_template_docx_sv__revise_plan",
+        case_id="advanced_multi_file_template_docx_sv",
+        evaluation_mode=ManualApiEvaluationMode.REVISE_PLAN,
+        follow_up_prompt=(
+            'Ändra bara så att saknade uppgifter får texten "Saknas i '
+            'underlaget" i mallen.'
+        ),
+        supported_by_current_api=False,
+    ),
+)
+
+
+def manual_api_eval_cases(
+    cases: tuple[ReliabilityCorpusCase, ...] = RELIABILITY_CORPUS_CASES,
+) -> tuple[ReliabilityCorpusCase, ...]:
+    by_case_id = {case.case_id: case for case in cases}
+    return tuple(by_case_id[case_id] for case_id in MANUAL_API_EVAL_CASE_IDS)
 
 
 SLOT_RESOLVER_CORPUS_CASES: tuple[SlotResolverCorpusCase, ...] = (
