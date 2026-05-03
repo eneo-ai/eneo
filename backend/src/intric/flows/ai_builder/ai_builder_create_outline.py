@@ -29,24 +29,18 @@ from intric.flows.ai_builder.ai_builder_mcp_resources import (
     AIBuilderMCPResourceInput,
 )
 from intric.flows.ai_builder.ai_builder_models import (
-    InputSource,
     InputType,
     OutputMode,
     OutputType,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     MAX_STRUCTURED_FIELD_DEPTH,
-    DocumentDeliveryMode,
     NewStepDraft,
     StructuredFieldDraft,
 )
 from intric.flows.ai_builder.ai_builder_new_step_schema import (
     build_structured_field_schema,
     small_ref_enums,
-)
-from intric.flows.ai_builder.ai_builder_outline_pattern_chains import (
-    chain_requests_docx_template_fill,
-    realize_outline_pattern_chain,
 )
 from intric.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
@@ -58,8 +52,9 @@ from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     RuntimeInputFieldHint,
 )
 from intric.flows.ai_builder.ai_builder_step_skeleton import (
-    default_final_step_instructions,
-    default_final_step_name,
+    StepSkeletonOutputTypeDrift,
+    StepSkeletonSemanticContent,
+    materialize_step_skeleton,
 )
 from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from intric.flows.ai_builder.planning_state import (
@@ -74,10 +69,8 @@ OUTLINE_FLOW_TOOL_NAME = "outline_flow"
 # product cap for legitimate advanced flows.
 MAX_OUTLINE_STEPS = 256
 
-_FILE_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
 _DOCUMENT_OUTPUT_TYPES = {OutputType.DOCX, OutputType.PDF}
 _COMPARISON_FAN_IN_PATTERN_IDS = frozenset({"comparison"})
-_IMPLICIT_TEMPLATE_FILL_PATTERN_ID = "document_to_docx_template"
 _OUTLINE_STEP_BACKEND_OWNED_KEYS = frozenset(
     {
         "aggregate_prior_outputs",
@@ -539,15 +532,9 @@ def compile_outline_to_create_draft(
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
     )
-    outline_steps = _apply_server_pattern_chain(
-        steps=outline_steps,
-        runtime_input_type=runtime_input_type,
-        final_output_type=final_output_type,
-        context=context,
-    )
 
-    steps: list[NewStepDraft] = []
-    for index, outline_step in enumerate(outline_steps):
+    semantic_steps: list[StepSkeletonSemanticContent] = []
+    for outline_step in outline_steps:
         uses_form_fields = [
             field_name
             for field_name in outline_step.uses_input_fields
@@ -565,70 +552,29 @@ def compile_outline_to_create_draft(
                 )
             ]
         )
-        fan_in_required = _requires_server_owned_fan_in(
-            step_index=index,
-            step_count=len(outline_steps),
-            context=context,
-        )
-        output_type = _derive_step_output_type(
-            step=outline_step,
-            is_last=index == len(outline_steps) - 1,
-            final_output_type=final_output_type,
-        )
-        steps.append(
-            NewStepDraft(
-                name=outline_step.name,
-                instructions=outline_step.task,
-                input_source=_derive_step_input_source(
-                    step_index=index,
-                    fan_in_required=fan_in_required,
-                ),
-                input_type=_derive_step_input_type(
-                    step_index=index,
-                    runtime_input_type=runtime_input_type,
-                    prior_step=steps[-1] if steps else None,
-                    fan_in_required=fan_in_required,
-                    uses_form_fields=uses_form_fields,
-                ),
-                output_type=output_type,
-                runtime_upload=(index == 0 and runtime_input_type in _FILE_INPUT_TYPES),
-                runtime_required=(
-                    index == 0
-                    and runtime_input_type in _FILE_INPUT_TYPES
-                    and outline.runtime_input.required
-                ),
-                runtime_max_files=(
-                    outline.runtime_input.max_files
-                    if index == 0 and runtime_input_type in _FILE_INPUT_TYPES
-                    else None
-                ),
+        semantic_steps.append(
+            _semantic_content_from_outline_step(
+                outline_step,
                 uses_form_fields=uses_form_fields,
-                model_ref=outline_step.model_ref,
-                knowledge_refs=list(outline_step.knowledge_refs),
-                mcp_server_refs=list(outline_step.mcp_server_refs),
-                mcp_tool_refs=list(outline_step.mcp_tool_refs),
-                document_delivery_mode=_document_delivery_mode_for_step(
-                    output_type=output_type,
-                    is_last=index == len(outline_steps) - 1,
-                    context=context,
-                ),
-                citations_requested=(
-                    outline_step.citations_requested and output_type == OutputType.TEXT
-                ),
-                output_fields=(
-                    outline_step.output_fields
-                    if output_type == OutputType.JSON
-                    else None
-                ),
             )
         )
 
-    steps = _ensure_final_artifact_step(
-        steps=steps,
+    skeleton_plan = materialize_step_skeleton(
+        runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
-        context=context,
+        final_output_mode=(context.final_output_mode if context is not None else None),
+        pattern_ids=context.pattern_ids if context is not None else (),
+        chain_steps=context.pattern_chain_steps if context is not None else (),
+        aggregation_intent=(
+            context.aggregation_intent if context is not None else "linear"
+        ),
+        runtime_required=outline.runtime_input.required,
+        runtime_max_files=outline.runtime_input.max_files,
+        ui_language=context.ui_language if context is not None else None,
     )
-    steps = _ensure_required_server_owned_fan_in(steps=steps, context=context)
+    composition = skeleton_plan.compose(semantic_steps)
+    _log_skeleton_output_type_drifts(composition.output_type_drifts)
+    steps = list(composition.steps)
     steps = _attach_unreferenced_form_fields_to_final_step(
         steps=steps,
         known_field_order=known_field_order,
@@ -646,6 +592,42 @@ def compile_outline_to_create_draft(
         form_fields=form_fields,
         steps=steps,
     )
+
+
+def _semantic_content_from_outline_step(
+    step: OutlineStep,
+    *,
+    uses_form_fields: list[str],
+) -> StepSkeletonSemanticContent:
+    return StepSkeletonSemanticContent(
+        name=step.name,
+        instructions=step.task,
+        requested_output_type=(
+            OutputType(step.output_type) if step.output_type is not None else None
+        ),
+        output_fields=tuple(step.output_fields or ()),
+        uses_form_fields=tuple(uses_form_fields),
+        model_ref=step.model_ref,
+        knowledge_refs=tuple(step.knowledge_refs),
+        mcp_server_refs=tuple(step.mcp_server_refs),
+        mcp_tool_refs=tuple(step.mcp_tool_refs),
+        citations_requested=step.citations_requested,
+    )
+
+
+def _log_skeleton_output_type_drifts(
+    output_type_drifts: tuple[StepSkeletonOutputTypeDrift, ...],
+) -> None:
+    for drift in output_type_drifts:
+        logger.info(
+            "ai_builder_skeleton_semantic_output_type_drift",
+            extra={
+                "slot_id": drift.slot_id,
+                "slot_ordinal": drift.slot_ordinal,
+                "requested_output_type": drift.requested_output_type.value,
+                "enforced_output_type": drift.enforced_output_type.value,
+            },
+        )
 
 
 def attach_selected_mcp_refs_to_explicit_outline_steps(
@@ -1237,83 +1219,6 @@ def _compile_input_field(field: OutlineInputField) -> CreateFormFieldDraft:
     )
 
 
-def _apply_server_pattern_chain(
-    *,
-    steps: list[OutlineStep],
-    runtime_input_type: InputType,
-    final_output_type: OutputType,
-    context: OutlineCompileContext | None,
-) -> list[OutlineStep]:
-    pattern_ids, chain_steps = _pattern_context_for_compilation(
-        runtime_input_type=runtime_input_type,
-        final_output_type=final_output_type,
-        context=context,
-    )
-    return realize_outline_pattern_chain(
-        steps=steps,
-        runtime_input_type=runtime_input_type,
-        final_output_type=final_output_type,
-        pattern_ids=pattern_ids,
-        chain_steps=chain_steps,
-        make_step=_make_outline_step,
-    )
-
-
-def _pattern_context_for_compilation(
-    *,
-    runtime_input_type: InputType,
-    final_output_type: OutputType,
-    context: OutlineCompileContext | None,
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    if context is None:
-        return (), ()
-
-    pattern_ids = list(context.pattern_ids)
-    chain_steps = list(context.pattern_chain_steps)
-    if _should_add_implicit_template_fill_chain(
-        runtime_input_type=runtime_input_type,
-        final_output_type=final_output_type,
-        context=context,
-    ):
-        pattern = PATTERN_REGISTRY[_IMPLICIT_TEMPLATE_FILL_PATTERN_ID]
-        pattern_ids.append(pattern.id)
-        chain_steps.extend(
-            chain_step
-            for chain_step in pattern.chain_steps
-            if chain_step not in chain_steps
-        )
-    return tuple(pattern_ids), tuple(chain_steps)
-
-
-def _should_add_implicit_template_fill_chain(
-    *,
-    runtime_input_type: InputType,
-    final_output_type: OutputType,
-    context: OutlineCompileContext,
-) -> bool:
-    if _IMPLICIT_TEMPLATE_FILL_PATTERN_ID in context.pattern_ids:
-        return False
-    return (
-        runtime_input_type in _FILE_INPUT_TYPES
-        and final_output_type == OutputType.DOCX
-        and context.final_output_mode == OutputMode.TEMPLATE_FILL
-    )
-
-
-def _make_outline_step(
-    name: str,
-    task: str,
-    output_type: str | None,
-    output_fields: list[StructuredFieldDraft] | None,
-) -> OutlineStep:
-    return OutlineStep(
-        name=name,
-        task=task,
-        output_type=output_type,
-        output_fields=output_fields,
-    )
-
-
 def _normalize_structured_field_list(
     value: Any,
     *,
@@ -1546,198 +1451,6 @@ def _field_type_from_scalar(value: Any) -> str:
     if isinstance(value, dict):
         return "object"
     return "string"
-
-
-def _derive_step_output_type(
-    *,
-    step: OutlineStep,
-    is_last: bool,
-    final_output_type: OutputType,
-) -> OutputType:
-    if step.output_fields and step.output_type not in {
-        OutputType.DOCX.value,
-        OutputType.PDF.value,
-    }:
-        return OutputType.JSON
-    if step.output_type is not None:
-        return OutputType(step.output_type)
-    if step.output_fields:
-        return OutputType.JSON
-    if is_last:
-        return final_output_type
-    return OutputType.TEXT
-
-
-def _derive_step_input_source(
-    *,
-    step_index: int,
-    fan_in_required: bool,
-) -> InputSource:
-    if step_index == 0:
-        return InputSource.FLOW_INPUT
-    if fan_in_required:
-        return InputSource.ALL_PREVIOUS_STEPS
-    return InputSource.PREVIOUS_STEP
-
-
-def _derive_step_input_type(
-    *,
-    step_index: int,
-    runtime_input_type: InputType,
-    prior_step: NewStepDraft | None,
-    fan_in_required: bool,
-    uses_form_fields: list[str],
-) -> InputType:
-    if step_index == 0:
-        return runtime_input_type
-    if fan_in_required:
-        return InputType.TEXT
-    if uses_form_fields:
-        return InputType.TEXT
-    if prior_step is not None and prior_step.output_type == OutputType.JSON:
-        return InputType.JSON
-    return InputType.TEXT
-
-
-def _requires_server_owned_fan_in(
-    *,
-    step_index: int,
-    step_count: int,
-    context: OutlineCompileContext | None,
-) -> bool:
-    if context is None or step_index <= 0 or step_count < 3:
-        return False
-    if step_index != step_count - 1:
-        return False
-    return bool(_COMPARISON_FAN_IN_PATTERN_IDS & set(context.pattern_ids))
-
-
-def _ensure_required_server_owned_fan_in(
-    *,
-    steps: list[NewStepDraft],
-    context: OutlineCompileContext | None,
-) -> list[NewStepDraft]:
-    if len(steps) < 2 or context is None:
-        return steps
-    if not (
-        context.aggregation_intent in {"aggregate", "compare"}
-        or bool(_COMPARISON_FAN_IN_PATTERN_IDS & set(context.pattern_ids))
-    ):
-        return steps
-    if any(step.input_source == InputSource.ALL_PREVIOUS_STEPS for step in steps):
-        return steps
-
-    fan_in_index = _server_owned_fan_in_target_index(steps)
-    if fan_in_index is None:
-        return steps
-    return [
-        step.model_copy(
-            update={
-                "input_source": InputSource.ALL_PREVIOUS_STEPS,
-                "input_type": InputType.TEXT,
-            }
-        )
-        if index == fan_in_index
-        else step
-        for index, step in enumerate(steps)
-    ]
-
-
-def _server_owned_fan_in_target_index(steps: list[NewStepDraft]) -> int | None:
-    """Return the semantic synthesis step that should receive broad fan-in.
-
-    Template-fill DOCX steps are renderers: their own output_config bindings
-    perform document placement. Feed broad `all_previous_steps` into the last
-    semantic content step before such a renderer instead of the renderer itself.
-    Generated DOCX/PDF/text/json terminal steps still count as semantic writers.
-    """
-    for index in range(len(steps) - 1, 0, -1):
-        if _is_template_fill_renderer(steps[index]):
-            continue
-        return index
-    return None
-
-
-def _is_template_fill_renderer(step: NewStepDraft) -> bool:
-    return (
-        step.output_type == OutputType.DOCX
-        and step.document_delivery_mode == "template_fill"
-    )
-
-
-def _document_delivery_mode(output_type: OutputType) -> DocumentDeliveryMode:
-    if output_type in _DOCUMENT_OUTPUT_TYPES:
-        return "generated"
-    return "not_applicable"
-
-
-def _document_delivery_mode_for_step(
-    *,
-    output_type: OutputType,
-    is_last: bool,
-    context: OutlineCompileContext | None,
-) -> DocumentDeliveryMode:
-    if (
-        is_last
-        and output_type == OutputType.DOCX
-        and context is not None
-        and (
-            context.final_output_mode == OutputMode.TEMPLATE_FILL
-            or chain_requests_docx_template_fill(
-                pattern_ids=context.pattern_ids,
-                chain_steps=context.pattern_chain_steps,
-            )
-        )
-    ):
-        return "template_fill"
-    return _document_delivery_mode(output_type)
-
-
-def _ensure_final_artifact_step(
-    *,
-    steps: list[NewStepDraft],
-    final_output_type: OutputType,
-    context: OutlineCompileContext | None,
-) -> list[NewStepDraft]:
-    if not steps:
-        return steps
-    if steps[-1].output_type == final_output_type:
-        return steps
-    if final_output_type == OutputType.JSON:
-        return [
-            *steps[:-1],
-            steps[-1].model_copy(
-                update={
-                    "output_type": OutputType.JSON,
-                    "document_delivery_mode": "not_applicable",
-                }
-            ),
-        ]
-
-    return [
-        *steps,
-        NewStepDraft(
-            name=default_final_step_name(
-                final_output_type,
-                ui_language=context.ui_language if context is not None else None,
-            ),
-            instructions=default_final_step_instructions(
-                ui_language=context.ui_language if context is not None else None,
-            ),
-            input_source=InputSource.PREVIOUS_STEP,
-            input_type=(
-                InputType.JSON
-                if steps[-1].output_type == OutputType.JSON
-                else InputType.TEXT
-            ),
-            output_type=final_output_type,
-            document_delivery_mode=_document_delivery_mode_for_step(
-                output_type=final_output_type,
-                is_last=True,
-                context=context,
-            ),
-        ),
-    ]
 
 
 def _attach_unreferenced_form_fields_to_final_step(

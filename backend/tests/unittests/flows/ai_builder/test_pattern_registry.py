@@ -18,11 +18,11 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_outline_pattern_chains import (
-    compiled_chain_realizer_ids,
-)
 from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
+)
+from intric.flows.ai_builder.ai_builder_step_skeleton import (
+    materialized_compiled_pattern_ids,
 )
 from intric.flows.ai_builder.pattern_registry import (
     CHAIN_STEP_DESCRIPTORS,
@@ -344,8 +344,8 @@ class TestPositivePatternContract:
         assert COMPILED_CHAIN_PATTERN_IDS.isdisjoint(PLANNER_ONLY_CHAIN_PATTERN_IDS)
         assert chain_bearing_ids == classified_ids
 
-    def test_compiled_chain_patterns_have_realizers(self) -> None:
-        assert compiled_chain_realizer_ids() == COMPILED_CHAIN_PATTERN_IDS
+    def test_compiled_chain_patterns_have_skeleton_materializers(self) -> None:
+        assert materialized_compiled_pattern_ids() == COMPILED_CHAIN_PATTERN_IDS
 
     def test_every_chain_step_token_is_declared_in_manifest(self) -> None:
         """Chain tokens are backend/compiler vocabulary.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Literal
@@ -12,6 +13,7 @@ from intric.flows.ai_builder.ai_builder_models import (
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
+    NewStepDraft,
     StructuredFieldDraft,
 )
 from intric.flows.ai_builder.pattern_registry import (
@@ -45,6 +47,13 @@ _DOCX_TEMPLATE_PATTERN_ID = "document_to_docx_template"
 _STRUCTURED_QUALITY_PATTERN_ID = "multi_step_quality_chain"
 _AUDIO_ARTIFACT_PATTERN_ID = "audio_to_artifact_report"
 _COMPARISON_PATTERN_ID = "comparison"
+_COMPILED_PATTERN_MATERIALIZER_IDS = frozenset(
+    {
+        _DOCX_TEMPLATE_PATTERN_ID,
+        _STRUCTURED_QUALITY_PATTERN_ID,
+        _AUDIO_ARTIFACT_PATTERN_ID,
+    }
+)
 _FILE_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
 _DOCUMENT_OUTPUT_TYPES = {OutputType.DOCX, OutputType.PDF}
 _LEGAL_STEP_SKELETON_POLICIES = frozenset(
@@ -62,6 +71,36 @@ class CompiledChainStepTemplate:
 
     name: str
     task: str
+
+
+@dataclass(frozen=True, slots=True)
+class StepSkeletonSemanticContent:
+    name: str
+    instructions: str
+    requested_output_type: OutputType | None = None
+    output_fields: tuple[StructuredFieldDraft, ...] = ()
+    uses_form_fields: tuple[str, ...] = ()
+    model_ref: str | None = None
+    knowledge_refs: tuple[str, ...] = ()
+    mcp_server_refs: tuple[str, ...] = ()
+    mcp_tool_refs: tuple[str, ...] = ()
+    citations_requested: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class StepSkeletonOutputTypeDrift:
+    slot_id: str
+    slot_ordinal: int
+    requested_output_type: OutputType
+    enforced_output_type: OutputType
+
+
+@dataclass(frozen=True, slots=True)
+class StepSkeletonComposition:
+    """Create-draft steps plus semantic drift detected during skeleton fill."""
+
+    steps: tuple[NewStepDraft, ...]
+    output_type_drifts: tuple[StepSkeletonOutputTypeDrift, ...]
 
 
 _COMPILED_CHAIN_STEP_TEMPLATES = MappingProxyType(
@@ -195,6 +234,7 @@ class StepSkeletonPlan:
     minimum_semantic_slots: int = 1
     runtime_required: bool = True
     runtime_max_files: int | None = None
+    ui_language: str | None = None
 
     def __post_init__(self) -> None:
         if self.minimum_semantic_slots < 1:
@@ -231,6 +271,51 @@ class StepSkeletonPlan:
             ),
             runtime_required=self.runtime_required,
             runtime_max_files=self.runtime_max_files,
+        )
+
+    def compose(
+        self,
+        semantic_steps: Sequence[StepSkeletonSemanticContent],
+    ) -> StepSkeletonComposition:
+        """Fill semantic content into slots and return final create-step mechanics."""
+
+        slots = self.slots_for_semantic_count(len(semantic_steps))
+        steps: list[NewStepDraft] = []
+        output_type_drifts: list[StepSkeletonOutputTypeDrift] = []
+        semantic_index = 0
+
+        for slot in slots:
+            content: StepSkeletonSemanticContent | None = None
+            if slot.role == "semantic_required":
+                content = semantic_steps[semantic_index]
+                semantic_index += 1
+            step, drift = _compose_step_skeleton_slot(
+                slot=slot,
+                content=content,
+                prior_step=steps[-1] if steps else None,
+            )
+            steps.append(step)
+            if drift is not None:
+                output_type_drifts.append(drift)
+
+        if steps and steps[-1].output_type != self.final_output_type:
+            terminal_slot = _terminal_artifact_slot(
+                slot_ordinal=len(steps),
+                input_source=InputSource.PREVIOUS_STEP,
+                final_output_type=self.final_output_type,
+                final_output_mode=self.final_output_mode,
+                ui_language=self.ui_language,
+            )
+            terminal_step, _ = _compose_step_skeleton_slot(
+                slot=terminal_slot,
+                content=None,
+                prior_step=steps[-1],
+            )
+            steps.append(terminal_step)
+
+        return StepSkeletonComposition(
+            steps=tuple(steps),
+            output_type_drifts=tuple(output_type_drifts),
         )
 
     def _semantic_slot_at(
@@ -376,6 +461,7 @@ def materialize_step_skeleton(
     if _AUDIO_ARTIFACT_PATTERN_ID in compiled_pattern_ids:
         return _materialize_audio_artifact_skeleton(
             final_output_type=final_output_type,
+            aggregation_intent=aggregation_intent,
             runtime_required=runtime_required,
             runtime_max_files=runtime_max_files,
             ui_language=ui_language,
@@ -396,6 +482,7 @@ def materialize_step_skeleton(
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
         final_output_mode=final_output_mode,
+        aggregation_intent=aggregation_intent,
         runtime_required=runtime_required,
         runtime_max_files=runtime_max_files,
         ui_language=ui_language,
@@ -406,6 +493,119 @@ def compiled_chain_step_template(
     chain_token: ChainStepToken,
 ) -> CompiledChainStepTemplate:
     return _COMPILED_CHAIN_STEP_TEMPLATES[chain_token]
+
+
+def materialized_compiled_pattern_ids() -> frozenset[str]:
+    return _COMPILED_PATTERN_MATERIALIZER_IDS
+
+
+def _compose_step_skeleton_slot(
+    *,
+    slot: StepSkeleton,
+    content: StepSkeletonSemanticContent | None,
+    prior_step: NewStepDraft | None,
+) -> tuple[NewStepDraft, StepSkeletonOutputTypeDrift | None]:
+    output_type, output_type_drift = _compose_output_type(slot=slot, content=content)
+    input_type = _compose_input_type(
+        slot=slot,
+        content=content,
+        prior_step=prior_step,
+    )
+    if content is not None and output_type == OutputType.JSON:
+        output_fields = list(content.output_fields) or None
+    else:
+        output_fields = list(slot.output_fields) or None
+    return (
+        NewStepDraft(
+            name=content.name if content is not None else slot.default_name,
+            instructions=(
+                content.instructions
+                if content is not None
+                else slot.default_instructions
+            ),
+            input_source=slot.input_source,
+            input_type=input_type,
+            output_type=output_type,
+            model_ref=content.model_ref if content is not None else None,
+            knowledge_refs=list(content.knowledge_refs) if content is not None else [],
+            mcp_server_refs=(
+                list(content.mcp_server_refs) if content is not None else []
+            ),
+            mcp_tool_refs=list(content.mcp_tool_refs) if content is not None else [],
+            runtime_upload=slot.runtime_upload,
+            runtime_required=slot.runtime_required,
+            runtime_max_files=slot.runtime_max_files,
+            uses_form_fields=(
+                list(content.uses_form_fields) if content is not None else []
+            ),
+            document_delivery_mode=(
+                "not_applicable"
+                if output_type == OutputType.JSON
+                else slot.document_delivery_mode
+            ),
+            citations_requested=(
+                content is not None
+                and content.citations_requested
+                and output_type == OutputType.TEXT
+            ),
+            output_fields=output_fields,
+        ),
+        output_type_drift,
+    )
+
+
+def _compose_output_type(
+    *,
+    slot: StepSkeleton,
+    content: StepSkeletonSemanticContent | None,
+) -> tuple[OutputType, StepSkeletonOutputTypeDrift | None]:
+    if content is None:
+        return slot.output_type, None
+
+    if (
+        _semantic_content_requests_json(content)
+        and slot.output_type not in _DOCUMENT_OUTPUT_TYPES
+    ):
+        return OutputType.JSON, None
+
+    requested_output_type = content.requested_output_type
+    if requested_output_type is None or requested_output_type == slot.output_type:
+        return slot.output_type, None
+
+    return (
+        slot.output_type,
+        StepSkeletonOutputTypeDrift(
+            slot_id=slot.slot_id,
+            slot_ordinal=slot.slot_ordinal,
+            requested_output_type=requested_output_type,
+            enforced_output_type=slot.output_type,
+        ),
+    )
+
+
+def _semantic_content_requests_json(content: StepSkeletonSemanticContent) -> bool:
+    return (
+        bool(content.output_fields) or content.requested_output_type == OutputType.JSON
+    )
+
+
+def _compose_input_type(
+    *,
+    slot: StepSkeleton,
+    content: StepSkeletonSemanticContent | None,
+    prior_step: NewStepDraft | None,
+) -> InputType:
+    if slot.mechanics_policy == "locked":
+        return slot.input_type
+    if slot.input_source != InputSource.PREVIOUS_STEP or prior_step is None:
+        return slot.input_type
+    if slot.input_type != InputType.TEXT:
+        return slot.input_type
+    if content is not None and content.uses_form_fields:
+        return InputType.TEXT
+    if prior_step.output_type == OutputType.JSON:
+        return InputType.JSON
+    return slot.input_type
 
 
 def default_structured_output_fields() -> list[StructuredFieldDraft]:
@@ -653,6 +853,7 @@ def _materialize_docx_template_skeleton(
         ),
         runtime_required=runtime_required,
         runtime_max_files=runtime_max_files,
+        ui_language=ui_language,
     )
 
 
@@ -728,16 +929,24 @@ def _materialize_structured_quality_skeleton(
         semantic_output_policy="text_for_all_semantic",
         runtime_required=runtime_required,
         runtime_max_files=runtime_max_files,
+        ui_language=ui_language,
     )
 
 
 def _materialize_audio_artifact_skeleton(
     *,
     final_output_type: OutputType,
+    aggregation_intent: AggregationIntent,
     runtime_required: bool,
     runtime_max_files: int | None,
     ui_language: str | None,
 ) -> StepSkeletonPlan:
+    terminal_artifact_needed = final_output_type in _DOCUMENT_OUTPUT_TYPES
+    terminal_input_source = (
+        InputSource.ALL_PREVIOUS_STEPS
+        if aggregation_intent in {"aggregate", "compare"}
+        else InputSource.PREVIOUS_STEP
+    )
     return _skeleton_plan(
         prefix_slots=(
             _backend_fixed_slot(
@@ -757,10 +966,14 @@ def _materialize_audio_artifact_skeleton(
             slot_id="audio_analysis",
             input_source=InputSource.PREVIOUS_STEP,
             input_type=InputType.TEXT,
-            output_type=final_output_type,
+            output_type=OutputType.TEXT
+            if terminal_artifact_needed
+            else final_output_type,
             output_mode=OutputMode.PASS_THROUGH,
             document_delivery_mode=_document_delivery_mode_for_output(
-                output_type=final_output_type,
+                output_type=OutputType.TEXT
+                if terminal_artifact_needed
+                else final_output_type,
                 final_output_mode=None,
             ),
             default_name=_semantic_default_name(
@@ -773,12 +986,29 @@ def _materialize_audio_artifact_skeleton(
             ),
             ui_language=ui_language,
         ),
-        suffix_slots=(),
+        suffix_slots=(
+            (
+                _terminal_artifact_slot(
+                    slot_ordinal=2,
+                    input_source=terminal_input_source,
+                    final_output_type=final_output_type,
+                    final_output_mode=None,
+                    ui_language=ui_language,
+                ),
+            )
+            if terminal_artifact_needed
+            else ()
+        ),
         final_output_type=final_output_type,
         final_output_mode=None,
-        semantic_output_policy="final_output_on_last_semantic",
+        semantic_output_policy=(
+            "text_for_all_semantic"
+            if terminal_artifact_needed
+            else "final_output_on_last_semantic"
+        ),
         runtime_required=runtime_required,
         runtime_max_files=runtime_max_files,
+        ui_language=ui_language,
     )
 
 
@@ -837,6 +1067,7 @@ def _materialize_comparison_skeleton(
         fan_in_policy="last_semantic",
         runtime_required=runtime_required,
         runtime_max_files=runtime_max_files,
+        ui_language=ui_language,
     )
 
 
@@ -845,10 +1076,20 @@ def _materialize_linear_skeleton(
     runtime_input_type: InputType,
     final_output_type: OutputType,
     final_output_mode: OutputMode | None,
+    aggregation_intent: AggregationIntent,
     runtime_required: bool,
     runtime_max_files: int | None,
     ui_language: str | None,
 ) -> StepSkeletonPlan:
+    terminal_artifact_needed = final_output_type in _DOCUMENT_OUTPUT_TYPES
+    terminal_input_source = (
+        InputSource.ALL_PREVIOUS_STEPS
+        if aggregation_intent in {"aggregate", "compare"}
+        else InputSource.PREVIOUS_STEP
+    )
+    semantic_output_type = (
+        OutputType.TEXT if terminal_artifact_needed else final_output_type
+    )
     return _skeleton_plan(
         prefix_slots=(),
         semantic_slot=_semantic_required_slot(
@@ -856,15 +1097,19 @@ def _materialize_linear_skeleton(
             slot_id="final_response",
             input_source=InputSource.FLOW_INPUT,
             input_type=runtime_input_type,
-            output_type=final_output_type,
+            output_type=semantic_output_type,
             output_mode=_final_output_mode(
                 input_type=runtime_input_type,
-                final_output_type=final_output_type,
-                final_output_mode=final_output_mode,
+                final_output_type=semantic_output_type,
+                final_output_mode=None
+                if terminal_artifact_needed
+                else final_output_mode,
             ),
             document_delivery_mode=_document_delivery_mode_for_output(
-                output_type=final_output_type,
-                final_output_mode=final_output_mode,
+                output_type=semantic_output_type,
+                final_output_mode=None
+                if terminal_artifact_needed
+                else final_output_mode,
             ),
             runtime_required=runtime_required,
             runtime_max_files=runtime_max_files,
@@ -878,12 +1123,29 @@ def _materialize_linear_skeleton(
             ),
             ui_language=ui_language,
         ),
-        suffix_slots=(),
+        suffix_slots=(
+            (
+                _terminal_artifact_slot(
+                    slot_ordinal=1,
+                    input_source=terminal_input_source,
+                    final_output_type=final_output_type,
+                    final_output_mode=final_output_mode,
+                    ui_language=ui_language,
+                ),
+            )
+            if terminal_artifact_needed
+            else ()
+        ),
         final_output_type=final_output_type,
         final_output_mode=final_output_mode,
-        semantic_output_policy="final_output_on_last_semantic",
+        semantic_output_policy=(
+            "text_for_all_semantic"
+            if terminal_artifact_needed
+            else "final_output_on_last_semantic"
+        ),
         runtime_required=runtime_required,
         runtime_max_files=runtime_max_files,
+        ui_language=ui_language,
     )
 
 
@@ -1017,6 +1279,7 @@ def _skeleton_plan(
     fan_in_policy: SemanticFanInPolicy = "none",
     runtime_required: bool,
     runtime_max_files: int | None,
+    ui_language: str | None,
 ) -> StepSkeletonPlan:
     return StepSkeletonPlan(
         prefix_slots=prefix_slots,
@@ -1028,6 +1291,7 @@ def _skeleton_plan(
         fan_in_policy=fan_in_policy,
         runtime_required=runtime_required,
         runtime_max_files=runtime_max_files,
+        ui_language=ui_language,
     )
 
 

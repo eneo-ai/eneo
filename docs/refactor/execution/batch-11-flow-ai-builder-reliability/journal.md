@@ -2,7 +2,7 @@
 
 ## Status
 
-11.1a IMPLEMENTATION COMPLETE
+11.1b IMPLEMENTATION COMPLETE
 
 ## Starting Point
 
@@ -14,7 +14,9 @@
   - `scripts/run_codex_review.sh`
   - `PRODUCT.md`
   - `docs/refactor/goals.md`
-- Source implementation in this pass: 11.0a reliability corpus and integrity test
+- Slices recorded in this journal: 11.0a reliability corpus, 11.0b proposal
+  measurement, 11.1a step skeleton ownership, and 11.1b skeleton fill
+  integration.
 
 ## 11.0a Slice Plan
 
@@ -618,11 +620,87 @@ change: one server-action assertion, missing local WeasyPrint native
 libraries (`libgobject-2.0-0`), and import-linter source-module drift. Focused
 tests for the touched owner and existing compiler/pattern behavior pass.
 
-### Carry-Forward To 11.1b
+## 11.1b StepSkeleton Fill And Compile Integration
 
-| Item | Reason |
+### Scope
+
+Rewired create-outline compilation to consume `materialize_step_skeleton` and
+`StepSkeletonPlan.compose`. Deleted the old outline pattern-chain realization
+module and the duplicate create-outline mechanics helpers.
+
+### Source Changes
+
+| Area | Evidence | Decision |
+|---|---|---|
+| Skeleton composition | `backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py:99`, `backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py:276` | Added typed composition result/drift data and made `StepSkeletonPlan.compose` the final create-step mechanics resolver. |
+| Create-outline compile path | `backend/src/intric/flows/ai_builder/ai_builder_create_outline.py:507`, `backend/src/intric/flows/ai_builder/ai_builder_create_outline.py:562`, `backend/src/intric/flows/ai_builder/ai_builder_create_outline.py:575` | The compiler now parses/folds semantic outline content, materializes a skeleton, composes `NewStepDraft`s, logs drift, and returns the draft. |
+| Deleted parallel mechanics path | `backend/src/intric/flows/ai_builder/ai_builder_outline_pattern_chains.py` | Removed the old chain realizer and create-outline `_derive_step_*` / terminal-step / fan-in helper path. |
+| Compiled chain coverage | `backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py:498`, `backend/tests/unittests/flows/ai_builder/test_pattern_registry.py:347` | `materialized_compiled_pattern_ids()` replaces the old realizer-id guard so registry compiled chains cannot drift from skeleton materializers. |
+| Artifact suffixes | `backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py:936`, `backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py:1074` | Linear and audio DOCX/PDF paths now use semantic text slots plus backend terminal artifact suffixes. |
+| Locked mechanics | `backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py:592` | Backend-fixed slots keep their declared input type even if previous semantic slots emit JSON. |
+| Drift logging | `backend/src/intric/flows/ai_builder/ai_builder_create_outline.py:618` | Explicit semantic output-type conflicts are logged as `ai_builder_skeleton_semantic_output_type_drift`. |
+
+### Test Changes
+
+| Coverage | Evidence |
 |---|---|
-| Make `compile_outline_to_create_draft` consume `materialize_step_skeleton`. | 11.1a intentionally introduces the typed owner without changing proposal behavior. |
-| Delete or move `_derive_step_output_type`, `_derive_step_input_source`, `_derive_step_input_type`, `_requires_server_owned_fan_in`, `_ensure_required_server_owned_fan_in`, `_document_delivery_mode_for_step`, and `_ensure_final_artifact_step`. | These helpers still own mechanics in the old compiler path and should collapse into the skeleton owner in 11.1b. |
-| Delete equivalence tests once compiler consumes the skeleton directly. | They are transition guards between independent old/new derivations; after integration they become same-source assertions. |
-| Watch `ai_builder_step_skeleton.py` size during integration. | The file is responsibility-coherent but large; if 11.1b moves more helper logic into it, split defaults/helpers by ownership tier rather than letting the module grow unbounded. |
+| Linear artifact terminal suffix | `backend/tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py:238` |
+| Typed output-type drift data | `backend/tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py:276` |
+| Compose fallback terminal text after structured semantic content | `backend/tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py:309` |
+| Backend-fixed locked input type after structured semantic outputs | `backend/tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py:332` |
+| Audio-to-DOCX skeleton terminal artifact | `backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py:2060` |
+| Audio aggregate fan-in on terminal artifact | `backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py:2115` |
+| Requested JSON intermediate preservation | `backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py:2753` |
+| Semantic output-type drift log contract | `backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py:2781` |
+
+### Claude Peer Review
+
+| Iteration | Artifact | Verdict | Green light | Minimum score | Outcome |
+|---:|---|---|---|---:|---|
+| 1 | `.codex/artifacts/claude-peer-loop-batch-11-1b-step-skeleton-fill-plan-20260503T015736Z.md` | `changes_required` | `no` | 5 | Rejected separate fill module and missing terminal artifact suffixes. |
+| 2 | `.codex/artifacts/claude-peer-loop-batch-11-1b-step-skeleton-fill-plan-verification-20260503T020242Z.md` | `green` | `yes` | 7 | Accepted `StepSkeletonPlan.compose` as the canonical resolver with clarifications. |
+| 3 | `.codex/artifacts/claude-peer-loop-batch-11-1b-step-skeleton-fill-implementation-20260503T021655Z.md` | `green` | `yes` | 7 | Accepted implementation, with hardening suggestions for locked slots and compose fallback coverage. |
+| 4 | `.codex/artifacts/claude-peer-loop-batch-11-1b-step-skeleton-fill-final-verification-20260503T022224Z.md` | `green` | `yes` | 8 | Content green, wrapper parse failed because the response was nested in summary tags. |
+| 5 | `.codex/artifacts/claude-peer-loop-batch-11-1b-step-skeleton-fill-final-verification-contract-20260503T022312Z.md` | `green` | `yes` | 8 | Parser-clean final green light. |
+
+### Accepted Claude Findings
+
+| Finding | Resolution |
+|---|---|
+| Separate fill module would become a second mechanics owner. | Put fill on `StepSkeletonPlan.compose`. |
+| Linear/audio artifact paths would let an LLM-authored semantic step emit DOCX/PDF directly. | Added backend `TERMINAL_ARTIFACT_STEP` suffixes for generated DOCX/PDF. |
+| Pattern-chain deletion needed a replacement invariant. | Added `materialized_compiled_pattern_ids()` and rewired the registry test. |
+| Audio aggregate fan-in slot was ambiguous. | Pinned generated-artifact fan-in to the terminal artifact slot. |
+| Locked backend-fixed slots could still have input type flipped by prior JSON. | Added locked-policy guard and a structured-quality regression test. |
+| Compose fallback was untested and had a dead drift branch. | Added fallback coverage and removed the dead branch. |
+
+### Validation
+
+| Command | Result |
+|---|---|
+| `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_pattern_registry.py -q` | Passed: `140 passed`. |
+| `cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_step_skeleton.py src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_pattern_registry.py` | Passed: `0 errors, 0 warnings, 0 informations`. |
+| `cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_step_skeleton.py src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_pattern_registry.py` | Passed. |
+| `cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_step_skeleton.py src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_pattern_registry.py` | Passed: `5 files already formatted`. |
+| `cd backend && uv run lint-imports --no-cache` | Passed: 3 contracts kept, 0 broken. |
+| `git diff --check -- <11.1b touched paths>` | Passed. |
+| `./scripts/gate-local/anti_slippage.sh --worktree` | Passed: `anti-slippage: worktree clean`. |
+| `cd backend && uv run pytest tests/unittests/flows/ai_builder -q` | Failed on known unrelated/environmental surfaces: one server-action wording assertion, four missing WeasyPrint native-library failures for `libgobject-2.0-0`, and import-linter source-module drift. Passing count before those failures: `1685 passed`; failures: `6`. |
+
+### Carry-Forward
+
+| Item | Owner slice |
+|---|---|
+| Typed architecture error surface and critic invariant classification. | 11.1c |
+| Edit-path fill/preserve/reject mechanics. | 11.1c |
+| Potential split of `ai_builder_step_skeleton.py` if 11.1c adds substantial materializer/compose code. | 11.1c |
+| Generalize `StepSkeletonOutputTypeDrift` only if 11.1c needs additional drift classes. | 11.1c |
+
+### 11.1a Carry-Forward Closed In 11.1b
+
+| Item | 11.1b closure |
+|---|---|
+| Make `compile_outline_to_create_draft` consume `materialize_step_skeleton`. | Done through `StepSkeletonPlan.compose`. |
+| Delete or move `_derive_step_output_type`, `_derive_step_input_source`, `_derive_step_input_type`, `_requires_server_owned_fan_in`, `_ensure_required_server_owned_fan_in`, `_document_delivery_mode_for_step`, and `_ensure_final_artifact_step`. | Done; create-outline no longer owns those mechanics helpers. |
+| Delete equivalence tests once compiler consumes the skeleton directly. | Done; replacement tests assert behavior through the compiler and registry invariant. |
+| Watch `ai_builder_step_skeleton.py` size during integration. | Carried to 11.1c as a split trigger if more compose/materializer code is added. |

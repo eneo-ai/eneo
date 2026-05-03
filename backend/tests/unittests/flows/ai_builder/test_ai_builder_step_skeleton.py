@@ -18,6 +18,8 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.ai_builder.ai_builder_step_skeleton import (
     _LEGAL_STEP_SKELETON_POLICIES,
     StepSkeleton,
+    StepSkeletonSemanticContent,
+    default_structured_output_fields,
     materialize_step_skeleton,
 )
 from intric.flows.ai_builder.pattern_registry import (
@@ -117,18 +119,21 @@ def test_materialize_audio_artifact_skeleton() -> None:
     assert [slot.role for slot in skeleton] == [
         "backend_fixed",
         "semantic_required",
+        "backend_fixed",
     ]
     assert [slot.chain_token for slot in skeleton] == [
         FLOW_INPUT_AUDIO_TRANSCRIPTION,
         None,
+        TERMINAL_ARTIFACT_STEP,
     ]
     assert _skeleton_type_modes(skeleton) == [
         ("audio", "text", "transcribe_only"),
+        ("text", "text", "pass_through"),
         ("text", "pdf", "pass_through"),
     ]
     assert skeleton[0].runtime_upload is True
     assert skeleton[0].runtime_required is True
-    assert skeleton[1].document_delivery_mode == "generated"
+    assert skeleton[2].document_delivery_mode == "generated"
 
 
 def test_materialize_template_fill_mode_without_pattern_uses_docx_chain() -> None:
@@ -224,6 +229,29 @@ def test_materialize_linear_skeleton_expands_semantic_step_count() -> None:
     ]
 
 
+def test_linear_artifact_skeleton_keeps_backend_terminal_artifact_slot() -> None:
+    plan = materialize_step_skeleton(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.DOCX,
+        final_output_mode=OutputMode.PASS_THROUGH,
+        pattern_ids=(),
+        chain_steps=(),
+    )
+    skeleton = plan.slots_for_semantic_count(2)
+
+    assert [slot.chain_token for slot in skeleton] == [
+        None,
+        None,
+        TERMINAL_ARTIFACT_STEP,
+    ]
+    assert _skeleton_type_modes(skeleton) == [
+        ("document", "text", "pass_through"),
+        ("text", "text", "pass_through"),
+        ("text", "docx", "pass_through"),
+    ]
+    assert skeleton[-1].document_delivery_mode == "generated"
+
+
 def test_materialize_comparison_skeleton_places_fan_in_on_last_semantic() -> None:
     plan = materialize_step_skeleton(
         runtime_input_type=InputType.DOCUMENT,
@@ -248,6 +276,93 @@ def test_materialize_comparison_skeleton_places_fan_in_on_last_semantic() -> Non
     ]
     assert two_step_skeleton[0].runtime_upload is True
     assert all(slot.runtime_upload is False for slot in two_step_skeleton[1:])
+
+
+def test_skeleton_composition_records_output_type_drift() -> None:
+    plan = materialize_step_skeleton(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.DOCX,
+        final_output_mode=OutputMode.PASS_THROUGH,
+        pattern_ids=(),
+        chain_steps=(),
+    )
+
+    composition = plan.compose(
+        [
+            StepSkeletonSemanticContent(
+                name="Draft report",
+                instructions="Draft the report narrative.",
+                requested_output_type=OutputType.PDF,
+            )
+        ]
+    )
+
+    assert [step.output_type.value for step in composition.steps] == ["text", "docx"]
+    assert len(composition.output_type_drifts) == 1
+    drift = composition.output_type_drifts[0]
+    assert drift.slot_id == "final_response"
+    assert drift.slot_ordinal == 0
+    assert drift.requested_output_type == OutputType.PDF
+    assert drift.enforced_output_type == OutputType.TEXT
+
+
+def test_skeleton_composition_appends_terminal_text_after_structured_semantic() -> None:
+    plan = materialize_step_skeleton(
+        runtime_input_type=InputType.TEXT,
+        final_output_type=OutputType.TEXT,
+        final_output_mode=OutputMode.PASS_THROUGH,
+        pattern_ids=(),
+        chain_steps=(),
+    )
+
+    composition = plan.compose(
+        [
+            StepSkeletonSemanticContent(
+                name="Extract structure",
+                instructions="Extract structured source data.",
+                output_fields=tuple(default_structured_output_fields()),
+            )
+        ]
+    )
+
+    assert [step.output_type.value for step in composition.steps] == ["json", "text"]
+    assert composition.steps[-1].name == "Create final answer"
+
+
+def test_backend_fixed_slots_keep_locked_input_type_after_structured_semantics() -> (
+    None
+):
+    plan = materialize_step_skeleton(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.PDF,
+        final_output_mode=OutputMode.PASS_THROUGH,
+        pattern_ids=("multi_step_quality_chain",),
+        chain_steps=_chain_steps("multi_step_quality_chain"),
+    )
+
+    composition = plan.compose(
+        [
+            StepSkeletonSemanticContent(
+                name="Extract section data",
+                instructions="Extract section data.",
+                output_fields=tuple(default_structured_output_fields()),
+            ),
+            StepSkeletonSemanticContent(
+                name="Extract risk data",
+                instructions="Extract risk data.",
+                output_fields=tuple(default_structured_output_fields()),
+            ),
+        ]
+    )
+
+    assert [step.name for step in composition.steps] == [
+        "Extract structured foundation",
+        "Extract section data",
+        "Extract risk data",
+        "Review quality and gaps",
+        "Create PDF",
+    ]
+    assert composition.steps[3].input_type == InputType.TEXT
 
 
 @pytest.mark.parametrize("semantic_step_count", [1, 2, 3])

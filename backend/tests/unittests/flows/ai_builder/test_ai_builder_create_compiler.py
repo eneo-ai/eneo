@@ -1021,10 +1021,10 @@ def test_parse_outline_flow_errors_are_safe_and_field_level() -> None:
     assert "input_value" not in message
 
 
-def test_parse_outline_flow_ignores_backend_owned_legacy_step_mechanics() -> None:
+def test_parse_outline_flow_ignores_stale_backend_owned_step_mechanics() -> None:
     outline = parse_outline_flow_arguments(
         {
-            "flow_name": "Legacy-shaped outline",
+            "flow_name": "Stale mechanics outline",
             "plan_rationale": "Stale models may emit low-level mechanics.",
             "steps": [
                 {
@@ -1175,7 +1175,7 @@ def test_outline_flow_truncates_over_deep_structured_fields_before_draft_validat
     assert level_three.fields is None
 
 
-def test_parse_outline_flow_allows_advanced_step_counts_above_legacy_limit() -> None:
+def test_parse_outline_flow_allows_advanced_step_counts_above_old_limit() -> None:
     outline = parse_outline_flow_arguments(
         {
             "flow_name": "Advanced workflow",
@@ -1202,7 +1202,7 @@ def test_parse_outline_flow_allows_advanced_step_counts_above_legacy_limit() -> 
     assert validation.valid
 
 
-def test_parse_outline_flow_allows_advanced_step_counts_above_legacy_soft_cap() -> None:
+def test_parse_outline_flow_allows_advanced_step_counts_above_old_soft_cap() -> None:
     outline = parse_outline_flow_arguments(
         {
             "flow_name": "Very advanced workflow",
@@ -1988,12 +1988,17 @@ def test_compile_outline_flow_uses_server_architecture_context_for_core_shape() 
     compiled = compile_create_draft(draft)
     validation = validate_spec(compiled)
 
-    assert [step.output_type.value for step in draft.steps] == ["text", "text", "pdf"]
+    assert [step.output_type.value for step in draft.steps] == [
+        "text",
+        "text",
+        "text",
+        "pdf",
+    ]
     assert draft.steps[0].input_type.value == "audio"
     assert draft.steps[0].runtime_upload is True
-    assert draft.steps[2].document_delivery_mode == "generated"
+    assert draft.steps[3].document_delivery_mode == "generated"
     assert compiled.steps[0].input_config["runtime_input"]["input_format"] == "audio"
-    assert compiled.steps[2].output_type.value == "pdf"
+    assert compiled.steps[3].output_type.value == "pdf"
     assert validation.valid
 
 
@@ -2038,15 +2043,122 @@ def test_compile_outline_flow_inserts_audio_transcription_for_single_artifact_st
     assert [step.name for step in draft.steps] == [
         "Transcribe audio",
         "Create report",
+        "Create PDF",
     ]
     assert draft.steps[0].input_type.value == "audio"
     assert draft.steps[0].output_type.value == "text"
     assert draft.steps[0].runtime_upload is True
     assert draft.steps[1].input_source.value == "previous_step"
     assert draft.steps[1].input_type.value == "text"
-    assert draft.steps[1].output_type.value == "pdf"
+    assert draft.steps[1].output_type.value == "text"
+    assert draft.steps[2].output_type.value == "pdf"
     assert compiled.steps[0].output_mode.value == "transcribe_only"
-    assert compiled.steps[1].output_type.value == "pdf"
+    assert compiled.steps[2].output_type.value == "pdf"
+    assert validation.valid
+
+
+def test_compile_outline_flow_audio_to_docx_uses_skeleton_terminal_artifact() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Audio DOCX report",
+            "plan_rationale": "Create a DOCX report from uploaded audio.",
+            "steps": [
+                {
+                    "name": "Summarize recording",
+                    "task": "Summarize the transcribed audio.",
+                }
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="audio",
+                    output_type="docx",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["audio_to_artifact_report"],
+            required_capabilities=["input_audio", "output_mode_pass_through"],
+        )
+    )
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state),
+    )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert [step.name for step in draft.steps] == [
+        "Transcribe audio",
+        "Summarize recording",
+        "Create DOCX",
+    ]
+    assert [step.input_type.value for step in draft.steps] == [
+        "audio",
+        "text",
+        "text",
+    ]
+    assert [step.output_type.value for step in draft.steps] == [
+        "text",
+        "text",
+        "docx",
+    ]
+    assert compiled.steps[0].output_mode.value == "transcribe_only"
+    assert compiled.steps[-1].output_type.value == "docx"
+    assert validation.valid
+
+
+def test_compile_outline_flow_audio_artifact_aggregate_fan_in_lands_on_terminal() -> (
+    None
+):
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Aggregate audio report",
+            "plan_rationale": "Aggregate several analyses into one PDF.",
+            "steps": [
+                {"name": "Extract themes", "task": "Extract main themes."},
+                {"name": "Assess risks", "task": "Assess risks in the recording."},
+                {"name": "Synthesize", "task": "Synthesize all prior work."},
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="audio",
+                    output_type="pdf",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["audio_to_artifact_report"],
+            required_capabilities=["input_audio", "output_mode_pass_through"],
+            aggregation_intent="aggregate",
+        )
+    )
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state),
+    )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert [step.name for step in draft.steps] == [
+        "Transcribe audio",
+        "Extract themes",
+        "Assess risks",
+        "Synthesize",
+        "Create PDF",
+    ]
+    assert draft.steps[-1].input_source.value == "all_previous_steps"
+    assert draft.steps[-1].input_type.value == "text"
+    assert compiled.steps[-1].input_bindings is None
     assert validation.valid
 
 
@@ -2447,7 +2559,7 @@ def test_compile_outline_flow_realizes_structured_quality_chain_from_pattern() -
         "Extract structured foundation",
         "Analyze material",
         "Review quality and gaps",
-        "Create final output",
+        "Create PDF",
     ]
     assert [step.output_type.value for step in draft.steps] == [
         "json",
@@ -2547,7 +2659,7 @@ def test_compile_outline_flow_quality_chain_preserves_all_semantic_steps() -> No
         "Analyze material",
         "Draft report",
         "Review quality and gaps",
-        "Create final output",
+        "Create PDF",
     ]
     assert compiled.steps[-1].output_type.value == "pdf"
     assert validation.valid
@@ -2596,7 +2708,7 @@ def test_compile_outline_flow_quality_chain_wraps_rich_outline_from_pattern() ->
         "Phase 3",
         "Phase 4",
         "Review quality and gaps",
-        "Create final output",
+        "Create PDF",
     ]
     assert draft.steps[-1].output_type.value == "pdf"
     assert compiled.steps[-1].output_type.value == "pdf"
@@ -2636,6 +2748,72 @@ def test_compile_outline_flow_treats_output_fields_as_structured_signal() -> Non
     assert draft.steps[0].output_fields is not None
     assert compiled.steps[1].input_type.value == "json"
     assert compiled.steps[1].input_contract == compiled.steps[0].output_contract
+
+
+def test_compile_outline_flow_preserves_requested_json_intermediate() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Structured intermediate",
+            "plan_rationale": "Create an intermediate JSON result before prose.",
+            "runtime_input": {"input_type": "text", "required": True},
+            "final_output_type": "text",
+            "steps": [
+                {
+                    "name": "Build structure",
+                    "task": "Create structured intermediate data.",
+                    "output_type": "json",
+                },
+                {"name": "Write answer", "task": "Write the final answer."},
+            ],
+        }
+    )
+
+    draft = compile_outline_to_create_draft(outline)
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert draft.steps[0].output_type.value == "json"
+    assert draft.steps[1].input_type.value == "json"
+    assert compiled.steps[1].input_bindings is None
+    assert validation.valid
+
+
+def test_compile_outline_flow_logs_semantic_output_type_drift(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "DOCX report",
+            "plan_rationale": "Backend owns the artifact output.",
+            "runtime_input": {"input_type": "document", "required": True},
+            "final_output_type": "docx",
+            "steps": [
+                {
+                    "name": "Write report",
+                    "task": "Write report content.",
+                    "output_type": "pdf",
+                }
+            ],
+        }
+    )
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="intric.flows.ai_builder.ai_builder_create_outline",
+    ):
+        draft = compile_outline_to_create_draft(outline)
+    drift_records = [
+        record
+        for record in caplog.records
+        if record.message == "ai_builder_skeleton_semantic_output_type_drift"
+    ]
+
+    assert [step.output_type.value for step in draft.steps] == ["text", "docx"]
+    assert len(drift_records) == 1
+    assert getattr(drift_records[0], "slot_id") == "final_response"
+    assert getattr(drift_records[0], "slot_ordinal") == 0
+    assert getattr(drift_records[0], "requested_output_type") == "pdf"
+    assert getattr(drift_records[0], "enforced_output_type") == "text"
 
 
 def test_compile_outline_flow_default_outline_stays_linear() -> None:
