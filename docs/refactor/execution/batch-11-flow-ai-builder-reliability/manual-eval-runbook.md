@@ -108,6 +108,15 @@ If the workspace fixture changes between slices, the comparison is invalid until
 a new baseline is recorded. Do not treat fixture drift as an AI Builder quality
 regression.
 
+Local audio fixture for live run validation:
+
+```text
+./utvecklingssamtal.mp3
+```
+
+Use this only as a local smoke fixture for audio upload/run checks. Do not commit
+the uploaded file, raw transcript, DOCX/PDF artifact, or evidence bundle.
+
 ## Endpoint Snapshot
 
 This table is a local test snapshot. The implementation agent should verify it
@@ -129,6 +138,27 @@ runbook age silently.
 | POST | `/api/v1/flows/ai-builder/plans/{plan_id}/approve` | Approve a generated plan when the runbook path reaches approval. |
 | POST | `/api/v1/flows/ai-builder/plans/{plan_id}/apply` | Apply an approved plan only when the slice explicitly validates applied flow shape. |
 | POST | `/api/v1/flows/ai-builder/plans/{plan_id}/revise` | Test edit/revise parity only in slices that scope edit behavior. |
+| GET | `/api/v1/flows/{id}/graph/` | Inspect applied Flow graph shape after apply. |
+| GET | `/api/v1/flows/{id}/runs/{run_id}/steps/` | Inspect typed step outputs after a run. |
+| GET | `/api/v1/flows/{id}/runs/{run_id}/evidence/` | Inspect evidence trace for source grounding and artifact derivation. |
+| GET | `/api/v1/flows/{id}/runs/{run_id}/evidence/export` | Export the local evidence bundle for manual inspection outside git. |
+| POST | `/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/` | Fetch generated artifacts for local visual/manual QA when a run produces a file. |
+
+## Runtime Input, Form Fields, And Underlag
+
+Use these terms consistently in manual evaluation:
+
+| Concept | What it means | Good AI Builder behavior | Failure signal |
+|---|---|---|---|
+| Primary runtime input | The main material supplied when the Flow runs, such as uploaded audio, documents, files, or a text prompt. | One clear `flow_input` owner with `input_config.runtime_input.enabled=true` for file-capable inputs. | Duplicates the upload as a form field, or asks whether audio/document input is needed when the prompt already says so. |
+| `Inmatningsfält` | Small secondary values the runner fills in, such as audience, case id, date, priority, or desired format details. | Adds fields only when the value is genuinely needed at run time and not already part of the uploaded material. | Creates fields for the primary file/audio/document, or invents unnecessary metadata questions. |
+| `Underlag till text` | The compiled `input_bindings.question` material sent into a step when implicit previous-step input is not enough. | Uses explicit bindings for form fields, selected structured JSON fields, or multi-source composition; otherwise relies on the normal previous-step chain. | Feeds a text/DOCX/PDF step a metadata-only JSON object, or loses source grounding by not referencing `previous.output.structured` where needed. |
+
+An explicit `input_bindings.question` replaces the step's implicit runtime
+input. A step with runtime upload and explicit underlag must therefore include
+the actual `step_input.*` reference. For ordinary linear previous-step chains,
+the absence of underlag is correct; for JSON-to-text boundaries, the harness
+should verify that the structured data is bridged intentionally.
 
 ## Planned Harness Shape
 
@@ -151,6 +181,9 @@ The harness must:
 - write only redacted scorecards to committed paths;
 - write raw local artifacts outside committed docs, or not at all;
 - mark repair invocation, typed validation failures, and plan/apply ids when available;
+- collect applied Flow graph shape, run step outputs, evidence trace availability,
+  evidence export status, and generated artifact file ids when the evaluation mode
+  includes an executed Flow run;
 - never run in CI unless a separate human-approved CI cost and flake policy exists.
 
 ## Six Stable Swedish Prompts
@@ -283,6 +316,7 @@ The harness should emit one JSON scorecard per prompt run with these fields:
     "session_id": "uuid-or-null",
     "plan_id": "uuid-or-null",
     "flow_id_if_applied": "uuid-or-null",
+    "run_id_if_executed": "uuid-or-null",
     "asked_follow_up": true,
     "follow_up_topics": ["sections"],
     "disallowed_follow_up_topics": [],
@@ -291,6 +325,11 @@ The harness should emit one JSON scorecard per prompt run with these fields:
     "terminal_output_mode": "create",
     "step_count": 3,
     "step_roles": ["transcribe", "extract", "render_docx"],
+    "flow_graph_fetched": true,
+    "step_outputs_fetched": true,
+    "evidence_trace_fetched": true,
+    "evidence_export_available": true,
+    "generated_artifact_file_ids": ["uuid"],
     "repair_invoked": false
   },
   "derived": {
@@ -365,13 +404,14 @@ For each relevant Batch 11 slice:
 2. Run the six prompts three times before the slice.
 3. Run the applicable `revise_plan` scenarios for the slice.
 4. For each `edit_existing_flow` scenario, first run the matching `create_plan` prompt, approve the plan, apply it, capture `flow_id`, and then run the edit prompt against that applied Flow.
-5. Record median typed failures, median manual score per axis, repair invocation count, and variance.
-6. Store the redacted baseline under `manual-eval-results/<slice>-<utc>.json` or another path defined by the harness README.
-7. Implement the slice.
-8. Run the same create/revise/edit scenarios three times after the slice.
-9. Diff against the most recent baseline for the same prompt id, evaluation mode, model, and workspace fixture.
-10. Promote every new failure into an automated fixture or test before commit.
-11. Treat lower median flow correctness, worse repair invocation count, or new architecture-class failure as a blocker unless the regression is explicitly accepted with a product reason.
+5. For slices that validate executed Flow quality, run the applied Flow with the stable local fixture or equivalent prompt-specific fixture, then fetch graph, step outputs, evidence trace/export, and artifact signed URL metadata before scoring.
+6. Record median typed failures, median manual score per axis, repair invocation count, and variance.
+7. Store the redacted baseline under `manual-eval-results/<slice>-<utc>.json` or another path defined by the harness README.
+8. Implement the slice.
+9. Run the same create/revise/edit scenarios three times after the slice.
+10. Diff against the most recent baseline for the same prompt id, evaluation mode, model, and workspace fixture.
+11. Promote every new failure into an automated fixture or test before commit.
+12. Treat lower median flow correctness, worse repair invocation count, or new architecture-class failure as a blocker unless the regression is explicitly accepted with a product reason.
 
 The runbook measures whether the builder is smarter, but commits should be gated
 by automated tests derived from the failures it exposes.

@@ -229,7 +229,7 @@ async def request_self_correction(
     self_correction_temperature: float,
     self_correction_bumped_temperature: float,
     max_self_correction_retries: int,
-    call_repair_completion: Callable[..., Awaitable[Any]],
+    call_proposal_completion: Callable[..., Awaitable[Any]],
     process_tool_arguments: Callable[..., Awaitable[Any]],
     target_tool_name: str,
     forced_tool_prompt: str,
@@ -253,7 +253,7 @@ async def request_self_correction(
     )
     while True:
         try:
-            response = await call_repair_completion(
+            response = await call_proposal_completion(
                 messages=correction_messages,
                 tool_schemas=tool_schemas,
                 litellm_model=litellm_model,
@@ -423,7 +423,7 @@ async def retry_forced_tool_after_text(
     target_tool_name: str,
     forced_tool_prompt: str,
     forced_proposal_temperature: float,
-    call_repair_completion: Callable[..., Awaitable[Any]],
+    call_proposal_completion: Callable[..., Awaitable[Any]],
     process_tool_arguments: Callable[..., Awaitable[Any]],
     process_tool_kwargs: dict[str, Any] | None = None,
     flow: Any = None,
@@ -457,7 +457,7 @@ async def retry_forced_tool_after_text(
     ]
 
     try:
-        response = await call_repair_completion(
+        response = await call_proposal_completion(
             messages=forced_messages,
             tool_schemas=tool_schemas,
             litellm_model=litellm_model,

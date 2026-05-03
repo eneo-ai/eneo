@@ -56,6 +56,7 @@ _COMPILED_PATTERN_MATERIALIZER_IDS = frozenset(
 )
 _FILE_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
 _DOCUMENT_OUTPUT_TYPES = {OutputType.DOCX, OutputType.PDF}
+_MIN_DOCUMENT_BODY_FAN_IN_PHASES = 3
 _LEGAL_STEP_SKELETON_POLICIES = frozenset(
     {
         ("backend_fixed", "locked", "backend_default"),
@@ -93,6 +94,7 @@ class StepSkeletonOutputTypeDrift:
     slot_ordinal: int
     requested_output_type: OutputType
     enforced_output_type: OutputType
+    dropped_output_fields: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,7 +286,7 @@ class StepSkeletonPlan:
         output_type_drifts: list[StepSkeletonOutputTypeDrift] = []
         semantic_index = 0
 
-        for slot in slots:
+        for slot_index, slot in enumerate(slots):
             content: StepSkeletonSemanticContent | None = None
             if slot.role == "semantic_required":
                 content = semantic_steps[semantic_index]
@@ -293,6 +295,10 @@ class StepSkeletonPlan:
                 slot=slot,
                 content=content,
                 prior_step=steps[-1] if steps else None,
+                allow_json_output=_semantic_json_output_allowed(
+                    slot_index=slot_index,
+                    slots=slots,
+                ),
             )
             steps.append(step)
             if drift is not None:
@@ -310,6 +316,7 @@ class StepSkeletonPlan:
                 slot=terminal_slot,
                 content=None,
                 prior_step=steps[-1],
+                allow_json_output=True,
             )
             steps.append(terminal_step)
 
@@ -365,6 +372,12 @@ class StepSkeletonPlan:
         is_last: bool,
         semantic_count: int,
     ) -> InputSource:
+        if self._last_document_body_reads_all_prior_work(
+            ordinal=ordinal,
+            is_last=is_last,
+            semantic_count=semantic_count,
+        ):
+            return InputSource.ALL_PREVIOUS_STEPS
         if (
             self.fan_in_policy == "last_semantic"
             and is_last
@@ -374,6 +387,24 @@ class StepSkeletonPlan:
         if ordinal == 0:
             return InputSource.FLOW_INPUT
         return InputSource.PREVIOUS_STEP
+
+    def _last_document_body_reads_all_prior_work(
+        self,
+        *,
+        ordinal: int,
+        is_last: bool,
+        semantic_count: int,
+    ) -> bool:
+        if self.final_output_type not in _DOCUMENT_OUTPUT_TYPES:
+            return False
+        if self.semantic_output_policy != "text_for_all_semantic":
+            return False
+        if not is_last or ordinal == 0:
+            return False
+        # Three or more semantic phases means the last text step is a document
+        # body synthesis step; previous_step alone can drop earlier structured
+        # sections before the backend DOCX/PDF renderer runs.
+        return semantic_count >= _MIN_DOCUMENT_BODY_FAN_IN_PHASES
 
     def _semantic_input_type(
         self,
@@ -504,8 +535,13 @@ def _compose_step_skeleton_slot(
     slot: StepSkeleton,
     content: StepSkeletonSemanticContent | None,
     prior_step: NewStepDraft | None,
+    allow_json_output: bool,
 ) -> tuple[NewStepDraft, StepSkeletonOutputTypeDrift | None]:
-    output_type, output_type_drift = _compose_output_type(slot=slot, content=content)
+    output_type, output_type_drift = _compose_output_type(
+        slot=slot,
+        content=content,
+        allow_json_output=allow_json_output,
+    )
     input_type = _compose_input_type(
         slot=slot,
         content=content,
@@ -558,15 +594,25 @@ def _compose_output_type(
     *,
     slot: StepSkeleton,
     content: StepSkeletonSemanticContent | None,
+    allow_json_output: bool,
 ) -> tuple[OutputType, StepSkeletonOutputTypeDrift | None]:
     if content is None:
         return slot.output_type, None
 
-    if (
-        _semantic_content_requests_json(content)
-        and slot.output_type not in _DOCUMENT_OUTPUT_TYPES
-    ):
-        return OutputType.JSON, None
+    if _semantic_content_requests_json(content):
+        if allow_json_output and slot.output_type not in _DOCUMENT_OUTPUT_TYPES:
+            return OutputType.JSON, None
+        if slot.output_type != OutputType.JSON:
+            return (
+                slot.output_type,
+                StepSkeletonOutputTypeDrift(
+                    slot_id=slot.slot_id,
+                    slot_ordinal=slot.slot_ordinal,
+                    requested_output_type=OutputType.JSON,
+                    enforced_output_type=slot.output_type,
+                    dropped_output_fields=bool(content.output_fields),
+                ),
+            )
 
     requested_output_type = content.requested_output_type
     if requested_output_type is None or requested_output_type == slot.output_type:
@@ -580,6 +626,37 @@ def _compose_output_type(
             requested_output_type=requested_output_type,
             enforced_output_type=slot.output_type,
         ),
+    )
+
+
+def _semantic_json_output_allowed(
+    *,
+    slot_index: int,
+    slots: tuple[StepSkeleton, ...],
+) -> bool:
+    slot = slots[slot_index]
+    if slot.role not in {"semantic_required", "semantic_optional"}:
+        return True
+
+    remaining_slots = slots[slot_index + 1 :]
+    if any(
+        remaining_slot.role in {"semantic_required", "semantic_optional"}
+        for remaining_slot in remaining_slots
+    ):
+        return True
+
+    return not any(
+        _backend_fixed_text_consumer(remaining_slot)
+        for remaining_slot in remaining_slots
+    )
+
+
+def _backend_fixed_text_consumer(slot: StepSkeleton) -> bool:
+    return (
+        slot.role == "backend_fixed"
+        and slot.input_type == InputType.TEXT
+        and slot.input_source
+        in {InputSource.PREVIOUS_STEP, InputSource.ALL_PREVIOUS_STEPS}
     )
 
 

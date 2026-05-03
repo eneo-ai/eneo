@@ -113,8 +113,16 @@ def compile_input_bindings(
 
     source_reference = _resolve_source_reference(step_draft, prior_steps)
     explicit_previous_fields = _compile_previous_field_sections(step_draft, prior_steps)
+    structured_previous_text_input = (
+        step_draft.input_source.value == "previous_step"
+        and step_draft.input_type.value == "text"
+        and bool(prior_steps)
+        and prior_steps[-1].output_type == OutputType.JSON
+    )
     needs_explicit_underlag = bool(
-        explicit_previous_fields or step_draft.uses_form_fields
+        explicit_previous_fields
+        or step_draft.uses_form_fields
+        or structured_previous_text_input
     )
 
     if step_draft.input_source.value == "previous_step" and not needs_explicit_underlag:

@@ -44,6 +44,7 @@ Flow AI Builder must reliably generate valid Eneo Flows from Swedish and English
 - UI confirmation had already understood runtime input as `Ljud` and final result as `DOCX`.
 - The final proposal then failed quality because no compiled step had `input_type="audio"` or `output_mode="transcribe_only"`.
 - Proposal repair could not honestly fix that, because the create proposal contract tells the LLM not to emit low-level mechanics such as `input_type` or `output_mode`.
+- A later local debug export exposed a second architecture-class failure: the penultimate DOCX-preparation step returned metadata-only JSON (`docx_title`, `document_sections_count`), then the terminal DOCX step consumed that tiny JSON instead of the content-rich sections produced earlier and generated generic prose.
 
 Batch 11 therefore treats Flow mechanics as backend-owned. The LLM should choose semantic content and refs inside a server-derived skeleton, not rediscover the Flow framework.
 
@@ -302,12 +303,14 @@ Internal split:
 - 11.1b: skeleton fill rules and compile integration.
 - 11.1c: critic invariant classification, architecture failure surface, and canary tests.
 - 11.1d: edit-path fill/preserve/reject mechanics. This closed the 11.1c carry-forward without mixing edit behavior into the create-path architecture-error slice.
+- 11.1e: artifact-body source hardening. The final semantic step feeding a backend-fixed text consumer must stay text even if the LLM asks for output fields, and JSON-to-text previous-step boundaries must compile an explicit `Underlag till text` bridge to `previous.output.structured`.
 
 Success gate:
 
 - zero chain-materialization regressions on the canary suite
 - audio-to-DOCX compiles without repair
 - no LLM output field is required to echo backend-owned mechanics
+- terminal DOCX/PDF steps are not fed metadata-only JSON when a content-bearing text body is required
 - fixed PlanningState/FCM tuple tests produce FCM-legal chains
 - Swedish corpus pass-rate is not claimed until 11.2 lands
 
@@ -860,6 +863,110 @@ git diff --check -- <11.5a touched paths>
 - Keep structured-output telemetry compact; add new fields only when a
   dashboard, alert, or support workflow has a named question the existing keys
   cannot answer.
+
+#### 11.5b — Proposal Tool-Call Boundary And Strict-Schema Decision
+
+Scope:
+
+- Finish the immediate 11.5 structured-output boundary decision for proposal
+  tool calls. `outline_flow` and `edit_flow` are function-tool contracts, not
+  planner JSON responses, so this slice makes the proposal completion boundary
+  strip planner `response_format` kwargs immediately before LiteLLM receives
+  `tools`.
+- Keep planner parse repair on the planner structured-output rail. Parse repair
+  repairs `PlannerOutput`, so it should inherit the same planner request kwargs
+  selected in 11.5a.
+- Decide the strict-schema question with source evidence. Current
+  `PlannerOutput` uses a discriminated action union plus optional/defaulted
+  fields. OpenAI structured-output guidance requires object schemas with all
+  fields required and `additionalProperties=false`, while LiteLLM forwards
+  strict `json_schema` / Pydantic response formats only when the provider
+  supports that path. A strict-friendly planner wire shape would require a
+  deliberate planner contract refactor, not a generated parallel schema.
+
+Canonical owners:
+
+| Concept | Owner | 11.5b decision |
+|---|---|---|
+| Proposal tool-call kwargs | `AIBuilderProposalProcessor.call_proposal_completion` | Keep this as the central proposal LiteLLM seam and strip planner-only kwargs in the same owner; do not filter at individual call sites. |
+| Planner response-format selection | `ai_builder_response_format.py` | Keep this owner planner-only. |
+| Planner parse repair kwargs | `ai_builder_orchestration_pipeline.py` / `ai_builder_repair.py` | Keep inherited planner kwargs; add coverage if a behavior gap is found. |
+| Strict planner JSON contract | `PlannerOutput` in `ai_builder_orchestrator.py` | Do not change wire shape in 11.5b; record the required refactor instead of creating a parallel schema. |
+
+Deliverables:
+
+- Proposal completions strip `response_format` before calling LiteLLM for:
+  - initial `outline_flow`
+  - initial `edit_flow`
+  - forced proposal retry after prose
+  - proposal self-correction after parse/validation/quality failure
+- The filter lives once at `AIBuilderProposalProcessor.call_proposal_completion`,
+  directly before `**litellm_kwargs` is unpacked into LiteLLM. Current source
+  evidence shows no known production leak path because
+  `AIBuilderPlanner._build_planner_litellm_kwargs` returns a fresh planner dict
+  and `proposal_processor.propose_plan` receives the original base kwargs; this
+  slice is defensive boundary hardening for future callers.
+- Existing provider credentials and safe non-structured kwargs, such as
+  `api_base` / timeout-style provider options, still pass through to proposal
+  calls. `drop_params` remains owned by the proposal completion call itself
+  rather than by caller-provided kwargs.
+- A debug log is emitted only when `response_format` is actually dropped.
+- Planner parse repair keeps planner `response_format` kwargs when the planner
+  selected `json_object`.
+- The strict-schema blocker test remains the behavior pin for why
+  `PlannerOutput` does not use `strict_json_schema` yet.
+- Plan/journal/retrospective state that a strict planner wire-shape refactor is
+  separate 11.5c work if we decide it is worth the contract churn.
+- Live local API smoke is run against the user's restarted backend and
+  migrated database with raw transcripts left outside committed docs.
+
+Do not:
+
+- add a second planner schema
+- weaken `PlannerOutput` typing just to satisfy provider schema restrictions
+- add explicit model/provider overrides
+- send both `tools` and planner `response_format` in proposal requests
+- preserve old planner JSON-mode telemetry fields
+- keep a compatibility alias for the old `call_repair_completion` method name
+
+Validation:
+
+```bash
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py tests/unittests/flows/ai_builder/test_ai_builder_response_format.py -q
+cd backend && uv run pytest tests/unittests/flows/ai_builder -q
+cd backend && uv run pyright backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py backend/tests/unittests/flows/ai_builder/test_ai_builder_response_format.py
+cd backend && uv run ruff check backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py backend/tests/unittests/flows/ai_builder/test_ai_builder_response_format.py
+cd backend && uv run ruff format --check backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py backend/tests/unittests/flows/ai_builder/test_ai_builder_response_format.py
+cd backend && uv run lint-imports --no-cache
+./scripts/gate-local/anti_slippage.sh --worktree
+git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py backend/tests/unittests/flows/ai_builder/test_ai_builder_response_format.py docs/refactor/execution/batch-11-flow-ai-builder-reliability
+```
+
+Live smoke validation:
+
+```bash
+curl -X GET "$ENEO_LOCAL_API_BASE/api/v1/flows/ai-builder/sessions" -H "accept: application/json" -H "X-API-Key: $ENEO_LOCAL_API_KEY"
+curl -X POST "$ENEO_LOCAL_API_BASE/api/v1/flows/ai-builder/sessions" -H "accept: application/json" -H "content-type: application/json" -H "X-API-Key: $ENEO_LOCAL_API_KEY" --data '{"target_kind":"create","space_id":"'"$ENEO_LOCAL_SPACE_ID"'","force_new":true}'
+curl -X POST "$ENEO_LOCAL_API_BASE/api/v1/flows/ai-builder/sessions/$SESSION_ID/messages" -H "accept: text/event-stream" -H "content-type: application/json" -H "X-API-Key: $ENEO_LOCAL_API_KEY" --data '{"message":"<batch-11-swedish-prompt>","ui_language":"sv"}'
+curl -X POST "$ENEO_LOCAL_API_BASE/api/v1/flows/ai-builder/sessions/$SESSION_ID/messages" -H "accept: text/event-stream" -H "content-type: application/json" -H "X-API-Key: $ENEO_LOCAL_API_KEY" --data '{"message":"Ja, det stämmer. Bygg planen.","ui_language":"sv","question_answer":{"requirements_confirmed":true,"requirements_version":"<requirements_version-from-sse>"}}'
+curl -X POST "$ENEO_LOCAL_API_BASE/api/v1/flows/ai-builder/plans/$PLAN_ID/approve" -H "accept: application/json" -H "content-type: application/json" -H "X-API-Key: $ENEO_LOCAL_API_KEY" --data '{}'
+curl -X POST "$ENEO_LOCAL_API_BASE/api/v1/flows/ai-builder/plans/$PLAN_ID/apply" -H "accept: application/json" -H "content-type: application/json" -H "X-API-Key: $ENEO_LOCAL_API_KEY" --data '{}'
+```
+
+Acceptance:
+
+- Every proposal LiteLLM call path covered by this slice omits
+  `response_format` even if upstream `litellm_kwargs` contains it.
+- A central seam test proves ordinary provider kwargs still pass through while
+  `response_format` is omitted.
+- Path coverage proves initial `outline_flow`, initial `edit_flow`,
+  forced retry after prose, and self-correction all use the same proposal seam.
+- Planner parse-repair tests prove the planner rail still carries
+  `response_format` where intended.
+- Live local smoke records HTTP status/timing, selected model, plan/apply ids,
+  typed outcome, and quality concerns without committing raw response bodies.
+- No new source comment, alias, or fallback path preserves never-shipped
+  structured-output behavior.
 
 ## Behavior And Quality Gates
 

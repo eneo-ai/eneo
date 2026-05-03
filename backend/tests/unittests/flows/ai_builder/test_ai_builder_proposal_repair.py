@@ -89,7 +89,7 @@ async def test_retry_forced_tool_after_text_does_not_inject_flow_into_processors
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
         forced_proposal_temperature=0.1,
-        call_repair_completion=AsyncMock(
+        call_proposal_completion=AsyncMock(
             return_value=_tool_response(
                 tool_name="outline_flow",
                 arguments={"flow_name": "Test", "plan_rationale": "R", "steps": []},
@@ -109,7 +109,7 @@ async def test_retry_forced_tool_after_text_accepts_json_arguments_returned_as_t
     None
 ):
     processed_arguments: dict[str, object] = {}
-    call_repair_completion = AsyncMock()
+    call_proposal_completion = AsyncMock()
 
     async def process_create_arguments(
         *,
@@ -148,7 +148,7 @@ async def test_retry_forced_tool_after_text_accepts_json_arguments_returned_as_t
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
         forced_proposal_temperature=0.1,
-        call_repair_completion=call_repair_completion,
+        call_proposal_completion=call_proposal_completion,
         process_tool_arguments=process_create_arguments,
         process_tool_kwargs=None,
         flow=None,
@@ -156,7 +156,7 @@ async def test_retry_forced_tool_after_text_accepts_json_arguments_returned_as_t
 
     assert result == ({"event": "plan", "data": "{}"},)
     assert processed_arguments["flow_name"] == "Text JSON outline"
-    call_repair_completion.assert_not_awaited()
+    call_proposal_completion.assert_not_awaited()
 
 
 def test_max_self_correction_retries_budgets_three_retries() -> None:
@@ -205,7 +205,7 @@ async def _run_repair_capturing(
     observed_temperatures: list[float] = []
     observed_retry_feedback: list[str] = []
 
-    async def call_repair_completion(
+    async def call_proposal_completion(
         *,
         messages: list[dict[str, Any]],
         tool_schemas: list[dict[str, Any]],
@@ -254,7 +254,7 @@ async def _run_repair_capturing(
         self_correction_temperature=base_temperature,
         self_correction_bumped_temperature=bumped_temperature,
         max_self_correction_retries=max_retries,
-        call_repair_completion=call_repair_completion,
+        call_proposal_completion=call_proposal_completion,
         process_tool_arguments=process_tool_arguments,
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
@@ -351,7 +351,7 @@ async def test_request_self_correction_emits_error_event_when_planner_bails_to_c
         ]
     )
 
-    async def call_repair_completion(**_: Any) -> SimpleNamespace:
+    async def call_proposal_completion(**_: Any) -> SimpleNamespace:
         return text_response
 
     async def process_tool_arguments(**_: Any) -> SimpleNamespace:
@@ -376,7 +376,7 @@ async def test_request_self_correction_emits_error_event_when_planner_bails_to_c
         self_correction_temperature=0.35,
         self_correction_bumped_temperature=0.6,
         max_self_correction_retries=3,
-        call_repair_completion=call_repair_completion,
+        call_proposal_completion=call_proposal_completion,
         process_tool_arguments=process_tool_arguments,
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
@@ -427,7 +427,7 @@ async def test_request_self_correction_still_yields_text_for_legitimate_info_req
         ]
     )
 
-    async def call_repair_completion(**_: Any) -> SimpleNamespace:
+    async def call_proposal_completion(**_: Any) -> SimpleNamespace:
         return text_response
 
     async def process_tool_arguments(**_: Any) -> SimpleNamespace:
@@ -452,7 +452,7 @@ async def test_request_self_correction_still_yields_text_for_legitimate_info_req
         self_correction_temperature=0.35,
         self_correction_bumped_temperature=0.6,
         max_self_correction_retries=3,
-        call_repair_completion=call_repair_completion,
+        call_proposal_completion=call_proposal_completion,
         process_tool_arguments=process_tool_arguments,
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",

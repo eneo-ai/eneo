@@ -329,6 +329,78 @@ def test_skeleton_composition_appends_terminal_text_after_structured_semantic() 
     assert composition.steps[-1].name == "Create final answer"
 
 
+def test_artifact_skeleton_keeps_final_semantic_body_text_when_fields_are_requested() -> (
+    None
+):
+    plan = materialize_step_skeleton(
+        runtime_input_type=InputType.AUDIO,
+        final_output_type=OutputType.DOCX,
+        final_output_mode=OutputMode.PASS_THROUGH,
+        pattern_ids=("audio_to_artifact_report",),
+        chain_steps=_chain_steps("audio_to_artifact_report"),
+        ui_language="sv",
+    )
+
+    composition = plan.compose(
+        [
+            StepSkeletonSemanticContent(
+                name="Generera DOCX-dokument",
+                instructions="Skapa dokumentets rubriker och textinnehåll.",
+                output_fields=tuple(default_structured_output_fields()),
+            )
+        ]
+    )
+
+    assert [step.output_type.value for step in composition.steps] == [
+        "text",
+        "text",
+        "docx",
+    ]
+    assert composition.steps[1].output_fields is None
+    assert composition.steps[-1].input_source == InputSource.PREVIOUS_STEP
+    assert composition.steps[-1].input_type == InputType.TEXT
+    assert len(composition.output_type_drifts) == 1
+    drift = composition.output_type_drifts[0]
+    assert drift.requested_output_type == OutputType.JSON
+    assert drift.enforced_output_type == OutputType.TEXT
+    assert drift.dropped_output_fields is True
+
+
+def test_docx_template_skeleton_keeps_template_body_text_when_fields_requested() -> (
+    None
+):
+    plan = materialize_step_skeleton(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.DOCX,
+        final_output_mode=OutputMode.TEMPLATE_FILL,
+        pattern_ids=("document_to_docx_template",),
+        chain_steps=_chain_steps("document_to_docx_template"),
+    )
+
+    composition = plan.compose(
+        [
+            StepSkeletonSemanticContent(
+                name="Prepare template body",
+                instructions="Prepare text for the template.",
+                output_fields=tuple(default_structured_output_fields()),
+            )
+        ]
+    )
+
+    assert [step.output_type.value for step in composition.steps] == [
+        "json",
+        "text",
+        "docx",
+    ]
+    assert composition.steps[1].output_fields is None
+    assert composition.steps[-1].document_delivery_mode == "template_fill"
+    assert len(composition.output_type_drifts) == 1
+    drift = composition.output_type_drifts[0]
+    assert drift.requested_output_type == OutputType.JSON
+    assert drift.enforced_output_type == OutputType.TEXT
+    assert drift.dropped_output_fields is True
+
+
 def test_backend_fixed_slots_keep_locked_input_type_after_structured_semantics() -> (
     None
 ):
@@ -362,7 +434,15 @@ def test_backend_fixed_slots_keep_locked_input_type_after_structured_semantics()
         "Review quality and gaps",
         "Create PDF",
     ]
+    assert composition.steps[2].output_type == OutputType.TEXT
+    assert composition.steps[2].output_fields is None
     assert composition.steps[3].input_type == InputType.TEXT
+    assert len(composition.output_type_drifts) == 1
+    drift = composition.output_type_drifts[0]
+    assert drift.slot_ordinal == 2
+    assert drift.requested_output_type == OutputType.JSON
+    assert drift.enforced_output_type == OutputType.TEXT
+    assert drift.dropped_output_fields is True
 
 
 @pytest.mark.parametrize("semantic_step_count", [1, 2, 3])

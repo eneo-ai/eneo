@@ -368,7 +368,7 @@ async def attempt_description_repair(
     )
 
     try:
-        response = await processor.call_repair_completion(
+        response = await processor.call_proposal_completion(
             messages=[{"role": "user", "content": repair_prompt}],
             tool_schemas=tool_schemas,
             litellm_model=litellm_model,

@@ -173,6 +173,32 @@ def _make_tool_call(
     return tool_call
 
 
+@pytest.mark.asyncio
+async def test_call_proposal_completion_strips_planner_response_format_kwargs() -> None:
+    processor = _make_processor()
+    response = _make_response_with_text("ok")
+    processor.litellm_client.acompletion = AsyncMock(return_value=response)
+
+    result = await processor.call_proposal_completion(
+        messages=[{"role": "user", "content": "Build a flow"}],
+        tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={
+            "response_format": {"type": "json_object"},
+            "drop_params": False,
+            "api_base": "http://provider.example",
+        },
+        max_output_tokens=1024,
+        temperature=0.2,
+    )
+
+    assert result is response
+    call_kwargs = processor.litellm_client.acompletion.await_args.kwargs
+    assert call_kwargs["drop_params"] is True
+    assert call_kwargs["api_base"] == "http://provider.example"
+    assert "response_format" not in call_kwargs
+
+
 def _make_flow_spec(
     *,
     model_ref: str | None,
@@ -370,9 +396,9 @@ async def test_request_non_question_continuation_uses_backend_followup_when_only
         ) as emit_followup,
         patch.object(
             processor,
-            "call_repair_completion",
+            "call_proposal_completion",
             new=AsyncMock(),
-        ) as repair_completion,
+        ) as proposal_completion,
     ):
         events = [
             event
@@ -411,7 +437,7 @@ async def test_request_non_question_continuation_uses_backend_followup_when_only
 
     assert events == followup_events
     emit_followup.assert_awaited_once()
-    repair_completion.assert_not_awaited()
+    proposal_completion.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -456,9 +482,9 @@ async def test_request_non_question_continuation_recovers_with_requirements_summ
         ) as emit_followup,
         patch.object(
             processor,
-            "call_repair_completion",
+            "call_proposal_completion",
             new=AsyncMock(return_value=_make_response_with_tool_calls(summary_call)),
-        ) as repair_completion,
+        ) as proposal_completion,
         patch.object(
             processor,
             "handle_tool_call",
@@ -509,13 +535,13 @@ async def test_request_non_question_continuation_recovers_with_requirements_summ
     assert events[0]["data"] == '{"status":"repairing"}'
     emit_followup.assert_awaited_once()
     handle_tool_call.assert_called_once()
-    assert repair_completion.await_args.kwargs["tool_choice"] == {
+    assert proposal_completion.await_args.kwargs["tool_choice"] == {
         "type": "function",
         "function": {"name": CONFIRM_REQUIREMENTS_TOOL_NAME},
     }
     assert [
         schema["function"]["name"]
-        for schema in repair_completion.await_args.kwargs["tool_schemas"]
+        for schema in proposal_completion.await_args.kwargs["tool_schemas"]
     ] == [CONFIRM_REQUIREMENTS_TOOL_NAME]
 
 
@@ -550,9 +576,9 @@ async def test_request_non_question_continuation_returns_typed_error_when_no_fol
         ),
         patch.object(
             processor,
-            "call_repair_completion",
+            "call_proposal_completion",
             new=AsyncMock(),
-        ) as repair_completion,
+        ) as proposal_completion,
     ):
         events = [
             event
@@ -582,7 +608,7 @@ async def test_request_non_question_continuation_returns_typed_error_when_no_fol
     payload = json.loads(events[0]["data"])
     assert payload["code"] == "question_recovery_unavailable"
     emit_followup.assert_awaited_once()
-    repair_completion.assert_not_awaited()
+    proposal_completion.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -651,7 +677,7 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
     with (
         patch.object(
             processor,
-            "call_repair_completion",
+            "call_proposal_completion",
             new=AsyncMock(return_value=_make_response_with_tool_calls(outline_call)),
         ) as call_completion,
         patch.object(
@@ -2462,7 +2488,7 @@ async def test_handle_tool_call_preserves_text_when_tool_is_clarification_only()
 
 
 @pytest.mark.asyncio
-async def test_request_self_correction_returns_typed_error_when_repair_completion_raises() -> (
+async def test_request_self_correction_returns_typed_error_when_proposal_completion_raises() -> (
     None
 ):
     processor = _make_processor()
@@ -2478,7 +2504,7 @@ async def test_request_self_correction_returns_typed_error_when_repair_completio
 
     with patch.object(
         processor,
-        "call_repair_completion",
+        "call_proposal_completion",
         new=AsyncMock(side_effect=RuntimeError("provider unavailable")),
     ):
         events = [

@@ -1043,7 +1043,7 @@ class AIBuilderProposalProcessor:
             model=litellm_model,
         )
         try:
-            response = await self._call_repair_completion_with_usage(
+            response = await self._call_proposal_completion_with_usage(
                 messages=llm_messages,
                 tool_schemas=tool_schemas,
                 litellm_model=litellm_model,
@@ -1488,7 +1488,7 @@ class AIBuilderProposalProcessor:
         ):
             yield event
 
-    async def call_repair_completion(
+    async def call_proposal_completion(
         self,
         *,
         messages: list[dict[str, Any]],
@@ -1499,6 +1499,12 @@ class AIBuilderProposalProcessor:
         temperature: float,
         tool_choice: dict[str, Any] | None = None,
     ) -> Any:
+        provider_kwargs = dict(litellm_kwargs)
+        provider_kwargs.pop("drop_params", None)
+        dropped_response_format = provider_kwargs.pop("response_format", None)
+        if dropped_response_format is not None:
+            logger.debug("ai_builder_proposal_completion_dropped_response_format")
+
         return await self.litellm_client.acompletion(
             model=litellm_model,
             messages=messages,
@@ -1508,10 +1514,10 @@ class AIBuilderProposalProcessor:
             drop_params=True,
             max_tokens=max_output_tokens,
             temperature=temperature,
-            **litellm_kwargs,
+            **provider_kwargs,
         )
 
-    async def _call_repair_completion_with_usage(
+    async def _call_proposal_completion_with_usage(
         self,
         *,
         messages: list[dict[str, Any]],
@@ -1524,7 +1530,7 @@ class AIBuilderProposalProcessor:
         tool_choice: dict[str, Any] | None = None,
         counts_as_repair: bool = False,
     ) -> Any:
-        response = await self.call_repair_completion(
+        response = await self.call_proposal_completion(
             messages=messages,
             tool_schemas=tool_schemas,
             litellm_model=litellm_model,
@@ -1609,8 +1615,8 @@ class AIBuilderProposalProcessor:
                 usage_tracker=ctx.usage_tracker,
             )
 
-        async def _call_repair_completion(**kwargs: Any) -> Any:
-            return await self._call_repair_completion_with_usage(
+        async def _call_proposal_completion(**kwargs: Any) -> Any:
+            return await self._call_proposal_completion_with_usage(
                 **kwargs,
                 usage_tracker=ctx.usage_tracker,
                 counts_as_repair=True,
@@ -1642,7 +1648,7 @@ class AIBuilderProposalProcessor:
                     self.self_correction_bumped_temperature
                 ),
                 max_self_correction_retries=MAX_SELF_CORRECTION_RETRIES,
-                call_repair_completion=_call_repair_completion,
+                call_proposal_completion=_call_proposal_completion,
                 process_tool_arguments=retry_config.process_tool_arguments,
                 target_tool_name=retry_config.target_tool_name,
                 forced_tool_prompt=retry_config.forced_tool_prompt,
@@ -1695,8 +1701,8 @@ class AIBuilderProposalProcessor:
         if resource_catalog is not None:
             merged_process_kwargs.setdefault("resource_catalog", resource_catalog)
 
-        async def _call_repair_completion(**kwargs: Any) -> Any:
-            return await self._call_repair_completion_with_usage(
+        async def _call_proposal_completion(**kwargs: Any) -> Any:
+            return await self._call_proposal_completion_with_usage(
                 **kwargs,
                 usage_tracker=usage_tracker,
                 counts_as_repair=True,
@@ -1718,7 +1724,7 @@ class AIBuilderProposalProcessor:
                 target_tool_name=target_tool_name,
                 forced_tool_prompt=forced_tool_prompt,
                 forced_proposal_temperature=self.forced_proposal_temperature,
-                call_repair_completion=_call_repair_completion,
+                call_proposal_completion=_call_proposal_completion,
                 process_tool_arguments=process_tool_arguments,
                 process_tool_kwargs=merged_process_kwargs,
                 flow=flow,
@@ -1897,7 +1903,7 @@ class AIBuilderProposalProcessor:
         active_messages = correction_messages
         while True:
             try:
-                response = await self._call_repair_completion_with_usage(
+                response = await self._call_proposal_completion_with_usage(
                     messages=active_messages,
                     tool_schemas=filtered_tool_schemas,
                     litellm_model=litellm_model,

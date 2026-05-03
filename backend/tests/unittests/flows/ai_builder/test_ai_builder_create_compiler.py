@@ -2115,6 +2115,240 @@ def test_compile_outline_flow_audio_to_docx_uses_skeleton_terminal_artifact() ->
     assert validation.valid
 
 
+def test_compile_outline_audio_docx_keeps_document_body_step_text_when_fields_requested() -> (
+    None
+):
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Audio DOCX report",
+            "plan_rationale": "Create a DOCX report from uploaded audio.",
+            "steps": [
+                {
+                    "name": "Generera DOCX-dokument",
+                    "task": "Skapa dokumentets rubriker och textinnehåll.",
+                    "output_fields": [
+                        {
+                            "name": "docx_title",
+                            "field_type": "string",
+                            "description": "Titel som används i dokumentet.",
+                            "required": True,
+                        },
+                        {
+                            "name": "document_sections_count",
+                            "field_type": "number",
+                            "description": "Antal rubriksektioner som inkluderades.",
+                            "required": True,
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="audio",
+                    output_type="docx",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["audio_to_artifact_report"],
+            required_capabilities=["input_audio", "output_mode_pass_through"],
+        )
+    )
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state),
+    )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert [step.name for step in draft.steps] == [
+        "Transcribe audio",
+        "Generera DOCX-dokument",
+        "Create DOCX",
+    ]
+    assert [step.output_type.value for step in draft.steps] == [
+        "text",
+        "text",
+        "docx",
+    ]
+    assert draft.steps[1].output_fields is None
+    assert compiled.steps[1].output_contract is None
+    assert compiled.steps[-1].input_type.value == "text"
+    assert compiled.steps[-1].input_bindings is None
+    assert validation.valid
+
+
+@pytest.mark.parametrize("final_output_type", ["docx", "pdf"])
+def test_compile_outline_audio_artifact_final_body_step_fans_in_prior_structured_work(
+    final_output_type: str,
+) -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Audio artifact report",
+            "plan_rationale": "Create a document report from uploaded audio.",
+            "steps": [
+                {
+                    "name": "Identifiera och segmentera innehåll per rubrik",
+                    "task": "Dela in mötet i rubriker.",
+                    "output_fields": [
+                        {
+                            "name": "sections",
+                            "field_type": "object",
+                            "description": "Rubrikindelat innehåll.",
+                            "required": True,
+                            "fields": [
+                                {
+                                    "name": "introduction",
+                                    "field_type": "string",
+                                    "description": "Introduktion.",
+                                    "required": True,
+                                },
+                                {
+                                    "name": "conclusions",
+                                    "field_type": "string",
+                                    "description": "Slutsatser.",
+                                    "required": True,
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Skapa sammanfattning av allt ovan",
+                    "task": "Sammanfatta rubrikavsnitten.",
+                    "output_fields": [
+                        {
+                            "name": "overall_summary",
+                            "field_type": "string",
+                            "description": "Sammanfattning av hela mötet.",
+                            "required": True,
+                        }
+                    ],
+                },
+                {
+                    "name": "Bygg dokument med rubriker och innehåll",
+                    "task": "Skriv dokumentets fullständiga text från alla tidigare steg.",
+                },
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="audio",
+                    output_type=final_output_type,
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["audio_to_artifact_report"],
+            required_capabilities=["input_audio", "output_mode_pass_through"],
+        )
+    )
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state),
+    )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    body_step = draft.steps[-2]
+    assert body_step.name == "Bygg dokument med rubriker och innehåll"
+    assert body_step.input_source.value == "all_previous_steps"
+    assert body_step.input_type.value == "text"
+    assert body_step.output_type.value == "text"
+    assert compiled.steps[-2].input_contract is None
+    assert draft.steps[-1].output_type.value == final_output_type
+    assert validation.valid
+
+
+def test_compile_outline_audio_docx_four_phase_body_step_fans_in_prior_work() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Audio DOCX report",
+            "plan_rationale": "Create a DOCX report from uploaded audio.",
+            "steps": [
+                {
+                    "name": "Rensa transkription",
+                    "task": "Normalisera transkriptionen inför analys.",
+                },
+                {
+                    "name": "Identifiera rubrikavsnitt",
+                    "task": "Dela in mötet i rubriker.",
+                    "output_fields": [
+                        {
+                            "name": "sections",
+                            "field_type": "object",
+                            "description": "Rubrikindelat innehåll.",
+                            "required": True,
+                            "fields": [
+                                {
+                                    "name": "introduction",
+                                    "field_type": "string",
+                                    "description": "Introduktion.",
+                                    "required": True,
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Skapa sammanfattning",
+                    "task": "Sammanfatta rubrikavsnitten.",
+                    "output_fields": [
+                        {
+                            "name": "overall_summary",
+                            "field_type": "string",
+                            "description": "Sammanfattning av hela mötet.",
+                            "required": True,
+                        }
+                    ],
+                },
+                {
+                    "name": "Bygg DOCX-dokument",
+                    "task": "Skriv dokumentets fullständiga text från alla tidigare steg.",
+                },
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="audio",
+                    output_type="docx",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["audio_to_artifact_report"],
+            required_capabilities=["input_audio", "output_mode_pass_through"],
+        )
+    )
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state),
+    )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    body_step = draft.steps[-2]
+    assert body_step.name == "Bygg DOCX-dokument"
+    assert body_step.input_source.value == "all_previous_steps"
+    assert body_step.input_type.value == "text"
+    assert body_step.output_type.value == "text"
+    assert compiled.steps[-2].input_contract is None
+    assert validation.valid
+
+
 def test_compile_outline_wraps_skeleton_materialization_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2808,6 +3042,78 @@ def test_compile_outline_flow_preserves_requested_json_intermediate() -> None:
     assert draft.steps[1].input_type.value == "json"
     assert compiled.steps[1].input_bindings is None
     assert validation.valid
+
+
+def test_compile_create_draft_bridges_structured_previous_output_into_text_input() -> (
+    None
+):
+    draft = FlowCreateDraft(
+        flow_name="Structured bridge",
+        plan_rationale="Extract JSON, then write text from the extracted structure.",
+        steps=[
+            CreateStepDraft(
+                name="Extract fields",
+                instructions="Extract stable fields.",
+                input_source="flow_input",
+                input_type="text",
+                output_type="json",
+                output_fields=[_field("summary", "string")],
+            ),
+            CreateStepDraft(
+                name="Write body",
+                instructions="Write the document body from the structured fields.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+            ),
+        ],
+    )
+
+    compiled = compile_create_draft(draft)
+
+    assert compiled.steps[1].input_bindings == {
+        "question": "{{ step_a.output.structured }}"
+    }
+
+
+def test_compile_create_draft_prefers_specific_previous_fields_for_text_input() -> None:
+    draft = FlowCreateDraft(
+        flow_name="Structured bridge",
+        plan_rationale="Extract JSON, then write text from a selected field.",
+        steps=[
+            CreateStepDraft(
+                name="Extract fields",
+                instructions="Extract stable fields.",
+                input_source="flow_input",
+                input_type="text",
+                output_type="json",
+                output_fields=[
+                    _field("summary", "string"),
+                    _field("details", "string"),
+                ],
+            ),
+            CreateStepDraft(
+                name="Write body",
+                instructions="Write the document body from selected fields.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+                uses_previous_fields=[
+                    {
+                        "from_step": 1,
+                        "field_path": "summary",
+                        "label": "Summary",
+                    }
+                ],
+            ),
+        ],
+    )
+
+    compiled = compile_create_draft(draft)
+
+    assert compiled.steps[1].input_bindings == {
+        "question": "Summary: {{ step_a.output.structured.summary }}"
+    }
 
 
 def test_compile_outline_flow_logs_semantic_output_type_drift(

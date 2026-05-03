@@ -648,6 +648,7 @@ def _log_skeleton_output_type_drifts(
                 "slot_ordinal": drift.slot_ordinal,
                 "requested_output_type": drift.requested_output_type.value,
                 "enforced_output_type": drift.enforced_output_type.value,
+                "dropped_output_fields": drift.dropped_output_fields,
             },
         )
 
