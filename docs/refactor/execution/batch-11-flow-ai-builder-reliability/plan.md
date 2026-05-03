@@ -968,6 +968,53 @@ Acceptance:
 - No new source comment, alias, or fallback path preserves never-shipped
   structured-output behavior.
 
+#### 11.5c — Terminal Output Clause Anchors And Audio-File Input Resolution
+
+Scope:
+
+- Fix the remaining live-smoke question-quality failure where a Swedish prompt
+  that clearly says "ljudfil" input and "Word-fil i slutet" output still asks
+  about input material and final output mode.
+- Keep the fix in existing owners:
+  - clause role assignment belongs to `ai_builder_clause_segmenter.py` and
+    `ai_builder_intent_markers.py`;
+  - runtime input architecture belongs to `ai_builder_input_architecture_policy.py`;
+  - PlanningState/discovery behavior must be pinned through existing tests.
+- Do not add downstream output fallback ladders in `ai_builder_framework_policy.py`
+  unless the segmenter cannot express the distinction.
+
+Canonical owners:
+
+| Concept | Owner | 11.5c decision |
+|---|---|---|
+| Terminal output phrasing | `ai_builder_clause_segmenter.py` / `ai_builder_intent_markers.py` | Add terminal-position output anchors so artifact phrases such as "Word-fil i slutet" are scoped as output even after an input verb. |
+| Audio-file vs terminal document output | `ai_builder_clause_segmenter.py` / `ai_builder_input_architecture_policy.py` | Scope terminal Word/PDF/DOCX phrases as output so `ljudfil` remains the runtime input unless a real document marker appears separately in the input clause. |
+| Resolved architecture slots | `planning_state_builder.py` tests | Pin `primary_runtime_input=audio`, `terminal_output=docx_document`, and `docx_output_mode=generated_docx` for the reported phrasing. |
+| Follow-up suppression | Discovery tests | Pin that resolved audio/Word prompts do not select `input_material_mode`, `flow_input_architecture`, or `final_output_mode`. |
+
+Acceptance:
+
+- `build_role_scoped_text(...)` puts terminal artifact phrasing in an output
+  clause instead of swallowing it into an input clause.
+- `resolve_input_intent(...)` treats audio-file upload phrasing as audio when a
+  terminal Word/PDF/DOCX phrase belongs to the output clause.
+- Legitimate mixed `ljudfil + dokument/bilaga/pdf/docx` prompts still require
+  architecture clarification.
+- `build_planning_state_from_conversation(...)` resolves the live-smoke prompt's
+  core architecture slots without an LLM.
+- `analyze_discovery(...)` does not select obvious input/output questions for
+  that prompt.
+
+Validation:
+
+```bash
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_clause_segmenter.py tests/unittests/flows/ai_builder/test_ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_discovery_flow.py -q
+cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_intent_markers.py src/intric/flows/ai_builder/ai_builder_clause_segmenter.py src/intric/flows/ai_builder/ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_ai_builder_clause_segmenter.py tests/unittests/flows/ai_builder/test_ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_discovery_flow.py
+cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_intent_markers.py src/intric/flows/ai_builder/ai_builder_clause_segmenter.py src/intric/flows/ai_builder/ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_ai_builder_clause_segmenter.py tests/unittests/flows/ai_builder/test_ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_discovery_flow.py
+cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_intent_markers.py src/intric/flows/ai_builder/ai_builder_clause_segmenter.py src/intric/flows/ai_builder/ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_ai_builder_clause_segmenter.py tests/unittests/flows/ai_builder/test_ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_discovery_flow.py
+git diff --check -- <11.5c touched paths>
+```
+
 ## Behavior And Quality Gates
 
 | Gate | Required result |

@@ -289,6 +289,25 @@ class TestPolicyDefaults:
         assert slot.value == "detailed_case_metadata"
         assert slot.source == "heuristic"
 
+    def test_swedish_audio_prompt_with_terminal_word_file_resolves_core_slots(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Jag vill bygga ett flöde där jag ska skicka in en ljudfil "
+                        "som ska transkriberas. Jag vill ha en Word-fil i slutet."
+                    ),
+                )
+            ]
+        )
+
+        assert state.resolved_slots["primary_runtime_input"].value == "audio"
+        assert state.resolved_slots["terminal_output"].value == "docx_document"
+        assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
+
 
 class TestModelSlotMerge:
     def test_model_output_cannot_displace_explicit_summary_or_flow_defaults(

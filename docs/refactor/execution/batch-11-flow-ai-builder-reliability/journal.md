@@ -174,6 +174,79 @@ workflow prose.
 | `StepSkeletonPlan` now has two last-semantic fan-in rules. They do not conflict today, but should be unified if a third fan-in rule appears. | Later skeleton cleanup. |
 | `PlannerOutput` strict-schema compatibility remains undecided. | Later structured-output contract slice. |
 
+## 11.5c Terminal Output Clause Anchors And Audio-File Input Resolution
+
+### Scope
+
+This slice targets the follow-up question-quality gap carried from 11.5b. The
+live Swedish prompt clearly said the user would provide a `ljudfil` and wanted a
+`Word-fil i slutet`, but the deterministic discovery path still selected input
+and output questions.
+
+Local evidence before implementation:
+
+| Check | Result |
+|---|---|
+| `build_planning_state_from_conversation(...)` for the live-smoke prompt | Resolved no slots. |
+| `analyze_discovery(...)` for the live-smoke prompt | Selected `flow_input_architecture` and `final_output_mode`. |
+| Input root cause | The input clause swallowed the terminal `Word-fil i slutet` phrase, so input detection saw document evidence that belonged to the final output. |
+| Output root cause | `Word-fil i slutet` did not have an explicit output verb in the minimal repro, so output intent looked only at the leading neutral/audio fragment. |
+
+### Claude Plan Review
+
+| Iteration | Artifact | Verdict | Green light | Minimum score | Outcome |
+|---:|---|---|---|---:|---|
+| 1 | `.codex/artifacts/claude-peer-loop-batch-11-5c-question-policy-audio-word-plan-20260503T093253Z.md` | timeout | no output | n/a | Timed out after 240 seconds. |
+| 2 | `.codex/artifacts/claude-peer-loop-batch-11-5c-question-policy-audio-word-plan-retry-20260503T093545Z.md` | `changes_required` | `no` | 6 | Rejected downstream output fallbacks and pointed the fix at clause segmentation plus a precise audio-file guard. |
+
+Accepted plan changes:
+
+| Finding | Resolution |
+|---|---|
+| Output fallback in `ai_builder_framework_policy.py` would deepen an overloaded heuristic chain. | Move terminal artifact phrasing to the clause segmenter instead. |
+| Audio-file upload should not suppress real mixed audio plus document flows. | No new guard was needed after clause scoping; mixed `ljudfil + dokument/bilaga/pdf/docx` remains a clarification case. |
+| Phrase hardcoding should stay generic. | Use terminal-position anchors and artifact nouns, not transcription or municipality-specific strings. |
+
+### Planned Validation
+
+| Command | Purpose |
+|---|---|
+| `uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_clause_segmenter.py tests/unittests/flows/ai_builder/test_ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_discovery_flow.py -q` | Focused behavior coverage for clause scoping, input resolution, PlanningState, and discovery questions. |
+| `uv run pyright <11.5c touched source and test files>` | Type safety. |
+| `uv run ruff check <11.5c touched source and test files>` | Lint. |
+| `uv run ruff format --check <11.5c touched source and test files>` | Formatting. |
+| `git diff --check -- <11.5c touched paths>` | Whitespace/review hygiene. |
+
+### Implementation Outcome
+
+| Result | Evidence |
+|---|---|
+| Terminal Word/PDF/DOCX artifact phrasing is scoped as output only when the artifact is near a terminal-position marker and is not the uploaded input file itself. | `ai_builder_clause_segmenter.py` terminal output clause tests. |
+| `Skicka in en DOCX i slutet` and `Ladda upp en PDF i slutet` stay document input. | Input policy regression tests. |
+| The reported Swedish audio-to-Word prompt resolves `primary_runtime_input=audio`, `terminal_output=docx_document`, and `docx_output_mode=generated_docx` without a follow-up question. | PlanningState and discovery tests. |
+| No audio-file document guard was added because the root issue was clause scoping; genuine mixed `ljudfil + dokument` still asks for architecture clarification. | Input policy mixed-mode test. |
+
+### Validation Result
+
+| Check | Result |
+|---|---|
+| Focused unit suite | `98 passed, 1 warning`. |
+| AI Builder benchmark corpus | `18 passed, 16 warnings`. |
+| `ruff check` on touched source/tests | Passed. |
+| `ruff format --check` on touched source/tests | Passed. |
+| `pyright` on touched source/tests | Passed. |
+| `git diff --check` on touched paths | Passed. |
+| Claude iteration 2 | `.codex/artifacts/claude-peer-loop-batch-11-5c-terminal-output-clause-implementation-verification-20260503T094834Z.md`; `GREEN_LIGHT: no`, found terse DOCX/PDF upload regression. |
+| Claude iteration 3 | `.codex/artifacts/claude-peer-loop-batch-11-5c-terminal-output-clause-final-verification-20260503T095532Z.md`; `GREEN_LIGHT: yes`, `MIN_SCORE: 8`. |
+| Live AI Builder smoke | Session `821c84f5-7d0e-4ce5-8b05-5be60f2a55fc`; prompt produced requirements summary with `Indata vid körning: Ljud`, `Slutresultat: DOCX-dokument`, and no question events. |
+| Live plan smoke | Plan `126ead32-e909-46d2-99ee-6451ce8865d6`; produced a 5-step audio → text → JSON → text → DOCX chain with no duplicate DOCX artifact step. |
+
+Live smoke follow-up observation:
+
+| Observation | Disposition |
+|---|---|
+| The live planner added optional runtime fields for language, document style, and timestamps. They are valid form fields and the binding references resolve, but they were inferred rather than requested. | Track in a later runtime-field minimality slice; this 11.5c slice fixed avoidable discovery questions and terminal output scoping. |
+
 ## 11.0a Claude Plan Review Iteration 1
 
 - Artifact: `.codex/artifacts/claude-peer-loop-batch-11-production-failure-corpus-plan-20260502T232903Z.md`

@@ -65,6 +65,56 @@ def test_resolve_input_intent_does_not_treat_keywords_as_word_document_signal() 
     assert intent.needs_architecture_clarification is False
 
 
+def test_resolve_input_intent_treats_word_file_at_end_as_output_not_document_input() -> (
+    None
+):
+    intent = resolve_input_intent(
+        (
+            "Jag vill bygga ett flöde där jag ska skicka in en ljudfil som ska "
+            "transkriberas. Jag vill ha en Word-fil i slutet."
+        ),
+        {},
+    )
+
+    assert intent.primary_runtime_input == "audio"
+    assert intent.audio_requested is True
+    assert intent.document_runtime_input_requested is False
+    assert intent.needs_architecture_clarification is False
+
+
+def test_resolve_input_intent_still_requires_architecture_for_audio_and_document_file() -> (
+    None
+):
+    intent = resolve_input_intent(
+        "Jag vill skicka in en ljudfil och ett bifogat dokument i samma körning.",
+        {},
+    )
+
+    assert intent.audio_requested is True
+    assert intent.document_runtime_input_requested is True
+    assert intent.needs_architecture_clarification is True
+
+
+def test_resolve_input_intent_keeps_terse_terminal_docx_upload_as_document_input() -> (
+    None
+):
+    intent = resolve_input_intent("Skicka in en DOCX i slutet.", {})
+
+    assert intent.primary_runtime_input == "documents"
+    assert intent.document_runtime_input_requested is True
+    assert intent.needs_architecture_clarification is False
+
+
+def test_resolve_input_intent_keeps_terse_terminal_pdf_upload_as_document_input() -> (
+    None
+):
+    intent = resolve_input_intent("Ladda upp en PDF i slutet.", {})
+
+    assert intent.primary_runtime_input == "documents"
+    assert intent.document_runtime_input_requested is True
+    assert intent.needs_architecture_clarification is False
+
+
 def test_resolve_input_intent_uses_role_scoped_input_clause_for_uploaded_pdf() -> None:
     intent = resolve_input_intent(
         "Bygg ett flöde som tar ett uppladdat PDF-dokument och genererar en DOCX-rapport.",

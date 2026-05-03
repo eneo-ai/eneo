@@ -1073,6 +1073,33 @@ class TestExtendedClarificationHints:
         assert "flow_input_architecture" not in question_ids
         assert "final_output_mode" not in question_ids
 
+    def test_swedish_audio_prompt_with_terminal_word_file_is_ready_for_confirmation(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Jag vill bygga ett flöde där jag ska skicka in en ljudfil "
+                    "som ska transkriberas. Jag vill ha en Word-fil i slutet."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert analysis.ready_for_confirmation is True
+        assert "input_material_mode" not in question_ids
+        assert "flow_input_architecture" not in question_ids
+        assert "final_output_mode" not in question_ids
+        assert "docx_output_mode" not in question_ids
+
     def test_edit_flow_uses_existing_flow_defaults_before_reasking_output_or_metadata(
         self,
     ) -> None:
