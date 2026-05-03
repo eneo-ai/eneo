@@ -62,22 +62,6 @@ class DiscoveryIssue:
 
 
 @dataclass(frozen=True)
-class SemanticAdjudicationSignal:
-    question_id: str
-    value: str
-    confidence: DiscoveryConfidence
-    reason: str
-
-
-@dataclass(frozen=True)
-class SemanticAdjudicationResult:
-    signals: tuple[SemanticAdjudicationSignal, ...] = ()
-    assumptions: tuple[str, ...] = ()
-    contradictions: tuple[str, ...] = ()
-    cached: bool = False
-
-
-@dataclass(frozen=True)
 class DiscoveryCandidate:
     issue_id: str
     question_id: str | None

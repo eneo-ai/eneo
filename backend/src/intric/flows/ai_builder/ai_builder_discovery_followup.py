@@ -102,6 +102,7 @@ async def emit_discovery_followup_if_needed(
         litellm_model=litellm_model,
         litellm_kwargs=litellm_kwargs,
         ui_language=ui_language,
+        tenant_id=tenant_id,
     )
     if followup is None:
         return []

@@ -30,6 +30,7 @@ from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
 )
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
     build_discovery_block_message_runtime,
+    build_runtime_planning_state,
 )
 from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
@@ -127,7 +128,6 @@ from intric.flows.ai_builder.planning_state import (
     PlanningState,
 )
 from intric.flows.ai_builder.planning_state_builder import (
-    build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
 )
 from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY
@@ -522,6 +522,7 @@ class AIBuilderPlanner:
             litellm_kwargs=litellm_kwargs,
             ui_language=ui_language,
             allow_semantic_adjudication=allow_discovery_semantic_adjudication,
+            tenant_id=self.user.tenant_id,
         )
 
         is_edit_mode = flow is not None
@@ -550,9 +551,15 @@ class AIBuilderPlanner:
             latest_user_message=message,
             flow=flow,
         )
-        rebuilt_planning_state = build_planning_state_from_conversation(
+        rebuilt_planning_state = await build_runtime_planning_state(
             conversation,
             flow=flow,
+            litellm_client=self.litellm_client,
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            ui_language=ui_language,
+            tenant_id=self.user.tenant_id,
+            allow_classification=discovery_block_message is None,
         )
         carry_forward_persisted_planner_state(
             rebuilt_planning_state, persisted_planning_state

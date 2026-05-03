@@ -10,7 +10,6 @@ from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
 from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryLanguage,
     DiscoveryProfile,
-    SemanticAdjudicationResult,
 )
 from intric.flows.ai_builder.ai_builder_discovery_questions import localized_text
 from intric.flows.ai_builder.ai_builder_edit_scope import (
@@ -29,6 +28,10 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_slot_classifier import (
+    UNKNOWN_SLOT_VALUE,
+    SlotClassificationResult,
+)
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
@@ -270,16 +273,16 @@ def merge_answer_signals(
     return merged
 
 
-def semantic_answers(
-    semantic_result: SemanticAdjudicationResult | None,
+def classification_answers(
+    classification_result: SlotClassificationResult | None,
 ) -> dict[str, set[str]] | None:
-    if semantic_result is None:
+    if classification_result is None:
         return None
     merged: dict[str, set[str]] = {}
-    for signal in semantic_result.signals:
-        if signal.confidence == "low":
+    for slot in classification_result.slots:
+        if slot.confidence == "low" or slot.value == UNKNOWN_SLOT_VALUE:
             continue
-        merged.setdefault(signal.question_id, set()).add(signal.value)
+        merged.setdefault(slot.slot_name, set()).add(slot.value)
     return merged or None
 
 

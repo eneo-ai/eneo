@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
@@ -154,6 +155,7 @@ async def test_discovery_semantic_adjudication_returns_none_on_llm_failure() -> 
                 ),
             ),
         ),
+        tenant_id=uuid4(),
     )
 
     assert result is None
@@ -194,6 +196,29 @@ def test_should_not_run_semantic_adjudication_for_docx_mode_choice() -> None:
                     DiscoveryCandidate(
                         issue_id="docx_output_mode",
                         question_id="docx_output_mode",
+                        confidence="low",
+                        impact="architecture",
+                        assumption_safe=False,
+                        family="output",
+                        resolved_by="heuristic_assumption",
+                    ),
+                ),
+            )
+        )
+        is False
+    )
+
+
+def test_should_not_run_semantic_adjudication_for_pdf_generation_mode_choice() -> None:
+    assert (
+        should_run_semantic_adjudication(
+            DiscoveryAnalysis(
+                issues=(),
+                mvs_met=True,
+                candidates=(
+                    DiscoveryCandidate(
+                        issue_id="pdf_generation_mode",
+                        question_id="pdf_generation_mode",
                         confidence="low",
                         impact="architecture",
                         assumption_safe=False,

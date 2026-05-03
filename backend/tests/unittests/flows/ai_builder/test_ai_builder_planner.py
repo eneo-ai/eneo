@@ -525,7 +525,8 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
             return_value=(None, discovery_analysis),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner.build_planning_state_from_conversation",
+            "intric.flows.ai_builder.ai_builder_planner.build_runtime_planning_state",
+            new_callable=AsyncMock,
             return_value=state,
         ),
         patch(

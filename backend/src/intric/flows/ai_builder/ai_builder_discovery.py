@@ -63,7 +63,6 @@ from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryIssue,
     DiscoveryLanguage,
     DiscoveryProfile,
-    SemanticAdjudicationResult,
 )
 from intric.flows.ai_builder.ai_builder_discovery_priority import (
     sort_discovery_issues,
@@ -72,10 +71,10 @@ from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile as _build_discovery_profile,
 )
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
-    default_discovery_assumptions as _default_discovery_assumptions,
+    classification_answers as _classification_answers,
 )
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
-    semantic_answers as _semantic_answers,
+    default_discovery_assumptions as _default_discovery_assumptions,
 )
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
     text_has_task_verbs as _text_has_task_verbs,
@@ -113,6 +112,7 @@ from intric.flows.ai_builder.ai_builder_signal_confidence import (
     has_low_confidence_signals,
     score_conversation_signals,
 )
+from intric.flows.ai_builder.ai_builder_slot_classifier import SlotClassificationResult
 from intric.flows.domain.flow import Flow
 
 
@@ -120,12 +120,12 @@ def analyze_discovery(
     conversation: list[ConversationMessage],
     *,
     flow: Flow | None = None,
-    semantic_result: SemanticAdjudicationResult | None = None,
+    slot_classification_result: SlotClassificationResult | None = None,
 ) -> DiscoveryAnalysis:
     profile = _build_discovery_profile(
         conversation,
         flow=flow,
-        supplemental_answers=_semantic_answers(semantic_result),
+        supplemental_answers=_classification_answers(slot_classification_result),
     )
     text = profile.text
     answers = profile.answers
@@ -453,7 +453,7 @@ def analyze_discovery(
         issues=_dedupe_issues(raw_issues),
         profile=profile,
         conversation=conversation,
-        semantic_result=semantic_result,
+        slot_classification_result=slot_classification_result,
     )
     assumptions.extend(
         _default_discovery_assumptions(
@@ -777,7 +777,7 @@ def _apply_discovery_decision_engine(
     issues: list[DiscoveryIssue],
     profile: DiscoveryProfile,
     conversation: list[ConversationMessage],
-    semantic_result: SemanticAdjudicationResult | None,
+    slot_classification_result: SlotClassificationResult | None,
 ) -> tuple[
     list[DiscoveryIssue],
     list[str],
@@ -789,5 +789,5 @@ def _apply_discovery_decision_engine(
         issues=issues,
         profile=profile,
         conversation=conversation,
-        semantic_result=semantic_result,
+        slot_classification_result=slot_classification_result,
     )

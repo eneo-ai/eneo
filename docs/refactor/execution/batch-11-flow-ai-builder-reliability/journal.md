@@ -2,7 +2,7 @@
 
 ## Status
 
-11.2a IMPLEMENTATION COMPLETE
+11.2b IMPLEMENTATION COMPLETE
 
 ## Starting Point
 
@@ -17,7 +17,8 @@
 - Slices recorded in this journal: 11.0a reliability corpus, 11.0b proposal
   measurement, 11.1a step skeleton ownership, 11.1b skeleton fill
   integration, 11.1c architecture error classification, 11.1d edit-path
-  mechanics, and 11.2a Swedish slot resolver corpus.
+  mechanics, 11.2a Swedish slot resolver corpus, and 11.2b model slot resolver
+  runtime overlay.
 
 ## 11.0a Slice Plan
 
@@ -944,3 +945,86 @@ the Batch 11.2 resolver success target.
 | Keyword-prior deletion criterion and disagreement measurement. | 11.2b |
 | Resolver telemetry for model, tenant, confidence, capability path, and latency. | 11.2b |
 | JSONB round-trip coverage for `source="model"` and `confidence="low"`. | 11.2b |
+
+## 11.2b Model Slot Resolver Runtime Overlay
+
+### Scope
+
+Implemented the model-backed resolver runtime overlay for PlanningState. This
+slice reuses the existing `ResolvedSlot` contract from 11.2a, deletes the old
+discovery-only semantic result/parser/cache path, and keeps the deterministic
+corpus baseline on the sync builder path.
+
+### Source Changes
+
+| Area | Evidence | Decision |
+|---|---|---|
+| Shared classifier core | `backend/src/intric/flows/ai_builder/ai_builder_slot_classifier.py:1` | Added the single LLM slot classifier with `ClassifiedSlot`, `SlotClassificationResult`, canonical `slots/slot_name` parsing, shared cache, prompt hash helper, and tenant-aware logs. |
+| Discovery semantic classification | `backend/src/intric/flows/ai_builder/ai_builder_semantic_adjudication.py:44` | Kept pending-question adjudication local, but moved discovery slot classification to the shared classifier. The old `SemanticAdjudicationResult` / `SemanticAdjudicationSignal` types and `_NON_ADJUDICABLE_QUESTION_IDS` constant were removed. |
+| Non-LLM slot policy | `backend/src/intric/flows/ai_builder/ai_builder_slot_vocabulary.py:26` | Added `NON_LLM_RESOLVABLE_SLOT_NAMES` for DOCX/PDF generation mode so downstream setup choices remain explicit user/deterministic decisions. |
+| Runtime PlanningState overlay | `backend/src/intric/flows/ai_builder/ai_builder_discovery_runtime.py:72` | Added `build_runtime_planning_state()` as the async owner for model classification and PlanningState overlay. |
+| Planner wiring | `backend/src/intric/flows/ai_builder/ai_builder_planner.py:552` | `_prepare_planner_request` now uses the runtime PlanningState builder before action-policy computation. Blocking discovery passes `allow_classification=False`. |
+| Sync merge contract | `backend/src/intric/flows/ai_builder/planning_state_builder.py:161` | Added `merge_llm_resolved_slots()` with conservative priority: explicit/summary/default evidence wins; high model can replace weak defaults; medium model can replace heuristics and fill missing slots; low/unknown/non-LLM values are ignored. |
+| Discovery answer merge | `backend/src/intric/flows/ai_builder/ai_builder_discovery_profile_builder.py:274` | Renamed classifier-to-answer projection to `classification_answers()` and made low/unknown slots unresolved. |
+| Discovery decision engine | `backend/src/intric/flows/ai_builder/ai_builder_discovery_decision_engine.py:244` | Rewired confidence resolution to `SlotClassificationResult.slots` and the shared `UNKNOWN_SLOT_VALUE`. |
+
+### Test Changes
+
+| Coverage | Evidence |
+|---|---|
+| Canonical classifier shape, illegal-value filtering, cache reuse, prompt hash, and tenant logging | `backend/tests/unittests/flows/ai_builder/test_ai_builder_slot_classifier.py:27`, `:48`, `:105`, `:132`, `:180` |
+| Runtime gates for strong resolved slots, weak-slot upgrade, empty text, disabled classification, and overlay persistence | `backend/tests/unittests/flows/ai_builder/test_ai_builder_discovery_runtime.py:71`, `:93`, `:146`, `:164`, `:182` |
+| DOCX/PDF model-resolution exclusion | `backend/tests/unittests/flows/ai_builder/test_ai_builder_semantic_adjudication.py:164`, `:194` |
+| Merge priority and skip rules | `backend/tests/unittests/flows/ai_builder/test_planning_state_builder.py:289`, `:336`, `:367`, `:397`, `:424`, `:437`, `:450`, `:469` |
+| Non-LLM slot vocabulary | `backend/tests/unittests/flows/ai_builder/test_ai_builder_slot_vocabulary.py:35` |
+| Planner blocking-discovery zero-LLM behavior | `backend/tests/unittests/flows/ai_builder/test_discovery_flow.py:1881` |
+| Corpus baseline remains deterministic | `backend/tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py:106` |
+
+### Claude Peer Review
+
+| Iteration | Artifact | Verdict | Green light | Minimum score | Outcome |
+|---:|---|---|---|---:|---|
+| 1 | `.codex/artifacts/claude-peer-loop-batch-11-2b-slot-resolver-runtime-plan-20260503T043632Z.md` | `changes_required` | `no` | 5 | Rejected a duplicate resolver module, async merge logic in the sync builder, weak merge priority, unstable evidence, and underspecified logging/tests. |
+| 2 | `.codex/artifacts/claude-peer-loop-batch-11-2b-slot-resolver-runtime-plan-verification-20260503T044044Z.md` | `changes_required` | `no` | 7 | Required one canonical JSON shape, type rename, prompt hash outside result type, explicit cache key, clearer gate, and PDF parity with DOCX non-LLM policy. |
+| 3 | `.codex/artifacts/claude-peer-loop-batch-11-2b-slot-resolver-runtime-plan-verification-3-20260503T044548Z.md` | `green` | `yes` | 8 | Approved the revised plan with low implementation clarifications. |
+| 4 | `.codex/artifacts/claude-peer-loop-batch-11-2b-slot-resolver-runtime-implementation-20260503T050605Z.md` | `green` | `yes` | 7 | Accepted the implementation and identified low cleanup items. |
+| 5 | `.codex/artifacts/claude-peer-loop-batch-11-2b-slot-resolver-runtime-final-verification-20260503T051437Z.md` | `green` | `yes` | 8 | Confirmed cleanup and weak-slot candidate fix. |
+| 6 | `.codex/artifacts/claude-peer-loop-batch-11-2b-slot-resolver-runtime-post-dead-branch-removal-20260503T052014Z.md` | `green` | `yes` | 9 | Content green but wrapper parse failed because Claude bolded the output-contract fields. |
+| 7 | `.codex/artifacts/claude-peer-loop-batch-11-2b-slot-resolver-runtime-parser-clean-final-20260503T052115Z.md` | `green` | `yes` | 9 | Parser-clean final verification. |
+
+### Accepted Claude Findings
+
+| Finding | Resolution |
+|---|---|
+| Do not add a duplicate `ai_builder_slot_resolver.py`. | Added one shared `ai_builder_slot_classifier.py` used by discovery and PlanningState runtime. |
+| Keep `planning_state_builder.py` synchronous. | Added only a sync mutation merge function; async LLM wiring lives in `ai_builder_discovery_runtime.py`. |
+| Do not preserve the old `signals/question_id` shape during the refactor. | Parser accepts only canonical `slots/slot_name`; tests assert old shape produces no slots. |
+| Rename stale semantic result types. | Deleted `SemanticAdjudicationResult` / `SemanticAdjudicationSignal` and introduced `SlotClassificationResult` / `ClassifiedSlot`. |
+| Keep `prompt_hash` out of the result type. | Added `slot_classification_prompt_hash()` and made `merge_llm_resolved_slots(..., prompt_hash=...)` require it. |
+| Consolidate non-LLM slot policy and include PDF parity. | Added `NON_LLM_RESOLVABLE_SLOT_NAMES = {"docx_output_mode", "pdf_generation_mode"}`. |
+| Do not use `litellm_client=None` as an implicit gate. | Added explicit `allow_classification` on `build_runtime_planning_state()`. |
+| Replace magic `unknown` literals with one owner. | Exported `UNKNOWN_SLOT_VALUE` from the classifier and reused it in merge/discovery consumers. |
+| Runtime candidate set must allow model upgrades of weak deterministic slots. | `_llm_candidate_slot_values()` includes missing slots plus heuristic/policy-default slots; runtime test covers policy-default upgrade. |
+| Remove dead model-to-model recency branch. | Deleted the merge branch and its test because model-sourced slots are not live runtime candidates today. |
+
+### Validation
+
+| Command | Result |
+|---|---|
+| `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_slot_classifier.py tests/unittests/flows/ai_builder/test_ai_builder_discovery_runtime.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_semantic_adjudication.py tests/unittests/flows/ai_builder/test_ai_builder_slot_vocabulary.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_ai_builder_understanding_goldens.py tests/integration/flows/ai_builder/benchmark/test_slot_resolver_corpus.py -q` | Passed: `129 passed`, 16 existing warnings from unrelated deprecations. |
+| `cd backend && uv run pyright <11.2b touched source/test files>` | Passed: `0 errors, 0 warnings, 0 informations`. |
+| `cd backend && uv run ruff check <11.2b touched source/test files>` | Passed. |
+| `cd backend && uv run ruff format --check <11.2b touched source/test files>` | Passed: `18 files already formatted`. |
+| `cd backend && uv run lint-imports --no-cache` | Passed: 3 contracts kept, 0 broken. |
+| `git diff --check` | Passed. |
+| `./scripts/gate-local/anti_slippage.sh --worktree` | Passed. |
+| Added-line slop grep for source/test `deprecated`, `legacy`, `backwards compatibility`, source-control/session/tooling comments, and TODO/FIXME markers | Passed with no matches. |
+
+### Carry-Forward
+
+| Item | Owner slice |
+|---|---|
+| Provider-backed evaluation against the frozen 80-case corpus before claiming `>= 0.85`. | 11.2c or the next resolver eval slice |
+| Keyword-prior deletion criterion and disagreement measurement. | Later 11.2 follow-up |
+| Unify discovery question-id and PlanningState slot-name namespaces so classifier cache sharing works across both surfaces more often. | Future cleanup |
+| If another weak slot source is introduced, lift the weak-source set used by runtime gating and merge priority into one named owner. | Future slot-source extension |

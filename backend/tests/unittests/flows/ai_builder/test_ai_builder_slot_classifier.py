@@ -1,0 +1,209 @@
+from __future__ import annotations
+
+import json
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
+
+import pytest
+
+from intric.flows.ai_builder import ai_builder_slot_classifier as classifier
+from intric.flows.ai_builder.ai_builder_slot_classifier import (
+    classify_slots,
+    parse_slot_classification_response,
+    slot_classification_prompt_hash,
+)
+
+
+def _make_response(content: str) -> MagicMock:
+    message = MagicMock()
+    message.content = content
+    choice = MagicMock()
+    choice.message = message
+    response = MagicMock()
+    response.choices = [choice]
+    return response
+
+
+def test_parse_slot_classification_response_uses_canonical_slots_shape_only() -> None:
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "signals": [
+                    {
+                        "question_id": "terminal_output",
+                        "value": "pdf_document",
+                        "confidence": "high",
+                        "reason": "old shape",
+                    }
+                ]
+            }
+        ),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+    )
+
+    assert result is not None
+    assert result.slots == ()
+
+
+def test_parse_slot_classification_response_filters_invalid_entries() -> None:
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "pdf_document",
+                        "confidence": "high",
+                        "reason": "explicit PDF report",
+                    },
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "structured_text",
+                        "confidence": "high",
+                        "reason": "duplicate",
+                    },
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "invented",
+                        "confidence": "high",
+                        "reason": "invalid value",
+                    },
+                    {
+                        "slot_name": "invented_slot",
+                        "value": "pdf_document",
+                        "confidence": "high",
+                        "reason": "invalid slot",
+                    },
+                    {
+                        "slot_name": "primary_runtime_input",
+                        "value": "unknown",
+                        "confidence": "low",
+                        "reason": "ambiguous input",
+                    },
+                ],
+                "assumptions": ["PDF is requested"],
+                "contradictions": ["input is ambiguous"],
+            }
+        ),
+        allowed_slot_values={
+            "terminal_output": {"pdf_document", "structured_text"},
+            "primary_runtime_input": {"text", "documents"},
+        },
+    )
+
+    assert result is not None
+    assert [slot.slot_name for slot in result.slots] == [
+        "terminal_output",
+        "primary_runtime_input",
+    ]
+    assert result.slots[0].value == "pdf_document"
+    assert result.slots[1].value == "unknown"
+    assert result.assumptions == ("PDF is requested",)
+    assert result.contradictions == ("input is ambiguous",)
+
+
+def test_prompt_hash_uses_sorted_names_and_stable_json_serialization() -> None:
+    text = "Sammanfatta ärendet"
+
+    prompt_hash = slot_classification_prompt_hash(
+        text=text,
+        ui_language="sv",
+        slot_names=("terminal_output", "primary_runtime_input"),
+    )
+
+    assert prompt_hash == slot_classification_prompt_hash(
+        text=text,
+        ui_language="sv",
+        slot_names=("primary_runtime_input", "terminal_output"),
+    )
+    assert (
+        prompt_hash
+        == classifier.hashlib.sha256(
+            json.dumps(
+                {
+                    "slot_names": ["primary_runtime_input", "terminal_output"],
+                    "text": text,
+                    "ui_language": "sv",
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+    )
+
+
+@pytest.mark.asyncio
+async def test_classify_slots_reuses_shared_cache_for_identical_targets() -> None:
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "pdf_document",
+                        "confidence": "high",
+                        "reason": "PDF report requested",
+                    }
+                ]
+            }
+        )
+    )
+    text = f"cache-target-{uuid4()}"
+    allowed_values = {"terminal_output": {"pdf_document"}}
+
+    first = await classify_slots(
+        litellm_client=litellm_client,
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        text=text,
+        allowed_slot_values=allowed_values,
+        tenant_id=uuid4(),
+        ui_language="sv",
+    )
+    second = await classify_slots(
+        litellm_client=litellm_client,
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        text=text,
+        allowed_slot_values=allowed_values,
+        tenant_id=uuid4(),
+        ui_language="sv",
+    )
+
+    assert first is not None
+    assert second is not None
+    assert first.cached is False
+    assert second.cached is True
+    assert litellm_client.acompletion.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_classify_slots_logs_tenant_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps({"slots": [], "assumptions": [], "contradictions": []})
+    )
+    log_calls: list[dict[str, object]] = []
+
+    def capture_info(_: str, *, extra: dict[str, object]) -> None:
+        log_calls.append(extra)
+
+    monkeypatch.setattr(classifier.logger, "info", capture_info)
+    tenant_id = uuid4()
+
+    await classify_slots(
+        litellm_client=litellm_client,
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        text=f"log-target-{uuid4()}",
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        tenant_id=tenant_id,
+        ui_language="sv",
+    )
+
+    assert log_calls
+    assert log_calls[-1]["tenant_id"] == str(tenant_id)
+    assert log_calls[-1]["model"] == "gpt-test"

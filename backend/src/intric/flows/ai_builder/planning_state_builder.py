@@ -1,10 +1,9 @@
 """Derive `PlanningState` from a conversation and render the planner
 prompt block from it.
 
-This module owns the deterministic slot-resolution logic that used to
-live in a separate legacy resolver. It is the single path from a raw
-conversation to a stamped `PlanningState` and from that state to the
-prompt block the planner LLM reads.
+This module owns the deterministic path from a raw conversation to a
+stamped `PlanningState` and from that state to the prompt block the
+planner LLM reads.
 """
 
 from __future__ import annotations
@@ -33,6 +32,14 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
     resolve_requirements_state,
 )
+from intric.flows.ai_builder.ai_builder_slot_classifier import (
+    UNKNOWN_SLOT_VALUE,
+    SlotClassificationResult,
+)
+from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
+    KNOWN_REQUIREMENT_SLOT_NAMES,
+    NON_LLM_RESOLVABLE_SLOT_NAMES,
+)
 from intric.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
@@ -43,6 +50,7 @@ from intric.flows.ai_builder.planning_state import (
     SlotConfidence,
     SlotSource,
 )
+from intric.flows.ai_builder.question_catalog import legal_slot_values
 from intric.flows.domain.flow import Flow
 
 
@@ -115,6 +123,10 @@ _PHASE_ORDER: tuple[str, ...] = (
     "plan_proposed",
 )
 
+_MODEL_PROTECTED_SOURCES: frozenset[SlotSource] = frozenset(
+    {"structured_answer", "requirements_summary", "flow_default"}
+)
+
 
 def carry_forward_persisted_planner_state(
     rebuilt: PlanningState,
@@ -147,6 +159,71 @@ def carry_forward_persisted_planner_state(
         rebuilt.draft_plan_id = persisted.draft_plan_id
     if _PHASE_ORDER.index(rebuilt.phase) < _PHASE_ORDER.index(persisted.phase):
         rebuilt.phase = persisted.phase
+
+
+def merge_llm_resolved_slots(
+    state: PlanningState,
+    classification_result: SlotClassificationResult,
+    *,
+    prompt_hash: str,
+) -> None:
+    """Overlay model slots without displacing explicit user or flow evidence."""
+    if not prompt_hash.strip():
+        raise ValueError("prompt_hash must be non-empty")
+
+    for classified_slot in classification_result.slots:
+        if not _model_slot_is_persistable(classified_slot.slot_name):
+            continue
+        if (
+            classified_slot.value == UNKNOWN_SLOT_VALUE
+            or classified_slot.confidence == "low"
+        ):
+            continue
+        if classified_slot.value not in legal_slot_values(classified_slot.slot_name):
+            continue
+
+        existing_slot = state.resolved_slots.get(classified_slot.slot_name)
+        if not _model_slot_can_replace(
+            existing_slot=existing_slot,
+            model_confidence=classified_slot.confidence,
+        ):
+            continue
+
+        state.resolved_slots[classified_slot.slot_name] = ResolvedSlot(
+            name=classified_slot.slot_name,
+            value=classified_slot.value,
+            source="model",
+            evidence=[
+                f"model:{classified_slot.slot_name}:{prompt_hash}",
+            ],
+            confidence=classified_slot.confidence,
+        )
+
+    if state.resolved_slots and state.phase == "awaiting_input":
+        state.phase = "discovering"
+
+
+def _model_slot_is_persistable(slot_name: str) -> bool:
+    return (
+        slot_name in KNOWN_REQUIREMENT_SLOT_NAMES
+        and slot_name not in NON_LLM_RESOLVABLE_SLOT_NAMES
+    )
+
+
+def _model_slot_can_replace(
+    *,
+    existing_slot: ResolvedSlot | None,
+    model_confidence: SlotConfidence,
+) -> bool:
+    if existing_slot is None:
+        return model_confidence in {"high", "medium"}
+    if existing_slot.source in _MODEL_PROTECTED_SOURCES:
+        return False
+    if existing_slot.source == "policy_default":
+        return model_confidence == "high"
+    if existing_slot.source == "heuristic":
+        return model_confidence in {"high", "medium"}
+    return False
 
 
 def _resolve_slots(

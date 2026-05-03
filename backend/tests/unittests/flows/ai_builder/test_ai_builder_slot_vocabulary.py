@@ -15,6 +15,7 @@ import pathlib
 import intric.flows.ai_builder.ai_builder_slot_vocabulary as slot_vocabulary
 from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
+    NON_LLM_RESOLVABLE_SLOT_NAMES,
 )
 
 
@@ -34,6 +35,15 @@ class TestSlotVocabularyShape:
 
     def test_frozenset_is_truly_frozen(self) -> None:
         assert isinstance(KNOWN_REQUIREMENT_SLOT_NAMES, frozenset)
+
+    def test_non_llm_resolvable_slots_are_document_generation_modes(self) -> None:
+        assert NON_LLM_RESOLVABLE_SLOT_NAMES == frozenset(
+            {
+                "docx_output_mode",
+                "pdf_generation_mode",
+            }
+        )
+        assert NON_LLM_RESOLVABLE_SLOT_NAMES <= KNOWN_REQUIREMENT_SLOT_NAMES
 
 
 class TestLeafPurity:

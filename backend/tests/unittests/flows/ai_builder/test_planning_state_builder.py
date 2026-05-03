@@ -16,6 +16,11 @@ from uuid import uuid4
 import pytest
 
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedSlot,
+    SlotClassificationConfidence,
+    SlotClassificationResult,
+)
 from intric.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
@@ -23,11 +28,15 @@ from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     EvidenceRef,
     PlanningState,
+    ResolvedSlot,
+    SlotConfidence,
+    SlotSource,
     StepTriple,
 )
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
+    merge_llm_resolved_slots,
 )
 
 
@@ -60,6 +69,35 @@ def _commit(hash_char: str = "a") -> ArchitectureCommit:
         chosen_patterns=["summarize_text"],
         committed_at=datetime(2026, 4, 23, tzinfo=timezone.utc),
         architecture_hash=hash_char * 64,
+    )
+
+
+def _slot(
+    *,
+    name: str,
+    value: str,
+    source: SlotSource,
+) -> ResolvedSlot:
+    confidence: SlotConfidence = "medium" if source == "policy_default" else "high"
+    return ResolvedSlot(
+        name=name,
+        value=value,
+        source=source,
+        evidence=[f"{source}:{name}"],
+        confidence=confidence,
+    )
+
+
+def _classified(
+    slot_name: str,
+    value: str,
+    confidence: SlotClassificationConfidence,
+) -> ClassifiedSlot:
+    return ClassifiedSlot(
+        slot_name=slot_name,
+        value=value,
+        confidence=confidence,
+        reason=f"{slot_name} classified",
     )
 
 
@@ -250,3 +288,193 @@ class TestPolicyDefaults:
         slot = state.resolved_slots["runtime_metadata_fields"]
         assert slot.value == "detailed_case_metadata"
         assert slot.source == "heuristic"
+
+
+class TestModelSlotMerge:
+    def test_model_output_cannot_displace_explicit_summary_or_flow_defaults(
+        self,
+    ) -> None:
+        state = _state()
+        state.resolved_slots = {
+            "primary_runtime_input": _slot(
+                name="primary_runtime_input",
+                value="documents",
+                source="structured_answer",
+            ),
+            "terminal_output": _slot(
+                name="terminal_output",
+                value="structured_text",
+                source="requirements_summary",
+            ),
+            "runtime_metadata_fields": _slot(
+                name="runtime_metadata_fields",
+                value="no_extra_metadata",
+                source="flow_default",
+            ),
+        }
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(
+                    _classified("primary_runtime_input", "text", "high"),
+                    _classified("terminal_output", "pdf_document", "high"),
+                    _classified(
+                        "runtime_metadata_fields",
+                        "detailed_case_metadata",
+                        "high",
+                    ),
+                )
+            ),
+            prompt_hash="a" * 64,
+        )
+
+        assert state.resolved_slots["primary_runtime_input"].value == "documents"
+        assert state.resolved_slots["terminal_output"].value == "structured_text"
+        assert state.resolved_slots["runtime_metadata_fields"].value == (
+            "no_extra_metadata"
+        )
+
+    def test_high_model_output_replaces_policy_default(self) -> None:
+        state = _state()
+        state.resolved_slots = {
+            "runtime_metadata_fields": _slot(
+                name="runtime_metadata_fields",
+                value="no_extra_metadata",
+                source="policy_default",
+            )
+        }
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(
+                    _classified(
+                        "runtime_metadata_fields",
+                        "detailed_case_metadata",
+                        "high",
+                    ),
+                )
+            ),
+            prompt_hash="b" * 64,
+        )
+
+        slot = state.resolved_slots["runtime_metadata_fields"]
+        assert slot.value == "detailed_case_metadata"
+        assert slot.source == "model"
+        assert slot.evidence == [
+            "model:runtime_metadata_fields:" + "b" * 64,
+        ]
+
+    def test_medium_model_output_does_not_replace_policy_default(self) -> None:
+        state = _state()
+        state.resolved_slots = {
+            "runtime_metadata_fields": _slot(
+                name="runtime_metadata_fields",
+                value="no_extra_metadata",
+                source="policy_default",
+            )
+        }
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(
+                    _classified(
+                        "runtime_metadata_fields",
+                        "detailed_case_metadata",
+                        "medium",
+                    ),
+                )
+            ),
+            prompt_hash="c" * 64,
+        )
+
+        slot = state.resolved_slots["runtime_metadata_fields"]
+        assert slot.value == "no_extra_metadata"
+        assert slot.source == "policy_default"
+
+    def test_medium_model_output_replaces_heuristic_and_fills_missing_slot(
+        self,
+    ) -> None:
+        state = _state(phase="awaiting_input")
+        state.resolved_slots = {
+            "terminal_output": _slot(
+                name="terminal_output",
+                value="structured_text",
+                source="heuristic",
+            )
+        }
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(
+                    _classified("terminal_output", "pdf_document", "medium"),
+                    _classified("primary_runtime_input", "text", "medium"),
+                )
+            ),
+            prompt_hash="d" * 64,
+        )
+
+        assert state.resolved_slots["terminal_output"].value == "pdf_document"
+        assert state.resolved_slots["primary_runtime_input"].value == "text"
+        assert state.phase == "discovering"
+
+    def test_low_model_slot_is_not_persisted(self) -> None:
+        state = _state()
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(_classified("terminal_output", "pdf_document", "low"),)
+            ),
+            prompt_hash="e" * 64,
+        )
+
+        assert state.resolved_slots == {}
+
+    def test_unknown_model_slot_is_not_persisted(self) -> None:
+        state = _state()
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(_classified("primary_runtime_input", "unknown", "high"),)
+            ),
+            prompt_hash="f" * 64,
+        )
+
+        assert state.resolved_slots == {}
+
+    def test_non_llm_resolvable_slots_are_not_persisted(self) -> None:
+        state = _state()
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(
+                    _classified("docx_output_mode", "template_fill_docx", "high"),
+                    _classified(
+                        "pdf_generation_mode",
+                        "pdf_template_requested",
+                        "high",
+                    ),
+                )
+            ),
+            prompt_hash="g" * 64,
+        )
+
+        assert state.resolved_slots == {}
+
+    def test_prompt_hash_is_required(self) -> None:
+        state = _state()
+
+        with pytest.raises(ValueError, match="prompt_hash"):
+            merge_llm_resolved_slots(
+                state,
+                SlotClassificationResult(
+                    slots=(_classified("primary_runtime_input", "text", "high"),)
+                ),
+                prompt_hash="",
+            )

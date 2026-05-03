@@ -10,7 +10,6 @@ from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryIssue,
     DiscoveryProfile,
     DiscoveryResolvedBy,
-    SemanticAdjudicationResult,
 )
 from intric.flows.ai_builder.ai_builder_discovery_priority import (
     DISCOVERY_ISSUE_PRIORITY,
@@ -29,6 +28,10 @@ from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
 from intric.flows.ai_builder.ai_builder_signal_confidence import (
     ScoredSignal,
     score_conversation_signals,
+)
+from intric.flows.ai_builder.ai_builder_slot_classifier import (
+    UNKNOWN_SLOT_VALUE,
+    SlotClassificationResult,
 )
 
 _QUESTION_IMPACT: dict[str, DiscoveryImpact] = {
@@ -55,7 +58,7 @@ def apply_discovery_decision_engine(
     issues: list[DiscoveryIssue],
     profile: DiscoveryProfile,
     conversation: list[ConversationMessage],
-    semantic_result: SemanticAdjudicationResult | None,
+    slot_classification_result: SlotClassificationResult | None,
 ) -> tuple[
     list[DiscoveryIssue],
     list[str],
@@ -69,7 +72,7 @@ def apply_discovery_decision_engine(
     planner_patterns = detect_planner_pattern_signals(profile.text)
     max_questions = compute_question_budget(profile.text)
     assumptions: list[str] = list(
-        semantic_result.assumptions if semantic_result else ()
+        slot_classification_result.assumptions if slot_classification_result else ()
     )
     selected: list[DiscoveryIssue] = []
     selected_question_ids: list[str] = []
@@ -82,7 +85,7 @@ def apply_discovery_decision_engine(
             issue=issue,
             profile=profile,
             scored_signals=scored_signals,
-            semantic_result=semantic_result,
+            slot_classification_result=slot_classification_result,
         )
         question_id = candidate.question_id
 
@@ -213,7 +216,7 @@ def build_candidate(
     issue: DiscoveryIssue,
     profile: DiscoveryProfile,
     scored_signals: list[ScoredSignal],
-    semantic_result: SemanticAdjudicationResult | None,
+    slot_classification_result: SlotClassificationResult | None,
 ) -> DiscoveryCandidate:
     question_id = issue.suggestion.question_id if issue.suggestion is not None else None
     confidence, resolved_by, evidence = candidate_confidence(
@@ -221,7 +224,7 @@ def build_candidate(
         question_id=question_id,
         profile=profile,
         scored_signals=scored_signals,
-        semantic_result=semantic_result,
+        slot_classification_result=slot_classification_result,
     )
     return DiscoveryCandidate(
         issue_id=issue.issue_id,
@@ -241,13 +244,15 @@ def candidate_confidence(
     question_id: str | None,
     profile: DiscoveryProfile,
     scored_signals: list[ScoredSignal],
-    semantic_result: SemanticAdjudicationResult | None,
+    slot_classification_result: SlotClassificationResult | None,
 ) -> tuple[DiscoveryConfidence, DiscoveryResolvedBy, tuple[str, ...]]:
-    if semantic_result is not None and question_id is not None:
-        for signal in semantic_result.signals:
-            if signal.question_id != question_id:
+    if slot_classification_result is not None and question_id is not None:
+        for slot in slot_classification_result.slots:
+            if slot.slot_name != question_id:
                 continue
-            return signal.confidence, "llm_semantic_inference", (signal.reason,)
+            if slot.value == UNKNOWN_SLOT_VALUE:
+                return "low", "llm_semantic_inference", (slot.reason,)
+            return slot.confidence, "llm_semantic_inference", (slot.reason,)
 
     if question_id is not None:
         for signal in scored_signals:

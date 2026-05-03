@@ -2148,6 +2148,7 @@ class AIBuilderProposalProcessor:
             litellm_client=self.litellm_client,
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
+            tenant_id=self.user.tenant_id,
         )
         if discovery_block_message is not None:
             return ToolProcessingResult(

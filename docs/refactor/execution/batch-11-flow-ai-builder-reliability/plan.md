@@ -320,8 +320,12 @@ Slice split:
 
 - 11.2a: freeze the Swedish corpus and existing slot contract before adding a
   model-backed resolver.
-- 11.2b: implement the resolver, follow-up behavior, telemetry, and the final
-  accuracy gate against the frozen corpus.
+- 11.2b: wire the model-backed resolver into the live PlanningState path,
+  delete the duplicate discovery-only semantic parser/result type, and keep the
+  deterministic corpus baseline unchanged.
+- 11.2c: run provider-backed resolver evaluation, decide telemetry and
+  disagreement measurements from real model behavior, and claim or revise the
+  final accuracy gate against the frozen corpus.
 
 Plan requirements before implementation:
 
@@ -378,6 +382,54 @@ Carry-forward to 11.2b:
 - resolver telemetry for model, tenant, confidence, capability path, and latency
 - JSONB round-trip test for model/low slot persistence
 - keyword-prior deletion criterion and disagreement measurement
+
+#### 11.2b — Model Slot Resolver Runtime Overlay
+
+Goal:
+Wire model-backed slot classification into the live PlanningState path without
+creating a parallel resolver contract.
+
+Implemented:
+
+- `ai_builder_slot_classifier.py` owns the shared classifier core,
+  `ClassifiedSlot`, `SlotClassificationResult`, the canonical
+  `slots/slot_name` JSON shape, cache key, and tenant-aware logs.
+- `ai_builder_semantic_adjudication.py` now delegates discovery classification
+  to the shared classifier and no longer owns a duplicate parser/cache/result
+  type.
+- `NON_LLM_RESOLVABLE_SLOT_NAMES` in `ai_builder_slot_vocabulary.py` excludes
+  DOCX/PDF generation mode from model guessing; those remain explicit user or
+  deterministic policy decisions.
+- `build_runtime_planning_state()` in `ai_builder_discovery_runtime.py` owns
+  async model classification and overlays accepted slots before planner action
+  policy runs.
+- `merge_llm_resolved_slots()` in `planning_state_builder.py` keeps the sync
+  merge contract conservative:
+  - explicit structured answers, requirements summaries, and flow defaults win
+  - high-confidence model slots can replace heuristic and policy-default slots
+  - medium-confidence model slots can replace heuristic slots and fill missing
+    slots
+  - low or `unknown` model slots are not persisted
+- Blocking discovery disables the PlanningState classifier overlay, preserving
+  zero-LLM backend follow-up behavior.
+
+Validated behavior:
+
+- old `signals/question_id` classifier JSON is not accepted
+- unknown/low/non-LLM slots are not persisted
+- model output cannot displace explicit, summary, or flow-default evidence
+- weak policy-default and heuristic slots can be upgraded by model evidence
+- deterministic corpus baseline still uses `build_planning_state_from_conversation`
+  and does not call the model
+
+Carry-forward:
+
+- run a provider-backed eval against the frozen 80-case corpus before claiming
+  the final `>= 0.85` target
+- decide the keyword-prior deletion threshold after real model disagreement
+  data exists
+- keep discovery question-id and PlanningState slot-name namespace unification
+  as a future cleanup candidate
 
 ### 11.3 — Form Fields And Resource Semantics
 

@@ -22,3 +22,10 @@ KNOWN_REQUIREMENT_SLOT_NAMES: frozenset[str] = frozenset(
         "runtime_metadata_fields",
     }
 )
+
+NON_LLM_RESOLVABLE_SLOT_NAMES: frozenset[str] = frozenset(
+    {
+        "docx_output_mode",
+        "pdf_generation_mode",
+    }
+)
