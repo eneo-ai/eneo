@@ -28,6 +28,7 @@ from intric.flows.ai_builder.ai_builder_validation_quality import (
     lint_json_output_without_contract,
     lint_multi_goal_prompts,
     lint_single_step_flow,
+    lint_source_material_underlag_boundaries,
     lint_unfiltered_structured_interpolation,
     lint_unused_form_fields,
     lint_vague_step_names,
@@ -105,6 +106,7 @@ def validate_spec(
         lint_unused_form_fields(spec, result)
         lint_all_previous_with_specific_refs(spec, result)
         lint_unfiltered_structured_interpolation(spec, result)
+        lint_source_material_underlag_boundaries(spec, result)
 
     return result
 

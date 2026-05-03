@@ -11,6 +11,9 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
 from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
+from intric.flows.ai_builder.ai_builder_create_dataflow import (
+    normalize_create_draft_mechanics,
+)
 from intric.flows.ai_builder.ai_builder_create_models import (
     CreateFormFieldDraft,
     CreateStepDraft,
@@ -2957,10 +2960,11 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
         outline,
         context=outline_compile_context_from_planning_state(state, ui_language="sv"),
     )
+    normalized = normalize_create_draft_mechanics(draft)
     compiled = compile_create_draft(draft)
     validation = validate_spec(compiled)
 
-    metadata_step = draft.steps[2]
+    metadata_step = normalized.steps[2]
     assert metadata_step.input_type.value == "text"
     assert [
         (ref.from_step, ref.label) for ref in metadata_step.uses_previous_outputs
@@ -2970,7 +2974,7 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
         "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
     )
 
-    protocol_step = draft.steps[3]
+    protocol_step = normalized.steps[3]
     assert protocol_step.name == "Skapa mötesprotokoll med fasta rubriker"
     assert protocol_step.input_source.value == "previous_step"
     assert protocol_step.input_type.value == "text"
@@ -2985,6 +2989,74 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
         "{{ step_c.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
     )
     assert validation.valid
+
+
+def test_compile_create_draft_direct_audio_docx_bad_shape_gets_source_underlag() -> (
+    None
+):
+    draft = FlowCreateDraft(
+        flow_name="Mötesprotokoll från ljud till Word",
+        plan_rationale="Transkribera ljud och skapa DOCX.",
+        steps=[
+            CreateStepDraft(
+                name="Transkribera ljud",
+                instructions="Transkribera uppladdat ljud.",
+                input_source="flow_input",
+                input_type="audio",
+                output_type="text",
+                runtime_upload=True,
+                runtime_required=True,
+            ),
+            CreateStepDraft(
+                name="Strukturera transkription",
+                instructions="Strukturera transkriptionen.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+                output_fields=[_field("transcription_text", "string")],
+            ),
+            CreateStepDraft(
+                name="Identifiera mötesmetadata",
+                instructions="Identifiera mötestitel.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="json",
+                output_fields=[_field("meeting_title", "string")],
+            ),
+            CreateStepDraft(
+                name="Skapa mötesprotokoll med fasta rubriker",
+                instructions="Skapa protokollsektioner från metadata och transkription.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="json",
+                output_fields=[_field("protocol_sections", "string")],
+            ),
+            CreateStepDraft(
+                name="Skapa DOCX",
+                instructions="Skapa slutdokumentet.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="docx",
+                document_delivery_mode="generated",
+            ),
+        ],
+    )
+
+    compiled = compile_create_draft(draft)
+
+    metadata_question = compiled.steps[2].input_bindings["question"]
+    protocol_question = compiled.steps[3].input_bindings["question"]
+    docx_question = compiled.steps[4].input_bindings["question"]
+    assert metadata_question == (
+        "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+    )
+    assert protocol_question == (
+        "{{ step_c.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+    )
+    assert docx_question == (
+        "{{ step_d.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+    )
+    assert validate_spec(compiled).valid
 
 
 def test_compile_outline_audio_pdf_protocol_step_uses_all_previous_fan_in() -> None:

@@ -14,7 +14,6 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
     NewStepDraft,
-    PreviousOutputRef,
     StructuredFieldDraft,
 )
 from intric.flows.ai_builder.pattern_registry import (
@@ -367,13 +366,6 @@ class StepSkeletonPlan:
                 allow_json_output=True,
             )
             steps.append(terminal_step)
-        steps = _attach_audio_source_foundation_refs(
-            steps=steps,
-            prefix_slots=self.prefix_slots,
-            final_output_type=self.final_output_type,
-            ui_language=self.ui_language,
-        )
-
         return StepSkeletonComposition(
             steps=tuple(steps),
             output_type_drifts=tuple(output_type_drifts),
@@ -592,93 +584,6 @@ def _compiled_chain_step_template(
 
 def materialized_compiled_pattern_ids() -> frozenset[str]:
     return _COMPILED_PATTERN_MATERIALIZER_IDS
-
-
-def _attach_audio_source_foundation_refs(
-    *,
-    steps: list[NewStepDraft],
-    prefix_slots: tuple[StepSkeleton, ...],
-    final_output_type: OutputType,
-    ui_language: str | None,
-) -> list[NewStepDraft]:
-    if final_output_type not in _DOCUMENT_OUTPUT_TYPES:
-        return steps
-    if not any(
-        slot.chain_token == FLOW_INPUT_AUDIO_TRANSCRIPTION for slot in prefix_slots
-    ):
-        return steps
-
-    source_ref = _audio_transcription_output_ref(
-        prefix_slots,
-        ui_language=ui_language,
-    )
-    if source_ref is None:
-        return steps
-
-    updated_steps = list(steps)
-    changed = False
-    for step_index, step in enumerate(steps):
-        if not _needs_source_foundation_ref(
-            steps=steps,
-            step=step,
-            step_index=step_index,
-            source_ref=source_ref,
-        ):
-            continue
-
-        updated_steps[step_index] = step.model_copy(
-            update={
-                # Foundation refs must render alongside the immediate previous JSON.
-                "input_type": InputType.TEXT,
-                "uses_previous_outputs": [*step.uses_previous_outputs, source_ref],
-            }
-        )
-        changed = True
-
-    return updated_steps if changed else steps
-
-
-def _audio_transcription_output_ref(
-    prefix_slots: tuple[StepSkeleton, ...],
-    *,
-    ui_language: str | None,
-) -> PreviousOutputRef | None:
-    for step_index, slot in enumerate(prefix_slots):
-        if slot.chain_token == FLOW_INPUT_AUDIO_TRANSCRIPTION:
-            return PreviousOutputRef(
-                from_step=step_index + 1,
-                label=_source_material_label(ui_language),
-            )
-    return None
-
-
-def _source_material_label(ui_language: str | None) -> str:
-    if ui_language == "sv":
-        return "Källmaterial"
-    return "Source material"
-
-
-def _needs_source_foundation_ref(
-    *,
-    steps: list[NewStepDraft],
-    step: NewStepDraft,
-    step_index: int,
-    source_ref: PreviousOutputRef,
-) -> bool:
-    if step.input_source != InputSource.PREVIOUS_STEP:
-        return False
-    if step.output_type in _DOCUMENT_OUTPUT_TYPES:
-        return False
-    if step_index == 0:
-        return False
-    if source_ref.from_step >= step_index:
-        return False
-    if any(
-        output_ref.from_step == source_ref.from_step
-        for output_ref in step.uses_previous_outputs
-    ):
-        return False
-    return True
 
 
 def _compose_step_skeleton_slot(

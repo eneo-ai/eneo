@@ -13,9 +13,16 @@ from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
+    InputType,
     OutputMode,
     OutputType,
     StepSpec,
+)
+from intric.flows.ai_builder.ai_builder_source_material import (
+    iter_compiled_source_material_boundaries,
+    question_binding,
+    source_material_binding_is_complete,
+    source_material_question_for_boundary,
 )
 from intric.flows.ai_builder.ai_builder_step_capabilities import (
     is_citation_capable_step,
@@ -86,6 +93,10 @@ def normalize_ai_builder_step_topology(
     flows do not need `all_previous_steps`; it duplicates context and triggers
     noisy quality warnings. Keep true fan-in when a prompt explicitly references
     several earlier steps, otherwise compile to the lean adjacent edge.
+
+    Artifact flows that cross a structured JSON boundary also need explicit
+    source-material underlag. Without that binding, later document-rendering
+    steps can see only metadata JSON and lose the transcript or source file text.
     """
 
     spec, artifact_tail_changes = _normalize_terminal_artifact_tail(
@@ -145,9 +156,64 @@ def normalize_ai_builder_step_topology(
             continue
         normalized_steps.append(step)
 
+    normalized_spec = (
+        spec if not mutated else spec.model_copy(update={"steps": normalized_steps})
+    )
+    normalized_spec, source_material_changes = _normalize_source_material_underlag(
+        normalized_spec
+    )
+    changes.extend(source_material_changes)
+    mutated = mutated or bool(source_material_changes)
+
     if not mutated:
         return spec, changes
-    return spec.model_copy(update={"steps": normalized_steps}), changes
+    return normalized_spec, changes
+
+
+def _normalize_source_material_underlag(
+    spec: FlowDraftSpecCore,
+) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
+    updated_steps = list(spec.steps)
+    changes: list[tuple[StepSpec, StepNormalizationChange]] = []
+
+    for boundary in iter_compiled_source_material_boundaries(spec):
+        if source_material_binding_is_complete(boundary):
+            continue
+        step_index = next(
+            index
+            for index, candidate in enumerate(spec.steps)
+            if candidate is boundary.step
+        )
+        existing_question = question_binding(boundary.step.input_bindings)
+        normalized_bindings = dict(boundary.step.input_bindings or {})
+        normalized_bindings["question"] = source_material_question_for_boundary(
+            boundary,
+            existing_question=existing_question,
+        )
+        normalized_step = boundary.step.model_copy(
+            update={
+                "input_type": InputType.TEXT,
+                "input_bindings": normalized_bindings,
+            }
+        )
+        updated_steps[step_index] = normalized_step
+        changes.append(
+            (
+                normalized_step,
+                StepNormalizationChange(
+                    code="source_material_underlag_completed",
+                    field_suffix="input_bindings.question",
+                    message=(
+                        "Completed source-material underlag so the step receives "
+                        "the immediate structured result and the earlier source text."
+                    ),
+                ),
+            )
+        )
+
+    if not changes:
+        return spec, []
+    return spec.model_copy(update={"steps": updated_steps}), changes
 
 
 def _normalize_pre_terminal_artifact_body_step(

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from intric.flows.ai_builder.ai_builder_create_dataflow import (
+    normalize_create_draft_mechanics,
+)
 from intric.flows.ai_builder.ai_builder_create_models import (
     CreateFormFieldDraft,
     FlowCreateDraft,
@@ -17,6 +20,7 @@ from intric.flows.ai_builder.ai_builder_runtime_input_defaults import (
 
 
 def compile_create_draft(draft: FlowCreateDraft) -> FlowDraftSpecCore:
+    draft = normalize_create_draft_mechanics(draft)
     compiled_steps: list[StepSpec] = []
     for index, step_draft in enumerate(draft.steps):
         compiled_steps.append(

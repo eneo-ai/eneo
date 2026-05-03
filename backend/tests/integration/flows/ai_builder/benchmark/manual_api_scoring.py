@@ -7,6 +7,14 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     FlowDraftSpecCore,
     StepSpec,
 )
+from intric.flows.ai_builder.ai_builder_primary_input_fields import (
+    is_primary_runtime_input_shadow_field,
+)
+from intric.flows.ai_builder.ai_builder_source_material import (
+    iter_compiled_source_material_boundaries,
+    question_binding,
+    source_material_binding_is_complete,
+)
 from intric.flows.enums import (
     AIBuilderInputSource,
     AIBuilderInputType,
@@ -117,13 +125,12 @@ def observe_plan_mechanics(spec: FlowDraftSpecCore) -> PlanObservedMechanics:
 
 
 def uses_underlag_till_text_correctly(spec: FlowDraftSpecCore) -> bool | None:
-    required_boundaries = list(_source_material_boundaries(spec.steps))
+    required_boundaries = list(iter_compiled_source_material_boundaries(spec))
     if not required_boundaries:
         return None
     return all(
-        _question_mentions_immediate_structured(step, previous_step)
-        and _question_mentions_prior_text_source(step, prior_text_steps)
-        for step, previous_step, prior_text_steps in required_boundaries
+        source_material_binding_is_complete(boundary)
+        for boundary in required_boundaries
     )
 
 
@@ -139,7 +146,15 @@ def uses_runtime_input_fields_correctly(
         field_name.casefold() for field_name in expected_secondary_field_names
     }
     actual_fields = {field.name.casefold() for field in form_fields}
-    if actual_fields & _primary_runtime_field_names():
+    runtime_input_type = _primary_runtime_input_type(spec)
+    if any(
+        is_primary_runtime_input_shadow_field(
+            variable_name=field.name,
+            field_type=field.type,
+            runtime_input_type=runtime_input_type,
+        )
+        for field in form_fields
+    ):
         return False
     return actual_fields <= expected_fields
 
@@ -148,11 +163,25 @@ def all_step_input_output_pairs_compatible(steps: Sequence[StepSpec]) -> bool:
     for previous_step, step in zip(steps, steps[1:], strict=False):
         if step.input_source != AIBuilderInputSource.PREVIOUS_STEP:
             continue
-        if _question_binding(step):
+        if question_binding(step.input_bindings):
             continue
         if step.input_type.value != previous_step.output_type.value:
             return False
     return True
+
+
+def _primary_runtime_input_type(
+    spec: FlowDraftSpecCore,
+) -> AIBuilderInputType | None:
+    first_runtime_step = next(
+        (
+            step
+            for step in spec.steps
+            if step.input_source == AIBuilderInputSource.FLOW_INPUT
+        ),
+        None,
+    )
+    return first_runtime_step.input_type if first_runtime_step else None
 
 
 def _typed_check_results(
@@ -210,55 +239,6 @@ def _typed_check_results(
     return checks
 
 
-def _source_material_boundaries(
-    steps: Sequence[StepSpec],
-) -> Iterable[tuple[StepSpec, StepSpec, tuple[StepSpec, ...]]]:
-    for index, step in enumerate(steps):
-        if index == 0 or step.input_source != AIBuilderInputSource.PREVIOUS_STEP:
-            continue
-        previous_step = steps[index - 1]
-        if previous_step.output_type != FlowOutputType.JSON:
-            continue
-        prior_text_steps = tuple(
-            prior_step
-            for prior_step in steps[:index]
-            if prior_step.output_type == FlowOutputType.TEXT
-        )
-        if not prior_text_steps:
-            continue
-        yield step, previous_step, prior_text_steps
-
-
-def _question_mentions_immediate_structured(
-    step: StepSpec,
-    previous_step: StepSpec,
-) -> bool:
-    question = _question_binding(step)
-    if question is None:
-        return False
-    return f"{{{{ {previous_step.plan_step_ref}.output.structured }}}}" in question
-
-
-def _question_mentions_prior_text_source(
-    step: StepSpec,
-    prior_text_steps: Sequence[StepSpec],
-) -> bool:
-    question = _question_binding(step)
-    if question is None:
-        return False
-    return any(
-        f"{{{{ {prior_step.plan_step_ref}.output.text }}}}" in question
-        for prior_step in prior_text_steps
-    )
-
-
-def _question_binding(step: StepSpec) -> str | None:
-    if not isinstance(step.input_bindings, dict):
-        return None
-    question = step.input_bindings.get("question")
-    return question if isinstance(question, str) and question.strip() else None
-
-
 def _is_transcription_step(step: StepSpec) -> bool:
     return step.output_mode == AIBuilderOutputMode.TRANSCRIBE_ONLY
 
@@ -268,7 +248,7 @@ def _has_source_grounding_step(steps: Sequence[StepSpec]) -> bool:
         question is not None
         and "{{ step_" in question
         and (".output.text" in question or ".output.structured" in question)
-        for question in (_question_binding(step) for step in steps)
+        for question in (question_binding(step.input_bindings) for step in steps)
     )
 
 
@@ -293,24 +273,6 @@ def _step_role(step: StepSpec) -> str:
     ):
         return "compose_text"
     return f"{step.input_type.value}_to_{step.output_type.value}"
-
-
-def _primary_runtime_field_names() -> frozenset[str]:
-    upload_input_values = {
-        input_type.value
-        for input_type in FlowInputType
-        if input_type
-        not in {
-            FlowInputType.ANY,
-            FlowInputType.JSON,
-            FlowInputType.TEXT,
-        }
-    }
-    return frozenset(
-        field_name
-        for input_value in upload_input_values
-        for field_name in (input_value, f"{input_value}s")
-    )
 
 
 def _json_schema_contains_array(schema: object) -> bool:

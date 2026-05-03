@@ -2026,3 +2026,63 @@ Accepted implementation findings:
 | Extend the typed rail to `outline_flow`, `edit_flow`, and parse repair only where the contract is a typed JSON object. | 11.5b |
 | Run a live provider smoke for the actual tenant/model Anthropic Haiku alias instead of assuming LiteLLM metadata from memory. | 11.5b / provider eval |
 | Consider removing the pre-existing `resolve_planner_params` introspection hedge in a separate planner cleanup slice. | Later Batch 11 cleanup |
+
+## 11.6b Source-Material Boundary Canonicalization Follow-up
+
+### Trigger
+
+The user reran the Swedish audio-to-DOCX prompt and supplied the resulting debug
+export. The run transcribed the audio correctly, but the final DOCX still said
+there was no substantive meeting/transcript material because downstream JSON
+steps consumed only immediate metadata JSON. The screenshots also showed that
+the visible `Underlag till text` surface did not make the source-material mapping
+obvious enough to trust prompt wording as the fix.
+
+### Claude Gate
+
+| Iteration | Artifact | Verdict | Green light | Minimum score | Outcome |
+|---:|---|---|---|---:|---|
+| 1 | `.codex/artifacts/claude-peer-loop-ai-builder-source-material-runtime-fields-plan-20260503T133745Z.md` | `changes_required` | `no` | n/a | Rejected the skeleton-only/source-wording path and required a canonical source-material boundary owner outside the retry loop. |
+| 2 | `.codex/artifacts/claude-peer-loop-ai-builder-source-material-runtime-fields-verification-20260503T135932Z.md` | `green` | `yes` | 7 | Verified the deterministic create-draft + compiled-spec normalization shape. |
+
+Post-green refinements applied from Claude's non-blocking notes:
+
+| Finding | Resolution |
+|---|---|
+| Draft and compiled source pickers could diverge. | Both now prefer the primary flow-input source-material text step before falling back to the first prior text step. |
+| Swedish label token `text` was too broad. | Removed it and added an English-label regression. |
+| Manual API scoring duplicated source-material and primary-input predicates. | Scoring now imports the production source-material and primary-input owners. |
+| Idempotency/order coverage was thin. | Added topology normalizer tests for idempotency, existing-question tail preservation, primary audio source preference, and English labels. |
+
+### Implementation Result
+
+| Area | Outcome |
+|---|---|
+| Source-material owner | Added `ai_builder_source_material.py` for source-material boundary detection, question construction, source labels, and create-draft enrichment. |
+| Create draft | `normalize_create_draft_mechanics` now calls the source-material owner; `compile_create_draft` normalizes as a direct-caller guard. |
+| Compiled spec | `normalize_ai_builder_step_topology` completes missing source-material underlag by setting `input_type=text` and a deterministic `question` binding. |
+| Skeleton cleanup | Removed the earlier skeleton-local source-material enrichment so there is one owner instead of an audio-only path. |
+| Validation | Added `source_material_boundary_missing_underlag` as a defensive quality warning; it is not in the retry warning set. |
+| Runtime fields | Added transcript/transcription aliases as audio primary-input shadows. |
+| Scoring | Manual API scoring uses the production source-material and primary-input predicates. |
+
+### Validation Result
+
+Docker validation was attempted first with `docker ps --format '{{.Names}}'`, but
+the current tool environment rejected Docker process creation as approval-gated
+while approval is disabled. Local validation was used as the fallback.
+
+| Command | Result |
+|---|---|
+| `cd backend && uv run ruff check <11.6b touched source and test files>` | Passed. |
+| `cd backend && uv run pyright <11.6b touched source and test files>` | Passed: `0 errors, 0 warnings, 0 informations`. |
+| `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_dataflow.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py tests/unittests/flows/ai_builder/test_ai_builder_primary_input_fields.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py -q` | Passed: `211 passed`, existing warnings only. |
+| `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py::test_outline_audio_to_docx_returns_plan_without_self_correction tests/unittests/flows/ai_builder/test_ai_builder_materialization_bridge.py -q` | Passed: `63 passed`, existing warning only. |
+| `cd backend && uv run pytest tests/integration/flows/ai_builder/benchmark -q` | Passed: `107 passed`, existing warnings only. |
+
+### Carry-Forward
+
+| Item | Owner |
+|---|---|
+| Re-run Docker validation in an environment where Docker commands are not approval-blocked. | Next implementation operator |
+| Promote any additional live debug-export failure into the source-material boundary tests before changing prompt wording. | Batch 11 reliability |

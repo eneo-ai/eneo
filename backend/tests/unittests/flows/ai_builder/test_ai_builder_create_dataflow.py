@@ -107,6 +107,79 @@ def test_normalize_create_draft_mechanics_prunes_invalid_previous_output_refs() 
     ] == [(1, "Transkription")]
 
 
+def test_normalize_create_draft_mechanics_restores_audio_source_material_underlag() -> (
+    None
+):
+    draft = FlowCreateDraft(
+        flow_name="Mötesprotokoll från ljud till Word",
+        plan_rationale="Transkribera ljud och skapa DOCX-protokoll.",
+        steps=[
+            {
+                "name": "Transkribera ljud",
+                "instructions": "Transkribera uppladdat ljud.",
+                "input_source": "flow_input",
+                "input_type": "audio",
+                "output_type": "text",
+                "runtime_upload": True,
+                "runtime_required": True,
+            },
+            {
+                "name": "Strukturera transkription",
+                "instructions": "Strukturera transkriptionen.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "json",
+                "output_fields": [_field("transcription_text")],
+            },
+            {
+                "name": "Identifiera mötesmetadata",
+                "instructions": "Identifiera titel och organisation.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "json",
+                "output_fields": [_field("meeting_title")],
+            },
+            {
+                "name": "Skapa mötesprotokoll med fasta rubriker",
+                "instructions": "Skapa protokollsektioner.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "json",
+                "output_fields": [_field("protocol_sections")],
+            },
+            {
+                "name": "Förbered DOCX-innehåll",
+                "instructions": "Förbered dokumentets text.",
+                "input_source": "all_previous_steps",
+                "input_type": "text",
+                "output_type": "text",
+            },
+            {
+                "name": "Skapa DOCX",
+                "instructions": "Skapa slutdokumentet.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "docx",
+                "document_delivery_mode": "generated",
+            },
+        ],
+    )
+
+    normalized = normalize_create_draft_mechanics(draft)
+
+    assert validate_create_draft(normalized).valid
+    assert normalized.steps[2].input_type == "text"
+    assert [
+        (ref.from_step, ref.label) for ref in normalized.steps[2].uses_previous_outputs
+    ] == [(1, "Källmaterial")]
+    assert normalized.steps[3].input_type == "text"
+    assert [
+        (ref.from_step, ref.label) for ref in normalized.steps[3].uses_previous_outputs
+    ] == [(1, "Källmaterial")]
+    assert normalized.steps[4].uses_previous_outputs == []
+    assert normalized.steps[5].uses_previous_outputs == []
+
+
 def test_normalize_create_draft_mechanics_prunes_unknown_form_field_refs() -> None:
     draft = FlowCreateDraft(
         flow_name="Robust formulärflöde",

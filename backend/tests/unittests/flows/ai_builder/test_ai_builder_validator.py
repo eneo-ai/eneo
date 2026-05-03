@@ -1152,6 +1152,81 @@ class TestQualityLint:
         assert not result.valid
         assert result.warnings == []  # No lint ran
 
+    def test_source_material_boundary_missing_underlag_warned(self) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="Transkribera ljud",
+                        input_source=InputSource.FLOW_INPUT,
+                        input_type=InputType.AUDIO,
+                        output_mode=OutputMode.TRANSCRIBE_ONLY,
+                        output_type=OutputType.TEXT,
+                    ),
+                    _step(
+                        ref="step_b",
+                        name="Strukturera transkription",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.TEXT,
+                        output_type=OutputType.JSON,
+                        output_contract={
+                            "type": "object",
+                            "properties": {"transcription_text": {"type": "string"}},
+                        },
+                    ),
+                    _step(
+                        ref="step_c",
+                        name="Identifiera mötesmetadata",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.JSON,
+                        output_type=OutputType.JSON,
+                        output_contract={
+                            "type": "object",
+                            "properties": {"meeting_title": {"type": "string"}},
+                        },
+                    ),
+                    _step(
+                        ref="step_d",
+                        name="Skapa mötesprotokoll",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.JSON,
+                        output_type=OutputType.JSON,
+                        output_contract={
+                            "type": "object",
+                            "properties": {"protocol_sections": {"type": "string"}},
+                        },
+                    ),
+                    _step(
+                        ref="step_e",
+                        name="Förbered DOCX-innehåll",
+                        input_source=InputSource.ALL_PREVIOUS_STEPS,
+                        input_type=InputType.TEXT,
+                        output_type=OutputType.TEXT,
+                    ),
+                    _step(
+                        ref="step_f",
+                        name="Skapa DOCX",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.TEXT,
+                        output_type=OutputType.DOCX,
+                    ),
+                ]
+            )
+        )
+
+        assert result.valid
+        assert any(
+            warning.code == "source_material_boundary_missing_underlag"
+            and warning.step_ref == "step_c"
+            for warning in result.warnings
+        )
+        assert any(
+            warning.code == "source_material_boundary_missing_underlag"
+            and warning.step_ref == "step_d"
+            for warning in result.warnings
+        )
+
     def test_runtime_input_without_binding_does_not_warn_for_transcribe_only_step(
         self,
     ) -> None:

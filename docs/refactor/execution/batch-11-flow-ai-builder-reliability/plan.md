@@ -1194,6 +1194,54 @@ cd backend && uv run ruff format --check tests/integration/flows/ai_builder/benc
 git diff --check -- backend/tests/integration/flows/ai_builder/benchmark docs/refactor/execution/batch-11-flow-ai-builder-reliability
 ```
 
+#### 11.6b — Source-Material Boundary Canonicalization Follow-up
+
+Problem:
+
+The manual API harness and live debug export exposed a second bypass path after
+11.5d: source-material preservation existed in the skeleton/compiler route, but
+direct create-draft callers and already-compiled specs could still retain the
+bad metadata-only JSON boundary. The scorer also had a local copy of the
+source-material predicate, so the implementation and benchmark could drift.
+
+Canonical owners:
+
+| Concept | Owner | 11.6b decision |
+|---|---|---|
+| Source-material boundary detection | `backend/src/intric/flows/ai_builder/ai_builder_source_material.py` | New narrow owner for document-artifact flows that need immediate structured JSON plus prior source text. |
+| Create-draft normalization | `normalize_create_draft_mechanics` | Enrich direct create drafts through the source-material owner before compilation. |
+| Compiled-spec topology normalization | `normalize_ai_builder_step_topology` | Complete missing source-material `input_bindings.question` without asking the LLM to repair itself. |
+| Quality lint | `lint_source_material_underlag_boundaries` | Defensive warning only; not part of the quality retry loop. |
+| Runtime input shadow fields | `ai_builder_primary_input_fields.py` | Audio transcript/transcription aliases are primary-input shadows, not secondary form fields. |
+| Deterministic scoring | `manual_api_scoring.py` | Reuse the production source-material and primary-input predicates instead of maintaining benchmark-local copies. |
+
+Acceptance:
+
+- The source-material rule is deterministic and does not rely on additional
+  prompt wording.
+- Create-draft and compiled-spec paths both complete underlag when a document
+  artifact step would otherwise consume only metadata JSON.
+- The completed question references the immediate previous structured JSON and
+  the canonical prior source text, preserving any existing question tail.
+- Plain adjacent typed handoffs remain typed; text input is used only when the
+  step receives a composed underlag prompt.
+- The quality warning does not enter the retry loop.
+- `transcript` / `transcription` / Swedish transcript aliases are filtered as
+  duplicate primary audio input fields.
+- The benchmark scorer and production normalizer share the same source-material
+  predicate.
+
+Validation:
+
+```bash
+cd backend && uv run ruff check <11.6b touched source and test files>
+cd backend && uv run pyright <11.6b touched source and test files>
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_dataflow.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py tests/unittests/flows/ai_builder/test_ai_builder_primary_input_fields.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py -q
+cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py::test_outline_audio_to_docx_returns_plan_without_self_correction tests/unittests/flows/ai_builder/test_ai_builder_materialization_bridge.py -q
+cd backend && uv run pytest tests/integration/flows/ai_builder/benchmark -q
+git diff --check -- <11.6b touched paths>
+```
+
 ## Behavior And Quality Gates
 
 | Gate | Required result |

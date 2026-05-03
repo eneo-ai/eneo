@@ -12,6 +12,9 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
     PreviousFieldRef,
     PreviousOutputRef,
 )
+from intric.flows.ai_builder.ai_builder_source_material import (
+    normalize_create_draft_source_material,
+)
 from intric.flows.ai_builder.ai_builder_structured_field_paths import (
     missing_draft_field_path,
 )
@@ -118,9 +121,10 @@ def normalize_create_draft_mechanics(draft: FlowCreateDraft) -> FlowCreateDraft:
             )
         )
 
-    if not changed:
-        return draft
-    return draft.model_copy(update={"steps": updated_steps})
+    normalized_draft = (
+        draft if not changed else draft.model_copy(update={"steps": updated_steps})
+    )
+    return normalize_create_draft_source_material(normalized_draft)
 
 
 def _normalize_step_mechanics(

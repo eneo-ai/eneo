@@ -231,3 +231,35 @@ def test_expected_runtime_metadata_fields_are_allowed() -> None:
 
     assert score.derived.uses_runtime_input_fields_correctly is True
     assert "uses_runtime_input_fields_correctly" not in score.typed_failures
+
+
+def test_audio_transcript_form_field_is_scored_as_duplicate_primary_input() -> None:
+    spec = _spec(
+        steps=[
+            _audio_transcription_step(),
+            {
+                "plan_step_ref": "step_b",
+                "name": "Skapa DOCX",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "docx",
+                "output_mode": "pass_through",
+            },
+        ],
+        form_fields=[
+            {
+                "name": "transcript",
+                "type": "text",
+                "label": "Transcript",
+                "required": False,
+            }
+        ],
+    )
+
+    score = score_plan_mechanics(
+        spec=spec,
+        corpus_case=_case("vague_audio_docx_sv"),
+    )
+
+    assert score.derived.uses_runtime_input_fields_correctly is False
+    assert "uses_runtime_input_fields_correctly" in score.typed_failures

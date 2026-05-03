@@ -11,6 +11,10 @@ from intric.flows.ai_builder.ai_builder_models import (
     OutputType,
     StepSpec,
 )
+from intric.flows.ai_builder.ai_builder_source_material import (
+    iter_compiled_source_material_boundaries,
+    source_material_binding_is_complete,
+)
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.template_reference_analyzer import (
     TemplateReferenceKind,
@@ -277,6 +281,23 @@ def lint_unfiltered_structured_interpolation(
                 ),
                 severity=LintSeverity.INFO,
             )
+
+
+def lint_source_material_underlag_boundaries(
+    spec: FlowDraftSpecCore, result: SpecValidationResult
+) -> None:
+    for boundary in iter_compiled_source_material_boundaries(spec):
+        if source_material_binding_is_complete(boundary):
+            continue
+        result.add_warning(
+            step_ref=boundary.step.plan_step_ref,
+            code="source_material_boundary_missing_underlag",
+            message=(
+                "Step consumes a structured JSON result while earlier source text is "
+                "still needed for document grounding. Underlag should include both "
+                "the immediate structured output and the earlier source text."
+            ),
+        )
 
 
 def _iter_step_templates(step: StepSpec) -> list[str]:
