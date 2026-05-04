@@ -13,7 +13,7 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     resolve_output_intent,
 )
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
-    mixed_audio_document_input_requested,
+    resolve_input_intent,
 )
 from intric.flows.ai_builder.ai_builder_models import (
     ConversationMessage,
@@ -83,6 +83,7 @@ def build_conversation_critic_context(
     signal_text = "\n".join(part for part in (text, requirements_text) if part)
     planner_patterns = detect_planner_pattern_signals(signal_text)
     output_intent = resolve_output_intent(text, answer_signals)
+    input_intent = resolve_input_intent(text, answer_signals, flow=flow)
 
     return CriticContext(
         spec=spec,
@@ -93,7 +94,8 @@ def build_conversation_critic_context(
         signal_text=signal_text,
         planner_patterns=planner_patterns,
         output_intent=output_intent,
-        mixed_audio_doc_input=mixed_audio_document_input_requested(text, flow=flow),
+        mixed_audio_doc_input=input_intent.needs_architecture_clarification,
+        primary_runtime_input=input_intent.primary_runtime_input,
         aggregation_intent=aggregation_intent,
         resource_catalog=resource_catalog,
     )

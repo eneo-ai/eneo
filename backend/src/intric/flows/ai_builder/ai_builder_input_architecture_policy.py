@@ -221,14 +221,6 @@ class InputIntentResolution:
     needs_architecture_clarification: bool
 
 
-def mixed_audio_document_input_requested(
-    text: str,
-    *,
-    flow: "Flow | None" = None,
-) -> bool:
-    return resolve_input_intent(text, {}, flow=flow).needs_architecture_clarification
-
-
 def resolve_input_intent(
     text: str,
     answer_signals: dict[str, set[str]],

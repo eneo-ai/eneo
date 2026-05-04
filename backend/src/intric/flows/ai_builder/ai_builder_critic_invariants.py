@@ -34,6 +34,7 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     runtime_metadata_requested,
 )
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
+    PrimaryRuntimeInput,
     degrades_document_entry_to_generic_file,
     has_real_audio_transcription_step,
     uses_pseudo_transcription_without_audio_step,
@@ -80,6 +81,7 @@ class CriticContext:
     planner_patterns: PlannerPatternSignals
     output_intent: OutputIntentResolution
     mixed_audio_doc_input: bool
+    primary_runtime_input: PrimaryRuntimeInput = "unknown"
     aggregation_intent: AggregationIntent = "linear"
     resource_catalog: "AIBuilderResourceCatalog | None" = None
 
@@ -151,48 +153,6 @@ _DOWNSTREAM_REUSE_MARKERS: tuple[str, ...] = (
     "nästa steg",
 )
 
-_AUDIO_STANDALONE_MARKERS: tuple[str, ...] = (
-    "audio",
-    "ljud",
-    "transkrib",
-    "transcrib",
-    "inspelning",
-    "recording",
-)
-
-# Words that name an actual audio source — a recording, a file, raw input.
-# Distinguished from `_AUDIO_STANDALONE_MARKERS` because the trigger word
-# `transkrib*` is overloaded: it matches both "transkribera ljudet"
-# (operation) and "originaltranskribering" (data noun). Active-audio words
-# are the unambiguous half.
-_ACTIVE_AUDIO_MARKERS: tuple[str, ...] = (
-    "audio",
-    "ljud",
-    "inspelning",
-    "recording",
-)
-
-# Phrasings that signal transcription is already-prepared text input rather
-# than an in-flow operation. When these are present and no active audio
-# source is named, the standalone-audio invariant suppresses — the flow
-# legitimately processes pre-transcribed text.
-_TRANSCRIPTION_AS_DATA_MARKERS: tuple[str, ...] = (
-    "originaltranskribering",
-    "från transkribering",
-    "from transcription",
-    "transkriberad text",
-    "transkriberade text",
-    "den transkriberade",
-    "redan transkrib",
-    "transkriberas innan",
-    "transkriberas före",
-    "extern transkrib",
-    "externally transcribed",
-    "transcribed text",
-    "pre-transcribed",
-    "already transcribed",
-)
-
 _FIELD_REUSE_MARKERS: tuple[str, ...] = (
     "specific fields",
     "specific json fields",
@@ -245,24 +205,6 @@ def _terminal_step_is_human_readable_only(text: str, spec: FlowDraftSpecCore) ->
     if any(marker in text for marker in _DOWNSTREAM_REUSE_MARKERS):
         return False
     return any(marker in text for marker in _HUMAN_READABLE_TERMINAL_MARKERS)
-
-
-def _conversation_mentions_audio(text: str) -> bool:
-    return any(marker in text for marker in _AUDIO_STANDALONE_MARKERS)
-
-
-def _conversation_mentions_active_audio(text: str) -> bool:
-    """True when the conversation names an actual audio source (recording,
-    file, raw input) — distinguishing from references to transcription text.
-    """
-    return any(marker in text for marker in _ACTIVE_AUDIO_MARKERS)
-
-
-def _conversation_treats_transcription_as_data(text: str) -> bool:
-    """True when the conversation describes transcription as already-prepared
-    input text rather than an in-flow operation.
-    """
-    return any(marker in text for marker in _TRANSCRIPTION_AS_DATA_MARKERS)
 
 
 def _spec_handles_audio(spec: FlowDraftSpecCore) -> bool:
@@ -631,36 +573,33 @@ _EXPLICIT_JSON_CONTRACT_REQUEST_WITHOUT_STEP = CriticInvariant(
 def _standalone_audio_requires_transcription_step_evidence(
     context: CriticContext,
 ) -> bool:
-    if not _conversation_mentions_audio(context.text):
+    if context.primary_runtime_input != "audio":
         return False
     if _spec_handles_audio(context.spec):
         return False
-    if context.mixed_audio_doc_input:
-        return False
-    # The trigger word `transkrib*` is overloaded — matches both the
-    # operation ("transkribera ljudet") and the data noun
-    # ("originaltranskribering"). When transcription is explicitly treated
-    # as already-prepared input AND no active audio source is named, the
-    # flow legitimately processes pre-transcribed text and the rule must
-    # stay silent.
-    if _conversation_treats_transcription_as_data(
-        context.text
-    ) and not _conversation_mentions_active_audio(context.text):
-        return False
-    return True
+    return not context.mixed_audio_doc_input
 
 
 _STANDALONE_AUDIO_REQUIRES_TRANSCRIPTION_STEP = CriticInvariant(
     id="standalone_audio_requires_transcription_step",
     kind="architecture",
     description=(
-        "When audio/transcription is mentioned standalone (not mixed with "
-        "document input), the plan must include a dedicated transcription step."
+        "When the slot classifier resolves the runtime input to audio (not "
+        "mixed with documents), the plan must include a dedicated "
+        "transcription step."
     ),
     evidence=_standalone_audio_requires_transcription_step_evidence,
     remediation=(
-        'Konversationen nämner ljud/transkribering men inget steg har `input_type="audio"` '
-        'eller `output_mode="transcribe_only"`. Lägg till ett dedikerat transkriberingssteg.'
+        "Inmatningen är ljud men inget steg transkriberar ljud till text. "
+        "Lägg till ett dedikerat transkriberingssteg som första steg i flödet med:\n"
+        '  - `input_type: "audio"`\n'
+        '  - `input_source: "flow_input"`\n'
+        '  - `output_type: "text"`\n'
+        '  - `output_mode: "transcribe_only"`\n'
+        "Efterföljande steg läser transkriptet via "
+        '`input_source="previous_step"` och `input_type="text"`. Om planen redan '
+        "har flera steg, skjut dem ett steg framåt och lägg transkriberingssteget "
+        "vid position 0."
     ),
 )
 

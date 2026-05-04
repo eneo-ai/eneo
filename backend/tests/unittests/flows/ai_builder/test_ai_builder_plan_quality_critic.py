@@ -1883,28 +1883,29 @@ class TestPreferTargetedUnderlagInvariant:
 
 
 class TestStandaloneAudioInvariant:
-    """`standalone_audio_requires_transcription_step` fires when the
-    conversation references audio/transcription but the spec lacks an
-    audio step.
+    """`standalone_audio_requires_transcription_step` fires when the slot
+    classifier has resolved the runtime input to `audio` and the spec has
+    no transcription step.
 
-    The trigger word `transkrib*` is overloaded: it matches both
-    "transkribera ljudet" (operation request) and "originaltranskribering"
-    (data noun). Without distinguishing those, the invariant misfires on
-    flows that legitimately process pre-transcribed text — the user's
-    "Mötesrapport från transkribering" case, where step 1's input is the
-    transcript itself and no audio source is named anywhere.
-
-    Suppression: when transcription is explicitly treated as already-prepared
-    text input AND no active audio source word (audio, ljud, inspelning,
-    recording) is present, the rule must stay silent.
+    The invariant defers to the slot classifier
+    (`resolve_input_intent.primary_runtime_input`) instead of doing its
+    own keyword scan. This keeps the architecture rule and the discovery
+    layer aligned: a prompt that the slot classifier reads as text input
+    (e.g. "indata: originaltranskribering") is a text flow, not a
+    forgotten transcription. The user is responsible for declaring audio
+    explicitly when they want the recording to enter the flow as audio
+    (e.g. "ladda upp ljudfilen", "audio file upload"). When they do, the
+    slot flips to `audio` and this invariant catches a missing
+    transcription step.
     """
 
     def _build_context(
         self,
         spec: FlowDraftSpecCore,
-        text: str,
         *,
+        primary_runtime_input: str = "unknown",
         mixed_audio_doc_input: bool = False,
+        text: str = "",
     ) -> "CriticContext":
         from intric.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
@@ -1926,20 +1927,45 @@ class TestStandaloneAudioInvariant:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=mixed_audio_doc_input,
+            primary_runtime_input=primary_runtime_input,  # type: ignore[arg-type]
         )
 
-    def test_silent_when_transcription_treated_as_data_and_no_audio_source(
+    def test_fires_when_primary_runtime_input_is_audio_and_no_audio_step(
         self,
     ) -> None:
-        """User-reported bug: a flow named "Mötesrapport från transkribering"
-        whose step 1 takes "originaltranskribering" as text input compiles a
-        valid text-input pipeline. No audio source word appears anywhere in
-        the conversation, but `transkrib` matches in both phrases and the
-        invariant hard-rejects the spec at commit time.
+        issues = evaluate_critic_invariants(
+            self._build_context(
+                FlowDraftSpecCore(
+                    flow_name="Sammanfatta möte",
+                    steps=[
+                        _step(
+                            "step_a",
+                            "Sammanfatta",
+                            "Sammanfatta innehållet.",
+                            input_type=InputType.TEXT,
+                            output_type=OutputType.TEXT,
+                        )
+                    ],
+                ),
+                primary_runtime_input="audio",
+            )
+        )
 
-        The rule must distinguish "transcription as already-prepared input"
-        from "transcription as a flow operation"; only the latter requires
-        a real audio step.
+        assert any(
+            issue.id == "standalone_audio_requires_transcription_step"
+            for issue in issues
+        )
+
+    def test_silent_when_primary_runtime_input_is_text_even_with_transcription_word(
+        self,
+    ) -> None:
+        """Regression for the user-reported failure: a prompt whose slot
+        classifier reading is "text" (e.g. "indata: originaltranskribering",
+        "läs hela den transkriberade mötestexten") must NOT trigger the
+        audio rule. The user has named transcribed text as their data,
+        not audio as their input. Firing here would push the planner to
+        graft an audio step onto a text flow and surface as
+        `architecture_critic_invariant_failed` to the end user.
         """
         issues = evaluate_critic_invariants(
             self._build_context(
@@ -1964,6 +1990,7 @@ class TestStandaloneAudioInvariant:
                         ),
                     ],
                 ),
+                primary_runtime_input="text",
                 text=(
                     "mötesrapport från transkribering. indata: "
                     "originaltranskribering. läs hela den transkriberade "
@@ -1975,22 +2002,18 @@ class TestStandaloneAudioInvariant:
         assert not any(
             issue.id == "standalone_audio_requires_transcription_step"
             for issue in issues
-        ), (
-            "the invariant must stay silent when no audio source is named "
-            "and the conversation explicitly treats transcription as data"
         )
 
-    def test_fires_when_audio_source_named_without_transcription_step(
-        self,
-    ) -> None:
-        """An "ljud"/"audio"/"inspelning" reference without a real
-        transcription step is the genuine failure mode the invariant
-        protects against. The data-marker suppression must not erode it.
+    def test_silent_when_primary_runtime_input_is_unknown(self) -> None:
+        """Default-state contexts (no slot resolution) must not fire.
+        The invariant only acts on a positive `audio` resolution — a
+        soft contract that protects every other test fixture from
+        accidentally tripping the audio rule.
         """
         issues = evaluate_critic_invariants(
             self._build_context(
                 FlowDraftSpecCore(
-                    flow_name="Sammanfatta möte",
+                    flow_name="Generic flow",
                     steps=[
                         _step(
                             "step_a",
@@ -2001,24 +2024,19 @@ class TestStandaloneAudioInvariant:
                         )
                     ],
                 ),
-                text=(
-                    "jag har en ljudinspelning av ett möte och vill ha "
-                    "en kort sammanfattning."
-                ),
+                primary_runtime_input="unknown",
             )
         )
 
-        assert any(
+        assert not any(
             issue.id == "standalone_audio_requires_transcription_step"
             for issue in issues
         )
 
     def test_silent_when_spec_already_has_audio_step(self) -> None:
         """An explicit audio step (`input_type=audio` or
-        `output_mode=transcribe_only`) satisfies the invariant regardless
-        of conversation framing. Pinning this case guards against a
-        regression where the suppression accidentally invalidates the
-        existing exit path.
+        `output_mode=transcribe_only`) satisfies the invariant even when
+        the slot classifier resolves to `audio`.
         """
         issues = evaluate_critic_invariants(
             self._build_context(
@@ -2043,7 +2061,7 @@ class TestStandaloneAudioInvariant:
                         ),
                     ],
                 ),
-                text="transkribera ljudfilen och sammanfatta resultatet.",
+                primary_runtime_input="audio",
             )
         )
 
@@ -2052,39 +2070,65 @@ class TestStandaloneAudioInvariant:
             for issue in issues
         )
 
-    def test_fires_when_audio_named_alongside_transcribed_text_phrase(
-        self,
-    ) -> None:
-        """Conservative call: when the conversation names an actual audio
-        source AND a "transcribed text" phrase, the invariant must still
-        fire — the user has audio that needs handling, regardless of
-        whether they also describe a downstream text. Suppression only
-        applies when no audio source is mentioned.
+    def test_silent_when_mixed_audio_doc_input_handles_clarification(self) -> None:
+        """Mixed audio+document prompts are handled by the dedicated
+        mixed-input invariants. The standalone rule must yield to them
+        rather than double-firing on the same root cause.
         """
         issues = evaluate_critic_invariants(
             self._build_context(
                 FlowDraftSpecCore(
-                    flow_name="Audio till rapport",
+                    flow_name="Sammanfatta möte",
                     steps=[
                         _step(
                             "step_a",
                             "Sammanfatta",
-                            "Sammanfatta texten.",
+                            "Sammanfatta innehållet.",
                             input_type=InputType.TEXT,
                             output_type=OutputType.TEXT,
                         )
                     ],
                 ),
-                text=(
-                    "jag har en audio-fil av ett möte. transkriberad text "
-                    "ska sedan sammanfattas."
-                ),
+                primary_runtime_input="audio",
+                mixed_audio_doc_input=True,
             )
         )
 
-        assert any(
+        assert not any(
             issue.id == "standalone_audio_requires_transcription_step"
             for issue in issues
+        )
+
+    def test_remediation_gives_planner_a_concrete_step_shape(self) -> None:
+        """The original one-liner "add a dedicated transcription step"
+        was too vague for the planner to converge when several
+        text-processing steps already existed. The remediation must
+        spell out the four required fields, the position (first step),
+        and how downstream steps should consume the transcript.
+        """
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CRITIC_INVARIANTS,
+        )
+
+        inv = next(
+            item
+            for item in CRITIC_INVARIANTS
+            if item.id == "standalone_audio_requires_transcription_step"
+        )
+
+        for required_token in (
+            "audio",
+            "transcribe_only",
+            "flow_input",
+            "previous_step",
+        ):
+            assert required_token in inv.remediation, (
+                f"remediation missing concrete shape token: {required_token}"
+            )
+        assert "första steg" in inv.remediation, (
+            "remediation must tell the planner WHERE to add the step "
+            "(first step / position 0); without positioning the LLM "
+            "tends to graft audio handling onto an existing step instead"
         )
 
 
