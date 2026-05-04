@@ -266,15 +266,13 @@ async def test_get_by_username_returns_none_for_unknown(db_session, test_tenant)
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_soft_delete_via_is_active_false(db_session, scim_user):
-    """Alias for test_soft_delete_via_state_inactive — kept for backwards compatibility."""
-    await test_soft_delete_via_state_inactive(db_session, scim_user)
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_soft_delete_via_state_inactive(db_session, scim_user):
-    """Setting state='inactive' hides the user from list() but keeps the row."""
+    """Setting state='inactive' hides the user from list() but keeps the row.
+
+    Defensive coverage: SCIM service no longer writes state='inactive' (it uses
+    state='deleted'), but the list filter still excludes any non-active state
+    so legacy or manually-modified rows do not leak into SCIM responses.
+    """
     from sqlalchemy import select
 
     async with db_session() as session:
@@ -364,3 +362,90 @@ async def test_get_user_http(client, bypass_scim_auth, scim_user):
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == str(scim_user.id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_delete_user_sets_deleted_state_and_timestamp(db_session, client, bypass_scim_auth, scim_user):
+    """DELETE /scim/v2/Users/{id} soft-deletes: state='deleted' and deleted_at set."""
+    from sqlalchemy import select
+
+    response = await client.delete(f"/scim/v2/Users/{scim_user.id}")
+    assert response.status_code == 204
+
+    async with db_session() as session:
+        result = await session.execute(select(Users).where(Users.id == scim_user.id))
+        user = result.scalar_one()
+        assert user.state == "deleted"
+        assert user.deleted_at is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_delete_user_is_idempotent(db_session, client, bypass_scim_auth, scim_user):
+    """A second DELETE returns 204 and does not overwrite the original deleted_at."""
+    from sqlalchemy import select
+
+    first = await client.delete(f"/scim/v2/Users/{scim_user.id}")
+    assert first.status_code == 204
+
+    async with db_session() as session:
+        result = await session.execute(select(Users).where(Users.id == scim_user.id))
+        first_deleted_at = result.scalar_one().deleted_at
+
+    second = await client.delete(f"/scim/v2/Users/{scim_user.id}")
+    assert second.status_code == 204
+
+    async with db_session() as session:
+        result = await session.execute(select(Users).where(Users.id == scim_user.id))
+        user = result.scalar_one()
+        assert user.state == "deleted"
+        assert user.deleted_at == first_deleted_at
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_patch_active_false_soft_deletes_user(db_session, client, bypass_scim_auth, scim_user):
+    """PATCH active=false maps to state='deleted' and stamps deleted_at."""
+    from sqlalchemy import select
+
+    payload = {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        "Operations": [{"op": "replace", "path": "active", "value": False}],
+    }
+    response = await client.patch(f"/scim/v2/Users/{scim_user.id}", json=payload)
+    assert response.status_code == 200
+    assert response.json()["active"] is False
+
+    async with db_session() as session:
+        result = await session.execute(select(Users).where(Users.id == scim_user.id))
+        user = result.scalar_one()
+        assert user.state == "deleted"
+        assert user.deleted_at is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_patch_active_true_reactivates_deleted_user(db_session, client, bypass_scim_auth, scim_user):
+    """PATCH active=true on a soft-deleted user clears deleted_at and restores state='active'."""
+    from sqlalchemy import select
+
+    deactivate = {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        "Operations": [{"op": "replace", "path": "active", "value": False}],
+    }
+    assert (await client.patch(f"/scim/v2/Users/{scim_user.id}", json=deactivate)).status_code == 200
+
+    reactivate = {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        "Operations": [{"op": "replace", "path": "active", "value": True}],
+    }
+    response = await client.patch(f"/scim/v2/Users/{scim_user.id}", json=reactivate)
+    assert response.status_code == 200
+    assert response.json()["active"] is True
+
+    async with db_session() as session:
+        result = await session.execute(select(Users).where(Users.id == scim_user.id))
+        user = result.scalar_one()
+        assert user.state == "active"
+        assert user.deleted_at is None

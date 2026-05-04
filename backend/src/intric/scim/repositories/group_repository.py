@@ -77,6 +77,15 @@ class ScimGroupRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_id_including_deleted(self, group_id: UUID, tenant_id: UUID) -> GroupModel | None:
+        result = await self._session.execute(
+            select(GroupModel).where(
+                GroupModel.id == group_id,
+                GroupModel.tenant_id == tenant_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def get_by_name(self, name: str, tenant_id: UUID) -> GroupModel | None:
         result = await self._session.execute(
             select(GroupModel).where(

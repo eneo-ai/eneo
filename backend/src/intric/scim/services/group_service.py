@@ -17,6 +17,7 @@ from intric.scim.repositories.group_repository import ScimGroupRepository
 from intric.scim.schemas.common import ScimFilter, ScimSort
 from intric.scim.schemas.group import ScimGroup, ScimGroupMember, ScimGroupRequest
 from intric.scim.schemas.user import PatchOperation, ScimMeta
+from intric.user_groups.user_group import UserGroupState
 
 logger = get_logger(__name__)
 
@@ -110,9 +111,10 @@ class ScimGroupService:
             raise ScimGroupConflictError(f"Group '{display_name}' already exists")
 
     async def create_group(self, data: ScimGroupRequest) -> ScimGroup:
-        try:
-            await self._validate_unique_display_name(data.displayName)
-        except ScimGroupConflictError:
+        existing = await self._repository.get_by_name(
+            data.displayName, tenant_id=self._tenant_id
+        )
+        if existing is not None and existing.state != UserGroupState.DELETED:
             logger.warning(
                 "scim.group.conflict",
                 extra={
@@ -121,14 +123,44 @@ class ScimGroupService:
                     "external_id": data.externalId,
                 },
             )
-            raise
+            raise ScimGroupConflictError(f"Group '{data.displayName}' already exists")
+
+        member_ids = [UUID(m.value) for m in data.members]
+        await _validate_member_ids(self._repository, self._tenant_id, member_ids)
+
+        if existing is not None:
+            existing.state = None
+            existing.external_id = data.externalId
+            await self._repository.set_members(existing.id, member_ids)
+            await self._repository.update(existing)
+            refreshed = await self._repository.get_by_id(
+                existing.id, tenant_id=self._tenant_id
+            )
+            assert refreshed is not None
+            model = refreshed
+            logger.info(
+                "scim.group.reactivated",
+                extra={
+                    "tenant_id": str(self._tenant_id),
+                    "group_id": str(model.id),
+                    "display_name": model.name,
+                    "external_id": model.external_id,
+                    "member_count": len(data.members),
+                },
+            )
+            await self._log(
+                ActionType.SCIM_GROUP_REACTIVATED,
+                model.id,
+                f"SCIM reactivated group '{model.name}'",
+                {**_group_target(model), "member_count": len(data.members)},
+            )
+            return _to_scim_group(model)
+
         model = GroupModel(  # pyright: ignore[reportCallIssue]
             external_id=data.externalId,  # pyright: ignore[reportCallIssue]
             name=data.displayName,  # pyright: ignore[reportCallIssue]
             tenant_id=self._tenant_id,  # pyright: ignore[reportCallIssue]
         )
-        member_ids = [UUID(m.value) for m in data.members]
-        await _validate_member_ids(self._repository, self._tenant_id, member_ids)
         model = await self._repository.create(model)
         if data.members:
             await self._repository.set_members(model.id, member_ids)
@@ -254,9 +286,13 @@ class ScimGroupService:
         return _to_scim_group(model)
 
     async def delete_group(self, group_id: UUID) -> None:
-        model = await self._repository.get_by_id(group_id, tenant_id=self._tenant_id)
+        model = await self._repository.get_by_id_including_deleted(
+            group_id, tenant_id=self._tenant_id
+        )
         if model is None:
             raise ScimGroupNotFoundError(f"Group '{group_id}' not found")
+        if model.state == UserGroupState.DELETED:
+            return
         await self._repository.delete(group_id)
         logger.info(
             "scim.group.deleted",

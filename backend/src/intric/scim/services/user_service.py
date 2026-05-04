@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Any, cast
 from uuid import UUID
 
@@ -183,6 +184,7 @@ class ScimUserService:
                         f"External ID '{data.externalId}' already exists"
                     )
             existing.state = ScimUserState.ACTIVE
+            existing.deleted_at = None
             existing.external_id = data.externalId
             result = _to_scim_user(await self._repository.update(existing))
             logger.info(
@@ -269,7 +271,7 @@ class ScimUserService:
 
     async def replace_user(self, user_id: UUID, data: ScimUserRequest) -> ScimUser:
         model = await self._repository.get_by_id(user_id, tenant_id=self._tenant_id)
-        if model is None or model.state != ScimUserState.ACTIVE:
+        if model is None:
             raise ScimUserNotFoundError(f"User '{user_id}' not found")
         email = _resolve_email(data)
         await self._validate_unique_fields(
@@ -281,7 +283,7 @@ class ScimUserService:
         model.external_id = data.externalId
         model.username = data.userName
         model.email = email
-        model.state = ScimUserState.ACTIVE if data.active else ScimUserState.INACTIVE
+        _set_active(model, data.active)
         model = await self._repository.update(model)
         logger.info(
             "scim.user.replaced",
@@ -303,7 +305,7 @@ class ScimUserService:
 
     async def patch_user(self, user_id: UUID, operations: list[PatchOperation]) -> ScimUser:
         model = await self._repository.get_by_id(user_id, tenant_id=self._tenant_id)
-        if model is None or model.state != ScimUserState.ACTIVE:
+        if model is None:
             raise ScimUserNotFoundError(f"User '{user_id}' not found")
         for op in operations:
             _apply_patch_operation(model, op)
@@ -333,9 +335,11 @@ class ScimUserService:
 
     async def delete_user(self, user_id: UUID) -> None:
         model = await self._repository.get_by_id(user_id, tenant_id=self._tenant_id)
-        if model is None or model.state != ScimUserState.ACTIVE:
+        if model is None:
             raise ScimUserNotFoundError(f"User '{user_id}' not found")
-        model.state = ScimUserState.INACTIVE
+        if model.state == ScimUserState.DELETED:
+            return
+        _set_active(model, False)
         await self._repository.update(model)
         logger.info(
             "scim.user.deprovisioned",
@@ -354,9 +358,23 @@ class ScimUserService:
         )
 
 
+def _set_active(model: UserModel, active: bool) -> None:
+    """Map SCIM `active` boolean to Eneo soft-delete state idempotently.
+
+    active=true  → state=ACTIVE,  deleted_at=NULL
+    active=false → state=DELETED, deleted_at=now() (preserved if already DELETED)
+    """
+    if active:
+        model.state = ScimUserState.ACTIVE
+        model.deleted_at = None
+    elif model.state != ScimUserState.DELETED:
+        model.state = ScimUserState.DELETED
+        model.deleted_at = datetime.now(timezone.utc)
+
+
 def _apply_user_attr(model: UserModel, attr: str, value: Any) -> None:
     if attr == "active":
-        model.state = ScimUserState.ACTIVE if bool(value) else ScimUserState.INACTIVE
+        _set_active(model, bool(value))
     elif attr == "username":
         model.username = str(value) if value is not None else model.username
     elif attr == "externalid":

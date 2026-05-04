@@ -100,6 +100,7 @@ class ActionType(str, Enum):
     SCIM_USER_DEPROVISIONED = "scim_user_deprovisioned"
     SCIM_USER_UPDATED = "scim_user_updated"
     SCIM_GROUP_CREATED = "scim_group_created"
+    SCIM_GROUP_REACTIVATED = "scim_group_reactivated"
     SCIM_GROUP_UPDATED = "scim_group_updated"
     SCIM_GROUP_DELETED = "scim_group_deleted"
     SCIM_TOKEN_CREATED = "scim_token_created"

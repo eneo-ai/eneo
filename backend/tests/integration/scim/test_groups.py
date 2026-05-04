@@ -446,3 +446,69 @@ async def test_get_group_http(client, bypass_scim_auth, scim_group):
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == str(scim_group.id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_create_group_with_active_duplicate_returns_409(client, bypass_scim_auth, scim_group):
+    """POST /Groups with displayName matching an active group → 409 uniqueness."""
+    payload = {
+        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+        "displayName": scim_group.name,
+        "members": [],
+    }
+    response = await client.post("/scim/v2/Groups", json=payload)
+    assert response.status_code == 409
+    assert response.json()["scimType"] == "uniqueness"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_delete_group_is_idempotent(db_session, client, bypass_scim_auth, scim_group):
+    """A second DELETE on a soft-deleted group returns 204 (idempotent)."""
+    first = await client.delete(f"/scim/v2/Groups/{scim_group.id}")
+    assert first.status_code == 204
+
+    second = await client.delete(f"/scim/v2/Groups/{scim_group.id}")
+    assert second.status_code == 204
+
+    async with db_session() as session:
+        result = await session.execute(select(UserGroups).where(UserGroups.id == scim_group.id))
+        assert result.scalar_one().state == "deleted"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_delete_group_returns_404_for_unknown_id(client, bypass_scim_auth):
+    """DELETE on a never-existed group ID returns 404 (not 204) — distinguishes from idempotent re-delete."""
+    response = await client.delete(f"/scim/v2/Groups/{uuid.uuid4()}")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_create_group_reactivates_soft_deleted_group(db_session, client, bypass_scim_auth, scim_group):
+    """POST /Groups with displayName matching a soft-deleted group reactivates it (201)."""
+    delete_response = await client.delete(f"/scim/v2/Groups/{scim_group.id}")
+    assert delete_response.status_code == 204
+
+    async with db_session() as session:
+        result = await session.execute(select(UserGroups).where(UserGroups.id == scim_group.id))
+        assert result.scalar_one().state == "deleted"
+
+    payload = {
+        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+        "displayName": scim_group.name,
+        "externalId": "ext-reactivated-001",
+        "members": [],
+    }
+    response = await client.post("/scim/v2/Groups", json=payload)
+    assert response.status_code == 201
+    body = response.json()
+    assert body["id"] == str(scim_group.id), "Re-activation should reuse the existing row, not create a new one"
+    assert body["externalId"] == "ext-reactivated-001"
+
+    async with db_session() as session:
+        result = await session.execute(select(UserGroups).where(UserGroups.id == scim_group.id))
+        group = result.scalar_one()
+        assert group.state is None, "state should be cleared (NULL) after reactivation"
