@@ -1325,6 +1325,75 @@ async def test_typed_validation_failure_persists_input_context_for_export(user):
 
 
 @pytest.mark.asyncio
+async def test_typed_validation_failure_persists_model_telemetry(user):
+    """flow_step_attempts must record requested_model/provider on typed failure.
+
+    The flow_llm_request_timeout path (per-step LLM timeout) raises a typed
+    exception. Without telemetry plumbed through finish_attempt, the
+    persisted row shows requested_model=null/provider=null — making it
+    impossible to triage which model wedged the run after the fact.
+    """
+    executor, flow_repo, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    step_id = uuid4()
+    assistant_id = uuid4()
+    claimed = _claimed_step_result(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        step_id=step_id,
+        assistant_id=assistant_id,
+    )
+
+    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_version_repo.get = AsyncMock(
+        return_value=FlowVersion(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum="checksum",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(step_id),
+                        "step_order": 1,
+                        "assistant_id": str(assistant_id),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                    }
+                ]
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+    typed_exc = TypedIOValidationException(
+        "Step 1: LLM request exceeded 600s timeout.",
+        code="flow_llm_request_timeout",
+    )
+    setattr(typed_exc, "requested_model", "openai/gpt-5.4-nano")
+    setattr(typed_exc, "provider", "openai")
+    executor._execute_step = AsyncMock(side_effect=typed_exc)
+
+    await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        celery_task_id="task-1",
+        retry_count=0,
+    )
+
+    finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
+    assert finish_kwargs["requested_model"] == "openai/gpt-5.4-nano"
+    assert finish_kwargs["provider"] == "openai"
+
+
+@pytest.mark.asyncio
 async def test_typed_validation_failure_without_attached_context_uses_fallback_payload(
     user,
 ):

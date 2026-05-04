@@ -190,6 +190,35 @@ class FlowRunExecutorConfig:
         )
 
 
+def _step_telemetry_from_state(
+    *,
+    state: RunExecutionState,
+    step: RuntimeStep,
+) -> tuple[str | None, str | None]:
+    """Best-effort (requested_model, provider) for failed/cancelled attempts.
+
+    Read from `state.assistant_cache`, which `prepare_step_execution` fills
+    before any LLM dispatch. When a step fails after dispatch, the cache
+    still carries the assistant we just tried. Returns (None, None) when
+    the assistant was never loaded, which keeps downstream `finish_attempt`
+    columns nullable instead of forcing a synthetic placeholder.
+    """
+    assistant = state.assistant_cache.get(step.assistant_id)
+    if assistant is None:
+        return None, None
+    completion_model = getattr(assistant, "completion_model", None)
+    if completion_model is None:
+        return None, None
+    requested = getattr(completion_model, "litellm_model_name", None) or getattr(
+        completion_model, "name", None
+    )
+    provider = getattr(completion_model, "provider_type", None)
+    return (
+        requested if isinstance(requested, str) else None,
+        provider if isinstance(provider, str) else None,
+    )
+
+
 def _build_attempt_provenance(
     *,
     step: RuntimeStep,
@@ -641,6 +670,7 @@ class FlowRunExecutor:
                     failed_input_payload=cast(
                         dict[str, Any] | None, failed_input_payload
                     ),
+                    state=state,
                 )
             except Exception as exc:
                 logger.exception(
@@ -655,6 +685,7 @@ class FlowRunExecutor:
                     step=step,
                     attempt_no=attempt_no,
                     claimed=claimed_result,
+                    state=state,
                 )
 
             latest_run = await self.flow_run_repo.get(
@@ -663,6 +694,21 @@ class FlowRunExecutor:
                 flow_id=flow_id,
             )
             if latest_run.status == FlowRunStatus.CANCELLED:
+                model_params = output.model_parameters_json or {}
+                cancel_requested_model = (
+                    model_params.get("model_name")
+                    if isinstance(model_params.get("model_name"), str)
+                    else None
+                )
+                cancel_provider = (
+                    model_params.get("provider")
+                    if isinstance(model_params.get("provider"), str)
+                    else None
+                )
+                if cancel_requested_model is None and cancel_provider is None:
+                    cancel_requested_model, cancel_provider = (
+                        _step_telemetry_from_state(state=state, step=step)
+                    )
                 await self.flow_run_repo.finish_attempt(
                     run_id=run_id,
                     step_id=step.step_id,
@@ -671,6 +717,10 @@ class FlowRunExecutor:
                     status=FlowStepAttemptStatus.CANCELLED,
                     error_code="run_cancelled",
                     error_message="Run was cancelled during step execution.",
+                    requested_model=cancel_requested_model,
+                    provider=cancel_provider,
+                    num_tokens_input=output.num_tokens_input or None,
+                    num_tokens_output=output.num_tokens_output or None,
                 )
                 await self._commit()
                 return {"status": "skipped", "reason": "run_cancelled"}
@@ -990,6 +1040,7 @@ class FlowRunExecutor:
         claimed: FlowStepResult,
         typed_exc: TypedIOValidationException,
         failed_input_payload: dict[str, Any] | None,
+        state: RunExecutionState | None = None,
     ) -> dict[str, Any]:
         failed_prompt = getattr(typed_exc, "effective_prompt", None)
         failure_plan = build_typed_failure_plan(
@@ -1000,6 +1051,12 @@ class FlowRunExecutor:
             effective_prompt=failed_prompt if isinstance(failed_prompt, str) else None,
         )
         await self._rollback()
+        requested_model = getattr(typed_exc, "requested_model", None)
+        provider = getattr(typed_exc, "provider", None)
+        if requested_model is None and provider is None and state is not None:
+            requested_model, provider = _step_telemetry_from_state(
+                state=state, step=step
+            )
         await self.flow_run_repo.finish_attempt(
             run_id=run_id,
             step_id=step.step_id,
@@ -1008,6 +1065,10 @@ class FlowRunExecutor:
             status=failure_plan.attempt_status,
             error_code=failure_plan.error_code,
             error_message=failure_plan.error_message,
+            requested_model=requested_model
+            if isinstance(requested_model, str)
+            else None,
+            provider=provider if isinstance(provider, str) else None,
         )
         await self.flow_repo.save_step_result(
             run_id, failure_plan.failed_result, tenant_id=tenant_id
@@ -1030,12 +1091,18 @@ class FlowRunExecutor:
         step: RuntimeStep,
         attempt_no: int,
         claimed: FlowStepResult,
+        state: RunExecutionState | None = None,
     ) -> dict[str, Any]:
         failure_plan = build_generic_failure_plan(
             claimed=claimed,
             public_error=f"Flow step {step.step_order} execution failed.",
         )
         await self._rollback()
+        requested_model, provider = (
+            _step_telemetry_from_state(state=state, step=step)
+            if state is not None
+            else (None, None)
+        )
         await self.flow_run_repo.finish_attempt(
             run_id=run_id,
             step_id=step.step_id,
@@ -1044,6 +1111,8 @@ class FlowRunExecutor:
             status=failure_plan.attempt_status,
             error_code=failure_plan.error_code,
             error_message=failure_plan.error_message,
+            requested_model=requested_model,
+            provider=provider,
         )
         await self.flow_repo.save_step_result(
             run_id, failure_plan.failed_result, tenant_id=tenant_id
