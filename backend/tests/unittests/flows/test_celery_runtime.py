@@ -390,6 +390,145 @@ def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
     } == {"flow_worker_stalled"}
 
 
+def test_redispatch_stale_queued_task_processes_all_tenants(monkeypatch):
+    """Beat-driven redispatch claims stuck QUEUED runs and dispatches them.
+
+    Without this safety net, a run whose post-response BackgroundTask
+    dispatch silently fails (FastAPI process restart, OOM, autoreload)
+    sits in QUEUED forever with no error_code and no retry. The beat
+    task is the only automatic recovery — `cancel_run` only flips DB
+    status, and `reconcile-stale-running` handles RUNNING, not QUEUED.
+    """
+    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tenant_one = SimpleNamespace(id=uuid4())
+    tenant_two = SimpleNamespace(id=uuid4())
+    user_run_user_id = uuid4()
+    service_key_id = uuid4()
+    user_run = SimpleNamespace(
+        id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=tenant_one.id,
+        principal_type="user",
+        principal_user_id=user_run_user_id,
+        principal_api_key_id=None,
+    )
+    service_run = SimpleNamespace(
+        id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=tenant_two.id,
+        principal_type="service_key",
+        principal_user_id=None,
+        principal_api_key_id=service_key_id,
+    )
+    repo = MagicMock()
+    repo.list_stale_queued_runs = AsyncMock(side_effect=[[user_run], [service_run]])
+    repo.claim_stale_queued_run_for_redispatch = AsyncMock(
+        side_effect=[user_run, service_run]
+    )
+    tenant_repo = MagicMock()
+    tenant_repo.get_all_tenants = AsyncMock(return_value=[tenant_one, tenant_two])
+    backend = MagicMock()
+    backend.dispatch = AsyncMock()
+
+    class _Container:
+        def __init__(self, session=None):
+            self._repo = repo
+            self._tenant_repo = tenant_repo
+            self._backend = backend
+
+        def flow_run_repo(self):
+            return self._repo
+
+        def tenant_repo(self):
+            return self._tenant_repo
+
+        def flow_execution_backend(self):
+            return self._backend
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return AsyncMock()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(tasks_module, "Container", _Container)
+    monkeypatch.setattr(
+        tasks_module.sessionmanager, "session", lambda: _SessionContext()
+    )
+
+    result = asyncio.run(tasks_module._redispatch_stale_queued_runs_all_tenants())
+
+    assert result["status"] == "ok"
+    assert result["redispatched"] == 2
+    assert backend.dispatch.await_count == 2
+    user_call = backend.dispatch.await_args_list[0]
+    assert user_call.kwargs["principal_type"] == "user"
+    assert user_call.kwargs["principal_user_id"] == user_run_user_id
+    assert user_call.kwargs["principal_api_key_id"] is None
+    service_call = backend.dispatch.await_args_list[1]
+    assert service_call.kwargs["principal_type"] == "service_key"
+    assert service_call.kwargs["principal_api_key_id"] == service_key_id
+
+
+def test_redispatch_stale_queued_skips_runs_lost_to_concurrent_claim(monkeypatch):
+    """If `claim_stale_queued_run_for_redispatch` returns None, skip dispatch.
+
+    A concurrent dispatch path or a recently-RUNNING-transitioned run
+    must not be redispatched twice; the atomic claim is the
+    cross-process serialization point.
+    """
+    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tenant = SimpleNamespace(id=uuid4())
+    stale_run = SimpleNamespace(
+        id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=tenant.id,
+        principal_type="user",
+        principal_user_id=uuid4(),
+        principal_api_key_id=None,
+    )
+    repo = MagicMock()
+    repo.list_stale_queued_runs = AsyncMock(return_value=[stale_run])
+    repo.claim_stale_queued_run_for_redispatch = AsyncMock(return_value=None)
+    tenant_repo = MagicMock()
+    tenant_repo.get_all_tenants = AsyncMock(return_value=[tenant])
+    backend = MagicMock()
+    backend.dispatch = AsyncMock()
+
+    class _Container:
+        def __init__(self, session=None):
+            self._repo = repo
+            self._tenant_repo = tenant_repo
+            self._backend = backend
+
+        def flow_run_repo(self):
+            return self._repo
+
+        def tenant_repo(self):
+            return self._tenant_repo
+
+        def flow_execution_backend(self):
+            return self._backend
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return AsyncMock()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(tasks_module, "Container", _Container)
+    monkeypatch.setattr(
+        tasks_module.sessionmanager, "session", lambda: _SessionContext()
+    )
+
+    result = asyncio.run(tasks_module._redispatch_stale_queued_runs_all_tenants())
+
+    assert result["redispatched"] == 0
+    assert backend.dispatch.await_count == 0
+
+
 def test_flow_worker_process_init_initializes_db_and_http_client(monkeypatch):
     celery_app_module = importlib.import_module("intric.flows.runtime.celery_app")
     init_mock = MagicMock()

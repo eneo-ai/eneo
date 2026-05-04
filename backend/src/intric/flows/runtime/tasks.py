@@ -17,6 +17,7 @@ from intric.flows.application.flow_run_audit_outbox_policy import (
     FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE,
 )
 from intric.flows.application.flow_run_recovery_policy import (
+    FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
     flow_stale_running_reconcile_after_seconds,
 )
 from intric.flows.domain.flow import FlowRunStatus
@@ -26,6 +27,7 @@ from intric.flows.flow_input_limits import (
     DEFAULT_MAX_AUDIO_FILES_PER_RUN,
     resolve_flow_input_limits,
 )
+from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime.celery_app import celery_app
 from intric.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
 from intric.main.config import get_settings
@@ -363,6 +365,88 @@ async def _reconcile_stale_running_runs_all_tenants(
     return {"status": "ok", "reconciled": reconciled}
 
 
+async def _redispatch_stale_queued_runs_all_tenants(
+    *, limit: int = 100
+) -> dict[str, int | str]:
+    """Re-dispatch QUEUED runs whose initial dispatch was lost.
+
+    `dispatch_flow_run_after_commit` runs as a FastAPI BackgroundTask
+    after the response is sent; if the API process exits before the
+    task fires (autoreload, OOM, deploy), the run sits in QUEUED with
+    no error_code and no automatic retry. This beat task is the
+    safety net.
+
+    The atomic `claim_stale_queued_run_for_redispatch` is the
+    cross-process serialization point — two beat workers cannot
+    redispatch the same run.
+    """
+    stale_before = datetime.now(timezone.utc) - timedelta(
+        seconds=max(1, FLOW_QUEUED_REDISPATCH_AFTER_SECONDS)
+    )
+    redispatched = 0
+    async with sessionmanager.session() as session:
+        container = Container(session=providers.Object(session))
+        run_repo = container.flow_run_repo()
+        backend = container.flow_execution_backend()
+        tenant_repo = container.tenant_repo()
+        tenants = await tenant_repo.get_all_tenants()
+        for tenant in tenants:
+            stale_runs = await run_repo.list_stale_queued_runs(
+                tenant_id=tenant.id,
+                stale_before=stale_before,
+                limit=limit,
+            )
+            for run in stale_runs:
+                claimed = await run_repo.claim_stale_queued_run_for_redispatch(
+                    run_id=run.id,
+                    tenant_id=run.tenant_id,
+                    stale_before=stale_before,
+                )
+                if claimed is None:
+                    continue
+                try:
+                    principal = FlowPrincipal.from_run(claimed)
+                except ValueError:
+                    logger.warning(
+                        "Skipping redispatch for run with invalid principal",
+                        extra={
+                            "run_id": str(claimed.id),
+                            "tenant_id": str(claimed.tenant_id),
+                        },
+                    )
+                    continue
+                try:
+                    if principal.is_service_key:
+                        await backend.dispatch(
+                            run_id=claimed.id,
+                            flow_id=claimed.flow_id,
+                            tenant_id=claimed.tenant_id,
+                            principal_type=principal.principal_type.value,
+                            principal_user_id=principal.principal_user_id,
+                            principal_api_key_id=principal.principal_api_key_id,
+                        )
+                    else:
+                        await backend.dispatch(
+                            run_id=claimed.id,
+                            flow_id=claimed.flow_id,
+                            tenant_id=claimed.tenant_id,
+                            principal_type=principal.principal_type.value,
+                            principal_user_id=principal.principal_user_id,
+                            principal_api_key_id=None,
+                        )
+                    redispatched += 1
+                except Exception:
+                    logger.exception(
+                        "Failed to redispatch stale queued flow run",
+                        extra={
+                            "run_id": str(claimed.id),
+                            "flow_id": str(claimed.flow_id),
+                            "tenant_id": str(claimed.tenant_id),
+                        },
+                    )
+    return {"status": "ok", "redispatched": redispatched}
+
+
 async def _deliver_flow_audit_outbox(
     *, limit: int = FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE
 ) -> dict[str, int | str]:
@@ -388,6 +472,18 @@ def reconcile_stale_running_runs() -> dict[str, int | str]:
         loop,
     )
     return future.result(timeout=30)
+
+
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+    name="flows.redispatch_stale_queued",
+)
+def redispatch_stale_queued_runs() -> dict[str, int | str]:
+    loop = _get_flow_task_loop()
+    future = asyncio.run_coroutine_threadsafe(
+        _redispatch_stale_queued_runs_all_tenants(),
+        loop,
+    )
+    return future.result(timeout=60)
 
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
