@@ -486,6 +486,94 @@ async def test_complete_step_execution_shares_deadline_across_json_mode_retry(
 
 
 @pytest.mark.asyncio
+async def test_complete_step_execution_fast_fails_when_deadline_already_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Json-mode retry must not dispatch when the deadline is already
+    spent.
+
+    If the first call burns the entire step budget before raising a
+    json-mode rejection, the retry hits `call_assistant_with_timeout`
+    with `timeout <= 0`. Dispatching to `assistant.get_response` in
+    that state would either block on a still-pending HTTP call or get
+    cancelled with an ambiguous TimeoutError. Raise the typed
+    `flow_llm_request_timeout` directly so the executor's failure
+    handler treats this exactly like the original timeout.
+    """
+    monkeypatch.setattr(
+        "intric.flows.runtime.step_execution_runtime.detect_native_json_output_support",
+        lambda assistant: None,
+    )
+    run = _run()
+    state = _state()
+    step = _step(output_type="json")
+
+    original_kwargs = MagicMock(name="original_kwargs")
+    json_mode_kwargs = MagicMock(name="json_mode_kwargs")
+    assistant = MagicMock()
+    assistant.completion_model_kwargs = original_kwargs
+    assistant.completion_model_kwargs.model_copy.return_value = json_mode_kwargs
+
+    async def fake_get_response(**_kwargs: object):
+        # Burn the entire step budget on the first call, then reject
+        # so the json-mode fallback path runs with timeout=0.
+        await asyncio.sleep(0.15)
+        raise RuntimeError("response_format json_object unsupported")
+
+    assistant.get_response = AsyncMock(side_effect=fake_get_response)
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello",
+            source_text="hello",
+            input_source="flow_input",
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={
+            "text": "hello",
+            "source_text": "hello",
+            "input_source": "flow_input",
+        },
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(
+            return_value=([], {"status": "skipped_no_service"}, [])
+        ),
+        process_typed_output=AsyncMock(return_value=({"ok": True}, None)),
+        apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
+        attach_typed_failure_context=attach_typed_failure_context,
+        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
+        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
+        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
+        count_tokens=lambda text: len(text),
+        llm_request_timeout_seconds=0.1,
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await complete_step_execution(
+            step=step,
+            run=run,
+            state=state,
+            prepared=prepared,
+            deps=deps,
+        )
+
+    assert exc_info.value.code == "flow_llm_request_timeout"
+    assert assistant.get_response.await_count == 1, (
+        "Retry must not dispatch a second LLM call when the deadline "
+        "is already exhausted; doing so blocks on HTTP that the budget "
+        "no longer covers."
+    )
+
+
+@pytest.mark.asyncio
 async def test_complete_step_execution_times_out_llm_request():
     run = _run()
     state = _state()
