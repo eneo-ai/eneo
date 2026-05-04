@@ -27,8 +27,12 @@ def upgrade() -> None:
     op.execute("ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS state VARCHAR")
     op.execute("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS scim_token_hash VARCHAR(64)")
     op.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_tenants_scim_token_hash ON tenants (scim_token_hash)")
-    # Replace the broad unique constraint with a partial one so that soft-deleted
-    # groups do not block re-creation of a group with the same name in the same tenant.
+    # Replace the broad unique constraint with a partial unique index so that
+    # soft-deleted groups do not block re-creation of a group with the same name.
+    # UNIQUE CONSTRAINT does not support a WHERE clause, hence the switch to an index.
+    op.execute(
+        "ALTER TABLE user_groups DROP CONSTRAINT IF EXISTS user_groups_name_tenant_unique"
+    )
     op.execute("DROP INDEX IF EXISTS user_groups_name_tenant_unique")
     op.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS user_groups_name_tenant_unique
@@ -40,8 +44,8 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS user_groups_name_tenant_unique")
     op.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS user_groups_name_tenant_unique
-        ON user_groups (name, tenant_id)
+        ALTER TABLE user_groups
+        ADD CONSTRAINT user_groups_name_tenant_unique UNIQUE (name, tenant_id)
     """)
     op.execute("DROP INDEX IF EXISTS ix_tenants_scim_token_hash")
     op.execute("ALTER TABLE tenants DROP COLUMN IF EXISTS scim_token_hash")
