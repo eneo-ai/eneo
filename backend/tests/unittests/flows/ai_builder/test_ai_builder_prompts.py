@@ -142,11 +142,15 @@ class TestBuildSystemPrompt:
                 "output_description": "Test",
             },
         )
-        # Planner-emitted-variable syntax stays hidden in create mode;
-        # templating is backend-compiled, not planner-authored.
-        assert "input_bindings.question" not in prompt
-        assert "{{ step_a.output.text }}" not in prompt
+        # The planner does not AUTHOR binding templates or step refs — backend
+        # compiles them. But it must still SEE the variable system so it can
+        # design flow shape that the compiler will translate into bindings;
+        # withholding the syntax forced the planner to default to
+        # `all_previous_steps` for any composition need.
+        assert "input_bindings.question" in prompt
+        assert "{{ step_a.output.text }}" in prompt
         assert "do not emit plan_step_ref values" in prompt
+        assert "do not emit input_source in create mode" in prompt
         # Create-mode IR surface (what the planner DOES emit) stays present.
         assert "output_fields" in prompt
         assert "runtime_input" in prompt
@@ -326,7 +330,16 @@ class TestBuildSystemPrompt:
         assert "Aktuellt flöde" not in prompt
 
     def test_prompt_deeply_covers_underlag(self) -> None:
-        """Create mode should teach compiler-owned underlag behavior without raw bindings."""
+        """Create mode teaches the underlag mechanism the compiler exposes.
+
+        The planner does not author raw `input_bindings.question` strings —
+        the outline schema strips them and the protocol forbids it. But it
+        must understand the wire format and the `{{ step_a.output.* }}`
+        variable family, because the planner's choice between
+        `previous_step` + targeted underlag and `all_previous_steps` is
+        only meaningful if it knows what the compiler will translate
+        each into.
+        """
         prompt = build_system_prompt(
             confirmed_requirements={
                 "summary": "Test",
@@ -339,7 +352,9 @@ class TestBuildSystemPrompt:
         assert "input_fields" in prompt
         assert "uses_input_fields" in prompt
         assert "uses_previous_fields" in prompt
-        assert "input_bindings.question" not in prompt
+        assert "input_bindings.question" in prompt
+        assert "Selektiv sammansättning" in prompt
+        assert "Alla steg använder all_previous_steps" in prompt
 
     def test_prompt_demotes_runtime_only_aliases_and_raw_json_blobs(self) -> None:
         prompt = build_system_prompt(

@@ -43,6 +43,97 @@ def test_build_prompt_knowledge_sections_for_create_after_confirmation_stays_com
     assert not any("Validation Repair Examples" in section for section in sections)
 
 
+def test_create_mode_after_confirmation_teaches_variable_system() -> None:
+    """The variable system block is the planner's ONLY guide to
+    `{{ step_a.output.structured.field }}` selectors. Withholding it
+    in create mode forced the planner to default to `all_previous_steps`
+    even when targeted refs would have served — the production failure
+    mode behind multi-minute first-token latency on document-stitching
+    flows. Edit mode already gets this content; create mode must too,
+    once requirements are confirmed and the planner is generating
+    flow shape rather than asking discovery questions."""
+
+    sections = build_prompt_knowledge_sections(
+        is_edit_mode=False,
+        has_confirmed_requirements=True,
+    )
+
+    assert any("Variabelsystemet" in section for section in sections), (
+        "Variable system teaching missing from confirmed-requirements create prompt"
+    )
+    assert any("step_a.output.structured" in section for section in sections), (
+        "Targeted JSON-field selector example must reach the create-mode planner"
+    )
+
+
+def test_create_mode_after_confirmation_teaches_underlag_design() -> None:
+    """`input_bindings.question` ("Underlag till steget") is the
+    PRIMARY mechanism for selective context composition. The
+    instructions-and-underlag block teaches the
+    `previous_step` + targeted underlag pattern as a deliberate
+    alternative to `all_previous_steps`. Without it the planner
+    cannot reason about when to choose one over the other."""
+
+    sections = build_prompt_knowledge_sections(
+        is_edit_mode=False,
+        has_confirmed_requirements=True,
+    )
+
+    assert any("Instruktioner vs Underlag" in section for section in sections), (
+        "Underlag/instruktioner teaching missing from confirmed-requirements create prompt"
+    )
+    assert any("Selektiv sammansättning" in section for section in sections), (
+        "Selective composition pattern (the explicit AB shape) must be visible"
+    )
+
+
+def test_create_mode_after_confirmation_teaches_all_previous_steps_anti_pattern() -> (
+    None
+):
+    """The anti-patterns block explicitly flags
+    `all_previous_steps` as token-explosive in long flows and points
+    the planner to `previous_step` + variable-driven underlag as the
+    structural alternative. This is the single highest-leverage
+    teaching for the targeted-underlag goal — keeping it in edit mode
+    only means the create-mode planner cannot self-correct the
+    bloat."""
+
+    sections = build_prompt_knowledge_sections(
+        is_edit_mode=False,
+        has_confirmed_requirements=True,
+    )
+
+    assert any("Antimönster" in section for section in sections), (
+        "Anti-patterns block missing from confirmed-requirements create prompt"
+    )
+    assert any(
+        "Alla steg använder all_previous_steps" in section for section in sections
+    ), "Specific anti-pattern naming all_previous_steps is the load-bearing teaching"
+
+
+def test_create_discovery_omits_underlag_and_anti_pattern_blocks() -> None:
+    """Pre-confirmation discovery is intentionally compact — the
+    planner's job there is to ask clarifying questions, not to
+    compose flow shape. Adding the variable/underlag/anti-pattern
+    blocks at that phase pollutes context for no benefit. Only
+    after `confirm_requirements` should the heavier teaching ship."""
+
+    sections = build_prompt_knowledge_sections(
+        is_edit_mode=False,
+        has_confirmed_requirements=False,
+    )
+
+    assert not any("Variabelsystemet" in section for section in sections), (
+        "Variable system must not pollute pre-confirmation discovery prompt"
+    )
+    assert not any("Instruktioner vs Underlag" in section for section in sections), (
+        "Underlag teaching must not pollute pre-confirmation discovery prompt"
+    )
+    assert not any("Antimönster" in section for section in sections), (
+        "Anti-patterns must not pollute pre-confirmation discovery prompt"
+    )
+
+
 def test_build_prompt_knowledge_sections_for_edit_mode_uses_edit_guidance() -> None:
     sections = build_prompt_knowledge_sections(
         is_edit_mode=True,

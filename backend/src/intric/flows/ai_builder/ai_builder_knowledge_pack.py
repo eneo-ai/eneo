@@ -37,6 +37,8 @@ def build_prompt_knowledge_sections(
             [
                 KNOWLEDGE_PACK_FLOW_ARCHITECTURE,
                 KNOWLEDGE_PACK_VARIABLE_SYSTEM,
+                KNOWLEDGE_PACK_INSTRUCTIONS_AND_UNDERLAG,
+                KNOWLEDGE_PACK_ANTI_PATTERNS,
                 render_knowledge_pack(),
                 KNOWLEDGE_PACK_EDIT_MODE,
                 KNOWLEDGE_PACK_CONTRACTS,
@@ -47,7 +49,19 @@ def build_prompt_knowledge_sections(
 
     sections.append(render_flow_architecture())
     if has_confirmed_requirements:
-        sections.append(render_knowledge_pack())
+        # The variable / underlag / anti-pattern blocks teach the
+        # planner about `{{ step_a.output.structured.field }}` selectors
+        # and the targeted-underlag pattern. They are gated behind
+        # `confirm_requirements` so the discovery phase stays focused
+        # on eliciting intent rather than authoring shape.
+        sections.extend(
+            [
+                KNOWLEDGE_PACK_VARIABLE_SYSTEM,
+                KNOWLEDGE_PACK_INSTRUCTIONS_AND_UNDERLAG,
+                KNOWLEDGE_PACK_ANTI_PATTERNS,
+                render_knowledge_pack(),
+            ]
+        )
     return sections
 
 
