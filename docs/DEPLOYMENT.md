@@ -319,7 +319,7 @@ docker compose up -d
 
 ### Upgrading Between Major Versions or After Long Gaps
 
-If upgrading from a very old image or across major versions (e.g., develop branch to main branch), you may encounter database migration issues.
+If upgrading from a very old image or across major versions (e.g., develop branch to release branch), you may encounter database migration issues.
 
 **Symptoms:**
 - "Unauthorized" errors in the frontend after upgrade
