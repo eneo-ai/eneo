@@ -131,3 +131,72 @@ class TestPrepareKwargsMaxTokens:
         adapter = _make_adapter("openai")
         result = adapter._prepare_kwargs(model_kwargs=None)
         assert "max_tokens" not in result
+
+
+class TestPrepareKwargsReasoningEffortTranslation:
+    """Translate 'none'/empty reasoning_effort instead of dropping silently.
+
+    Dropping reasoning_effort lets reasoning models fall back to their
+    default effort (medium/high on the gpt-5 family), which contributes
+    to multi-minute single-call latency. When the caller signals
+    minimum reasoning, translate to the lowest supported value rather
+    than handing the model no signal.
+    """
+
+    def test_openai_translates_none_reasoning_effort_to_low(self):
+        adapter = _make_adapter("openai")
+        with patch(
+            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+        ) as mock_litellm:
+            mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
+            result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "none"})
+        assert result["reasoning_effort"] == "low"
+
+    def test_openai_translates_empty_reasoning_effort_to_low(self):
+        adapter = _make_adapter("openai")
+        with patch(
+            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+        ) as mock_litellm:
+            mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
+            result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": ""})
+        assert result["reasoning_effort"] == "low"
+
+    def test_openai_translates_none_object_reasoning_effort_to_low(self):
+        adapter = _make_adapter("openai")
+        with patch(
+            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+        ) as mock_litellm:
+            mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
+            result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": None})
+        assert result["reasoning_effort"] == "low"
+
+    def test_openai_preserves_explicit_reasoning_effort(self):
+        adapter = _make_adapter("openai")
+        with patch(
+            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+        ) as mock_litellm:
+            mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
+            result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "high"})
+        assert result["reasoning_effort"] == "high"
+
+    def test_openai_drops_when_model_does_not_support_reasoning_effort(self):
+        """Unsupported by the model → drop. Translation is for the
+        capability-present-but-explicit-off case only."""
+        adapter = _make_adapter("openai")
+        with patch(
+            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+        ) as mock_litellm:
+            mock_litellm.get_supported_openai_params.return_value = []
+            result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "none"})
+        assert "reasoning_effort" not in result
+
+    def test_anthropic_drops_none_reasoning_effort(self):
+        """Anthropic uses LiteLLM's extended-thinking mapping; explicit
+        'no thinking' is best expressed by absence, not 'low'."""
+        adapter = _make_adapter("anthropic")
+        with patch(
+            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+        ) as mock_litellm:
+            mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
+            result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "none"})
+        assert "reasoning_effort" not in result

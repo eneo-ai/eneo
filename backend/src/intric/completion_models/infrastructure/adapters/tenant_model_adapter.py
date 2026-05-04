@@ -525,8 +525,6 @@ class TenantModelAdapter(CompletionModelAdapter):
                         f"Scaled temperature for Anthropic: {temp} -> {temp / 2}"
                     )
 
-            # Only pass reasoning_effort if the model actually supports it
-            # (per LiteLLM's supported_openai_params) and the value is meaningful
             if "reasoning_effort" in model_kwargs_dict:
                 supported_params = (
                     get_supported_openai_params(
@@ -535,10 +533,25 @@ class TenantModelAdapter(CompletionModelAdapter):
                     )
                     or ()
                 )
-                if "reasoning_effort" not in supported_params or model_kwargs_dict[
-                    "reasoning_effort"
-                ] in (None, "none", ""):
+                is_off_signal = model_kwargs_dict["reasoning_effort"] in (
+                    None,
+                    "none",
+                    "",
+                )
+                if "reasoning_effort" not in supported_params:
                     del model_kwargs_dict["reasoning_effort"]
+                elif is_off_signal:
+                    # OpenAI reasoning models default to medium/high effort
+                    # when reasoning_effort is absent, which costs multi-minute
+                    # first-token latency on routine calls. Translate "off"
+                    # signals to the lowest supported value rather than
+                    # dropping. Anthropic uses LiteLLM's extended-thinking
+                    # mapping where absence is the correct "no thinking"
+                    # expression, so we still drop there.
+                    if self.provider_type == "openai":
+                        model_kwargs_dict["reasoning_effort"] = "low"
+                    else:
+                        del model_kwargs_dict["reasoning_effort"]
 
             # Ensure max_tokens is set - some APIs (e.g., vLLM, OpenAI-compatible)
             # require it explicitly or return empty responses
