@@ -686,7 +686,9 @@ class UserService:
         settings_upsert = SettingsUpsert(user_id=user_in_db.id)
         await self.settings_repo.add(settings_upsert)
 
-        api_key = await self.generate_api_key(user_id=user_in_db.id)
+        api_key = await self.auth_service.create_user_api_key_v2(
+            user_id=user_in_db.id, tenant_id=user_in_db.tenant_id
+        )
 
         access_token = AccessToken(
             access_token=self.auth_service.create_access_token_for_user(
