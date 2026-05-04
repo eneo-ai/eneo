@@ -385,23 +385,30 @@ async def _redispatch_stale_queued_runs_all_tenants(
     )
     redispatched = 0
     async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
         container = Container(session=providers.Object(session))
         run_repo = container.flow_run_repo()
         backend = container.flow_execution_backend()
         tenant_repo = container.tenant_repo()
-        tenants = await tenant_repo.get_all_tenants()
+        async with session.begin():
+            tenants = await tenant_repo.get_all_tenants()
         for tenant in tenants:
-            stale_runs = await run_repo.list_stale_queued_runs(
-                tenant_id=tenant.id,
-                stale_before=stale_before,
-                limit=limit,
-            )
-            for run in stale_runs:
-                claimed = await run_repo.claim_stale_queued_run_for_redispatch(
-                    run_id=run.id,
-                    tenant_id=run.tenant_id,
+            async with session.begin():
+                stale_runs = await run_repo.list_stale_queued_runs(
+                    tenant_id=tenant.id,
                     stale_before=stale_before,
+                    limit=limit,
                 )
+            for run in stale_runs:
+                # Commit the atomic claim before dispatching: the celery
+                # worker that picks up the dispatched run reads the run
+                # in a fresh session, so the claim must be visible first.
+                async with session.begin():
+                    claimed = await run_repo.claim_stale_queued_run_for_redispatch(
+                        run_id=run.id,
+                        tenant_id=run.tenant_id,
+                        stale_before=stale_before,
+                    )
                 if claimed is None:
                     continue
                 try:

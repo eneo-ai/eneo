@@ -16,6 +16,24 @@ from intric.flows.runtime.celery_execution_backend import (
 )
 
 
+def _fake_flow_task_session():
+    """Mock session that supports `enable_autobegin_for_flow_task_session`
+    and `async with session.begin():` as no-ops, for unit tests that do
+    not exercise real SQLAlchemy semantics."""
+
+    class _BeginContext:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, _exc_type, _exc, _tb):
+            return False
+
+    return SimpleNamespace(
+        sync_session=SimpleNamespace(autobegin=False),
+        begin=lambda: _BeginContext(),
+    )
+
+
 @pytest.mark.asyncio
 async def test_celery_execution_backend_dispatches_task():
     celery_app = MagicMock()
@@ -445,9 +463,11 @@ def test_redispatch_stale_queued_task_processes_all_tenants(monkeypatch):
         def flow_execution_backend(self):
             return self._backend
 
+    fake_session = _fake_flow_task_session()
+
     class _SessionContext:
         async def __aenter__(self):
-            return AsyncMock()
+            return fake_session
 
         async def __aexit__(self, exc_type, exc, tb):
             return False
@@ -511,9 +531,11 @@ def test_redispatch_stale_queued_skips_runs_lost_to_concurrent_claim(monkeypatch
         def flow_execution_backend(self):
             return self._backend
 
+    fake_session = _fake_flow_task_session()
+
     class _SessionContext:
         async def __aenter__(self):
-            return AsyncMock()
+            return fake_session
 
         async def __aexit__(self, exc_type, exc, tb):
             return False
@@ -566,3 +588,111 @@ def test_enable_autobegin_for_flow_task_session():
     tasks_module.enable_autobegin_for_flow_task_session(async_session)
 
     assert sync_session.autobegin is True
+
+
+def test_redispatch_stale_queued_commits_claim_before_dispatch(monkeypatch):
+    """The atomic UPDATE must commit before the celery dispatch fires.
+
+    With `autobegin=False` on the sessionmaker the beat task must enable
+    autobegin for the session and wrap the claim in `session.begin()`.
+    Otherwise the claim either raises (no transaction is open) or is
+    not yet visible to the worker that picks up the dispatched run.
+    """
+    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tenant = SimpleNamespace(id=uuid4())
+    stale_run = SimpleNamespace(
+        id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=tenant.id,
+        principal_type="user",
+        principal_user_id=uuid4(),
+        principal_api_key_id=None,
+    )
+    events: list[str] = []
+    repo = MagicMock()
+
+    async def list_stale(**_kwargs):
+        events.append("list_stale")
+        return [stale_run]
+
+    async def claim(**_kwargs):
+        events.append("claim")
+        return stale_run
+
+    repo.list_stale_queued_runs = list_stale
+    repo.claim_stale_queued_run_for_redispatch = claim
+    tenant_repo = MagicMock()
+
+    async def get_all_tenants():
+        events.append("get_tenants")
+        return [tenant]
+
+    tenant_repo.get_all_tenants = get_all_tenants
+    backend = MagicMock()
+
+    async def dispatch(**_kwargs):
+        events.append("dispatch")
+
+    backend.dispatch = dispatch
+
+    class _Container:
+        def __init__(self, session=None):
+            self._repo = repo
+            self._tenant_repo = tenant_repo
+            self._backend = backend
+
+        def flow_run_repo(self):
+            return self._repo
+
+        def tenant_repo(self):
+            return self._tenant_repo
+
+        def flow_execution_backend(self):
+            return self._backend
+
+    class _BeginContext:
+        async def __aenter__(self):
+            events.append("begin")
+            return None
+
+        async def __aexit__(self, exc_type, _exc, _tb):
+            events.append("commit" if exc_type is None else "rollback")
+            return False
+
+    sync_session = SimpleNamespace(autobegin=False)
+    fake_session = SimpleNamespace(
+        sync_session=sync_session,
+        begin=lambda: _BeginContext(),
+    )
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return fake_session
+
+        async def __aexit__(self, _exc_type, _exc, _tb):
+            return False
+
+    monkeypatch.setattr(tasks_module, "Container", _Container)
+    monkeypatch.setattr(
+        tasks_module.sessionmanager, "session", lambda: _SessionContext()
+    )
+
+    result = asyncio.run(tasks_module._redispatch_stale_queued_runs_all_tenants())
+
+    assert result == {"status": "ok", "redispatched": 1}
+    assert sync_session.autobegin is True, (
+        "Beat task must enable autobegin so the claim UPDATE opens a "
+        "transaction; with autobegin=False it raises InvalidRequestError."
+    )
+    claim_idx = events.index("claim")
+    dispatch_idx = events.index("dispatch")
+    commits_between = [
+        i
+        for i, e in enumerate(events)
+        if e == "commit" and claim_idx < i < dispatch_idx
+    ]
+    assert commits_between, (
+        f"Expected claim→commit→dispatch ordering; got {events}. "
+        "Without a commit between claim and dispatch, the worker may "
+        "pick up the run before the QUEUED-claim is visible."
+    )
