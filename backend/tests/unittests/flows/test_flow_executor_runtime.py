@@ -1394,6 +1394,85 @@ async def test_typed_validation_failure_persists_model_telemetry(user):
 
 
 @pytest.mark.asyncio
+async def test_typed_validation_failure_partial_typed_exc_falls_back_field_independently(
+    user,
+):
+    """Each telemetry field falls back from state independently.
+
+    `_handle_typed_step_failure` reads `requested_model` and `provider`
+    from the typed exception's attached attributes and falls back to
+    `state.assistant_cache` for the assistant we just tried. The
+    fallback must apply per-field — if only `provider` is attached
+    (e.g. the timeout fired before the LLM client returned a model
+    name), the persisted attempt row must still get `requested_model`
+    from the assistant cache rather than null.
+    """
+    executor, flow_repo, flow_run_repo, _ = _build_executor(user)
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_repo.save_step_result = AsyncMock()
+    executor._terminalize_run = AsyncMock()
+    executor._rollback = AsyncMock()
+
+    step_id = uuid4()
+    assistant_id = uuid4()
+    run_id = uuid4()
+    flow_id = uuid4()
+    claimed = _claimed_step_result(
+        run_id=run_id,
+        flow_id=flow_id,
+        tenant_id=user.tenant_id,
+        step_id=step_id,
+        assistant_id=assistant_id,
+    )
+    step = RuntimeStep(
+        step_id=step_id,
+        step_order=1,
+        assistant_id=assistant_id,
+        user_description=None,
+        input_source="flow_input",
+        input_bindings=None,
+        input_config=None,
+        output_mode="pass_through",
+        output_config=None,
+        output_type="text",
+    )
+
+    state = _empty_execution_state()
+    state.assistant_cache[assistant_id] = SimpleNamespace(
+        completion_model=SimpleNamespace(
+            litellm_model_name="openai/gpt-5.4-nano",
+            name="gpt-5.4-nano",
+            provider_type="openai",
+        )
+    )
+
+    typed_exc = TypedIOValidationException(
+        "Step 1: LLM request exceeded 600s timeout.",
+        code="flow_llm_request_timeout",
+    )
+    setattr(typed_exc, "provider", "openai")
+
+    await executor._handle_typed_step_failure(
+        run_id=run_id,
+        tenant_id=user.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=typed_exc,
+        failed_input_payload=None,
+        state=state,
+    )
+
+    finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
+    assert finish_kwargs["requested_model"] == "openai/gpt-5.4-nano", (
+        "requested_model was None on typed_exc, so must fall back to "
+        "state.assistant_cache. Without per-field fallback the column "
+        "stays null and triage of stuck runs becomes impossible."
+    )
+    assert finish_kwargs["provider"] == "openai"
+
+
+@pytest.mark.asyncio
 async def test_typed_validation_failure_without_attached_context_uses_fallback_payload(
     user,
 ):

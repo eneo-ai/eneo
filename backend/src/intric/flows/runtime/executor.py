@@ -705,10 +705,14 @@ class FlowRunExecutor:
                     if isinstance(model_params.get("provider"), str)
                     else None
                 )
-                if cancel_requested_model is None and cancel_provider is None:
-                    cancel_requested_model, cancel_provider = (
-                        _step_telemetry_from_state(state=state, step=step)
+                if cancel_requested_model is None or cancel_provider is None:
+                    state_model, state_provider = _step_telemetry_from_state(
+                        state=state, step=step
                     )
+                    if cancel_requested_model is None:
+                        cancel_requested_model = state_model
+                    if cancel_provider is None:
+                        cancel_provider = state_provider
                 await self.flow_run_repo.finish_attempt(
                     run_id=run_id,
                     step_id=step.step_id,
@@ -1053,10 +1057,14 @@ class FlowRunExecutor:
         await self._rollback()
         requested_model = getattr(typed_exc, "requested_model", None)
         provider = getattr(typed_exc, "provider", None)
-        if requested_model is None and provider is None and state is not None:
-            requested_model, provider = _step_telemetry_from_state(
+        if state is not None and (requested_model is None or provider is None):
+            state_model, state_provider = _step_telemetry_from_state(
                 state=state, step=step
             )
+            if requested_model is None:
+                requested_model = state_model
+            if provider is None:
+                provider = state_provider
         await self.flow_run_repo.finish_attempt(
             run_id=run_id,
             step_id=step.step_id,
