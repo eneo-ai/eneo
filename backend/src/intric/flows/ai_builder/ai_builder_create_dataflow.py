@@ -295,7 +295,13 @@ def auto_bind_targeted_underlag_for_text_composer(
         for index, step in enumerate(steps[:composer_index])
         if not _is_renderer_draft(step)
     ]
-    if not priors or len(priors) > TARGETED_UNDERLAG_SOFT_CAP:
+    if not priors:
+        return steps
+
+    text_priors_count = sum(
+        1 for _, step in priors if step.output_type == OutputType.TEXT
+    )
+    if text_priors_count > TARGETED_UNDERLAG_SOFT_CAP:
         return steps
 
     json_priors = [

@@ -739,6 +739,12 @@ _JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE = CriticInvariant(
 
 
 TARGETED_UNDERLAG_SOFT_CAP = 6
+"""Cap on the number of TEXT-emitting prior content steps a targeted-
+underlag composer can absorb. Text priors get body-coalesced via
+`uses_previous_outputs`; concatenating that many bodies past the cap
+makes the underlag unwieldy. JSON priors with output_contract bind via
+`uses_previous_fields` and scale gracefully field-by-field, so they do
+not count against this cap."""
 
 
 def _last_compositional_step_index(spec: FlowDraftSpecCore) -> int | None:
@@ -800,9 +806,11 @@ def _prefer_targeted_underlag_over_all_previous_steps_evidence(
     Suppression cases:
     - aggregation_intent in {aggregate, compare}: the multi-document
       compare invariant already requires `all_previous_steps`.
-    - >`TARGETED_UNDERLAG_SOFT_CAP` prior content steps: an explicit
-      underlag template grows past the point where it is more legible
-      than concatenation.
+    - text-emitting prior content steps exceed `TARGETED_UNDERLAG_SOFT_CAP`:
+      body-coalescing many text priors via `uses_previous_outputs` is
+      unwieldy. JSON priors with output_contract bind via
+      `uses_previous_fields` and scale, so they do not count against
+      the cap.
     - All priors are text-typed: there are no structured fields to
       reference — `all_previous_steps` is the only composition.
     - The composer's `input_bindings.question` already targets prior
@@ -829,7 +837,10 @@ def _prefer_targeted_underlag_over_all_previous_steps_evidence(
     priors = [
         step for step in spec.steps[:composer_index] if not _is_renderer_step(step)
     ]
-    if not priors or len(priors) > TARGETED_UNDERLAG_SOFT_CAP:
+    if not priors:
+        return False
+    text_priors_count = sum(1 for step in priors if step.output_type == OutputType.TEXT)
+    if text_priors_count > TARGETED_UNDERLAG_SOFT_CAP:
         return False
     return any(
         step.output_type == OutputType.JSON and step.output_contract is not None
@@ -924,8 +935,11 @@ def _final_text_step_must_reference_relevant_structured_outputs_evidence(
     Suppression cases mirror `prefer_targeted_underlag`:
     - aggregation_intent in {aggregate, compare}: those flows go
       through the multi-document compare invariant.
-    - >`TARGETED_UNDERLAG_SOFT_CAP` prior content steps: an explicit
-      underlag template stops being more legible than concatenation.
+    - text-emitting prior content steps exceed `TARGETED_UNDERLAG_SOFT_CAP`:
+      body-coalescing many text priors via `uses_previous_outputs` is
+      unwieldy. JSON priors with output_contract bind via
+      `uses_previous_fields` and scale, so they do not count against
+      the cap.
     - <2 prior content steps emit JSON+output_contract: there is no
       fan-in to surface, only a 2-step refinement chain.
     - The composer's `input_bindings.question` already targets ≥2
@@ -948,7 +962,10 @@ def _final_text_step_must_reference_relevant_structured_outputs_evidence(
     priors = [
         step for step in spec.steps[:composer_index] if not _is_renderer_step(step)
     ]
-    if len(priors) > TARGETED_UNDERLAG_SOFT_CAP:
+    if not priors:
+        return False
+    text_priors_count = sum(1 for step in priors if step.output_type == OutputType.TEXT)
+    if text_priors_count > TARGETED_UNDERLAG_SOFT_CAP:
         return False
     json_priors = [
         step
