@@ -525,20 +525,22 @@ class TenantModelAdapter(CompletionModelAdapter):
                         f"Scaled temperature for Anthropic: {temp} -> {temp / 2}"
                     )
 
-            if "reasoning_effort" in model_kwargs_dict:
-                supported_params = (
-                    get_supported_openai_params(
-                        model=self.litellm_model,
-                        custom_llm_provider=self.provider_type,
-                    )
-                    or ()
+            supported_params = (
+                get_supported_openai_params(
+                    model=self.litellm_model,
+                    custom_llm_provider=self.provider_type,
                 )
+                or ()
+            )
+            reasoning_supported = "reasoning_effort" in supported_params
+
+            if "reasoning_effort" in model_kwargs_dict:
                 is_off_signal = model_kwargs_dict["reasoning_effort"] in (
                     None,
                     "none",
                     "",
                 )
-                if "reasoning_effort" not in supported_params:
+                if not reasoning_supported:
                     del model_kwargs_dict["reasoning_effort"]
                 elif is_off_signal:
                     # OpenAI reasoning models default to medium/high effort
@@ -552,6 +554,15 @@ class TenantModelAdapter(CompletionModelAdapter):
                         model_kwargs_dict["reasoning_effort"] = "low"
                     else:
                         del model_kwargs_dict["reasoning_effort"]
+            elif reasoning_supported and self.provider_type == "openai":
+                # ModelKwargs(reasoning_effort=None) — the wire shape the
+                # UI's "Default" option produces — was already stripped by
+                # model_dump(exclude_none=True), so the explicit-off
+                # branch above never sees it. Without this floor the
+                # OpenAI reasoning default reasserts itself and we
+                # regain the multi-minute first-token latency the
+                # explicit-off branch was added to fix.
+                model_kwargs_dict["reasoning_effort"] = "low"
 
             # Ensure max_tokens is set - some APIs (e.g., vLLM, OpenAI-compatible)
             # require it explicitly or return empty responses

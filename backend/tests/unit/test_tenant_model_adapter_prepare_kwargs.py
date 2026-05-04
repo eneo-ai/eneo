@@ -200,3 +200,59 @@ class TestPrepareKwargsReasoningEffortTranslation:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "none"})
         assert "reasoning_effort" not in result
+
+    def test_openai_translates_pydantic_none_reasoning_effort_to_low(self):
+        """Production callers pass a Pydantic ModelKwargs, not a dict.
+
+        ModelKwargs(reasoning_effort=None) — the wire shape produced when
+        the UI's 'Default' option is selected — gets stripped by
+        model_dump(exclude_none=True) before the explicit-off-signal
+        branch runs, so the dict-only translation never fires in
+        production. Apply the same 'low' floor when the key is absent
+        on an OpenAI model that supports reasoning_effort, otherwise
+        the runtime silently defaults to medium/high effort and we
+        regain the multi-minute first-token latency we set out to fix.
+        """
+        from intric.ai_models.completion_models.completion_model import ModelKwargs
+
+        adapter = _make_adapter("openai")
+        with patch(
+            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+        ) as mock_litellm:
+            mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
+            result = adapter._prepare_kwargs(
+                model_kwargs=ModelKwargs(reasoning_effort=None)
+            )
+        assert result["reasoning_effort"] == "low"
+
+    def test_anthropic_pydantic_none_reasoning_effort_does_not_inject(self):
+        """The Pydantic-None floor must not inject reasoning_effort on
+        Anthropic — there, absence is the correct 'no thinking' signal
+        and a synthesized value would force extended-thinking on every
+        call."""
+        from intric.ai_models.completion_models.completion_model import ModelKwargs
+
+        adapter = _make_adapter("anthropic")
+        with patch(
+            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+        ) as mock_litellm:
+            mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
+            result = adapter._prepare_kwargs(
+                model_kwargs=ModelKwargs(reasoning_effort=None)
+            )
+        assert "reasoning_effort" not in result
+
+    def test_openai_non_reasoning_model_pydantic_none_does_not_inject(self):
+        """Models that don't support reasoning_effort must not have it
+        injected by the Pydantic-None floor."""
+        from intric.ai_models.completion_models.completion_model import ModelKwargs
+
+        adapter = _make_adapter("openai")
+        with patch(
+            "intric.completion_models.infrastructure.tenant_model_capabilities.litellm"
+        ) as mock_litellm:
+            mock_litellm.get_supported_openai_params.return_value = []
+            result = adapter._prepare_kwargs(
+                model_kwargs=ModelKwargs(reasoning_effort=None)
+            )
+        assert "reasoning_effort" not in result
