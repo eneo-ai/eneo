@@ -275,7 +275,37 @@ async def call_assistant_with_timeout(
     info_blob_chunks: list[InfoBlobChunkInDBWithScore],
     prompt_override: str,
     version: int,
+    step_deadline_monotonic: float | None = None,
 ) -> Any:
+    # When a step deadline is supplied, the json-mode rejection retry shares
+    # the same wall-clock budget as the initial call. Without this, a step
+    # that consumes most of its timeout on the first attempt is granted a
+    # fresh per-call budget for the fallback retry — silently doubling the
+    # bound the executor's outer asyncio.wait_for is supposed to enforce.
+    if step_deadline_monotonic is None:
+        timeout = deps.llm_request_timeout_seconds
+    else:
+        loop = asyncio.get_event_loop()
+        timeout = max(0.0, step_deadline_monotonic - loop.time())
+
+    if timeout <= 0:
+        if deps.logger is not None:
+            deps.logger.warning(
+                "flow_executor.llm_timeout run_id=%s step_order=%d timeout=%s",
+                run.id,
+                step.step_order,
+                deps.llm_request_timeout_seconds,
+            )
+        raise deps.attach_typed_failure_context(
+            TypedIOValidationException(
+                f"Step {step.step_order}: LLM request exceeded "
+                f"{deps.llm_request_timeout_seconds:g}s timeout.",
+                code="flow_llm_request_timeout",
+            ),
+            input_payload_for_result=prepared.input_payload_for_result,
+            effective_prompt=prepared.effective_prompt,
+        )
+
     try:
         return await asyncio.wait_for(
             prepared.assistant.get_response(
@@ -288,7 +318,7 @@ async def call_assistant_with_timeout(
                 prompt_override=prompt_override,
                 version=version,
             ),
-            timeout=deps.llm_request_timeout_seconds,
+            timeout=timeout,
         )
     except TimeoutError as exc:
         if deps.logger is not None:
@@ -893,6 +923,9 @@ async def complete_step_execution(
                 if prepared.effective_prompt.strip()
                 else inherited_appendix
             )
+    step_deadline_monotonic = (
+        asyncio.get_event_loop().time() + deps.llm_request_timeout_seconds
+    )
     try:
         response = await call_assistant_with_timeout(
             step=step,
@@ -903,6 +936,7 @@ async def complete_step_execution(
             info_blob_chunks=info_blob_chunks,
             prompt_override=prompt_override,
             version=2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1,
+            step_deadline_monotonic=step_deadline_monotonic,
         )
     except Exception as model_exc:
         if native_json_object_requested and deps.is_json_mode_rejection(model_exc):
@@ -916,6 +950,7 @@ async def complete_step_execution(
                 info_blob_chunks=info_blob_chunks,
                 prompt_override=prompt_override,
                 version=2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1,
+                step_deadline_monotonic=step_deadline_monotonic,
             )
         else:
             raise
