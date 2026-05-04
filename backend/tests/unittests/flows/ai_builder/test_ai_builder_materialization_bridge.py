@@ -1157,6 +1157,49 @@ _ARCHETYPE_CASES: tuple[dict[str, Any], ...] = (
         expected_assistants_to_create=1,
         expected_output_modes=["pass_through"],
     ),
+    # source_parallel_extractions_to_final_text — one source, two or
+    # more parallel JSON extractions, one composer that fans in across
+    # all extractions via uses_previous_fields. The bridge just needs
+    # to round-trip the shape; the auto-binder is exercised separately.
+    _archetype_case(
+        pattern_id="source_parallel_extractions_to_final_text",
+        tuples_chain=[
+            StepTriple(
+                input_type="text", output_type="json", output_mode="pass_through"
+            ),
+            StepTriple(
+                input_type="text", output_type="json", output_mode="pass_through"
+            ),
+            StepTriple(
+                input_type="text", output_type="text", output_mode="pass_through"
+            ),
+        ],
+        envelope_steps=[
+            {
+                "name": "Extrahera produktdata",
+                "instructions": "Plocka ut produktrelaterade fält ur underlaget.",
+                "input_source": "flow_input",
+                "input_type": "text",
+                "output_type": "json",
+            },
+            {
+                "name": "Extrahera kunddata",
+                "instructions": "Plocka ut kundrelaterade fält ur samma underlag.",
+                "input_source": "flow_input",
+                "input_type": "text",
+                "output_type": "json",
+            },
+            {
+                "name": "Skriv sammanfattning",
+                "instructions": "Sammanfatta produkten och kundprofilen.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "text",
+            },
+        ],
+        expected_assistants_to_create=3,
+        expected_output_modes=["pass_through", "pass_through", "pass_through"],
+    ),
     # mcp_tool_step — runtime MCP access is step-scoped. The bridge
     # carries refs through the normal new-step compiler; actual MCP
     # execution remains runtime-only.

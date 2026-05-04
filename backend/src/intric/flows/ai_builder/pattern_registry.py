@@ -486,6 +486,37 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "terminal_output",
         ),
     ),
+    # Canonical multi-source fan-in shape: one source step feeds two or
+    # more parallel JSON extractions, then a single text step composes
+    # from all of them via `uses_previous_fields`. Without this archetype
+    # the planner tends to chain extractions through `previous_step` and
+    # the composer ends up reading only the immediate prior, silently
+    # losing the earlier extractions.
+    _pattern(
+        id="source_parallel_extractions_to_final_text",
+        examples=(
+            "single source feeds multiple parallel JSON extractions, "
+            "then a final text step composes from all of them",
+            "audio or document upload → several JSON extractions in "
+            "parallel → composed text summary that references each "
+            "extraction's structured fields",
+        ),
+        retrieval_hints=(
+            "parallel multi-aspect extraction fan-in composition",
+            "extrahera flera olika perspektiv aspekter dimensioner",
+            "för varje rubrik kategori per ämne",
+            "uses_previous_fields previous_step refs across multiple JSON priors",
+            "input_type=text|audio|document output_type=json output_type=text",
+        ),
+        required_architectural_slots=(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
+        question_template_ids=(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
+    ),
 )
 
 _NEGATIVE_PATTERNS: tuple[Pattern, ...] = (

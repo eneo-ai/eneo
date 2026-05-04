@@ -1544,7 +1544,21 @@ def test_compile_outline_flow_derives_runtime_input_fields_and_final_docx() -> N
     assert validation.valid
 
 
-def test_compile_outline_flow_adds_server_derived_runtime_field_hints() -> None:
+def test_compile_outline_flow_drops_server_derived_hints_when_planner_did_not_reference_them() -> (
+    None
+):
+    """Server-derived runtime field hints are suggestions for fields the
+    user mentioned in free text. They are only added to `form_fields`
+    when the planner actually references them via `uses_input_fields`
+    on at least one step. Hints the planner ignored are dropped so they
+    do not surface as orphan UI controls or trigger the semantic critic
+    spuriously — the planner asked for a flow with no input fields and
+    that is what they get.
+    """
+    from intric.flows.ai_builder.ai_builder_form_field_usage import (
+        find_unused_form_fields,
+    )
+
     outline = parse_outline_flow_arguments(
         {
             "flow_name": "Review report",
@@ -1569,19 +1583,64 @@ def test_compile_outline_flow_adds_server_derived_runtime_field_hints() -> None:
     compiled = compile_create_draft(draft)
     validation = validate_spec(compiled)
 
-    assert [field.variable_name for field in draft.form_fields] == [
-        "audience",
-        "detail_level",
-    ]
-    assert draft.steps[-1].uses_form_fields == ["audience", "detail_level"]
-    assert compiled.steps[-1].input_bindings == {
-        "question": "{{ indata_text }}\n\naudience: {{ audience }}\n"
-        "detail_level: {{ detail_level }}"
-    }
+    assert [field.variable_name for field in draft.form_fields] == []
+    assert draft.steps[-1].uses_form_fields == []
+    assert compiled.form_fields is None or compiled.form_fields == []
     assert validation.valid
+    assert find_unused_form_fields(compiled) == []
 
 
-def test_compile_outline_flow_wires_extracted_runtime_metadata_fields() -> None:
+def test_compile_outline_flow_keeps_hint_when_planner_referenced_it_via_uses_input_fields() -> (
+    None
+):
+    """A server-derived hint completes the declaration when the planner
+    referenced its variable name via `uses_input_fields` even without
+    declaring an explicit `input_fields` entry. The compiler then wires
+    the field into the step's underlag automatically — the planner
+    needs only to mention the name once.
+    """
+    from intric.flows.ai_builder.ai_builder_form_field_usage import (
+        find_unused_form_fields,
+    )
+
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Review report",
+            "plan_rationale": "Review source material for the chosen audience.",
+            "steps": [
+                {
+                    "name": "Review",
+                    "task": "Review the source material for the chosen audience.",
+                    "uses_input_fields": ["audience"],
+                }
+            ],
+        }
+    )
+    context = outline_compile_context_from_planning_state(
+        None,
+        runtime_input_field_hints=(
+            RuntimeInputFieldHint(variable_name="audience", label="Audience"),
+            RuntimeInputFieldHint(variable_name="detail_level", label="Detail level"),
+        ),
+    )
+
+    draft = compile_outline_to_create_draft(outline, context=context)
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert [field.variable_name for field in draft.form_fields] == ["audience"]
+    assert draft.steps[0].uses_form_fields == ["audience"]
+    assert compiled.form_fields is not None
+    assert [field.name for field in compiled.form_fields] == ["audience"]
+    first_question = compiled.steps[0].input_bindings or {}
+    assert "{{ audience }}" in str(first_question.get("question") or "")
+    assert validation.valid
+    assert find_unused_form_fields(compiled) == []
+
+
+def test_compile_outline_flow_drops_extracted_metadata_hints_when_planner_did_not_wire_them() -> (
+    None
+):
     prompt = (
         "Jag vill ha ett flöde för utvecklingssamtal där användaren kommer "
         "att ange namn, personnummer, yrke, roll och nuvarande lön och sedan "
@@ -1628,28 +1687,116 @@ def test_compile_outline_flow_wires_extracted_runtime_metadata_fields() -> None:
     compiled = compile_create_draft(draft)
     validation = validate_spec(compiled)
 
-    expected_names = [
-        "namn",
-        "personnummer",
-        "yrke",
-        "roll",
-        "nuvarande_lon",
-    ]
-    assert [field.variable_name for field in draft.form_fields] == expected_names
-    assert draft.steps[-1].uses_form_fields == expected_names
-    assert compiled.form_fields is not None
-    assert [field.name for field in compiled.form_fields] == expected_names
-    assert compiled.steps[-1].input_bindings == {
-        "question": (
-            "{{ step_a.output.text }}\n\n"
-            "namn: {{ namn }}\n"
-            "personnummer: {{ personnummer }}\n"
-            "yrke: {{ yrke }}\n"
-            "roll: {{ roll }}\n"
-            "nuvarande_lon: {{ nuvarande_lon }}"
-        )
-    }
+    from intric.flows.ai_builder.ai_builder_form_field_usage import (
+        find_unused_form_fields,
+    )
+
+    # The planner declared no `input_fields` and did not list any hint name
+    # in `uses_input_fields`, so the server-derived hints stay out of
+    # form_fields entirely. The flow validates without orphan UI controls.
+    assert [field.variable_name for field in draft.form_fields] == []
+    assert draft.steps[-1].uses_form_fields == []
+    assert compiled.form_fields is None or compiled.form_fields == []
     assert validation.valid
+    assert find_unused_form_fields(compiled) == []
+
+
+def test_compile_outline_flow_overlap_planner_declared_field_and_hint_with_same_name() -> (
+    None
+):
+    """When the planner declares an `input_fields` entry whose name
+    matches a server-derived hint, the planner-declared label/options/etc
+    win and the field appears exactly once in form_fields. The hint
+    completes nothing because the declaration is already there.
+    """
+    from intric.flows.ai_builder.ai_builder_form_field_usage import (
+        find_unused_form_fields,
+    )
+
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Overlap audience",
+            "plan_rationale": "Use audience for tone.",
+            "input_fields": [
+                {
+                    "variable_name": "audience",
+                    "label": "Audience explicit",
+                    "field_type": "text",
+                    "required": False,
+                }
+            ],
+            "steps": [
+                {
+                    "name": "Write",
+                    "task": "Write for the audience.",
+                    "uses_input_fields": ["audience"],
+                }
+            ],
+        }
+    )
+    context = outline_compile_context_from_planning_state(
+        None,
+        runtime_input_field_hints=(
+            RuntimeInputFieldHint(
+                variable_name="audience", label="Audience hint label"
+            ),
+        ),
+    )
+
+    draft = compile_outline_to_create_draft(outline, context=context)
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    # Field appears once and keeps the planner-declared label.
+    assert [field.variable_name for field in draft.form_fields] == ["audience"]
+    assert draft.form_fields[0].label == "Audience explicit"
+    assert draft.steps[0].uses_form_fields == ["audience"]
+    assert compiled.form_fields is not None
+    assert [field.name for field in compiled.form_fields] == ["audience"]
+    first_question = str((compiled.steps[0].input_bindings or {}).get("question") or "")
+    assert first_question.count("{{ audience }}") == 1
+    assert validation.valid
+    assert find_unused_form_fields(compiled) == []
+
+
+def test_compile_outline_flow_orphan_uses_input_fields_reference_is_dropped_silently() -> (
+    None
+):
+    """When a step lists a name in `uses_input_fields` that exists in
+    NEITHER `outline.input_fields` NOR any server-derived hint, the
+    reference is silently dropped. The compiled spec is valid (no
+    orphan template variable, no exception).
+    """
+    from intric.flows.ai_builder.ai_builder_form_field_usage import (
+        find_unused_form_fields,
+    )
+
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Orphan reference",
+            "plan_rationale": "Reference a name that does not exist.",
+            "steps": [
+                {
+                    "name": "Write",
+                    "task": "Write something useful.",
+                    "uses_input_fields": ["missing_field"],
+                }
+            ],
+        }
+    )
+
+    draft = compile_outline_to_create_draft(outline)
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    # The orphan reference does not pull a field into form_fields and
+    # does not poison the step's bindings with `{{ missing_field }}`.
+    assert [field.variable_name for field in draft.form_fields] == []
+    assert draft.steps[0].uses_form_fields == []
+    first_question = str((compiled.steps[0].input_bindings or {}).get("question") or "")
+    assert "{{ missing_field }}" not in first_question
+    assert validation.valid
+    assert find_unused_form_fields(compiled) == []
 
 
 def test_compile_outline_flow_drops_field_that_shadows_primary_text_input(
@@ -2833,10 +2980,16 @@ def test_compile_outline_audio_artifact_final_body_step_fans_in_prior_structured
 
     body_step = draft.steps[-2]
     assert body_step.name == "Bygg dokument med rubriker och innehåll"
-    assert body_step.input_source.value == "all_previous_steps"
-    assert body_step.input_type.value == "text"
+    assert body_step.input_source.value == "previous_step"
+    assert body_step.input_type.value == "json"
     assert body_step.output_type.value == "text"
-    assert compiled.steps[-2].input_contract is None
+    assert body_step.uses_previous_fields, (
+        "body composer must auto-bind explicit field refs when JSON predecessors exist"
+    )
+    field_paths = {ref.field_path for ref in body_step.uses_previous_fields}
+    assert "sections" in field_paths
+    assert "overall_summary" in field_paths
+    assert compiled.steps[-2].input_contract is not None
     assert draft.steps[-1].output_type.value == final_output_type
     assert validation.valid
 
@@ -2914,11 +3067,402 @@ def test_compile_outline_audio_docx_four_phase_body_step_fans_in_prior_work() ->
 
     body_step = draft.steps[-2]
     assert body_step.name == "Bygg DOCX-dokument"
-    assert body_step.input_source.value == "all_previous_steps"
-    assert body_step.input_type.value == "text"
+    assert body_step.input_source.value == "previous_step"
+    assert body_step.input_type.value == "json"
     assert body_step.output_type.value == "text"
-    assert compiled.steps[-2].input_contract is None
+    assert body_step.uses_previous_fields, (
+        "body composer must auto-bind explicit field refs when JSON predecessors exist"
+    )
+    field_paths = {ref.field_path for ref in body_step.uses_previous_fields}
+    assert "sections" in field_paths
+    assert "overall_summary" in field_paths
+    transcript_refs = {ref.from_step for ref in body_step.uses_previous_outputs}
+    assert transcript_refs, "uses_previous_outputs must include text predecessors"
+    assert compiled.steps[-2].input_contract is not None
     assert validation.valid
+
+
+def test_compile_outline_audio_docx_body_step_auto_authors_targeted_refs_when_json_predecessor() -> (
+    None
+):
+    """When the audio→DOCX skeleton produces a body composer text step with
+    JSON predecessors, the dataflow normalizer must switch input_source to
+    `previous_step` and auto-populate `uses_previous_fields` so the
+    `prefer_targeted_underlag_over_all_previous_steps` semantic invariant
+    does not fire and the LLM is not stuck in a repair loop it cannot fix.
+    """
+    from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        CRITIC_INVARIANTS,
+        CriticContext,
+        evaluate_critic_invariants,
+    )
+    from intric.flows.ai_builder.ai_builder_framework_policy import (
+        OutputIntentResolution,
+    )
+    from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        PlannerPatternSignals,
+    )
+
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Mötesrapport från ljud till Word",
+            "plan_rationale": "Transkribera ljud och skapa DOCX-rapport.",
+            "steps": [
+                {
+                    "name": "Identifiera mötesmetadata",
+                    "task": "Identifiera deltagare och datum från transkriptionen.",
+                    "output_fields": [
+                        {
+                            "name": "meeting_title",
+                            "field_type": "string",
+                            "description": "Mötestitel.",
+                            "required": True,
+                        },
+                        {
+                            "name": "participants",
+                            "field_type": "string",
+                            "description": "Deltagare.",
+                            "required": True,
+                        },
+                    ],
+                },
+                {
+                    "name": "Identifiera beslut",
+                    "task": "Lista alla beslut.",
+                    "output_fields": [
+                        {
+                            "name": "decisions_summary",
+                            "field_type": "string",
+                            "description": "Beslut sammanfattat.",
+                            "required": True,
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv strukturerad rapport",
+                    "task": "Skriv en strukturerad mötesrapport på svenska.",
+                },
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="audio",
+                    output_type="docx",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["audio_to_artifact_report"],
+            required_capabilities=["input_audio", "output_mode_pass_through"],
+        )
+    )
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state),
+    )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    body_step = draft.steps[-2]
+    assert body_step.name == "Skriv strukturerad rapport"
+    assert body_step.output_type.value == "text"
+    assert body_step.input_source.value == "previous_step"
+    assert body_step.input_type.value == "json"
+    assert body_step.uses_previous_fields, (
+        "body step must auto-bind uses_previous_fields when JSON predecessors exist"
+    )
+    field_paths = {ref.field_path for ref in body_step.uses_previous_fields}
+    assert "meeting_title" in field_paths
+    assert "decisions_summary" in field_paths
+
+    composer = compiled.steps[-2]
+    assert composer.input_bindings is not None
+    question = composer.input_bindings["question"]
+    assert "step_" in question and "output.structured" in question
+
+    context = CriticContext(
+        spec=compiled,
+        flow=None,
+        answer_signals={},
+        text="",
+        requirements_text="",
+        signal_text="",
+        planner_patterns=PlannerPatternSignals(),
+        output_intent=OutputIntentResolution(terminal_output="docx_document"),
+        mixed_audio_doc_input=False,
+    )
+    issues = evaluate_critic_invariants(context, invariants=CRITIC_INVARIANTS)
+    issue_ids = [issue.id for issue in issues]
+    assert "prefer_targeted_underlag_over_all_previous_steps" not in issue_ids, (
+        f"prefer_targeted_underlag must not fire after auto-binding; issues={issue_ids}"
+    )
+    assert validation.valid
+
+
+def test_auto_bind_targeted_underlag_skips_when_aggregation_intent_is_aggregate() -> (
+    None
+):
+    """Aggregation intents `aggregate` and `compare` retain `all_previous_steps`
+    because the multi-document compare invariant requires it. Auto-binding
+    must defer to that wider rule.
+    """
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        auto_bind_targeted_underlag_for_text_composer,
+    )
+    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+
+    steps_before = [
+        NewStepDraft(
+            name="Sektion A",
+            instructions="x",
+            input_source="flow_input",
+            input_type="text",
+            output_type="json",
+            output_fields=[_field("section_a", "string", description="Sektion A.")],
+        ),
+        NewStepDraft(
+            name="Sektion B",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="json",
+            output_fields=[_field("section_b", "string", description="Sektion B.")],
+        ),
+        NewStepDraft(
+            name="Aggregera",
+            instructions="x",
+            input_source="all_previous_steps",
+            input_type="text",
+            output_type="text",
+        ),
+    ]
+
+    for intent in ("aggregate", "compare"):
+        result = auto_bind_targeted_underlag_for_text_composer(
+            steps_before,
+            aggregation_intent=intent,  # type: ignore[arg-type]
+        )
+        assert result is steps_before, (
+            f"intent={intent!r} should be a no-op, but the composer was rewritten"
+        )
+        composer = result[2]
+        assert composer.input_source.value == "all_previous_steps"
+        assert composer.uses_previous_fields == []
+
+
+def test_auto_bind_targeted_underlag_two_step_linear_flow_is_unchanged() -> None:
+    """A 2-step `flow_input → text_summary` flow with linear intent must NOT
+    be rewritten. The skeleton already defaults the terminal to
+    `previous_step` for linear shapes, so auto-bind has nothing to do.
+    Reviewer concern: a 2-step shape with `composer_index == 1` and a JSON
+    predecessor could otherwise force `uses_previous_fields` even when user
+    intent is "summarize what came before" via broad fan-in.
+    """
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        auto_bind_targeted_underlag_for_text_composer,
+    )
+    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+
+    steps_before = [
+        NewStepDraft(
+            name="Hämta data",
+            instructions="x",
+            input_source="flow_input",
+            input_type="text",
+            output_type="json",
+            output_fields=[_field("payload", "string", description="API-svar.")],
+        ),
+        NewStepDraft(
+            name="Skriv kommentar",
+            instructions="x",
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+        ),
+    ]
+
+    result = auto_bind_targeted_underlag_for_text_composer(
+        steps_before,
+        aggregation_intent="linear",
+    )
+    assert result is steps_before, "2-step linear flow must be a no-op"
+    composer = result[1]
+    assert composer.input_source.value == "previous_step"
+    assert composer.uses_previous_fields == []
+    assert composer.uses_previous_outputs == []
+
+
+def test_auto_bind_targeted_underlag_skips_when_priors_exceed_soft_cap() -> None:
+    """When there are more than TARGETED_UNDERLAG_SOFT_CAP priors, the
+    composer keeps `all_previous_steps` because targeted refs become
+    unwieldy at scale and the wider fan-in is the safer default.
+    """
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        auto_bind_targeted_underlag_for_text_composer,
+    )
+    from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        TARGETED_UNDERLAG_SOFT_CAP,
+    )
+    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+
+    priors: list[NewStepDraft] = []
+    for index in range(TARGETED_UNDERLAG_SOFT_CAP + 1):
+        priors.append(
+            NewStepDraft(
+                name=f"Prior {index}",
+                instructions="x",
+                input_source="flow_input" if index == 0 else "previous_step",
+                input_type="text" if index == 0 else "json",
+                output_type="json",
+                output_fields=[_field(f"f_{index}", "string")],
+            )
+        )
+    composer = NewStepDraft(
+        name="Slutrapport",
+        instructions="x",
+        input_source="all_previous_steps",
+        input_type="text",
+        output_type="text",
+    )
+    steps_before = [*priors, composer]
+
+    result = auto_bind_targeted_underlag_for_text_composer(
+        steps_before,
+        aggregation_intent="linear",
+    )
+    assert result is steps_before, "over-cap priors should bail out"
+    assert result[-1].input_source.value == "all_previous_steps"
+
+
+def test_auto_bind_targeted_underlag_rewrites_previous_step_composer_with_multiple_json_priors() -> (
+    None
+):
+    """When the final text composer reads from `previous_step` and at least
+    two prior content steps emit JSON with output_fields, auto-bind must
+    populate `uses_previous_fields` with refs across all JSON priors. The
+    composer keeps `previous_step` as its source — the goal is targeted
+    fan-in, not concatenated body text. The 1-JSON-prior linear case
+    remains a no-op (pinned by
+    `test_auto_bind_targeted_underlag_two_step_linear_flow_is_unchanged`).
+    """
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        auto_bind_targeted_underlag_for_text_composer,
+    )
+    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+
+    steps_before = [
+        NewStepDraft(
+            name="Extrahera produktdata",
+            instructions="x",
+            input_source="flow_input",
+            input_type="text",
+            output_type="json",
+            output_fields=[
+                _field("product_name", "string", description="Produktnamn."),
+                _field("product_price", "string", description="Produktpris."),
+            ],
+        ),
+        NewStepDraft(
+            name="Extrahera kunddata",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="json",
+            output_fields=[
+                _field("customer_segment", "string", description="Kundsegment."),
+            ],
+        ),
+        NewStepDraft(
+            name="Extrahera leveransdata",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="json",
+            output_fields=[
+                _field("delivery_window", "string", description="Leveransfönster."),
+            ],
+        ),
+        NewStepDraft(
+            name="Skriv sammanfattning",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="text",
+        ),
+    ]
+
+    result = auto_bind_targeted_underlag_for_text_composer(
+        steps_before,
+        aggregation_intent="linear",
+    )
+
+    assert result is not steps_before, (
+        "composer with previous_step source and ≥2 JSON priors must be rewritten"
+    )
+    composer = result[-1]
+    assert composer.input_source.value == "previous_step", (
+        "input_source should remain previous_step (targeted fan-in, not concat)"
+    )
+
+    field_refs = {
+        (ref.from_step, ref.field_path) for ref in composer.uses_previous_fields
+    }
+    assert (1, "product_name") in field_refs
+    assert (1, "product_price") in field_refs
+    assert (2, "customer_segment") in field_refs
+    assert (3, "delivery_window") in field_refs
+    assert len(field_refs) == 4, (
+        f"expected 4 field refs across 3 JSON priors, got {len(field_refs)}"
+    )
+
+
+def test_auto_bind_targeted_underlag_skips_previous_step_composer_with_single_json_prior() -> (
+    None
+):
+    """A composer reading `previous_step` from exactly one JSON prior is a
+    valid linear extract→summarize pipeline. Auto-bind must NOT inflate it
+    with multi-source attachment (Codex's "no eager bind" risk).
+    """
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        auto_bind_targeted_underlag_for_text_composer,
+    )
+    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+
+    steps_before = [
+        NewStepDraft(
+            name="Extrahera fält",
+            instructions="x",
+            input_source="flow_input",
+            input_type="text",
+            output_type="json",
+            output_fields=[
+                _field("payload", "string", description="Extraherad data."),
+            ],
+        ),
+        NewStepDraft(
+            name="Skriv kommentar",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="text",
+        ),
+    ]
+
+    result = auto_bind_targeted_underlag_for_text_composer(
+        steps_before,
+        aggregation_intent="linear",
+    )
+
+    assert result is steps_before, (
+        "single-JSON-prior + previous_step composer must remain a no-op"
+    )
+    composer = result[-1]
+    assert composer.input_source.value == "previous_step"
+    assert composer.uses_previous_fields == []
 
 
 def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() -> None:
@@ -3122,7 +3666,9 @@ def test_compile_create_draft_direct_audio_docx_bad_shape_gets_source_underlag()
     assert validate_spec(compiled).valid
 
 
-def test_compile_outline_audio_pdf_protocol_step_uses_all_previous_fan_in() -> None:
+def test_compile_outline_audio_pdf_protocol_step_auto_authors_targeted_underlag() -> (
+    None
+):
     outline = parse_outline_flow_arguments(
         {
             "flow_name": "Mötesprotokoll från ljud till PDF",
@@ -3198,9 +3744,14 @@ def test_compile_outline_audio_pdf_protocol_step_uses_all_previous_fan_in() -> N
     validation = validate_spec(compiled)
 
     protocol_step = draft.steps[3]
-    assert protocol_step.input_source.value == "all_previous_steps"
-    assert protocol_step.uses_previous_outputs == []
-    assert compiled.steps[3].input_bindings is None
+    assert protocol_step.input_source.value == "previous_step"
+    assert protocol_step.input_type.value == "json"
+    assert protocol_step.output_type.value == "text"
+    field_paths = {ref.field_path for ref in protocol_step.uses_previous_fields}
+    assert "transcription_text" in field_paths
+    assert "meeting_title" in field_paths
+    assert compiled.steps[3].input_bindings is not None
+    assert "output.structured" in compiled.steps[3].input_bindings["question"]
     assert validation.valid
 
 
@@ -3281,7 +3832,7 @@ def test_compile_outline_audio_document_without_pattern_still_creates_transcript
         ("flow_input", "audio", "text"),
         ("previous_step", "text", "json"),
         ("previous_step", "text", "json"),
-        ("all_previous_steps", "text", "text"),
+        ("previous_step", "json", "text"),
         ("previous_step", "text", final_output_type),
     ]
     assert [step.name for step in draft.steps[:4]] == [
@@ -3300,7 +3851,14 @@ def test_compile_outline_audio_document_without_pattern_still_creates_transcript
     assert compiled.steps[2].input_bindings == {
         "question": "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
     }
-    assert compiled.steps[3].input_source == InputSource.ALL_PREVIOUS_STEPS
+    assert compiled.steps[3].input_source == InputSource.PREVIOUS_STEP
+    body_field_paths = {
+        ref.field_path for ref in normalized.steps[3].uses_previous_fields
+    }
+    assert "meeting_context" in body_field_paths
+    assert "background_points" in body_field_paths
+    assert compiled.steps[3].input_bindings is not None
+    assert "output.structured" in compiled.steps[3].input_bindings["question"]
     assert compiled.steps[4].input_source == InputSource.PREVIOUS_STEP
     assert validation.valid
 

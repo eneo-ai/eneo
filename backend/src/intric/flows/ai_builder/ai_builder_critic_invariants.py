@@ -25,6 +25,9 @@ from typing import TYPE_CHECKING, Literal
 from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
+from intric.flows.ai_builder.ai_builder_form_field_usage import (
+    find_unused_form_fields,
+)
 from intric.flows.ai_builder.ai_builder_form_intake_signals import (
     mentions_sectioned_form_intake,
 )
@@ -54,6 +57,10 @@ from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     PlannerPatternSignals,
 )
 from intric.flows.ai_builder.planning_state import AggregationIntent
+from intric.flows.template_reference_analyzer import (
+    TemplateReferenceKind,
+    analyze_template,
+)
 
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_resource_catalog import (
@@ -643,13 +650,18 @@ def _multi_document_compare_requires_all_previous_steps_evidence(
     )
 
 
+def _is_renderer_step(step: StepSpec) -> bool:
+    """True for template-fill / DOCX / PDF stubs — document assembly steps
+    the backend wires, not compositional content steps a stitch step would
+    reference by field path."""
+    return step.output_mode == OutputMode.TEMPLATE_FILL or step.output_type in {
+        OutputType.DOCX,
+        OutputType.PDF,
+    }
+
+
 def _spec_has_multiple_content_steps(spec: FlowDraftSpecCore) -> bool:
-    content_steps = [
-        step
-        for step in spec.steps
-        if step.output_mode != OutputMode.TEMPLATE_FILL
-        and step.output_type not in {OutputType.DOCX, OutputType.PDF}
-    ]
+    content_steps = [step for step in spec.steps if not _is_renderer_step(step)]
     return len(content_steps) >= 2
 
 
@@ -726,52 +738,98 @@ _JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE = CriticInvariant(
 # ── Targeted underlag preferred over all_previous_steps ─────────────────
 
 
-_TARGETED_UNDERLAG_SOFT_CAP = 6
+TARGETED_UNDERLAG_SOFT_CAP = 6
 
 
-def _spec_prior_content_steps(spec: FlowDraftSpecCore) -> list[StepSpec]:
-    """Steps preceding the terminal step that contribute composable content.
+def _last_compositional_step_index(spec: FlowDraftSpecCore) -> int | None:
+    """Index of the last step that composes content.
 
-    Skips template-fill renderers and DOCX/PDF-typed renders — those
-    are document assembly stubs, not content steps a stitch step would
-    reference by field path.
+    Document-output flows often end with a renderer (template_fill DOCX,
+    raw DOCX/PDF) that the backend wires. The actual content composition
+    happens one step earlier; the targeted-underlag rule must evaluate
+    that step's input wiring, not the renderer's.
     """
-    return [
-        step
-        for step in spec.steps[:-1]
-        if step.output_mode != OutputMode.TEMPLATE_FILL
-        and step.output_type not in {OutputType.DOCX, OutputType.PDF}
-    ]
+    for index in range(len(spec.steps) - 1, -1, -1):
+        if not _is_renderer_step(spec.steps[index]):
+            return index
+    return None
+
+
+def _composer_question_targets_prior_structured_field(
+    *, spec: FlowDraftSpecCore, composer_index: int
+) -> bool:
+    """True when the composer's `input_bindings.question` resolves to a
+    structured field on a step that runs before it.
+
+    Uses the canonical `analyze_template` parser so the predicate stays
+    aligned with how the runtime actually resolves `{{ ... }}`
+    expressions — including JSON-escaped quoting and arbitrarily deep
+    `output.structured.<a>.<b>...` paths. Future or current-step
+    references and parse errors do not count as targeted underlag.
+    """
+    composer = spec.steps[composer_index]
+    if composer.input_bindings is None:
+        return False
+    question = composer.input_bindings.get("question")
+    if not isinstance(question, str) or not question:
+        return False
+    step_refs = {step.plan_step_ref: index for index, step in enumerate(spec.steps)}
+    form_field_names = {field.name for field in (spec.form_fields or [])}
+    references = analyze_template(
+        question,
+        step_refs=step_refs,
+        form_field_names=form_field_names,
+    )
+    return any(
+        reference.kind is TemplateReferenceKind.STEP
+        and reference.path_error_code is None
+        and reference.step_order is not None
+        and reference.step_order < composer_index
+        and reference.structured_path
+        for reference in references
+    )
 
 
 def _prefer_targeted_underlag_over_all_previous_steps_evidence(
     context: CriticContext,
 ) -> bool:
-    """Fire when a text-typed terminal step reads
+    """Fire when the last compositional step reads
     `input_source=all_previous_steps` while ≥1 prior content step
-    emits structured JSON the terminal could reference selectively.
+    emits structured JSON the composer could reference selectively.
 
     Suppression cases:
     - aggregation_intent in {aggregate, compare}: the multi-document
       compare invariant already requires `all_previous_steps`.
-    - >`_TARGETED_UNDERLAG_SOFT_CAP` prior content steps: an explicit
+    - >`TARGETED_UNDERLAG_SOFT_CAP` prior content steps: an explicit
       underlag template grows past the point where it is more legible
       than concatenation.
     - All priors are text-typed: there are no structured fields to
       reference — `all_previous_steps` is the only composition.
+    - The composer's `input_bindings.question` already targets prior
+      structured fields explicitly: the spec is effectively using
+      targeted underlag despite the nominal source.
     """
     spec = context.spec
     if context.aggregation_intent in {"aggregate", "compare"}:
         return False
     if len(spec.steps) < 2:
         return False
-    terminal = spec.steps[-1]
-    if terminal.input_source != InputSource.ALL_PREVIOUS_STEPS:
+    composer_index = _last_compositional_step_index(spec)
+    if composer_index is None or composer_index == 0:
         return False
-    if terminal.input_type != InputType.TEXT:
+    composer = spec.steps[composer_index]
+    if composer.input_source != InputSource.ALL_PREVIOUS_STEPS:
         return False
-    priors = _spec_prior_content_steps(spec)
-    if not priors or len(priors) > _TARGETED_UNDERLAG_SOFT_CAP:
+    if composer.input_type != InputType.TEXT:
+        return False
+    if _composer_question_targets_prior_structured_field(
+        spec=spec, composer_index=composer_index
+    ):
+        return False
+    priors = [
+        step for step in spec.steps[:composer_index] if not _is_renderer_step(step)
+    ]
+    if not priors or len(priors) > TARGETED_UNDERLAG_SOFT_CAP:
         return False
     return any(
         step.output_type == OutputType.JSON and step.output_contract is not None
@@ -783,24 +841,199 @@ _PREFER_TARGETED_UNDERLAG_OVER_ALL_PREVIOUS_STEPS = CriticInvariant(
     id="prefer_targeted_underlag_over_all_previous_steps",
     kind="semantic",
     description=(
-        "When the terminal text step reads `all_previous_steps` but at least "
-        "one prior content step emits a structured JSON output_contract, the "
-        "spec should switch to `previous_step` and compose its underlag from "
-        "explicit `uses_previous_fields` references. `all_previous_steps` "
-        "concatenates every prior body text, scaling tokens monotonically with "
-        "step count; targeted underlag scopes input to the fields the terminal "
-        "actually consumes."
+        "When the last compositional text step reads `all_previous_steps` "
+        "but at least one prior content step emits a structured JSON "
+        "output_contract, the spec should switch to `previous_step` and "
+        "compose its underlag from explicit `uses_previous_fields` "
+        "references. `all_previous_steps` concatenates every prior body "
+        "text, scaling tokens monotonically with step count; targeted "
+        "underlag scopes input to the fields the composer actually "
+        "consumes. Document renderer terminals (template_fill, DOCX, PDF) "
+        "are skipped — the rule evaluates the step that builds the body."
     ),
     evidence=_prefer_targeted_underlag_over_all_previous_steps_evidence,
     remediation=(
-        'Det sista steget har `input_source="all_previous_steps"` trots att tidigare steg producerar '
-        "strukturerad JSON. Det betyder att hela texten från alla tidigare steg sammanfogas och skickas "
-        "in — token-kostnaden växer linjärt med antalet steg, även om det avslutande steget egentligen "
+        'Det sista komponerande textsteget har `input_source="all_previous_steps"` '
+        "fastän tidigare steg producerar strukturerad JSON. Det betyder att hela "
+        "texten från alla tidigare steg sammanfogas och skickas in — token-kostnaden "
+        "växer linjärt med antalet steg, även om det komponerande steget egentligen "
         "bara behöver några specifika fält. Byt till "
         '`input_source="previous_step"` och bygg underlaget explicit: deklarera '
-        "`uses_previous_fields` för de fält som steget faktiskt läser och referera dem i "
-        "`input_bindings.question` via `{{ step_<ref>.output.structured.<fält> }}`. Då scopas "
-        "underlaget till det avslutande stegets verkliga behov utan att förlora sammanhang."
+        "`uses_previous_fields` för de fält som steget faktiskt läser och referera "
+        "dem i `input_bindings.question` via `{{ step_<ref>.output.structured.<fält> }}`. "
+        "Eventuella DOCX/PDF-renderingar i slutet förblir orörda — regeln gäller bara "
+        "det komponerande textsteget."
+    ),
+)
+
+
+def _composer_question_distinct_prior_structured_step_count(
+    *, spec: FlowDraftSpecCore, composer_index: int
+) -> int:
+    """Number of distinct prior steps the composer's `input_bindings.question`
+    pulls a structured field from.
+
+    Mirrors `_composer_question_targets_prior_structured_field` but counts
+    distinct prior step indices rather than collapsing to a boolean. Used
+    by the under-bind rule, which suppresses only when ≥2 priors are
+    already targeted (one prior is the auto-binder's bare-minimum case
+    and still leaves earlier predecessors silently dropped).
+    """
+    composer = spec.steps[composer_index]
+    if composer.input_bindings is None:
+        return 0
+    question = composer.input_bindings.get("question")
+    if not isinstance(question, str) or not question:
+        return 0
+    step_refs = {step.plan_step_ref: index for index, step in enumerate(spec.steps)}
+    form_field_names = {field.name for field in (spec.form_fields or [])}
+    references = analyze_template(
+        question,
+        step_refs=step_refs,
+        form_field_names=form_field_names,
+    )
+    distinct: set[int] = set()
+    for reference in references:
+        if reference.kind is not TemplateReferenceKind.STEP:
+            continue
+        if reference.path_error_code is not None:
+            continue
+        if reference.step_order is None or reference.step_order >= composer_index:
+            continue
+        if not reference.structured_path:
+            continue
+        distinct.add(reference.step_order)
+    return len(distinct)
+
+
+def _final_text_step_must_reference_relevant_structured_outputs_evidence(
+    context: CriticContext,
+) -> bool:
+    """Fire when the last compositional text step reads `previous_step`
+    but at least two prior content steps emit structured JSON the
+    composer is silently dropping.
+
+    Defense-in-depth complement of
+    `prefer_targeted_underlag_over_all_previous_steps`. The over-fan
+    shape (`all_previous_steps` with structured priors) is owned by
+    that rule; this rule covers the opposite under-bind shape where the
+    composer reads `previous_step` and only sees the most recent JSON
+    predecessor — even though earlier predecessors carry distinct
+    fields the composer almost certainly needs.
+
+    Suppression cases mirror `prefer_targeted_underlag`:
+    - aggregation_intent in {aggregate, compare}: those flows go
+      through the multi-document compare invariant.
+    - >`TARGETED_UNDERLAG_SOFT_CAP` prior content steps: an explicit
+      underlag template stops being more legible than concatenation.
+    - <2 prior content steps emit JSON+output_contract: there is no
+      fan-in to surface, only a 2-step refinement chain.
+    - The composer's `input_bindings.question` already targets ≥2
+      distinct prior structured fields: the spec is doing what the
+      rule would suggest despite the nominal source shape.
+    """
+    spec = context.spec
+    if context.aggregation_intent in {"aggregate", "compare"}:
+        return False
+    if len(spec.steps) < 2:
+        return False
+    composer_index = _last_compositional_step_index(spec)
+    if composer_index is None or composer_index == 0:
+        return False
+    composer = spec.steps[composer_index]
+    if composer.input_source != InputSource.PREVIOUS_STEP:
+        return False
+    if composer.output_type != OutputType.TEXT:
+        return False
+    priors = [
+        step for step in spec.steps[:composer_index] if not _is_renderer_step(step)
+    ]
+    if len(priors) > TARGETED_UNDERLAG_SOFT_CAP:
+        return False
+    json_priors = [
+        step
+        for step in priors
+        if step.output_type == OutputType.JSON and step.output_contract is not None
+    ]
+    if len(json_priors) < 2:
+        return False
+    if (
+        _composer_question_distinct_prior_structured_step_count(
+            spec=spec, composer_index=composer_index
+        )
+        >= 2
+    ):
+        return False
+    return True
+
+
+_FINAL_TEXT_STEP_MUST_REFERENCE_RELEVANT_STRUCTURED_OUTPUTS = CriticInvariant(
+    id="final_text_step_must_reference_relevant_structured_outputs",
+    kind="semantic",
+    description=(
+        "When the last compositional text step reads `previous_step` and "
+        "at least two prior content steps emit a structured JSON "
+        "output_contract, the composer must reference structured fields "
+        "from at least two of those priors via `uses_previous_fields` and "
+        "explicit `{{ step_<ref>.output.structured.<field> }}` selectors "
+        "in `input_bindings.question`. A `previous_step` composer that "
+        "only sees the immediate predecessor silently drops the fields "
+        "earlier predecessors emit. Document renderer terminals are "
+        "skipped — the rule evaluates the step that builds the body."
+    ),
+    evidence=_final_text_step_must_reference_relevant_structured_outputs_evidence,
+    remediation=(
+        'Det sista komponerande textsteget läser `input_source="previous_step"` '
+        "fastän flera tidigare steg producerar strukturerad JSON. Det betyder att "
+        "endast det omedelbart föregående steget syns för komponenten — fält från "
+        "ännu tidigare steg går förlorade. Behåll "
+        '`input_source="previous_step"` men deklarera `uses_previous_fields` för '
+        "de fält som steget faktiskt behöver från varje relevant tidigare steg "
+        "och referera dem i `input_bindings.question` via "
+        "`{{ step_<ref>.output.structured.<fält> }}`. Eventuella DOCX/PDF-renderingar "
+        "i slutet förblir orörda — regeln gäller bara det komponerande textsteget."
+    ),
+)
+
+
+def _form_fields_declared_must_be_referenced_evidence(
+    context: CriticContext,
+) -> bool:
+    """Fire when the spec declares form_fields no step references.
+
+    A declared but unreferenced form_field reaches the user as an
+    input control with no effect on flow behaviour. The runtime would
+    silently inject the value into a step that never consumes it,
+    polluting the prompt context. The planner gets a repair turn so it
+    can either remove the field or wire it through a step's templates.
+    """
+    return bool(find_unused_form_fields(context.spec))
+
+
+_FORM_FIELDS_DECLARED_MUST_BE_REFERENCED = CriticInvariant(
+    id="form_fields_declared_must_be_referenced",
+    kind="semantic",
+    description=(
+        "Every form_field declared on the flow must be referenced by at "
+        "least one step's templates (instructions, input_bindings, or "
+        "output_config). Unreferenced fields surface as live UI controls "
+        "with no flow behaviour and risk polluting downstream prompts at "
+        "runtime."
+    ),
+    evidence=_form_fields_declared_must_be_referenced_evidence,
+    remediation=(
+        "Ett eller flera deklarerade fält saknar koppling till något steg. "
+        "Reparera på något av följande sätt: "
+        "(a) Skapa-läge: lista varje fält i `uses_input_fields` på minst ett "
+        "steg som behöver värdet — kompilatorn injicerar då `{{ <namn> }}` "
+        "automatiskt i stegets underlag/`input_bindings`. Skriv inte själva "
+        "`{{ ... }}`-syntaxen i `task`-fältet (det är förbjudet av schemat). "
+        "(b) Redigera-läge: lägg fältet i `uses_form_fields` på minst ett steg "
+        "och referera det med exakt `{{ <namn> }}` (utan `form.`-prefix) i "
+        "stegets `instructions` eller `input_bindings.question`. "
+        "(c) Ta bort fältet helt om ingen ska läsa det. "
+        "Fält som ingen läser visas som live-kontroller utan effekt på flödets "
+        "beteende och riskerar att förorena nedströms prompts vid körning."
     ),
 )
 
@@ -952,6 +1185,8 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _MCP_SELECTION_REQUIRES_SEMANTIC_SUPPORT,
     _JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE,
     _PREFER_TARGETED_UNDERLAG_OVER_ALL_PREVIOUS_STEPS,
+    _FINAL_TEXT_STEP_MUST_REFERENCE_RELEVANT_STRUCTURED_OUTPUTS,
+    _FORM_FIELDS_DECLARED_MUST_BE_REFERENCED,
     _TEMPLATE_FILL_DOCX_REQUIRES_TEMPLATE_FILL_STEP,
     _GENERATED_DOCX_REJECTS_TEMPLATE_FILL,
     _MIXED_AUDIO_DOC_REJECTS_FILE_DEGRADATION,

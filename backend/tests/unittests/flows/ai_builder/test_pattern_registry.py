@@ -63,6 +63,7 @@ _EXPECTED_POSITIVE_IDS: frozenset[str] = frozenset(
         "sectioned_form_intake",
         "form_field_runtime_inputs",
         "mcp_tool_step",
+        "source_parallel_extractions_to_final_text",
     }
 )
 
@@ -269,6 +270,35 @@ class TestRegistryInvariants:
             )
         ids = [pattern.id for pattern in PATTERN_REGISTRY.values()]
         assert len(ids) == len(set(ids)), f"Duplicate pattern ids in registry: {ids}"
+
+    def test_source_parallel_extractions_pattern_is_seeded(self) -> None:
+        """Canonical positive shape for flows where one source feeds
+        multiple parallel structured extractions that a final text step
+        composes from. Without it, the planner has no worked example of
+        the fan-in shape and tends to daisy-chain extractions through
+        `previous_step` so each later extraction loses sight of the
+        original material.
+        """
+        pattern = PATTERN_REGISTRY.get("source_parallel_extractions_to_final_text")
+        assert pattern is not None, (
+            "source_parallel_extractions_to_final_text must be registered"
+        )
+        assert pattern.polarity == "positive"
+        assert "primary_runtime_input" in pattern.required_architectural_slots
+        assert "terminal_output" in pattern.required_architectural_slots
+        hint_blob = " ".join(pattern.retrieval_hints).lower()
+        assert "parallel" in hint_blob or "fan-in" in hint_blob, (
+            f"retrieval_hints should describe the fan-in shape; got "
+            f"{pattern.retrieval_hints!r}"
+        )
+        assert any(
+            "uses_previous_fields" in hint or "previous_step" in hint
+            for hint in pattern.retrieval_hints
+        ), (
+            f"retrieval_hints should reference the underlying mechanic "
+            f"(uses_previous_fields / previous_step); got "
+            f"{pattern.retrieval_hints!r}"
+        )
 
 
 class TestPositivePatternContract:

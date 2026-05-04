@@ -53,6 +53,8 @@ EXPECTED_CRITIC_INVARIANT_KINDS = {
     "mcp_selection_requires_semantic_support": "semantic",
     "json_input_rejects_all_previous_steps_source": "architecture",
     "prefer_targeted_underlag_over_all_previous_steps": "semantic",
+    "final_text_step_must_reference_relevant_structured_outputs": "semantic",
+    "form_fields_declared_must_be_referenced": "semantic",
     "template_fill_docx_requires_template_fill_step": "architecture",
     "generated_docx_rejects_template_fill": "architecture",
     "mixed_audio_doc_rejects_file_degradation": "architecture",
@@ -476,7 +478,10 @@ def test_does_not_flag_sectioned_rubric_intake_when_form_fields_are_present() ->
             _step(
                 "step_a",
                 "Sammanställ underlag",
-                "Sammanställ sektionerna till ett DOCX.",
+                (
+                    "Sammanställ sektionerna {{ planering_och_halsa }} "
+                    "och {{ tidigare_insatser }} till ett DOCX."
+                ),
                 output_type=OutputType.DOCX,
             )
         ],
@@ -1821,6 +1826,343 @@ class TestPreferTargetedUnderlagInvariant:
         }
         assert ids == set()
 
+    def test_render_critic_issues_targets_composer_step_before_renderer(
+        self,
+    ) -> None:
+        """When the final step is a template_fill / DOCX / PDF renderer,
+        the actual content composer is the step before it. The rule must
+        evaluate the composer's input wiring, not the renderer's — a
+        renderer reading `previous_step` is structurally fine, but the
+        composer behind it can still be over-fanning into all_previous_steps.
+        """
+
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+            render_critic_issues,
+        )
+        from intric.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Rapport med template-fill DOCX",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extrahera A",
+                    "Extrahera fakta som JSON.",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"summary": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Extrahera B",
+                    "Extrahera fakta som JSON.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"detail": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Skriv rapport",
+                    "Sammanställ en rapport.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_d",
+                    "Fyll mall",
+                    "Fyll DOCX-mallen.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.DOCX,
+                    output_mode=OutputMode.TEMPLATE_FILL,
+                ),
+            ],
+        )
+        context = CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output=None),
+            mixed_audio_doc_input=False,
+        )
+
+        issues = render_critic_issues(context)
+
+        targeted_issue = next(
+            (issue for issue in issues if "uses_previous_fields" in issue),
+            None,
+        )
+        assert targeted_issue is not None, (
+            "rule must look past the template_fill renderer and flag the "
+            "composer step (step_c) reading all_previous_steps"
+        )
+        assert "komponerande" in targeted_issue, (
+            "remediation must address the composer step, not falsely claim "
+            "the terminal renderer itself has all_previous_steps"
+        )
+        assert "Det sista steget" not in targeted_issue, (
+            "old wording referred to the final step; the rule now evaluates "
+            "the composer behind a renderer terminal — wording must follow"
+        )
+
+    def test_render_critic_issues_silent_when_question_targets_prior_fields(
+        self,
+    ) -> None:
+        """A spec whose composer reads `all_previous_steps` nominally but
+        whose `input_bindings.question` already references prior structured
+        fields via `{{ step_x.output.structured.field }}` is effectively
+        using targeted underlag. The runtime context window is wide, but
+        the prompt is narrow — nudging the planner to switch source would
+        produce no real change. The rule stays silent."""
+
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+            render_critic_issues,
+        )
+        from intric.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Effektiv targeted underlag",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extrahera",
+                    "Extrahera fakta.",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"summary": {"type": "string"}},
+                    },
+                ),
+                StepSpec(
+                    plan_step_ref="step_b",
+                    name="Skriv rapport",
+                    assistant_spec=AssistantSpec(
+                        instructions=(
+                            "Skriv en rapport baserat på "
+                            "{{ step_a.output.structured.summary }}."
+                        ),
+                    ),
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_mode=OutputMode.PASS_THROUGH,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": (
+                            "Använd sammanfattningen i "
+                            "{{ step_a.output.structured.summary }} "
+                            "för att skriva en rapport."
+                        )
+                    },
+                ),
+            ],
+        )
+        context = CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output=None),
+            mixed_audio_doc_input=False,
+        )
+
+        ids = {
+            issue
+            for issue in render_critic_issues(context)
+            if "uses_previous_fields" in issue
+        }
+        assert ids == set()
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            # Nested structured path — analyze_template walks the dotted tail
+            # past `output.structured.` and only the head/order/non-empty path
+            # need to validate.
+            "Använd {{ step_a.output.structured.sections.introduction }} som underlag.",
+            # JSON-escaped form the planner emits when authoring bindings via
+            # JSON-serialized tool calls.
+            ('Använd \\"{{ step_a.output.structured.summary }}\\" som rubrik.'),
+        ],
+    )
+    def test_render_critic_issues_silent_when_question_uses_nested_or_escaped_selectors(
+        self,
+        question: str,
+    ) -> None:
+        """Targeted-underlag suppression must accept both nested structured
+        paths (`...structured.sections.introduction`) and the JSON-escaped
+        quote form the planner produces inside serialized tool calls — the
+        canonical template parser covers both shapes."""
+
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+            render_critic_issues,
+        )
+        from intric.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Targeted underlag selektorer",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extrahera",
+                    "Extrahera fakta.",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {
+                            "summary": {"type": "string"},
+                            "sections": {
+                                "type": "object",
+                                "properties": {
+                                    "introduction": {"type": "string"},
+                                },
+                            },
+                        },
+                    },
+                ),
+                StepSpec(
+                    plan_step_ref="step_b",
+                    name="Skriv rapport",
+                    assistant_spec=AssistantSpec(instructions="Skriv en rapport."),
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_mode=OutputMode.PASS_THROUGH,
+                    output_type=OutputType.TEXT,
+                    input_bindings={"question": question},
+                ),
+            ],
+        )
+        context = CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output=None),
+            mixed_audio_doc_input=False,
+        )
+
+        issues = [
+            issue
+            for issue in render_critic_issues(context)
+            if "uses_previous_fields" in issue
+        ]
+        assert issues == []
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            # Future-step reference: composer is step_b (index 1); a selector
+            # pointing at step_b itself or step_c does not constitute a prior
+            # structured read and must NOT suppress the nudge.
+            "Skriv en rapport baserat på {{ step_b.output.structured.summary }}.",
+            "Skriv en rapport baserat på {{ step_c.output.structured.summary }}.",
+            # Malformed selector: empty structured path (`output.structured.`
+            # alone) does not target any field.
+            "Skriv en rapport baserat på {{ step_a.output.structured. }}.",
+            # No selector at all — plain text question.
+            "Skriv en rapport.",
+        ],
+    )
+    def test_render_critic_issues_fires_when_question_lacks_valid_prior_field_selector(
+        self,
+        question: str,
+    ) -> None:
+        """Suppression requires a *valid* selector pointing at a prior step's
+        non-empty structured path. Future-step references, current-step
+        references, malformed selectors, and plain text do not qualify and
+        must let the nudge fire."""
+
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+            render_critic_issues,
+        )
+        from intric.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Saknar giltig selektor",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extrahera",
+                    "Extrahera fakta.",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"summary": {"type": "string"}},
+                    },
+                ),
+                StepSpec(
+                    plan_step_ref="step_b",
+                    name="Skriv rapport",
+                    assistant_spec=AssistantSpec(instructions="Skriv en rapport."),
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_mode=OutputMode.PASS_THROUGH,
+                    output_type=OutputType.TEXT,
+                    input_bindings={"question": question},
+                ),
+            ],
+        )
+        context = CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output=None),
+            mixed_audio_doc_input=False,
+        )
+
+        issues = [
+            issue
+            for issue in render_critic_issues(context)
+            if "uses_previous_fields" in issue
+        ]
+        assert issues, (
+            "no valid prior-structured-field selector means suppression "
+            f"should not apply; question={question!r}"
+        )
+
     def test_render_critic_issues_silent_when_final_uses_previous_step(
         self,
     ) -> None:
@@ -1880,6 +2222,498 @@ class TestPreferTargetedUnderlagInvariant:
             if "uses_previous_fields" in issue
         }
         assert ids == set()
+
+
+_FINAL_TEXT_STEP_INVARIANT_ID = (
+    "final_text_step_must_reference_relevant_structured_outputs"
+)
+
+
+def _final_text_step_critic_context(
+    spec: FlowDraftSpecCore,
+    *,
+    aggregation_intent: str = "linear",
+) -> "CriticContext":
+    from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        CriticContext,
+    )
+    from intric.flows.ai_builder.ai_builder_framework_policy import (
+        OutputIntentResolution,
+    )
+    from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        PlannerPatternSignals,
+    )
+
+    return CriticContext(
+        spec=spec,
+        flow=None,
+        answer_signals={},
+        text="",
+        requirements_text="",
+        signal_text="",
+        planner_patterns=PlannerPatternSignals(),
+        output_intent=OutputIntentResolution(terminal_output=None),
+        mixed_audio_doc_input=False,
+        aggregation_intent=aggregation_intent,  # type: ignore[arg-type]
+    )
+
+
+class TestFinalTextStepReferencesRelevantStructuredOutputs:
+    """`final_text_step_must_reference_relevant_structured_outputs` is the
+    defense-in-depth complement of `prefer_targeted_underlag_over_all_previous_steps`.
+
+    `prefer_targeted_underlag` fires on the over-fanned shape
+    (`input_source=all_previous_steps`). This rule fires on the opposite
+    shape: a final text composer reading `input_source=previous_step`
+    that visually only sees the most recent JSON predecessor — even
+    though earlier predecessors also emit structured fields the
+    composer almost certainly needs.
+
+    Pattern: parallel multi-aspect extractions that fan-in to a single
+    text rendering. Each prior step extracts a distinct structured slice
+    of the source; a `previous_step` composer that does not pull
+    `{{ step_n.output.structured.* }}` selectors from at least two
+    of those priors is silently dropping data on the floor. The
+    upstream auto-binder usually rewrites this in create-mode, but the
+    invariant exists for the cases where the auto-binder cannot fire:
+    edit-mode, planner-authored selectors that miss priors, or future
+    create-mode shapes the auto-binder does not yet cover.
+
+    Suppression mirrors `prefer_targeted_underlag`:
+    - `aggregation_intent` in {aggregate, compare}: those flows go
+      through `multi_document_compare_requires_all_previous_steps`.
+    - >`TARGETED_UNDERLAG_SOFT_CAP` prior content steps: an explicit
+      template stops being more legible than concatenation.
+    - All priors are text-typed: there are no structured fields to
+      pull, so no nudge is possible.
+    - The composer's `input_bindings.question` already targets ≥2
+      distinct prior structured fields: the spec is already doing the
+      right thing despite the nominal `previous_step` source.
+    """
+
+    def test_invariant_is_registered(self) -> None:
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CRITIC_INVARIANTS,
+            CriticInvariant,
+        )
+
+        ids = [inv.id for inv in CRITIC_INVARIANTS]
+        assert _FINAL_TEXT_STEP_INVARIANT_ID in ids
+        inv = next(
+            item
+            for item in CRITIC_INVARIANTS
+            if item.id == _FINAL_TEXT_STEP_INVARIANT_ID
+        )
+        assert isinstance(inv, CriticInvariant)
+        assert callable(inv.evidence)
+        assert "uses_previous_fields" in inv.remediation
+
+    def test_fires_on_previous_step_composer_with_multiple_json_priors(
+        self,
+    ) -> None:
+        """The user-reported regression: a multi-step extraction chain ends
+        in a `previous_step` composer that only sees the immediate predecessor.
+        The composer should read at least two priors' structured fields."""
+
+        spec = FlowDraftSpecCore(
+            flow_name="Sammanställ extraktioner",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extrahera produktdata",
+                    "Extrahera produktdata som JSON.",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"produkt": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Extrahera kunddata",
+                    "Extrahera kunddata som JSON.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"kund": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Extrahera leveransdata",
+                    "Extrahera leveransdata som JSON.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"leverans": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_d",
+                    "Skriv sammanfattning",
+                    "Skriv en kort sammanfattning.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues), (
+            "rule must nudge a previous_step composer with two JSON priors "
+            "to pull structured fields from earlier predecessors"
+        )
+
+    def test_silent_on_single_json_prior_refinement_chain(self) -> None:
+        """The classic 2-step refinement (extract → render) only has one
+        JSON prior. There is no fan-in — `previous_step` is the canonical
+        shape and the rule must not fire."""
+
+        spec = FlowDraftSpecCore(
+            flow_name="Enkel raffineringskedja",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extrahera fakta",
+                    "Extrahera fakta som JSON.",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"summary": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Skriv rapport",
+                    "Skriv en kort rapport.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
+    def test_silent_when_question_already_targets_two_prior_structured_fields(
+        self,
+    ) -> None:
+        """When the composer's `input_bindings.question` already references
+        at least two distinct prior steps' structured fields via
+        `{{ step_n.output.structured.field }}`, the spec is doing what
+        the rule would suggest. The rule must stay silent."""
+
+        spec = FlowDraftSpecCore(
+            flow_name="Redan riktade selektorer",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extrahera produktdata",
+                    "Extrahera produktdata.",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"produkt": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Extrahera kunddata",
+                    "Extrahera kunddata.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"kund": {"type": "string"}},
+                    },
+                ),
+                StepSpec(
+                    plan_step_ref="step_c",
+                    name="Skriv sammanfattning",
+                    assistant_spec=AssistantSpec(
+                        instructions="Skriv en kort sammanfattning."
+                    ),
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_mode=OutputMode.PASS_THROUGH,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": (
+                            "Använd {{ step_a.output.structured.produkt }} "
+                            "och {{ step_b.output.structured.kund }} för att "
+                            "skriva en kort sammanfattning."
+                        )
+                    },
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
+    def test_fires_when_question_targets_only_one_prior_structured_field(
+        self,
+    ) -> None:
+        """A composer that pulls a selector from only ONE prior is still
+        dropping data — the rule must fire. Suppression requires ≥2
+        distinct prior steps referenced."""
+
+        spec = FlowDraftSpecCore(
+            flow_name="Bara en selektor",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extrahera produktdata",
+                    "Extrahera produktdata.",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"produkt": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Extrahera kunddata",
+                    "Extrahera kunddata.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"kund": {"type": "string"}},
+                    },
+                ),
+                StepSpec(
+                    plan_step_ref="step_c",
+                    name="Skriv sammanfattning",
+                    assistant_spec=AssistantSpec(
+                        instructions="Skriv en kort sammanfattning."
+                    ),
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_mode=OutputMode.PASS_THROUGH,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": (
+                            "Använd {{ step_b.output.structured.kund }} för att "
+                            "skriva en kort sammanfattning."
+                        )
+                    },
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
+    @pytest.mark.parametrize("intent", ["aggregate", "compare"])
+    def test_silent_on_aggregate_or_compare_intent(self, intent: str) -> None:
+        """`multi_document_compare_requires_all_previous_steps` owns the
+        aggregate / compare cases. This rule must defer rather than nudge
+        toward `previous_step` against the aggregate-shape requirement."""
+
+        spec = FlowDraftSpecCore(
+            flow_name="Aggregeringsflöde",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extrahera produktdata",
+                    "Extrahera produktdata.",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"produkt": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Extrahera kunddata",
+                    "Extrahera kunddata.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"kund": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Skriv sammanfattning",
+                    "Skriv en kort sammanfattning.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(
+            _final_text_step_critic_context(spec, aggregation_intent=intent)
+        )
+
+        assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
+    def test_silent_when_priors_are_text(self) -> None:
+        """Priors that emit plain text expose no structured fields. The
+        composer cannot pull `{{ step_n.output.structured.* }}` from them.
+        `previous_step` is the only sensible source — the rule stays silent."""
+
+        spec = FlowDraftSpecCore(
+            flow_name="Texter ihop",
+            steps=[
+                _step(
+                    "step_a",
+                    "Skriv del 1",
+                    "Skriv del 1.",
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_b",
+                    "Skriv del 2",
+                    "Skriv del 2.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_c",
+                    "Sammanställ",
+                    "Sammanställ båda.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
+    def test_silent_when_too_many_priors(self) -> None:
+        """Beyond the soft cap, an explicit underlag template is unwieldy
+        and the trade-off flips. The rule defers."""
+
+        priors = [
+            _step(
+                f"step_{chr(ord('a') + idx)}",
+                f"Extraktion {idx + 1}",
+                "Extrahera del.",
+                input_source=InputSource.PREVIOUS_STEP
+                if idx > 0
+                else InputSource.FLOW_INPUT,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"value": {"type": "string"}},
+                },
+            )
+            for idx in range(7)
+        ]
+        spec = FlowDraftSpecCore(
+            flow_name="För många extraktioner",
+            steps=[
+                *priors,
+                _step(
+                    "step_h",
+                    "Skriv sammanfattning",
+                    "Skriv en kort sammanfattning.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
+    def test_silent_when_input_source_is_all_previous_steps(self) -> None:
+        """The over-fan shape is owned by `prefer_targeted_underlag_over_all_previous_steps`.
+        This rule fires only on the under-bind shape (`previous_step` with
+        ≥2 JSON priors)."""
+
+        spec = FlowDraftSpecCore(
+            flow_name="All previous steps shape",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extrahera produktdata",
+                    "Extrahera produktdata.",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"produkt": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Extrahera kunddata",
+                    "Extrahera kunddata.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"kund": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Skriv sammanfattning",
+                    "Skriv en kort sammanfattning.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
+    def test_silent_when_terminal_is_renderer_and_composer_has_no_priors(
+        self,
+    ) -> None:
+        """A 2-step DOCX-fill flow has the renderer as the terminal step
+        but the composer is step 0 — there are no priors before it.
+        The rule must not fire on this canonical 2-step shape."""
+
+        spec = FlowDraftSpecCore(
+            flow_name="DOCX-fill med en JSON-extraktion",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extrahera fakta",
+                    "Extrahera fakta.",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"summary": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Fyll mall",
+                    "Fyll DOCX-mallen.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.DOCX,
+                    output_mode=OutputMode.TEMPLATE_FILL,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
 
 
 class TestStandaloneAudioInvariant:
@@ -2166,6 +3000,8 @@ class TestCriticInvariantRegistry:
             "mcp_selection_requires_semantic_support",
             "json_input_rejects_all_previous_steps_source",
             "prefer_targeted_underlag_over_all_previous_steps",
+            "final_text_step_must_reference_relevant_structured_outputs",
+            "form_fields_declared_must_be_referenced",
             "template_fill_docx_requires_template_fill_step",
             "generated_docx_rejects_template_fill",
             "mixed_audio_doc_rejects_file_degradation",
@@ -2342,7 +3178,7 @@ class TestRichWorkflowInvariants:
                 _step(
                     "step_a",
                     "Analysera dokument",
-                    "Läs dokumentet och skriv rapport.",
+                    ("Läs dokumentet och skriv rapport för {{ ansvarig_enhet }}."),
                     input_type=InputType.DOCUMENT,
                 )
             ],
