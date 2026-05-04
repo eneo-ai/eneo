@@ -160,6 +160,39 @@ _AUDIO_STANDALONE_MARKERS: tuple[str, ...] = (
     "recording",
 )
 
+# Words that name an actual audio source — a recording, a file, raw input.
+# Distinguished from `_AUDIO_STANDALONE_MARKERS` because the trigger word
+# `transkrib*` is overloaded: it matches both "transkribera ljudet"
+# (operation) and "originaltranskribering" (data noun). Active-audio words
+# are the unambiguous half.
+_ACTIVE_AUDIO_MARKERS: tuple[str, ...] = (
+    "audio",
+    "ljud",
+    "inspelning",
+    "recording",
+)
+
+# Phrasings that signal transcription is already-prepared text input rather
+# than an in-flow operation. When these are present and no active audio
+# source is named, the standalone-audio invariant suppresses — the flow
+# legitimately processes pre-transcribed text.
+_TRANSCRIPTION_AS_DATA_MARKERS: tuple[str, ...] = (
+    "originaltranskribering",
+    "från transkribering",
+    "from transcription",
+    "transkriberad text",
+    "transkriberade text",
+    "den transkriberade",
+    "redan transkrib",
+    "transkriberas innan",
+    "transkriberas före",
+    "extern transkrib",
+    "externally transcribed",
+    "transcribed text",
+    "pre-transcribed",
+    "already transcribed",
+)
+
 _FIELD_REUSE_MARKERS: tuple[str, ...] = (
     "specific fields",
     "specific json fields",
@@ -216,6 +249,20 @@ def _terminal_step_is_human_readable_only(text: str, spec: FlowDraftSpecCore) ->
 
 def _conversation_mentions_audio(text: str) -> bool:
     return any(marker in text for marker in _AUDIO_STANDALONE_MARKERS)
+
+
+def _conversation_mentions_active_audio(text: str) -> bool:
+    """True when the conversation names an actual audio source (recording,
+    file, raw input) — distinguishing from references to transcription text.
+    """
+    return any(marker in text for marker in _ACTIVE_AUDIO_MARKERS)
+
+
+def _conversation_treats_transcription_as_data(text: str) -> bool:
+    """True when the conversation describes transcription as already-prepared
+    input text rather than an in-flow operation.
+    """
+    return any(marker in text for marker in _TRANSCRIPTION_AS_DATA_MARKERS)
 
 
 def _spec_handles_audio(spec: FlowDraftSpecCore) -> bool:
@@ -588,7 +635,19 @@ def _standalone_audio_requires_transcription_step_evidence(
         return False
     if _spec_handles_audio(context.spec):
         return False
-    return not context.mixed_audio_doc_input
+    if context.mixed_audio_doc_input:
+        return False
+    # The trigger word `transkrib*` is overloaded — matches both the
+    # operation ("transkribera ljudet") and the data noun
+    # ("originaltranskribering"). When transcription is explicitly treated
+    # as already-prepared input AND no active audio source is named, the
+    # flow legitimately processes pre-transcribed text and the rule must
+    # stay silent.
+    if _conversation_treats_transcription_as_data(
+        context.text
+    ) and not _conversation_mentions_active_audio(context.text):
+        return False
+    return True
 
 
 _STANDALONE_AUDIO_REQUIRES_TRANSCRIPTION_STEP = CriticInvariant(
