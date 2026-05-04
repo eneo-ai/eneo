@@ -261,6 +261,7 @@ from intric.questions.questions_repo import QuestionRepository
 from intric.redis.connection import build_redis_pool_kwargs
 from intric.roles.roles_repo import RolesRepository
 from intric.roles.roles_service import RolesService
+from intric.scim.services.token_service import ScimTokenService
 from intric.security_classifications.application.security_classification_service import (
     SecurityClassificationService,
 )
@@ -824,6 +825,11 @@ class Container(containers.DeclarativeContainer):
         repository=audit_log_repo,
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
+    )
+    scim_token_service = providers.Factory(
+        ScimTokenService,
+        session=session,
+        audit_service=audit_service,
     )
     tenant_service = providers.Factory(
         TenantService,

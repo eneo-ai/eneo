@@ -1,5 +1,3 @@
-from uuid import UUID
-
 from pydantic import BaseModel, Field
 
 from intric.main.models import ModelId
@@ -35,16 +33,6 @@ class InfoBlobDifferencePublic(BaseModel):
     database_count: int
     datastore_count: int
     extra_info_blobs: AggregatedExtraBlobs
-
-
-class ScimTokenCreatedResponse(BaseModel):
-    tenant_id: UUID
-    token: str = Field(description="Plaintext token — shown once, never stored")
-
-
-class ScimTokenStatusResponse(BaseModel):
-    tenant_id: UUID
-    is_active: bool
 
 
 class CreateAndImportSpaceRequest(BaseModel):

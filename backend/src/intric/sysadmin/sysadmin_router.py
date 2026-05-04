@@ -61,8 +61,8 @@ from intric.server.dependencies.container import (
 )
 from intric.server.dependencies.get_repository import get_repository
 from intric.server.protocol import responses
-from intric.sysadmin.sysadmin_models import ScimTokenCreatedResponse, ScimTokenStatusResponse
-from intric.sysadmin.sysadmin_service import ScimTokenService, SysAdminService
+from intric.scim.schemas.token import ScimTokenCreatedResponse, ScimTokenStatusResponse
+from intric.sysadmin.sysadmin_service import SysAdminService
 from intric.tenants.tenant import (
     TenantBase,
     TenantUpdatePublic,
@@ -1423,7 +1423,7 @@ async def create_scim_token(
 ) -> ScimTokenCreatedResponse:
     session = cast(AsyncSession, container.session())
     async with session.begin():
-        token = await ScimTokenService(session).create_token(tenant_id)
+        token = await container.scim_token_service().create_token(tenant_id)
     logger.info("scim.token.created", extra={"tenant_id": str(tenant_id)})
     return ScimTokenCreatedResponse(tenant_id=tenant_id, token=token)
 
@@ -1444,7 +1444,7 @@ async def get_scim_token_status(
 ) -> ScimTokenStatusResponse:
     session = cast(AsyncSession, container.session())
     async with session.begin():
-        is_active = await ScimTokenService(session).get_status(tenant_id)
+        is_active = await container.scim_token_service().get_status(tenant_id)
     return ScimTokenStatusResponse(tenant_id=tenant_id, is_active=is_active)
 
 
@@ -1464,5 +1464,5 @@ async def delete_scim_token(
 ) -> None:
     session = cast(AsyncSession, container.session())
     async with session.begin():
-        await ScimTokenService(session).revoke_token(tenant_id)
+        await container.scim_token_service().revoke_token(tenant_id)
     logger.info("scim.token.revoked", extra={"tenant_id": str(tenant_id)})

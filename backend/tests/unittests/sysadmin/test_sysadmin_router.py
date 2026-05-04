@@ -27,6 +27,7 @@ from intric.sysadmin.sysadmin_router import (
     get_user,
     update_user,
 )
+from intric.scim.services.token_service import ScimTokenService
 from intric.users.user import UserUpdatePublic
 
 
@@ -323,63 +324,50 @@ def _scim_session(execute_side_effects: list):
     return session
 
 
-def _scim_container(session):
+def _scim_container(session, audit=None):
+    audit = audit or AsyncMock()
     container = MagicMock()
     container.session.return_value = session
-    return container
-
-
-def _patch_audit(monkeypatch):
-    mock_audit = AsyncMock()
-    monkeypatch.setattr(
-        "intric.sysadmin.sysadmin_service.AuditService",
-        MagicMock(return_value=mock_audit),
+    container.scim_token_service.return_value = ScimTokenService(
+        session=session, audit_service=audit
     )
-    monkeypatch.setattr(
-        "intric.sysadmin.sysadmin_service.AuditLogRepositoryImpl",
-        MagicMock(),
-    )
-    return mock_audit
+    return container, audit
 
 
 class TestCreateScimToken:
-    async def test_returns_token_for_existing_tenant(self, monkeypatch):
+    async def test_returns_token_for_existing_tenant(self):
         tenant_id = uuid.uuid4()
         select_result = MagicMock()
         select_result.scalar_one_or_none.return_value = tenant_id
         session = _scim_session([select_result, MagicMock()])
-        _patch_audit(monkeypatch)
+        container, _ = _scim_container(session)
 
-        result = await create_scim_token(
-            tenant_id=tenant_id, container=_scim_container(session)
-        )
+        result = await create_scim_token(tenant_id=tenant_id, container=container)
 
         assert result.tenant_id == tenant_id
         assert isinstance(result.token, str) and len(result.token) > 0
 
-    async def test_writes_to_db_and_logs_audit(self, monkeypatch):
+    async def test_writes_to_db_and_logs_audit(self):
         tenant_id = uuid.uuid4()
         select_result = MagicMock()
         select_result.scalar_one_or_none.return_value = tenant_id
         session = _scim_session([select_result, MagicMock()])
-        mock_audit = _patch_audit(monkeypatch)
+        container, audit = _scim_container(session)
 
-        await create_scim_token(tenant_id=tenant_id, container=_scim_container(session))
+        await create_scim_token(tenant_id=tenant_id, container=container)
 
         assert session.execute.call_count == 2
-        mock_audit.log.assert_called_once()
+        audit.log.assert_called_once()
 
-    async def test_raises_404_for_unknown_tenant(self, monkeypatch):
+    async def test_raises_404_for_unknown_tenant(self):
         tenant_id = uuid.uuid4()
         select_result = MagicMock()
         select_result.scalar_one_or_none.return_value = None
         session = _scim_session([select_result])
-        _patch_audit(monkeypatch)
+        container, _ = _scim_container(session)
 
         with pytest.raises(NotFoundException):
-            await create_scim_token(
-                tenant_id=tenant_id, container=_scim_container(session)
-            )
+            await create_scim_token(tenant_id=tenant_id, container=container)
 
 
 class TestGetScimTokenStatus:
@@ -389,10 +377,9 @@ class TestGetScimTokenStatus:
         result.one_or_none.return_value = ("abc123hash",)
         session = MagicMock()
         session.execute = AsyncMock(return_value=result)
+        container, _ = _scim_container(session)
 
-        status = await get_scim_token_status(
-            tenant_id=tenant_id, container=_scim_container(session)
-        )
+        status = await get_scim_token_status(tenant_id=tenant_id, container=container)
 
         assert status.tenant_id == tenant_id
         assert status.is_active is True
@@ -403,10 +390,9 @@ class TestGetScimTokenStatus:
         result.one_or_none.return_value = (None,)
         session = MagicMock()
         session.execute = AsyncMock(return_value=result)
+        container, _ = _scim_container(session)
 
-        status = await get_scim_token_status(
-            tenant_id=tenant_id, container=_scim_container(session)
-        )
+        status = await get_scim_token_status(tenant_id=tenant_id, container=container)
 
         assert status.is_active is False
 
@@ -416,37 +402,32 @@ class TestGetScimTokenStatus:
         result.one_or_none.return_value = None
         session = MagicMock()
         session.execute = AsyncMock(return_value=result)
+        container, _ = _scim_container(session)
 
         with pytest.raises(NotFoundException):
-            await get_scim_token_status(
-                tenant_id=tenant_id, container=_scim_container(session)
-            )
+            await get_scim_token_status(tenant_id=tenant_id, container=container)
 
 
 class TestDeleteScimToken:
-    async def test_revokes_token_for_existing_tenant(self, monkeypatch):
+    async def test_revokes_token_for_existing_tenant(self):
         tenant_id = uuid.uuid4()
         select_result = MagicMock()
         select_result.scalar_one_or_none.return_value = tenant_id
         session = _scim_session([select_result, MagicMock()])
-        mock_audit = _patch_audit(monkeypatch)
+        container, audit = _scim_container(session)
 
-        result = await delete_scim_token(
-            tenant_id=tenant_id, container=_scim_container(session)
-        )
+        result = await delete_scim_token(tenant_id=tenant_id, container=container)
 
         assert result is None
         assert session.execute.call_count == 2
-        mock_audit.log.assert_called_once()
+        audit.log.assert_called_once()
 
-    async def test_raises_404_for_unknown_tenant(self, monkeypatch):
+    async def test_raises_404_for_unknown_tenant(self):
         tenant_id = uuid.uuid4()
         select_result = MagicMock()
         select_result.scalar_one_or_none.return_value = None
         session = _scim_session([select_result])
-        _patch_audit(monkeypatch)
+        container, _ = _scim_container(session)
 
         with pytest.raises(NotFoundException):
-            await delete_scim_token(
-                tenant_id=tenant_id, container=_scim_container(session)
-            )
+            await delete_scim_token(tenant_id=tenant_id, container=container)
