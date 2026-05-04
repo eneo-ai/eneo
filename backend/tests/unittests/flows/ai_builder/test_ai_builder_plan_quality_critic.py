@@ -52,6 +52,7 @@ EXPECTED_CRITIC_INVARIANT_KINDS = {
     "multi_document_compare_requires_all_previous_steps": "architecture",
     "mcp_selection_requires_semantic_support": "semantic",
     "json_input_rejects_all_previous_steps_source": "architecture",
+    "prefer_targeted_underlag_over_all_previous_steps": "semantic",
     "template_fill_docx_requires_template_fill_step": "architecture",
     "generated_docx_rejects_template_fill": "architecture",
     "mixed_audio_doc_rejects_file_degradation": "architecture",
@@ -1474,7 +1475,10 @@ class TestJsonInputRejectsAllPreviousStepsSourceInvariant:
         self,
     ) -> None:
         """`input_type=text` with `input_source=all_previous_steps` is legal
-        (concatenated text is still text) and must not trigger the invariant."""
+        when prior steps are also text — concatenation is the only available
+        composition. The targeted-underlag invariant in
+        `TestPreferTargetedUnderlagInvariant` only fires when prior steps
+        emit structured JSON the final step could reference instead."""
         from intric.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
             render_critic_issues,
@@ -1521,6 +1525,363 @@ class TestJsonInputRejectsAllPreviousStepsSourceInvariant:
         assert render_critic_issues(context) == []
 
 
+class TestPreferTargetedUnderlagInvariant:
+    """A text-typed final step that reads `input_source=all_previous_steps`
+    when prior steps emit structured JSON should instead read
+    `previous_step` and compose its underlag explicitly via
+    `{{ step_a.output.structured.field }}` references.
+
+    `all_previous_steps` concatenates every prior step's text, monotonically
+    inflating tokens with step count — for a 6-section JSON-emitting flow
+    that is ~50k tokens of prompt against the final step before the
+    instructions even begin. Targeted underlag scopes the input to the
+    fields the final step actually consumes, preserving cross-section
+    coherence without paying envelope cost for content the step never
+    references.
+
+    Suppression: when `aggregation_intent` is `aggregate` or `compare`,
+    the existing `multi_document_compare_requires_all_previous_steps`
+    invariant correctly demands `all_previous_steps`; the targeted-
+    underlag rule must defer to it. Soft-cap at 6 prior content steps —
+    beyond that the underlag template itself becomes unwieldy and the
+    diagnostic stops being better than concatenation.
+    """
+
+    def test_invariant_is_registered(self) -> None:
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CRITIC_INVARIANTS,
+            CriticInvariant,
+        )
+
+        ids = [inv.id for inv in CRITIC_INVARIANTS]
+        assert "prefer_targeted_underlag_over_all_previous_steps" in ids
+        inv = next(
+            item
+            for item in CRITIC_INVARIANTS
+            if item.id == "prefer_targeted_underlag_over_all_previous_steps"
+        )
+        assert isinstance(inv, CriticInvariant)
+        assert callable(inv.evidence)
+        assert "all_previous_steps" in inv.remediation
+        assert "uses_previous_fields" in inv.remediation
+
+    def test_render_critic_issues_fires_on_text_terminal_after_structured_priors(
+        self,
+    ) -> None:
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+            render_critic_issues,
+        )
+        from intric.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Strukturerad rapport",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extrahera A",
+                    "Extrahera fakta som JSON.",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"summary": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Extrahera B",
+                    "Extrahera fakta som JSON.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"detail": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Skriv rapport",
+                    "Sammanställ en rapport.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+        context = CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output=None),
+            mixed_audio_doc_input=False,
+        )
+
+        issues = render_critic_issues(context)
+
+        assert any("uses_previous_fields" in issue for issue in issues)
+        assert any("all_previous_steps" in issue for issue in issues)
+
+    def test_render_critic_issues_silent_when_priors_are_text(
+        self,
+    ) -> None:
+        """When prior content steps emit plain text, there are no
+        structured fields to reference. `all_previous_steps` is the
+        only composition path and the invariant must not fire."""
+
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+            render_critic_issues,
+        )
+        from intric.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Texter ihop",
+            steps=[
+                _step(
+                    "step_a",
+                    "Skriv del 1",
+                    "Skriv del 1.",
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_b",
+                    "Skriv del 2",
+                    "Skriv del 2.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_c",
+                    "Sammanställ",
+                    "Sammanställ båda.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+        context = CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output=None),
+            mixed_audio_doc_input=False,
+        )
+
+        ids = {
+            issue
+            for issue in render_critic_issues(context)
+            if "uses_previous_fields" in issue
+        }
+        assert ids == set()
+
+    def test_render_critic_issues_silent_when_aggregate_intent(
+        self,
+    ) -> None:
+        """`multi_document_compare_requires_all_previous_steps` owns the
+        aggregate / compare cases. The targeted-underlag rule must
+        defer rather than contradict."""
+
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+            render_critic_issues,
+        )
+        from intric.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Jämförelse",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extrahera",
+                    "Extrahera fakta.",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"x": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Sammanställ",
+                    "Sammanställ alla.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+        context = CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output=None),
+            mixed_audio_doc_input=False,
+            aggregation_intent="compare",
+        )
+
+        ids = {
+            issue
+            for issue in render_critic_issues(context)
+            if "prefer" in issue.lower() and "targeted" in issue.lower()
+        }
+        assert ids == set()
+
+    def test_render_critic_issues_silent_when_too_many_priors(
+        self,
+    ) -> None:
+        """Beyond ~6 prior content steps, an explicit underlag template
+        becomes unwieldy and `all_previous_steps` is the pragmatic
+        choice. Soft-cap silences the invariant."""
+
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+            render_critic_issues,
+        )
+        from intric.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        priors = [
+            _step(
+                f"step_{chr(ord('a') + idx)}",
+                f"Sektion {idx + 1}",
+                "Extrahera del.",
+                input_source=InputSource.PREVIOUS_STEP
+                if idx > 0
+                else InputSource.FLOW_INPUT,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"title": {"type": "string"}},
+                },
+            )
+            for idx in range(7)
+        ]
+        spec = FlowDraftSpecCore(
+            flow_name="Sju sektioner",
+            steps=[
+                *priors,
+                _step(
+                    "step_h",
+                    "Sammanställ",
+                    "Sammanställ allt.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+        context = CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output=None),
+            mixed_audio_doc_input=False,
+        )
+
+        ids = {
+            issue
+            for issue in render_critic_issues(context)
+            if "uses_previous_fields" in issue
+        }
+        assert ids == set()
+
+    def test_render_critic_issues_silent_when_final_uses_previous_step(
+        self,
+    ) -> None:
+        """The compliant shape: `previous_step` + an underlag template
+        that references prior structured fields. The invariant is the
+        nudge toward this; once adopted it must stay silent."""
+
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+            render_critic_issues,
+        )
+        from intric.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Selektiv sammansättning",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extrahera",
+                    "Extrahera fakta.",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"summary": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Skriv rapport",
+                    "Skriv en kort rapport.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+        context = CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output=None),
+            mixed_audio_doc_input=False,
+        )
+
+        ids = {
+            issue
+            for issue in render_critic_issues(context)
+            if "uses_previous_fields" in issue
+        }
+        assert ids == set()
+
+
 class TestCriticInvariantRegistry:
     """The flat `CRITIC_INVARIANTS` tuple is the sole public registry.
 
@@ -1554,6 +1915,7 @@ class TestCriticInvariantRegistry:
             "multi_document_compare_requires_all_previous_steps",
             "mcp_selection_requires_semantic_support",
             "json_input_rejects_all_previous_steps_source",
+            "prefer_targeted_underlag_over_all_previous_steps",
             "template_fill_docx_requires_template_fill_step",
             "generated_docx_rejects_template_fill",
             "mixed_audio_doc_rejects_file_degradation",

@@ -47,6 +47,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     InputType,
     OutputMode,
     OutputType,
+    StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     PlannerPatternSignals,
@@ -724,6 +725,88 @@ _JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE = CriticInvariant(
 )
 
 
+# ── Targeted underlag preferred over all_previous_steps ─────────────────
+
+
+_TARGETED_UNDERLAG_SOFT_CAP = 6
+
+
+def _spec_prior_content_steps(spec: FlowDraftSpecCore) -> list[StepSpec]:
+    """Steps preceding the terminal step that contribute composable content.
+
+    Skips template-fill renderers and DOCX/PDF-typed renders — those
+    are document assembly stubs, not content steps a stitch step would
+    reference by field path.
+    """
+    return [
+        step
+        for step in spec.steps[:-1]
+        if step.output_mode != OutputMode.TEMPLATE_FILL
+        and step.output_type not in {OutputType.DOCX, OutputType.PDF}
+    ]
+
+
+def _prefer_targeted_underlag_over_all_previous_steps_evidence(
+    context: CriticContext,
+) -> bool:
+    """Fire when a text-typed terminal step reads
+    `input_source=all_previous_steps` while ≥1 prior content step
+    emits structured JSON the terminal could reference selectively.
+
+    Suppression cases:
+    - aggregation_intent in {aggregate, compare}: the multi-document
+      compare invariant already requires `all_previous_steps`.
+    - >`_TARGETED_UNDERLAG_SOFT_CAP` prior content steps: an explicit
+      underlag template grows past the point where it is more legible
+      than concatenation.
+    - All priors are text-typed: there are no structured fields to
+      reference — `all_previous_steps` is the only composition.
+    """
+    spec = context.spec
+    if context.aggregation_intent in {"aggregate", "compare"}:
+        return False
+    if len(spec.steps) < 2:
+        return False
+    terminal = spec.steps[-1]
+    if terminal.input_source != InputSource.ALL_PREVIOUS_STEPS:
+        return False
+    if terminal.input_type != InputType.TEXT:
+        return False
+    priors = _spec_prior_content_steps(spec)
+    if not priors or len(priors) > _TARGETED_UNDERLAG_SOFT_CAP:
+        return False
+    return any(
+        step.output_type == OutputType.JSON and step.output_contract is not None
+        for step in priors
+    )
+
+
+_PREFER_TARGETED_UNDERLAG_OVER_ALL_PREVIOUS_STEPS = CriticInvariant(
+    id="prefer_targeted_underlag_over_all_previous_steps",
+    kind="semantic",
+    description=(
+        "When the terminal text step reads `all_previous_steps` but at least "
+        "one prior content step emits a structured JSON output_contract, the "
+        "spec should switch to `previous_step` and compose its underlag from "
+        "explicit `uses_previous_fields` references. `all_previous_steps` "
+        "concatenates every prior body text, scaling tokens monotonically with "
+        "step count; targeted underlag scopes input to the fields the terminal "
+        "actually consumes."
+    ),
+    evidence=_prefer_targeted_underlag_over_all_previous_steps_evidence,
+    remediation=(
+        'Det sista steget har `input_source="all_previous_steps"` trots att tidigare steg producerar '
+        "strukturerad JSON. Det betyder att hela texten från alla tidigare steg sammanfogas och skickas "
+        "in — token-kostnaden växer linjärt med antalet steg, även om det avslutande steget egentligen "
+        "bara behöver några specifika fält. Byt till "
+        '`input_source="previous_step"` och bygg underlaget explicit: deklarera '
+        "`uses_previous_fields` för de fält som steget faktiskt läser och referera dem i "
+        "`input_bindings.question` via `{{ step_<ref>.output.structured.<fält> }}`. Då scopas "
+        "underlaget till det avslutande stegets verkliga behov utan att förlora sammanhang."
+    ),
+)
+
+
 # ── DOCX output-mode alignment ───────────────────────────────────────────
 
 
@@ -870,6 +953,7 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _MULTI_DOCUMENT_COMPARE_REQUIRES_ALL_PREVIOUS_STEPS,
     _MCP_SELECTION_REQUIRES_SEMANTIC_SUPPORT,
     _JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE,
+    _PREFER_TARGETED_UNDERLAG_OVER_ALL_PREVIOUS_STEPS,
     _TEMPLATE_FILL_DOCX_REQUIRES_TEMPLATE_FILL_STEP,
     _GENERATED_DOCX_REJECTS_TEMPLATE_FILL,
     _MIXED_AUDIO_DOC_REJECTS_FILE_DEGRADATION,
