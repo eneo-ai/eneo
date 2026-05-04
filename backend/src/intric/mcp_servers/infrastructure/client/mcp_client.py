@@ -355,9 +355,12 @@ class MCPClient:
     async def disconnect(self) -> None:
         """Disconnect from the MCP server.
 
-        Note: Due to anyio's task boundary restrictions, cleanup may fail if
-        disconnect is called from a different task than connect. In this case,
-        we just clear references and let GC handle cleanup.
+        Must run on the same asyncio.Task that called connect(). The MCP SDK's
+        streamablehttp_client uses anyio cancel scopes bound to the entering
+        task; calling __aexit__ from a different task fails the task-boundary
+        check and leaks the internal anyio TaskGroup's child tasks (the
+        persistent HTTP read/write loops). We log this case explicitly so
+        leaks are visible rather than disguised as a slow CPU climb.
         """
         # Clear session first
         session_ctx = self._session_context
@@ -367,18 +370,34 @@ class MCPClient:
         streams_ctx = self._streams_context
         self._streams_context = None
 
-        # Try to properly close contexts, but don't fail if task boundary issues
+        cleanup_errors: list[BaseException] = []
+
         try:
             if session_ctx:
                 await session_ctx.__aexit__(None, None, None)
-        except BaseException:
-            pass  # Task boundary issue or cleanup error - GC will handle
+        except BaseException as e:
+            cleanup_errors.append(e)
 
         try:
             if streams_ctx:
                 await streams_ctx.__aexit__(None, None, None)
-        except BaseException:
-            pass  # Task boundary issue or cleanup error - GC will handle
+        except BaseException as e:
+            cleanup_errors.append(e)
+
+        for err in cleanup_errors:
+            msg = str(err).lower()
+            if "cancel scope" in msg or "different task" in msg:
+                logger.error(
+                    "MCP cleanup task-boundary error for %s: %s. This leaks the "
+                    "streamablehttp_client TaskGroup; ensure connect() and "
+                    "disconnect() run on the same asyncio.Task.",
+                    self.mcp_server.name,
+                    err,
+                )
+            else:
+                logger.warning(
+                    "MCP cleanup error for %s: %s", self.mcp_server.name, err
+                )
 
         logger.debug(f"Disconnected from MCP server: {self.mcp_server.name}")
 

@@ -101,6 +101,8 @@
   // Model info from capabilities API
   interface ModelInfo {
     name: string;
+    display_name?: string;
+    mode?: string;
     max_input_tokens?: number;
     max_output_tokens?: number;
     supports_vision?: boolean;
@@ -124,50 +126,93 @@
     return limit.toString();
   }
 
-  // Providers that need live model listing from their API (not LiteLLM static data)
-  const liveListProviders = new Set(["vllm"]);
-
-  // Providers where LiteLLM names don't match user input (e.g. Azure uses deployment names)
+  // Providers where neither live listing nor the static catalog can produce
+  // useful suggestions — Azure uses deployment names that vary per tenant.
   const noSuggestionsProviders = new Set(["azure"]);
 
-  // Live models fetched from the provider's own API
+  // Live models fetched from the provider's own API, enriched server-side
+  // with capability metadata from litellm.model_cost. The backend short-
+  // circuits to an empty list for providers that don't expose /v1/models, so
+  // we always try live first and fall back to the static LiteLLM catalog
+  // when the response is empty. The backend also filters by mode, so the
+  // payload we receive contains only models for the current tab — adding a
+  // new live-list provider is a backend-only change (extend
+  // `_DEFAULT_ENDPOINTS` or `_auth_headers_for`).
+  type ApiMode = "completion" | "embedding" | "transcription";
   let liveModels: ModelInfo[] = [];
-  let liveModelsLoaded = false;
   let liveModelsError = "";
-  async function loadLiveModels() {
-    if (!providerId || liveModelsLoaded) return;
+  // Cache key includes mode so switching wizard tabs refetches only the
+  // first time the user lands on that tab.
+  let liveLoadedFor: { providerId: string; mode: ApiMode } | null = null;
+
+  async function loadLiveModels(forProviderId: string, forMode: ApiMode) {
+    if (
+      liveLoadedFor &&
+      liveLoadedFor.providerId === forProviderId &&
+      liveLoadedFor.mode === forMode
+    )
+      return;
+    // Reset state so a previous provider/mode's models don't bleed through.
+    liveModels = [];
     liveModelsError = "";
+    liveLoadedFor = { providerId: forProviderId, mode: forMode };
+
     try {
       const result = (await intric.modelProviders.listModels({
-        id: providerId
+        id: forProviderId,
+        mode: forMode
       })) as unknown as Record<string, unknown>[];
+      // The user may have switched provider/mode while we were waiting;
+      // a newer fetch has already taken over — drop this stale response.
       if (
-        result &&
+        !liveLoadedFor ||
+        liveLoadedFor.providerId !== forProviderId ||
+        liveLoadedFor.mode !== forMode
+      )
+        return;
+
+      if (
         Array.isArray(result) &&
         result.length > 0 &&
         (result[0] as Record<string, unknown>)?.error
       ) {
         liveModelsError = (result[0] as Record<string, unknown>).error as string;
-      } else if (result && Array.isArray(result)) {
+      } else if (Array.isArray(result)) {
         liveModels = result.map((item: Record<string, unknown>) => ({
-          name: item.model ? `${item.name} (${item.model})` : String(item.name),
-          max_input_tokens: undefined,
-          max_output_tokens: undefined,
-          supports_vision: false,
-          supports_reasoning: false
+          name: String(item.name),
+          display_name: item.display_name != null ? String(item.display_name) : undefined,
+          mode: item.mode != null ? String(item.mode) : undefined,
+          max_input_tokens: item.max_input_tokens as number | undefined,
+          max_output_tokens: item.max_output_tokens as number | undefined,
+          supports_vision: (item.supports_vision as boolean | undefined) ?? false,
+          supports_function_calling:
+            (item.supports_function_calling as boolean | undefined) ?? false,
+          supports_reasoning: (item.supports_reasoning as boolean | undefined) ?? false,
+          output_vector_size: item.output_vector_size as number | undefined
         }));
       }
     } catch {
-      liveModelsError = "Could not fetch models from provider";
+      if (
+        liveLoadedFor &&
+        liveLoadedFor.providerId === forProviderId &&
+        liveLoadedFor.mode === forMode
+      ) {
+        liveModelsError = "Could not fetch models from provider";
+      }
     }
-    liveModelsLoaded = true;
   }
-  $: if (liveListProviders.has(providerType) && providerId) loadLiveModels();
+  $: if (providerId && !noSuggestionsProviders.has(providerType))
+    loadLiveModels(providerId, modeMap[modelType] as ApiMode);
 
-  // All models: live from provider API, static from LiteLLM, or none for Azure
+  // Treat the provider as "live-listing capable" iff the backend actually
+  // returned models. Empty live result → fall back to static catalog.
+  $: hasLiveModels = liveModels.length > 0;
+
+  // The backend already filters by mode so we don't filter again here.
+  // Azure stays empty; otherwise live (when supported) or static catalog.
   $: allModels = noSuggestionsProviders.has(providerType)
     ? []
-    : liveListProviders.has(providerType)
+    : hasLiveModels
       ? liveModels
       : ((capabilityProviders[providerType]?.models?.[modeMap[modelType]] ?? []) as ModelInfo[]);
 
@@ -192,12 +237,17 @@
   let showAllModels = false;
   let modelSearch = "";
   $: filteredModels = modelSearch
-    ? allModels.filter((m) => m.name.toLowerCase().includes(modelSearch.toLowerCase()))
+    ? allModels.filter((m) => {
+        const q = modelSearch.toLowerCase();
+        return (
+          m.name.toLowerCase().includes(q) || (m.display_name?.toLowerCase().includes(q) ?? false)
+        );
+      })
     : allModels;
 
   function selectModelInfo(info: ModelInfo) {
     currentModel.name = info.name;
-    currentModel.displayName = info.name;
+    currentModel.displayName = info.display_name ?? info.name;
     if (modelType === "completion") {
       currentModel.maxInputTokensStr =
         info.max_input_tokens != null ? String(info.max_input_tokens) : "";
@@ -429,8 +479,9 @@
               : 'border-dimmer hover:border-accent-default hover:bg-accent-dimmer'}
               focus-visible:ring-accent-default/60 focus-visible:ring-offset-surface focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
             on:click={() => selectModelInfo(suggestion)}
+            title={suggestion.display_name ? suggestion.name : undefined}
           >
-            {suggestion.name}
+            {suggestion.display_name ?? suggestion.name}
           </button>
         {/each}
         {#if allModels.length > 4}
@@ -474,7 +525,10 @@
                   showAllModels = false;
                 }}
               >
-                <span class="font-medium">{model.name}</span>
+                <span class="font-medium">{model.display_name ?? model.name}</span>
+                {#if model.display_name && model.display_name !== model.name}
+                  <span class="text-muted mt-0.5 block font-mono text-xs">{model.name}</span>
+                {/if}
                 <span class="text-muted mt-0.5 flex gap-3 text-xs">
                   {#if model.max_input_tokens}
                     <span>{formatTokens(model.max_input_tokens)} context</span>

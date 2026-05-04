@@ -100,15 +100,26 @@ export function initModelProviders(client) {
     },
 
     /**
-     * List available models/deployments from the provider's own API.
-     * @param {{id: string}} provider
+     * List available models from the provider's own API.
+     *
+     * Pass ``mode`` to have the server filter the response — preferred over
+     * filtering client-side so consumers (frontend pickers, external API
+     * clients) get only what they need.
+     *
+     * @param {{id: string, mode?: "completion" | "embedding" | "transcription"}} args
      * @returns {Promise<any>}
      * @throws {IntricError}
      * */
-    listModels: async ({ id }) => {
+    listModels: async ({ id, mode }) => {
       const res = await client.fetch("/api/v1/admin/model-providers/{provider_id}/models/", {
         method: "get",
-        params: { path: { provider_id: id } }
+        params: {
+          path: { provider_id: id },
+          // @ts-expect-error — `mode` is a new optional query param; this
+          // typing relaxation can be removed once schema.d.ts is regenerated
+          // from the backend's openapi.json (run `node update.js`).
+          query: mode ? { mode } : undefined
+        }
       });
 
       return res;

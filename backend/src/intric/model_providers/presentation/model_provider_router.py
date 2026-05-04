@@ -1,10 +1,10 @@
 import re
 from collections import defaultdict
 from datetime import date
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from typing_extensions import TypedDict
 
 from intric.authentication.auth_dependencies import get_current_active_user
@@ -383,9 +383,20 @@ async def update_provider(
 async def list_provider_models(
     provider_id: UUID,
     service: ServiceDep,
+    mode: Annotated[
+        Literal["completion", "embedding", "transcription"] | None,
+        Query(description="Filter response to a single mode."),
+    ] = None,
 ) -> list[dict[str, Any]]:
-    """List available models/deployments from the provider's API using its credentials."""
-    return await service.list_available_models(provider_id)
+    """List available models from the provider's API using its credentials.
+
+    Each entry has at least ``name`` and ``mode``. Completion entries also
+    include ``max_input_tokens``, ``max_output_tokens`` and ``supports_*``
+    flags; embedding entries include ``max_input_tokens`` and
+    ``output_vector_size``. When ``mode`` is supplied the server returns
+    only matching entries — consumers don't need to filter client-side.
+    """
+    return await service.list_available_models(provider_id, mode=mode)
 
 
 @router.post(

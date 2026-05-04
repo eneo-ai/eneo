@@ -181,6 +181,10 @@ class AppFactory:
             File.model_validate(attachment.file) for attachment in app_in_db.attachments
         ]
         model_kwargs = self._create_model_kwargs(completion_model_kwargs)
+        if model_kwargs is not None and completion_model is not None:
+            model_kwargs = model_kwargs.filter_unsupported(
+                completion_model.supported_model_kwargs
+            )
 
         source_template = (
             self.app_template_factory.create_app_template(app_in_db.template)
@@ -258,6 +262,10 @@ class AppFactory:
             ),
             None,
         )
+        if model_kwargs is not None and completion_model is not None:
+            model_kwargs = model_kwargs.filter_unsupported(
+                completion_model.get_supported_model_kwargs()
+            )
 
         transcription_model = next(
             (

@@ -308,6 +308,29 @@ class ModelKwargs(BaseModel):
     frequency_penalty: Optional[float] = None
     top_k: Optional[int] = None
 
+    def filter_unsupported(self, supported: SupportedModelKwargs) -> "ModelKwargs":
+        # Strip stored values whose capability is currently disabled so a kwarg
+        # saved while the capability was enabled (e.g. reasoning_effort on a
+        # model whose reasoning flag was later turned off) does not leak to the
+        # provider. response_format is intentionally unmanaged here — it is not
+        # a SupportedModelKwargs field.
+        updates: dict[str, None] = {}
+        for field_name in (
+            "temperature",
+            "top_p",
+            "reasoning_effort",
+            "verbosity",
+            "presence_penalty",
+            "frequency_penalty",
+            "top_k",
+        ):
+            capability = getattr(supported, field_name)
+            if not capability.supported and getattr(self, field_name) is not None:
+                updates[field_name] = None
+        if not updates:
+            return self
+        return self.model_copy(update=updates)
+
 
 class CompletionModelSparse(CompletionModelBase, InDB):
     provider_type: Optional[str] = None

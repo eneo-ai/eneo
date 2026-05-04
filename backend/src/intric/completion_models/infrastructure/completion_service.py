@@ -305,11 +305,20 @@ class CompletionService:
             # Two-phase streaming pattern:
             # Phase 1: Create stream connection BEFORE returning (can raise exceptions)
             # This happens eagerly, so exceptions propagate before HTTP response starts
-            stream_obj = await model_adapter.prepare_streaming(
-                context=context,
-                model_kwargs=model_kwargs,
-                mcp_proxy=mcp_proxy,
-            )
+            try:
+                stream_obj = await model_adapter.prepare_streaming(
+                    context=context,
+                    model_kwargs=model_kwargs,
+                    mcp_proxy=mcp_proxy,
+                )
+            except BaseException:
+                # If stream prep fails, close the proxy here — the streaming_wrapper's
+                # finally block won't run because the generator is never reached.
+                # Without this, leaked MCP connections accumulate anyio task-group
+                # background tasks and creep CPU toward 100% over the worker's lifetime.
+                if mcp_proxy:
+                    await mcp_proxy.close()
+                raise
 
             # Phase 2: Create generator that iterates the pre-created stream
             # This generator yields error events for mid-stream failures
