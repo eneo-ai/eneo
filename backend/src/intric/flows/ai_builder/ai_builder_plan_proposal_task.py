@@ -16,6 +16,10 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
 from intric.flows.ai_builder.ai_builder_mcp_resources import (
     AIBuilderMCPResourceInput,
 )
+from intric.flows.ai_builder.ai_builder_requirements_state import (
+    user_relevant_requirement_notes,
+    user_relevant_requirement_text,
+)
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceReferenceMaterial,
     build_ai_builder_resource_catalog,
@@ -72,6 +76,7 @@ def build_plan_proposal_system_prompt(
         "Design rules:",
         "- Use a short human-readable `flow_name` with words and spaces; never copy internal pattern ids, capability ids, or snake_case tokens into the name.",
         "- Use as many steps as the requested workflow needs, up to the tool schema limit.",
+        "- Direct text transformations such as translation, rewriting, correction, shortening, or summarizing a supplied snippet default to one text step; add JSON, review, form fields, or extra steps only when the user explicitly asks for them.",
         "- Prefer a clear multi-step flow for complex work instead of one overloaded step.",
         "- Use JSON output fields when later steps need specific structured facts.",
         "- Describe each step's semantic work; the backend derives runtime uploads and final output mechanics from the committed architecture.",
@@ -146,8 +151,9 @@ def _confirmed_requirements_block(
         "output_description",
     ):
         value = confirmed_requirements.get(key)
-        if isinstance(value, str) and value.strip():
-            lines.append(f"- {key}: {value.strip()}")
+        if isinstance(value, str):
+            if relevant_value := user_relevant_requirement_text(value):
+                lines.append(f"- {key}: {relevant_value}")
 
     key_decisions = confirmed_requirements.get("key_decisions")
     if isinstance(key_decisions, list) and key_decisions:
@@ -163,10 +169,14 @@ def _confirmed_requirements_block(
 
     assumptions = confirmed_requirements.get("assumptions")
     if isinstance(assumptions, list) and assumptions:
-        lines.append("- assumptions:")
-        for assumption in cast(list[Any], assumptions):
-            if isinstance(assumption, str) and assumption.strip():
-                lines.append(f"  - {assumption.strip()}")
+        relevant_assumptions = user_relevant_requirement_notes(
+            assumption
+            for assumption in cast(list[Any], assumptions)
+            if isinstance(assumption, str)
+        )
+        if relevant_assumptions:
+            lines.append("- assumptions:")
+            lines.extend(f"  - {assumption}" for assumption in relevant_assumptions)
 
     return "\n".join(lines) if lines else "- none"
 

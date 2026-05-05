@@ -25,6 +25,18 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     PlannerOutput,
     PlanningStateDelta,
 )
+from intric.flows.ai_builder.ai_builder_requirements_state import (
+    DEFAULT_FINAL_OUTPUT_NEEDS_REVIEW_EN,
+    DEFAULT_FINAL_OUTPUT_NEEDS_REVIEW_SV,
+    DEFAULT_PLAN_FOLLOWS_REQUIREMENTS_EN,
+    DEFAULT_PLAN_FOLLOWS_REQUIREMENTS_SV,
+    DEFAULT_REQUIREMENTS_SUMMARY_EN,
+    DEFAULT_REQUIREMENTS_SUMMARY_SV,
+    DEFAULT_RUNTIME_INPUT_NEEDS_REVIEW_EN,
+    DEFAULT_RUNTIME_INPUT_NEEDS_REVIEW_SV,
+    DEFAULT_USER_REVIEWS_PLAN_EN,
+    DEFAULT_USER_REVIEWS_PLAN_SV,
+)
 from intric.flows.ai_builder.planning_state import PlanningState
 from intric.flows.ai_builder.question_catalog import Locale, render_question
 
@@ -205,15 +217,8 @@ def _summary_text(
         return summary
 
     if locale == "sv":
-        return (
-            "Jag har tillräckligt med information för att ta fram ett "
-            "förslag till flödesplan. Granska sammanfattningen innan planen "
-            "byggs."
-        )
-    return (
-        "I have enough information to draft a flow plan. Review this "
-        "summary before the plan is built."
-    )
+        return DEFAULT_REQUIREMENTS_SUMMARY_SV
+    return DEFAULT_REQUIREMENTS_SUMMARY_EN
 
 
 def _input_description(
@@ -226,12 +231,12 @@ def _input_description(
         return (
             f"Primär indata vid körning: {rendered_value}."
             if value
-            else "Primär indata vid körning behöver granskas."
+            else DEFAULT_RUNTIME_INPUT_NEEDS_REVIEW_SV
         )
     return (
         f"Primary runtime input: {rendered_value}."
         if value
-        else "Primary runtime input needs review."
+        else DEFAULT_RUNTIME_INPUT_NEEDS_REVIEW_EN
     )
 
 
@@ -245,24 +250,24 @@ def _output_description(
         return (
             f"Huvudsakligt slutresultat: {rendered_value}."
             if value
-            else "Huvudsakligt slutresultat behöver granskas."
+            else DEFAULT_FINAL_OUTPUT_NEEDS_REVIEW_SV
         )
     return (
         f"Primary final output: {rendered_value}."
         if value
-        else "Primary final output needs review."
+        else DEFAULT_FINAL_OUTPUT_NEEDS_REVIEW_EN
     )
 
 
 def _assumptions(locale: Locale) -> list[str]:
     if locale == "sv":
         return [
-            "Planen ska följa kraven och underlaget i konversationen.",
-            "Användaren ska kunna granska och ändra planen innan den tillämpas.",
+            DEFAULT_PLAN_FOLLOWS_REQUIREMENTS_SV,
+            DEFAULT_USER_REVIEWS_PLAN_SV,
         ]
     return [
-        "The plan should follow the requirements and source material in the conversation.",
-        "The user can review and change the plan before it is applied.",
+        DEFAULT_PLAN_FOLLOWS_REQUIREMENTS_EN,
+        DEFAULT_USER_REVIEWS_PLAN_EN,
     ]
 
 

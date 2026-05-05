@@ -682,6 +682,46 @@ _MULTI_DOCUMENT_COMPARE_REQUIRES_ALL_PREVIOUS_STEPS = CriticInvariant(
 )
 
 
+# ── Simple text transform restraint ──────────────────────────────────────
+
+
+def _simple_text_transform_must_remain_single_step_evidence(
+    context: CriticContext,
+) -> bool:
+    if not context.planner_patterns.is_simple_text_transform:
+        return False
+    if context.spec.form_fields:
+        return False
+    return not _spec_is_single_text_transform_step(context.spec)
+
+
+def _spec_is_single_text_transform_step(spec: FlowDraftSpecCore) -> bool:
+    if len(spec.steps) != 1:
+        return False
+    step = spec.steps[0]
+    return (
+        step.input_type == InputType.TEXT
+        and step.output_type == OutputType.TEXT
+        and step.output_mode == OutputMode.PASS_THROUGH
+        and step.output_contract is None
+    )
+
+
+_SIMPLE_TEXT_TRANSFORM_MUST_REMAIN_SINGLE_STEP = CriticInvariant(
+    id="simple_text_transform_must_remain_single_step",
+    kind="semantic",
+    description=(
+        "A direct text-to-text transform must not add unrequested JSON, "
+        "review, artifact, or multi-step structure."
+    ),
+    evidence=_simple_text_transform_must_remain_single_step_evidence,
+    remediation=(
+        "Användaren ber om en direkt textomvandling utan filer, extra fält, JSON eller granskning. "
+        "Planen ska därför vara ett enda text-till-text-steg om användaren inte uttryckligen ber om fler steg."
+    ),
+)
+
+
 # ── MCP resource alignment ───────────────────────────────────────────────
 
 
@@ -1309,6 +1349,7 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _STANDALONE_AUDIO_REQUIRES_TRANSCRIPTION_STEP,
     _FIELD_REUSE_REQUIRES_INPUT_BINDINGS,
     _MULTI_DOCUMENT_COMPARE_REQUIRES_ALL_PREVIOUS_STEPS,
+    _SIMPLE_TEXT_TRANSFORM_MUST_REMAIN_SINGLE_STEP,
     _MCP_SELECTION_REQUIRES_SEMANTIC_SUPPORT,
     _JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE,
     _PREFER_TARGETED_UNDERLAG_OVER_ALL_PREVIOUS_STEPS,

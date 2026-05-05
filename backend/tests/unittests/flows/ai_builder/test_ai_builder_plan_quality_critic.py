@@ -54,6 +54,7 @@ EXPECTED_CRITIC_INVARIANT_KINDS = {
     "standalone_audio_requires_transcription_step": "architecture",
     "field_reuse_requires_input_bindings": "semantic",
     "multi_document_compare_requires_all_previous_steps": "architecture",
+    "simple_text_transform_must_remain_single_step": "semantic",
     "mcp_selection_requires_semantic_support": "semantic",
     "json_input_rejects_all_previous_steps_source": "architecture",
     "prefer_targeted_underlag_over_all_previous_steps": "semantic",
@@ -647,6 +648,183 @@ def test_does_not_overstructure_simple_single_step_summary() -> None:
     )
 
     assert build_conversation_aware_quality_feedback(conversation, spec) is None
+
+
+def test_flags_direct_text_transform_with_unrequested_json_and_steps() -> None:
+    conversation = [
+        {
+            "role": "user",
+            "content": "Översätt den här meningen till engelska: Vi ses imorgon.",
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Översättning",
+        steps=[
+            _step(
+                "step_a",
+                "Analysera språk",
+                "Identifiera språk och ton.",
+                output_type=OutputType.JSON,
+                output_contract={"type": "object", "properties": {}},
+            ),
+            _step(
+                "step_b",
+                "Översätt",
+                "Översätt till engelska.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+            ),
+        ],
+    )
+
+    issues = evaluate_critic_invariants(
+        build_conversation_critic_context(conversation, spec)
+    )
+
+    assert [
+        issue.id
+        for issue in issues
+        if issue.id == "simple_text_transform_must_remain_single_step"
+    ] == ["simple_text_transform_must_remain_single_step"]
+
+
+def test_direct_text_transform_accepts_single_text_step() -> None:
+    conversation = [
+        {
+            "role": "user",
+            "content": "Translate this sentence to English: Vi ses imorgon.",
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Translate sentence",
+        steps=[_step("step_a", "Translate", "Translate the supplied text to English.")],
+    )
+
+    assert build_conversation_aware_quality_feedback(conversation, spec) is None
+
+
+def test_direct_text_transform_restraint_does_not_collapse_quality_chain() -> None:
+    conversation = [
+        {
+            "role": "user",
+            "content": (
+                "Translate the paragraph, let a separate critique step review "
+                "clarity, and write a final version using the critique."
+            ),
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Reviewed translation",
+        steps=[
+            _step("step_a", "Translate", "Translate the paragraph."),
+            _step(
+                "step_b",
+                "Critique",
+                "Review clarity and factuality.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+            _step(
+                "step_c",
+                "Final version",
+                "Revise using the critique.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ],
+    )
+
+    issues = evaluate_critic_invariants(
+        build_conversation_critic_context(conversation, spec)
+    )
+
+    assert not any(
+        issue.id == "simple_text_transform_must_remain_single_step" for issue in issues
+    )
+
+
+def test_direct_text_transform_restraint_ignores_form_field_driven_transform() -> None:
+    conversation = [
+        {
+            "role": "user",
+            "content": "Translate the text provided in the runtime input field target_text.",
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Translate runtime text",
+        form_fields=[
+            FormFieldSpec(
+                name="target_text",
+                label="Target text",
+                type="text",
+            )
+        ],
+        steps=[_step("step_a", "Translate", "Translate the target_text value.")],
+    )
+
+    issues = evaluate_critic_invariants(
+        build_conversation_critic_context(conversation, spec)
+    )
+
+    assert not any(
+        issue.id == "simple_text_transform_must_remain_single_step" for issue in issues
+    )
+
+
+def test_direct_text_transform_restraint_applies_in_edit_context() -> None:
+    from uuid import uuid4
+
+    from intric.flows.flow import Flow, FlowStep
+
+    flow = Flow(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        name="Translate text",
+        steps=[
+            FlowStep(
+                assistant_id=uuid4(),
+                step_order=1,
+                user_description="Translate text",
+                input_source="flow_input",
+                input_type="text",
+                output_mode="pass_through",
+                output_type="text",
+                mcp_policy="inherit",
+            )
+        ],
+    )
+    conversation = [
+        {
+            "role": "user",
+            "content": "Ändra flödet så att det översätter meningen till franska.",
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Translate text",
+        steps=[
+            _step(
+                "step_a",
+                "Analysera språk",
+                "Identifiera språk innan översättning.",
+                output_type=OutputType.JSON,
+                output_contract={"type": "object", "properties": {}},
+            ),
+            _step(
+                "step_b",
+                "Translate",
+                "Translate to French.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+            ),
+        ],
+    )
+
+    issues = evaluate_critic_invariants(
+        build_conversation_critic_context(conversation, spec, flow=flow)
+    )
+
+    assert any(
+        issue.id == "simple_text_transform_must_remain_single_step" for issue in issues
+    )
 
 
 def test_flags_edit_plan_that_fakes_audio_transcription_by_downgrading_to_generic_file() -> (
@@ -3285,6 +3463,7 @@ class TestCriticInvariantRegistry:
             "standalone_audio_requires_transcription_step",
             "field_reuse_requires_input_bindings",
             "multi_document_compare_requires_all_previous_steps",
+            "simple_text_transform_must_remain_single_step",
             "mcp_selection_requires_semantic_support",
             "json_input_rejects_all_previous_steps_source",
             "prefer_targeted_underlag_over_all_previous_steps",

@@ -115,6 +115,46 @@ def test_plan_proposal_prompt_identifies_runtime_metadata_as_compiler_policy():
     assert "clearly ask for runtime metadata" in prompt
 
 
+def test_plan_proposal_prompt_teaches_direct_text_transform_restraint():
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=PlanningState.empty(),
+        confirmed_requirements={
+            "summary": "Översätt en kort mening till engelska.",
+        },
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+    )
+
+    assert "Direct text transformations" in prompt
+    assert "default to one text step" in prompt
+    assert "only when the user explicitly asks" in prompt
+
+
+def test_plan_proposal_prompt_omits_confirmed_requirement_boilerplate():
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=PlanningState.empty(),
+        confirmed_requirements={
+            "summary": "Översätt en kort svensk text till engelska.",
+            "input_description": "Primär indata vid körning behöver granskas.",
+            "output_description": "Huvudsakligt slutresultat behöver granskas.",
+            "assumptions": [
+                "Planen ska följa kraven och underlaget i konversationen.",
+                "Användaren ska kunna granska och ändra planen innan den tillämpas.",
+                "Inga extra fält.",
+            ],
+        },
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+    )
+
+    assert "- summary: Översätt en kort svensk text till engelska." in prompt
+    assert "behöver granskas" not in prompt
+    assert "Användaren ska kunna granska" not in prompt
+    assert "Inga extra fält." in prompt
+
+
 def test_plan_proposal_prompt_scopes_audio_transcription_to_backend():
     prompt = build_plan_proposal_system_prompt(
         planning_state=PlanningState.empty(),

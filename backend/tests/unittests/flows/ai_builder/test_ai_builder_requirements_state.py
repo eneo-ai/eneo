@@ -16,6 +16,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     RequirementsSummaryPayload,
 )
 from intric.flows.ai_builder.ai_builder_requirements_state import (
+    build_confirmed_requirements_prompt_block,
     build_requirements_version,
     resolve_requirements_state,
 )
@@ -144,3 +145,59 @@ class TestResolveRequirementsStateFromAssistantMetadata:
 
         assert state.latest_summary is not None
         assert state.confirmed is False
+
+    def test_confirmed_requirements_prompt_omits_default_review_boilerplate(
+        self,
+    ) -> None:
+        payload = RequirementsSummaryPayload.model_validate(
+            {
+                "summary": (
+                    "Jag har tillräckligt med information för att ta fram ett "
+                    "förslag till flödesplan. Granska sammanfattningen innan "
+                    "planen byggs."
+                ),
+                "key_decisions": [
+                    {"topic": "Bearbetning", "decision": "Översätt text till text"},
+                ],
+                "input_description": "Primär indata vid körning behöver granskas.",
+                "output_description": "Huvudsakligt slutresultat behöver granskas.",
+                "assumptions": [
+                    "Planen ska följa kraven och underlaget i konversationen.",
+                    "Användaren ska kunna granska och ändra planen innan den tillämpas.",
+                    "Ingen extra metadata ska samlas in vid körning.",
+                ],
+                "manual_setup_notes": [
+                    "The user can review and change the plan before it is applied.",
+                    "Koppla standardmodellen för textsteg.",
+                ],
+            }
+        )
+        version = build_requirements_version(payload)
+        conversation = [
+            ConversationMessage(
+                role="assistant",
+                content="Summary",
+                metadata={
+                    "requirements_summary": payload.model_dump(mode="json"),
+                    "requirements_version": version,
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="Bekräfta",
+                metadata={
+                    "requirements_confirmed": True,
+                    "requirements_version": version,
+                },
+            ),
+        ]
+
+        prompt_block = build_confirmed_requirements_prompt_block(conversation)
+
+        assert prompt_block is not None
+        assert "Granska sammanfattningen innan planen byggs" not in prompt_block
+        assert "Primär indata vid körning behöver granskas" not in prompt_block
+        assert "Huvudsakligt slutresultat behöver granskas" not in prompt_block
+        assert "Användaren ska kunna granska" not in prompt_block
+        assert "Översätt text till text" in prompt_block
+        assert "Koppla standardmodellen för textsteg" in prompt_block

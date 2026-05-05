@@ -765,6 +765,73 @@ tasks:
         - "Replace runtime BadRequestException string parsing and _infer_step_ref_from_message with structured runtime validation errors."
         - "Continue restraint/topology work for N1 and unnecessary clarification work for Q1/C5."
 
+  - id: T015
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Keep direct text-transform prompts as minimal one-step text flows unless the user explicitly asks for JSON, review, form fields, artifacts, or extra steps."
+    allowed_files:
+      - backend/src/intric/flows/ai_builder/ai_builder_create_feedback.py
+      - backend/src/intric/flows/ai_builder/ai_builder_critic_invariants.py
+      - backend/src/intric/flows/ai_builder/ai_builder_framework_policy.py
+      - backend/src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py
+      - backend/src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py
+      - backend/src/intric/flows/ai_builder/ai_builder_requirements_state.py
+      - backend/src/intric/flows/ai_builder/ai_builder_server_actions.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py
+      - backend/tests/unittests/flows/ai_builder/test_discovery_flow.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T015-simple-text-transform-restraint.md
+    verify:
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py -q"
+      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_create_feedback.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py src/intric/flows/ai_builder/ai_builder_requirements_state.py src/intric/flows/ai_builder/ai_builder_server_actions.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_discovery_flow.py"
+      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_create_feedback.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py src/intric/flows/ai_builder/ai_builder_requirements_state.py src/intric/flows/ai_builder/ai_builder_server_actions.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_discovery_flow.py"
+      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_create_feedback.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py src/intric/flows/ai_builder/ai_builder_requirements_state.py src/intric/flows/ai_builder/ai_builder_server_actions.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_discovery_flow.py"
+      - "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --include-supplemental --case N1 --case Q1 --runs 3 --apply --output-dir /tmp/material-efficiency-live-eval/20260506-004653-t015-simple-transform-restraint"
+    stop_if:
+      - "Fix requires N1-specific Swedish prompt wording instead of a direct text-transform rule."
+      - "Fix collapses explicit Q1-style quality chains."
+      - "Boilerplate filtering duplicates emitted requirement strings instead of sharing a canonical source."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T015-simple-text-transform-restraint.md
+      summary: "Direct text-transform prompts now default to one text step through planner guidance, planner pattern signals, and a critic invariant, while confirmed-requirements boilerplate is filtered through shared canonical constants so generic review text does not trigger unnecessary quality chains."
+      canonical_owners:
+        planner_signals: backend/src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py
+        critic_contract: backend/src/intric/flows/ai_builder/ai_builder_critic_invariants.py
+        requirements_boilerplate: backend/src/intric/flows/ai_builder/ai_builder_requirements_state.py
+        requirements_emitter: backend/src/intric/flows/ai_builder/ai_builder_server_actions.py
+      peer_review: "Claude iteration 1 blocked on duplicated boilerplate strings; iteration 2 returned GREEN_LIGHT yes, MIN_SCORE 8 after the constants were made canonical."
+      verification:
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py -q"
+          status: pass
+          output: "241 passed, 1 warning"
+        - cmd: "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_create_feedback.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py src/intric/flows/ai_builder/ai_builder_requirements_state.py src/intric/flows/ai_builder/ai_builder_server_actions.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_discovery_flow.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_create_feedback.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py src/intric/flows/ai_builder/ai_builder_requirements_state.py src/intric/flows/ai_builder/ai_builder_server_actions.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_discovery_flow.py"
+          status: pass
+          output: "All checks passed!"
+        - cmd: "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_create_feedback.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py src/intric/flows/ai_builder/ai_builder_requirements_state.py src/intric/flows/ai_builder/ai_builder_server_actions.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_discovery_flow.py"
+          status: pass
+          output: "14 files already formatted"
+        - cmd: "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --include-supplemental --case N1 --case Q1 --runs 3 --apply --output-dir /tmp/material-efficiency-live-eval/20260506-004653-t015-simple-transform-restraint"
+          status: pass
+          output: "N1 applied 3/3 with exactly one text step in every generated flow; Q1 applied 2/3 with the explicit 3-step quality chain preserved and clarification_required 1/3."
+        - cmd: "manual publish/run for N1 flow 764dcc54-e8fd-4381-a646-b14182777cbd"
+          status: pass
+          output: "Run e0272777-9b25-43ad-aa0e-c35660a8e508 completed in one model step with 46 input tokens, 10 output tokens, and output 'See you at the meeting tomorrow.'"
+      remaining_follow_up:
+        - "C5 still over-clarifies material source even when the prompt says the user records or uploads audio."
+        - "C2/C3 remain flaky in live eval."
+        - "Q1 still had one clarification_required run and a prior runtime run hung on the final revision step."
+
   - id: T999
     type: judge
     assignee: Judge
@@ -805,12 +872,12 @@ checks:
   dirty_fingerprint: unknown
   last_verification:
     result: pass
-    task: T014
+    task: T015
     commands:
-      - "uv run --directory backend pytest tests/unittests/flows/ai_builder -q"
-      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_reference_rewriter.py src/intric/flows/ai_builder/ai_builder_validation_references.py src/intric/flows/ai_builder/ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py"
-      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_reference_rewriter.py src/intric/flows/ai_builder/ai_builder_validation_references.py src/intric/flows/ai_builder/ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py"
-      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_reference_rewriter.py src/intric/flows/ai_builder/ai_builder_validation_references.py src/intric/flows/ai_builder/ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py"
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py -q"
+      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_create_feedback.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py src/intric/flows/ai_builder/ai_builder_requirements_state.py src/intric/flows/ai_builder/ai_builder_server_actions.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py"
+      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_create_feedback.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py src/intric/flows/ai_builder/ai_builder_requirements_state.py src/intric/flows/ai_builder/ai_builder_server_actions.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py"
+      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_create_feedback.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py src/intric/flows/ai_builder/ai_builder_requirements_state.py src/intric/flows/ai_builder/ai_builder_server_actions.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py"
   live_eval:
     result: partial_failures_found
     latest_summaries:
@@ -833,6 +900,8 @@ checks:
       supplemental_after_t014: "/tmp/material-efficiency-live-eval/20260505-235342-user-requested-current-supplemental/summary.json"
       c1_repeat_after_t014_reference_bridge: "/tmp/material-efficiency-live-eval/20260506-000408-t014-c1-reference-bridge/summary.json"
       create_suite_after_t014_reference_bridge_final: "/tmp/material-efficiency-live-eval/20260506-001537-t014-create-suite-reference-bridge-final/summary.json"
+      full_rerun_before_t015: "/tmp/material-efficiency-live-eval/20260506-002802-user-requested-full-rerun/full/summary.json"
+      n1_q1_after_t015: "/tmp/material-efficiency-live-eval/20260506-004653-t015-simple-transform-restraint/summary.json"
     latest_findings:
       - "V2 source-preserving audio-to-DOCX plans applied consistently and published with a valid run contract after T009."
       - "C1 was blocked/unstable before T013: builder_error or no_plan_after_requirements_confirmation."
@@ -852,6 +921,9 @@ checks:
       - "N1 still overbuilds trivial translation into multiple steps; Q1 now asks an unnecessary final-output clarification for a clearly text-only quality-chain prompt."
       - "C3 and N1 showed nondeterministic no_plan_after_requirements_confirmation in targeted reruns."
       - "Manual V2 runtime run uploaded audio and completed transcription, then stayed running at step 2 until cancelled."
+      - "User-requested full rerun before T015: C1 and V2 applied 3/3; N1 applied 3/3 but overbuilt trivial translation into 4-5 steps; C2/C3/Q1 remained flaky; C5 over-clarified material source."
+      - "Post-T015 targeted N1/Q1 rerun: N1 applied 3/3 as exactly one text step; Q1 applied 2/3 with the explicit quality chain preserved and clarification_required 1/3."
+      - "Post-T015 manual N1 runtime run completed in one model step with 46 input tokens and 10 output tokens."
     spaces:
       - "ad300505-5602-47f4-8da1-f0232303cff8"
       - "e9372935-25fb-46a8-9dd0-cc11f7ea2f72"

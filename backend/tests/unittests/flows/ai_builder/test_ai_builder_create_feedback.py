@@ -112,6 +112,26 @@ def test_format_create_critic_feedback_translates_mechanics_to_semantics(
         assert token not in feedback
 
 
+def test_format_create_critic_feedback_translates_simple_text_transform_restraint() -> (
+    None
+):
+    feedback = format_create_critic_feedback(
+        (
+            CriticIssue(
+                id="simple_text_transform_must_remain_single_step",
+                kind="semantic",
+                remediation="Raw remediation.",
+            ),
+        )
+    )
+
+    assert feedback is not None
+    assert "direkt textomvandling" in feedback.casefold()
+    assert "ett enda textsteg" in feedback.casefold()
+    for token in _CREATE_FEEDBACK_MECHANICS_TOKENS:
+        assert token not in feedback
+
+
 def test_create_critic_feedback_covers_every_semantic_invariant() -> None:
     semantic_ids = {
         invariant.id for invariant in CRITIC_INVARIANTS if invariant.kind == "semantic"

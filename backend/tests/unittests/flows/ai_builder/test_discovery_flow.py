@@ -1418,6 +1418,29 @@ class TestExtendedClarificationHints:
 
         assert "final_output_mode" not in question_ids
 
+    def test_text_answer_flow_does_not_reopen_final_output_mode(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Skapa ett enkelt textflöde som skriver ett kort svar på en "
+                    "inkommande fråga, låter ett separat kritiksteg kontrollera "
+                    "tydlighet och saklighet, och skriver en slutversion som "
+                    "använder kritiken. Inga filer och inga inmatningsfält behövs."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "final_output_mode" not in question_ids
+
     def test_contract_heavy_prompt_infers_output_from_detailed_description(
         self,
     ) -> None:

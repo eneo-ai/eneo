@@ -272,6 +272,22 @@ def test_resolve_output_intent_defaults_report_like_prompt_to_structured_text() 
     assert intent.pdf_generation_mode is None
 
 
+def test_resolve_output_intent_defaults_text_answer_flow_to_structured_text() -> None:
+    intent = resolve_output_intent(
+        (
+            "Skapa ett enkelt textflöde som skriver ett kort svar på en "
+            "inkommande fråga, låter ett separat kritiksteg kontrollera "
+            "tydlighet och saklighet, och skriver en slutversion som använder "
+            "kritiken."
+        ),
+        {},
+    )
+
+    assert intent.terminal_output == "structured_text"
+    assert intent.docx_output_mode is None
+    assert intent.pdf_generation_mode is None
+
+
 def test_needs_structured_extraction_for_named_reusable_fields() -> None:
     assert needs_structured_extraction(
         (

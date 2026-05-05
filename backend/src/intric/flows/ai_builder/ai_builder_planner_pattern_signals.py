@@ -6,6 +6,10 @@ from typing import Any, Mapping
 from intric.flows.ai_builder.ai_builder_form_intake_signals import (
     mentions_form_field_needs,
 )
+from intric.flows.ai_builder.ai_builder_requirements_state import (
+    user_relevant_requirement_notes,
+    user_relevant_requirement_text,
+)
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     runtime_input_fields_declared_absent,
 )
@@ -83,6 +87,13 @@ _FORM_COMPLEMENT_MARKERS: tuple[str, ...] = (
     "metadatafält",
     "metadata fields",
 )
+_FORM_FIELD_GUARD_MARKERS: tuple[str, ...] = (
+    "runtime input field",
+    "input field",
+    "form field",
+    "inmatningsfält",
+    "formulärfält",
+)
 _DERIVE_FROM_INPUT_ONLY_MARKERS: tuple[str, ...] = (
     "baserat på transkriptionen",
     "utifrån transkriptionen",
@@ -102,13 +113,36 @@ _DERIVE_FROM_INPUT_ONLY_MARKERS: tuple[str, ...] = (
 _RICH_DOCUMENT_WORKFLOW_SIGNAL = "rich_document_workflow"
 
 
+_DIRECT_TEXT_TRANSFORM_MARKERS: tuple[str, ...] = (
+    "översätt",
+    "oversatt",
+    "translate",
+    "skriv om",
+    "rewrite",
+    "korrigera",
+    "correct this",
+    "rätta",
+    "förkorta",
+    "forkorta",
+    "shorten",
+    "sammanfatta den här",
+    "sammanfatta denna",
+    "summarize this",
+    "summera den här",
+    "summera denna",
+)
+
+
 @dataclass(frozen=True, slots=True)
 class PlannerPatternSignals:
+    """Conversation signals for both structure-seeking and restraint rules."""
+
     needs_form_fields: bool = False
     derive_from_input_only: bool = False
     prefers_structured_intermediate: bool = False
     prefers_quality_step: bool = False
     rich_document_workflow: bool = False
+    is_simple_text_transform: bool = False
 
     def recipe_signals(self) -> set[str]:
         signals: set[str] = set()
@@ -126,13 +160,16 @@ def build_requirements_signal_text(
     parts: list[str] = []
     for key in ("summary", "input_description", "output_description"):
         value = confirmed_requirements.get(key)
-        if isinstance(value, str) and value.strip():
-            parts.append(value.strip())
+        if isinstance(value, str):
+            if relevant_value := user_relevant_requirement_text(value):
+                parts.append(relevant_value)
 
     assumptions: Any = confirmed_requirements.get("assumptions") or []
-    for note in assumptions:
-        if isinstance(note, str) and note.strip():
-            parts.append(note.strip())
+    parts.extend(
+        user_relevant_requirement_notes(
+            note for note in assumptions if isinstance(note, str)
+        )
+    )
 
     key_decisions: Any = confirmed_requirements.get("key_decisions") or []
     for decision in key_decisions:
@@ -147,9 +184,11 @@ def build_requirements_signal_text(
             parts.append(choice.strip())
 
     manual_setup_notes: Any = confirmed_requirements.get("manual_setup_notes") or []
-    for note in manual_setup_notes:
-        if isinstance(note, str) and note.strip():
-            parts.append(note.strip())
+    parts.extend(
+        user_relevant_requirement_notes(
+            note for note in manual_setup_notes if isinstance(note, str)
+        )
+    )
 
     return "\n".join(parts)
 
@@ -177,6 +216,16 @@ def detect_planner_pattern_signals(text: str) -> PlannerPatternSignals:
         mentions_form_field_needs(normalized)
         or _contains_any(normalized, _FORM_COMPLEMENT_MARKERS)
     ) and not derive_from_input_only
+    is_simple_text_transform = (
+        _contains_any(normalized, _DIRECT_TEXT_TRANSFORM_MARKERS)
+        and not document_like_input
+        and not document_like_output
+        and not prefers_structured_intermediate
+        and not prefers_quality_step
+        and not mentions_form_field_needs(normalized)
+        and not _contains_any(normalized, _FORM_COMPLEMENT_MARKERS)
+        and not _contains_any(normalized, _FORM_FIELD_GUARD_MARKERS)
+    )
     rich_document_workflow = (
         document_like_input
         and document_like_output
@@ -190,6 +239,7 @@ def detect_planner_pattern_signals(text: str) -> PlannerPatternSignals:
         prefers_structured_intermediate=prefers_structured_intermediate,
         prefers_quality_step=prefers_quality_step,
         rich_document_workflow=rich_document_workflow,
+        is_simple_text_transform=is_simple_text_transform,
     )
 
 

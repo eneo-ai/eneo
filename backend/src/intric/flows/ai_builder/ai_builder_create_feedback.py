@@ -40,6 +40,9 @@ CREATE_CRITIC_REMEDIATION: dict[str, str] = {
     "form_fields_declared_must_be_referenced": (
         "Koppla varje deklarerat inmatningsfält till minst ett semantiskt steg som faktiskt behöver värdet, eller ta bort fältet från planen."
     ),
+    "simple_text_transform_must_remain_single_step": (
+        "För en direkt textomvandling utan filer, JSON, extra fält eller granskning ska outline-planen innehålla ett enda textsteg som gör omvandlingen."
+    ),
 }
 CREATE_CRITIC_REMEDIATION_PASSTHROUGH_IDS: frozenset[str] = frozenset(
     {"mcp_selection_requires_semantic_support"}

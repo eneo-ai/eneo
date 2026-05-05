@@ -670,11 +670,46 @@ def _resolve_direct_output_choice(
         ),
     ):
         return "structured_text"
+    if _looks_like_text_terminal_output(role_scoped_text or fallback_text):
+        return "structured_text"
     if _looks_like_final_json_output(role_scoped_text or fallback_text):
         return "structured_json"
     if _looks_like_pdf_template_expectation(role_scoped_text or fallback_text):
         return "pdf_document"
     return None
+
+
+def _looks_like_text_terminal_output(text: str) -> bool:
+    if not text:
+        return False
+    if contains_any_phrase(
+        text,
+        (
+            "docx",
+            "word",
+            "pdf",
+            "json",
+            "spreadsheet",
+            "kalkylblad",
+            "excel",
+        ),
+    ):
+        return False
+    return contains_any_phrase(
+        text,
+        (
+            "kort svar",
+            "short answer",
+            "svar på",
+            "answer to",
+            "answer a",
+            "slutversion",
+            "final version",
+            "textresultat",
+            "text output",
+            "text response",
+        ),
+    )
 
 
 def _looks_like_final_json_output(text: str) -> bool:
