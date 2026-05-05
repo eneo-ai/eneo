@@ -9,7 +9,7 @@ updates:
       day: "monday"
       time: "06:00"
       timezone: "Europe/Stockholm"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     labels:
       - "dependencies"
       - "backend"
@@ -32,7 +32,7 @@ updates:
       day: "monday"
       time: "06:30"
       timezone: "Europe/Stockholm"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     labels:
       - "dependencies"
       - "frontend"
@@ -54,7 +54,7 @@ updates:
       day: "monday"
       time: "07:00"
       timezone: "Europe/Stockholm"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     labels:
       - "dependencies"
       - "github-actions"
@@ -73,7 +73,7 @@ updates:
       day: "monday"
       time: "07:30"
       timezone: "Europe/Stockholm"
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
     labels:
       - "dependencies"
       - "docker"
@@ -96,7 +96,7 @@ updates:
       day: "monday"
       time: "07:45"
       timezone: "Europe/Stockholm"
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
     labels:
       - "dependencies"
       - "docker"
@@ -119,7 +119,7 @@ updates:
       day: "monday"
       time: "08:00"
       timezone: "Europe/Stockholm"
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
     labels:
       - "dependencies"
       - "docker"
@@ -142,7 +142,7 @@ updates:
       day: "monday"
       time: "08:15"
       timezone: "Europe/Stockholm"
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
     labels:
       - "dependencies"
       - "devcontainer"
