@@ -33,7 +33,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T007
+active_task: T999
 
 tasks:
   - id: T001
@@ -321,7 +321,7 @@ tasks:
   - id: T007
     type: worker
     assignee: Worker
-    status: active
+    status: blocked
     reasoning_hint: medium
     objective: "Run live V1-V5 and C1-C5 smoke evals across five spaces with scorecard, material-routing metrics, and skipped-step evidence."
     allowed_files:
@@ -336,12 +336,25 @@ tasks:
       - "Local API unavailable."
       - "API key invalid."
       - "SSE endpoint contract differs; record actual response and stop this eval slice."
-    receipt: null
+    receipt:
+      result: blocked
+      note: docs/goals/material-efficiency/notes/T007-live-eval.md
+      summary: "Live smoke passed, but all V1-V5/C1-C5 create eval runs returned no_plan. Advanced cases emitted architecture_committed events but no latest_plan_id or plans, and sessions ended cancelled. Treat as runner/API sequence blocker, not flow-quality evidence."
+      raw_output:
+        smoke_summary: "/tmp/material-efficiency-live-eval/20260505-205343/summary.json"
+        create_summary: "/tmp/material-efficiency-live-eval/20260505-205402/summary.json"
+      verification:
+        - cmd: "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --smoke"
+          status: pass
+          output: "sessions readable; flows endpoint reachable for all five eval spaces"
+        - cmd: "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --all --runs 3 --apply"
+          status: blocked
+          output: "30/30 runs no_plan; no plan IDs or flow IDs produced"
 
   - id: T999
     type: judge
     assignee: Judge
-    status: queued
+    status: active
     reasoning_hint: high
     objective: "Final tranche audit."
     inputs:
