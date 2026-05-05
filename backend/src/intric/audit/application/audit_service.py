@@ -23,11 +23,34 @@ from intric.audit.domain.repositories.audit_log_repository import AuditLogReposi
 from intric.jobs.job_manager import job_manager
 from intric.jobs.job_models import Task
 from intric.jobs.task_models import TaskParams
+from intric.main.request_context import get_request_context
 
 if TYPE_CHECKING:
     from intric.feature_flag.feature_flag_service import FeatureFlagService
 
 logger = logging.getLogger(__name__)
+
+
+def _fill_request_context(
+    ip_address: Optional[str],
+    user_agent: Optional[str],
+    request_id: Optional[UUID],
+) -> tuple[Optional[str], Optional[str], Optional[UUID]]:
+    """Fall back to per-request contextvars (set by RequestContextMiddleware) for
+    any audit field the caller did not provide. Worker / migration / seeder paths
+    have empty context and naturally write NULL.
+    """
+    if ip_address is not None and user_agent is not None and request_id is not None:
+        return ip_address, user_agent, request_id
+
+    ctx = get_request_context()
+    if ip_address is None:
+        ip_address = ctx.get("ip_address")
+    if user_agent is None:
+        user_agent = ctx.get("user_agent")
+    if request_id is None:
+        request_id = ctx.get("request_id")
+    return ip_address, user_agent, request_id
 
 
 class AuditService:
@@ -132,6 +155,10 @@ class AuditService:
 
         if actor_type != ActorType.SYSTEM and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
+
+        ip_address, user_agent, request_id = _fill_request_context(
+            ip_address, user_agent, request_id
+        )
 
         audit_log = AuditLog(
             id=uuid4(),
@@ -284,6 +311,10 @@ class AuditService:
         # Validate
         if outcome == Outcome.FAILURE and not error_message:
             raise ValueError("error_message required when outcome is failure")
+
+        ip_address, user_agent, request_id = _fill_request_context(
+            ip_address, user_agent, request_id
+        )
 
         # Create job ID
         job_id = uuid4()

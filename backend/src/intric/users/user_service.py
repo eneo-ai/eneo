@@ -22,7 +22,6 @@ from intric.authentication.api_key_resolver import (
     ApiKeyValidationError,
     check_resource_permission,
 )
-from intric.authentication.api_key_router_helpers import extract_audit_context
 from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.auth_models import (
     METHOD_PERMISSION_MAP,
@@ -58,6 +57,7 @@ from intric.main.exceptions import (
 )
 from intric.main.logging import get_logger
 from intric.main.models import ModelId
+from intric.main.request_context import get_request_context
 from intric.roles.permissions import Permission
 from intric.settings.settings import SettingsUpsert
 from intric.settings.settings_repo import SettingsRepository
@@ -856,15 +856,13 @@ class UserService:
         # (e.g. SpaceAssembler) can reflect effective permissions accurately.
         user.active_api_key = resolved.key
 
-        ip_address, request_id, user_agent = extract_audit_context(request)
-
         policy_service = ApiKeyPolicyService(
             allowed_origin_repo=self.allowed_origin_repo,
             space_service=self.space_service,
             user=None,
         )
         origin = request.headers.get("origin") if request else None
-        client_ip = ip_address
+        client_ip = get_request_context().get("ip_address")
         # Permission check runs after rate-limiting and last_used_at intentionally:
         # 1. Guardrails (IP/origin/expiry) block stolen keys before any logic
         # 2. Rate limiting before authz prevents permission-probing resource exhaustion
@@ -882,9 +880,6 @@ class UserService:
                 user,
                 resolved.key,
                 exc,
-                ip_address=ip_address,
-                request_id=request_id,
-                user_agent=user_agent,
                 request=request,
             )
             raise
@@ -931,9 +926,6 @@ class UserService:
                     user,
                     resolved.key,
                     exc,
-                    ip_address=ip_address,
-                    request_id=request_id,
-                    user_agent=user_agent,
                     request=request,
                 )
                 raise exc
@@ -952,9 +944,6 @@ class UserService:
                     user,
                     resolved.key,
                     exc,
-                    ip_address=ip_address,
-                    request_id=request_id,
-                    user_agent=user_agent,
                     request=request,
                 )
                 raise
@@ -967,9 +956,6 @@ class UserService:
                     user,
                     resolved.key,
                     exc,
-                    ip_address=ip_address,
-                    request_id=request_id,
-                    user_agent=user_agent,
                     request=request,
                 )
                 raise
@@ -984,9 +970,6 @@ class UserService:
                     user,
                     resolved.key,
                     exc,
-                    ip_address=ip_address,
-                    request_id=request_id,
-                    user_agent=user_agent,
                     request=request,
                 )
                 raise
@@ -1008,9 +991,6 @@ class UserService:
                     user,
                     resolved.key,
                     exc,
-                    ip_address=ip_address,
-                    request_id=request_id,
-                    user_agent=user_agent,
                     request=request,
                 )
                 raise
@@ -1018,9 +998,6 @@ class UserService:
         await self._maybe_log_api_key_used(
             user,
             resolved.key,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
             request=request,
         )
 
@@ -1491,9 +1468,6 @@ class UserService:
         user: "UserInDB",
         key: ApiKeyV2InDB,
         *,
-        ip_address: str | None = None,
-        request_id: UUID | None = None,
-        user_agent: str | None = None,
         request: Request | None = None,
     ) -> None:
         if self.audit_service is None:
@@ -1545,9 +1519,6 @@ class UserService:
             entity_id=key.id,
             description="Service API key used" if is_service else "API key used",
             metadata=metadata,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
 
     async def _log_api_key_auth_failed(
@@ -1556,9 +1527,6 @@ class UserService:
         key: ApiKeyV2InDB,
         exc: ApiKeyValidationError,
         *,
-        ip_address: str | None = None,
-        request_id: UUID | None = None,
-        user_agent: str | None = None,
         request: Request | None = None,
     ) -> None:
         if self.audit_service is None:
@@ -1613,9 +1581,6 @@ class UserService:
             metadata=metadata,
             outcome=Outcome.FAILURE,
             error_message=exc.message,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
 
         logger.warning(
@@ -1739,7 +1704,6 @@ class UserService:
                 request=request,
                 expected_tenant_id=assistant_tenant_id,
             )
-            ip_addr, req_id, ua = extract_audit_context(request)
             try:
                 if assistant_id is not None:
                     await self._require_api_key_scope_for_assistant(
@@ -1757,9 +1721,6 @@ class UserService:
                     user_in_db,
                     key,
                     exc,
-                    ip_address=ip_addr,
-                    request_id=req_id,
-                    user_agent=ua,
                     request=request,
                 )
                 raise
