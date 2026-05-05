@@ -4,22 +4,42 @@ Pins the middleware-to-audit pathway against future refactors. If the
 middleware stops capturing one of these fields, this test fails.
 """
 
+import contextlib
+from dataclasses import dataclass
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select
 
 from intric.audit.domain.action_types import ActionType
+from intric.database.database import sessionmanager
 from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
 
 pytestmark = pytest.mark.integration
 
 
-async def _latest_session_created_row(db_session, tenant_id):
-    """Return the most recent AUDIT_SESSION_CREATED row for the tenant."""
-    async with db_session() as session:
+@dataclass(frozen=True)
+class AuditRowSnapshot:
+    ip_address: str | None
+    user_agent: str | None
+    request_id: UUID | None
+
+
+@contextlib.asynccontextmanager
+async def _db_session():
+    async with sessionmanager.session() as session, session.begin():
+        yield session
+
+
+async def _latest_session_created_row(tenant_id) -> AuditRowSnapshot | None:
+    """Return the audit-context columns of the most recent AUDIT_SESSION_CREATED row."""
+    async with _db_session() as session:
         query = (
-            select(AuditLogTable)
+            select(
+                AuditLogTable.ip_address,
+                AuditLogTable.user_agent,
+                AuditLogTable.request_id,
+            )
             .where(
                 AuditLogTable.tenant_id == tenant_id,
                 AuditLogTable.action == ActionType.AUDIT_SESSION_CREATED.value,
@@ -27,8 +47,14 @@ async def _latest_session_created_row(db_session, tenant_id):
             .order_by(AuditLogTable.timestamp.desc())
             .limit(1)
         )
-        result = await session.execute(query)
-        return result.scalar_one_or_none()
+        row = (await session.execute(query)).first()
+        if row is None:
+            return None
+        return AuditRowSnapshot(
+            ip_address=str(row.ip_address) if row.ip_address is not None else None,
+            user_agent=row.user_agent,
+            request_id=row.request_id,
+        )
 
 
 async def test_audit_row_captures_request_context_from_headers(
@@ -59,16 +85,7 @@ async def test_audit_row_captures_request_context_from_headers(
 
     assert response.status_code == 200, response.text
 
-    import contextlib
-
-    from intric.database.database import sessionmanager
-
-    @contextlib.asynccontextmanager
-    async def db_session():
-        async with sessionmanager.session() as session, session.begin():
-            yield session
-
-    row = await _latest_session_created_row(db_session, test_tenant.id)
+    row = await _latest_session_created_row(test_tenant.id)
 
     assert row is not None, "audit row was not created"
     assert row.user_agent == user_agent
@@ -104,16 +121,7 @@ async def test_audit_row_request_id_null_when_header_is_invalid_uuid(
     # Graceful fallback: request still succeeds with 200.
     assert response.status_code == 200, response.text
 
-    import contextlib
-
-    from intric.database.database import sessionmanager
-
-    @contextlib.asynccontextmanager
-    async def db_session():
-        async with sessionmanager.session() as session, session.begin():
-            yield session
-
-    row = await _latest_session_created_row(db_session, test_tenant.id)
+    row = await _latest_session_created_row(test_tenant.id)
 
     assert row is not None
     assert row.user_agent == user_agent
@@ -143,23 +151,10 @@ async def test_audit_row_user_agent_null_when_header_missing(
 
     assert response.status_code == 200, response.text
 
-    import contextlib
-
-    from intric.database.database import sessionmanager
-
-    @contextlib.asynccontextmanager
-    async def db_session():
-        async with sessionmanager.session() as session, session.begin():
-            yield session
-
-    row = await _latest_session_created_row(db_session, test_tenant.id)
+    row = await _latest_session_created_row(test_tenant.id)
 
     assert row is not None
     # Empty User-Agent is treated as a valid (empty) string by Starlette;
     # the middleware does not coerce empty strings to None.
     assert row.user_agent in ("", None)
     assert row.ip_address is not None
-
-
-# Suppress unused import on UUID when this file is parsed without pytest.
-_ = UUID
