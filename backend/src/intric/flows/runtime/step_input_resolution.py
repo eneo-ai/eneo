@@ -235,7 +235,14 @@ async def resolve_step_input(
             raw_extracted_text = runtime_input_text or raw_extracted_text
 
     if step.input_type == "json":
-        if structured is not None:
+        if used_question_binding:
+            # Explicit underlag is the complete LLM input; JSON normalization
+            # may parse it for contracts, but must not replace it with source data.
+            try:
+                structured = json.loads(input_text)
+            except (json.JSONDecodeError, ValueError):
+                structured = None
+        elif structured is not None:
             input_text = json.dumps(structured, ensure_ascii=False)
         elif step.input_source == "previous_step":
             prev = next(

@@ -710,6 +710,44 @@ tasks:
       result: done
       note: "See notes/T022-worker-targeted-underlag-fan-in.md. Claude implementation review returned GREEN_LIGHT: yes with MIN_SCORE 9; targeted-underlag/audio fan-in tests, full create compiler suite, critic invariants, pyright, ruff, format check, lint-imports, and diff check passed."
 
+  - id: T023
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Recover the live explicit-underlag runtime failure: preserve resolved input_bindings as effective input, align graph/frontend dependency diagnostics, and keep AI Builder contracts consistent with explicit underlag."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_new_step_compiler.py"
+      - "backend/src/intric/flows/api/flow_graph.py"
+      - "backend/src/intric/flows/runtime/step_execution_runtime.py"
+      - "backend/src/intric/flows/runtime/step_input_resolution.py"
+      - "backend/src/intric/flows/step_lineage.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "backend/tests/unittests/flows/test_flow_graph.py"
+      - "backend/tests/unittests/flows/test_step_execution_runtime.py"
+      - "backend/tests/unittests/flows/test_typed_io_executor.py"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowStepEditPanel.svelte"
+      - "frontend/apps/web/src/lib/features/flows/flowVariableTokens.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/flowVariableTokens.ts"
+      - "docs/goals/flow-ai-builder-quality-hardening/state.yaml"
+      - "docs/goals/flow-ai-builder-quality-hardening/notes/T023-explicit-underlag-runtime-recovery.md"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_graph.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -k 'not document_outputs_generate_downloadable_artifacts' -q"
+      - "cd backend && uv run pyright src/intric/flows/api/flow_graph.py src/intric/flows/step_lineage.py src/intric/flows/runtime/step_input_resolution.py src/intric/flows/runtime/step_execution_runtime.py src/intric/flows/ai_builder/ai_builder_new_step_compiler.py tests/unittests/flows/test_flow_graph.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "cd backend && uv run ruff check src/intric/flows/api/flow_graph.py src/intric/flows/step_lineage.py src/intric/flows/runtime/step_input_resolution.py src/intric/flows/runtime/step_execution_runtime.py src/intric/flows/ai_builder/ai_builder_new_step_compiler.py tests/unittests/flows/test_flow_graph.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/flowVariableTokens.test.ts src/lib/features/flows/flowStepUxCopy.test.ts --run"
+      - "cd frontend/apps/web && bunx prettier --check src/lib/features/flows/flowVariableTokens.ts src/lib/features/flows/flowVariableTokens.test.ts src/lib/features/flows/components/FlowStepEditPanel.svelte"
+      - "git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_new_step_compiler.py backend/src/intric/flows/api/flow_graph.py backend/src/intric/flows/runtime/step_execution_runtime.py backend/src/intric/flows/runtime/step_input_resolution.py backend/src/intric/flows/step_lineage.py backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py backend/tests/unittests/flows/test_flow_graph.py backend/tests/unittests/flows/test_step_execution_runtime.py backend/tests/unittests/flows/test_typed_io_executor.py frontend/apps/web/src/lib/features/flows/components/FlowStepEditPanel.svelte frontend/apps/web/src/lib/features/flows/flowVariableTokens.test.ts frontend/apps/web/src/lib/features/flows/flowVariableTokens.ts"
+    stop_if:
+      - "Need unrelated AI Builder prompt rewrites or broad flow runtime redesign."
+      - "Need all_previous_steps as a band-aid."
+      - "Need to stage scripts/run_codex_review.sh, PRODUCT.md, docs/refactor drafts, MP3 files, or unrelated dirty files."
+      - "Verification fails for selected files."
+      - "Claude peer loop blocks the slice."
+    receipt:
+      result: done
+      note: "See notes/T023-explicit-underlag-runtime-recovery.md. Claude peer loop returned GREEN_LIGHT: yes; focused backend/frontend validation passed. User's later live run completed successfully, with remaining quality note that restarted servers should use the source-material normalizer for intermediate transcript underlag."
+
 checks:
   dirty_baseline:
     captured_from: "git status --short --branch at board creation"
@@ -748,14 +786,11 @@ checks:
       - "utvecklingssamtal.mp3"
   last_verification:
     result: pass # none | pass | fail
-    task: T022
+    task: T023
     commands:
-      - "Red check: seven targeted-underlag/audio fan-in tests failed before implementation."
-      - "cd backend && uv run pytest -q tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -k 'audio_docx_four_phase_body_step_fans_in_prior_work or audio_artifact_final_body_step_fans_in_prior_structured_work or audio_pdf_protocol_step_auto_authors_targeted_underlag or audio_document_without_pattern_still_creates_transcript_source or audio_docx_body_step_auto_authors_targeted_refs_when_json_predecessor'"
-      - "cd backend && uv run pytest -n 4 -q tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
-      - "cd backend && uv run pytest -q tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py::TestPreferTargetedUnderlagInvariant tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py::TestFinalTextStepReferencesRelevantStructuredOutputs"
-      - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
-      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
-      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
-      - "cd backend && uv run lint-imports --no-cache"
-      - "git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_create_outline.py backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py docs/goals/flow-ai-builder-quality-hardening"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_graph.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -k 'not document_outputs_generate_downloadable_artifacts' -q"
+      - "cd backend && uv run pyright src/intric/flows/api/flow_graph.py src/intric/flows/step_lineage.py src/intric/flows/runtime/step_input_resolution.py src/intric/flows/runtime/step_execution_runtime.py src/intric/flows/ai_builder/ai_builder_new_step_compiler.py tests/unittests/flows/test_flow_graph.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "cd backend && uv run ruff check src/intric/flows/api/flow_graph.py src/intric/flows/step_lineage.py src/intric/flows/runtime/step_input_resolution.py src/intric/flows/runtime/step_execution_runtime.py src/intric/flows/ai_builder/ai_builder_new_step_compiler.py tests/unittests/flows/test_flow_graph.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/flowVariableTokens.test.ts src/lib/features/flows/flowStepUxCopy.test.ts --run"
+      - "cd frontend/apps/web && bunx prettier --check src/lib/features/flows/flowVariableTokens.ts src/lib/features/flows/flowVariableTokens.test.ts src/lib/features/flows/components/FlowStepEditPanel.svelte"
+      - "git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_new_step_compiler.py backend/src/intric/flows/api/flow_graph.py backend/src/intric/flows/runtime/step_execution_runtime.py backend/src/intric/flows/runtime/step_input_resolution.py backend/src/intric/flows/step_lineage.py backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py backend/tests/unittests/flows/test_flow_graph.py backend/tests/unittests/flows/test_step_execution_runtime.py backend/tests/unittests/flows/test_typed_io_executor.py frontend/apps/web/src/lib/features/flows/components/FlowStepEditPanel.svelte frontend/apps/web/src/lib/features/flows/flowVariableTokens.test.ts frontend/apps/web/src/lib/features/flows/flowVariableTokens.ts"

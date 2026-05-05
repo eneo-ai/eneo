@@ -157,6 +157,124 @@ async def test_prepare_step_execution_interpolates_prompt_and_records_contract_v
     assert prepared.llm_files == []
 
 
+@pytest.mark.asyncio
+async def test_prepare_step_execution_keeps_json_binding_underlag_without_contract_failure():
+    run = _run()
+    state = _state()
+    step = _step(
+        step_order=3,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "required": ["final_report"],
+            "properties": {"final_report": {"type": "string"}},
+        },
+    )
+    assistant = MagicMock()
+    assistant.get_prompt_text.return_value = "Skapa slutresultatet."
+    step_input = StepInputValue(
+        text="Slutrapport: Saknar underlag\n\nTranskribering: mötesinnehåll",
+        source_text='{"final_report":"Saknar underlag"}',
+        input_source="previous_step",
+        used_question_binding=True,
+    )
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(return_value=assistant),
+        resolve_step_input=AsyncMock(return_value=step_input),
+        retrieve_rag_chunks=AsyncMock(),
+        process_typed_output=AsyncMock(),
+        apply_output_cap=AsyncMock(),
+        attach_typed_failure_context=lambda exc, **kwargs: exc,
+        effective_model_parameters=lambda assistant_obj: {},
+        json_mode_cache_key=lambda assistant_obj: "unused",
+        is_json_mode_rejection=lambda exc: False,
+        count_tokens=lambda text: len(text),
+    )
+
+    prepared = await prepare_step_execution(
+        step=step,
+        run=run,
+        state=state,
+        version_metadata=None,
+        deps=deps,
+    )
+
+    assert prepared.step_input.text == (
+        "Slutrapport: Saknar underlag\n\nTranskribering: mötesinnehåll"
+    )
+    assert prepared.contract_validation is None
+    assert "contract_validation" not in prepared.input_payload_for_result
+    assert any(
+        diagnostic.code == "flow_input_contract_skipped_for_binding"
+        for diagnostic in prepared.diagnostics
+    )
+
+
+@pytest.mark.asyncio
+async def test_prepare_step_execution_validates_json_binding_when_binding_is_json():
+    run = _run()
+    state = _state()
+    step = _step(
+        step_order=3,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "required": ["final_report"],
+            "properties": {"final_report": {"type": "string"}},
+        },
+    )
+    assistant = MagicMock()
+    assistant.get_prompt_text.return_value = "Skapa slutresultatet."
+    step_input = StepInputValue(
+        text='{"final_report":"Rapport från underlag"}',
+        source_text='{"final_report":"Gammal rapport"}',
+        structured={"final_report": "Rapport från underlag"},
+        input_source="previous_step",
+        used_question_binding=True,
+    )
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(return_value=assistant),
+        resolve_step_input=AsyncMock(return_value=step_input),
+        retrieve_rag_chunks=AsyncMock(),
+        process_typed_output=AsyncMock(),
+        apply_output_cap=AsyncMock(),
+        attach_typed_failure_context=lambda exc, **kwargs: exc,
+        effective_model_parameters=lambda assistant_obj: {},
+        json_mode_cache_key=lambda assistant_obj: "unused",
+        is_json_mode_rejection=lambda exc: False,
+        count_tokens=lambda text: len(text),
+    )
+
+    prepared = await prepare_step_execution(
+        step=step,
+        run=run,
+        state=state,
+        version_metadata=None,
+        deps=deps,
+    )
+
+    assert prepared.contract_validation == {
+        "schema_type_hint": "object",
+        "parse_attempted": False,
+        "parse_succeeded": True,
+        "candidate_type": "dict",
+    }
+    assert (
+        prepared.input_payload_for_result["contract_validation"]
+        == prepared.contract_validation
+    )
+    assert not any(
+        diagnostic.code == "flow_input_contract_skipped_for_binding"
+        for diagnostic in prepared.diagnostics
+    )
+
+
 def test_augment_prompt_for_json_output_appends_schema_instructions():
     prompt = augment_prompt_for_typed_output(
         output_type="json",

@@ -3058,7 +3058,7 @@ def test_compile_outline_audio_artifact_final_body_step_fans_in_prior_structured
     field_paths = {ref.field_path for ref in body_step.uses_previous_fields}
     assert "sections" in field_paths
     assert "overall_summary" in field_paths
-    assert compiled.steps[-2].input_contract is not None
+    assert compiled.steps[-2].input_contract is None
     assert draft.steps[-1].output_type.value == final_output_type
     assert validation.valid
 
@@ -3147,7 +3147,7 @@ def test_compile_outline_audio_docx_four_phase_body_step_fans_in_prior_work() ->
     assert "overall_summary" in field_paths
     transcript_refs = {ref.from_step for ref in body_step.uses_previous_outputs}
     assert transcript_refs, "uses_previous_outputs must include text predecessors"
-    assert compiled.steps[-2].input_contract is not None
+    assert compiled.steps[-2].input_contract is None
     assert validation.valid
 
 
@@ -3794,6 +3794,12 @@ def test_compile_create_draft_direct_audio_docx_bad_shape_gets_source_underlag()
     metadata_question = compiled.steps[2].input_bindings["question"]
     protocol_question = compiled.steps[3].input_bindings["question"]
     docx_question = compiled.steps[4].input_bindings["question"]
+    assert compiled.steps[2].input_type.value == "text"
+    assert compiled.steps[2].input_contract is None
+    assert compiled.steps[3].input_type.value == "text"
+    assert compiled.steps[3].input_contract is None
+    assert compiled.steps[4].input_type.value == "text"
+    assert compiled.steps[4].input_contract is None
     assert metadata_question == (
         "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
     )
@@ -3803,6 +3809,83 @@ def test_compile_create_draft_direct_audio_docx_bad_shape_gets_source_underlag()
     assert docx_question == (
         "{{ step_d.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
     )
+    assert validate_spec(compiled).valid
+
+
+def test_compile_create_draft_audio_report_section_extractors_keep_transcript_underlag() -> (
+    None
+):
+    draft = FlowCreateDraft(
+        flow_name="Mötesrapport från ljud",
+        plan_rationale="Transkribera ljud och skapa en strukturerad mötesrapport.",
+        steps=[
+            CreateStepDraft(
+                name="Transkribera mötesljud",
+                instructions="Transkribera mötesljudet till svensk text.",
+                input_source="flow_input",
+                input_type="audio",
+                output_type="text",
+                runtime_upload=True,
+                runtime_required=True,
+            ),
+            CreateStepDraft(
+                name="Etablera möteskontext",
+                instructions="Skapa möteskontext baserat på transkriberingen.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+                output_fields=[_field("meeting_context", "string")],
+            ),
+            CreateStepDraft(
+                name="Analysera bakgrund",
+                instructions="Läs hela transkriberingen och extrahera bakgrund.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="json",
+                output_fields=[_field("background_notes", "string")],
+            ),
+            CreateStepDraft(
+                name="Analysera genomgång och diskussion",
+                instructions=(
+                    "Läs hela transkriberingen och extrahera diskussionsunderlag."
+                ),
+                input_source="previous_step",
+                input_type="json",
+                output_type="json",
+                output_fields=[_field("discussion_notes", "string")],
+            ),
+            CreateStepDraft(
+                name="Skriv fullständig mötesrapport",
+                instructions="Skriv rapporten från möteskontext och alla underlag.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="json",
+                output_fields=[_field("report_text", "string")],
+            ),
+            CreateStepDraft(
+                name="Skapa DOCX",
+                instructions="Skapa slutdokumentet.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="docx",
+                document_delivery_mode="generated",
+            ),
+        ],
+    )
+
+    compiled = compile_create_draft(draft)
+
+    for step_index in (2, 3, 4, 5):
+        step = compiled.steps[step_index]
+        assert step.input_type.value == "text"
+        assert step.input_contract is None
+        assert step.input_bindings is not None
+        question = step.input_bindings["question"]
+        assert "Källmaterial: {{ step_a.output.text }}" in question
+    assert "{{ step_b.output.structured }}" in compiled.steps[2].input_bindings["question"]
+    assert "{{ step_c.output.structured }}" in compiled.steps[3].input_bindings["question"]
+    assert "{{ step_d.output.structured }}" in compiled.steps[4].input_bindings["question"]
+    assert "{{ step_e.output.structured }}" in compiled.steps[5].input_bindings["question"]
     assert validate_spec(compiled).valid
 
 

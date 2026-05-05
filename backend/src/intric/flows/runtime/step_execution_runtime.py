@@ -747,26 +747,44 @@ async def prepare_step_execution(
         output_contract=step.output_contract,
         prompt=effective_prompt,
     )
+    diagnostics = list(step_input.diagnostics)
 
-    try:
-        contract_validation = validate_input_contract(
-            step_order=step.step_order,
-            input_type=step.input_type,
-            input_contract=step.input_contract,
-            text=step_input.text,
-            structured=step_input.structured,
-        )
-    except TypedIOValidationException as exc:
-        contract_validation_payload = getattr(exc, "contract_validation", None)
-        if isinstance(contract_validation_payload, dict):
-            input_payload_for_result["contract_validation"] = (
-                contract_validation_payload
+    if (
+        step.input_type == "json"
+        and step_input.used_question_binding
+        and step_input.structured is None
+    ):
+        contract_validation = None
+        diagnostics.append(
+            StepDiagnostic(
+                code="flow_input_contract_skipped_for_binding",
+                message=(
+                    f"Step {step.step_order}: skipped JSON input contract validation "
+                    "because explicit underlag replaced the previous structured input."
+                ),
+                severity="info",
             )
-        raise deps.attach_typed_failure_context(
-            exc,
-            input_payload_for_result=input_payload_for_result,
-            effective_prompt=effective_prompt,
-        ) from exc
+        )
+    else:
+        try:
+            contract_validation = validate_input_contract(
+                step_order=step.step_order,
+                input_type=step.input_type,
+                input_contract=step.input_contract,
+                text=step_input.text,
+                structured=step_input.structured,
+            )
+        except TypedIOValidationException as exc:
+            contract_validation_payload = getattr(exc, "contract_validation", None)
+            if isinstance(contract_validation_payload, dict):
+                input_payload_for_result["contract_validation"] = (
+                    contract_validation_payload
+                )
+            raise deps.attach_typed_failure_context(
+                exc,
+                input_payload_for_result=input_payload_for_result,
+                effective_prompt=effective_prompt,
+            ) from exc
 
     if contract_validation is not None:
         input_payload_for_result["contract_validation"] = contract_validation
@@ -793,7 +811,7 @@ async def prepare_step_execution(
         effective_prompt=effective_prompt,
         input_payload_for_result=input_payload_for_result,
         contract_validation=contract_validation,
-        diagnostics=list(step_input.diagnostics),
+        diagnostics=diagnostics,
         llm_files=llm_files,
     )
 

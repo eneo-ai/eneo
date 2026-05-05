@@ -41,6 +41,10 @@
   } from "$lib/features/flows/flowRuntimeInputConfig";
   import { getFlowStepUxCopy } from "$lib/features/flows/flowStepUxCopy";
   import {
+    collectTemplateStepReferenceOrders,
+    getInputTemplateSourceConflictStepOrders
+  } from "$lib/features/flows/flowVariableTokens";
+  import {
     applyInputSourceChange,
     applyInputTypeChange,
     applyOutputModeChange,
@@ -704,25 +708,16 @@
   const inputTemplateSectionDescription = $derived(stepUxCopy.inputTemplateDescription);
 
   const templateStepRefs = $derived.by(() => {
-    if (!inputTemplateText) return [];
-    const refs: number[] = [];
-    const regex = /\{\{\s*step_(\d+)\./g;
-    let match;
-    while ((match = regex.exec(inputTemplateText)) !== null) {
-      refs.push(parseInt(match[1], 10));
-    }
-    return [...new Set(refs)];
+    return collectTemplateStepReferenceOrders(inputTemplateText);
   });
 
   const templateSourceConflict = $derived.by(() => {
     if (!activeStep || templateStepRefs.length === 0) return null;
-    if (activeStep.input_source === "all_previous_steps") return null;
-    if (activeStep.input_source === "previous_step") {
-      const connected = activeStep.step_order - 1;
-      const unconnected = templateStepRefs.filter((r) => r !== connected);
-      return unconnected.length > 0 ? unconnected : null;
-    }
-    return templateStepRefs;
+    return getInputTemplateSourceConflictStepOrders({
+      inputSource: activeStep.input_source,
+      stepOrder: activeStep.step_order,
+      templateStepRefs
+    });
   });
 
   // ---------------------------------------------------------------------------

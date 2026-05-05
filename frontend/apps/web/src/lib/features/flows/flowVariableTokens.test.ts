@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  collectTemplateStepReferenceOrders,
   collectUnresolvedTemplateTokens,
   collectInvalidStructuredOutputReferences,
+  getInputTemplateSourceConflictStepOrders,
   remapStepOrderTemplateTokens,
   replaceExactTemplateToken,
   classifyVariable,
@@ -15,6 +17,48 @@ describe("replaceExactTemplateToken", () => {
     const input = "Hej {{Namn på brukare}} och {{Personnummer}}";
     const output = replaceExactTemplateToken(input, "Namn på brukare", "Brukare");
     expect(output).toBe("Hej {{Brukare}} och {{Personnummer}}");
+  });
+});
+
+describe("collectTemplateStepReferenceOrders", () => {
+  it("extracts unique ordered step references from template text", () => {
+    expect(
+      collectTemplateStepReferenceOrders(
+        "{{ step_3.output.text }} {{ step_1.output.structured.title }} {{step_3.output}}"
+      )
+    ).toEqual([1, 3]);
+  });
+});
+
+describe("getInputTemplateSourceConflictStepOrders", () => {
+  it("does not flag earlier explicit underlag refs on previous_step steps", () => {
+    expect(
+      getInputTemplateSourceConflictStepOrders({
+        inputSource: "previous_step",
+        stepOrder: 9,
+        templateStepRefs: [1, 2, 8]
+      })
+    ).toBeNull();
+  });
+
+  it("still flags unavailable current or future refs", () => {
+    expect(
+      getInputTemplateSourceConflictStepOrders({
+        inputSource: "previous_step",
+        stepOrder: 4,
+        templateStepRefs: [1, 4, 5]
+      })
+    ).toEqual([4, 5]);
+  });
+
+  it("flags step refs on flow_input steps", () => {
+    expect(
+      getInputTemplateSourceConflictStepOrders({
+        inputSource: "flow_input",
+        stepOrder: 4,
+        templateStepRefs: [1, 2]
+      })
+    ).toEqual([1, 2]);
   });
 });
 

@@ -298,6 +298,58 @@ async def test_resolve_step_input_json_to_json_prefers_structured(user):
 
 
 @pytest.mark.asyncio
+async def test_resolve_step_input_json_question_binding_overrides_previous_structured(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="Transkription med mötesinnehåll.",
+        ),
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=2,
+            text='{"final_report":"Saknar underlag"}',
+            structured={"final_report": "Saknar underlag"},
+        ),
+    ]
+    step = _runtime_step(
+        step_order=3,
+        input_source="previous_step",
+        input_type="json",
+        input_bindings={
+            "question": (
+                "Slutrapport: {{ step_2.output.structured.final_report }}\n\n"
+                "Transkribering: {{ step_1.output.text }}"
+            )
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.text == (
+        "Slutrapport: Saknar underlag\n\n"
+        "Transkribering: Transkription med mötesinnehåll."
+    )
+    assert resolved.structured is None
+    assert resolved.used_question_binding is True
+    assert any(d.code == "flow_underlag_summary" for d in resolved.diagnostics)
+
+
+@pytest.mark.asyncio
 async def test_resolve_step_input_json_previous_step_parses_text_when_structured_missing(
     user,
 ):

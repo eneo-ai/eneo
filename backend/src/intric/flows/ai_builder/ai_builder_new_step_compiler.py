@@ -25,9 +25,13 @@ def compile_new_step_draft(
     plan_step_ref = make_plan_step_ref(step_index)
     output_mode = derive_new_step_output_mode(step_draft)
     output_contract = compile_output_contract(step_draft.output_fields)
-    input_contract = _derive_input_contract(step_draft, prior_steps)
     input_config = compile_input_config(step_draft)
     input_bindings = compile_input_bindings(step_draft, prior_steps)
+    input_contract = _derive_input_contract(
+        step_draft,
+        prior_steps,
+        input_bindings=input_bindings,
+    )
     assistant_instructions = compile_assistant_instructions(
         step_draft=step_draft,
         input_bindings=input_bindings,
@@ -250,8 +254,14 @@ def compile_output_contract(
 def _derive_input_contract(
     step_draft: NewStepDraft,
     prior_steps: list[StepSpec],
+    *,
+    input_bindings: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     if step_draft.input_type.value != "json":
+        return None
+    if input_bindings is not None:
+        # Explicit underlag replaces the implicit previous-step JSON input, so a
+        # contract copied from the previous step would validate the wrong shape.
         return None
     if step_draft.input_source.value != "previous_step" or not prior_steps:
         return None

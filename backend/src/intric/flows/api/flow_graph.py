@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
+
+from intric.flows.step_lineage import (
+    build_step_ref_mapping,
+    resolve_reference_step_orders,
+)
+from intric.flows.template_reference_analyzer import analyze_template
 
 
 def build_graph_from_steps(steps: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -30,6 +36,7 @@ def build_graph_from_steps(steps: list[dict[str, Any]]) -> tuple[list[dict[str, 
         )
 
     nodes.append({"id": "output", "label": "Output", "type": "output"})
+    step_ref_mapping = build_step_ref_mapping(sorted_steps)
 
     for step in sorted_steps:
         step_id = str(step.get("step_id") or step.get("id"))
@@ -76,7 +83,7 @@ def build_graph_from_steps(steps: list[dict[str, Any]]) -> tuple[list[dict[str, 
                             "style": "dashed",
                             "label": "aggregated",
                         }
-                    )
+                )
             edges.append(
                 {
                     "source": "input",
@@ -85,6 +92,37 @@ def build_graph_from_steps(steps: list[dict[str, Any]]) -> tuple[list[dict[str, 
                     "source_step_order": 0,
                     "target_step_order": step_order,
                     "style": "dashed",
+                }
+            )
+
+        existing_upstream_orders = {
+            int(edge["source_step_order"])
+            for edge in edges
+            if edge.get("target") == step_id
+            and isinstance(edge.get("source_step_order"), int)
+            and int(edge["source_step_order"]) > 0
+        }
+        for upstream_order in _binding_upstream_orders(
+            step=step,
+            step_ref_mapping=step_ref_mapping,
+        ):
+            if upstream_order in existing_upstream_orders:
+                continue
+            upstream = next(
+                (item for item in sorted_steps if int(item["step_order"]) == upstream_order),
+                None,
+            )
+            if upstream is None:
+                continue
+            edges.append(
+                {
+                    "source": str(upstream.get("step_id") or upstream.get("id")),
+                    "target": step_id,
+                    "kind": "input_bindings.question",
+                    "source_step_order": upstream_order,
+                    "target_step_order": step_order,
+                    "style": "dashed",
+                    "label": "underlag",
                 }
             )
 
@@ -121,6 +159,32 @@ def build_graph_from_steps(steps: list[dict[str, Any]]) -> tuple[list[dict[str, 
         )
 
     return nodes, edges
+
+
+def _binding_upstream_orders(
+    *,
+    step: dict[str, Any],
+    step_ref_mapping: dict[str, int],
+) -> list[int]:
+    """Return upstream orders referenced by explicit underlag."""
+    bindings = step.get("input_bindings")
+    if not isinstance(bindings, dict):
+        return []
+    bindings_dict = cast(dict[str, object], bindings)
+    question = bindings_dict.get("question")
+    if not isinstance(question, str) or not question.strip():
+        return []
+
+    step_order = int(step["step_order"])
+    references = analyze_template(
+        question,
+        step_refs=step_ref_mapping,
+        form_field_names=set(),
+    )
+    return resolve_reference_step_orders(
+        references=references,
+        max_prior_step_order=step_order - 1,
+    )
 
 
 def enrich_nodes_with_run_results(

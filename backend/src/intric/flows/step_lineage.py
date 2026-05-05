@@ -29,6 +29,21 @@ def resolve_upstream_step_orders(
         orders.append(step_order - 1)
     elif input_source == "all_previous_steps" and step_order > 1:
         orders.extend(range(1, step_order))
+    orders.extend(
+        resolve_reference_step_orders(
+            references=references,
+            max_prior_step_order=max_prior_step_order,
+        )
+    )
+    return list(dict.fromkeys(sorted(orders)))
+
+
+def resolve_reference_step_orders(
+    *,
+    references: list[Any],
+    max_prior_step_order: int,
+) -> list[int]:
+    orders: list[int] = []
     for reference in references:
         referenced_order = getattr(reference, "step_order", None)
         if (

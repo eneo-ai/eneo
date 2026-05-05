@@ -22,6 +22,37 @@ export function extractTemplateTokens(text: string): string[] {
   return [...tokens];
 }
 
+export function collectTemplateStepReferenceOrders(text: string): number[] {
+  const orders = new Set<number>();
+  for (const token of extractTemplateTokens(text)) {
+    const stepMatch = STEP_ORDER_TOKEN_PATTERN.exec(token);
+    if (!stepMatch) continue;
+    orders.add(Number(stepMatch[1]));
+  }
+  return [...orders].sort((a, b) => a - b);
+}
+
+export function getInputTemplateSourceConflictStepOrders({
+  inputSource,
+  stepOrder,
+  templateStepRefs
+}: {
+  inputSource: string | null | undefined;
+  stepOrder: number;
+  templateStepRefs: number[];
+}): number[] | null {
+  if (templateStepRefs.length === 0) return null;
+
+  const unavailableRefs = templateStepRefs.filter((order) => order >= stepOrder);
+  if (unavailableRefs.length > 0) return unavailableRefs;
+
+  if (inputSource === "previous_step" || inputSource === "all_previous_steps") {
+    return null;
+  }
+
+  return templateStepRefs;
+}
+
 export function replaceExactTemplateToken(
   text: string,
   fromToken: string,
