@@ -230,6 +230,61 @@ def _make_flow_spec(
     )
 
 
+def _structured_fan_in_spec() -> FlowDraftSpecCore:
+    return FlowDraftSpecCore(
+        flow_name="Structured report",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Extract A",
+                assistant_spec=AssistantSpec(instructions="Extract A."),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"summary": {"type": "string"}},
+                },
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                name="Extract B",
+                assistant_spec=AssistantSpec(instructions="Extract B."),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"detail": {"type": "string"}},
+                },
+            ),
+            StepSpec(
+                plan_step_ref="step_c",
+                name="Write report",
+                assistant_spec=AssistantSpec(instructions="Write report."),
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+
+
+def _json_all_previous_architecture_spec() -> FlowDraftSpecCore:
+    spec = _structured_fan_in_spec()
+    return spec.model_copy(
+        update={
+            "steps": [
+                *spec.steps[:2],
+                spec.steps[2].model_copy(update={"input_type": InputType.JSON}),
+            ]
+        }
+    )
+
+
 def _make_plan(spec: FlowDraftSpecCore) -> BuilderPlan:
     return BuilderPlan(
         id=uuid4(),
@@ -272,6 +327,53 @@ def test_plan_edit_output_intent_preserves_prior_document_terminal_type() -> Non
     )
 
     assert output_type == OutputType.PDF
+
+
+def test_create_contextual_quality_feedback_uses_semantic_remediation() -> None:
+    processor = _make_processor()
+
+    feedback = processor._format_create_contextual_quality_feedback(
+        conversation=[],
+        spec=_structured_fan_in_spec(),
+        aggregation_intent="linear",
+        resource_catalog=None,
+    )
+
+    assert feedback is not None
+    assert "Quality issues" in feedback
+    assert "strukturerade" in feedback.casefold()
+    for token in (
+        "input_source",
+        "uses_previous_fields",
+        "input_bindings",
+        "{{ step_",
+    ):
+        assert token not in feedback
+
+
+def test_edit_contextual_quality_feedback_keeps_mechanics_remediation() -> None:
+    processor = _make_processor()
+
+    feedback = processor.format_contextual_quality_feedback(
+        conversation=[],
+        spec=_structured_fan_in_spec(),
+    )
+
+    assert feedback is not None
+    assert "input_source" in feedback
+    assert "uses_previous_fields" in feedback
+
+
+def test_create_contextual_quality_feedback_still_enforces_architecture() -> None:
+    processor = _make_processor()
+
+    with pytest.raises(AIBuilderArchitectureError):
+        processor._format_create_contextual_quality_feedback(
+            conversation=[],
+            spec=_json_all_previous_architecture_spec(),
+            aggregation_intent="linear",
+            resource_catalog=None,
+        )
 
 
 def test_plan_edit_output_intent_uses_latest_explicit_document_change() -> None:

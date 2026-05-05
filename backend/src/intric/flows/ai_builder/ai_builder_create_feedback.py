@@ -1,7 +1,49 @@
 from __future__ import annotations
 
+from intric.flows.ai_builder.ai_builder_critic_invariants import CriticIssue
 from intric.flows.ai_builder.ai_builder_plan_store import format_revision_feedback
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+
+# Raw critic remediations stay mechanics-oriented for edit/compiled contexts.
+# Create mode translates them here because outline_flow only accepts semantic steps.
+CREATE_CRITIC_REMEDIATION: dict[str, str] = {
+    "runtime_metadata_requires_form_fields": (
+        "Beskriv vilka extra inmatningsfält användaren ska fylla i vid körning och vilka semantiska steg som behöver värdena."
+    ),
+    "sectioned_form_intake_requires_form_fields": (
+        "Beskriv varje rubrik eller sektion som ett eget inmatningsfält och låt senare semantiska steg använda dessa värden för slutresultatet."
+    ),
+    "rich_workflow_requires_form_fields": (
+        "Lägg till de manuella kompletteringarna som namngivna inmatningsfält i outline-planen och beskriv vilka steg som behöver dem."
+    ),
+    "rich_workflow_requires_json_contract_step": (
+        "Lägg till ett mellanliggande extraktionssteg som producerar namngivna strukturerade fält innan analys, rapport eller dokumentleverans."
+    ),
+    "rich_workflow_requires_multiple_steps": (
+        "Dela upp arbetsflödet i tydliga semantiska steg för extraktion, analys eller granskning innan slutleveransen."
+    ),
+    "structured_extraction_requires_json_contract_step": (
+        "Lägg till ett tydligt extraktionssteg som producerar namngivna strukturerade fält som senare steg kan återanvända."
+    ),
+    "explicit_json_contract_request_without_step": (
+        "Lägg till ett strukturerat extraktionssteg när användaren ber om fält, kontrakt eller maskinellt återanvändbar information."
+    ),
+    "field_reuse_requires_input_bindings": (
+        "Beskriv vilka namngivna fält från den strukturerade extraktionen som nästa semantiska steg ska återanvända."
+    ),
+    "prefer_targeted_underlag_over_all_previous_steps": (
+        "Beskriv ett semantiskt syntessteg som sammanställer just de relevanta strukturerade resultaten från tidigare steg, i stället för att läsa allt tidigare innehåll."
+    ),
+    "final_text_step_must_reference_relevant_structured_outputs": (
+        "Beskriv ett semantiskt kompositionssteg som väver in relevanta strukturerade resultat från flera tidigare steg, inte bara det senaste."
+    ),
+    "form_fields_declared_must_be_referenced": (
+        "Koppla varje deklarerat inmatningsfält till minst ett semantiskt steg som faktiskt behöver värdet, eller ta bort fältet från planen."
+    ),
+}
+CREATE_CRITIC_REMEDIATION_PASSTHROUGH_IDS: frozenset[str] = frozenset(
+    {"mcp_selection_requires_semantic_support"}
+)
 
 
 def format_create_validation_feedback(validation: SpecValidationResult) -> str:
@@ -59,3 +101,23 @@ def format_create_quality_feedback(feedback: str | None) -> str | None:
     return f"{feedback}\n\nOutline-flow quality repair rules:\n- " + "\n- ".join(
         repair_rules
     )
+
+
+def format_create_critic_feedback(issues: tuple[CriticIssue, ...]) -> str | None:
+    remediations: list[str] = []
+    for issue in issues:
+        if issue.kind != "semantic":
+            raise ValueError(
+                f"Create critic feedback requires semantic issues; received {issue.id}"
+            )
+        if issue.id in CREATE_CRITIC_REMEDIATION:
+            remediations.append(CREATE_CRITIC_REMEDIATION[issue.id])
+            continue
+        if issue.id in CREATE_CRITIC_REMEDIATION_PASSTHROUGH_IDS:
+            remediations.append(issue.remediation)
+            continue
+        raise ValueError(f"No create-mode critic remediation registered for {issue.id}")
+
+    if not remediations:
+        return None
+    return format_revision_feedback("Quality issues", remediations)

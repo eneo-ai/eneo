@@ -536,7 +536,7 @@ tasks:
   - id: T017
     type: judge
     assignee: Judge
-    status: queued
+    status: done
     reasoning_hint: high
     objective: "Select a follow-up slice to rewrite create-mode critic remediations that still tell the planner to author backend-owned mechanics."
     inputs:
@@ -554,7 +554,46 @@ tasks:
       - "Allowed files."
       - "Validation commands."
       - "Stop conditions."
-    receipt: null
+    receipt:
+      result: green
+      note: "See notes/T017-judge-create-critic-remediation.md. Claude plan review iteration 2 returned GREEN_LIGHT: yes for the create-mode semantic critic-remediation Worker."
+
+  - id: T018
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Translate semantic critic issues into create-mode outline guidance without weakening edit-mode or compiled-spec mechanics remediation."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_feedback.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "docs/goals/flow-ai-builder-quality-hardening/state.yaml"
+      - "docs/goals/flow-ai-builder-quality-hardening/notes/T017-judge-create-critic-remediation.md"
+      - "docs/goals/flow-ai-builder-quality-hardening/notes/T018-worker-create-critic-remediation.md"
+    verify:
+      - "Red check: focused tests failed before implementation because create critic formatter/constants did not exist and processor create feedback still returned raw mechanics."
+      - "cd backend && uv run pytest -n 4 -q tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py::TestPreferTargetedUnderlagInvariant tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py::TestFinalTextStepReferencesRelevantStructuredOutputs"
+      - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_create_feedback.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_create_feedback.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_create_feedback.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "cd backend && uv run lint-imports --no-cache"
+      - "rg -n \"tjänsteskrivelse|ärende|nämnd|remiss|beslutsunderlag|handläggare\" backend/src/intric/flows/ai_builder/ai_builder_create_feedback.py backend/tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_create_feedback.py backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py docs/goals/flow-ai-builder-quality-hardening/state.yaml docs/goals/flow-ai-builder-quality-hardening/notes/T017-judge-create-critic-remediation.md docs/goals/flow-ai-builder-quality-hardening/notes/T018-worker-create-critic-remediation.md"
+    stop_if:
+      - "Need to edit ai_builder_critic_invariants.py."
+      - "Need to weaken edit-mode or compiled-spec remediation strings."
+      - "Need broad prompt, schema, runtime, devcontainer, script, product, MP3, or unrelated local files."
+      - "New remediation text includes specialty nouns such as tjänsteskrivelse, ärende, nämnd, remiss, beslutsunderlag, or handläggare."
+      - "Coverage test cannot close over all semantic invariant ids."
+      - "Processor boundary test cannot be deterministic."
+      - "Validation fails."
+      - "Claude implementation review blocks the commit."
+      - "Staging contains anything outside allowed files."
+    receipt:
+      result: done
+      note: "See notes/T018-worker-create-critic-remediation.md. Claude implementation review iterations 1 and 2 returned GREEN_LIGHT: yes; clean-HEAD compiler test reproduced the 10 broad-suite failures as pre-existing drift."
 
 checks:
   dirty_baseline:
@@ -594,11 +633,7 @@ checks:
       - "utvecklingssamtal.mp3"
   last_verification:
     result: pass # none | pass | fail
-    task: T016
+    task: T018
     commands:
-      - "cd backend && uv run pytest -n 4 -q tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_tools.py::TestBuildToolSchema::test_outline_schema_hides_backend_owned_mechanics tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py::test_parse_outline_flow_ignores_stale_backend_owned_step_mechanics"
-      - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py"
-      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py"
-      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py"
-      - "cd backend && uv run lint-imports --no-cache"
-      - "git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_create_feedback.py backend/tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py"
+      - "Red check: focused tests failed before implementation because create critic formatter/constants did not exist and processor create feedback still returned raw mechanics."
+      - "cd backend && uv run pytest -n 4 -q tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py::TestPreferTargetedUnderlagInvariant tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py::TestFinalTextStepReferencesRelevantStructuredOutputs"

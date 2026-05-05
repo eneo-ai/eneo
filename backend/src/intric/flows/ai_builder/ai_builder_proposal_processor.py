@@ -25,6 +25,7 @@ from intric.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_draft_mechanics,
 )
 from intric.flows.ai_builder.ai_builder_create_feedback import (
+    format_create_critic_feedback,
     format_create_quality_feedback,
     format_create_validation_feedback,
 )
@@ -40,6 +41,7 @@ from intric.flows.ai_builder.ai_builder_create_outline import (
 from intric.flows.ai_builder.ai_builder_create_validator import validate_create_draft
 from intric.flows.ai_builder.ai_builder_critic_invariants import (
     enforce_architecture_critic_invariants,
+    evaluate_critic_invariants,
 )
 from intric.flows.ai_builder.ai_builder_discovery import (
     build_registry_question_followup,
@@ -105,7 +107,6 @@ from intric.flows.ai_builder.ai_builder_plan_edit_context import (
 from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_aware_quality_feedback,
     build_conversation_critic_context,
-    build_quality_feedback_from_critic_context,
 )
 from intric.flows.ai_builder.ai_builder_plan_store import (
     format_revision_feedback,
@@ -488,10 +489,7 @@ class AIBuilderProposalProcessor:
             resource_catalog=resource_catalog,
         )
         enforce_architecture_critic_invariants(context)
-        return build_quality_feedback_from_critic_context(
-            context,
-            include_architecture=False,
-        )
+        return format_create_critic_feedback(evaluate_critic_invariants(context))
 
     async def _process_outline_arguments(
         self,
