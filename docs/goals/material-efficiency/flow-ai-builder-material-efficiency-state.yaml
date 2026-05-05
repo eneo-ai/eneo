@@ -436,6 +436,50 @@ tasks:
         - "Consolidate renderer predicates across create_outline, create_dataflow, and critic_invariants."
         - "Track the pre-existing form-field lifecycle input_contract test failure separately."
 
+  - id: T009
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "Fix live eval publish sequencing so runtime contracts are inspected after publish, not before."
+    allowed_files:
+      - docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py
+      - backend/tests/unittests/flows/ai_builder/test_live_eval_runner.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T009-live-eval-publish-runtime-inspection.md
+    verify:
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_live_eval_runner.py -q"
+      - "cd backend && uv run ruff check ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+      - "cd backend && uv run ruff format --check ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+      - "cd backend && uv run pyright ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+      - "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --case V2 --runs 1 --apply --publish"
+    stop_if:
+      - "Runner fix requires changing live API behavior."
+      - "Post-publish run contract still writes flow_not_published false negatives."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T009-live-eval-publish-runtime-inspection.md
+      summary: "Split authoring inspection from published runtime inspection so --publish runs fetch published view and run contract only after publishing."
+      peer_review: "[no-peer-review] Narrow eval-runner sequencing fix with direct regression and live proof; no production Flow AI Builder behavior changed."
+      raw_output:
+        live_publish_summary: "/tmp/material-efficiency-live-eval/20260505-220834-post-runner-fix-publish/summary.json"
+      verification:
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_live_eval_runner.py -q"
+          status: pass
+          output: "5 passed"
+        - cmd: "cd backend && uv run ruff check ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+          status: pass
+          output: "All checks passed!"
+        - cmd: "cd backend && uv run ruff format --check ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+          status: pass
+          output: "2 files already formatted"
+        - cmd: "cd backend && uv run pyright ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --case V2 --runs 1 --apply --publish --output-dir /tmp/material-efficiency-live-eval/20260505-220834-post-runner-fix-publish"
+          status: pass
+          output: "V2 applied flow=01f3d8b1-3510-4ea3-9e57-f3a0d3fc8df5; run-contract.json exists with published_flow_version=1; run-contract.json.error.txt absent."
+
   - id: T999
     type: judge
     assignee: Judge
@@ -475,16 +519,26 @@ tasks:
 checks:
   dirty_fingerprint: unknown
   last_verification:
-    result: pass_with_pre_existing_failure
-    task: T008
+    result: pass
+    task: T009
     commands:
-      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py -q -k 'renderer_terminal_form_field_fallback_logs_diagnostic or declared_input_field_without_step_use_attaches_to_final_step or single_step_renderer_form_field_fallback_does_not_log_diagnostic'"
-      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -k 'form_field or input_field or runtime_input_field'"
-      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
-      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
-      - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_live_eval_runner.py -q"
+      - "cd backend && uv run ruff check ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+      - "cd backend && uv run ruff format --check ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+      - "cd backend && uv run pyright ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
   live_eval:
-    result: unknown
+    result: partial_failures_found
+    latest_summaries:
+      smoke: "/tmp/material-efficiency-live-eval/20260505-214401-rerun-smoke/summary.json"
+      create_suite: "/tmp/material-efficiency-live-eval/20260505-214422-rerun-create/summary.json"
+      supplemental: "/tmp/material-efficiency-live-eval/20260505-215259-rerun-supplemental/summary.json"
+      publish_runtime_check: "/tmp/material-efficiency-live-eval/20260505-220834-post-runner-fix-publish/summary.json"
+    latest_findings:
+      - "V2 source-preserving audio-to-DOCX plans applied consistently and published with a valid run contract after T009."
+      - "C1 remains blocked/unstable: builder_error or no_plan_after_requirements_confirmation."
+      - "C2 remains flaky and still routes fokusområde to terminal output rather than the intermediate risk step."
+      - "C3 and N1 showed nondeterministic no_plan_after_requirements_confirmation in targeted reruns."
+      - "Manual V2 runtime run uploaded audio and completed transcription, then stayed running at step 2 until cancelled."
     spaces:
       - "ad300505-5602-47f4-8da1-f0232303cff8"
       - "e9372935-25fb-46a8-9dd0-cc11f7ea2f72"

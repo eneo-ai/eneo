@@ -837,10 +837,11 @@ def run_case(
             result.status = "applied_without_flow_id"
             return result
 
-        inspect_flow(client, result.flow_id, case_dir)
+        inspect_flow_authoring(client, result.flow_id, case_dir)
         if publish:
             published = client.post_json(f"/api/v1/flows/{result.flow_id}/publish/")
             write_json(case_dir / "publish.json", published)
+            inspect_published_runtime(client, result.flow_id, case_dir)
         result.status = "applied"
         return result
     except urllib.error.HTTPError as error:
@@ -862,14 +863,28 @@ def run_case(
         return result
 
 
-def inspect_flow(client: ApiClient, flow_id: str, case_dir: Path) -> None:
+def inspect_flow_authoring(client: ApiClient, flow_id: str, case_dir: Path) -> None:
     endpoints = {
         "flow.json": f"/api/v1/flows/{flow_id}/",
         "graph.json": f"/api/v1/flows/{flow_id}/graph/",
-        "run-contract.json": f"/api/v1/flows/{flow_id}/run-contract/",
         "input-policy.json": f"/api/v1/flows/{flow_id}/input-policy/",
         "template-files.json": f"/api/v1/flows/{flow_id}/template-files/",
     }
+    inspect_endpoints(client, case_dir, endpoints)
+
+
+def inspect_published_runtime(client: ApiClient, flow_id: str, case_dir: Path) -> None:
+    endpoints = {
+        "published.json": f"/api/v1/flows/{flow_id}/published/",
+        "run-contract.json": f"/api/v1/flows/{flow_id}/run-contract/",
+        "input-policy.json": f"/api/v1/flows/{flow_id}/input-policy/",
+    }
+    inspect_endpoints(client, case_dir, endpoints)
+
+
+def inspect_endpoints(
+    client: ApiClient, case_dir: Path, endpoints: dict[str, str]
+) -> None:
     for filename, path in endpoints.items():
         try:
             write_json(case_dir / filename, client.get_json(path))
