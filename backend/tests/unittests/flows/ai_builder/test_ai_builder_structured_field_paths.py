@@ -98,3 +98,4 @@ def test_missing_draft_field_path_requires_array_index() -> None:
 
     assert missing_draft_field_path(fields, "risker.0.rubrik") is None
     assert missing_draft_field_path(fields, "risker.rubrik") == "risker.rubrik"
+    assert missing_draft_field_path(fields, "risker") is None

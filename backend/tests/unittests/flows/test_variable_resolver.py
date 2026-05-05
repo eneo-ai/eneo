@@ -265,6 +265,58 @@ def test_interpolate_raises_for_non_numeric_list_index():
         )
 
 
+def test_resolve_path_returns_list_when_path_ends_on_list_value():
+    resolver = FlowVariableResolver()
+    context = resolver.build_context(
+        flow_input={},
+        prior_results=[
+            _result(
+                step_order=1,
+                output_payload={
+                    "structured": {
+                        "risker": [
+                            {"rubrik": "Budgetrisk"},
+                            {"rubrik": "Tidplansrisk"},
+                        ]
+                    }
+                },
+            )
+        ],
+    )
+
+    assert resolver.resolve_path(
+        context,
+        "step_1.output.structured.risker",
+    ) == [{"rubrik": "Budgetrisk"}, {"rubrik": "Tidplansrisk"}]
+
+
+def test_resolve_path_requires_numeric_index_to_read_list_item_field():
+    resolver = FlowVariableResolver()
+    context = resolver.build_context(
+        flow_input={},
+        prior_results=[
+            _result(
+                step_order=1,
+                output_payload={
+                    "structured": {
+                        "risker": [
+                            {"rubrik": "Budgetrisk"},
+                        ]
+                    }
+                },
+            )
+        ],
+    )
+
+    with pytest.raises(BadRequestException, match="Expected numeric index"):
+        resolver.resolve_path(context, "step_1.output.structured.risker.rubrik")
+
+    assert (
+        resolver.resolve_path(context, "step_1.output.structured.risker.0.rubrik")
+        == "Budgetrisk"
+    )
+
+
 def test_interpolate_raises_for_list_index_out_of_range():
     resolver = FlowVariableResolver()
     context = resolver.build_context(

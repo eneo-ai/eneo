@@ -48,6 +48,14 @@ def missing_draft_field_path(
     fields: Sequence[StructuredFieldDraft],
     field_path: str,
 ) -> str | None:
+    """Return the first missing segment of a draft field path, or None if valid.
+
+    A path that ends on an array field is accepted: the runtime resolver
+    returns the whole list and stringifies it. A path that traverses past
+    an array without a numeric index (e.g. ``risker.rubrik``) is rejected,
+    matching the runtime template resolver's required-index branch.
+    """
+
     current_fields: Sequence[StructuredFieldDraft] = fields
     current_field: StructuredFieldDraft | None = None
     traversed: list[str] = []
@@ -86,7 +94,7 @@ def missing_draft_field_path(
             else:
                 current_fields = []
 
-    return ".".join(traversed) if expecting_index else None
+    return None
 
 
 def schema_property_names(schema: dict[str, Any]) -> set[str]:
