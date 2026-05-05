@@ -319,11 +319,19 @@
     }
   });
 
-  $effect(() => {
-    if (!open) {
+  // Reset runs only once the close animation is fully complete and bits-ui
+  // has unmounted the dialog content tree. Doing it inside an `$effect` that
+  // tracked `open` cascaded through `isDirty` → `closeBehavior` → bits-ui
+  // props and tripped Svelte's effect-depth guard; it also nulled
+  // `currentRuntimeStep` while child components were still alive. The
+  // `onOpenChangeComplete` callback is the right Svelte 5 hook for one-shot
+  // close cleanup — the docs explicitly warn against using `$effect` to
+  // synchronise state.
+  function handleOpenChangeComplete(isOpen: boolean) {
+    if (!isOpen) {
       resetDialogState();
     }
-  });
+  }
 
   function resetDialogState() {
     runContractLoadedForFlowId = null;
@@ -1089,7 +1097,7 @@
   }
 </script>
 
-<Dialog.Root bind:open>
+<Dialog.Root bind:open onOpenChangeComplete={handleOpenChangeComplete}>
   <Dialog.Content
     class="!flex max-h-[92vh] min-h-[24rem] !max-w-5xl flex-col !gap-0 overflow-hidden !rounded-2xl !p-0 sm:min-h-[30rem]"
     showCloseButton={false}

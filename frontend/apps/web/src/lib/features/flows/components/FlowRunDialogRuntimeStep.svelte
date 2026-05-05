@@ -154,10 +154,18 @@
   // Push the live ref up to the dialog every time it changes so the
   // session controller (which lives in the dialog) can call back into
   // this recorder. Returning a teardown clears the ref on unmount.
+  //
+  // The optional-chained read on `step` guards a Svelte 5 lifecycle race
+  // during dialog close: the parent's reset clears `currentRuntimeStep`
+  // synchronously while bits-ui is still tearing down the content tree, so
+  // the AudioRecorder's bind:this nullification re-fires this effect after
+  // the prop has already gone away. Bail out before touching `step` or any
+  // derived that reads it.
   $effect(() => {
-    if (!supportsAudioRecording) return;
-    onRecorderRef?.(step.step_id, recorderRef);
-    return () => onRecorderRef?.(step.step_id, null);
+    const activeStepId = step?.step_id;
+    if (!activeStepId || !supportsAudioRecording) return;
+    onRecorderRef?.(activeStepId, recorderRef);
+    return () => onRecorderRef?.(activeStepId, null);
   });
 </script>
 
