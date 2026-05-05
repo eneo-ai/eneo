@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -33,6 +33,10 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_critic_invariants import CriticContext
+    from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
+        PrimaryRuntimeInput,
+    )
+    from intric.flows.ai_builder.planning_state import AggregationIntent
 
 
 EXPECTED_CRITIC_INVARIANT_KINDS = {
@@ -1759,12 +1763,10 @@ class TestPreferTargetedUnderlagInvariant:
         }
         assert ids == set()
 
-    def test_render_critic_issues_silent_when_too_many_priors(
+    def test_render_critic_issues_silent_when_too_many_text_priors(
         self,
     ) -> None:
-        """Beyond ~6 prior content steps, an explicit underlag template
-        becomes unwieldy and `all_previous_steps` is the pragmatic
-        choice. Soft-cap silences the invariant."""
+        # Pins 78bf7994: JSON priors do not count against the text-prior cap.
 
         from intric.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
@@ -1777,28 +1779,36 @@ class TestPreferTargetedUnderlagInvariant:
             PlannerPatternSignals,
         )
 
-        priors = [
+        text_priors = [
             _step(
                 f"step_{chr(ord('a') + idx)}",
-                f"Sektion {idx + 1}",
-                "Extrahera del.",
+                f"Skriv del {idx + 1}",
+                "Skriv del.",
                 input_source=InputSource.PREVIOUS_STEP
                 if idx > 0
                 else InputSource.FLOW_INPUT,
-                output_type=OutputType.JSON,
-                output_contract={
-                    "type": "object",
-                    "properties": {"title": {"type": "string"}},
-                },
+                output_type=OutputType.TEXT,
             )
             for idx in range(7)
         ]
+        json_anchor = _step(
+            "step_h",
+            "Extrahera fakta",
+            "Extrahera fakta.",
+            input_source=InputSource.PREVIOUS_STEP,
+            output_type=OutputType.JSON,
+            output_contract={
+                "type": "object",
+                "properties": {"title": {"type": "string"}},
+            },
+        )
         spec = FlowDraftSpecCore(
-            flow_name="Sju sektioner",
+            flow_name="Många textsteg",
             steps=[
-                *priors,
+                *text_priors,
+                json_anchor,
                 _step(
-                    "step_h",
+                    "step_i",
                     "Sammanställ",
                     "Sammanställ allt.",
                     input_source=InputSource.ALL_PREVIOUS_STEPS,
@@ -1825,6 +1835,77 @@ class TestPreferTargetedUnderlagInvariant:
             if "uses_previous_fields" in issue
         }
         assert ids == set()
+
+    def test_render_critic_issues_fires_when_many_json_priors_under_text_cap(
+        self,
+    ) -> None:
+        # Pins 78bf7994: many JSON priors still trigger targeted-underlag.
+
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+            render_critic_issues,
+        )
+        from intric.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        transcription = _step(
+            "step_a",
+            "Transkribera ljudet",
+            "Transkribera ljudet.",
+            input_type=InputType.AUDIO,
+            output_type=OutputType.TEXT,
+            output_mode=OutputMode.TRANSCRIBE_ONLY,
+        )
+        json_priors = [
+            _step(
+                f"step_{chr(ord('b') + idx)}",
+                f"Extrahera del {idx + 1}",
+                "Extrahera del.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {f"field_{idx}": {"type": "string"}},
+                },
+            )
+            for idx in range(8)
+        ]
+        spec = FlowDraftSpecCore(
+            flow_name="Många JSON-extraktioner",
+            steps=[
+                transcription,
+                *json_priors,
+                _step(
+                    "step_j",
+                    "Sammanställ",
+                    "Sammanställ allt.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+        context = CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output=None),
+            mixed_audio_doc_input=False,
+        )
+
+        issues = render_critic_issues(context)
+        assert any("uses_previous_fields" in issue for issue in issues), (
+            "rule must fire when many JSON priors are available even past the "
+            "old all-priors cap; structured field refs scale, body coalesce does not"
+        )
 
     def test_render_critic_issues_targets_composer_step_before_renderer(
         self,
@@ -2254,7 +2335,7 @@ def _final_text_step_critic_context(
         planner_patterns=PlannerPatternSignals(),
         output_intent=OutputIntentResolution(terminal_output=None),
         mixed_audio_doc_input=False,
-        aggregation_intent=aggregation_intent,  # type: ignore[arg-type]
+        aggregation_intent=cast("AggregationIntent", aggregation_intent),
     )
 
 
@@ -2596,32 +2677,52 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
 
         assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
 
-    def test_silent_when_too_many_priors(self) -> None:
-        """Beyond the soft cap, an explicit underlag template is unwieldy
-        and the trade-off flips. The rule defers."""
+    def test_silent_when_too_many_text_priors(self) -> None:
+        # Pins 78bf7994: the under-bind rule uses the same text-prior cap.
 
-        priors = [
+        text_priors = [
             _step(
                 f"step_{chr(ord('a') + idx)}",
-                f"Extraktion {idx + 1}",
-                "Extrahera del.",
+                f"Skriv del {idx + 1}",
+                "Skriv del.",
                 input_source=InputSource.PREVIOUS_STEP
                 if idx > 0
                 else InputSource.FLOW_INPUT,
-                output_type=OutputType.JSON,
-                output_contract={
-                    "type": "object",
-                    "properties": {"value": {"type": "string"}},
-                },
+                output_type=OutputType.TEXT,
             )
             for idx in range(7)
         ]
+        json_anchors = [
+            _step(
+                "step_h",
+                "Extrahera fakta A",
+                "Extrahera fakta.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"a": {"type": "string"}},
+                },
+            ),
+            _step(
+                "step_i",
+                "Extrahera fakta B",
+                "Extrahera fakta.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"b": {"type": "string"}},
+                },
+            ),
+        ]
         spec = FlowDraftSpecCore(
-            flow_name="För många extraktioner",
+            flow_name="För många textpriors",
             steps=[
-                *priors,
+                *text_priors,
+                *json_anchors,
                 _step(
-                    "step_h",
+                    "step_j",
                     "Skriv sammanfattning",
                     "Skriv en kort sammanfattning.",
                     input_source=InputSource.PREVIOUS_STEP,
@@ -2634,6 +2735,55 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
         issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
 
         assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
+    def test_fires_when_many_json_priors_under_text_cap(self) -> None:
+        # Pins 78bf7994: JSON-heavy chains still need structured fan-in.
+
+        transcription = _step(
+            "step_a",
+            "Transkribera",
+            "Transkribera ljudet.",
+            input_type=InputType.AUDIO,
+            output_type=OutputType.TEXT,
+            output_mode=OutputMode.TRANSCRIBE_ONLY,
+        )
+        json_priors = [
+            _step(
+                f"step_{chr(ord('b') + idx)}",
+                f"Extrahera del {idx + 1}",
+                "Extrahera del.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {f"f_{idx}": {"type": "string"}},
+                },
+            )
+            for idx in range(8)
+        ]
+        spec = FlowDraftSpecCore(
+            flow_name="Många JSON-extraktioner",
+            steps=[
+                transcription,
+                *json_priors,
+                _step(
+                    "step_j",
+                    "Skriv sammanfattning",
+                    "Skriv en kort sammanfattning.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues), (
+            "rule must fire when many JSON priors are available even past the "
+            "old all-priors cap; the composer is dropping fields from earlier "
+            "predecessors"
+        )
 
     def test_silent_when_input_source_is_all_previous_steps(self) -> None:
         """The over-fan shape is owned by `prefer_targeted_underlag_over_all_previous_steps`.
@@ -2761,7 +2911,7 @@ class TestStandaloneAudioInvariant:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=mixed_audio_doc_input,
-            primary_runtime_input=primary_runtime_input,  # type: ignore[arg-type]
+            primary_runtime_input=cast("PrimaryRuntimeInput", primary_runtime_input),
         )
 
     def test_fires_when_primary_runtime_input_is_audio_and_no_audio_step(

@@ -37,7 +37,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T009
+active_task: T011
 
 tasks:
   - id: T001
@@ -309,7 +309,7 @@ tasks:
   - id: T009
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next implementation slice after the form-field usage owner recovery commit."
     inputs:
@@ -324,6 +324,66 @@ tasks:
     expected_output:
       - "Next Worker objective."
       - "Allowed files."
+      - "Validation commands."
+      - "Stop conditions."
+    receipt:
+      result: green
+      note: "See notes/T009-judge-next-slice.md. Claude review iteration 2 returned GREEN_LIGHT: yes for a test-backfill Worker tied to commit 78bf7994."
+
+  - id: T010
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Backfill targeted-underlag regression tests for behavior shipped in 78bf7994."
+    allowed_files:
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "docs/goals/flow-ai-builder-quality-hardening/state.yaml"
+      - "docs/goals/flow-ai-builder-quality-hardening/notes/T010-worker-backfill-targeted-underlag-tests.md"
+    verify:
+      - "Clean temp worktree: copy only the two selected dirty test files onto HEAD and run targeted pytest."
+      - "Revert temp worktree: copy only the two selected dirty test files onto HEAD, run git revert 78bf7994 --no-commit, then prove at least one new/renamed targeted-underlag test fails."
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q"
+      - "cd backend && uv run pyright tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "cd backend && uv run ruff check tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "cd backend && uv run ruff format --check tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "cd backend && uv run lint-imports --no-cache"
+      - "git diff --check -- backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py docs/goals/flow-ai-builder-quality-hardening/state.yaml docs/goals/flow-ai-builder-quality-hardening/notes/T010-worker-backfill-targeted-underlag-tests.md"
+    stop_if:
+      - "Clean temp worktree tests fail."
+      - "git revert 78bf7994 --no-commit conflicts in the temp worktree."
+      - "Revert-fail check does not fail at least one new/renamed targeted-underlag test."
+      - "Need source files to make tests pass."
+      - "Need files outside allowed_files."
+      - "New/renamed tests contain long tutorial docstrings or # type: ignore."
+      - "Staging contains anything outside allowed_files."
+    receipt:
+      result: done
+      note: "See notes/T010-worker-backfill-targeted-underlag-tests.md. Six targeted-underlag tests pass on the current branch; three fire-on-many-JSON-prior tests fail when 78bf7994 is reverted in a temp worktree."
+
+  - id: T011
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Select the next source implementation slice after the targeted-underlag test backfill."
+    inputs:
+      - "T005 dirty create/dataflow disposition"
+      - "T009 Judge decision"
+      - "T010 test-backfill receipt"
+      - "current dirty diff"
+    constraints:
+      - "Read-only until a Worker is selected."
+      - "Use Claude peer loop in skeptical mode with require-green and required-min-score 8 before activating a Worker."
+      - "Prefer a source slice from the existing dirty Group A/B evidence; do not choose another tests-only slice unless new evidence proves source implementation is unsafe."
+      - "Do not stage the full dirty draft."
+      - "Do not select a Worker unless allowed_files, validation, and stop_if are fully populated."
+      - "Do not use all_previous_steps as a band-aid for dropped context."
+    expected_output:
+      - "Next source Worker objective."
+      - "Allowed files."
+      - "Required red/recovery evidence."
       - "Validation commands."
       - "Stop conditions."
     receipt: null
@@ -365,6 +425,15 @@ checks:
       - "PRODUCT.md"
       - "utvecklingssamtal.mp3"
   last_verification:
-    result: none # none | pass | fail
-    task: null
-    commands: []
+    result: pass # none | pass | fail
+    task: T010
+    commands:
+      - "Pure HEAD temp worktree full two-file baseline: 13 failures, proving the broad file target is already non-green outside T010."
+      - "Clean temp worktree with selected dirty test files: six T010 targeted-underlag tests passed."
+      - "Revert temp worktree with git revert 78bf7994 --no-commit: three T010 fire-on-many-JSON-prior tests failed as expected."
+      - "cd backend && uv run pytest -n 4 -q <six T010 targeted-underlag tests>"
+      - "cd backend && uv run pyright tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "cd backend && uv run ruff check tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "cd backend && uv run ruff format --check tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "cd backend && uv run lint-imports --no-cache"
+      - "git diff --check -- backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py docs/goals/flow-ai-builder-quality-hardening/state.yaml docs/goals/flow-ai-builder-quality-hardening/notes/T009-judge-next-slice.md"

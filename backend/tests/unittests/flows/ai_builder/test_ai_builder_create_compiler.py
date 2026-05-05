@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import cast
 
 import pytest
 
@@ -57,6 +58,7 @@ from intric.flows.ai_builder.pattern_registry import (
     TERMINAL_ARTIFACT_STEP,
 )
 from intric.flows.ai_builder.planning_state import (
+    AggregationIntent,
     ArchitectureCommitDraft,
     PlanningState,
     ResolvedSlot,
@@ -3244,7 +3246,7 @@ def test_auto_bind_targeted_underlag_skips_when_aggregation_intent_is_aggregate(
     for intent in ("aggregate", "compare"):
         result = auto_bind_targeted_underlag_for_text_composer(
             steps_before,
-            aggregation_intent=intent,  # type: ignore[arg-type]
+            aggregation_intent=cast(AggregationIntent, intent),
         )
         assert result is steps_before, (
             f"intent={intent!r} should be a no-op, but the composer was rewritten"
@@ -3296,11 +3298,8 @@ def test_auto_bind_targeted_underlag_two_step_linear_flow_is_unchanged() -> None
     assert composer.uses_previous_outputs == []
 
 
-def test_auto_bind_targeted_underlag_skips_when_priors_exceed_soft_cap() -> None:
-    """When there are more than TARGETED_UNDERLAG_SOFT_CAP priors, the
-    composer keeps `all_previous_steps` because targeted refs become
-    unwieldy at scale and the wider fan-in is the safer default.
-    """
+def test_auto_bind_targeted_underlag_skips_when_text_priors_exceed_soft_cap() -> None:
+    # Pins 78bf7994: the soft cap counts text priors, not JSON priors.
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
         auto_bind_targeted_underlag_for_text_composer,
     )
@@ -3309,18 +3308,25 @@ def test_auto_bind_targeted_underlag_skips_when_priors_exceed_soft_cap() -> None
     )
     from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 
-    priors: list[NewStepDraft] = []
+    text_priors: list[NewStepDraft] = []
     for index in range(TARGETED_UNDERLAG_SOFT_CAP + 1):
-        priors.append(
+        text_priors.append(
             NewStepDraft(
-                name=f"Prior {index}",
+                name=f"Skriv del {index}",
                 instructions="x",
                 input_source="flow_input" if index == 0 else "previous_step",
-                input_type="text" if index == 0 else "json",
-                output_type="json",
-                output_fields=[_field(f"f_{index}", "string")],
+                input_type="text",
+                output_type="text",
             )
         )
+    json_anchor = NewStepDraft(
+        name="Extrahera fakta",
+        instructions="x",
+        input_source="previous_step",
+        input_type="text",
+        output_type="json",
+        output_fields=[_field("summary", "string")],
+    )
     composer = NewStepDraft(
         name="Slutrapport",
         instructions="x",
@@ -3328,14 +3334,81 @@ def test_auto_bind_targeted_underlag_skips_when_priors_exceed_soft_cap() -> None
         input_type="text",
         output_type="text",
     )
-    steps_before = [*priors, composer]
+    steps_before = [*text_priors, json_anchor, composer]
 
     result = auto_bind_targeted_underlag_for_text_composer(
         steps_before,
         aggregation_intent="linear",
     )
-    assert result is steps_before, "over-cap priors should bail out"
+    assert result is steps_before, "over-cap text priors should bail out"
     assert result[-1].input_source.value == "all_previous_steps"
+
+
+def test_auto_bind_targeted_underlag_fires_when_many_json_priors_with_few_text_priors() -> (
+    None
+):
+    # Pins 78bf7994: many JSON priors should still auto-bind targeted refs.
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        auto_bind_targeted_underlag_for_text_composer,
+    )
+    from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        TARGETED_UNDERLAG_SOFT_CAP,
+    )
+    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+
+    transcription = NewStepDraft(
+        name="Transkribera ljudet",
+        instructions="x",
+        input_source="flow_input",
+        input_type="audio",
+        output_type="text",
+    )
+    json_extractions: list[NewStepDraft] = []
+    for index in range(TARGETED_UNDERLAG_SOFT_CAP + 2):
+        json_extractions.append(
+            NewStepDraft(
+                name=f"Extrahera del {index}",
+                instructions="x",
+                input_source="previous_step",
+                input_type="json" if index > 0 else "text",
+                output_type="json",
+                output_fields=[
+                    _field(f"section_{index}", "string", description=f"Del {index}.")
+                ],
+            )
+        )
+    composer = NewStepDraft(
+        name="Skriv sammanfattning",
+        instructions="x",
+        input_source="previous_step",
+        input_type="json",
+        output_type="text",
+    )
+    steps_before = [transcription, *json_extractions, composer]
+
+    result = auto_bind_targeted_underlag_for_text_composer(
+        steps_before,
+        aggregation_intent="linear",
+    )
+
+    assert result is not steps_before, (
+        "auto-binder must fire when bulk of priors is JSON+output_fields, "
+        "even if total prior count exceeds the text-prior cap"
+    )
+    rewritten_composer = result[-1]
+    assert rewritten_composer.input_source.value == "previous_step"
+    assert len(rewritten_composer.uses_previous_fields) == len(json_extractions), (
+        "every JSON predecessor's structured field must be referenced"
+    )
+    referenced_steps = {
+        ref.from_step for ref in rewritten_composer.uses_previous_fields
+    }
+    assert referenced_steps == {index + 2 for index in range(len(json_extractions))}, (
+        "field refs must point at every JSON predecessor by 1-indexed position"
+    )
+    assert any(
+        ref.from_step == 1 for ref in rewritten_composer.uses_previous_outputs
+    ), "the transcription text prior must be wired via uses_previous_outputs"
 
 
 def test_auto_bind_targeted_underlag_rewrites_previous_step_composer_with_multiple_json_priors() -> (
