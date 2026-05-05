@@ -652,6 +652,63 @@ def test_normalize_ai_builder_spec_completes_source_material_for_text_report() -
     assert metrics["all_previous_steps_count"] == 0
 
 
+def test_normalize_ai_builder_spec_bounds_material_metrics_for_section_chain() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Section report",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Transcribe meeting",
+                instructions="Transcribe the uploaded meeting.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.AUDIO,
+                output_type=OutputType.TEXT,
+                output_mode=OutputMode.TRANSCRIBE_ONLY,
+            ),
+            _step(
+                ref="step_b",
+                name="Extract summary",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_c",
+                name="Extract decisions",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_d",
+                name="Extract risks",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_e",
+                name="Write report",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+
+    normalized, _changes = normalize_ai_builder_spec(spec)
+
+    for step in normalized.steps[2:]:
+        question = question_binding(step.input_bindings) or ""
+        metrics = _question_metrics(question=question, spec=normalized)
+        assert metrics["binding_byte_size"] <= 96
+        assert metrics["fan_in_width"] == 2
+        assert metrics["structured_field_count"] == 0
+        assert metrics["whole_output_reference_count"] == 2
+        assert metrics["source_duplication_count"] == 1
+        assert metrics["all_previous_steps_count"] == 0
+
+
 def test_normalize_ai_builder_spec_treats_immediate_structured_only_as_incomplete() -> (
     None
 ):

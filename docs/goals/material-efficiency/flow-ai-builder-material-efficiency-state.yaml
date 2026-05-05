@@ -33,7 +33,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T005
+active_task: T006
 
 tasks:
   - id: T001
@@ -266,20 +266,44 @@ tasks:
   - id: T005
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Add deterministic material-efficiency metrics to tests/eval if not completed in T003."
-    allowed_files: []
-    verify: []
+    allowed_files:
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T005-material-efficiency-metrics.md
+    verify:
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py -q -k material_metrics"
+      - "uv run --directory backend ruff check tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py"
+      - "uv run --directory backend ruff format --check tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py"
+      - "uv run --directory backend pyright tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py"
     stop_if:
       - "Metrics require broad benchmark rewrite."
       - "Need API credentials for deterministic unit-level metrics."
-    receipt: null
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T005-material-efficiency-metrics.md
+      summary: "Added a longer-chain material-efficiency assertion for binding byte size, fan-in width, source duplication, whole-output refs, structured-field refs, and all_previous_steps count."
+      peer_review: "[no-peer-review] Narrow test-only follow-up after T004 green light; no production behavior changed."
+      verification:
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py -q -k material_metrics"
+          status: pass
+          output: "1 passed, 26 deselected"
+        - cmd: "uv run --directory backend ruff check tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py"
+          status: pass
+          output: "All checks passed"
+        - cmd: "uv run --directory backend ruff format --check tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py"
+          status: pass
+          output: "1 file already formatted"
+        - cmd: "uv run --directory backend pyright tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
 
   - id: T006
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: medium
     objective: "Improve form-field material lifecycle only if the source-material tranche is green and Judge selects it as the next safe slice."
     allowed_files: []
