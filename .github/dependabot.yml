@@ -1,0 +1,135 @@
+version: 2
+
+updates:
+  # Python backend: backend/pyproject.toml + backend/uv.lock
+  - package-ecosystem: "uv"
+    directory: "/backend"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Stockholm"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "backend"
+    commit-message:
+      prefix: "deps(backend)"
+    groups:
+      backend-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Frontend Bun monorepo: frontend/package.json + frontend/bun.lock
+  - package-ecosystem: "bun"
+    directory: "/frontend"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:30"
+      timezone: "Europe/Stockholm"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "frontend"
+    commit-message:
+      prefix: "deps(frontend)"
+    groups:
+      frontend-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions used by workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Europe/Stockholm"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "deps(actions)"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  # Backend Dockerfile
+  - package-ecosystem: "docker"
+    directory: "/backend"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:30"
+      timezone: "Europe/Stockholm"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "docker"
+      - "backend"
+    commit-message:
+      prefix: "deps(docker)"
+
+  # Frontend Dockerfile
+  - package-ecosystem: "docker"
+    directory: "/frontend"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:45"
+      timezone: "Europe/Stockholm"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "docker"
+      - "frontend"
+    commit-message:
+      prefix: "deps(docker)"
+
+  # Devcontainer Dockerfile
+  - package-ecosystem: "docker"
+    directory: "/.devcontainer"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Europe/Stockholm"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "docker"
+      - "devcontainer"
+    commit-message:
+      prefix: "deps(devcontainer)"
+
+  # Devcontainer features in .devcontainer/devcontainer.json
+  - package-ecosystem: "devcontainers"
+    directory: "/"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:15"
+      timezone: "Europe/Stockholm"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "devcontainer"
+    commit-message:
+      prefix: "deps(devcontainer)"
