@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-import json
 from typing import cast
 
 from intric.flows.ai_builder.ai_builder_domain_models import JsonObject
+from intric.flows.ai_builder.ai_builder_form_field_usage import (
+    find_unused_form_fields,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     FlowDraftSpecCore,
     InputSource,
     LintSeverity,
     OutputType,
-    StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_source_material import (
     SourceMaterialBindingStatus,
@@ -20,7 +21,6 @@ from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationR
 from intric.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,
-    referenced_form_fields,
     referenced_step_refs,
 )
 
@@ -185,24 +185,7 @@ def lint_contract_instruction_alignment(
 def lint_unused_form_fields(
     spec: FlowDraftSpecCore, result: SpecValidationResult
 ) -> None:
-    declared_fields = {
-        field.name.strip() for field in (spec.form_fields or []) if field.name.strip()
-    }
-    if not declared_fields:
-        return
-
-    used_fields: set[str] = set()
-    step_refs = {step.plan_step_ref: index + 1 for index, step in enumerate(spec.steps)}
-    for step in spec.steps:
-        for template in _iter_step_templates(step):
-            refs = analyze_template(
-                template,
-                step_refs=step_refs,
-                form_field_names=declared_fields,
-            )
-            used_fields.update(referenced_form_fields(refs))
-
-    for field_name in sorted(declared_fields - used_fields):
+    for field_name in find_unused_form_fields(spec):
         result.add_warning(
             step_ref=None,
             code="unused_form_field",
@@ -302,18 +285,6 @@ def lint_source_material_underlag_boundaries(
                 "the immediate structured output and the earlier source text."
             ),
         )
-
-
-def _iter_step_templates(step: StepSpec) -> list[str]:
-    templates = [step.assistant_spec.instructions]
-    for payload in (step.input_bindings, step.output_config):
-        if payload is None:
-            continue
-        if isinstance(payload, str):
-            templates.append(payload)
-        else:
-            templates.append(json.dumps(payload, ensure_ascii=False))
-    return templates
 
 
 def _question_binding(input_bindings: JsonObject | None) -> str | None:
