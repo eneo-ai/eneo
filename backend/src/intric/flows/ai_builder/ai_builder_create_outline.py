@@ -546,10 +546,16 @@ def compile_outline_to_create_draft(
         if context is not None and context.final_output_type is not None
         else OutputType(outline.final_output_type)
     )
+    referenced_hint_names = {
+        field_name
+        for outline_step in outline.steps
+        for field_name in outline_step.uses_input_fields
+    }
     form_fields, dropped_primary_input_field_names = _compile_form_fields(
         outline_fields=outline.input_fields,
         context=context,
         runtime_input_type=runtime_input_type,
+        referenced_hint_names=referenced_hint_names,
     )
     known_field_order = [field.variable_name for field in form_fields]
     known_field_names = set(known_field_order)
@@ -1110,6 +1116,7 @@ def _compile_form_fields(
     outline_fields: list[OutlineInputField],
     context: OutlineCompileContext | None,
     runtime_input_type: InputType | None,
+    referenced_hint_names: set[str],
 ) -> tuple[list[CreateFormFieldDraft], list[str]]:
     runtime_metadata_state = (
         context.runtime_metadata_state if context is not None else None
@@ -1147,6 +1154,8 @@ def _compile_form_fields(
             runtime_input_type=runtime_input_type,
         ):
             dropped_primary_input_field_names.append(hint.variable_name)
+            continue
+        if hint.variable_name not in referenced_hint_names:
             continue
         if hint.variable_name in seen:
             continue

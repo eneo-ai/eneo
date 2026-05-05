@@ -595,6 +595,63 @@ tasks:
       result: done
       note: "See notes/T018-worker-create-critic-remediation.md. Claude implementation review iterations 1 and 2 returned GREEN_LIGHT: yes; clean-HEAD compiler test reproduced the 10 broad-suite failures as pre-existing drift."
 
+  - id: T019
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Split the clean-HEAD compiler failures into the next safe source slice."
+    inputs:
+      - "Clean-HEAD `test_ai_builder_create_compiler.py` failures after T018"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_outline.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_dataflow.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+    constraints:
+      - "Do not combine independent compiler failure clusters if Claude finds the slice too broad."
+      - "Do not stage unrelated dirty files."
+      - "Use Claude plan review with 15 minute timeout."
+    expected_output:
+      - "Next Worker objective or blocker."
+      - "Allowed files."
+      - "Validation commands."
+      - "Deferred follow-up."
+    receipt:
+      result: green
+      note: "See notes/T019-judge-compiler-failure-slice.md. Claude iteration 1 rejected combining hint filtering with targeted-underlag auto-binder wiring; iteration 2 green-lit the runtime input hint filtering slice only."
+
+  - id: T020
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Filter server-derived runtime input field hints so only planner-referenced hints become create-mode form_fields."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_outline.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "docs/goals/flow-ai-builder-quality-hardening/state.yaml"
+      - "docs/goals/flow-ai-builder-quality-hardening/notes/T019-judge-compiler-failure-slice.md"
+      - "docs/goals/flow-ai-builder-quality-hardening/notes/T020-worker-runtime-input-hint-filtering.md"
+    verify:
+      - "Red check: the three runtime-hint tests fail before implementation."
+      - "cd backend && uv run pytest -n 4 -q tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py::test_compile_outline_flow_drops_server_derived_hints_when_planner_did_not_reference_them tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py::test_compile_outline_flow_keeps_hint_when_planner_referenced_it_via_uses_input_fields tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py::test_compile_outline_flow_drops_extracted_metadata_hints_when_planner_did_not_wire_them tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py::test_compile_outline_flow_overlap_planner_declared_field_and_hint_with_same_name tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py::test_compile_outline_flow_drops_field_that_shadows_primary_text_input tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py::test_compile_outline_flow_drops_runtime_fields_when_metadata_is_disabled"
+      - "Add and run a partial-hint regression test."
+      - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "cd backend && uv run lint-imports --no-cache"
+      - "git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_create_outline.py backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py docs/goals/flow-ai-builder-quality-hardening/state.yaml docs/goals/flow-ai-builder-quality-hardening/notes/T019-judge-compiler-failure-slice.md docs/goals/flow-ai-builder-quality-hardening/notes/T020-worker-runtime-input-hint-filtering.md"
+    stop_if:
+      - "Need to edit ai_builder_create_dataflow.py or auto-binder behavior."
+      - "Need prompt, repair, runtime, devcontainer, scripts, product docs, MP3, broad docs, or unrelated files."
+      - "Need to weaken or delete the failing runtime-hint tests."
+      - "Explicit planner-declared fields would be dropped or changed."
+      - "Validation fails for selected files."
+      - "Claude implementation review blocks the commit."
+      - "Staging contains anything outside allowed files."
+    receipt:
+      result: done
+      note: "See notes/T020-worker-runtime-input-hint-filtering.md. Claude implementation review iterations 1 and 2 returned GREEN_LIGHT: yes; only the deferred targeted-underlag/audio fan-in compiler tests remain red."
+
 checks:
   dirty_baseline:
     captured_from: "git status --short --branch at board creation"

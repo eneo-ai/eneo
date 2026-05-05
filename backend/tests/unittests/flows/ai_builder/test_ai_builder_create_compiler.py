@@ -1640,6 +1640,73 @@ def test_compile_outline_flow_keeps_hint_when_planner_referenced_it_via_uses_inp
     assert find_unused_form_fields(compiled) == []
 
 
+def test_compile_outline_flow_includes_only_referenced_runtime_hints() -> None:
+    from intric.flows.ai_builder.ai_builder_form_field_usage import (
+        find_unused_form_fields,
+    )
+
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Review report",
+            "plan_rationale": "Review source material for the chosen audience.",
+            "steps": [
+                {
+                    "name": "Extract report facts",
+                    "task": "Extract facts for the selected report type.",
+                    "output_fields": [
+                        {
+                            "name": "facts",
+                            "field_type": "array",
+                            "description": "Relevant report facts.",
+                            "required": True,
+                            "item_fields": [
+                                {
+                                    "name": "fact",
+                                    "field_type": "string",
+                                    "description": "A fact.",
+                                    "required": True,
+                                }
+                            ],
+                        }
+                    ],
+                    "uses_input_fields": ["report_type"],
+                },
+                {
+                    "name": "Review for audience",
+                    "task": "Review the extracted facts for the chosen audience.",
+                    "uses_input_fields": ["audience"],
+                },
+            ],
+        }
+    )
+    context = outline_compile_context_from_planning_state(
+        None,
+        runtime_input_field_hints=(
+            RuntimeInputFieldHint(variable_name="audience", label="Audience"),
+            RuntimeInputFieldHint(variable_name="report_type", label="Report type"),
+            RuntimeInputFieldHint(variable_name="detail_level", label="Detail level"),
+        ),
+    )
+
+    draft = compile_outline_to_create_draft(outline, context=context)
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert [field.variable_name for field in draft.form_fields] == [
+        "audience",
+        "report_type",
+    ]
+    assert draft.steps[0].uses_form_fields == ["report_type"]
+    assert draft.steps[1].uses_form_fields == ["audience"]
+    assert compiled.form_fields is not None
+    assert [field.name for field in compiled.form_fields] == [
+        "audience",
+        "report_type",
+    ]
+    assert find_unused_form_fields(compiled) == []
+    assert validation.valid
+
+
 def test_compile_outline_flow_drops_extracted_metadata_hints_when_planner_did_not_wire_them() -> (
     None
 ):
