@@ -386,6 +386,7 @@ async def _collect_manageable_keys_for_page(
     state: ApiKeyState | None,
     key_type: ApiKeyType | None,
     ownership: str | None = None,
+    owner_user_id: UUID | None = None,
 ) -> list[ApiKeyV2InDB]:
     """Collect enough manageable keys to produce one filtered page.
 
@@ -409,6 +410,7 @@ async def _collect_manageable_keys_for_page(
             state=state,
             key_type=key_type.value if key_type else None,
             ownership=ownership,
+            owner_user_id=owner_user_id,
         )
         if not raw_keys:
             break
@@ -958,6 +960,10 @@ async def list_api_keys(
     policy: ApiKeyPolicyService = container.api_key_policy_service()
 
     ownership_value = ownership.value if ownership else None
+    # /account/api-keys is a personal listing — only show keys the caller owns,
+    # regardless of tenant-admin manageability. Tenant-wide listing is the
+    # responsibility of /admin/api-keys.
+    owner_filter = user.id
     if limit is not None and not previous:
         filtered_keys = await _collect_manageable_keys_for_page(
             repo=repo,
@@ -970,6 +976,7 @@ async def list_api_keys(
             state=state,
             key_type=key_type,
             ownership=ownership_value,
+            owner_user_id=owner_filter,
         )
     else:
         raw_keys = await repo.list_paginated(
@@ -982,6 +989,7 @@ async def list_api_keys(
             state=state,
             key_type=key_type.value if key_type else None,
             ownership=ownership_value,
+            owner_user_id=owner_filter,
         )
 
         filtered_keys, _auth_cache = await _filter_manageable_keys(
@@ -998,6 +1006,7 @@ async def list_api_keys(
             state=state,
             key_type=key_type.value if key_type else None,
             ownership=ownership_value,
+            owner_user_id=owner_filter,
         )
 
     return ApiKeyListResponse.model_validate(
