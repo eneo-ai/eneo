@@ -52,7 +52,7 @@ jobs:
           category: "/language:${{ matrix.language }}"
 
   codeql:
-    name: CodeQL
+    name: CodeQL gate
     runs-on: ubuntu-latest
     if: always()
     needs:
