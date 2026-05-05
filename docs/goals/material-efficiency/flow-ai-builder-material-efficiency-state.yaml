@@ -699,6 +699,72 @@ tasks:
       remaining_follow_up:
         - "Investigate draft input-binding reference validation or repair diagnostics for the C1 step_k validation flake."
 
+  - id: T014
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Fix the draft-reference validation bridge so declared plan_step_ref aliases do not leak into runtime flow validation or produce contradictory repair feedback."
+    allowed_files:
+      - backend/src/intric/flows/ai_builder/ai_builder_plan_store.py
+      - backend/src/intric/flows/ai_builder/ai_builder_reference_rewriter.py
+      - backend/src/intric/flows/ai_builder/ai_builder_service.py
+      - backend/src/intric/flows/ai_builder/ai_builder_validation_references.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_validator.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T014-reference-validation-bridge.md
+    verify:
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_validator.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py -q"
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder -q"
+      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_reference_rewriter.py src/intric/flows/ai_builder/ai_builder_validation_references.py src/intric/flows/ai_builder/ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py"
+      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_reference_rewriter.py src/intric/flows/ai_builder/ai_builder_validation_references.py src/intric/flows/ai_builder/ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py"
+      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_reference_rewriter.py src/intric/flows/ai_builder/ai_builder_validation_references.py src/intric/flows/ai_builder/ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py"
+      - "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --smoke --output-dir /tmp/material-efficiency-live-eval/20260506-000108-user-requested-smoke"
+      - "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --all --runs 3 --apply --output-dir /tmp/material-efficiency-live-eval/20260505-234714-user-requested-current-create"
+      - "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --all --include-supplemental --runs 3 --apply --output-dir /tmp/material-efficiency-live-eval/20260505-235342-user-requested-current-supplemental"
+    stop_if:
+      - "Fix requires C1-specific step names or prompt wording."
+      - "Declared plan_step_ref aliases can still reach runtime validation unrewritten."
+      - "Validation feedback can still claim a declared ref is invalid because of runtime alias wording."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T014-reference-validation-bridge.md
+      summary: "The reference rewriter now rewrites every declared plan_step_ref template head, draft validation rejects unsupported step output paths precisely, plan feedback no longer adds contradictory declared-ref guidance for runtime alias errors, and plan-envelope validation typing uses SpecValidationResult."
+      canonical_owners:
+        rewriter: backend/src/intric/flows/ai_builder/ai_builder_reference_rewriter.py
+        draft_validator: backend/src/intric/flows/ai_builder/ai_builder_validation_references.py
+        feedback: backend/src/intric/flows/ai_builder/ai_builder_plan_store.py
+        revision_envelope: backend/src/intric/flows/ai_builder/ai_builder_service.py
+      peer_review: "Claude iteration 1 blocked the initial plan; iteration 2 required two sharper tests; iteration 3 returned GREEN_LIGHT yes, MIN_SCORE 8."
+      verification:
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_validator.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py -q"
+          status: pass
+          output: "120 passed"
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder -q"
+          status: pass
+          output: "1949 passed, 4 skipped"
+        - cmd: "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_reference_rewriter.py src/intric/flows/ai_builder/ai_builder_validation_references.py src/intric/flows/ai_builder/ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py"
+          status: pass
+          output: "All checks passed!"
+        - cmd: "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_reference_rewriter.py src/intric/flows/ai_builder/ai_builder_validation_references.py src/intric/flows/ai_builder/ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py"
+          status: pass
+          output: "7 files already formatted"
+        - cmd: "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_reference_rewriter.py src/intric/flows/ai_builder/ai_builder_validation_references.py src/intric/flows/ai_builder/ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --case C1 --runs 3 --apply --publish --output-dir /tmp/material-efficiency-live-eval/20260506-000408-t014-c1-reference-bridge"
+          status: pass
+          output: "C1 applied 3/3; applied graphs had no exact authoring refs, no all_previous_steps, and form_fields=[]."
+        - cmd: "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --all --runs 1 --apply --publish --output-dir /tmp/material-efficiency-live-eval/20260506-001537-t014-create-suite-reference-bridge-final"
+          status: pass
+          output: "C1/C2/C3/V2 applied 1/1; V1/V3/V4/V5/C4/C5 clarification_required 1/1; builder_errors=0; applied graphs had no exact authoring refs or all_previous_steps."
+      remaining_follow_up:
+        - "Collapse duplicate template-expression regexes between the rewriter and variable resolver."
+        - "Replace runtime BadRequestException string parsing and _infer_step_ref_from_message with structured runtime validation errors."
+        - "Continue restraint/topology work for N1 and unnecessary clarification work for Q1/C5."
+
   - id: T999
     type: judge
     assignee: Judge
@@ -739,12 +805,12 @@ checks:
   dirty_fingerprint: unknown
   last_verification:
     result: pass
-    task: T013
+    task: T014
     commands:
       - "uv run --directory backend pytest tests/unittests/flows/ai_builder -q"
-      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
-      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
-      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_reference_rewriter.py src/intric/flows/ai_builder/ai_builder_validation_references.py src/intric/flows/ai_builder/ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py"
+      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_reference_rewriter.py src/intric/flows/ai_builder/ai_builder_validation_references.py src/intric/flows/ai_builder/ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py"
+      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_reference_rewriter.py src/intric/flows/ai_builder/ai_builder_validation_references.py src/intric/flows/ai_builder/ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py"
   live_eval:
     result: partial_failures_found
     latest_summaries:
@@ -762,6 +828,11 @@ checks:
       c1_after_t013: "/tmp/material-efficiency-live-eval/20260505-233516-t013-c1-runtime-field-absence-v2/summary.json"
       c1_repeat_after_t013: "/tmp/material-efficiency-live-eval/20260505-233938-t013-c1-repeat-runtime-field-absence/summary.json"
       create_suite_after_t013: "/tmp/material-efficiency-live-eval/20260505-233614-t013-create-suite-runtime-field-absence/summary.json"
+      smoke_after_t014: "/tmp/material-efficiency-live-eval/20260506-000108-user-requested-smoke/summary.json"
+      create_suite_after_t014: "/tmp/material-efficiency-live-eval/20260505-234714-user-requested-current-create/summary.json"
+      supplemental_after_t014: "/tmp/material-efficiency-live-eval/20260505-235342-user-requested-current-supplemental/summary.json"
+      c1_repeat_after_t014_reference_bridge: "/tmp/material-efficiency-live-eval/20260506-000408-t014-c1-reference-bridge/summary.json"
+      create_suite_after_t014_reference_bridge_final: "/tmp/material-efficiency-live-eval/20260506-001537-t014-create-suite-reference-bridge-final/summary.json"
     latest_findings:
       - "V2 source-preserving audio-to-DOCX plans applied consistently and published with a valid run contract after T009."
       - "C1 was blocked/unstable before T013: builder_error or no_plan_after_requirements_confirmation."
@@ -775,6 +846,10 @@ checks:
       - "C1 live logs show the repair loop demanded named input fields even though the case explicitly says no inmatningsfält are needed; this is the next high-ROI defect."
       - "Post-T013 targeted C1 rerun applied 3/3 with form_fields=[] and all_previous_steps_count=0 in applied graphs, proving explicit no-field semantics now suppress inferred form-field needs."
       - "Post-T013 one-run create suite still found a separate C1 validation flake: invalid step reference step_k despite step_k appearing in declared refs."
+      - "Post-T014 full create suite: C1/C2/C3/V2 applied 3/3; V1/V3/V4/V5/C4/C5 clarification_required 3/3; no C1 invalid step_k builder_error reproduced."
+      - "Post-T014 supplemental suite: C1/C2/C3/V2/N1 applied 3/3; H1/H2/Q1 and several vague/template cases clarification_required; E1/E2 skipped."
+      - "Post-T014 C1 artifact inspection showed all_previous_steps_count=0 and the DOCX composer received both step_1.output.text and explicit structured section refs."
+      - "N1 still overbuilds trivial translation into multiple steps; Q1 now asks an unnecessary final-output clarification for a clearly text-only quality-chain prompt."
       - "C3 and N1 showed nondeterministic no_plan_after_requirements_confirmation in targeted reruns."
       - "Manual V2 runtime run uploaded audio and completed transcription, then stayed running at step 2 until cancelled."
     spaces:

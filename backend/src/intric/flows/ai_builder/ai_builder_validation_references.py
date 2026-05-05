@@ -109,7 +109,19 @@ def validate_variable_references(
                 )
                 continue
 
-            if not reference.structured_path:
+            if not _has_supported_step_output_path(reference):
+                result.add_error(
+                    step_ref=step.plan_step_ref,
+                    code="invalid_step_reference_path",
+                    message=(
+                        f"Variable '{expression}' uses an unsupported step reference path. "
+                        f"Use {{{{ {reference.head}.output.text }}}} or "
+                        f"{{{{ {reference.head}.output.structured.<field> }}}}."
+                    ),
+                )
+                continue
+
+            if not _uses_structured_output(reference):
                 continue
 
             if referenced_step.output_type != OutputType.JSON:
@@ -123,7 +135,10 @@ def validate_variable_references(
                 )
                 continue
 
-            if referenced_step.output_contract is None:
+            if (
+                referenced_step.output_contract is None
+                or reference.structured_path is None
+            ):
                 continue
 
             missing_path = missing_structured_output_path(
@@ -158,6 +173,20 @@ def _iter_step_template_expressions(step: StepSpec) -> list[str]:
         )
 
     return expressions
+
+
+def _has_supported_step_output_path(reference: TemplateReference) -> bool:
+    return (
+        reference.tail == "output.text"
+        or reference.tail == "output.structured"
+        or reference.tail.startswith("output.structured.")
+    )
+
+
+def _uses_structured_output(reference: TemplateReference) -> bool:
+    return reference.tail == "output.structured" or reference.tail.startswith(
+        "output.structured."
+    )
 
 
 def _stringify_template_payload(payload: Any) -> str:

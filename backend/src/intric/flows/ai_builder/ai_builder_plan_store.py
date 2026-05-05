@@ -13,7 +13,10 @@ from intric.flows.ai_builder.ai_builder_models import (
 )
 from intric.flows.ai_builder.ai_builder_prompts import build_plan_summary
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
-from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationError
+from intric.flows.ai_builder.ai_builder_validation_common import (
+    SpecValidationError,
+    SpecValidationResult,
+)
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
@@ -23,7 +26,7 @@ if TYPE_CHECKING:
     from intric.flows.flow import Flow
 
 
-def build_lint_warnings(validation: Any) -> list[LintWarning]:
+def build_lint_warnings(validation: SpecValidationResult) -> list[LintWarning]:
     return [
         LintWarning(
             step_ref=warning.step_ref,
@@ -52,7 +55,7 @@ def build_plan_envelope(
     assumptions: list[str],
     plan_rationale: str | None,
     reasoning: str | None,
-    validation: Any,
+    validation: SpecValidationResult,
 ) -> PlannerPlanEnvelope:
     return PlannerPlanEnvelope(
         spec=spec,
@@ -64,7 +67,7 @@ def build_plan_envelope(
 
 
 def warnings_for_quality_retry(
-    validation: Any,
+    validation: SpecValidationResult,
     *,
     retry_warning_codes: set[str],
 ) -> list[LintWarning]:
@@ -131,7 +134,6 @@ def _requires_reference_guidance(error: SpecValidationError) -> bool:
     return any(
         marker in message
         for marker in (
-            "invalid step reference",
             "input bindings may only reference outputs from earlier steps",
             "input binding references unknown step order",
         )
@@ -154,7 +156,7 @@ async def store_plan_and_update_conversation(
     assumptions: list[str],
     plan_rationale: str | None,
     reasoning: str | None,
-    validation: Any,
+    validation: SpecValidationResult,
     edit_result_json: dict[str, Any] | None = None,
     lease_request_id: UUID | None = None,
     lease_lock_token: UUID | None = None,

@@ -419,6 +419,108 @@ class TestSemanticVariableValidation:
         assert not result.valid
         assert any(e.code == "future_step_reference" for e in result.errors)
 
+    def test_declared_step_reference_requires_supported_output_path(self) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(ref="step_a", name="Extract"),
+                    _step(
+                        ref="step_b",
+                        name="Use malformed reference",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_bindings={"question": "Use {{ step_a.text }}"},
+                    ),
+                ]
+            )
+        )
+
+        assert not result.valid
+        assert any(e.code == "invalid_step_reference_path" for e in result.errors)
+        assert not any(
+            e.code == "flow_step_invalid"
+            and "Invalid step reference 'step_a'" in e.message
+            for e in result.errors
+        )
+
+    def test_declared_step_reference_rejects_bare_output_path_before_runtime_parity(
+        self,
+    ) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(ref="step_a", name="Extract"),
+                    _step(
+                        ref="step_b",
+                        name="Use ambiguous output",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_bindings={"question": "Use {{ step_a.output }}"},
+                    ),
+                ]
+            )
+        )
+
+        assert not result.valid
+        assert any(e.code == "invalid_step_reference_path" for e in result.errors)
+        assert not any(
+            e.code == "flow_step_invalid"
+            and "Invalid step reference 'step_a'" in e.message
+            for e in result.errors
+        )
+
+    def test_declared_step_reference_path_is_checked_in_output_config(self) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(ref="step_a", name="Extract"),
+                    _step(
+                        ref="step_b",
+                        name="Render",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        output_config={"body": "Use {{ step_a.text }}"},
+                    ),
+                ]
+            )
+        )
+
+        assert not result.valid
+        assert any(e.code == "invalid_step_reference_path" for e in result.errors)
+        assert not any(
+            e.code == "flow_step_invalid"
+            and "Invalid step reference 'step_a'" in e.message
+            for e in result.errors
+        )
+
+    def test_whole_structured_output_reference_is_rewritten_for_flow_parity(
+        self,
+    ) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="Extract JSON",
+                        output_type=OutputType.JSON,
+                        output_contract={
+                            "type": "object",
+                            "properties": {
+                                "summary": {"type": "string"},
+                            },
+                        },
+                    ),
+                    _step(
+                        ref="step_b",
+                        name="Use structured object",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_bindings={
+                            "question": "Use {{ step_a.output.structured }}"
+                        },
+                    ),
+                ]
+            )
+        )
+
+        assert result.valid
+
     def test_structured_access_requires_json_output(self) -> None:
         result = validate_spec(
             _spec(

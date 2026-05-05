@@ -63,10 +63,7 @@ from intric.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifec
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
-from intric.flows.ai_builder.ai_builder_validation_common import (
-    LintWarning,
-    SpecValidationError,
-)
+from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.main.exceptions import BadRequestException
 from intric.model_providers.infrastructure.litellm_runtime_config import (
     configure_litellm_runtime,
@@ -664,12 +661,5 @@ class AIBuilderService:
         )
 
 
-class _EmptyValidation:
-    """Stub validation result with no warnings/errors for plan revisions."""
-
-    warnings: list[LintWarning] = []
-    errors: list[SpecValidationError] = []
-
-
-def _empty_validation() -> _EmptyValidation:
-    return _EmptyValidation()
+def _empty_validation() -> SpecValidationResult:
+    return SpecValidationResult()

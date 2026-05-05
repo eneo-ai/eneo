@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -24,14 +24,20 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.ai_builder.ai_builder_plan_store import (
     append_plan_messages,
     build_lint_warnings,
+    format_validation_feedback,
     store_plan_and_update_conversation,
+)
+from intric.flows.ai_builder.ai_builder_validation_common import (
+    SpecValidationError,
+    SpecValidationResult,
 )
 from intric.flows.ai_builder.planning_state import PlanningState
 
 
 def test_build_lint_warnings_hides_internal_info_level_quality_lints() -> None:
-    validation = SimpleNamespace(
-        warnings=[
+    validation = SpecValidationResult()
+    validation.warnings.extend(
+        [
             LintWarning(
                 step_ref="step_d",
                 code="json_output_text_interpolation",
@@ -90,6 +96,70 @@ def test_append_plan_messages_uses_active_submission_tool_name() -> None:
     assert conversation[0].tool_calls[0]["name"] == OUTLINE_FLOW_TOOL_NAME
 
 
+def test_format_validation_feedback_does_not_add_step_ref_guidance_for_runtime_alias_error() -> (
+    None
+):
+    spec = FlowDraftSpecCore(
+        flow_name="Unit plan",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Extract",
+                assistant_spec=AssistantSpec(instructions="Extract."),
+                input_source=InputSource.FLOW_INPUT,
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                name="Summarize",
+                assistant_spec=AssistantSpec(instructions="Summarize."),
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ],
+    )
+
+    feedback = format_validation_feedback(
+        spec=spec,
+        errors=[
+            SpecValidationError(
+                step_ref="step_a",
+                code="flow_step_invalid",
+                message="Invalid step reference 'step_a' in input bindings.",
+            )
+        ],
+    )
+
+    assert "Invalid step reference 'step_a' in input bindings." in feedback
+    assert "Declared step refs in this draft: step_a, step_b" not in feedback
+
+
+def test_format_validation_feedback_keeps_undeclared_step_ref_visible() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Unit plan",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Extract",
+                assistant_spec=AssistantSpec(instructions="Extract."),
+                input_source=InputSource.FLOW_INPUT,
+            )
+        ],
+    )
+
+    feedback = format_validation_feedback(
+        spec=spec,
+        errors=[
+            SpecValidationError(
+                step_ref="step_a",
+                code="invalid_runtime_variable_path",
+                message="Invalid step reference 'step_z' in template expression.",
+            )
+        ],
+    )
+
+    assert "Invalid step reference 'step_z' in template expression." in feedback
+    assert "Declared step refs in this draft: step_a" not in feedback
+
+
 @asynccontextmanager
 async def _noop_savepoint() -> AsyncIterator[None]:
     yield
@@ -145,7 +215,7 @@ async def test_store_plan_and_update_conversation_saves_planning_state_inside_sa
         assumptions=[],
         plan_rationale=None,
         reasoning=None,
-        validation=MagicMock(warnings=[]),
+        validation=SpecValidationResult(),
     )
 
     repo.save_planning_state.assert_awaited_once()

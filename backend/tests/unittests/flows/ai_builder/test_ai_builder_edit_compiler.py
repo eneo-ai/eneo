@@ -23,6 +23,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     InputType,
     OutputMode,
     OutputType,
+    StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_reference_rewriter import (
     build_ref_to_order,
@@ -1545,6 +1546,30 @@ class TestCompiledResultApproval:
             "Kontext: {{ Handläggningskontext }}\n"
             "Behov: {{ step_2.output.structured.brukare.kan_uttrycka_behov_sjalv }}"
         )
+
+    def test_plan_step_ref_head_rewritten_for_every_template_reference_shape(
+        self,
+    ) -> None:
+        step = StepSpec(
+            plan_step_ref="step_b",
+            name="Use source",
+            assistant_spec=AssistantSpec(
+                instructions="Use {{ step_a.output }} and {{ step_a.text }}."
+            ),
+            input_source=InputSource.PREVIOUS_STEP,
+            input_bindings={
+                "question": "Use {{ step_a.output }} and {{ step_a.text }}."
+            },
+        )
+
+        rewritten = rewrite_step_spec_variables(step, {"step_a": 1, "step_b": 2})
+
+        assert rewritten.assistant_spec.instructions == (
+            "Use {{ step_1.output }} and {{ step_1.text }}."
+        )
+        assert rewritten.input_bindings == {
+            "question": "Use {{ step_1.output }} and {{ step_1.text }}."
+        }
 
 
 class TestConfidence:

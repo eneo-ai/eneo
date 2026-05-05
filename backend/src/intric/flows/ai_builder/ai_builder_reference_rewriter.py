@@ -5,9 +5,7 @@ from typing import Any, cast
 
 from intric.flows.ai_builder.ai_builder_models import AssistantSpec, StepSpec
 
-_PLAN_REF_PATTERN = re.compile(
-    r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\.(output\.\S*?)\s*\}\}"
-)
+_TEMPLATE_EXPRESSION_PATTERN = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
 
 
 def build_ref_to_order(step_specs: list[StepSpec]) -> dict[str, int]:
@@ -61,13 +59,21 @@ def rewrite_variable_string(
     ref_to_order: dict[str, int],
 ) -> str:
     def replacer(match: re.Match[str]) -> str:
-        ref_name = match.group(1)
-        output_path = match.group(2)
+        expression = match.group(1).strip()
+        if "." in expression:
+            ref_name, tail = expression.split(".", maxsplit=1)
+        else:
+            ref_name, tail = expression, ""
+        ref_name = ref_name.strip()
         if ref_name in ref_to_order:
-            return "{{ step_" + str(ref_to_order[ref_name]) + "." + output_path + " }}"
+            rewritten_head = f"step_{ref_to_order[ref_name]}"
+            rewritten_expression = (
+                f"{rewritten_head}.{tail.strip()}" if tail else rewritten_head
+            )
+            return "{{ " + rewritten_expression + " }}"
         return match.group(0)
 
-    return _PLAN_REF_PATTERN.sub(replacer, text)
+    return _TEMPLATE_EXPRESSION_PATTERN.sub(replacer, text)
 
 
 def rewrite_variable_value(
