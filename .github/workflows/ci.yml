@@ -170,8 +170,8 @@ jobs:
       - name: Run type checks
         run: bun run check
 
-      - name: Run lint
-        run: bun run lint
+      - name: Run package lint
+        run: FORCE_COLOR=1 bun run --filter '@intric/*' lint
 
       - name: Build frontend
         run: bun run build

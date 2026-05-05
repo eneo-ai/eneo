@@ -53,8 +53,10 @@ The repository uses GitHub security features and CI to prevent regressions:
   frontend, GitHub Actions, Dockerfiles, and devcontainer configuration.
 - Dependency Review runs on pull requests into `develop` and blocks newly
   introduced vulnerable dependencies at `high` severity or above.
-- CodeQL runs on pushes and pull requests to `develop`, plus a weekly scheduled
-  scan.
+- CodeQL uses the repository's advanced GitHub Actions workflow so the scanned
+  languages and query suites are versioned with the code. It scans Python,
+  JavaScript/TypeScript, and GitHub Actions workflows on pushes and pull
+  requests to `develop`, plus a weekly scheduled scan.
 - Secret scanning and push protection should remain enabled for provider keys,
   tokens, credentials, and other repository secrets.
 - The normal `CI` gate validates frozen backend and frontend installs before
