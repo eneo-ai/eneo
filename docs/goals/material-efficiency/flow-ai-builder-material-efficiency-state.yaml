@@ -377,6 +377,65 @@ tasks:
         - ".codex/artifacts/claude-peer-loop-claude-peer-loop-20260505T193822Z.md"
       green_light: true
 
+  - id: T008
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Add compiler-owned diagnostics for renderer-terminal form-field fallback discovered by live eval."
+    allowed_files:
+      - backend/src/intric/flows/ai_builder/ai_builder_create_outline.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T008-form-field-terminal-diagnostic.md
+    verify:
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py -q -k 'renderer_terminal_form_field_fallback_logs_diagnostic or declared_input_field_without_step_use_attaches_to_final_step or single_step_renderer_form_field_fallback_does_not_log_diagnostic'"
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -k 'form_field or input_field or runtime_input_field'"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+      - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+    stop_if:
+      - "Would require semantic content/style form-field classification."
+      - "Would introduce a critic policy before measuring false positives."
+      - "Would change generated flow behavior without a deterministic red policy test."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T008-form-field-terminal-diagnostic.md
+      summary: "Added an info-level compiler diagnostic when unreferenced form fields are fallback-attached to a document renderer terminal with prior compositional steps. This records the C2-shaped risk without adding a brittle critic invariant or changing generated flow behavior."
+      live_evidence:
+        case: "C2"
+        raw_plan: "/tmp/material-efficiency-live-eval/20260505-212703-final-create/C2-run1/plan.json"
+        issue: "focus_area reached only the terminal PDF binding although the prompt required it to steer risk analysis before the final report."
+      red_evidence:
+        - "Focused diagnostic test initially failed with StopIteration because no log record existed."
+      verification:
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py -q -k 'renderer_terminal_form_field_fallback_logs_diagnostic or declared_input_field_without_step_use_attaches_to_final_step or single_step_renderer_form_field_fallback_does_not_log_diagnostic'"
+          status: pass
+          output: "3 passed, 3 deselected"
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -k 'form_field or input_field or runtime_input_field'"
+          status: pass
+          output: "7 passed, 101 deselected"
+        - cmd: "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+          status: pass
+          output: "All checks passed"
+        - cmd: "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+          status: pass
+          output: "2 files already formatted"
+        - cmd: "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py -q"
+          status: fail_pre_existing
+          output: "5 passed, 1 failed: test_intermediate_form_field_use_flows_through_structured_previous_field. Same assertion failed with touched files stashed on HEAD."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t008-form-field-routing-plan-20260505T194934Z.md"
+        - ".codex/artifacts/claude-peer-loop-t008-form-field-routing-implementation-20260505T195724Z.md"
+        - ".codex/artifacts/claude-peer-loop-t008-form-field-routing-implementation-v2-20260505T200314Z.md"
+      green_light: true
+      remaining_followups:
+        - "Consolidate renderer predicates across create_outline, create_dataflow, and critic_invariants."
+        - "Track the pre-existing form-field lifecycle input_contract test failure separately."
+
   - id: T999
     type: judge
     assignee: Judge
@@ -416,9 +475,14 @@ tasks:
 checks:
   dirty_fingerprint: unknown
   last_verification:
-    result: unknown
-    task: null
-    commands: []
+    result: pass_with_pre_existing_failure
+    task: T008
+    commands:
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py -q -k 'renderer_terminal_form_field_fallback_logs_diagnostic or declared_input_field_without_step_use_attaches_to_final_step or single_step_renderer_form_field_fallback_does_not_log_diagnostic'"
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -k 'form_field or input_field or runtime_input_field'"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+      - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
   live_eval:
     result: unknown
     spaces:

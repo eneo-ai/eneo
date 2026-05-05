@@ -1700,6 +1700,11 @@ def _attach_unreferenced_form_fields_to_final_step(
     if not unreferenced:
         return steps
     final_step = steps[-1]
+    _log_form_field_terminal_fallback(
+        steps=steps,
+        final_step=final_step,
+        form_field_names=unreferenced,
+    )
     return [
         *steps[:-1],
         final_step.model_copy(
@@ -1711,6 +1716,38 @@ def _attach_unreferenced_form_fields_to_final_step(
             }
         ),
     ]
+
+
+def _log_form_field_terminal_fallback(
+    *,
+    steps: list[NewStepDraft],
+    final_step: NewStepDraft,
+    form_field_names: list[str],
+) -> None:
+    prior_content_step_count = sum(
+        1 for step in steps[:-1] if not _is_document_renderer_step(step)
+    )
+    if prior_content_step_count == 0 or not _is_document_renderer_step(final_step):
+        return
+    logger.info(
+        "ai_builder_form_fields_attached_to_document_terminal",
+        extra={
+            "form_field_count": len(form_field_names),
+            "form_field_names": form_field_names,
+            "final_step_name": final_step.name,
+            "final_output_type": final_step.output_type.value,
+            "final_document_delivery_mode": final_step.document_delivery_mode,
+            "prior_content_step_count": prior_content_step_count,
+            "step_count": len(steps),
+        },
+    )
+
+
+def _is_document_renderer_step(step: NewStepDraft) -> bool:
+    return (
+        step.output_type in _DOCUMENT_OUTPUT_TYPES
+        or step.document_delivery_mode != "not_applicable"
+    )
 
 
 __all__ = [

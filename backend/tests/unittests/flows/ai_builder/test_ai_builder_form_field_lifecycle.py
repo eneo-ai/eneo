@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 from uuid import uuid4
+
+import pytest
 
 from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
 from intric.flows.ai_builder.ai_builder_create_models import (
@@ -10,6 +13,7 @@ from intric.flows.ai_builder.ai_builder_create_models import (
     StructuredFieldDraft,
 )
 from intric.flows.ai_builder.ai_builder_create_outline import (
+    _log_form_field_terminal_fallback,
     compile_outline_to_create_draft,
     parse_outline_flow_arguments,
 )
@@ -19,11 +23,15 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     StepEditOperation,
     StepPatch,
 )
+from intric.flows.ai_builder.ai_builder_models import InputSource, OutputType
+from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_validator import validate_spec
 from intric.flows.flow import FlowStep
 
 
-def test_declared_input_field_without_step_use_attaches_to_final_step() -> None:
+def test_declared_input_field_without_step_use_attaches_to_final_step(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     outline = parse_outline_flow_arguments(
         {
             "flow_name": "Priority review",
@@ -59,7 +67,8 @@ def test_declared_input_field_without_step_use_attaches_to_final_step() -> None:
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
+    with caplog.at_level(logging.INFO):
+        draft = compile_outline_to_create_draft(outline)
     compiled = compile_create_draft(draft)
     final_question = _question_binding(compiled.steps[-1].input_bindings)
 
@@ -71,6 +80,84 @@ def test_declared_input_field_without_step_use_attaches_to_final_step() -> None:
     assert final_question.count("{{ priority }}") == 1
     assert "priority: {{ priority }}" in final_question
     assert validate_spec(compiled).valid
+    assert not _has_terminal_fallback_diagnostic(caplog)
+
+
+def test_renderer_terminal_form_field_fallback_logs_diagnostic(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "PDF report",
+            "plan_rationale": "Analyze the document before rendering PDF.",
+            "runtime_input": {"input_type": "document", "required": True},
+            "final_output_type": "pdf",
+            "input_fields": [
+                {
+                    "variable_name": "focus_area",
+                    "label": "Focus area",
+                    "field_type": "text",
+                    "required": True,
+                }
+            ],
+            "steps": [
+                {
+                    "name": "Extract risks",
+                    "task": "Extract risks from the document.",
+                    "output_fields": [
+                        {
+                            "name": "risks",
+                            "field_type": "array",
+                            "description": "Risks found in the document.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Prepare report body",
+                    "task": "Write the report body from the extracted risks.",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Create PDF",
+                    "task": "Render the report body as PDF.",
+                    "output_type": "pdf",
+                },
+            ],
+        }
+    )
+
+    with caplog.at_level(logging.INFO):
+        draft = compile_outline_to_create_draft(outline)
+
+    assert draft.steps[-1].uses_form_fields == ["focus_area"]
+    diagnostic = next(
+        record
+        for record in caplog.records
+        if record.message == "ai_builder_form_fields_attached_to_document_terminal"
+    )
+    assert diagnostic.form_field_names == ["focus_area"]
+    assert diagnostic.final_step_name == "Create PDF"
+    assert diagnostic.final_output_type == "pdf"
+
+
+def test_single_step_renderer_form_field_fallback_does_not_log_diagnostic(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    final_step = NewStepDraft(
+        name="Create PDF",
+        instructions="Render the submitted material as PDF.",
+        input_source=InputSource.FLOW_INPUT,
+        output_type=OutputType.PDF,
+    )
+
+    with caplog.at_level(logging.INFO):
+        _log_form_field_terminal_fallback(
+            steps=[final_step],
+            final_step=final_step,
+            form_field_names=["report_title"],
+        )
+
+    assert not _has_terminal_fallback_diagnostic(caplog)
 
 
 def test_intermediate_form_field_use_flows_through_structured_previous_field() -> None:
@@ -257,6 +344,13 @@ def _question_binding(input_bindings: dict[str, object] | None) -> str:
     question = input_bindings["question"]
     assert isinstance(question, str)
     return question
+
+
+def _has_terminal_fallback_diagnostic(caplog: pytest.LogCaptureFixture) -> bool:
+    return any(
+        record.message == "ai_builder_form_fields_attached_to_document_terminal"
+        for record in caplog.records
+    )
 
 
 def _flow_step(
