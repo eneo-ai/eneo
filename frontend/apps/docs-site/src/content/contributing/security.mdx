@@ -18,6 +18,8 @@ Pull requests into `develop` run three security and quality gates:
 
 Backend dependency installs use `uv sync --frozen --all-groups`. Frontend dependency installs use `bun install --frozen-lockfile`. This matters because dependency PRs should prove that the committed lockfiles still install and the app still builds.
 
+The CI workflow also builds the backend, frontend, and devcontainer Docker images without pushing them. This catches Dockerfile and base-image update problems before Dependabot Docker PRs merge.
+
 Ruff currently checks `backend/src/intric`. Tests and Alembic are not part of the Ruff gate yet.
 
 ### Dependency Review
@@ -49,6 +51,8 @@ Remove older required status checks if they appear as `Expected` and never repor
 - `Test Docker builds`
 
 Those names belonged to the previous PR workflows. They are not queued work; GitHub is waiting for checks that no longer exist on this branch.
+
+The old `Test Docker builds` check is replaced by Docker build subjobs inside `CI / CI`.
 
 ## Dependency Updates
 

@@ -183,6 +183,32 @@ jobs:
           # The Svelte production build exceeds Node's default heap on GitHub-hosted runners.
           NODE_OPTIONS: --max-old-space-size=6144
 
+  docker-builds:
+    name: Docker builds (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: backend
+            context: ./backend
+            file: ./backend/Dockerfile
+          - image: frontend
+            context: ./frontend
+            file: ./frontend/Dockerfile
+          - image: devcontainer
+            context: ./.devcontainer
+            file: ./.devcontainer/Dockerfile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        env:
+          DOCKER_BUILDKIT: "1"
+        run: docker build --pull --file "${{ matrix.file }}" --tag "eneo-${{ matrix.image }}:ci" "${{ matrix.context }}"
+
   ci:
     name: CI
     runs-on: ubuntu-latest
@@ -192,6 +218,7 @@ jobs:
       - backend-quality
       - backend-tests
       - frontend
+      - docker-builds
 
     steps:
       - name: Check required jobs
@@ -200,6 +227,7 @@ jobs:
           BACKEND_QUALITY_RESULT: ${{ needs.backend-quality.result }}
           BACKEND_TESTS_RESULT: ${{ needs.backend-tests.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
+          DOCKER_BUILDS_RESULT: ${{ needs.docker-builds.result }}
         run: |
           failed=0
 
@@ -222,5 +250,6 @@ jobs:
           check_result "Backend quality" "$BACKEND_QUALITY_RESULT"
           check_result "Backend tests" "$BACKEND_TESTS_RESULT"
           check_result "Frontend" "$FRONTEND_RESULT"
+          check_result "Docker builds" "$DOCKER_BUILDS_RESULT"
 
           exit "$failed"
