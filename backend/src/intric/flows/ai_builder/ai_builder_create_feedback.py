@@ -54,13 +54,6 @@ def format_create_quality_feedback(feedback: str | None) -> str | None:
         repair_rules.append(
             "Set the final step output_type to 'pdf' so the last step matches the requested final artifact."
         )
-    if (
-        '`input_source="all_previous_steps"`' in feedback
-        or '`input_source=\\"all_previous_steps\\"`' in feedback
-    ):
-        repair_rules.append(
-            "Do not author input_source or explicit all-previous wiring in outline_flow. Add semantic analysis/synthesis steps and let the backend compile the dataflow."
-        )
     if not repair_rules:
         return feedback
     return f"{feedback}\n\nOutline-flow quality repair rules:\n- " + "\n- ".join(

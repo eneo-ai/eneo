@@ -40,15 +40,25 @@ def test_format_create_validation_feedback_adds_json_all_previous_steps_rule() -
     assert "server-owned fan-in" in feedback
 
 
-def test_format_create_quality_feedback_adds_terminal_artifact_and_aggregation_rules() -> (
-    None
-):
+def test_format_create_quality_feedback_adds_terminal_artifact_rule() -> None:
     feedback = format_create_quality_feedback(
-        "Du har valt DOCX som slutartefakt men sista steget producerar inte DOCX. "
-        'När flera dokument ska sammanställas bör du använda `input_source="all_previous_steps"`.'
+        "Du har valt DOCX som slutartefakt men sista steget producerar inte DOCX."
     )
 
     assert feedback is not None
     assert "Outline-flow quality repair rules" in feedback
     assert "final step output_type to 'docx'" in feedback
-    assert "let the backend compile the dataflow" in feedback
+
+
+def test_format_create_quality_feedback_does_not_redirect_input_source_authoring() -> (
+    None
+):
+    feedback = format_create_quality_feedback(
+        "Det sista steget har "
+        '`input_source="all_previous_steps"` trots att tidigare steg producerar JSON.'
+    )
+
+    assert feedback is not None
+    assert "Outline-flow quality repair rules" not in feedback
+    assert "let the backend compile the dataflow" not in feedback
+    assert "do not author input_source" not in feedback.casefold()
