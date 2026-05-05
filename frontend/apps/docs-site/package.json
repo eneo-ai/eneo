@@ -25,7 +25,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9.28.0",
     "eslint-config-next": "15.3.8",
-    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
