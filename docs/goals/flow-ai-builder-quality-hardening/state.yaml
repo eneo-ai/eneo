@@ -1,0 +1,240 @@
+# Goal Maker v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Flow AI Builder Quality Hardening"
+  slug: "flow-ai-builder-quality-hardening"
+  kind: specific
+  tranche: "Discover the current AI Builder state, choose the first safe TDD implementation slice, implement it, verify it, run Claude review, and audit whether the known bad multi-section document flow class is prevented."
+  status: active
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  worker_requires_judge_populated_allowed_files: true
+  worker_requires_judge_populated_verify: true
+  worker_blocks_until_failing_test_observed_red: true
+  no_all_previous_steps_bandaid: true
+  no_big_bang_rewrite: true
+  no_live_llm_only_fix: true
+  no_secrets_or_local_eval_outputs_in_commits: true
+  judge_requires_complete_dirty_disposition: true
+  commit_requires_green_review_and_clean_staging_list: true
+  no_push: true
+  validation_devcontainer_prefix: "docker exec eneo-41ae93-eneo-1"
+  ask_claude_for_broad_design_questions: true
+  claude_peer_loop_required_for_plan_and_implementation_gates: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+active_task: T999
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: medium
+    objective: "Baseline the dirty repo state, read the PRD/review docs, inspect the AI Builder source/test owners named by the user, and identify the smallest safe first implementation slice."
+    inputs:
+      - "git status --short --branch"
+      - "docs/refactor/new/flow_ai_builder_merge_ready_prd.md"
+      - "docs/refactor/new/flow_ai_builder_merge_readiness_review.md"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_dataflow.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_new_step_compiler.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_source_material.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_step_transition_policy.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_critic_invariants.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_validation_references.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_validation_quality.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_validator.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_tool_schema.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_models.py"
+      - "backend/src/intric/flows/template_reference_analyzer.py"
+      - "backend/tests/integration/flows/ai_builder/benchmark/cases.py"
+      - "backend/tests/integration/flows/ai_builder/benchmark/manual_api_scoring.py"
+      - "backend/tests/integration/flows/ai_builder/benchmark/manual_api_eval.py"
+    constraints:
+      - "Read-only."
+      - "Do not edit implementation files."
+      - "Do not stage or commit anything."
+      - "Classify unrelated dirty files before recommending a Worker task."
+      - "Find existing test patterns/factories before inventing new ones."
+      - "Report exact verification commands discovered from repo scripts, Taskfile, or backend docs."
+    expected_output:
+      - "Dirty-file disposition table."
+      - "Canonical owners for dataflow bindings, terminal artifact validation, fan-in coverage, and form-field edit schema."
+      - "Existing tests/factories to extend."
+      - "Baseline targeted test/typecheck commands and current result if reasonably fast."
+      - "Advisory candidate Worker task with proposed allowed_files, verify, and stop_if; Judge owns the final selection."
+    receipt:
+      result: done
+      note: "See notes/T001-scout-baseline.md. Focused AI Builder unit tests passed: 196 passed. Focused pyright passed: 0 errors."
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Review the Scout evidence and choose the first merge-ready implementation slice by impact, confidence, reversibility, and verification strength."
+    inputs:
+      - "T001 receipt"
+      - "T001 dirty-file disposition table"
+      - "docs/refactor/new/flow_ai_builder_merge_ready_prd.md"
+      - "docs/refactor/new/flow_ai_builder_merge_readiness_review.md"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Choose a small TDD slice, not the whole PRD."
+      - "Prefer terminal artifact correctness and structured fan-in regression coverage unless Scout evidence proves another slice is safer."
+      - "Reject broad rewrites, live-LLM-only fixes, and all_previous_steps band-aids."
+      - "Verify any fixture derived from real exports is domain-neutralized or explicitly marked reported_failure."
+      - "If the selected slice touches a mutating endpoint or persisted mutation path, require audit/logging coverage in allowed_files and verify."
+      - "Do not select a Worker task unless allowed_files and verify are fully populated."
+      - "Do not select a Worker task until dirty files are classified as task-owned, unrelated/do-not-touch, or owner-decision-needed."
+    expected_output:
+      - "Decision: first Worker task or blocker."
+      - "Exact Worker objective."
+      - "Allowed files."
+      - "Required failing tests before implementation."
+      - "Validation commands."
+      - "Stop conditions."
+      - "Deferred tasks."
+    receipt:
+      result: done
+      note: "See notes/T002-judge-decision.md. Claude plan review required changes twice, then returned GREEN_LIGHT: yes on iteration 3."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Expose edit-mode form_operations in the edit_flow tool schema with a deterministic red schema test and the smallest schema-only production change."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_tool_schema.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_flow_schema_values.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_tool_schema.py"
+      - "docs/goals/flow-ai-builder-quality-hardening/notes/T003-worker-form-operations-schema.md"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_edit_tool_schema.py -q"
+      - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_flow_schema_values.py src/intric/flows/ai_builder/ai_builder_edit_tool_schema.py tests/unittests/flows/ai_builder/test_ai_builder_edit_tool_schema.py"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_flow_schema_values.py src/intric/flows/ai_builder/ai_builder_edit_tool_schema.py tests/unittests/flows/ai_builder/test_ai_builder_edit_tool_schema.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_flow_schema_values.py src/intric/flows/ai_builder/ai_builder_edit_tool_schema.py tests/unittests/flows/ai_builder/test_ai_builder_edit_tool_schema.py"
+      - "git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_flow_schema_values.py backend/src/intric/flows/ai_builder/ai_builder_edit_tool_schema.py backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_tool_schema.py docs/goals/flow-ai-builder-quality-hardening/notes/T003-worker-form-operations-schema.md"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Edit extends beyond allowed_files."
+      - "Cannot write a failing deterministic test before implementation."
+      - "Implementation begins before the relevant regression test is observed failing."
+      - "Behavior is ambiguous or would require product strategy."
+      - "Implementation would use all_previous_steps as a band-aid for dropped context."
+      - "Implementation would let the LLM author backend mechanics directly."
+      - "Strict typecheck cannot be run or fails for touched code."
+      - "Live smoke requires unavailable credentials or unavailable localhost API."
+      - "Verification requires staging or committing any dirty-baseline file not selected by Judge."
+      - "Commit would include API keys, local eval output, curl logs, temporary scripts, screenshots, cache files, MP3 files, PRODUCT.md, scripts/run_codex_review.sh, or unrelated docs."
+    receipt:
+      result: done
+      note: "See notes/T003-worker-form-operations-schema.md. Red observed, implementation green locally, pending Judge/Claude implementation review."
+
+  - id: T004
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Run implementation review before commit boundary using self-review and the required Claude peer-review loop."
+    inputs:
+      - "T003 receipt"
+      - "Dirty diff"
+      - "Validation results"
+    constraints:
+      - "Read-only."
+      - "Do not implement."
+      - "Challenge maintainability, ownership boundaries, typed contracts, test value, and AI slop."
+      - "Use `/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py` for non-trivial implementation review."
+      - "If the diff touches three or more coherent source/test files, resume the Claude peer loop with a stricter high-risk review prompt or explicitly justify why the focused Claude loop is enough."
+    expected_output:
+      - "GREEN | changes_required | blocked"
+      - "Accepted findings"
+      - "Required fixes before commit"
+      - "Disagreements with source evidence, if any"
+    receipt:
+      result: green
+      note: "Claude implementation review iteration 1 required fixes; iteration 2 returned GREEN_LIGHT: yes. T003 receipt records accepted fixes and final validation."
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Audit whether the current tranche satisfies the original user outcome for the first merge-ready slice."
+    inputs:
+      - "All done task receipts"
+      - "Last verification"
+      - "Current dirty diff"
+      - "Claude/Judge implementation review"
+    constraints:
+      - "Read-only."
+      - "Reject completion if required Worker work is still queued or active."
+      - "Reject completion if no implementation was verified."
+      - "Reject completion if the known bad meeting flow class is not represented by deterministic tests."
+    expected_output:
+      - "complete | not_complete"
+      - "Production readiness assessment"
+      - "Would merge yes/no"
+      - "Could this be cleaner/smarter?"
+      - "Remaining out-of-scope work"
+      - "If not complete, mark the tranche blocked or require owner choice for a new board/tranche."
+    receipt: null
+
+checks:
+  dirty_baseline:
+    captured_from: "git status --short --branch at board creation"
+    branch: "feature/refactor-flows-flowai...origin/feature/refactor-flows-flowai [ahead 6]"
+    task_relevant_unclassified:
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_feedback.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_outline.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_prompts.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_structured_field_paths.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_validation_quality.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_form_field_usage.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_prompts.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_structured_field_paths.py"
+    other_unclassified:
+      - ".devcontainer/devcontainer.json"
+      - ".devcontainer/docker-compose.yml"
+      - "backend/src/intric/flows/runtime/step_execution_runtime.py"
+      - "docs/FLOWS_AND_AI_BUILDER_ARCHITECTURE.md (deleted)"
+      - "docs/gemini_Review.md"
+      - "docs/gemini_prd.md"
+      - "docs/refactor/claude_prd.md"
+      - "docs/refactor/claude_review.md"
+      - "docs/refactor/goals.md"
+      - "docs/refactor/new/"
+      - "docs/refactor/runtime-hang-and-builder-rootcause.md"
+      - "flow_ai_builder_prd.md"
+      - "flow_ai_builder_review.md"
+    do_not_touch_without_owner_approval:
+      - "scripts/run_codex_review.sh"
+      - "PRODUCT.md"
+      - "utvecklingssamtal.mp3"
+  last_verification:
+    result: none # none | pass | fail
+    task: null
+    commands: []

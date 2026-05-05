@@ -38,6 +38,8 @@ class TestBuildEditFlowToolSchema:
     def test_schema_has_correct_name(self):
         schema = build_edit_flow_tool_schema([_make_step(1)])
         assert schema["function"]["name"] == EDIT_FLOW_TOOL_NAME
+        assert "form_operations" in schema["function"]["description"]
+        assert "uses_form_fields" in schema["function"]["description"]
 
     def test_target_ref_enum_contains_valid_refs(self):
         steps = [_make_step(1), _make_step(2), _make_step(3)]
@@ -86,6 +88,45 @@ class TestBuildEditFlowToolSchema:
         ops_schema = schema["function"]["parameters"]["properties"]["operations"]
         op_field = ops_schema["items"]["properties"]["op"]
         assert op_field["enum"] == ["add", "modify", "remove"]
+
+    def test_form_operations_schema_teaches_form_field_edits(self):
+        schema = build_edit_flow_tool_schema([_make_step(1)])
+
+        form_operations = schema["function"]["parameters"]["properties"][
+            "form_operations"
+        ]
+        item_schema = form_operations["items"]
+        properties = item_schema["properties"]
+        payload = properties["field_payload"]
+
+        assert item_schema["additionalProperties"] is False
+        assert properties["op"]["enum"] == ["add", "modify", "remove"]
+        assert item_schema["required"] == ["op", "field_name"]
+        assert properties["field_name"] == {"type": "string", "minLength": 1}
+        assert set(payload["properties"]) == {
+            "label",
+            "field_type",
+            "required",
+            "description",
+            "options",
+        }
+        assert payload["additionalProperties"] is False
+        assert payload["properties"]["field_type"]["enum"] == [
+            "text",
+            "number",
+            "date",
+            "select",
+            "multiselect",
+        ]
+        assert payload["properties"]["options"] == {
+            "type": "array",
+            "items": {"type": "string"},
+        }
+        description = form_operations["description"]
+        assert "uses_form_fields" in description
+        assert "orphan UI controls" in description
+        assert "field_payload is required for add and modify" in description
+        assert "omit field_payload for remove" in description
 
     def test_add_payload_uses_shared_new_step_authoring_shape(self):
         schema = build_edit_flow_tool_schema([_make_step(1)])

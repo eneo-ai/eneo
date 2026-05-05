@@ -11,6 +11,7 @@ from typing import Any
 
 from intric.flows.ai_builder.ai_builder_flow_name import MAX_FLOW_NAME_LENGTH
 from intric.flows.ai_builder.ai_builder_flow_schema_values import (
+    builder_form_field_type_values,
     builder_input_source_values,
     builder_input_type_values,
     builder_output_mode_values,
@@ -71,6 +72,8 @@ def build_edit_flow_tool_schema(
                 "Edit an existing flow. Describe only the steps or flow properties that truly change — "
                 "the backend preserves everything else. Each operation targets "
                 "a specific step by its ref. Unmentioned steps are kept as-is. "
+                "Use form_operations to add, modify, or remove flow-level inmatningsfält/form fields, "
+                "then reference those fields from consuming steps with uses_form_fields. "
                 "When you change output_type or output_mode, clear or omit incompatible "
                 "output_config fields instead of rewriting unrelated step config."
             ),
@@ -149,6 +152,7 @@ def build_edit_flow_tool_schema(
                             },
                         },
                     },
+                    "form_operations": _build_form_operations_schema(),
                     "assumptions": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -190,6 +194,57 @@ def build_edit_mode_tool_schemas(
 # ---------------------------------------------------------------------------
 # Internal schema builders
 # ---------------------------------------------------------------------------
+
+
+def _build_form_operations_schema() -> dict[str, Any]:
+    return {
+        "type": "array",
+        "description": (
+            "Optional operations for flow-level form fields/inmatningsfält. "
+            "When adding a field, also add the field name to uses_form_fields on "
+            "every step that consumes it; declared fields without step references "
+            "become orphan UI controls. field_payload is required for add and "
+            "modify; omit field_payload for remove."
+        ),
+        "items": {
+            "type": "object",
+            "required": ["op", "field_name"],
+            "additionalProperties": False,
+            "properties": {
+                "op": {
+                    "type": "string",
+                    "enum": ["add", "modify", "remove"],
+                    "description": (
+                        "add: create a new form field. "
+                        "modify: update an existing form field. "
+                        "remove: delete an existing form field."
+                    ),
+                },
+                "field_name": {"type": "string", "minLength": 1},
+                "field_payload": _build_form_field_payload_schema(),
+            },
+        },
+    }
+
+
+def _build_form_field_payload_schema() -> dict[str, Any]:
+    return {
+        "type": ["object", "null"],
+        "additionalProperties": False,
+        "properties": {
+            "label": {"type": "string"},
+            "field_type": {
+                "type": "string",
+                "enum": builder_form_field_type_values(),
+            },
+            "required": {"type": "boolean"},
+            "description": {"type": "string"},
+            "options": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+    }
 
 
 def _build_step_payload_schema(

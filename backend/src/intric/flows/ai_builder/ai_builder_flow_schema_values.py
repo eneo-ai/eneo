@@ -45,6 +45,12 @@ def builder_output_mode_values() -> list[str]:
     return [item.value for item in AIBuilderOutputMode]
 
 
+def builder_form_field_type_values() -> list[str]:
+    """LLM-facing form-field types for AI Builder tool schemas."""
+
+    return ["text", "number", "date", "select", "multiselect"]
+
+
 def document_delivery_mode_values() -> list[str]:
     """Document delivery modes derived from Flow output/mode capability rules."""
 
@@ -71,6 +77,7 @@ def _builder_exposed_input_types() -> set[str]:
 
 
 __all__ = [
+    "builder_form_field_type_values",
     "builder_input_source_values",
     "builder_input_type_values",
     "builder_output_mode_values",
