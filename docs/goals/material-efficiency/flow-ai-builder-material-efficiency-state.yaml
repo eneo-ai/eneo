@@ -480,6 +480,56 @@ tasks:
           status: pass
           output: "V2 applied flow=01f3d8b1-3510-4ea3-9e57-f3a0d3fc8df5; run-contract.json exists with published_flow_version=1; run-contract.json.error.txt absent."
 
+  - id: T010
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "Stop multi-step form-field terminal fallback from hiding planner routing omissions."
+    allowed_files:
+      - backend/src/intric/flows/ai_builder/ai_builder_create_outline.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T010-form-field-terminal-fallback-narrowing.md
+    verify:
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py -q"
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -k 'form_field or input_field or runtime_input_field'"
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_usage.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+      - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+    stop_if:
+      - "Fix requires planner keyword heuristics instead of compiler fallback narrowing."
+      - "Normalizer/linter/critic no longer share the same form-field usage predicate."
+      - "Single semantic-step flows lose simple form-field binding behavior."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T010-form-field-terminal-fallback-narrowing.md
+      summary: "Narrowed unreferenced form-field fallback to one semantic-step outlines so multi-step flows expose unused fields to the existing linter and critic repair path."
+      peer_review: "Claude iteration 1 blocked heuristic routing and identified terminal fallback laundering; iteration 2 returned GREEN_LIGHT yes, MIN_SCORE 8. Non-blocking critic assertion and invariant comment suggestions were incorporated."
+      verification:
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py -q"
+          status: pass
+          output: "6 passed"
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -k 'form_field or input_field or runtime_input_field'"
+          status: pass
+          output: "7 passed, 101 deselected"
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_usage.py -q"
+          status: pass
+          output: "8 passed"
+        - cmd: "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+          status: pass
+          output: "All checks passed!"
+        - cmd: "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+          status: pass
+          output: "2 files already formatted"
+        - cmd: "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --case C2 --runs 1 --apply --publish --output-dir /tmp/material-efficiency-live-eval/20260505-223500-t010-c2-targeted"
+          status: partial
+          output: "C2 applied flow=05b26073-c54d-43ed-a5ee-292bae3ce24a; focus_area reached the risk JSON step, but organization_name/report_period were still unused and one composer still used all_previous_steps."
+
   - id: T999
     type: judge
     assignee: Judge
@@ -520,12 +570,14 @@ checks:
   dirty_fingerprint: unknown
   last_verification:
     result: pass
-    task: T009
+    task: T010
     commands:
-      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_live_eval_runner.py -q"
-      - "cd backend && uv run ruff check ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
-      - "cd backend && uv run ruff format --check ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
-      - "cd backend && uv run pyright ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py -q"
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -k 'form_field or input_field or runtime_input_field'"
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_usage.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+      - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
   live_eval:
     result: partial_failures_found
     latest_summaries:
@@ -533,10 +585,13 @@ checks:
       create_suite: "/tmp/material-efficiency-live-eval/20260505-214422-rerun-create/summary.json"
       supplemental: "/tmp/material-efficiency-live-eval/20260505-215259-rerun-supplemental/summary.json"
       publish_runtime_check: "/tmp/material-efficiency-live-eval/20260505-220834-post-runner-fix-publish/summary.json"
+      c2_after_t010: "/tmp/material-efficiency-live-eval/20260505-223500-t010-c2-targeted/summary.json"
     latest_findings:
       - "V2 source-preserving audio-to-DOCX plans applied consistently and published with a valid run contract after T009."
       - "C1 remains blocked/unstable: builder_error or no_plan_after_requirements_confirmation."
       - "C2 remains flaky and still routes fokusområde to terminal output rather than the intermediate risk step."
+      - "T010 removes the compiler-side multi-step terminal fallback that hid C2-style form-field omissions from the unused-field linter and critic; planner repair/live quality still needs a C2 rerun."
+      - "Post-T010 C2 targeted live rerun applied and published flow 05b26073-c54d-43ed-a5ee-292bae3ce24a; focus_area reached the risk JSON step via explicit binding, but organization_name/report_period were still declared without useful downstream bindings and an all_previous_steps composer remains."
       - "C3 and N1 showed nondeterministic no_plan_after_requirements_confirmation in targeted reruns."
       - "Manual V2 runtime run uploaded audio and completed transcription, then stayed running at step 2 until cancelled."
     spaces:

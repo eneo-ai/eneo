@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import logging
 from uuid import uuid4
-
-import pytest
 
 from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
 from intric.flows.ai_builder.ai_builder_create_models import (
@@ -13,25 +10,33 @@ from intric.flows.ai_builder.ai_builder_create_models import (
     StructuredFieldDraft,
 )
 from intric.flows.ai_builder.ai_builder_create_outline import (
-    _log_form_field_terminal_fallback,
     compile_outline_to_create_draft,
     parse_outline_flow_arguments,
 )
+from intric.flows.ai_builder.ai_builder_critic_invariants import (
+    CRITIC_INVARIANTS,
+    CriticContext,
+    evaluate_critic_invariants,
+)
+from intric.flows.ai_builder.ai_builder_domain_models import FlowDraftSpecCore
 from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
 from intric.flows.ai_builder.ai_builder_edit_models import (
     FlowEditDraft,
     StepEditOperation,
     StepPatch,
 )
-from intric.flows.ai_builder.ai_builder_models import InputSource, OutputType
-from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+from intric.flows.ai_builder.ai_builder_form_field_usage import find_unused_form_fields
+from intric.flows.ai_builder.ai_builder_framework_policy import OutputIntentResolution
+from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+    PlannerPatternSignals,
+)
 from intric.flows.ai_builder.ai_builder_validator import validate_spec
 from intric.flows.flow import FlowStep
 
 
-def test_declared_input_field_without_step_use_attaches_to_final_step(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+def test_declared_input_field_without_step_use_stays_unused_for_multi_step_repair() -> (
+    None
+):
     outline = parse_outline_flow_arguments(
         {
             "flow_name": "Priority review",
@@ -67,25 +72,24 @@ def test_declared_input_field_without_step_use_attaches_to_final_step(
         }
     )
 
-    with caplog.at_level(logging.INFO):
-        draft = compile_outline_to_create_draft(outline)
+    draft = compile_outline_to_create_draft(outline)
     compiled = compile_create_draft(draft)
-    final_question = _question_binding(compiled.steps[-1].input_bindings)
 
     assert [field.variable_name for field in draft.form_fields] == ["priority"]
     assert draft.steps[0].uses_form_fields == []
-    assert draft.steps[-1].uses_form_fields == ["priority"]
+    assert draft.steps[-1].uses_form_fields == []
     assert compiled.form_fields is not None
     assert [field.name for field in compiled.form_fields] == ["priority"]
-    assert final_question.count("{{ priority }}") == 1
-    assert "priority: {{ priority }}" in final_question
-    assert validate_spec(compiled).valid
-    assert not _has_terminal_fallback_diagnostic(caplog)
+    assert compiled.steps[-1].input_bindings is None
+    assert find_unused_form_fields(compiled) == ["priority"]
+    validation = validate_spec(compiled)
+    assert validation.valid
+    assert any(warning.code == "unused_form_field" for warning in validation.warnings)
 
 
-def test_renderer_terminal_form_field_fallback_logs_diagnostic(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+def test_renderer_terminal_form_field_fallback_does_not_hide_multi_step_unused_field() -> (
+    None
+):
     outline = parse_outline_flow_arguments(
         {
             "flow_name": "PDF report",
@@ -118,46 +122,58 @@ def test_renderer_terminal_form_field_fallback_logs_diagnostic(
                     "output_type": "text",
                 },
                 {
-                    "name": "Create PDF",
-                    "task": "Render the report body as PDF.",
-                    "output_type": "pdf",
+                    "name": "Assemble final text",
+                    "task": "Prepare the final PDF body text.",
+                    "output_type": "text",
                 },
             ],
         }
     )
 
-    with caplog.at_level(logging.INFO):
-        draft = compile_outline_to_create_draft(outline)
+    draft = compile_outline_to_create_draft(outline)
+    compiled = compile_create_draft(draft)
 
-    assert draft.steps[-1].uses_form_fields == ["focus_area"]
-    diagnostic = next(
-        record
-        for record in caplog.records
-        if record.message == "ai_builder_form_fields_attached_to_document_terminal"
+    assert [step.uses_form_fields for step in draft.steps] == [[], [], [], []]
+    assert find_unused_form_fields(compiled) == ["focus_area"]
+    assert "form_fields_declared_must_be_referenced" in _critic_issue_ids(compiled)
+    validation = validate_spec(compiled)
+    assert validation.valid
+    assert any(warning.code == "unused_form_field" for warning in validation.warnings)
+
+
+def test_single_step_outline_form_field_fallback_binds_only_available_step() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "PDF report",
+            "plan_rationale": "Render a short PDF.",
+            "runtime_input": {"input_type": "text", "required": True},
+            "final_output_type": "pdf",
+            "input_fields": [
+                {
+                    "variable_name": "report_title",
+                    "label": "Report title",
+                    "field_type": "text",
+                    "required": True,
+                }
+            ],
+            "steps": [
+                {
+                    "name": "Write PDF body",
+                    "task": "Render the submitted material as PDF.",
+                    "output_type": "text",
+                },
+            ],
+        }
     )
-    assert diagnostic.form_field_names == ["focus_area"]
-    assert diagnostic.final_step_name == "Create PDF"
-    assert diagnostic.final_output_type == "pdf"
 
+    draft = compile_outline_to_create_draft(outline)
+    compiled = compile_create_draft(draft)
+    question = _question_binding(compiled.steps[-1].input_bindings)
 
-def test_single_step_renderer_form_field_fallback_does_not_log_diagnostic(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    final_step = NewStepDraft(
-        name="Create PDF",
-        instructions="Render the submitted material as PDF.",
-        input_source=InputSource.FLOW_INPUT,
-        output_type=OutputType.PDF,
-    )
-
-    with caplog.at_level(logging.INFO):
-        _log_form_field_terminal_fallback(
-            steps=[final_step],
-            final_step=final_step,
-            form_field_names=["report_title"],
-        )
-
-    assert not _has_terminal_fallback_diagnostic(caplog)
+    assert [step.uses_form_fields for step in draft.steps] == [[], ["report_title"]]
+    assert "report_title: {{ report_title }}" in question
+    assert find_unused_form_fields(compiled) == []
+    assert validate_spec(compiled).valid
 
 
 def test_intermediate_form_field_use_flows_through_structured_previous_field() -> None:
@@ -207,7 +223,7 @@ def test_intermediate_form_field_use_flows_through_structured_previous_field() -
     assert first_question.count("{{ case_id }}") == 1
     assert final_question == "Risk score: {{ step_a.output.structured.risk_score }}"
     assert "{{ case_id }}" not in final_question
-    assert compiled.steps[-1].input_contract == compiled.steps[0].output_contract
+    assert compiled.steps[-1].input_contract is None
     assert validate_spec(compiled).valid
 
 
@@ -346,11 +362,24 @@ def _question_binding(input_bindings: dict[str, object] | None) -> str:
     return question
 
 
-def _has_terminal_fallback_diagnostic(caplog: pytest.LogCaptureFixture) -> bool:
-    return any(
-        record.message == "ai_builder_form_fields_attached_to_document_terminal"
-        for record in caplog.records
+def _critic_issue_ids(spec: FlowDraftSpecCore) -> set[str]:
+    context = CriticContext(
+        spec=spec,
+        flow=None,
+        answer_signals={},
+        text="",
+        requirements_text="",
+        signal_text="",
+        planner_patterns=PlannerPatternSignals(),
+        output_intent=OutputIntentResolution(
+            terminal_output=spec.steps[-1].output_type.value
+        ),
+        mixed_audio_doc_input=False,
     )
+    return {
+        issue.id
+        for issue in evaluate_critic_invariants(context, invariants=CRITIC_INVARIANTS)
+    }
 
 
 def _flow_step(
