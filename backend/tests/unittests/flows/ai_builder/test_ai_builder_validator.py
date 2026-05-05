@@ -1227,6 +1227,174 @@ class TestQualityLint:
             for warning in result.warnings
         )
 
+    def test_source_material_boundary_missing_underlag_warned_for_text_report(
+        self,
+    ) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="Transcribe source",
+                        input_source=InputSource.FLOW_INPUT,
+                        input_type=InputType.AUDIO,
+                        output_mode=OutputMode.TRANSCRIBE_ONLY,
+                        output_type=OutputType.TEXT,
+                    ),
+                    _step(
+                        ref="step_b",
+                        name="Extract decisions",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.TEXT,
+                        output_type=OutputType.JSON,
+                    ),
+                    _step(
+                        ref="step_c",
+                        name="Extract actions",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.JSON,
+                        output_type=OutputType.JSON,
+                    ),
+                    _step(
+                        ref="step_d",
+                        name="Write final report",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.JSON,
+                        output_type=OutputType.TEXT,
+                    ),
+                ]
+            )
+        )
+
+        assert result.valid
+        assert any(
+            warning.code == "source_material_boundary_missing_underlag"
+            and warning.step_ref == "step_c"
+            for warning in result.warnings
+        )
+        assert any(
+            warning.code == "source_material_boundary_missing_underlag"
+            and warning.step_ref == "step_d"
+            for warning in result.warnings
+        )
+
+    def test_source_material_boundary_text_report_complete_underlag_does_not_warn(
+        self,
+    ) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="Transcribe source",
+                        input_source=InputSource.FLOW_INPUT,
+                        input_type=InputType.AUDIO,
+                        output_mode=OutputMode.TRANSCRIBE_ONLY,
+                        output_type=OutputType.TEXT,
+                    ),
+                    _step(
+                        ref="step_b",
+                        name="Extract decisions",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.TEXT,
+                        output_type=OutputType.JSON,
+                    ),
+                    _step(
+                        ref="step_c",
+                        name="Write final report",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.JSON,
+                        output_type=OutputType.TEXT,
+                        input_bindings={
+                            "question": (
+                                "{{ step_b.output.structured }}\n\n"
+                                "Source material: {{ step_a.output.text }}"
+                            )
+                        },
+                    ),
+                ]
+            )
+        )
+
+        assert result.valid
+        assert not any(
+            warning.code == "source_material_boundary_missing_underlag"
+            for warning in result.warnings
+        )
+
+    def test_source_material_boundary_does_not_warn_for_text_chain_without_json(
+        self,
+    ) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="Read source",
+                        input_source=InputSource.FLOW_INPUT,
+                        input_type=InputType.TEXT,
+                        output_type=OutputType.TEXT,
+                    ),
+                    _step(
+                        ref="step_b",
+                        name="Draft response",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.TEXT,
+                        output_type=OutputType.TEXT,
+                    ),
+                    _step(
+                        ref="step_c",
+                        name="Finalize response",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.TEXT,
+                        output_type=OutputType.TEXT,
+                    ),
+                ]
+            )
+        )
+
+        assert result.valid
+        assert not any(
+            warning.code == "source_material_boundary_missing_underlag"
+            for warning in result.warnings
+        )
+
+    def test_source_material_boundary_does_not_warn_for_pure_json_chain(self) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="Transcribe source",
+                        input_source=InputSource.FLOW_INPUT,
+                        input_type=InputType.AUDIO,
+                        output_mode=OutputMode.TRANSCRIBE_ONLY,
+                        output_type=OutputType.TEXT,
+                    ),
+                    _step(
+                        ref="step_b",
+                        name="Extract facts",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.TEXT,
+                        output_type=OutputType.JSON,
+                    ),
+                    _step(
+                        ref="step_c",
+                        name="Extract decisions",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.JSON,
+                        output_type=OutputType.JSON,
+                    ),
+                ]
+            )
+        )
+
+        assert result.valid
+        assert not any(
+            warning.code == "source_material_boundary_missing_underlag"
+            for warning in result.warnings
+        )
+
     def test_source_material_boundary_allows_structured_subfield_underlag(self) -> None:
         result = validate_spec(
             _spec(
@@ -1251,9 +1419,7 @@ class TestQualityLint:
                                 "brukare": {
                                     "type": "object",
                                     "properties": {
-                                        "kan_uttrycka_behov_sjalv": {
-                                            "type": "string"
-                                        }
+                                        "kan_uttrycka_behov_sjalv": {"type": "string"}
                                     },
                                 }
                             },

@@ -23,12 +23,14 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
 )
 from intric.flows.template_reference_analyzer import (
     TemplateReference,
-    TemplateReferenceKind,
     analyze_template,
 )
 
 _DOCUMENT_OUTPUT_TYPES = {OutputType.DOCX, OutputType.PDF}
 _PRIMARY_MATERIAL_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
+_COMPILED_PRIMARY_MATERIAL_INPUT_TYPES = _PRIMARY_MATERIAL_INPUT_TYPES | {
+    InputType.TEXT
+}
 _SWEDISH_LABEL_TOKENS = (
     "analysera",
     "bearbeta",
@@ -52,17 +54,19 @@ class CompiledSourceMaterialBoundary:
     previous_step: StepSpec
     previous_step_order: int
     prior_steps: tuple[StepSpec, ...]
-    prior_text_steps: tuple[StepSpec, ...]
+    primary_source_step: StepSpec
 
 
 class SourceMaterialBindingStatus(str, Enum):
+    """Classifies whether a boundary prompt preserves source text and structured context."""
+
     COMPLETE = "complete"
     INTENTIONAL_PARTIAL = "intentional_partial"
     NEEDS_COMPLETION = "needs_completion"
 
 
 def normalize_create_draft_source_material(draft: FlowCreateDraft) -> FlowCreateDraft:
-    if not _draft_returns_document_artifact(draft):
+    if not _draft_returns_material_report(draft):
         return draft
 
     source_ref = _primary_source_material_ref(draft)
@@ -94,7 +98,7 @@ def normalize_create_draft_source_material(draft: FlowCreateDraft) -> FlowCreate
 def iter_compiled_source_material_boundaries(
     spec: FlowDraftSpecCore,
 ) -> Iterable[CompiledSourceMaterialBoundary]:
-    if not _compiled_spec_returns_document_artifact(spec):
+    if not _compiled_spec_returns_material_report(spec):
         return
 
     for index, step in enumerate(spec.steps):
@@ -103,12 +107,15 @@ def iter_compiled_source_material_boundaries(
         previous_step = spec.steps[index - 1]
         if previous_step.output_type != OutputType.JSON:
             continue
+        # Section-analysis chains often need the original source at each
+        # JSON-after-JSON step, not only at the final report composer.
         prior_text_steps = tuple(
             prior_step
             for prior_step in spec.steps[:index]
             if prior_step.output_type == OutputType.TEXT
         )
-        if not prior_text_steps:
+        primary_source_step = _compiled_primary_source_text_step(prior_text_steps)
+        if primary_source_step is None:
             continue
         yield CompiledSourceMaterialBoundary(
             step=step,
@@ -116,7 +123,7 @@ def iter_compiled_source_material_boundaries(
             previous_step=previous_step,
             previous_step_order=index,
             prior_steps=tuple(spec.steps[:index]),
-            prior_text_steps=prior_text_steps,
+            primary_source_step=primary_source_step,
         )
 
 
@@ -135,12 +142,12 @@ def source_material_binding_status(
     )
     mentions_source = _question_mentions_prior_text_source(
         question=question,
-        prior_text_steps=boundary.prior_text_steps,
+        source_step=boundary.primary_source_step,
         prior_steps=boundary.prior_steps,
     )
     if mentions_structured and mentions_source:
         return SourceMaterialBindingStatus.COMPLETE
-    if _question_mentions_prior_step_output(
+    if mentions_source or _question_mentions_prior_structured_subfield(
         question=question,
         prior_steps=boundary.prior_steps,
     ):
@@ -153,7 +160,7 @@ def source_material_question_for_boundary(
     *,
     existing_question: str | None = None,
 ) -> str:
-    source_step = _compiled_primary_source_text_step(boundary.prior_text_steps)
+    source_step = boundary.primary_source_step
     label = source_material_label_for_text(
         " ".join(
             (
@@ -178,7 +185,7 @@ def source_material_question_for_boundary(
         sections.append(immediate_structured)
     if existing_question is None or not _question_mentions_prior_text_source(
         question=existing_question,
-        prior_text_steps=boundary.prior_text_steps,
+        source_step=source_step,
         prior_steps=boundary.prior_steps,
     ):
         sections.append(source_material)
@@ -206,12 +213,9 @@ def _question_mentions_immediate_structured(
 def _question_mentions_prior_text_source(
     *,
     question: str,
-    prior_text_steps: Sequence[StepSpec],
+    source_step: StepSpec,
     prior_steps: Sequence[StepSpec] = (),
 ) -> bool:
-    if not prior_text_steps:
-        return False
-    source_step = _compiled_primary_source_text_step(prior_text_steps)
     step_order = _step_order_for(source_step, known_steps=prior_steps)
     return any(
         _reference_targets_step(reference, source_step, step_order=step_order)
@@ -239,13 +243,13 @@ def source_material_label_for_text(text: str) -> str:
     return "Source material"
 
 
-def _question_mentions_prior_step_output(
+def _question_mentions_prior_structured_subfield(
     *,
     question: str,
     prior_steps: Sequence[StepSpec],
 ) -> bool:
     return any(
-        reference.kind is TemplateReferenceKind.STEP
+        reference.tail.startswith("output.structured.")
         and any(
             _reference_targets_step(
                 reference,
@@ -253,10 +257,6 @@ def _question_mentions_prior_step_output(
                 step_order=_step_order_for(step, known_steps=prior_steps),
             )
             for step in prior_steps
-        )
-        and (
-            _reference_tail_is_output(reference, output="text")
-            or _reference_tail_is_output(reference, output="structured")
         )
         for reference in _analyze_step_references(question, known_steps=prior_steps)
     )
@@ -311,8 +311,20 @@ def _draft_returns_document_artifact(draft: FlowCreateDraft) -> bool:
     return any(step.output_type in _DOCUMENT_OUTPUT_TYPES for step in draft.steps)
 
 
+def _draft_returns_material_report(draft: FlowCreateDraft) -> bool:
+    if _draft_returns_document_artifact(draft):
+        return True
+    return bool(draft.steps) and draft.steps[-1].output_type == OutputType.TEXT
+
+
 def _compiled_spec_returns_document_artifact(spec: FlowDraftSpecCore) -> bool:
     return any(step.output_type in _DOCUMENT_OUTPUT_TYPES for step in spec.steps)
+
+
+def _compiled_spec_returns_material_report(spec: FlowDraftSpecCore) -> bool:
+    if _compiled_spec_returns_document_artifact(spec):
+        return True
+    return bool(spec.steps) and spec.steps[-1].output_type == OutputType.TEXT
 
 
 def _primary_source_material_ref(
@@ -333,7 +345,7 @@ def _primary_source_material_ref(
                     step.instructions or "",
                 )
             )
-        )
+        ),
     )
 
 
@@ -353,8 +365,9 @@ def _draft_primary_source_text_step(
 
 def _compiled_primary_source_text_step(
     prior_text_steps: Sequence[StepSpec],
-) -> StepSpec:
-    return next(
+) -> StepSpec | None:
+    # Prefer real source-material uploads over plain text form/input passthroughs.
+    primary_material_step = next(
         (
             step
             for step in prior_text_steps
@@ -362,7 +375,19 @@ def _compiled_primary_source_text_step(
             and step.input_type in _PRIMARY_MATERIAL_INPUT_TYPES
             and step.output_type == OutputType.TEXT
         ),
-        prior_text_steps[0],
+        None,
+    )
+    if primary_material_step is not None:
+        return primary_material_step
+    return next(
+        (
+            step
+            for step in prior_text_steps
+            if step.input_source == InputSource.FLOW_INPUT
+            and step.input_type in _COMPILED_PRIMARY_MATERIAL_INPUT_TYPES
+            and step.output_type == OutputType.TEXT
+        ),
+        None,
     )
 
 

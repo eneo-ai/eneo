@@ -3882,10 +3882,81 @@ def test_compile_create_draft_audio_report_section_extractors_keep_transcript_un
         assert step.input_bindings is not None
         question = step.input_bindings["question"]
         assert "Källmaterial: {{ step_a.output.text }}" in question
-    assert "{{ step_b.output.structured }}" in compiled.steps[2].input_bindings["question"]
-    assert "{{ step_c.output.structured }}" in compiled.steps[3].input_bindings["question"]
-    assert "{{ step_d.output.structured }}" in compiled.steps[4].input_bindings["question"]
-    assert "{{ step_e.output.structured }}" in compiled.steps[5].input_bindings["question"]
+    assert (
+        "{{ step_b.output.structured }}" in compiled.steps[2].input_bindings["question"]
+    )
+    assert (
+        "{{ step_c.output.structured }}" in compiled.steps[3].input_bindings["question"]
+    )
+    assert (
+        "{{ step_d.output.structured }}" in compiled.steps[4].input_bindings["question"]
+    )
+    assert (
+        "{{ step_e.output.structured }}" in compiled.steps[5].input_bindings["question"]
+    )
+    assert validate_spec(compiled).valid
+
+
+def test_compile_create_draft_text_report_keeps_source_and_structured_underlag() -> (
+    None
+):
+    draft = FlowCreateDraft(
+        flow_name="Mötesrapport från ljud",
+        plan_rationale="Transkribera ljud och skapa en textbaserad mötesrapport.",
+        steps=[
+            CreateStepDraft(
+                name="Transkribera mötesljud",
+                instructions="Transkribera mötesljudet till svensk text.",
+                input_source="flow_input",
+                input_type="audio",
+                output_type="text",
+                runtime_upload=True,
+                runtime_required=True,
+            ),
+            CreateStepDraft(
+                name="Etablera möteskontext",
+                instructions="Skapa möteskontext baserat på transkriberingen.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+                output_fields=[_field("meeting_context", "string")],
+            ),
+            CreateStepDraft(
+                name="Analysera beslut",
+                instructions="Extrahera beslut från mötet.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="json",
+                output_fields=[_field("decisions", "string")],
+            ),
+            CreateStepDraft(
+                name="Skriv rapport",
+                instructions="Skriv en textbaserad rapport från underlaget.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="text",
+            ),
+        ],
+    )
+
+    compiled = compile_create_draft(draft)
+
+    analysis_step = compiled.steps[2]
+    report_step = compiled.steps[3]
+    assert analysis_step.input_type.value == "text"
+    assert analysis_step.input_contract is None
+    assert analysis_step.input_bindings == {
+        "question": (
+            "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+        )
+    }
+    assert report_step.input_type.value == "text"
+    assert report_step.input_contract is None
+    assert report_step.input_bindings == {
+        "question": (
+            "{{ step_c.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+        )
+    }
     assert validate_spec(compiled).valid
 
 

@@ -1,0 +1,362 @@
+# Goal Maker v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Flow AI Builder Material Efficiency and Binding Quality"
+  slug: "flow-ai-builder-material-efficiency"
+  kind: open_ended
+  tranche: "Improve explicit material routing, binding efficiency, source-material preservation, and measurable context cost through successive safe verified slices."
+  status: active
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  stay_on_current_branch: true
+  commit_phase_boundaries_only: true
+  never_push_without_owner_instruction: true
+  no_secrets_or_eval_artifacts_in_commits: true
+  red_test_before_fix: true
+  no_all_previous_steps_band_aid: true
+  no_parallel_material_planning_abstraction_without_evidence: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+active_task: T005
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Baseline current branch and verify the real next material-efficiency gap before implementation."
+    inputs:
+      - docs/refactor/new/flow_ai_builder_merge_ready_prd.md
+      - docs/refactor/new/flow_ai_builder_merge_readiness_review.md
+      - docs/refactor/flow-ai-builder-material-efficiency-review-handoff.md
+      - backend/src/intric/flows/ai_builder/ai_builder_source_material.py
+      - backend/src/intric/flows/ai_builder/ai_builder_new_step_compiler.py
+      - backend/src/intric/flows/ai_builder/ai_builder_step_transition_policy.py
+      - backend/src/intric/flows/ai_builder/ai_builder_validation_quality.py
+      - backend/src/intric/flows/ai_builder/ai_builder_create_dataflow.py
+      - backend/tests/unittests/flows/ai_builder
+      - backend/tests/integration/flows/ai_builder/benchmark
+    constraints:
+      - "Read-only."
+      - "Run git status --short and classify dirty files."
+      - "Do not edit implementation files."
+      - "Verify current code after recent commits; do not trust stale handoff assumptions."
+      - "Prefer file:line evidence over generic advice."
+      - "Identify exact verification commands for pytest, pyright, ruff, and live eval."
+    expected_output:
+      - "Current branch/dirty baseline."
+      - "Whether source-material loss is still reproducible or needs a new reproducer."
+      - "Canonical owner recommendation with file:line evidence."
+      - "Candidate red tests."
+      - "Candidate metrics for context/binding efficiency."
+      - "Recommended first Worker slice with allowed_files, verify, and stop_if."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T001-scout-baseline.md
+      summary: "Reproduced a remaining text-terminal source-material gap: audio/text source -> JSON -> JSON -> text finalizer has no compiled boundary, no normalization, no source-material warning, and no final input_bindings."
+      dirty_baseline:
+        - "M scripts/run_codex_review.sh (pre-existing unrelated)"
+        - "?? PRODUCT.md (pre-existing unrelated)"
+        - "?? docs/goals/material-efficiency/ (goal docs/state/eval runner; PM-owned only)"
+        - "?? docs/refactor/flow-ai-builder-material-efficiency-review-handoff.md (goal input)"
+        - "?? docs/refactor/goals.md (pre-existing docs)"
+        - "?? docs/refactor/new/ (goal input)"
+        - "?? docs/refactor/runtime-hang-and-builder-rootcause.md (pre-existing docs)"
+        - "?? flow_ai_builder_prd.md (pre-existing docs)"
+        - "?? flow_ai_builder_review.md (pre-existing docs)"
+        - "?? utvecklingssamtal.mp3 (local media; never commit)"
+      evidence:
+        - "backend/src/intric/flows/ai_builder/ai_builder_source_material.py:94"
+        - "backend/src/intric/flows/ai_builder/ai_builder_step_transition_policy.py:174"
+        - "backend/src/intric/flows/ai_builder/ai_builder_validation_quality.py:270"
+        - "backend/src/intric/flows/ai_builder/ai_builder_create_compiler.py:22"
+      commands:
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py -q"
+          status: pass
+          output: "17 passed"
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -k 'source_underlag or audio_report_section_extractors or direct_audio_docx_bad_shape or targeted_underlag'"
+          status: pass
+          output: "9 passed, 98 deselected"
+        - cmd: "uv run --directory backend python - <<'PY' ... text-terminal source-material boundary probe ... PY"
+          status: reproduced
+          output: "boundaries []; changes []; final bindings None"
+      recommended_worker:
+        objective: "Add a deterministic red golden for text-terminal source-material loss across JSON boundaries, implement the smallest source-material owner fix, and add per-golden material-efficiency metrics."
+        allowed_files:
+          - backend/src/intric/flows/ai_builder/ai_builder_source_material.py
+          - backend/tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py
+          - backend/tests/unittests/flows/ai_builder/test_ai_builder_validator.py
+        verify:
+          - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py -q"
+          - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_validator.py -q -k source_material"
+          - "uv run --directory backend pytest tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py -q"
+          - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_source_material.py"
+          - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_source_material.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py"
+          - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_source_material.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py"
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the smallest safe TDD Worker slice for material routing and efficiency."
+    inputs:
+      - "T001 receipt"
+      - "Current diff"
+      - "Claude plan review artifact"
+    constraints:
+      - "Do not implement."
+      - "Run Claude peer loop with skepticism=skeptical or blocking before approving Worker."
+      - "Pick small reviewable work with a red test first."
+      - "Reject broad rewrites and parallel material-planning abstractions unless evidence proves they are necessary."
+      - "Require normalizer/linter symmetry if source-material boundary behavior changes."
+    expected_output:
+      - "Decision: activate worker | blocked | revise scout."
+      - "Exact Worker objective."
+      - "allowed_files."
+      - "verify commands."
+      - "stop_if."
+      - "Risks and non-goals."
+    receipt:
+      result: done
+      decision: "activate_worker"
+      note: docs/goals/material-efficiency/notes/T002-judge-revised-worker-slice.md
+      summary: "Claude peer loop required two revisions, then green-lit a narrow TDD Worker slice for text-terminal source-material boundary coverage with explicit SourceMaterialBindingStatus semantics and test-local metrics only."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-flow-ai-builder-material-efficiency-t002-judge-critique-iteration-1-20260505T181615Z.md"
+        - ".codex/artifacts/claude-peer-loop-flow-ai-builder-material-efficiency-t002-judge-critique-iteration-2-20260505T182012Z.md"
+        - ".codex/artifacts/claude-peer-loop-flow-ai-builder-material-efficiency-t002-judge-critique-iteration-3-20260505T182333Z.md"
+      green_light: true
+      selected_worker: T003
+      worker_scope:
+        objective: "Add red tests and a minimal ai_builder_source_material.py fix so source-material boundary detection covers text-terminal report composers only when there is a primary source text step, with normalizer/linter symmetry and no all_previous_steps fallback."
+        allowed_files:
+          - backend/src/intric/flows/ai_builder/ai_builder_source_material.py
+          - backend/tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py
+          - backend/tests/unittests/flows/ai_builder/test_ai_builder_validator.py
+          - backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py
+          - backend/tests/integration/flows/ai_builder/benchmark/manual_api_scoring.py
+          - backend/tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py
+        verify:
+          - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py -q"
+          - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_validator.py -q -k source_material"
+          - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -k 'source_underlag or audio_report_section_extractors or direct_audio_docx_bad_shape or targeted_underlag'"
+          - "uv run --directory backend pytest tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py -q"
+          - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_source_material.py src/intric/flows/ai_builder/ai_builder_step_transition_policy.py src/intric/flows/ai_builder/ai_builder_validation_quality.py src/intric/flows/ai_builder/ai_builder_create_dataflow.py"
+          - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_source_material.py src/intric/flows/ai_builder/ai_builder_step_transition_policy.py src/intric/flows/ai_builder/ai_builder_validation_quality.py src/intric/flows/ai_builder/ai_builder_create_dataflow.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/integration/flows/ai_builder/benchmark/manual_api_scoring.py tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py"
+          - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_source_material.py src/intric/flows/ai_builder/ai_builder_step_transition_policy.py src/intric/flows/ai_builder/ai_builder_validation_quality.py src/intric/flows/ai_builder/ai_builder_create_dataflow.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/integration/flows/ai_builder/benchmark/manual_api_scoring.py tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py"
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Add the first red golden/test and implement the smallest canonical-owner fix selected by Judge."
+    allowed_files:
+      - backend/src/intric/flows/ai_builder/ai_builder_source_material.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_validator.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py
+      - backend/tests/integration/flows/ai_builder/benchmark/manual_api_scoring.py
+      - backend/tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py
+    verify:
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py -q"
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_validator.py -q -k source_material"
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -k 'source_underlag or audio_report_section_extractors or direct_audio_docx_bad_shape or targeted_underlag'"
+      - "uv run --directory backend pytest tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py -q"
+      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_source_material.py src/intric/flows/ai_builder/ai_builder_step_transition_policy.py src/intric/flows/ai_builder/ai_builder_validation_quality.py src/intric/flows/ai_builder/ai_builder_create_dataflow.py"
+      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_source_material.py src/intric/flows/ai_builder/ai_builder_step_transition_policy.py src/intric/flows/ai_builder/ai_builder_validation_quality.py src/intric/flows/ai_builder/ai_builder_create_dataflow.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/integration/flows/ai_builder/benchmark/manual_api_scoring.py tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py"
+      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_source_material.py src/intric/flows/ai_builder/ai_builder_step_transition_policy.py src/intric/flows/ai_builder/ai_builder_validation_quality.py src/intric/flows/ai_builder/ai_builder_create_dataflow.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/integration/flows/ai_builder/benchmark/manual_api_scoring.py tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py"
+    stop_if:
+      - "Need files outside Judge-approved allowed_files."
+      - "Cannot produce a meaningful red test."
+      - "Fix would require blanket all_previous_steps."
+      - "Fix would introduce a parallel material-planning source of truth."
+      - "Verification fails twice for reasons not proven pre-existing."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T003-worker-source-material-text-terminal.md
+      summary: "Added red tests and a minimal source-material owner fix so text-terminal report composers preserve primary source text and immediate structured JSON across JSON boundaries, without all_previous_steps fallback."
+      changed_files:
+        - backend/src/intric/flows/ai_builder/ai_builder_source_material.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_validator.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py
+        - backend/tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py
+      red_evidence:
+        - "step_transition_policy targeted subset initially failed 3 cases proving missing text-terminal normalization."
+        - "validator source_material_boundary subset initially failed 1 case proving linter gap."
+        - "manual_api_scoring text-terminal case initially failed because missing source material was not scored."
+        - "create_compiler text-terminal golden initially failed because create-draft source-material normalization was document-artifact-only."
+      verification:
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py -q"
+          status: pass
+          output: "210 passed, 16 warnings"
+        - cmd: "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_source_material.py src/intric/flows/ai_builder/ai_builder_step_transition_policy.py src/intric/flows/ai_builder/ai_builder_validation_quality.py src/intric/flows/ai_builder/ai_builder_create_dataflow.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/integration/flows/ai_builder/benchmark/manual_api_scoring.py tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py"
+          status: pass
+          output: "All checks passed"
+        - cmd: "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_source_material.py src/intric/flows/ai_builder/ai_builder_step_transition_policy.py src/intric/flows/ai_builder/ai_builder_validation_quality.py src/intric/flows/ai_builder/ai_builder_create_dataflow.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/integration/flows/ai_builder/benchmark/manual_api_scoring.py tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py"
+          status: pass
+          output: "9 files already formatted"
+        - cmd: "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_source_material.py src/intric/flows/ai_builder/ai_builder_step_transition_policy.py src/intric/flows/ai_builder/ai_builder_validation_quality.py src/intric/flows/ai_builder/ai_builder_create_dataflow.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_validator.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "git diff --check"
+          status: pass
+          output: "clean"
+
+  - id: T004
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Pre-commit review for the first implementation slice."
+    inputs:
+      - "T003 receipt"
+      - "Current diff"
+      - "Verification output"
+      - "Claude commit-gate artifact"
+    constraints:
+      - "Do not implement."
+      - "Reject if no red-before-green evidence."
+      - "Reject if implementation hides source loss with broad fan-in."
+      - "Reject if comments/names/types add AI slop or maintainability debt."
+      - "Reject if normalizer and linter drift."
+    expected_output:
+      - "GREEN_LIGHT yes|no."
+      - "Merge readiness."
+      - "Commit allowed yes|no."
+      - "Required follow-up if not green."
+    receipt:
+      result: done
+      decision: "commit_allowed"
+      summary: "Claude commit-gate review initially required scope discipline and two small source-material cleanup comments; iteration 2 returned GREEN_LIGHT yes."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-claude-peer-loop-20260505T184230Z.md"
+        - ".codex/artifacts/claude-peer-loop-claude-peer-loop-20260505T184644Z.md"
+      green_light: true
+      required_commit_scope:
+        - backend/src/intric/flows/ai_builder/ai_builder_source_material.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_validator.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py
+        - backend/tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py
+        - docs/goals/material-efficiency/
+      remaining_followups:
+        - "Consolidate source_material.question_binding with validation_quality._question_binding."
+        - "Add longer-chain source duplication / binding byte-size assertions in T005."
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: medium
+    objective: "Add deterministic material-efficiency metrics to tests/eval if not completed in T003."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "Metrics require broad benchmark rewrite."
+      - "Need API credentials for deterministic unit-level metrics."
+    receipt: null
+
+  - id: T006
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Improve form-field material lifecycle only if the source-material tranche is green and Judge selects it as the next safe slice."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "Would mix scoped form_fields migration with unrelated source-material changes."
+      - "Would break legacy bare form-field references."
+      - "Need UI/product decision before coding."
+    receipt: null
+
+  - id: T007
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Run live V1-V5 and C1-C5 smoke evals across five spaces with scorecard, material-routing metrics, and skipped-step evidence."
+    allowed_files:
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T007-live-eval.md
+    verify:
+      - "Run python docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --smoke with ENEO_LOCAL_API_KEY."
+      - "Run python docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --all --runs 3 --apply or record why local API, credentials, or fixtures are unavailable."
+      - "Run supplemental edit-path, HTTP capability, and restraint probes when fixtures allow, or record blockers."
+      - "Do not commit /tmp eval outputs."
+    stop_if:
+      - "Local API unavailable."
+      - "API key invalid."
+      - "SSE endpoint contract differs; record actual response and stop this eval slice."
+    receipt: null
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Final tranche audit."
+    inputs:
+      - "All receipts"
+      - "Current diff"
+      - "Commits made"
+      - "Verification output"
+      - "Live eval summary if available"
+    constraints:
+      - "Do not implement."
+      - "Reject completion if source-material routing is not test-covered."
+      - "Reject completion if material efficiency remains unmeasured."
+      - "Reject completion if current branch contains unclassified dirty files or uncommitted implementation changes."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "merge-readiness"
+      - "production-readiness"
+      - "remaining follow-up slices"
+    receipt: null
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: unknown
+    task: null
+    commands: []
+  live_eval:
+    result: unknown
+    spaces:
+      - "ad300505-5602-47f4-8da1-f0232303cff8"
+      - "e9372935-25fb-46a8-9dd0-cc11f7ea2f72"
+      - "5dc394a3-62f8-4d6e-9dc7-a5c11b36cc6d"
+      - "a71ce415-dbd1-4e8c-9a7a-ff0d10d4e480"
+      - "2b4a43a7-b543-46f0-8d55-913e5b7ebb14"
+    prompts: ["V1", "V2", "V3", "V4", "V5", "C1", "C2", "C3", "C4", "C5"]
+    supplemental_prompts: ["E1", "E2", "H1", "H2", "N1", "Q1"]
+    score_axes:
+      - clarification_restraint
+      - minimal_viable_topology
+      - source_preservation
+      - targeted_material_routing
+      - form_field_lifecycle
+      - terminal_mode_fit
+      - context_efficiency
+      - output_usefulness

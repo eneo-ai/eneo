@@ -200,6 +200,39 @@ def test_document_source_text_boundary_is_scored_like_audio_source_material() ->
     assert "uses_underlag_till_text_correctly" not in score.typed_failures
 
 
+def test_text_terminal_missing_source_material_fails_deterministic_scoring() -> None:
+    spec = _spec(
+        steps=[
+            _audio_transcription_step(),
+            {
+                "plan_step_ref": "step_b",
+                "name": "Extract decisions",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "json",
+                "output_mode": "pass_through",
+            },
+            {
+                "plan_step_ref": "step_c",
+                "name": "Write final report",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "text",
+                "output_mode": "pass_through",
+                "input_bindings": {"question": "{{ step_b.output.structured }}"},
+            },
+        ],
+    )
+
+    score = score_plan_mechanics(
+        spec=spec,
+        corpus_case=_case("vague_audio_docx_sv"),
+    )
+
+    assert score.derived.uses_underlag_till_text_correctly is False
+    assert "uses_underlag_till_text_correctly" in score.typed_failures
+
+
 def test_expected_runtime_metadata_fields_are_allowed() -> None:
     corpus_case = replace(
         _case("vague_audio_docx_sv"),
