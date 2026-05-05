@@ -131,7 +131,9 @@ def test_compile_edit_draft_clears_all_previous_input_contract() -> None:
     )
 
 
-def test_compile_edit_draft_repairs_audio_document_flow_missing_transcript_step() -> None:
+def test_compile_edit_draft_repairs_audio_document_flow_missing_transcript_step() -> (
+    None
+):
     meeting_contract = {
         "type": "object",
         "properties": {"meeting_context": {"type": "string"}},
@@ -275,7 +277,9 @@ def test_compile_edit_draft_does_not_repair_existing_audio_transcript_flow() -> 
     )
 
 
-def test_compile_edit_draft_does_not_repair_audio_flow_without_document_terminal() -> None:
+def test_compile_edit_draft_does_not_repair_audio_flow_without_document_terminal() -> (
+    None
+):
     existing = [
         _make_flow_step(
             step_order=1,
@@ -1129,6 +1133,83 @@ class TestTransitionNormalization:
             ("existing_step_4", "unchanged"),
             ("existing_step_5", "modified"),
         ]
+        assert result.diff.step_changes[-1].details == "output_type → pdf"
+
+    def test_output_only_edit_does_not_flag_source_material_completion_as_modified(
+        self,
+    ):
+        existing = [
+            _make_flow_step(
+                step_order=1,
+                user_description="Extrahera text",
+                input_source="flow_input",
+                input_type="document",
+                output_type="text",
+            ),
+            _make_flow_step(
+                step_order=2,
+                user_description="Sammanfatta underlag",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+                output_contract={
+                    "type": "object",
+                    "properties": {"sammanfattning": {"type": "string"}},
+                },
+            ),
+            _make_flow_step(
+                step_order=3,
+                user_description="Extrahera risker",
+                input_source="previous_step",
+                input_type="json",
+                output_type="json",
+                input_bindings={"question": "{{ step_2.output.structured }}"},
+                output_contract={
+                    "type": "object",
+                    "properties": {"risker": {"type": "array"}},
+                },
+            ),
+            _make_flow_step(
+                step_order=4,
+                user_description="Skriv rapport",
+                input_source="previous_step",
+                input_type="json",
+                output_type="text",
+                input_bindings={"question": "{{ step_3.output.structured }}"},
+            ),
+            _make_flow_step(
+                step_order=5,
+                user_description="Skapa DOCX",
+                input_source="previous_step",
+                input_type="text",
+                output_type="docx",
+            ),
+        ]
+
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_5",
+                    patch=StepPatch(output_type=OutputType.PDF),
+                ),
+            ],
+            plan_rationale="Byt bara slutformatet till PDF.",
+        )
+
+        result = compile_edit_draft(draft, existing, base_flow_revision=3)
+
+        assert [
+            (change.step_ref, change.kind) for change in result.diff.step_changes
+        ] == [
+            ("existing_step_1", "unchanged"),
+            ("existing_step_2", "unchanged"),
+            ("existing_step_3", "unchanged"),
+            ("existing_step_4", "unchanged"),
+            ("existing_step_5", "modified"),
+        ]
+        step_3_question = result.compiled_spec.steps[2].input_bindings["question"]
+        assert "Source material: {{ step_a.output.text }}" in step_3_question
         assert result.diff.step_changes[-1].details == "output_type → pdf"
 
 

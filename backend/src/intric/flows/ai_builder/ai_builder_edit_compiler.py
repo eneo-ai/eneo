@@ -59,7 +59,6 @@ from intric.flows.ai_builder.ai_builder_primary_input_fields import (
 from intric.flows.ai_builder.ai_builder_step_transition_policy import (
     StepNormalizationChange,
     normalize_ai_builder_spec,
-    normalize_ai_builder_step,
 )
 from intric.flows.domain.flow import FlowStep
 
@@ -389,7 +388,9 @@ def _runtime_input_config(input_config: dict[str, Any] | None) -> dict[str, Any]
     if not isinstance(input_config, dict):
         return {}
     runtime_input = input_config.get("runtime_input")
-    return cast(dict[str, Any], runtime_input) if isinstance(runtime_input, dict) else {}
+    return (
+        cast(dict[str, Any], runtime_input) if isinstance(runtime_input, dict) else {}
+    )
 
 
 def _flow_step_to_spec(
@@ -647,21 +648,22 @@ def _build_step_changes(
         for step in compiled_steps
         if (existing_order := _existing_step_order(step.existing_step_ref)) is not None
     }
-    baseline_specs: dict[str, StepSpec] = {}
     removed_names: dict[str, str] = {}
+    baseline_steps: list[StepSpec] = []
     for step in current_steps:
         ref = f"existing_step_{step.step_order}"
+        plan_ref = existing_order_to_plan_ref.get(step.step_order, ref)
         baseline_spec = _flow_step_to_spec(
             step,
-            ref,
+            plan_ref,
             assistant_snapshots=assistant_snapshots,
             current_steps=current_steps,
         )
-        baseline_specs[ref] = _canonicalize_step_for_diff(
-            baseline_spec,
-            existing_order_to_plan_ref,
+        baseline_steps.append(
+            _canonicalize_step_for_diff(baseline_spec, existing_order_to_plan_ref)
         )
         removed_names[ref] = step.user_description or f"Step {step.step_order}"
+    baseline_specs = _normalize_baseline_specs_for_diff(baseline_steps)
 
     step_changes: list[StepChange] = []
     for step in compiled_steps:
@@ -717,11 +719,21 @@ def _canonicalize_step_for_diff(
     step: StepSpec,
     existing_order_to_plan_ref: dict[int, str],
 ) -> StepSpec:
-    canonical_step = _rewrite_runtime_aliases_for_existing_step(
+    return _rewrite_runtime_aliases_for_existing_step(
         step,
         existing_order_to_plan_ref,
     )
-    return normalize_ai_builder_step(canonical_step)[0]
+
+
+def _normalize_baseline_specs_for_diff(steps: list[StepSpec]) -> dict[str, StepSpec]:
+    normalized_spec, _ = normalize_ai_builder_spec(
+        FlowDraftSpecCore(flow_name="Existing flow", steps=steps, form_fields=None)
+    )
+    return {
+        step.existing_step_ref: step
+        for step in normalized_spec.steps
+        if step.existing_step_ref is not None
+    }
 
 
 def _comparable_step_payload(step: StepSpec) -> dict[str, Any]:

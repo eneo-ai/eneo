@@ -103,7 +103,9 @@ MATRIX_ROWS: tuple[GoldenCoverageRow, ...] = (
     GoldenCoverageRow(
         row_id="create_form_field_declare_only",
         owner_module=LIFECYCLE_MODULE,
-        test_name="test_declared_input_field_without_step_use_attaches_to_final_step",
+        test_name=(
+            "test_declared_input_field_without_step_use_stays_unused_for_multi_step_repair"
+        ),
         surface=CoverageSurface.CREATE,
         concerns=frozenset({CoverageConcern.FORM_FIELD_CHAIN}),
         pattern_ids=frozenset({"form_field_runtime_inputs"}),

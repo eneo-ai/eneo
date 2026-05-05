@@ -583,6 +583,63 @@ tasks:
           status: partial
           output: "H1/H2 clarification_required 3/3; N1 applied 3/3 but still overbuilt translation into 3-4 steps; Q1 no_plan once and applied twice."
 
+  - id: T012
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Normalize edit diff baselines at the same full-spec scope as compiled edit previews."
+    allowed_files:
+      - backend/src/intric/flows/ai_builder/ai_builder_edit_compiler.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T012-edit-diff-baseline-normalization.md
+    verify:
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py::TestTransitionNormalization -q"
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py -q"
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py"
+      - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py"
+      - "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --smoke --output-dir /tmp/material-efficiency-live-eval/20260505-230733-t011-smoke-rerun"
+      - "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --case C2 --runs 1 --apply --publish --output-dir /tmp/material-efficiency-live-eval/20260505-230801-t011-c2-rerun"
+      - "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --all --runs 1 --apply --publish --output-dir /tmp/material-efficiency-live-eval/20260505-230918-t011-create-suite-rerun"
+    stop_if:
+      - "Baseline normalization hides real user-requested modifications."
+      - "Fix requires a second normalization source of truth."
+      - "Full AI Builder suite fails."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T012-edit-diff-baseline-normalization.md
+      summary: "Existing-flow edit diff baselines now run through the same full-spec normalizer as compiled edit previews, preventing source-material/topology-only completions from appearing as modified steps."
+      peer_review: "Claude iteration 1 required one normalization gate and a source-material regression; iteration 2 returned GREEN_LIGHT yes, MIN_SCORE 8."
+      verification:
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py::TestTransitionNormalization -q"
+          status: pass
+          output: "3 passed"
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py -q"
+          status: pass
+          output: "47 passed"
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder -q"
+          status: pass
+          output: "1933 passed, 4 skipped"
+        - cmd: "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py"
+          status: pass
+          output: "All checks passed!"
+        - cmd: "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py"
+          status: pass
+          output: "3 files already formatted"
+        - cmd: "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --case C2 --runs 1 --apply --publish --output-dir /tmp/material-efficiency-live-eval/20260505-230801-t011-c2-rerun"
+          status: pass
+          output: "C2 applied flow=2837f8d7-644c-42f4-890e-4a98a0a275c3; body composer no longer used all_previous_steps and included explicit JSON/form-field references."
+        - cmd: "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --all --runs 1 --apply --publish --output-dir /tmp/material-efficiency-live-eval/20260505-230918-t011-create-suite-rerun"
+          status: partial
+          output: "V2/C2/C3 applied; V1/V3/V4/V5/C4/C5 clarification_required; C1 builder_error due separate input-field quality-gate issue."
+
   - id: T999
     type: judge
     assignee: Judge
@@ -623,12 +680,12 @@ checks:
   dirty_fingerprint: unknown
   last_verification:
     result: pass
-    task: T011
+    task: T012
     commands:
-      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q -k 'auto_bind_targeted_underlag or targeted_underlag or final_text_step_must_reference or nonterminal_body'"
-      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_create_dataflow.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
-      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_create_dataflow.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
-      - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_create_dataflow.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py"
+      - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_golden_coverage_matrix.py"
   live_eval:
     result: partial_failures_found
     latest_summaries:
@@ -640,6 +697,9 @@ checks:
       c2_after_t011: "/tmp/material-efficiency-live-eval/20260505-225524-t011-c2-rerun/summary.json"
       create_suite_after_t011: "/tmp/material-efficiency-live-eval/20260505-225658-t011-full-create-rerun/summary.json"
       supplemental_after_t011: "/tmp/material-efficiency-live-eval/20260505-230611-t011-supplemental-rerun/summary.json"
+      smoke_after_t012: "/tmp/material-efficiency-live-eval/20260505-230733-t011-smoke-rerun/summary.json"
+      c2_after_t012: "/tmp/material-efficiency-live-eval/20260505-230801-t011-c2-rerun/summary.json"
+      create_suite_after_t012: "/tmp/material-efficiency-live-eval/20260505-230918-t011-create-suite-rerun/summary.json"
     latest_findings:
       - "V2 source-preserving audio-to-DOCX plans applied consistently and published with a valid run contract after T009."
       - "C1 remains blocked/unstable: builder_error or no_plan_after_requirements_confirmation."
@@ -649,6 +709,8 @@ checks:
       - "Post-T011 targeted C2 rerun applied and published flow f1ae7afb-114b-4de0-9ed8-2ff34f372ea0 with all_previous_steps_count=0 and explicit section/form-field bindings in the PDF body composer."
       - "Post-T011 full create rerun: V2 and C3 applied 3/3; C2 applied 2/3 with all_previous_steps_count=0 in both applied flows; C1 builder_error 3/3; V1/V3/V4/V5/C4/C5 clarification_required 3/3."
       - "Post-T011 supplemental rerun: H1/H2 clarification_required 3/3; N1 still overbuilds translation into 3-4 steps; Q1 applied 2/3 and no_plan 1/3."
+      - "Post-T012 smoke reached the API; targeted C2 applied/published flow 2837f8d7-644c-42f4-890e-4a98a0a275c3 with no all_previous_steps body composer; one-run create suite applied V2/C2/C3, asked clarification for V1/V3/V4/V5/C4/C5, and reproduced C1 builder_error."
+      - "C1 live logs show the repair loop demanded named input fields even though the case explicitly says no inmatningsfält are needed; this is the next high-ROI defect."
       - "C3 and N1 showed nondeterministic no_plan_after_requirements_confirmation in targeted reruns."
       - "Manual V2 runtime run uploaded audio and completed transcription, then stayed running at step 2 until cancelled."
     spaces:
