@@ -15,7 +15,7 @@ RUN bun run build
 # Stage 2: Production runtime using Node.js
 # Required ENV vars, see README.md
 # ORIGIN, JWT_SECRET, PUBLIC_API_URL
-FROM node:20-bullseye-slim AS runner
+FROM node:25-bullseye-slim AS runner
 
 WORKDIR /app
 COPY --from=builder /app/apps/web/build build/
