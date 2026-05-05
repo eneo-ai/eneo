@@ -360,17 +360,8 @@
     }
   });
 
-  function handleCancel() {
-    if (isDirty && !isSubmitting) {
-      showCloseConfirmation = true;
-    } else {
-      open = false;
-    }
-  }
-
-  function handleConfirmClose() {
-    showCloseConfirmation = false;
-    open = false;
+  function requestCloseConfirmation() {
+    showCloseConfirmation = true;
   }
 
   function handleCancelClose() {
@@ -379,13 +370,13 @@
 
   function handleInteractOutside() {
     if (isDirty) {
-      showCloseConfirmation = true;
+      requestCloseConfirmation();
     }
   }
 
   function handleEscapeKeydown() {
     if (isDirty) {
-      showCloseConfirmation = true;
+      requestCloseConfirmation();
     }
   }
 
@@ -1124,15 +1115,31 @@
             {/if}
           </Dialog.Description>
         </div>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          class="text-muted hover:text-primary -mt-1 -mr-1 shrink-0"
-          aria-label={m.flow_run_trigger_close()}
-          onclick={handleCancel}
-        >
-          <IconXMark />
-        </Button>
+        {#if isDirty && !isSubmitting}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            class="text-muted hover:text-primary -mt-1 -mr-1 shrink-0"
+            aria-label={m.flow_run_trigger_close()}
+            onclick={requestCloseConfirmation}
+          >
+            <IconXMark />
+          </Button>
+        {:else}
+          <Dialog.Close>
+            {#snippet child({ props })}
+              <Button
+                {...props}
+                variant="ghost"
+                size="icon-sm"
+                class="text-muted hover:text-primary -mt-1 -mr-1 shrink-0"
+                aria-label={m.flow_run_trigger_close()}
+              >
+                <IconXMark />
+              </Button>
+            {/snippet}
+          </Dialog.Close>
+        {/if}
       </div>
     </header>
 
@@ -1365,9 +1372,13 @@
             <Button variant="outline" size="sm" onclick={handleCancelClose}>
               {labels.closeConfirmKeep}
             </Button>
-            <Button variant="destructive" size="sm" onclick={handleConfirmClose}>
-              {labels.closeConfirmDiscard}
-            </Button>
+            <Dialog.Close>
+              {#snippet child({ props })}
+                <Button variant="destructive" size="sm" {...props}>
+                  {labels.closeConfirmDiscard}
+                </Button>
+              {/snippet}
+            </Dialog.Close>
           </div>
         </div>
       {:else}
@@ -1407,11 +1418,23 @@
               </Button>
             {/if}
 
-            <Button
-              variant="outline"
-              onclick={handleCancel}
-              class="order-3 w-full sm:order-2 sm:w-auto">{m.cancel()}</Button
-            >
+            {#if isDirty && !isSubmitting}
+              <Button
+                variant="outline"
+                onclick={requestCloseConfirmation}
+                class="order-3 w-full sm:order-2 sm:w-auto"
+              >
+                {m.cancel()}
+              </Button>
+            {:else}
+              <Dialog.Close>
+                {#snippet child({ props })}
+                  <Button variant="outline" class="order-3 w-full sm:order-2 sm:w-auto" {...props}>
+                    {m.cancel()}
+                  </Button>
+                {/snippet}
+              </Dialog.Close>
+            {/if}
 
             {#if currentPageIndex > 0}
               <Button
