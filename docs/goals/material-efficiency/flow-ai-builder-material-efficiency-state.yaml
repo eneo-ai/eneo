@@ -8,7 +8,7 @@ goal:
   slug: "flow-ai-builder-material-efficiency"
   kind: open_ended
   tranche: "Improve explicit material routing, binding efficiency, source-material preservation, and measurable context cost through successive safe verified slices."
-  status: active
+  status: blocked
 
 rules:
   pm_owns_state: true
@@ -33,7 +33,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T999
+active_task: null
 
 tasks:
   - id: T001
@@ -354,7 +354,7 @@ tasks:
   - id: T999
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Final tranche audit."
     inputs:
@@ -374,7 +374,18 @@ tasks:
       - "merge-readiness"
       - "production-readiness"
       - "remaining follow-up slices"
-    receipt: null
+    receipt:
+      result: not_complete
+      note: docs/goals/material-efficiency/notes/T999-final-tranche-audit.md
+      full_outcome_complete: false
+      merge_readiness: "partial"
+      production_readiness: "source-material deterministic slice ready; live eval and form-field lifecycle broader goal blocked"
+      summary: "Deterministic source-material routing and material-efficiency assertions are committed and verified. Full tranche remains blocked because live eval could not produce plans and form-field lifecycle changes need live/product evidence."
+      commits:
+        - "381547f2 Improve flow builder source material routing"
+        - "8399208a Add flow builder material efficiency assertions"
+        - "dee9c734 Record flow builder form field follow-up evidence"
+        - "b12b7a0c Record flow builder live eval blocker"
 
 checks:
   dirty_fingerprint: unknown
