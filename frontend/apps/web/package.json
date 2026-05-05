@@ -61,6 +61,6 @@
   "dependencies": {
     "@inlang/paraglide-js": "^2.0.13",
     "@intric/ui": "workspace:*",
-    "lucide-svelte": "^0.544.0"
+    "lucide-svelte": "^1.0.1"
   }
 }
