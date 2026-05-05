@@ -530,6 +530,59 @@ tasks:
           status: partial
           output: "C2 applied flow=05b26073-c54d-43ed-a5ee-292bae3ce24a; focus_area reached the risk JSON step, but organization_name/report_period were still unused and one composer still used all_previous_steps."
 
+  - id: T011
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Route non-terminal report-body composers through targeted underlag instead of broad all_previous_steps."
+    allowed_files:
+      - backend/src/intric/flows/ai_builder/ai_builder_create_dataflow.py
+      - backend/src/intric/flows/ai_builder/ai_builder_critic_invariants.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T011-nonterminal-targeted-underlag.md
+    verify:
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q -k 'auto_bind_targeted_underlag or targeted_underlag or final_text_step_must_reference or nonterminal_body'"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_create_dataflow.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_create_dataflow.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_create_dataflow.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --case C2 --runs 1 --apply --publish --output-dir /tmp/material-efficiency-live-eval/20260505-225524-t011-c2-rerun"
+      - "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --all --runs 3 --apply --output-dir /tmp/material-efficiency-live-eval/20260505-225658-t011-full-create-rerun"
+      - "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --include-supplemental --case H1 --case H2 --case N1 --case Q1 --runs 3 --apply --output-dir /tmp/material-efficiency-live-eval/20260505-230611-t011-supplemental-rerun"
+    stop_if:
+      - "Fix requires a new parallel material-planning abstraction."
+      - "Fix reintroduces blanket all_previous_steps for report composers."
+      - "Critic and auto-binder disagree on eligible composers."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T011-nonterminal-targeted-underlag.md
+      summary: "Generalized targeted-underlag eligibility to non-terminal compositional text steps and reused that predicate in both the auto-binder and critic."
+      peer_review: "Claude iterations 1 and 2 blocked broader or inconsistent plans; iteration 3 returned GREEN_LIGHT yes, MIN_SCORE 8."
+      verification:
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q -k 'auto_bind_targeted_underlag or targeted_underlag or final_text_step_must_reference or nonterminal_body'"
+          status: pass
+          output: "12 passed, 183 deselected"
+        - cmd: "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_create_dataflow.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+          status: pass
+          output: "All checks passed!"
+        - cmd: "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_create_dataflow.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+          status: pass
+          output: "4 files already formatted"
+        - cmd: "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_create_dataflow.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --case C2 --runs 1 --apply --publish --output-dir /tmp/material-efficiency-live-eval/20260505-225524-t011-c2-rerun"
+          status: pass
+          output: "C2 applied flow=f1ae7afb-114b-4de0-9ed8-2ff34f372ea0; all_previous_steps_count=0; PDF body composer used explicit structured fields and organization/report-period bindings."
+        - cmd: "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --all --runs 3 --apply --output-dir /tmp/material-efficiency-live-eval/20260505-225658-t011-full-create-rerun"
+          status: partial
+          output: "V2 and C3 applied 3/3; C2 applied 2/3 with all_previous_steps_count=0 in applied flows; C1 builder_error 3/3; V1/V3/V4/V5/C4/C5 clarification_required 3/3."
+        - cmd: "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --include-supplemental --case H1 --case H2 --case N1 --case Q1 --runs 3 --apply --output-dir /tmp/material-efficiency-live-eval/20260505-230611-t011-supplemental-rerun"
+          status: partial
+          output: "H1/H2 clarification_required 3/3; N1 applied 3/3 but still overbuilt translation into 3-4 steps; Q1 no_plan once and applied twice."
+
   - id: T999
     type: judge
     assignee: Judge
@@ -570,14 +623,12 @@ checks:
   dirty_fingerprint: unknown
   last_verification:
     result: pass
-    task: T010
+    task: T011
     commands:
-      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py -q"
-      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -k 'form_field or input_field or runtime_input_field'"
-      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_usage.py -q"
-      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
-      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
-      - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_create_outline.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q -k 'auto_bind_targeted_underlag or targeted_underlag or final_text_step_must_reference or nonterminal_body'"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_create_dataflow.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_create_dataflow.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_create_dataflow.py src/intric/flows/ai_builder/ai_builder_critic_invariants.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
   live_eval:
     result: partial_failures_found
     latest_summaries:
@@ -586,12 +637,18 @@ checks:
       supplemental: "/tmp/material-efficiency-live-eval/20260505-215259-rerun-supplemental/summary.json"
       publish_runtime_check: "/tmp/material-efficiency-live-eval/20260505-220834-post-runner-fix-publish/summary.json"
       c2_after_t010: "/tmp/material-efficiency-live-eval/20260505-223500-t010-c2-targeted/summary.json"
+      c2_after_t011: "/tmp/material-efficiency-live-eval/20260505-225524-t011-c2-rerun/summary.json"
+      create_suite_after_t011: "/tmp/material-efficiency-live-eval/20260505-225658-t011-full-create-rerun/summary.json"
+      supplemental_after_t011: "/tmp/material-efficiency-live-eval/20260505-230611-t011-supplemental-rerun/summary.json"
     latest_findings:
       - "V2 source-preserving audio-to-DOCX plans applied consistently and published with a valid run contract after T009."
       - "C1 remains blocked/unstable: builder_error or no_plan_after_requirements_confirmation."
-      - "C2 remains flaky and still routes fokusområde to terminal output rather than the intermediate risk step."
+      - "C2 remains flaky, but T011 removed the observed all_previous_steps report-body composer in applied C2 flows."
       - "T010 removes the compiler-side multi-step terminal fallback that hid C2-style form-field omissions from the unused-field linter and critic; planner repair/live quality still needs a C2 rerun."
       - "Post-T010 C2 targeted live rerun applied and published flow 05b26073-c54d-43ed-a5ee-292bae3ce24a; focus_area reached the risk JSON step via explicit binding, but organization_name/report_period were still declared without useful downstream bindings and an all_previous_steps composer remains."
+      - "Post-T011 targeted C2 rerun applied and published flow f1ae7afb-114b-4de0-9ed8-2ff34f372ea0 with all_previous_steps_count=0 and explicit section/form-field bindings in the PDF body composer."
+      - "Post-T011 full create rerun: V2 and C3 applied 3/3; C2 applied 2/3 with all_previous_steps_count=0 in both applied flows; C1 builder_error 3/3; V1/V3/V4/V5/C4/C5 clarification_required 3/3."
+      - "Post-T011 supplemental rerun: H1/H2 clarification_required 3/3; N1 still overbuilds translation into 3-4 steps; Q1 applied 2/3 and no_plan 1/3."
       - "C3 and N1 showed nondeterministic no_plan_after_requirements_confirmation in targeted reruns."
       - "Manual V2 runtime run uploaded audio and completed transcription, then stayed running at step 2 until cancelled."
     spaces:

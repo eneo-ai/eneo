@@ -2002,6 +2002,107 @@ class TestPreferTargetedUnderlagInvariant:
             "the composer behind a renderer terminal — wording must follow"
         )
 
+    def test_render_critic_issues_targets_nonterminal_body_composer_before_review(
+        self,
+    ) -> None:
+        """A body composer followed by a review step is still eligible for the
+        targeted-underlag invariant. Restricting the rule to the last
+        compositional step misses the C2 live-eval shape.
+        """
+
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CriticContext,
+        )
+        from intric.flows.ai_builder.ai_builder_framework_policy import (
+            OutputIntentResolution,
+        )
+        from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+            PlannerPatternSignals,
+        )
+
+        spec = FlowDraftSpecCore(
+            flow_name="Rapport med granskning",
+            steps=[
+                _step(
+                    "step_a",
+                    "Läs PDF",
+                    "Läs PDF-underlaget.",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_b",
+                    "Extrahera bakgrund",
+                    "Extrahera bakgrund som JSON.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"background": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Extrahera risker",
+                    "Extrahera risker som JSON.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"risks": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_d",
+                    "Förbered rapporttext",
+                    "Skriv rapporttext.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_e",
+                    "Granska rapporttext",
+                    "Granska rapporttexten.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_f",
+                    "Skapa PDF",
+                    "Skapa PDF.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.PDF,
+                ),
+            ],
+        )
+        context = CriticContext(
+            spec=spec,
+            flow=None,
+            answer_signals={},
+            text="",
+            requirements_text="",
+            signal_text="",
+            planner_patterns=PlannerPatternSignals(),
+            output_intent=OutputIntentResolution(terminal_output=None),
+            mixed_audio_doc_input=False,
+        )
+
+        issues = evaluate_critic_invariants(context, invariants=CRITIC_INVARIANTS)
+        targeted_issue = next(
+            (
+                issue
+                for issue in issues
+                if issue.id == "prefer_targeted_underlag_over_all_previous_steps"
+            ),
+            None,
+        )
+        assert targeted_issue is not None
+        assert "Det sista komponerande textsteget" not in targeted_issue.remediation
+        assert "Ett komponerande textsteg" in targeted_issue.remediation
+
     def test_render_critic_issues_silent_when_question_targets_prior_fields(
         self,
     ) -> None:

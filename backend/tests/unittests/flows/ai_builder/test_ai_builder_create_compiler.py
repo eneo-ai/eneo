@@ -3478,6 +3478,292 @@ def test_auto_bind_targeted_underlag_fires_when_many_json_priors_with_few_text_p
     ), "the transcription text prior must be wired via uses_previous_outputs"
 
 
+def test_auto_bind_targeted_underlag_rewrites_nonterminal_all_previous_composer() -> (
+    None
+):
+    """A report-body composer can be followed by a review step before the
+    artifact renderer. The body composer is still the step that must avoid
+    broad `all_previous_steps`; otherwise runtime prompt material is bloated
+    before the review/revision chain even starts.
+    """
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        auto_bind_targeted_underlag_for_text_composer,
+    )
+    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+
+    steps_before = [
+        NewStepDraft(
+            name="Läs PDF",
+            instructions="x",
+            input_source="flow_input",
+            input_type="document",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Extrahera bakgrund",
+            instructions="x",
+            input_source="previous_step",
+            input_type="text",
+            output_type="json",
+            output_fields=[_field("background", "string", description="Bakgrund.")],
+        ),
+        NewStepDraft(
+            name="Extrahera risker",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="json",
+            output_fields=[_field("risks", "string", description="Risker.")],
+        ),
+        NewStepDraft(
+            name="Förbered rapporttext",
+            instructions="x",
+            input_source="all_previous_steps",
+            input_type="text",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Granska rapporttext",
+            instructions="x",
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Skapa PDF",
+            instructions="x",
+            input_source="previous_step",
+            input_type="text",
+            output_type="pdf",
+        ),
+    ]
+
+    result = auto_bind_targeted_underlag_for_text_composer(
+        steps_before,
+        aggregation_intent="linear",
+    )
+
+    assert result is not steps_before
+    body_composer = result[3]
+    assert body_composer.input_source.value == "previous_step"
+    assert body_composer.input_type.value == "json"
+    field_refs = {
+        (ref.from_step, ref.field_path) for ref in body_composer.uses_previous_fields
+    }
+    assert field_refs == {(2, "background"), (3, "risks")}
+    assert any(ref.from_step == 1 for ref in body_composer.uses_previous_outputs), (
+        "the original source text must remain available as targeted material"
+    )
+
+
+def test_auto_bind_targeted_underlag_rewrites_multiple_eligible_composers() -> None:
+    """Each eligible all_previous text composer is evaluated against its own
+    prior material. Stopping after the final composer leaves earlier generated
+    report sections broad and token-heavy.
+    """
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        auto_bind_targeted_underlag_for_text_composer,
+    )
+    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+
+    steps_before = [
+        NewStepDraft(
+            name="Läs underlag",
+            instructions="x",
+            input_source="flow_input",
+            input_type="document",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Extrahera resultat",
+            instructions="x",
+            input_source="previous_step",
+            input_type="text",
+            output_type="json",
+            output_fields=[_field("findings", "string", description="Resultat.")],
+        ),
+        NewStepDraft(
+            name="Skriv första utkast",
+            instructions="x",
+            input_source="all_previous_steps",
+            input_type="text",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Extrahera risker",
+            instructions="x",
+            input_source="previous_step",
+            input_type="text",
+            output_type="json",
+            output_fields=[_field("risks", "string", description="Risker.")],
+        ),
+        NewStepDraft(
+            name="Skriv reviderad text",
+            instructions="x",
+            input_source="all_previous_steps",
+            input_type="text",
+            output_type="text",
+        ),
+    ]
+
+    result = auto_bind_targeted_underlag_for_text_composer(
+        steps_before,
+        aggregation_intent="linear",
+    )
+
+    assert result is not steps_before
+    first_composer = result[2]
+    assert first_composer.input_source.value == "previous_step"
+    assert {
+        (ref.from_step, ref.field_path) for ref in first_composer.uses_previous_fields
+    } == {(2, "findings")}
+
+    second_composer = result[4]
+    assert second_composer.input_source.value == "previous_step"
+    assert {
+        (ref.from_step, ref.field_path) for ref in second_composer.uses_previous_fields
+    } == {(2, "findings"), (4, "risks")}
+    assert {ref.from_step for ref in second_composer.uses_previous_outputs} == {1, 3}
+
+
+def test_auto_bind_targeted_underlag_leaves_text_only_all_previous_composer() -> None:
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        auto_bind_targeted_underlag_for_text_composer,
+    )
+    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+
+    steps_before = [
+        NewStepDraft(
+            name="Skriv del ett",
+            instructions="x",
+            input_source="flow_input",
+            input_type="text",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Skriv del två",
+            instructions="x",
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Sammanställ text",
+            instructions="x",
+            input_source="all_previous_steps",
+            input_type="text",
+            output_type="text",
+        ),
+    ]
+
+    result = auto_bind_targeted_underlag_for_text_composer(
+        steps_before,
+        aggregation_intent="linear",
+    )
+
+    assert result is steps_before
+    assert result[-1].input_source.value == "all_previous_steps"
+    assert result[-1].uses_previous_fields == []
+
+
+def test_auto_bound_c2_shape_does_not_trigger_targeted_underlag_critic_loop() -> None:
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        auto_bind_targeted_underlag_for_text_composer,
+    )
+    from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        CRITIC_INVARIANTS,
+        CriticContext,
+        evaluate_critic_invariants,
+    )
+    from intric.flows.ai_builder.ai_builder_framework_policy import (
+        OutputIntentResolution,
+    )
+    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+    from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        PlannerPatternSignals,
+    )
+
+    steps = [
+        NewStepDraft(
+            name="Läs PDF",
+            instructions="x",
+            input_source="flow_input",
+            input_type="document",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Extrahera bakgrund",
+            instructions="x",
+            input_source="previous_step",
+            input_type="text",
+            output_type="json",
+            output_fields=[_field("background", "string", description="Bakgrund.")],
+        ),
+        NewStepDraft(
+            name="Extrahera resultat",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="json",
+            output_fields=[_field("findings", "string", description="Resultat.")],
+        ),
+        NewStepDraft(
+            name="Förbered PDF-innehåll",
+            instructions="x",
+            input_source="all_previous_steps",
+            input_type="text",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Granska kvalitet och luckor",
+            instructions="x",
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Skapa PDF",
+            instructions="x",
+            input_source="previous_step",
+            input_type="text",
+            output_type="pdf",
+        ),
+    ]
+    rebound_steps = auto_bind_targeted_underlag_for_text_composer(
+        steps,
+        aggregation_intent="linear",
+    )
+    spec = compile_create_draft(
+        FlowCreateDraft(
+            flow_name="PDF-rapport",
+            plan_rationale="Skapar en PDF-rapport med granskningssteg.",
+            steps=rebound_steps,
+        )
+    )
+    context = CriticContext(
+        spec=spec,
+        flow=None,
+        answer_signals={},
+        text="",
+        requirements_text="",
+        signal_text="",
+        planner_patterns=PlannerPatternSignals(),
+        output_intent=OutputIntentResolution(terminal_output="pdf_document"),
+        mixed_audio_doc_input=False,
+    )
+
+    issue_ids = {
+        issue.id
+        for issue in evaluate_critic_invariants(
+            context,
+            invariants=CRITIC_INVARIANTS,
+        )
+    }
+
+    assert "prefer_targeted_underlag_over_all_previous_steps" not in issue_ids
+    assert "final_text_step_must_reference_relevant_structured_outputs" not in issue_ids
+
+
 def test_auto_bind_targeted_underlag_rewrites_previous_step_composer_with_multiple_json_priors() -> (
     None
 ):

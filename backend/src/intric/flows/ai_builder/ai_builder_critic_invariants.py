@@ -18,7 +18,7 @@ layer.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -63,6 +63,7 @@ from intric.flows.template_reference_analyzer import (
 )
 
 if TYPE_CHECKING:
+    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
     from intric.flows.ai_builder.ai_builder_resource_catalog import (
         AIBuilderResourceCatalog,
     )
@@ -747,6 +748,115 @@ makes the underlag unwieldy. JSON priors with output_contract bind via
 not count against this cap."""
 
 
+@dataclass(frozen=True, slots=True)
+class _TargetedUnderlagStepSignal:
+    input_source: InputSource
+    input_type: InputType
+    output_type: OutputType
+    is_renderer: bool
+    has_structured_json_output: bool
+    already_targets_previous_fields: bool
+    question_targets_prior_structured_field: bool
+
+
+def targeted_underlag_all_previous_indexes_for_drafts(
+    steps: Sequence["NewStepDraft"],
+    *,
+    aggregation_intent: AggregationIntent,
+) -> tuple[int, ...]:
+    """Return draft step indexes where `all_previous_steps` should become
+    targeted underlag before the draft is materialized.
+    """
+    return _targeted_underlag_all_previous_indexes(
+        tuple(
+            _TargetedUnderlagStepSignal(
+                input_source=step.input_source,
+                input_type=step.input_type,
+                output_type=step.output_type,
+                is_renderer=(
+                    step.document_delivery_mode == "template_fill"
+                    or step.output_type in {OutputType.DOCX, OutputType.PDF}
+                ),
+                has_structured_json_output=(
+                    step.output_type == OutputType.JSON and bool(step.output_fields)
+                ),
+                already_targets_previous_fields=bool(step.uses_previous_fields),
+                question_targets_prior_structured_field=False,
+            )
+            for step in steps
+        ),
+        aggregation_intent=aggregation_intent,
+    )
+
+
+def targeted_underlag_all_previous_indexes_for_spec(
+    spec: FlowDraftSpecCore,
+    *,
+    aggregation_intent: AggregationIntent,
+) -> tuple[int, ...]:
+    """Return compiled spec step indexes that violate targeted-underlag
+    material routing.
+    """
+    return _targeted_underlag_all_previous_indexes(
+        tuple(
+            _TargetedUnderlagStepSignal(
+                input_source=step.input_source,
+                input_type=step.input_type,
+                output_type=step.output_type,
+                is_renderer=_is_renderer_step(step),
+                has_structured_json_output=(
+                    step.output_type == OutputType.JSON
+                    and step.output_contract is not None
+                ),
+                already_targets_previous_fields=False,
+                question_targets_prior_structured_field=(
+                    _composer_question_targets_prior_structured_field(
+                        spec=spec, composer_index=index
+                    )
+                ),
+            )
+            for index, step in enumerate(spec.steps)
+        ),
+        aggregation_intent=aggregation_intent,
+    )
+
+
+def _targeted_underlag_all_previous_indexes(
+    steps: Sequence[_TargetedUnderlagStepSignal],
+    *,
+    aggregation_intent: AggregationIntent,
+) -> tuple[int, ...]:
+    if aggregation_intent in {"aggregate", "compare"}:
+        return ()
+
+    indexes: list[int] = []
+    for index, step in enumerate(steps):
+        if index == 0 or step.is_renderer:
+            continue
+        if step.input_source != InputSource.ALL_PREVIOUS_STEPS:
+            continue
+        if step.input_type != InputType.TEXT or step.output_type != OutputType.TEXT:
+            continue
+        if (
+            step.already_targets_previous_fields
+            or step.question_targets_prior_structured_field
+        ):
+            continue
+
+        priors = [prior for prior in steps[:index] if not prior.is_renderer]
+        if not priors:
+            continue
+        text_priors_count = sum(
+            1 for prior in priors if prior.output_type == OutputType.TEXT
+        )
+        if text_priors_count > TARGETED_UNDERLAG_SOFT_CAP:
+            continue
+        if any(prior.has_structured_json_output for prior in priors):
+            indexes.append(index)
+
+    return tuple(indexes)
+
+
 def _last_compositional_step_index(spec: FlowDraftSpecCore) -> int | None:
     """Index of the last step that composes content.
 
@@ -799,7 +909,7 @@ def _composer_question_targets_prior_structured_field(
 def _prefer_targeted_underlag_over_all_previous_steps_evidence(
     context: CriticContext,
 ) -> bool:
-    """Fire when the last compositional step reads
+    """Fire when a compositional step reads
     `input_source=all_previous_steps` while ≥1 prior content step
     emits structured JSON the composer could reference selectively.
 
@@ -817,34 +927,11 @@ def _prefer_targeted_underlag_over_all_previous_steps_evidence(
       structured fields explicitly: the spec is effectively using
       targeted underlag despite the nominal source.
     """
-    spec = context.spec
-    if context.aggregation_intent in {"aggregate", "compare"}:
-        return False
-    if len(spec.steps) < 2:
-        return False
-    composer_index = _last_compositional_step_index(spec)
-    if composer_index is None or composer_index == 0:
-        return False
-    composer = spec.steps[composer_index]
-    if composer.input_source != InputSource.ALL_PREVIOUS_STEPS:
-        return False
-    if composer.input_type != InputType.TEXT:
-        return False
-    if _composer_question_targets_prior_structured_field(
-        spec=spec, composer_index=composer_index
-    ):
-        return False
-    priors = [
-        step for step in spec.steps[:composer_index] if not _is_renderer_step(step)
-    ]
-    if not priors:
-        return False
-    text_priors_count = sum(1 for step in priors if step.output_type == OutputType.TEXT)
-    if text_priors_count > TARGETED_UNDERLAG_SOFT_CAP:
-        return False
-    return any(
-        step.output_type == OutputType.JSON and step.output_contract is not None
-        for step in priors
+    return bool(
+        targeted_underlag_all_previous_indexes_for_spec(
+            context.spec,
+            aggregation_intent=context.aggregation_intent,
+        )
     )
 
 
@@ -852,7 +939,7 @@ _PREFER_TARGETED_UNDERLAG_OVER_ALL_PREVIOUS_STEPS = CriticInvariant(
     id="prefer_targeted_underlag_over_all_previous_steps",
     kind="semantic",
     description=(
-        "When the last compositional text step reads `all_previous_steps` "
+        "When a compositional text step reads `all_previous_steps` "
         "but at least one prior content step emits a structured JSON "
         "output_contract, the spec should switch to `previous_step` and "
         "compose its underlag from explicit `uses_previous_fields` "
@@ -864,7 +951,7 @@ _PREFER_TARGETED_UNDERLAG_OVER_ALL_PREVIOUS_STEPS = CriticInvariant(
     ),
     evidence=_prefer_targeted_underlag_over_all_previous_steps_evidence,
     remediation=(
-        'Det sista komponerande textsteget har `input_source="all_previous_steps"` '
+        'Ett komponerande textsteg har `input_source="all_previous_steps"` '
         "fastän tidigare steg producerar strukturerad JSON. Det betyder att hela "
         "texten från alla tidigare steg sammanfogas och skickas in — token-kostnaden "
         "växer linjärt med antalet steg, även om det komponerande steget egentligen "
@@ -915,6 +1002,24 @@ def _composer_question_distinct_prior_structured_step_count(
             continue
         distinct.add(reference.step_order)
     return len(distinct)
+
+
+def _previous_text_step_already_composes_structured_underlag(
+    *, spec: FlowDraftSpecCore, composer_index: int
+) -> bool:
+    if composer_index <= 0:
+        return False
+    previous_index = composer_index - 1
+    previous_step = spec.steps[previous_index]
+    if previous_step.output_type != OutputType.TEXT or _is_renderer_step(previous_step):
+        return False
+    return (
+        _composer_question_distinct_prior_structured_step_count(
+            spec=spec,
+            composer_index=previous_index,
+        )
+        >= 2
+    )
 
 
 def _final_text_step_must_reference_relevant_structured_outputs_evidence(
@@ -979,6 +1084,11 @@ def _final_text_step_must_reference_relevant_structured_outputs_evidence(
             spec=spec, composer_index=composer_index
         )
         >= 2
+    ):
+        return False
+    if _previous_text_step_already_composes_structured_underlag(
+        spec=spec,
+        composer_index=composer_index,
     ):
         return False
     return True

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, cast
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_critic_invariants import (
     TARGETED_UNDERLAG_SOFT_CAP,
+    targeted_underlag_all_previous_indexes_for_drafts,
 )
 from intric.flows.ai_builder.ai_builder_mechanical_refs import (
     clean_raw_previous_field_refs,
@@ -239,7 +240,7 @@ def auto_bind_targeted_underlag_for_text_composer(
     *,
     aggregation_intent: "AggregationIntent",
 ) -> list[NewStepDraft]:
-    """Rewrite the last compositional text step so it reads JSON predecessors
+    """Rewrite compositional text steps so they read JSON predecessors
     via explicit field refs instead of `all_previous_steps` or a single
     daisy-chained predecessor.
 
@@ -271,24 +272,49 @@ def auto_bind_targeted_underlag_for_text_composer(
     """
     if aggregation_intent in {"aggregate", "compare"}:
         return steps
-    composer_index = _last_compositional_step_index(steps)
-    if composer_index is None or composer_index == 0:
-        return steps
+
+    rewritten_steps = steps
+    changed = False
+    for composer_index in targeted_underlag_all_previous_indexes_for_drafts(
+        rewritten_steps,
+        aggregation_intent=aggregation_intent,
+    ):
+        updated_steps = _bind_targeted_underlag_for_composer(
+            rewritten_steps,
+            composer_index=composer_index,
+            require_multiple_json_priors=False,
+        )
+        if updated_steps is not rewritten_steps:
+            rewritten_steps = updated_steps
+            changed = True
+
+    composer_index = _last_compositional_step_index(rewritten_steps)
+    if composer_index is not None:
+        composer = rewritten_steps[composer_index]
+        if (
+            composer.input_source == InputSource.PREVIOUS_STEP
+            and composer.output_type == OutputType.TEXT
+            and not composer.uses_previous_fields
+        ):
+            updated_steps = _bind_targeted_underlag_for_composer(
+                rewritten_steps,
+                composer_index=composer_index,
+                require_multiple_json_priors=True,
+            )
+            if updated_steps is not rewritten_steps:
+                rewritten_steps = updated_steps
+                changed = True
+
+    return rewritten_steps if changed else steps
+
+
+def _bind_targeted_underlag_for_composer(
+    steps: list[NewStepDraft],
+    *,
+    composer_index: int,
+    require_multiple_json_priors: bool,
+) -> list[NewStepDraft]:
     composer = steps[composer_index]
-    if composer.input_source not in (
-        InputSource.ALL_PREVIOUS_STEPS,
-        InputSource.PREVIOUS_STEP,
-    ):
-        return steps
-    if composer.output_type != OutputType.TEXT:
-        return steps
-    if (
-        composer.input_source == InputSource.ALL_PREVIOUS_STEPS
-        and composer.input_type != InputType.TEXT
-    ):
-        return steps
-    if composer.uses_previous_fields:
-        return steps
 
     priors = [
         (index, step)
@@ -311,7 +337,7 @@ def auto_bind_targeted_underlag_for_text_composer(
     ]
     if not json_priors:
         return steps
-    if composer.input_source == InputSource.PREVIOUS_STEP and len(json_priors) < 2:
+    if require_multiple_json_priors and len(json_priors) < 2:
         return steps
 
     new_field_refs: list[PreviousFieldRef] = []
