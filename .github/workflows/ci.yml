@@ -139,8 +139,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --python 3.11 --frozen --all-groups
 
-      - name: Run tests
-        run: uv run pytest -v -n 2 tests/
+      - name: Run unit tests
+        run: uv run pytest -v -n 2 -m "not integration" tests/
+
+      - name: Run integration tests
+        run: uv run pytest -v -n 2 -m integration tests/integration/
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
