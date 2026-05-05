@@ -70,6 +70,9 @@ _RUNTIME_METADATA_CONCEPT_TRIGGERS: tuple[str, ...] = (
 _RUNTIME_METADATA_ABSENCE_TRIGGERS = (
     *_RUNTIME_FIELD_DECLARATION_TRIGGERS,
     *_RUNTIME_METADATA_CONCEPT_TRIGGERS,
+    "extra fält",
+    "extra falt",
+    "extra fields",
     "metadata",
 )
 _RUNTIME_METADATA_INTENT_TRIGGERS = (
@@ -206,6 +209,24 @@ _ABSENCE_PREDICATE_TOKENS = frozenset(
         "required",
     }
 )
+_POST_TRIGGER_NEGATABLE_ABSENCE_PREDICATE_TOKENS = frozenset(
+    {
+        "behovs",
+        "behövs",
+        "kravs",
+        "krävs",
+        "needed",
+    }
+)
+_ABSENCE_AUXILIARY_TOKENS = frozenset(
+    {
+        "are",
+        "is",
+        "be",
+        "är",
+        "ar",
+    }
+)
 
 
 def runtime_input_fields_declared_absent(text: str) -> bool:
@@ -317,7 +338,9 @@ def _field_trigger_has_absence_polarity(
 ) -> bool:
     negated = any(token in _NEGATION_TOKENS for token in before)
     if not negated:
-        return False
+        return _post_trigger_clause_has_absence_polarity(after)
+    if before and before[-1] in _NEGATION_TOKENS:
+        return True
     if not after:
         return True
     if any(token in {"utan", "without"} for token in before):
@@ -326,7 +349,34 @@ def _field_trigger_has_absence_polarity(
         return True
     if any(token in {"utan", "without"} for token in after):
         return True
-    return any(token in _ABSENCE_PREDICATE_TOKENS for token in after)
+    if any(token in _ABSENCE_PREDICATE_TOKENS for token in after):
+        return True
+    return _post_trigger_clause_has_absence_polarity(after)
+
+
+def _post_trigger_clause_has_absence_polarity(after: list[str]) -> bool:
+    clause = list(after)
+    while clause and clause[0] in _ABSENCE_AUXILIARY_TOKENS:
+        clause.pop(0)
+    negation_indexes = [
+        index for index, token in enumerate(clause) if token in _NEGATION_TOKENS
+    ]
+    predicate_indexes = [
+        index
+        for index, token in enumerate(clause)
+        if token in _ABSENCE_PREDICATE_TOKENS
+    ]
+    for negation_index in negation_indexes:
+        if any(
+            0 < predicate_index - negation_index <= 2
+            for predicate_index in predicate_indexes
+        ):
+            return True
+    return any(
+        clause[predicate_index] in _POST_TRIGGER_NEGATABLE_ABSENCE_PREDICATE_TOKENS
+        and predicate_index + 1 in negation_indexes
+        for predicate_index in predicate_indexes
+    )
 
 
 def _clause_starts_with_absence_predicate(clause: str) -> bool:

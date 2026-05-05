@@ -49,6 +49,38 @@ def test_runtime_input_field_extraction_understands_bare_absence() -> None:
     assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Metadata vid körning: Inga extra fält.",
+        "Runtime metadata: No extra fields.",
+    ],
+)
+def test_runtime_input_field_extraction_understands_extra_field_absence(
+    text: str,
+) -> None:
+    assert runtime_input_fields_declared_absent(text)
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Skapa ett rapportflöde. Inmatningsfält behövs inte.",
+        "Skapa ett rapportflöde. Inmatningsfält krävs inte.",
+        "Create a report flow. Input fields are not needed.",
+        "Create a report flow. Input fields are not required.",
+    ],
+)
+def test_runtime_input_field_extraction_understands_post_trigger_negation(
+    text: str,
+) -> None:
+    assert runtime_input_fields_declared_absent(text)
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
+
+
 def test_runtime_input_field_extraction_understands_bare_metadata_absence() -> None:
     text = "Skapa ett rapportflöde. Ingen metadata behövs vid körning."
 
@@ -114,6 +146,13 @@ def test_runtime_input_field_extraction_keeps_bare_metadata_as_basic_intent() ->
 
     assert extract_runtime_input_field_hints(text) == ()
     assert infer_runtime_metadata_slot(text) == BASIC_CASE_METADATA
+
+
+def test_runtime_input_field_extraction_keeps_required_not_optional_positive() -> None:
+    text = "Create a report flow. Input fields are required, not optional."
+
+    assert not runtime_input_fields_declared_absent(text)
+    assert infer_runtime_metadata_slot(text) != NO_EXTRA_RUNTIME_METADATA
 
 
 def test_runtime_input_field_extraction_does_not_treat_bare_metadata_as_runtime_intent() -> (

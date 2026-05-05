@@ -227,6 +227,43 @@ def test_flags_missing_form_fields_when_runtime_metadata_was_requested() -> None
     assert "form_fields" in feedback
 
 
+def test_no_input_fields_instruction_does_not_request_runtime_form_fields() -> None:
+    conversation = [
+        {
+            "role": "user",
+            "content": (
+                "Jag vill bygga ett flöde där användaren skickar in mötesljud, "
+                "flödet transkriberar ljudet och skapar en Word-rapport med "
+                "rubriker. Inmatningsfält behövs inte."
+            ),
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Mötesrapport",
+        steps=[
+            _step(
+                "step_a",
+                "Transkribera ljud",
+                "Transkribera mötesljudet.",
+                input_type=InputType.AUDIO,
+            ),
+            _step(
+                "step_b",
+                "Skapa Word-rapport",
+                "Skapa Word-rapporten från transkriptionen.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.DOCX,
+            ),
+        ],
+    )
+    context = build_conversation_critic_context(conversation, spec)
+
+    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
+
+    assert "runtime_metadata_requires_form_fields" not in issue_ids
+    assert "rich_workflow_requires_form_fields" not in issue_ids
+
+
 def test_flags_unrelated_mcp_selection_when_requested_mcp_is_unavailable() -> None:
     catalog = build_ai_builder_resource_catalog(
         available_models=[],

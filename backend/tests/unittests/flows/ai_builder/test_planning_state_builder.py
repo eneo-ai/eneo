@@ -345,6 +345,28 @@ class TestPolicyDefaults:
             "no_extra_metadata"
         )
 
+    def test_swedish_audio_docx_prompt_with_no_input_fields_keeps_metadata_absent(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Jag vill bygga ett flöde där användaren skickar in "
+                        "mötesljud, flödet transkriberar ljudet och skapar en "
+                        "Word-rapport med rubriker. Inmatningsfält behövs inte."
+                    ),
+                )
+            ]
+        )
+
+        assert state.resolved_slots["primary_runtime_input"].value == "audio"
+        assert state.resolved_slots["terminal_output"].value == "docx_document"
+        slot = state.resolved_slots["runtime_metadata_fields"]
+        assert slot.value == "no_extra_metadata"
+        assert slot.source == "heuristic"
+
     def test_swedish_audio_recording_prompt_with_terminal_word_file_resolves_core_slots(
         self,
     ) -> None:
