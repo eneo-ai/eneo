@@ -33,7 +33,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T006
+active_task: T007
 
 tasks:
   - id: T001
@@ -303,7 +303,7 @@ tasks:
   - id: T006
     type: worker
     assignee: Worker
-    status: active
+    status: blocked
     reasoning_hint: medium
     objective: "Improve form-field material lifecycle only if the source-material tranche is green and Judge selects it as the next safe slice."
     allowed_files: []
@@ -312,12 +312,16 @@ tasks:
       - "Would mix scoped form_fields migration with unrelated source-material changes."
       - "Would break legacy bare form-field references."
       - "Need UI/product decision before coding."
-    receipt: null
+    receipt:
+      result: blocked
+      note: docs/goals/material-efficiency/notes/T006-form-field-lifecycle-scout.md
+      summary: "No safe production form-field lifecycle change was made. Existing code already drops ignored hints, binds referenced fields into question underlag, and lints unused compiled fields. Content-vs-style field classification needs live-eval/product evidence before coding."
+      blocker: "Would require brittle semantic heuristics or product decision before deterministic failure evidence."
 
   - id: T007
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: medium
     objective: "Run live V1-V5 and C1-C5 smoke evals across five spaces with scorecard, material-routing metrics, and skipped-step evidence."
     allowed_files:
