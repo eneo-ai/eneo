@@ -50,3 +50,25 @@ jobs:
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{ matrix.language }}"
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - analyze
+
+    steps:
+      - name: Check CodeQL analysis jobs
+        env:
+          ANALYZE_RESULT: ${{ needs.analyze.result }}
+        run: |
+          case "$ANALYZE_RESULT" in
+            success|skipped)
+              echo "CodeQL analyze: $ANALYZE_RESULT"
+              ;;
+            *)
+              echo "::error::CodeQL analyze failed with result: $ANALYZE_RESULT"
+              exit 1
+              ;;
+          esac

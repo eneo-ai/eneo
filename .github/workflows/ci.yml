@@ -170,11 +170,15 @@ jobs:
       - name: Run type checks
         run: bun run check
 
+      # The docs workflow owns docs-site lint/build; this gate stays focused on shipped frontend packages.
       - name: Run package lint
         run: FORCE_COLOR=1 bun run --filter '@intric/*' lint
 
       - name: Build frontend
         run: bun run build
+        env:
+          # The Svelte production build exceeds Node's default heap on GitHub-hosted runners.
+          NODE_OPTIONS: --max-old-space-size=6144
 
   ci:
     name: CI

@@ -80,6 +80,13 @@ updates:
       - "backend"
     commit-message:
       prefix: "deps(docker)"
+    groups:
+      backend-docker-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "docker"
     directory: "/frontend"
@@ -96,6 +103,13 @@ updates:
       - "frontend"
     commit-message:
       prefix: "deps(docker)"
+    groups:
+      frontend-docker-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "docker"
     directory: "/.devcontainer"
@@ -112,6 +126,13 @@ updates:
       - "devcontainer"
     commit-message:
       prefix: "deps(devcontainer)"
+    groups:
+      devcontainer-docker-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "devcontainers"
     directory: "/"
@@ -127,3 +148,10 @@ updates:
       - "devcontainer"
     commit-message:
       prefix: "deps(devcontainer)"
+    groups:
+      devcontainer-features-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
