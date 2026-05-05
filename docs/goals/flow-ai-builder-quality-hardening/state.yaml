@@ -748,6 +748,30 @@ tasks:
       result: done
       note: "See notes/T023-explicit-underlag-runtime-recovery.md. Claude peer loop returned GREEN_LIGHT: yes; focused backend/frontend validation passed. User's later live run completed successfully, with remaining quality note that restarted servers should use the source-material normalizer for intermediate transcript underlag."
 
+  - id: T024
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether the current tranche now satisfies the original bad-flow prevention goal after T022 and T023."
+    inputs:
+      - "T022 receipt"
+      - "T023 receipt"
+      - "User live debug export generated at 2026-05-05T12:36:48Z"
+      - "Current verification results"
+      - "Commit d5bc9189"
+    constraints:
+      - "Read-only audit."
+      - "Do not reopen broad planner-context redesign without new failing evidence."
+      - "Separate proven prevention from remaining builder-quality optimizations."
+    expected_output:
+      - "complete | not_complete"
+      - "Evidence"
+      - "Remaining follow-up, if any"
+    receipt:
+      result: complete
+      note: "Current tranche passes. Known bad final-output data loss is covered from builder, runtime, graph, and frontend sides; the user-provided regenerated flow completed. Remaining observation: intermediate JSON section steps in the live export were still plain previous-step JSON, but current local compiler/source-material tests cover transcript underlag once the server process is restarted."
+
 checks:
   dirty_baseline:
     captured_from: "git status --short --branch at board creation"
