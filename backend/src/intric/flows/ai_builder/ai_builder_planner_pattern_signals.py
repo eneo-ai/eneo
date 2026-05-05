@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -25,6 +26,14 @@ _DOCUMENT_INPUT_MARKERS: tuple[str, ...] = (
     "uploaded documents",
     "document package",
     "documents per run",
+    "avtal",
+    "leverantörsavtal",
+    "faktura",
+    "fakturor",
+    "contract",
+    "contracts",
+    "invoice",
+    "invoices",
 )
 
 _DOCUMENT_OUTPUT_MARKERS: tuple[str, ...] = (
@@ -116,6 +125,10 @@ _RICH_DOCUMENT_WORKFLOW_SIGNAL = "rich_document_workflow"
 _DIRECT_TEXT_TRANSFORM_MARKERS: tuple[str, ...] = (
     "översätt",
     "oversatt",
+    "översätta",
+    "oversatta",
+    "översätter",
+    "oversatter",
     "translate",
     "skriv om",
     "rewrite",
@@ -130,6 +143,11 @@ _DIRECT_TEXT_TRANSFORM_MARKERS: tuple[str, ...] = (
     "summarize this",
     "summera den här",
     "summera denna",
+)
+_DIRECT_TEXT_TRANSFORM_PATTERN = re.compile(
+    r"\b(?:"
+    + "|".join(re.escape(marker) for marker in _DIRECT_TEXT_TRANSFORM_MARKERS)
+    + r")\b"
 )
 
 
@@ -217,7 +235,7 @@ def detect_planner_pattern_signals(text: str) -> PlannerPatternSignals:
         or _contains_any(normalized, _FORM_COMPLEMENT_MARKERS)
     ) and not derive_from_input_only
     is_simple_text_transform = (
-        _contains_any(normalized, _DIRECT_TEXT_TRANSFORM_MARKERS)
+        _contains_direct_text_transform_marker(normalized)
         and not document_like_input
         and not document_like_output
         and not prefers_structured_intermediate
@@ -249,3 +267,7 @@ def extract_planner_pattern_recipe_signals(text: str) -> set[str]:
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
     return any(marker in text for marker in markers)
+
+
+def _contains_direct_text_transform_marker(text: str) -> bool:
+    return _DIRECT_TEXT_TRANSFORM_PATTERN.search(text) is not None

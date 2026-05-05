@@ -12,6 +12,7 @@ from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     "text",
     [
         "Översätt den här meningen till engelska: Vi ses imorgon.",
+        "Översätter den här texten till engelska.",
         "Translate this sentence to English: Vi ses imorgon.",
         "Skriv om den här texten så att den blir kortare.",
         "Correct this text and keep the same meaning.",
@@ -35,6 +36,11 @@ def test_detect_planner_pattern_signals_flags_simple_text_transform(
         "Ladda upp ett dokument och översätt det till en Word-rapport.",
         "Translate the text provided in the runtime input field target_text.",
         "Help me with this text.",
+        "Beskriv om processen behöver godkännanden.",
+        "Bygg ett flöde där användaren skriver om upplevelsen.",
+        "Förrätta uppdraget och sammanställ en kort notis.",
+        "Sammanfatta den här leverantörsavtalet.",
+        "Översätt fakturor till engelska.",
     ],
 )
 def test_detect_planner_pattern_signals_does_not_flag_complex_or_ambiguous_text(

@@ -288,6 +288,30 @@ def test_resolve_output_intent_defaults_text_answer_flow_to_structured_text() ->
     assert intent.pdf_generation_mode is None
 
 
+def test_resolve_output_intent_defaults_english_short_answer_flow_to_structured_text() -> (
+    None
+):
+    intent = resolve_output_intent(
+        "Create a flow that writes a short answer to an incoming question.",
+        {},
+    )
+
+    assert intent.terminal_output == "structured_text"
+    assert intent.docx_output_mode is None
+    assert intent.pdf_generation_mode is None
+
+
+def test_resolve_output_intent_does_not_treat_incidental_answer_phrase_as_text_output() -> (
+    None
+):
+    intent = resolve_output_intent(
+        "Skapa ett flöde som ger svar på leverantörens fråga.",
+        {},
+    )
+
+    assert intent.terminal_output is None
+
+
 def test_needs_structured_extraction_for_named_reusable_fields() -> None:
     assert needs_structured_extraction(
         (
