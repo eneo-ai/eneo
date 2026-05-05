@@ -14,14 +14,15 @@ import urllib.request
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
-
+from typing import Any, cast
 
 DEFAULT_API_BASE = "http://localhost:8123"
 DEFAULT_OUTPUT_ROOT = Path("/tmp/material-efficiency-live-eval")
 DEFAULT_STATE_PATH = Path(__file__).with_name(
     "flow-ai-builder-material-efficiency-state.yaml"
 )
+JsonObject = dict[str, Any]
+JsonList = list[Any]
 
 SCORE_AXES = [
     "clarification_restraint",
@@ -58,6 +59,9 @@ class CaseRunResult:
     flow_id: str | None = None
     output_dir: str | None = None
     error: str | None = None
+    requirements_version: str | None = None
+    checkpoints: list[str] = field(default_factory=lambda: [])
+    builder_errors: list[str] = field(default_factory=lambda: [])
     review_required: bool = True
     score_axes: dict[str, int | None] = field(
         default_factory=lambda: {axis: None for axis in SCORE_AXES}
@@ -79,7 +83,12 @@ CREATE_CASES: list[EvalCase] = [
     EvalCase(
         case_id="V1",
         prompt="Jag vill kunna ladda upp ett dokument och få en kort sammanfattning.",
-        tags=["create_path", "document_to_text", "minimal_topology", "null_form_fields"],
+        tags=[
+            "create_path",
+            "document_to_text",
+            "minimal_topology",
+            "null_form_fields",
+        ],
         desired_signal=(
             "A one-step document-to-text flow or one concise clarification about "
             "output format. No invented fields, artifact terminal, or unnecessary JSON."
@@ -149,7 +158,12 @@ CREATE_CASES: list[EvalCase] = [
             "Jag vill att flödet ska läsa ett dokument, plocka ut viktiga uppgifter "
             "och skicka resultatet till vårt API."
         ),
-        tags=["create_path", "document_to_structured", "http_post_call", "api_body_binding"],
+        tags=[
+            "create_path",
+            "document_to_structured",
+            "http_post_call",
+            "api_body_binding",
+        ],
         desired_signal=(
             "Asks for endpoint, auth, and body schema if not supplied. API call body is "
             "built from prepared extracted fields, not raw full document material."
@@ -340,7 +354,12 @@ SUPPLEMENTAL_CASES: list[EvalCase] = [
             "Kundnummer ska användas i GET-steget och metadata från GET-steget ska användas "
             "i POST-body tillsammans med extraherad JSON."
         ),
-        tags=["http_get_call", "http_post_call", "api_body_binding", "capability_check"],
+        tags=[
+            "http_get_call",
+            "http_post_call",
+            "api_body_binding",
+            "capability_check",
+        ],
         desired_signal="API material is routed through explicit fields; GET response and document extraction reach POST body.",
         failure_signal="API details are invented, raw dumps are posted, or the builder cannot author the requested HTTP path.",
         notes=(
@@ -358,7 +377,12 @@ SUPPLEMENTAL_CASES: list[EvalCase] = [
             "som använder både hämtad metadata och sammanfattningen. Artikelnummer ska "
             "användas i GET-steget, inte bara nämnas i sluttexten."
         ),
-        tags=["http_get_call", "document_summary", "material_merge", "capability_check"],
+        tags=[
+            "http_get_call",
+            "document_summary",
+            "material_merge",
+            "capability_check",
+        ],
         desired_signal="GET call is material-producing, and final answer uses API metadata plus source summary.",
         failure_signal="Article number is only mentioned in final text, or API metadata never becomes step material.",
         notes="Treat as capability-discovery evidence if AI Builder cannot author http_get input sources.",
@@ -393,7 +417,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run Flow AI Builder material-efficiency live smoke/eval cases."
     )
-    parser.add_argument("--api-base", default=os.getenv("ENEO_LOCAL_API_BASE", DEFAULT_API_BASE))
+    parser.add_argument(
+        "--api-base", default=os.getenv("ENEO_LOCAL_API_BASE", DEFAULT_API_BASE)
+    )
     parser.add_argument("--api-key", default=os.getenv("ENEO_LOCAL_API_KEY"))
     parser.add_argument("--output-dir", type=Path, default=default_output_dir())
     parser.add_argument("--state-file", type=Path, default=DEFAULT_STATE_PATH)
@@ -402,9 +428,15 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Also write summary to /tmp/material-efficiency-live-eval/baselines/<label>/summary.json.",
     )
-    parser.add_argument("--smoke", action="store_true", help="Run sessions and flow-list smoke checks.")
-    parser.add_argument("--list-cases", action="store_true", help="Print available cases and exit.")
-    parser.add_argument("--case", action="append", dest="case_ids", help="Case ID to run. Repeatable.")
+    parser.add_argument(
+        "--smoke", action="store_true", help="Run sessions and flow-list smoke checks."
+    )
+    parser.add_argument(
+        "--list-cases", action="store_true", help="Print available cases and exit."
+    )
+    parser.add_argument(
+        "--case", action="append", dest="case_ids", help="Case ID to run. Repeatable."
+    )
     parser.add_argument("--all", action="store_true", help="Run all create cases.")
     parser.add_argument(
         "--include-supplemental",
@@ -481,6 +513,89 @@ class ApiClient:
         return json.loads(raw.decode("utf-8"))
 
 
+@dataclass(frozen=True)
+class BuilderStreamEvent:
+    event: str
+    data: Any
+
+
+def parse_builder_stream(raw: bytes) -> list[BuilderStreamEvent]:
+    events: list[BuilderStreamEvent] = []
+    text = raw.decode("utf-8", errors="replace").replace("\r\n", "\n")
+    for block in text.split("\n\n"):
+        event_name: str | None = None
+        data_lines: list[str] = []
+        for line in block.splitlines():
+            if line.startswith("event:"):
+                event_name = line.split(":", 1)[1].strip()
+            elif line.startswith("data:"):
+                data_lines.append(line.split(":", 1)[1].strip())
+        if not event_name:
+            continue
+        raw_data = "\n".join(data_lines)
+        parsed_data: Any = None
+        if raw_data:
+            try:
+                parsed_data = json.loads(raw_data)
+            except json.JSONDecodeError:
+                parsed_data = raw_data
+        events.append(BuilderStreamEvent(event=event_name, data=parsed_data))
+    return events
+
+
+def write_stream_artifacts(
+    case_dir: Path, name: str, stream: bytes
+) -> list[BuilderStreamEvent]:
+    (case_dir / f"{name}.sse").write_bytes(stream)
+    events = parse_builder_stream(stream)
+    write_json(case_dir / f"{name}-events.json", [asdict(event) for event in events])
+    return events
+
+
+def stream_event_names(events: list[BuilderStreamEvent]) -> list[str]:
+    return [event.event for event in events]
+
+
+def stream_requirements_version(events: list[BuilderStreamEvent]) -> str | None:
+    for event in events:
+        event_data: object = event.data
+        if event.event != "requirements_summary" or not isinstance(event_data, dict):
+            continue
+        data = cast(JsonObject, event_data)
+        version = data.get("requirements_version")
+        if isinstance(version, str) and version:
+            return version
+    return None
+
+
+def stream_error_messages(events: list[BuilderStreamEvent]) -> list[str]:
+    errors: list[str] = []
+    for event in events:
+        event_data: object = event.data
+        if event.event != "error":
+            continue
+        if isinstance(event_data, dict):
+            data = cast(JsonObject, event_data)
+            message = data.get("message") or data.get("error")
+            code = data.get("code") or data.get("intric_error_code")
+            if isinstance(message, str) and message:
+                if isinstance(code, str) and code:
+                    errors.append(f"{code}: {message}")
+                else:
+                    errors.append(message)
+            else:
+                errors.append(json.dumps(data, ensure_ascii=False, sort_keys=True))
+        elif event_data is not None:
+            errors.append(str(event_data))
+        else:
+            errors.append("Builder returned an unspecified stream error.")
+    return errors
+
+
+def stream_has_question(events: list[BuilderStreamEvent]) -> bool:
+    return any(event.event == "question" for event in events)
+
+
 def main() -> int:
     args = parse_args()
     cases = selected_cases(args)
@@ -505,6 +620,7 @@ def main() -> int:
         "applied": args.apply,
         "published": args.publish,
         "score_axes": SCORE_AXES,
+        "invocation": redacted_invocation(args),
         "scoring": {
             "score_source": "manual",
             "metrics_source": "manual_plan_or_flow_review",
@@ -540,7 +656,9 @@ def main() -> int:
     summary["aggregate"] = aggregate_results(summary["results"])
     write_json(output_dir / "summary.json", summary)
     if args.baseline_label:
-        baseline_dir = DEFAULT_OUTPUT_ROOT / "baselines" / sanitize_label(args.baseline_label)
+        baseline_dir = (
+            DEFAULT_OUTPUT_ROOT / "baselines" / sanitize_label(args.baseline_label)
+        )
         baseline_dir.mkdir(parents=True, exist_ok=True)
         write_json(baseline_dir / "summary.json", redacted_baseline_summary(summary))
     print(f"Summary written to {output_dir / 'summary.json'}")
@@ -576,7 +694,10 @@ def run_smoke(
         data = client.get_json(f"/api/v1/flows/?{query}")
         write_json(smoke_dir / f"flows-{space_id}.json", data)
         flow_lists[space_id] = summarize_list_payload(data)
-    summary["smoke"] = {"sessions": summarize_list_payload(sessions), "flows": flow_lists}
+    summary["smoke"] = {
+        "sessions": summarize_list_payload(sessions),
+        "flows": flow_lists,
+    }
 
 
 def run_case(
@@ -629,7 +750,11 @@ def run_case(
             f"/api/v1/flows/ai-builder/sessions/{result.session_id}/messages",
             {"message": case.prompt, "ui_language": "sv"},
         )
-        (case_dir / "message.sse").write_bytes(stream)
+        events = write_stream_artifacts(case_dir, "message", stream)
+        all_events = list(events)
+        result.checkpoints.extend(stream_event_names(events))
+        result.builder_errors.extend(stream_error_messages(events))
+        result.requirements_version = stream_requirements_version(events)
 
         session_after = client.get_json(
             f"/api/v1/flows/ai-builder/sessions/{result.session_id}"
@@ -641,8 +766,52 @@ def run_case(
         )
         write_json(case_dir / "plans.json", plans)
         result.plan_id = extract_plan_id(plans)
+
+        if not result.plan_id and result.requirements_version:
+            confirm_stream = client.post_stream(
+                f"/api/v1/flows/ai-builder/sessions/{result.session_id}/messages",
+                {
+                    "message": "Kraven stämmer. Skapa planen.",
+                    "ui_language": "sv",
+                    "question_answer": {
+                        "requirements_confirmed": True,
+                        "requirements_version": result.requirements_version,
+                    },
+                },
+            )
+            confirm_events = write_stream_artifacts(
+                case_dir, "requirements-confirmation", confirm_stream
+            )
+            all_events.extend(confirm_events)
+            result.checkpoints.extend(stream_event_names(confirm_events))
+            result.builder_errors.extend(stream_error_messages(confirm_events))
+
+            session_after_confirm = client.get_json(
+                f"/api/v1/flows/ai-builder/sessions/{result.session_id}"
+            )
+            write_json(
+                case_dir / "session-after-requirements-confirmation.json",
+                session_after_confirm,
+            )
+
+            plans = client.get_json(
+                f"/api/v1/flows/ai-builder/sessions/{result.session_id}/plans"
+            )
+            write_json(case_dir / "plans-after-requirements-confirmation.json", plans)
+            result.plan_id = extract_plan_id(plans)
+
+        if result.builder_errors and not result.plan_id:
+            result.status = "builder_error"
+            result.error = "; ".join(result.builder_errors)
+            return result
+        if not result.plan_id and stream_has_question(all_events):
+            result.status = "clarification_required"
+            return result
         if not result.plan_id:
-            result.status = "no_plan"
+            if result.requirements_version:
+                result.status = "no_plan_after_requirements_confirmation"
+            else:
+                result.status = "no_plan"
             return result
 
         plan = client.get_json(f"/api/v1/flows/ai-builder/plans/{result.plan_id}")
@@ -662,7 +831,8 @@ def run_case(
         write_json(case_dir / "apply.json", applied)
         result.flow_id = extract_first(applied, "flow_id", "id")
         if not result.flow_id and isinstance(applied, dict):
-            result.flow_id = extract_first(applied.get("flow"), "flow_id", "id")
+            applied_object = cast(JsonObject, applied)
+            result.flow_id = extract_first(applied_object.get("flow"), "flow_id", "id")
         if not result.flow_id:
             result.status = "applied_without_flow_id"
             return result
@@ -711,23 +881,27 @@ def inspect_flow(client: ApiClient, flow_id: str, case_dir: Path) -> None:
 
 def extract_plan_id(payload: Any) -> str | None:
     if isinstance(payload, dict):
-        direct = extract_first(payload, "plan_id", "id", "latest_plan_id")
+        payload_object = cast(JsonObject, payload)
+        direct = extract_first(payload_object, "plan_id", "id", "latest_plan_id")
         if direct:
             return direct
         for key in ("plans", "items", "data"):
-            child = payload.get(key)
+            child = payload_object.get(key)
             if isinstance(child, list) and child:
-                return extract_first(child[0], "plan_id", "id")
+                child_list = cast(JsonList, child)
+                return extract_first(child_list[0], "plan_id", "id")
     if isinstance(payload, list) and payload:
-        return extract_first(payload[0], "plan_id", "id")
+        payload_list = cast(JsonList, payload)
+        return extract_first(payload_list[0], "plan_id", "id")
     return None
 
 
 def extract_first(payload: Any, *keys: str) -> str | None:
     if not isinstance(payload, dict):
         return None
+    payload_object = cast(JsonObject, payload)
     for key in keys:
-        value = payload.get(key)
+        value = payload_object.get(key)
         if isinstance(value, str) and value:
             return value
     return None
@@ -735,12 +909,15 @@ def extract_first(payload: Any, *keys: str) -> str | None:
 
 def summarize_list_payload(payload: Any) -> dict[str, Any]:
     if isinstance(payload, dict):
+        payload_object = cast(JsonObject, payload)
         for key in ("sessions", "items", "flows", "data"):
-            value = payload.get(key)
+            value = payload_object.get(key)
             if isinstance(value, list):
-                return {"count": len(value)}
+                value_list = cast(JsonList, value)
+                return {"count": len(value_list)}
     if isinstance(payload, list):
-        return {"count": len(payload)}
+        payload_list = cast(JsonList, payload)
+        return {"count": len(payload_list)}
     return {"count": None}
 
 
@@ -754,6 +931,26 @@ def write_json(path: Path, value: Any) -> None:
         json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def redacted_invocation(args: argparse.Namespace) -> dict[str, Any]:
+    # Intentionally omit api_key; raw eval outputs are not secret stores.
+    return {
+        "api_base": args.api_base,
+        "output_dir": str(args.output_dir),
+        "state_file": str(args.state_file),
+        "baseline_label": args.baseline_label,
+        "smoke": args.smoke,
+        "list_cases": args.list_cases,
+        "case_ids": args.case_ids,
+        "all": args.all,
+        "include_supplemental": args.include_supplemental,
+        "runs": args.runs,
+        "apply": args.apply,
+        "publish": args.publish,
+        "edit_flow_id": args.edit_flow_id,
+        "timeout": args.timeout,
+    }
 
 
 def default_output_dir() -> Path:
@@ -838,6 +1035,7 @@ def redacted_baseline_summary(summary: dict[str, Any]) -> dict[str, Any]:
         "runs": summary["runs"],
         "applied": summary["applied"],
         "published": summary["published"],
+        "invocation": summary.get("invocation"),
         "score_axes": summary["score_axes"],
         "scoring": summary["scoring"],
         "aggregate": summary.get("aggregate", {}),
@@ -860,7 +1058,9 @@ def redacted_baseline_summary(summary: dict[str, Any]) -> dict[str, Any]:
 
 
 def sanitize_label(label: str) -> str:
-    sanitized = "".join(char if char.isalnum() or char in "-_." else "-" for char in label)
+    sanitized = "".join(
+        char if char.isalnum() or char in "-_." else "-" for char in label
+    )
     return sanitized.strip(".-") or "baseline"
 
 
