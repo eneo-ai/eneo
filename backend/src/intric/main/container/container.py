@@ -883,7 +883,6 @@ class Container(containers.DeclarativeContainer):
     )
     api_key_policy_service = providers.Factory(
         ApiKeyPolicyService,
-        allowed_origin_repo=allowed_origin_repo,
         space_service=space_service,
         user=user,
     )
@@ -1107,7 +1106,6 @@ class Container(containers.DeclarativeContainer):
         auth_service=auth_service,
         api_key_auth_resolver=api_key_auth_resolver,
         api_key_v2_repo=api_key_v2_repo,
-        allowed_origin_repo=allowed_origin_repo,
         audit_service=audit_service,
         settings_repo=settings_repo,
         tenant_repo=tenant_repo,

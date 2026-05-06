@@ -8,7 +8,6 @@ import jwt
 import sqlalchemy as sa
 from starlette.requests import Request
 
-from intric.allowed_origins.allowed_origin_repo import AllowedOriginRepository
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
@@ -205,7 +204,6 @@ class UserService:
         auth_service: AuthService,
         api_key_auth_resolver: ApiKeyAuthResolver,
         api_key_v2_repo: ApiKeysV2Repository,
-        allowed_origin_repo: AllowedOriginRepository,
         audit_service: Optional[AuditService],
         settings_repo: SettingsRepository,
         tenant_repo: TenantRepository,
@@ -220,7 +218,6 @@ class UserService:
         self.auth_service = auth_service
         self.api_key_auth_resolver = api_key_auth_resolver
         self.api_key_v2_repo = api_key_v2_repo
-        self.allowed_origin_repo = allowed_origin_repo
         self.space_service = space_service
         self.audit_service = audit_service
         self.settings_repo = settings_repo
@@ -857,7 +854,6 @@ class UserService:
         user.active_api_key = resolved.key
 
         policy_service = ApiKeyPolicyService(
-            allowed_origin_repo=self.allowed_origin_repo,
             space_service=self.space_service,
             user=None,
         )

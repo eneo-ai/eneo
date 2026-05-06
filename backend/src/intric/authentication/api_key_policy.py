@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import ipaddress
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, cast
 from urllib.parse import urlparse
 from uuid import UUID
 
-from intric.allowed_origins.allowed_origin_repo import AllowedOriginRepository
 from intric.allowed_origins.origin_matching import origin_matches_pattern
 from intric.authentication.api_key_request_context import resolve_client_ip
 from intric.authentication.api_key_resolver import ApiKeyValidationError
@@ -34,30 +32,16 @@ if TYPE_CHECKING:
     from intric.users.user import UserInDB
 
 
-@dataclass(slots=True)
-class _TenantOriginCacheEntry:
-    patterns: list[str]
-    expires_at: datetime
-
-
 class ApiKeyPolicyService:
-    _shared_tenant_origin_cache: dict[UUID, _TenantOriginCacheEntry] = {}
-
     def __init__(
         self,
-        allowed_origin_repo: AllowedOriginRepository,
         space_service: "SpaceService | None" = None,
         user: "UserInDB | None" = None,
     ):
         super().__init__()
-        self.allowed_origin_repo = allowed_origin_repo
         self.space_service = space_service
         self.user = user
         self.settings = get_settings()
-        self._tenant_origin_cache = self._shared_tenant_origin_cache
-        self._tenant_origin_cache_ttl_seconds = max(
-            int(self.settings.api_key_origin_cache_ttl_seconds), 0
-        )
 
     def _require_space_service(self) -> "SpaceService":
         if self.space_service is None:
@@ -143,20 +127,8 @@ class ApiKeyPolicyService:
                     code="invalid_request",
                     message="pk_ keys do not allow IP restrictions.",
                 )
-            if request.allowed_origins:
-                for origin in request.allowed_origins:
-                    if not self._origin_has_scheme(
-                        origin
-                    ) and not self._is_localhost_origin(origin):
-                        raise ApiKeyValidationError(
-                            status_code=400,
-                            code="invalid_request",
-                            message="Origin entries must include scheme (https://...).",
-                        )
-                await self.validate_allowed_origins_subset(
-                    allowed_origins=request.allowed_origins,
-                    tenant_id=self._require_user().tenant_id,
-                )
+            for origin in request.allowed_origins:
+                self._validate_origin_format(origin)
 
         if request.key_type == ApiKeyType.SK and request.allowed_origins is not None:
             raise ApiKeyValidationError(
@@ -342,20 +314,8 @@ class ApiKeyPolicyService:
                         code="invalid_request",
                         message="pk_ keys require at least one allowed origin.",
                     )
-                if allowed_origins:
-                    for origin in allowed_origins:
-                        if not self._origin_has_scheme(
-                            origin
-                        ) and not self._is_localhost_origin(origin):
-                            raise ApiKeyValidationError(
-                                status_code=400,
-                                code="invalid_request",
-                                message="Origin entries must include scheme (https://...).",
-                            )
-                await self.validate_allowed_origins_subset(
-                    allowed_origins=allowed_origins,
-                    tenant_id=key.tenant_id,
-                )
+                for origin in allowed_origins:
+                    self._validate_origin_format(origin)
 
         if "allowed_ips" in updates:
             allowed_ips = cast(list[str] | None, updates.get("allowed_ips"))
@@ -445,50 +405,6 @@ class ApiKeyPolicyService:
         if ApiKeyType(key.key_type) == ApiKeyType.SK:
             self._validate_ip(key=key, client_ip=client_ip)
 
-    async def validate_allowed_origins_subset(
-        self, *, allowed_origins: list[str] | None, tenant_id: UUID
-    ):
-        if allowed_origins is None:
-            return
-
-        tenant_patterns = await self._get_tenant_origin_patterns(tenant_id)
-
-        if not tenant_patterns:
-            for origin in allowed_origins:
-                if not self._is_localhost_origin(origin):
-                    raise ApiKeyValidationError(
-                        status_code=400,
-                        code="invalid_request",
-                        message="Origin not allowed by tenant policy.",
-                    )
-            return
-
-        for origin in allowed_origins:
-            if self._is_localhost_origin(origin):
-                continue
-            if "*" in origin:
-                if origin in tenant_patterns:
-                    continue
-                if "://" in origin:
-                    host_only = origin.split("://", 1)[1]
-                    if host_only in tenant_patterns:
-                        continue
-                if origin not in tenant_patterns:
-                    raise ApiKeyValidationError(
-                        status_code=400,
-                        code="invalid_request",
-                        message=f"Origin '{origin}' is not allowed by tenant policy.",
-                    )
-                continue
-            if not any(
-                self._origin_matches(origin, pattern) for pattern in tenant_patterns
-            ):
-                raise ApiKeyValidationError(
-                    status_code=400,
-                    code="invalid_request",
-                    message=f"Origin '{origin}' is not allowed by tenant policy.",
-                )
-
     async def _validate_expiration(self, expires_at: datetime | None):
         user = self._require_user()
         policy = user.tenant.api_key_policy or {}
@@ -574,41 +490,22 @@ class ApiKeyPolicyService:
                 message="Origin header required for pk_ keys.",
             )
 
-        if (
-            self._is_localhost_origin(origin)
-            and self.settings.api_key_allow_localhost_origin
-        ):
-            return
-        # When allow_localhost_origin is off, localhost falls through to
-        # normal tenant/key pattern matching — no free pass.
-
-        tenant_patterns = await self._get_tenant_origin_patterns(key.tenant_id)
-
-        if not tenant_patterns:
-            raise ApiKeyValidationError(
-                status_code=403,
-                code="origin_not_allowed",
-                message="Origin not allowed by tenant policy.",
-            )
-
+        # Per-key allowed_origins is the only authority. The central tenant
+        # allowlist was dropped: trust the key creator to list exactly the
+        # origins their integration needs.
         key_patterns = key.allowed_origins
         if key_patterns is None:
-            key_patterns = tenant_patterns
-        elif len(key_patterns) == 0:
+            # Legacy keys minted before allowed_origins became required.
+            # New pk_ keys always carry a non-empty list.
+            return
+        if len(key_patterns) == 0:
             raise ApiKeyValidationError(
                 status_code=403,
                 code="origin_not_allowed",
                 message="Origin not allowed by API key policy.",
             )
 
-        matches_tenant = any(
-            self._origin_matches(origin, pattern) for pattern in tenant_patterns
-        )
-        matches_key = any(
-            self._origin_matches(origin, pattern) for pattern in key_patterns
-        )
-
-        if not matches_tenant or not matches_key:
+        if not any(self._origin_matches(origin, pattern) for pattern in key_patterns):
             raise ApiKeyValidationError(
                 status_code=403,
                 code="origin_not_allowed",
@@ -654,15 +551,24 @@ class ApiKeyPolicyService:
                 return True
         return False
 
-    def _origin_has_scheme(self, origin: str) -> bool:
-        parsed = urlparse(origin)
-        return bool(parsed.scheme and parsed.hostname)
+    def _validate_origin_format(self, origin: str) -> None:
+        """Sanity-check a per-key origin entry. Trust the key creator on the
+        value, but reject typos that would silently break their integration.
 
-    def _is_localhost_origin(self, origin: str) -> bool:
+        Required shape: ``<scheme>://<host>[:port]`` with scheme http(s) and
+        a non-empty host. Wildcards in the host are fine (matching is the
+        request-time concern of ``origin_matches_pattern``).
+        """
         parsed = urlparse(origin)
-        if parsed.hostname in ("localhost", "127.0.0.1", "::1"):
-            return True
-        return False
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise ApiKeyValidationError(
+                status_code=400,
+                code="invalid_request",
+                message=(
+                    f"Invalid origin '{origin}': "
+                    "must include scheme (http:// or https://) and host."
+                ),
+            )
 
     def _origin_matches(self, origin: str, pattern: str) -> bool:
         return origin_matches_pattern(origin, pattern)
@@ -675,26 +581,3 @@ class ApiKeyPolicyService:
                 message="User context required.",
             )
         return self.user
-
-    async def _get_tenant_origin_patterns(self, tenant_id: UUID) -> list[str]:
-        now = datetime.now(timezone.utc)
-        if self._tenant_origin_cache_ttl_seconds > 0:
-            cached = self._tenant_origin_cache.get(tenant_id)
-            if cached is not None and cached.expires_at > now:
-                return cached.patterns
-
-        tenant_origins = await self.allowed_origin_repo.get_by_tenant(tenant_id)
-        patterns = [origin.url for origin in tenant_origins]
-        if self._tenant_origin_cache_ttl_seconds > 0:
-            self._tenant_origin_cache[tenant_id] = _TenantOriginCacheEntry(
-                patterns=patterns,
-                expires_at=now
-                + timedelta(seconds=self._tenant_origin_cache_ttl_seconds),
-            )
-        return patterns
-
-    def invalidate_tenant_origin_cache(self, tenant_id: UUID | None = None) -> None:
-        if tenant_id is None:
-            self._tenant_origin_cache.clear()
-            return
-        self._tenant_origin_cache.pop(tenant_id, None)

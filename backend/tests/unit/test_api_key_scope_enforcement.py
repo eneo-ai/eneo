@@ -654,7 +654,6 @@ class TestResolveApiKeyScopeWiring:
                 )
             )
         )
-        svc.allowed_origin_repo = AsyncMock()
         svc.space_service = AsyncMock()
         svc.api_key_rate_limiter = None
         svc._session = None
@@ -1640,7 +1639,6 @@ class TestTenantScopeForDeleteEnforcement:
                 )
             )
         )
-        svc.allowed_origin_repo = AsyncMock()
         svc.space_service = AsyncMock()
         svc.api_key_rate_limiter = None
         svc._session = None

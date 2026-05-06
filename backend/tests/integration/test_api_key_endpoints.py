@@ -250,81 +250,68 @@ async def test_pk_origin_guardrail(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_pk_localhost_origin_denied_when_allow_localhost_origin_false(
-    client, db_container, default_user, default_user_token
+async def test_pk_localhost_origin_rejected_when_not_listed_on_key(
+    client, default_user_token
 ):
-    """When localhost bypass is disabled, localhost must follow normal pattern matching."""
-    settings = get_settings()
-    patched = settings.model_copy(update={"api_key_allow_localhost_origin": False})
-    set_settings(patched)
-    try:
-        allowed_origin = f"https://app-{uuid4().hex[:8]}.example.com"
-        await _add_allowed_origin(db_container, default_user.tenant_id, allowed_origin)
+    """A pk_ key whose allowed_origins doesn't include localhost rejects localhost requests.
 
-        create_response = await client.post(
-            "/api/v1/api-keys",
-            json={
-                "name": "PK Localhost Disabled",
-                "key_type": "pk_",
-                "permission": "read",
-                "scope_type": "tenant",
-                "allowed_origins": [allowed_origin],
-            },
-            headers={"Authorization": f"Bearer {default_user_token}"},
-        )
-        assert create_response.status_code == 201, create_response.text
-        secret = create_response.json()["secret"]
+    Localhost is no longer magic — it must be explicitly listed on the key.
+    """
+    allowed_origin = f"https://app-{uuid4().hex[:8]}.example.com"
 
-        localhost_response = await client.get(
-            _AUTH_ENDPOINT,
-            headers={
-                "X-API-Key": secret,
-                "Origin": "http://localhost:3000",
-            },
-        )
-        assert localhost_response.status_code == 403
-        assert localhost_response.json()["code"] == "origin_not_allowed"
-    finally:
-        set_settings(settings)
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "PK No Localhost",
+            "key_type": "pk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "allowed_origins": [allowed_origin],
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    secret = create_response.json()["secret"]
+
+    localhost_response = await client.get(
+        _AUTH_ENDPOINT,
+        headers={
+            "X-API-Key": secret,
+            "Origin": "http://localhost:3000",
+        },
+    )
+    assert localhost_response.status_code == 403
+    assert localhost_response.json()["code"] == "origin_not_allowed"
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_pk_localhost_origin_allowed_when_allow_localhost_origin_true(
-    client, db_container, default_user, default_user_token
+async def test_pk_localhost_origin_allowed_when_listed_on_key(
+    client, default_user_token
 ):
-    """When localhost bypass is enabled, localhost should pass even without matching patterns."""
-    settings = get_settings()
-    patched = settings.model_copy(update={"api_key_allow_localhost_origin": True})
-    set_settings(patched)
-    try:
-        allowed_origin = f"https://app-{uuid4().hex[:8]}.example.com"
-        await _add_allowed_origin(db_container, default_user.tenant_id, allowed_origin)
+    """Localhost works iff the key creator put it on the per-key allowed_origins list."""
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "PK With Localhost",
+            "key_type": "pk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "allowed_origins": ["http://localhost:3000"],
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    secret = create_response.json()["secret"]
 
-        create_response = await client.post(
-            "/api/v1/api-keys",
-            json={
-                "name": "PK Localhost Enabled",
-                "key_type": "pk_",
-                "permission": "read",
-                "scope_type": "tenant",
-                "allowed_origins": [allowed_origin],
-            },
-            headers={"Authorization": f"Bearer {default_user_token}"},
-        )
-        assert create_response.status_code == 201, create_response.text
-        secret = create_response.json()["secret"]
-
-        localhost_response = await client.get(
-            _AUTH_ENDPOINT,
-            headers={
-                "X-API-Key": secret,
-                "Origin": "http://localhost:3000",
-            },
-        )
-        assert localhost_response.status_code == 200, localhost_response.text
-    finally:
-        set_settings(settings)
+    localhost_response = await client.get(
+        _AUTH_ENDPOINT,
+        headers={
+            "X-API-Key": secret,
+            "Origin": "http://localhost:3000",
+        },
+    )
+    assert localhost_response.status_code == 200, localhost_response.text
 
 
 @pytest.mark.integration
