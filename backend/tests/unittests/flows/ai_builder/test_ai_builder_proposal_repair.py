@@ -323,6 +323,7 @@ async def _run_repair_capturing(
     *,
     max_retries: int,
     failure_kind: str = "validation",
+    failure_codes: frozenset[str] = frozenset(),
     base_temperature: float = 0.35,
     bumped_temperature: float = 0.6,
 ) -> tuple[list[float], list[str], list[dict[str, str]]]:
@@ -358,7 +359,10 @@ async def _run_repair_capturing(
         **_,
     ) -> SimpleNamespace:
         return SimpleNamespace(
-            event=None, feedback="still bad", failure_kind=failure_kind
+            event=None,
+            feedback="still bad",
+            failure_kind=failure_kind,
+            failure_codes=failure_codes,
         )
 
     events: list[dict[str, str]] = []
@@ -454,6 +458,18 @@ async def test_request_self_correction_rejects_non_extra_failure_after_normal_bu
     assert temps == [0.35, 0.6, 0.6, 0.6]
     assert len(retry_feedback) == 4
     assert events[-1] == {"event": "error", "data": "still bad"}
+
+
+@pytest.mark.asyncio
+async def test_request_self_correction_adds_duplicate_name_outline_guidance() -> None:
+    _, retry_feedback, _ = await _run_repair_capturing(
+        max_retries=1,
+        failure_kind="validation",
+        failure_codes=frozenset({"duplicate_step_name"}),
+    )
+
+    assert len(retry_feedback) == 2
+    assert "Every steps[] name must be unique case-insensitively" in retry_feedback[1]
 
 
 @pytest.mark.asyncio

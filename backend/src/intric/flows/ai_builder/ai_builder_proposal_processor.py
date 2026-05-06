@@ -371,6 +371,7 @@ class ToolProcessingResult:
     events: tuple[dict[str, str], ...] = ()
     feedback: str | None = None
     failure_kind: ToolProcessingFailureKind | None = None
+    failure_codes: frozenset[str] = frozenset()
 
     @property
     def has_events(self) -> bool:
@@ -657,6 +658,9 @@ class AIBuilderProposalProcessor:
             return ToolProcessingResult(
                 feedback=format_create_validation_feedback(create_validation),
                 failure_kind="validation",
+                failure_codes=frozenset(
+                    error.code for error in create_validation.errors
+                ),
             )
 
         try:
@@ -685,6 +689,11 @@ class AIBuilderProposalProcessor:
             return ToolProcessingResult(
                 feedback=prepared.failure_feedback,
                 failure_kind="validation",
+                failure_codes=frozenset(
+                    error.code for error in prepared.validation.errors
+                )
+                if prepared.validation is not None
+                else frozenset(),
             )
         assert prepared.spec is not None
         assert prepared.validation is not None
@@ -779,6 +788,7 @@ class AIBuilderProposalProcessor:
             return ToolProcessingResult(
                 feedback=combined_feedback,
                 failure_kind="validation",
+                failure_codes=frozenset(error.code for error in validation.errors),
             )
 
         quality_feedback = self.format_quality_feedback(validation)

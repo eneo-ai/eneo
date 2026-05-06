@@ -1143,6 +1143,35 @@ async def test_outline_processing_enforces_without_mcp_selection() -> None:
 
 
 @pytest.mark.asyncio
+async def test_outline_validation_failure_preserves_duplicate_step_name_code() -> None:
+    processor = _make_processor()
+
+    result = await processor._process_outline_arguments(
+        session_id=uuid4(),
+        conversation=[ConversationMessage(role="user", content="Bygg ett textflöde.")],
+        new_messages_start=0,
+        arguments={
+            "flow_name": "Duplicate names",
+            "plan_rationale": "Two semantic steps accidentally share a name.",
+            "steps": [
+                {"name": "Förbered PDF-innehåll", "task": "Sammanfatta texten."},
+                {"name": "Förbered PDF-innehåll", "task": "Skriv slutrapport."},
+            ],
+        },
+        assistant_content="",
+        tool_call_id="call-duplicate-name",
+        available_model_refs=None,
+        available_kb_refs=None,
+    )
+
+    assert result.failure_kind == "validation"
+    assert "duplicate_step_name" in result.failure_codes
+    assert result.feedback is not None
+    assert "Duplicate step name" in result.feedback
+    processor.repo.commit_turn.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_outline_quality_failure_records_failed_first_attempt() -> None:
     processor = _make_processor()
     tracker = ProposalTurnTelemetry(

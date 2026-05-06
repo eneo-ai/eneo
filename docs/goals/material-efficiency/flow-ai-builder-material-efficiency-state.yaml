@@ -2414,6 +2414,69 @@ tasks:
         - "Investigate C2 duplicate semantic step-name self-correction flake."
         - "Investigate C5 structured extraction quality flake."
 
+  - id: T044
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Fix create-mode repair guidance for C2 duplicate step-name and C5 structured extraction follow-ups."
+    inputs:
+      - "T043 follow-ups"
+      - "/tmp/material-efficiency-live-eval/20260506-124328-t043-create-suite-post-t042/summary.json"
+      - "C2-run3 and C5-run2 artifacts under /tmp/material-efficiency-live-eval"
+    constraints:
+      - "Use structured validation codes instead of parsing error-message text."
+      - "Keep create-mode guidance on the outline_flow API surface."
+      - "Do not loosen duplicate-step-name validation."
+      - "Do not add retries, prompt-wide rewrites, or pattern-registry changes."
+      - "Do not commit API keys or /tmp live eval artifacts."
+    expected_output:
+      - "C2 duplicate-step-name repair guidance is deterministic."
+      - "C5 structured extraction repair guidance names create-mode output_fields."
+      - "Focused unit and processor-level tests."
+      - "Claude peer-loop review."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T044-create-repair-feedback.md
+      summary: "Create-mode self-correction now preserves validation failure codes and maps duplicate_step_name to outline-specific uniqueness guidance. Structured extraction critic feedback now names output_type=\"json\" and output_fields for outline_flow while compiled/edit-mode remediation remains output_contract-based."
+      claude:
+        plan_artifact: ".codex/artifacts/claude-peer-loop-t044-create-mode-repair-feedback-plan-20260506T133543Z.md"
+        commit_gate_artifact: ".codex/artifacts/claude-peer-loop-t044-create-mode-repair-feedback-implementation-20260506T134538Z.md"
+        initial_verdict: "changes_required"
+        final_verdict: "green"
+        min_score: 8
+        addressed_blockers:
+          - "Used structured failure_codes instead of substring matching."
+          - "Added processor-level duplicate_step_name preservation coverage."
+          - "Pinned create-mode structured extraction guidance to output_type=\"json\" and output_fields."
+          - "Recorded deferred debt for folding outline remediations into critic invariants if the translation table grows."
+      verification:
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q"
+          status: pass
+          output: "83 passed, 1 warning"
+        - cmd: "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_proposal_processor.py src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "ruff check backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py backend/src/intric/flows/ai_builder/ai_builder_create_feedback.py backend/tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+          status: pass
+          output: "All checks passed"
+        - cmd: "ruff format --check backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py backend/src/intric/flows/ai_builder/ai_builder_create_feedback.py backend/tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+          status: pass
+          output: "6 files already formatted"
+      live_eval:
+        targeted_c2_c5:
+          output_dir: "/tmp/material-efficiency-live-eval/20260506-t044-c2-c5-live-8123-base"
+          summary_json: "/tmp/material-efficiency-live-eval/20260506-t044-c2-c5-live-8123-base/summary.json"
+          status: "pass"
+          output: "C2 applied flow=434cb033-9e9a-4762-bbdd-98bc486b429d; C5 applied flow=97612233-5d52-4cd7-8e54-9069a2957f43. No builder_errors."
+        create_suite_one_run:
+          output_dir: "/tmp/material-efficiency-live-eval/20260506-t044-create-suite-live-8123"
+          summary_json: "/tmp/material-efficiency-live-eval/20260506-t044-create-suite-live-8123/summary.json"
+          status: "pass_with_clarifications"
+          output: "C1/C2/C3/C5/V2 applied. V1/V3/V4/V5/C4 returned clarification_required. No builder_errors."
+      follow_ups:
+        - "Review whether V1/V3/V4/V5/C4 clarification_required is desired product behavior or should be narrowed in a separate requirements/discovery slice."
+
   - id: T999
     type: judge
     assignee: Judge

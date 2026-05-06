@@ -112,6 +112,32 @@ def test_format_create_critic_feedback_translates_mechanics_to_semantics(
         assert token not in feedback
 
 
+@pytest.mark.parametrize(
+    "issue_id",
+    [
+        "rich_workflow_requires_json_contract_step",
+        "structured_extraction_requires_json_contract_step",
+    ],
+)
+def test_format_create_critic_feedback_names_outline_structured_fields(
+    issue_id: str,
+) -> None:
+    feedback = format_create_critic_feedback(
+        (
+            CriticIssue(
+                id=issue_id,
+                kind="semantic",
+                remediation="Raw remediation with output_contract.",
+            ),
+        )
+    )
+
+    assert feedback is not None
+    assert 'output_type="json"' in feedback
+    assert "output_fields" in feedback
+    assert "output_contract" not in feedback
+
+
 def test_format_create_critic_feedback_translates_simple_text_transform_restraint() -> (
     None
 ):
@@ -150,6 +176,24 @@ def test_create_critic_feedback_remediations_do_not_leak_backend_mechanics() -> 
     for remediation in CREATE_CRITIC_REMEDIATION.values():
         for token in _CREATE_FEEDBACK_MECHANICS_TOKENS:
             assert token not in remediation
+
+
+@pytest.mark.parametrize(
+    "issue_id",
+    [
+        "rich_workflow_requires_json_contract_step",
+        "structured_extraction_requires_json_contract_step",
+    ],
+)
+def test_semantic_critic_keeps_compiled_contract_remediation_for_edit_mode(
+    issue_id: str,
+) -> None:
+    invariant = next(
+        invariant for invariant in CRITIC_INVARIANTS if invariant.id == issue_id
+    )
+
+    assert "output_contract" in invariant.remediation
+    assert "output_fields" not in invariant.remediation
 
 
 def test_format_create_critic_feedback_passes_through_explicit_allowlist() -> None:

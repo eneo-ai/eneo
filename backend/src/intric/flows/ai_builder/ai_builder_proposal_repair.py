@@ -4,7 +4,7 @@ import inspect
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import Any, Protocol, cast, runtime_checkable
 from uuid import UUID, uuid4
 
 from intric.flows.ai_builder.ai_builder_events import (
@@ -41,6 +41,11 @@ class BuildSelfCorrectionErrorEvent(Protocol):
         feedback: str | None,
         failure_kind: ToolProcessingFailureKind | None,
     ) -> dict[str, str]: ...
+
+
+@runtime_checkable
+class _ToolFailureCodes(Protocol):
+    failure_codes: frozenset[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +105,13 @@ def _tool_result_events(tool_result: Any) -> EventBatch:
     if event is None:
         return events
     return (event, *events)
+
+
+def _tool_result_failure_codes(tool_result: object) -> frozenset[str]:
+    if not isinstance(tool_result, _ToolFailureCodes):
+        return frozenset()
+    raw_codes = tool_result.failure_codes
+    return raw_codes
 
 
 def _build_process_tool_kwargs(
@@ -192,6 +204,7 @@ def _build_retry_feedback(
     target_tool_name: str,
     feedback: str,
     failure_kind: ToolProcessingFailureKind | None,
+    failure_codes: frozenset[str] = frozenset(),
     retry_count: int = 1,
 ) -> str:
     suffix = f"Keep valid parts and fix only the listed issues. Return one complete {target_tool_name} call."
@@ -202,11 +215,18 @@ def _build_retry_feedback(
             f"Rebuild any broken array entries as normal JSON objects and return one complete {target_tool_name} call."
         )
     if target_tool_name == "outline_flow":
+        outline_rules = [
+            "Every steps[] item must be one complete semantic outline step with at least name and task.",
+            "Runtime form inputs belong in top-level input_fields[], and steps should reference them by name in uses_input_fields.",
+            "Do not emit input_source, input_type, input_bindings, output_mode, refs, ids, hashes, or timestamps; backend compiles those mechanics.",
+        ]
+        if "duplicate_step_name" in failure_codes:
+            outline_rules.append(
+                "Every steps[] name must be unique case-insensitively; rename duplicate semantic steps with specific labels."
+            )
         suffix = (
-            "Every steps[] item must be one complete semantic outline step with at least name and task. "
-            "Runtime form inputs belong in top-level input_fields[], and steps should reference them by name in uses_input_fields. "
-            "Do not emit input_source, input_type, input_bindings, output_mode, refs, ids, hashes, or timestamps; backend compiles those mechanics. "
-            "Keep valid semantic parts and fix only the listed issues. Return one complete outline_flow call."
+            " ".join(outline_rules)
+            + " Keep valid semantic parts and fix only the listed issues. Return one complete outline_flow call."
         )
     if retry_count >= 2:
         preamble = (
@@ -300,6 +320,7 @@ async def request_self_correction(
                                 target_tool_name=target_tool_name,
                                 feedback=_invalid_tool_arguments_message(error),
                                 failure_kind="parse",
+                                failure_codes=frozenset(),
                                 retry_count=retry_state.next_retry_count,
                             ),
                             "parse",
@@ -342,6 +363,7 @@ async def request_self_correction(
                                 feedback=tool_result.feedback
                                 or "Invalid tool payload.",
                                 failure_kind=tool_result.failure_kind,
+                                failure_codes=_tool_result_failure_codes(tool_result),
                                 retry_count=retry_state.next_retry_count,
                             ),
                             tool_result.failure_kind,
