@@ -2125,6 +2125,119 @@ tasks:
       follow_ups:
         - "Investigate invalid_session_transition cancelled -> awaiting_approval as a builder session lifecycle issue."
 
+  - id: T039
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next long-term reliability slice from the post-T038 live eval failures without tuning one case-specific prompt."
+    inputs:
+      - "/tmp/material-efficiency-live-eval/20260506-073543-t038-c2-repair-feedback/summary.json"
+      - "/tmp/material-efficiency-live-eval/20260506-073730-t038-create-suite-repair-feedback/summary.json"
+      - "/tmp/material-efficiency-live-eval/20260506-074728-t038-c3-regression-check/summary.json"
+      - "backend/src/intric/flows/ai_builder"
+      - "backend/tests/unittests/flows/ai_builder"
+      - "docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml"
+    constraints:
+      - "Read-only Judge task; do not implement."
+      - "Use source and eval artifact evidence before selecting a Worker."
+      - "Prefer canonical owner fixes that improve all similar flows over C2/C3 prompt tuning."
+      - "Run Claude peer loop with a 15 minute timeout before activating any Worker."
+      - "Require eval commands in the Worker verification plan."
+      - "Use pytest -n 4, never -n auto."
+      - "Do not stage or commit unrelated dirty files."
+    expected_output:
+      - "activate_worker | activate_scout | blocked | no_change"
+      - "Root-cause hypothesis with artifact/source evidence."
+      - "If activate_worker: exact objective, allowed_files, verify commands using -n 4, eval command, and stop_if."
+    receipt:
+      result: done
+      decision: "activate_worker"
+      selected_worker: T040
+      note: docs/goals/material-efficiency/notes/T039-judge-terminal-contract-normalization.md
+      summary: "Selected a terminal-contract normalization slice for JSON-helper-before-pass-through-text drift, using the existing step topology normalizer instead of prompt tuning or skeleton changes."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t039-judge-terminal-contract-normalization-20260506T055911Z.md"
+        - ".codex/artifacts/claude-peer-loop-t039-revised-terminal-contract-normalization-20260506T060326Z.md"
+      green_light: true
+      worker_scope:
+        objective: "Generalize terminal helper-tail normalization so foldable JSON-helper-before-pass-through-text plans return the requested JSON terminal output while ambiguous text tails still fail validation."
+        allowed_files:
+          - backend/src/intric/flows/ai_builder/ai_builder_step_transition_policy.py
+          - backend/tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py
+          - backend/tests/unittests/flows/ai_builder/test_ai_builder_compiled_spec_preparation.py
+          - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+          - docs/goals/material-efficiency/notes/T039-judge-terminal-contract-normalization.md
+          - docs/goals/material-efficiency/notes/T040-worker-json-terminal-normalization.md
+        verify:
+          - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_compiled_spec_preparation.py -q"
+          - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+          - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_compiled_spec_preparation.py"
+          - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_compiled_spec_preparation.py"
+          - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_compiled_spec_preparation.py"
+          - "uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --api-base http://localhost:8123 --api-key '<local-key>' --case C3 --runs 3 --apply --publish --output-dir /tmp/material-efficiency-live-eval/<timestamp>-t040-c3-json-terminal-normalization"
+          - "uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --api-base http://localhost:8123 --api-key '<local-key>' --all --runs 1 --apply --publish --output-dir /tmp/material-efficiency-live-eval/<timestamp>-t040-create-suite-json-terminal-normalization"
+
+  - id: T040
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Generalize terminal helper-tail normalization for foldable JSON terminal drift."
+    allowed_files:
+      - backend/src/intric/flows/ai_builder/ai_builder_step_transition_policy.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_compiled_spec_preparation.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T039-judge-terminal-contract-normalization.md
+      - docs/goals/material-efficiency/notes/T040-worker-json-terminal-normalization.md
+    verify:
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_compiled_spec_preparation.py -q"
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_compiled_spec_preparation.py"
+      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_compiled_spec_preparation.py"
+      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_compiled_spec_preparation.py"
+      - "uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --api-base http://localhost:8123 --api-key '<local-key>' --case C3 --runs 3 --apply --publish --output-dir /tmp/material-efficiency-live-eval/<timestamp>-t040-c3-json-terminal-normalization"
+      - "uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --api-base http://localhost:8123 --api-key '<local-key>' --all --runs 1 --apply --publish --output-dir /tmp/material-efficiency-live-eval/<timestamp>-t040-create-suite-json-terminal-normalization"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Cannot produce a red test for foldable JSON-helper-before-text terminal drift."
+      - "Fix requires planner prompt, skeleton, or C3-specific wording changes."
+      - "Fix folds ALL_PREVIOUS_STEPS or non-pass-through JSON terminal tails."
+      - "Fix creates a parallel normalizer instead of reusing the terminal helper-tail owner."
+      - "Verification fails twice for reasons not proven pre-existing."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T040-worker-json-terminal-normalization.md
+      summary: "Generalized strict terminal helper-tail normalization to JSON while preserving all_previous_steps tails as validation-visible material-efficiency problems."
+      changed_files:
+        - backend/src/intric/flows/ai_builder/ai_builder_step_transition_policy.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_compiled_spec_preparation.py
+      verification:
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_compiled_spec_preparation.py -q"
+          status: pass
+          output: "40 passed"
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+          status: pass
+          output: "2071 passed, 4 skipped"
+        - cmd: "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_compiled_spec_preparation.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_compiled_spec_preparation.py"
+          status: pass
+          output: "All checks passed"
+        - cmd: "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_compiled_spec_preparation.py"
+          status: pass
+          output: "3 files already formatted"
+      live_eval:
+        c3_after_all_previous_guard:
+          summary_json: "/tmp/material-efficiency-live-eval/20260506-084044-t040-c3-json-terminal-normalization-post-allprev-guard/summary.json"
+          output: "C3 applied 2/3; run 3 transport error after plan artifacts; applied flows still show all_previous_steps_count=1 on a text terminal final step, which remains a separate material-routing follow-up."
+      follow_ups:
+        - "Fix C3 final-step all_previous_steps fan-in with a targeted material-routing slice."
+        - "Investigate C3 no_plan/remote-close flake separately from JSON terminal normalization."
+
   - id: T999
     type: judge
     assignee: Judge

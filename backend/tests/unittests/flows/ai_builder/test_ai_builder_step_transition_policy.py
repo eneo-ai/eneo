@@ -329,6 +329,298 @@ def test_normalize_ai_builder_spec_promotes_trailing_text_after_requested_pdf() 
     ] == ["terminal_artifact_helper_folded"]
 
 
+def test_normalize_ai_builder_spec_promotes_trailing_text_after_requested_json() -> (
+    None
+):
+    spec = FlowDraftSpecCore(
+        flow_name="Structured comparison",
+        form_fields=[
+            FormFieldSpec(
+                name="audience",
+                type="text",
+                label="Audience",
+            )
+        ],
+        steps=[
+            _step(
+                ref="step_a",
+                name="Extract source facts",
+                input_source=InputSource.FLOW_INPUT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_b",
+                name="Prepare JSON result",
+                instructions="Create the final structured JSON object.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.JSON,
+                input_bindings={
+                    "question": "{{ step_a.output.structured }}",
+                },
+            ),
+            _step(
+                ref="step_c",
+                name="Create final result",
+                instructions="Include the audience metadata in the final result.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+                input_bindings={
+                    "question": (
+                        "{{ step_b.output.structured }}\n\naudience: {{ audience }}"
+                    )
+                },
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.JSON,
+    )
+
+    assert [step.plan_step_ref for step in normalized.steps] == ["step_a", "step_c"]
+    terminal = normalized.steps[-1]
+    assert terminal.input_source == InputSource.PREVIOUS_STEP
+    assert terminal.input_type == InputType.JSON
+    assert terminal.output_type == OutputType.JSON
+    assert terminal.input_bindings == {
+        "question": "{{ step_a.output.structured }}\n\naudience: {{ audience }}"
+    }
+    assert "Include the audience metadata" in terminal.assistant_spec.instructions
+    assert "Create the final structured JSON object" in (
+        terminal.assistant_spec.instructions
+    )
+    assert [
+        change.code
+        for _step_spec, change in changes
+        if change.code == "terminal_artifact_helper_folded"
+    ] == ["terminal_artifact_helper_folded"]
+    assert len(material_metric_steps_from_draft(normalized)) == (
+        len(material_metric_steps_from_draft(spec)) - 1
+    )
+
+
+def test_normalize_ai_builder_spec_promotes_json_tail_without_terminal_bindings() -> (
+    None
+):
+    spec = FlowDraftSpecCore(
+        flow_name="Structured summary",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Extract source facts",
+                input_source=InputSource.FLOW_INPUT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_b",
+                name="Prepare JSON result",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.JSON,
+                input_bindings={"question": "{{ step_a.output.structured }}"},
+            ),
+            _step(
+                ref="step_c",
+                name="Create final result",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.JSON,
+    )
+
+    assert [step.plan_step_ref for step in normalized.steps] == ["step_a", "step_c"]
+    assert normalized.steps[-1].output_type == OutputType.JSON
+    assert normalized.steps[-1].input_bindings == {
+        "question": "{{ step_a.output.structured }}"
+    }
+    assert [
+        change.code
+        for _step_spec, change in changes
+        if change.code == "terminal_artifact_helper_folded"
+    ] == ["terminal_artifact_helper_folded"]
+
+
+def test_normalize_ai_builder_spec_preserves_json_all_previous_tail() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Structured comparison",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Extract source facts",
+                input_source=InputSource.FLOW_INPUT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_b",
+                name="Prepare JSON result",
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                input_type=InputType.JSON,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_c",
+                name="Create final result",
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                input_type=InputType.JSON,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.JSON,
+    )
+
+    assert [step.plan_step_ref for step in normalized.steps] == [
+        "step_a",
+        "step_b",
+        "step_c",
+    ]
+    assert normalized.steps[-1].input_source == InputSource.ALL_PREVIOUS_STEPS
+    assert normalized.steps[-1].output_type == OutputType.TEXT
+    assert not any(
+        change.code == "terminal_artifact_helper_folded"
+        for _step_spec, change in changes
+    )
+
+
+def test_normalize_ai_builder_spec_preserves_unfoldable_json_all_previous_tail() -> (
+    None
+):
+    spec = FlowDraftSpecCore(
+        flow_name="Ambiguous structured comparison",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Extract source facts",
+                input_source=InputSource.FLOW_INPUT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_b",
+                name="Prepare JSON result",
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                input_type=InputType.JSON,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_c",
+                name="Create final result",
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                input_type=InputType.JSON,
+                output_type=OutputType.TEXT,
+                input_bindings={"question": "{{ step_b.output.structured }}"},
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.JSON,
+    )
+
+    assert [step.plan_step_ref for step in normalized.steps] == [
+        "step_a",
+        "step_b",
+        "step_c",
+    ]
+    assert normalized.steps[-1].output_type == OutputType.TEXT
+    assert not any(
+        change.code == "terminal_artifact_helper_folded"
+        for _step_spec, change in changes
+    )
+
+
+def test_normalize_ai_builder_spec_preserves_json_tail_with_non_pass_through_terminal() -> (
+    None
+):
+    spec = FlowDraftSpecCore(
+        flow_name="Structured comparison",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Extract source facts",
+                input_source=InputSource.FLOW_INPUT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_b",
+                name="Prepare JSON result",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_c",
+                name="Create final result",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.TEXT,
+                output_mode=OutputMode.TEMPLATE_FILL,
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.JSON,
+    )
+
+    assert [step.plan_step_ref for step in normalized.steps] == [
+        "step_a",
+        "step_b",
+        "step_c",
+    ]
+    assert normalized.steps[-1].output_type == OutputType.TEXT
+    assert not any(
+        change.code == "terminal_artifact_helper_folded"
+        for _step_spec, change in changes
+    )
+
+
+def test_normalize_ai_builder_spec_preserves_existing_json_terminal() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Structured comparison",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Extract source facts",
+                input_source=InputSource.FLOW_INPUT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_b",
+                name="Create JSON result",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.JSON,
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.JSON,
+    )
+
+    assert [step.plan_step_ref for step in normalized.steps] == ["step_a", "step_b"]
+    assert normalized.steps[-1].output_type == OutputType.JSON
+    assert not any(
+        change.code == "terminal_artifact_helper_folded"
+        for _step_spec, change in changes
+    )
+
+
 def test_normalize_ai_builder_spec_renames_pre_terminal_docx_body_step() -> None:
     spec = FlowDraftSpecCore(
         flow_name="Audio DOCX",

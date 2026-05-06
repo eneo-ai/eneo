@@ -38,6 +38,9 @@ _TEMPLATE_FILL_ONLY_KEYS = frozenset(
     {"bindings", "template_asset_id", "template_file_id"}
 )
 _UNFOLDABLE = object()
+_TERMINAL_HELPER_FOLD_OUTPUT_TYPES = frozenset(
+    {OutputType.JSON, OutputType.PDF, OutputType.DOCX}
+)
 _ARTIFACT_GENERATION_PREFIXES = (
     "create",
     "generate",
@@ -354,35 +357,33 @@ def _normalize_terminal_artifact_tail(
     *,
     terminal_output_type: OutputType | None,
 ) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
-    """Keep artifact-output plans terminal on the requested artifact.
+    """Keep strict-output plans terminal on the requested output type.
 
-    LLMs often satisfy "make the final output PDF/DOCX" by inserting a new
-    artifact-producing helper step before an existing "create final result"
+    LLMs often satisfy "make the final output JSON/PDF/DOCX" by inserting a new
+    output-producing helper step before an existing "create final result"
     text step. That is semantically close, but the Flow runtime returns the
     final step. Fold that helper into the terminal text step instead of asking
     the model to retry, preserving scoped-edit target refs and reducing repair
     loops.
     """
 
-    if terminal_output_type not in {OutputType.PDF, OutputType.DOCX}:
+    if terminal_output_type not in _TERMINAL_HELPER_FOLD_OUTPUT_TYPES:
         return spec, []
+    output_type = cast(OutputType, terminal_output_type)
     if len(spec.steps) < 2:
         return spec, []
 
     artifact_step = spec.steps[-2]
     terminal_step = spec.steps[-1]
-    if terminal_step.output_type == terminal_output_type:
+    if terminal_step.output_type == output_type:
         return spec, []
-    if artifact_step.output_type != terminal_output_type:
+    if artifact_step.output_type != output_type:
         return spec, []
     if terminal_step.output_type != OutputType.TEXT:
         return spec, []
     if terminal_step.output_mode != OutputMode.PASS_THROUGH:
         return spec, []
-    if terminal_step.input_source not in {
-        InputSource.PREVIOUS_STEP,
-        InputSource.ALL_PREVIOUS_STEPS,
-    }:
+    if terminal_step.input_source != InputSource.PREVIOUS_STEP:
         return spec, []
 
     folded_input_bindings = _fold_artifact_helper_input_bindings(
@@ -404,7 +405,7 @@ def _normalize_terminal_artifact_tail(
             "input_bindings": folded_input_bindings,
             "input_contract": artifact_step.input_contract,
             "input_config": artifact_step.input_config,
-            "output_type": terminal_output_type,
+            "output_type": output_type,
             "output_mode": artifact_step.output_mode,
             "output_contract": artifact_step.output_contract,
             "output_config": artifact_step.output_config,

@@ -21,6 +21,8 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 
+_DEFAULT_HELPER_INPUT_BINDINGS = object()
+
 
 def _make_spec() -> FlowDraftSpecCore:
     return FlowDraftSpecCore(
@@ -38,6 +40,63 @@ def _make_spec() -> FlowDraftSpecCore:
                 output_type=OutputType.TEXT,
                 mcp_policy=MCPPolicy.INHERIT,
             )
+        ],
+    )
+
+
+def _json_helper_before_text_terminal_spec(
+    *,
+    helper_input_source: InputSource = InputSource.PREVIOUS_STEP,
+    helper_input_bindings: dict[str, object] | None | object = (
+        _DEFAULT_HELPER_INPUT_BINDINGS
+    ),
+    terminal_input_source: InputSource = InputSource.PREVIOUS_STEP,
+    terminal_output_mode: OutputMode = OutputMode.PASS_THROUGH,
+) -> FlowDraftSpecCore:
+    if helper_input_bindings is _DEFAULT_HELPER_INPUT_BINDINGS:
+        helper_input_bindings = {"question": "{{ step_a.output.structured }}"}
+
+    return FlowDraftSpecCore(
+        flow_name="Structured comparison",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Extract source facts",
+                assistant_spec=AssistantSpec(
+                    instructions="Extract structured facts from the source.",
+                ),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+                mcp_policy=MCPPolicy.INHERIT,
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                name="Prepare JSON result",
+                assistant_spec=AssistantSpec(
+                    instructions="Create the final structured JSON object.",
+                ),
+                input_source=helper_input_source,
+                input_type=InputType.JSON,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+                input_bindings=helper_input_bindings,
+                mcp_policy=MCPPolicy.INHERIT,
+            ),
+            StepSpec(
+                plan_step_ref="step_c",
+                name="Create final result",
+                assistant_spec=AssistantSpec(
+                    instructions="Return the final result.",
+                ),
+                input_source=terminal_input_source,
+                input_type=InputType.JSON,
+                output_mode=terminal_output_mode,
+                output_type=OutputType.TEXT,
+                input_bindings={"question": "{{ step_b.output.structured }}"},
+                mcp_policy=MCPPolicy.INHERIT,
+            ),
         ],
     )
 
@@ -217,3 +276,115 @@ def test_prepare_compiled_spec_for_session_rejects_terminal_output_type_drift() 
     assert result.validation is not None
     assert not result.validation.valid
     assert result.validation.errors[0].code == "terminal_output_type_mismatch"
+
+
+def test_prepare_compiled_spec_for_session_folds_json_helper_before_text_terminal() -> (
+    None
+):
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_compiled_spec_for_session",
+            side_effect=lambda spec, target_kind: spec,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
+            return_value=SpecValidationResult(),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_compiled_spec_for_session",
+            return_value=MagicMock(errors=[]),
+        ),
+    ):
+        result = prepare_compiled_spec_for_session(
+            spec=_json_helper_before_text_terminal_spec(),
+            target_kind=TargetKind.CREATE,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+            valid_existing_step_refs=None,
+            terminal_output_type=OutputType.JSON,
+        )
+
+    assert result.spec is not None
+    assert result.validation is not None
+    assert result.validation.valid
+    assert [step.plan_step_ref for step in result.spec.steps] == ["step_a", "step_c"]
+    assert result.spec.steps[-1].output_type == OutputType.JSON
+
+
+def test_prepare_compiled_spec_for_session_rejects_json_all_previous_text_terminal() -> (
+    None
+):
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_compiled_spec_for_session",
+            side_effect=lambda spec, target_kind: spec,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
+            return_value=SpecValidationResult(),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_compiled_spec_for_session",
+            return_value=MagicMock(errors=[]),
+        ),
+    ):
+        result = prepare_compiled_spec_for_session(
+            spec=_json_helper_before_text_terminal_spec(
+                terminal_input_source=InputSource.ALL_PREVIOUS_STEPS,
+            ),
+            target_kind=TargetKind.CREATE,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+            valid_existing_step_refs=None,
+            terminal_output_type=OutputType.JSON,
+        )
+
+    assert result.spec is not None
+    assert result.validation is not None
+    assert not result.validation.valid
+    assert [step.plan_step_ref for step in result.spec.steps] == [
+        "step_a",
+        "step_b",
+        "step_c",
+    ]
+    assert result.spec.steps[-1].output_type == OutputType.TEXT
+    assert result.validation.errors[-1].code == "terminal_output_type_mismatch"
+
+
+def test_prepare_compiled_spec_for_session_rejects_unfoldable_json_text_terminal() -> (
+    None
+):
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_compiled_spec_for_session",
+            side_effect=lambda spec, target_kind: spec,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
+            return_value=SpecValidationResult(),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_compiled_spec_for_session",
+            return_value=MagicMock(errors=[]),
+        ),
+    ):
+        result = prepare_compiled_spec_for_session(
+            spec=_json_helper_before_text_terminal_spec(
+                helper_input_source=InputSource.ALL_PREVIOUS_STEPS,
+                helper_input_bindings=None,
+                terminal_input_source=InputSource.ALL_PREVIOUS_STEPS,
+            ),
+            target_kind=TargetKind.CREATE,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+            valid_existing_step_refs=None,
+            terminal_output_type=OutputType.JSON,
+        )
+
+    assert result.spec is not None
+    assert result.validation is not None
+    assert not result.validation.valid
+    assert result.validation.errors[-1].code == "terminal_output_type_mismatch"
