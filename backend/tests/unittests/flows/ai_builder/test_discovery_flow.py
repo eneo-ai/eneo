@@ -1527,6 +1527,79 @@ class TestExtendedClarificationHints:
 
         assert "final_output_mode" not in question_ids
 
+    def test_swedish_short_summary_output_does_not_reopen_final_output_mode(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Jag vill kunna ladda upp ett dokument och få en kort sammanfattning.",
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "final_output_mode" not in question_ids
+
+    def test_uploaded_word_template_fill_output_does_not_reask_output_mode(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Fyll i en uppladdad Word-mall som innehåller {{platshållare}}. "
+                    "Användaren laddar upp ett underlagsdokument och fyller i "
+                    "inmatningsfälten referens_id och ansvarig innan körning. "
+                    "Steg 1 ska extrahera strukturerad JSON ur underlaget. "
+                    "Steg 2 ska kombinera den extraherade JSON:en med referens_id "
+                    "och ansvarig till en sammanställning som matchar mallens "
+                    "platshållare. Steg 3 ska fylla mallen från sammanställningen."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "final_output_mode" not in question_ids
+        assert "docx_output_mode" not in question_ids
+
+    def test_word_input_form_fields_do_not_resolve_as_template_fill_output(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Användaren laddar upp ett Word-dokument och fyll i "
+                    "inmatningsfält. Sammanfatta innehållet."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "docx_output_mode" not in question_ids
+        assert "final_output_mode" in question_ids
+
     def test_text_answer_flow_does_not_reopen_final_output_mode(self) -> None:
         conversation = [
             ConversationMessage(
@@ -1549,6 +1622,92 @@ class TestExtendedClarificationHints:
         ]
 
         assert "final_output_mode" not in question_ids
+
+    def test_edit_prompt_short_summary_output_does_not_reopen_final_output_mode(
+        self,
+    ) -> None:
+        flow = Flow(
+            id=uuid4(),
+            tenant_id=uuid4(),
+            space_id=uuid4(),
+            name="Dokumentflöde",
+            description="Befintligt dokumentflöde",
+            steps=[
+                FlowStep(
+                    assistant_id=uuid4(),
+                    step_order=1,
+                    user_description="Analysera dokument",
+                    input_source="flow_input",
+                    input_type="document",
+                    output_mode="pass_through",
+                    output_type="text",
+                    mcp_policy="inherit",
+                )
+            ],
+        )
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Behåll dokumentuppladdningen men ändra slutresultatet så att "
+                    "användaren får en kort sammanfattning."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation, flow=flow)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "final_output_mode" not in question_ids
+
+    def test_edit_prompt_word_template_fill_output_does_not_reask_docx_mode(
+        self,
+    ) -> None:
+        flow = Flow(
+            id=uuid4(),
+            tenant_id=uuid4(),
+            space_id=uuid4(),
+            name="Dokumentflöde",
+            description="Befintligt dokumentflöde",
+            steps=[
+                FlowStep(
+                    assistant_id=uuid4(),
+                    step_order=1,
+                    user_description="Analysera dokument",
+                    input_source="flow_input",
+                    input_type="document",
+                    output_mode="pass_through",
+                    output_type="text",
+                    mcp_policy="inherit",
+                )
+            ],
+        )
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Behåll dokumentunderlaget men ändra slutresultatet till att "
+                    "fylla i en uppladdad Word-mall. Steget ska fylla mallen från "
+                    "den strukturerade sammanställningen."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation, flow=flow)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "final_output_mode" not in question_ids
+        assert "docx_output_mode" not in question_ids
 
     def test_contract_heavy_prompt_infers_output_from_detailed_description(
         self,

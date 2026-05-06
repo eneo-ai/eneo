@@ -84,6 +84,21 @@ class OutputIntentResolution:
     pdf_generation_mode: str | None = None
 
 
+_DOCX_TEMPLATE_FILL_ACTION_MARKERS: tuple[str, ...] = (
+    "fylla mallen",
+    "fyll mallen",
+    "fyller mallen",
+    "fyll i mallen",
+    "fyll i en mall",
+    "fyll i en docx mall",
+    "fyll i en word mall",
+    "fyller en docx mall",
+    "fill the template",
+    "fill a template",
+    "populate the template",
+)
+
+
 def latest_pending_structured_question(
     conversation: Sequence[ConversationMessage | Mapping[str, Any]],
 ) -> dict[str, Any] | None:
@@ -636,7 +651,11 @@ def _resolve_direct_output_choice(
 ) -> str | None:
     output_values = answer_signals.get("final_output_mode", set())
     pdf_generation_values = answer_signals.get("pdf_generation_mode", set())
-    role_scoped_text = scoped_text.preferred_output_text()
+    role_scoped_text = (
+        scoped_text.replacement_target_text
+        or scoped_text.output_text
+        or scoped_text.neutral_text
+    )
     fallback_text = scoped_text.full_text
     if "docx_document" in output_values:
         return "docx_document"
@@ -677,10 +696,14 @@ def _resolve_direct_output_choice(
         return "structured_text"
     if _looks_like_final_json_output(role_scoped_text or fallback_text):
         return "structured_json"
-    if _looks_like_text_terminal_output(role_scoped_text or fallback_text):
+    if _looks_like_text_terminal_output(
+        role_scoped_text
+    ) or _looks_like_text_terminal_output(fallback_text):
         return "structured_text"
-    if _looks_like_pdf_template_expectation(role_scoped_text or fallback_text):
+    if _looks_like_pdf_template_expectation(role_scoped_text):
         return "pdf_document"
+    if _looks_like_docx_template_fill_terminal_output(fallback_text):
+        return "docx_document"
     return None
 
 
@@ -715,6 +738,8 @@ def _looks_like_text_terminal_output(text: str) -> bool:
             "kort svar",
             "short answer",
             "brief answer",
+            "få en kort sammanfattning",
+            "fa en kort sammanfattning",
             "slutversion",
             "final version",
             "textresultat",
@@ -811,6 +836,8 @@ def resolve_docx_output_mode(
     output_text = scoped_text.preferred_output_text()
     has_docx_context = contains_any_phrase(output_text, DOCX_CONTEXT_MARKERS)
     if not has_docx_context:
+        if _looks_like_docx_template_fill_terminal_output(scoped_text.full_text):
+            return "template_fill_docx"
         return (
             "generated_docx"
             if "docx_document" in answer_signals.get("final_output_mode", set())
@@ -988,6 +1015,15 @@ def _looks_like_pdf_template_expectation(text: str) -> bool:
     if contains_any_phrase(text, PDF_TEMPLATE_EXPECTATION_MARKERS):
         return True
     return contains_any_phrase(text, PDF_TEMPLATE_GENERIC_MARKERS)
+
+
+def _looks_like_docx_template_fill_terminal_output(text: str) -> bool:
+    # Why: uploaded Word templates are input-scoped, so high-confidence fill actions
+    # need a full-text check rather than the usual role-scoped output clause.
+    return contains_any_phrase(text, DOCX_CONTEXT_MARKERS) and contains_any_phrase(
+        text,
+        _DOCX_TEMPLATE_FILL_ACTION_MARKERS,
+    )
 
 
 def _infer_output_content_shape(text: str) -> str | None:

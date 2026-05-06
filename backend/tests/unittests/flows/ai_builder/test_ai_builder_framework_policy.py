@@ -32,7 +32,6 @@ from intric.flows.ai_builder.planning_state_builder import (
 )
 from intric.flows.flow import Flow, FlowStep
 
-
 _AUDIO_TO_WORD_REPORT_PROMPT = (
     "Skapa ett flöde i Eneo Flödesbyggaren. "
     "Flödet ska ta emot en ljudfil eller ljudinspelning från ett möte, "
@@ -213,6 +212,65 @@ def test_resolve_output_intent_keeps_docx_template_prompt_on_docx_path() -> None
     assert intent.terminal_output == "docx_document"
     assert intent.docx_output_mode == "template_fill_docx"
     assert intent.pdf_generation_mode is None
+
+
+def test_resolve_output_intent_detects_uploaded_word_template_fill_output() -> None:
+    prompt = (
+        "Fyll i en uppladdad Word-mall som innehåller {{platshållare}}. "
+        "Användaren laddar upp ett underlagsdokument och fyller i "
+        "inmatningsfälten referens_id och ansvarig innan körning. "
+        "Steg 1 ska extrahera strukturerad JSON ur underlaget. "
+        "Steg 2 ska kombinera den extraherade JSON:en med referens_id och "
+        "ansvarig till en sammanställning som matchar mallens platshållare. "
+        "Steg 3 ska fylla mallen från sammanställningen."
+    )
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output == "docx_document"
+    assert intent.docx_output_mode == "template_fill_docx"
+
+
+def test_resolve_output_intent_does_not_treat_word_template_reference_as_docx_output() -> (
+    None
+):
+    prompt = "Ladda upp en Word-mall och en PDF - använd båda som referens."
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output is None
+    assert intent.docx_output_mode is None
+
+
+def test_resolve_output_intent_does_not_treat_word_input_form_fields_as_docx_output() -> (
+    None
+):
+    prompt = (
+        "Användaren laddar upp ett Word-dokument och fyll i inmatningsfält. "
+        "Sammanfatta innehållet."
+    )
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output is None
+    assert intent.docx_output_mode is None
+
+
+def test_resolve_output_intent_keeps_pdf_when_word_template_is_reference() -> None:
+    prompt = "Jag har en DOCX-mall som referens, men slutresultatet ska vara en PDF."
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output == "pdf_document"
+    assert intent.docx_output_mode is None
 
 
 def test_audio_to_word_report_prompt_infers_audio_input_not_document_input() -> None:
@@ -1055,6 +1113,36 @@ def test_resolve_output_intent_prefers_text_summary_over_pdf_input_reference() -
     )
 
     assert intent.terminal_output == "structured_text"
+
+
+def test_resolve_output_intent_detects_swedish_short_summary_output() -> None:
+    prompt = "Jag vill kunna ladda upp ett dokument och få en kort sammanfattning."
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output == "structured_text"
+
+
+def test_resolve_output_intent_does_not_treat_summary_reference_as_output() -> None:
+    prompt = "Jag laddar upp en sammanfattning som referens."
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output is None
+
+
+def test_resolve_output_intent_keeps_vague_file_review_unresolved() -> None:
+    prompt = "Hjälp mig granska dom här filerna och förstå dom."
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output is None
 
 
 def test_intermediate_json_extraction_with_final_prose_does_not_resolve_json() -> None:

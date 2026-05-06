@@ -2,6 +2,7 @@ from __future__ import annotations
 
 INPUT_ROLE_MARKERS: tuple[str, ...] = (
     "ladda upp",
+    "laddar upp",
     "upload",
     "skicka in",
     "send in",
