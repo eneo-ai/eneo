@@ -732,13 +732,13 @@
 <AlertDialog.Root bind:open={showCancelConfirm}>
   <AlertDialog.Content>
     <AlertDialog.Header>
-      <AlertDialog.Title>{m.cancel()}</AlertDialog.Title>
+      <AlertDialog.Title>{m.flow_run_cancel_title()}</AlertDialog.Title>
       <AlertDialog.Description>{m.flow_run_cancel_confirm()}</AlertDialog.Description>
     </AlertDialog.Header>
     <AlertDialog.Footer>
-      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Cancel>{m.flow_run_cancel_keep_running()}</AlertDialog.Cancel>
       <AlertDialog.Action variant="destructive" onclick={confirmCancelRun}>
-        {m.cancel()}
+        {m.flow_run_cancel_action()}
       </AlertDialog.Action>
     </AlertDialog.Footer>
   </AlertDialog.Content>
