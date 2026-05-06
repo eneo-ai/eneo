@@ -1466,6 +1466,31 @@ class TestExtendedClarificationHints:
         assert "document_kind" not in question_ids
         assert "comparison_scope" not in question_ids
 
+    def test_multi_source_contradiction_prompt_skips_comparison_scope(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Användaren laddar upp 2-5 underlagsfiler. Flödet ska "
+                    "extrahera nyckelfakta som strukturerad JSON från varje fil "
+                    "eller från varje dokumentdel, sedan identifiera motsägelser "
+                    "mellan källorna i ett separat analyssteg."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "comparison_scope" not in question_ids
+
     def test_ambiguous_compare_prompt_prioritizes_comparison_scope(self) -> None:
         conversation = [
             ConversationMessage(

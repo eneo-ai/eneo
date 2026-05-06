@@ -3,7 +3,11 @@ from __future__ import annotations
 from intric.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
+from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
+from intric.flows.ai_builder.planning_state_builder import (
+    build_planning_state_from_conversation,
+)
 
 
 def _slot(name: str, value: str) -> ResolvedSlot:
@@ -133,6 +137,27 @@ def test_derives_compare_intent_for_same_run_comparison_scope() -> None:
             comparison_scope="same_run_compare",
         )
     )
+
+    assert draft is not None
+    assert draft.aggregation_intent == "compare"
+
+
+def test_derives_compare_intent_from_high_confidence_multi_source_prompt() -> None:
+    state = build_planning_state_from_conversation(
+        [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Användaren laddar upp 2-5 underlagsfiler. Flödet ska "
+                    "extrahera nyckelfakta från varje fil och identifiera "
+                    "motsägelser mellan källorna i ett separat analyssteg. "
+                    "Slutresultatet ska vara strukturerad JSON."
+                ),
+            )
+        ]
+    )
+
+    draft = derive_architecture_commit_draft(state)
 
     assert draft is not None
     assert draft.aggregation_intent == "compare"

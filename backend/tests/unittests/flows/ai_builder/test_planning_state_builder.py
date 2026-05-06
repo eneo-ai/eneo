@@ -252,6 +252,63 @@ class TestPolicyDefaults:
         assert slot.value == "flexible_document_case"
         assert slot.source == "policy_default"
 
+    def test_multi_source_contradiction_prompt_resolves_compare_slots(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Användaren laddar upp 2-5 underlagsfiler. Flödet ska "
+                        "extrahera nyckelfakta som strukturerad JSON från varje fil "
+                        "eller från varje dokumentdel, sedan identifiera motsägelser "
+                        "mellan källorna i ett separat analyssteg."
+                    ),
+                )
+            ]
+        )
+
+        assert state.resolved_slots["document_material_scope"].value == (
+            "multiple_documents_case"
+        )
+        assert state.resolved_slots["comparison_scope"].value == "same_run_compare"
+
+    def test_single_document_compare_prompt_does_not_resolve_same_run_compare(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Bygg ett flöde som jämför ett avtal mot interna riktlinjer "
+                        "och skriver en kort rapport."
+                    ),
+                )
+            ]
+        )
+
+        assert "comparison_scope" not in state.resolved_slots
+
+    def test_non_comparison_multi_file_prompt_resolves_aggregate_scope_only(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Låt användaren ladda upp flera underlagsfiler och "
+                        "sammanfatta dem i en strukturerad rapport."
+                    ),
+                )
+            ]
+        )
+
+        assert state.resolved_slots["document_material_scope"].value == (
+            "multiple_documents_case"
+        )
+        assert "comparison_scope" not in state.resolved_slots
+
     def test_document_input_defaults_to_no_extra_runtime_metadata(self) -> None:
         state = build_planning_state_from_conversation(
             [

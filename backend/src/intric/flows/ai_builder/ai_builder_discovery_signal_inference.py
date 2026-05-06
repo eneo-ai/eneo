@@ -79,6 +79,47 @@ def _contains_any(text: str, phrases: Iterable[str]) -> bool:
     return contains_any_phrase(text, phrases)
 
 
+_MULTI_SOURCE_FILE_PHRASES: tuple[str, ...] = (
+    "2-5 underlagsfiler",
+    "flera underlagsfiler",
+    "flera filer",
+    "flera dokumentfiler",
+    "flera källfiler",
+    "several source files",
+    "multiple source files",
+    "several files",
+    "multiple files",
+    "uploaded reports",
+)
+
+_SOURCE_TO_SOURCE_COMPARISON_PHRASES: tuple[str, ...] = (
+    "motsägelser mellan källorna",
+    "motsägelser mellan källor",
+    "motstridiga uppgifter mellan källorna",
+    "jämför vad de olika filerna säger",
+    "jämförelseanalysen",
+    "inconsistencies between the uploaded reports",
+    "inconsistencies between sources",
+    "contradictions between sources",
+    "compare what the different files say",
+)
+
+
+def is_high_confidence_source_to_source_comparison(text: str) -> bool:
+    normalized = normalize_signal_text(text)
+    if not normalized:
+        return False
+    return _infer_document_material_scope(
+        normalized
+    ) == "multiple_documents_case" and _has_source_to_source_comparison_evidence(
+        normalized
+    )
+
+
+def _has_source_to_source_comparison_evidence(text: str) -> bool:
+    return _contains_any(text, _SOURCE_TO_SOURCE_COMPARISON_PHRASES)
+
+
 def _infer_document_kind(text: str) -> str | None:
     if _contains_any(
         text,
@@ -170,6 +211,7 @@ def _infer_document_material_scope(text: str) -> str | None:
             "flera pdf",
             "flera pdf er",
             "multiple pdf",
+            *_MULTI_SOURCE_FILE_PHRASES,
             "document package",
             "dokumentpaket",
             "samlat underlag",
@@ -271,6 +313,8 @@ def _infer_comparison_scope(text: str) -> str | None:
         ),
     ):
         return "compare_previous_material"
+    if is_high_confidence_source_to_source_comparison(text):
+        return "same_run_compare"
     if _contains_any(
         text,
         (

@@ -1854,6 +1854,158 @@ tasks:
         - flow_ai_builder_review.md
         - utvecklingssamtal.mp3
 
+  - id: T035
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next safe Worker for C3 comparison/material-routing quality after the dirty builder-policy baseline was resolved."
+    inputs:
+      - "T034 receipt"
+      - "Latest full live eval C3 artifacts"
+      - backend/src/intric/flows/ai_builder/ai_builder_discovery_signal_inference.py
+      - backend/src/intric/flows/ai_builder/ai_builder_framework_policy.py
+      - backend/src/intric/flows/ai_builder/planning_state_builder.py
+      - backend/src/intric/flows/ai_builder/ai_builder_architecture_derivation.py
+      - backend/tests/unittests/flows/ai_builder
+    constraints:
+      - "Do not implement in this Judge task."
+      - "Run Claude peer loop before activating any Worker."
+      - "Prefer a long-term canonical-owner fix over C3 prompt tuning."
+      - "Do not stage or commit unrelated dirty files."
+    expected_output:
+      - "activate_worker | blocked | no_change"
+      - "If activate_worker: exact objective, allowed_files, verify commands using -n 4, live eval command, and stop_if."
+    receipt:
+      result: done
+      decision: "activate_worker"
+      selected_worker: T036
+      note: docs/goals/material-efficiency/notes/T035-judge-c3-comparison-routing.md
+      summary: "Selected a narrow signal/framework-policy slice: high-confidence multi-source contradiction evidence may resolve same-run comparison, while ambiguous comparison prompts still ask comparison_scope."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t035-judge-c3-comparison-routing-20260506T042751Z.md"
+        - ".codex/artifacts/claude-peer-loop-t035-judge-c3-comparison-routing-revised-20260506T043239Z.md"
+      green_light: true
+      worker_scope:
+        objective: "Add red tests and a minimal canonical-owner fix so high-confidence multi-source contradiction/comparison prompts route through existing comparison_scope and architecture aggregation mechanics."
+        allowed_files:
+          - backend/src/intric/flows/ai_builder/ai_builder_discovery_signal_inference.py
+          - backend/src/intric/flows/ai_builder/ai_builder_framework_policy.py
+          - backend/src/intric/flows/ai_builder/planning_state_builder.py
+          - backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py
+          - backend/tests/unittests/flows/ai_builder/test_discovery_flow.py
+          - backend/tests/unittests/flows/ai_builder/test_planning_state_builder.py
+          - backend/tests/unittests/flows/ai_builder/test_ai_builder_architecture_derivation.py
+          - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+          - docs/goals/material-efficiency/notes/T035-judge-c3-comparison-routing.md
+          - docs/goals/material-efficiency/notes/T036-worker-c3-comparison-routing.md
+        verify:
+          - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_architecture_derivation.py -q"
+          - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+          - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_discovery_signal_inference.py src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_architecture_derivation.py"
+          - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_discovery_signal_inference.py src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_architecture_derivation.py"
+          - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_discovery_signal_inference.py src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_architecture_derivation.py"
+          - "uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --api-base http://localhost:8123 --api-key '<local-key>' --case C3 --runs 3 --apply --publish --output-dir /tmp/material-efficiency-live-eval/<timestamp>-t036-c3-comparison-routing"
+
+  - id: T036
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Add red tests and a minimal canonical-owner fix for high-confidence multi-source comparison routing."
+    allowed_files:
+      - backend/src/intric/flows/ai_builder/ai_builder_discovery_signal_inference.py
+      - backend/src/intric/flows/ai_builder/ai_builder_framework_policy.py
+      - backend/src/intric/flows/ai_builder/planning_state_builder.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py
+      - backend/tests/unittests/flows/ai_builder/test_discovery_flow.py
+      - backend/tests/unittests/flows/ai_builder/test_planning_state_builder.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_architecture_derivation.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T035-judge-c3-comparison-routing.md
+      - docs/goals/material-efficiency/notes/T036-worker-c3-comparison-routing.md
+    verify:
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_architecture_derivation.py -q"
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_discovery_signal_inference.py src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_architecture_derivation.py"
+      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_discovery_signal_inference.py src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_architecture_derivation.py"
+      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_discovery_signal_inference.py src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_architecture_derivation.py"
+      - "uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --api-base http://localhost:8123 --api-key '<local-key>' --case C3 --runs 3 --apply --publish --output-dir /tmp/material-efficiency-live-eval/<timestamp>-t036-c3-comparison-routing"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Cannot produce red tests that fail on HEAD."
+      - "High-confidence predicate would require semantic parsing beyond lexical source/comparison evidence."
+      - "Fix would touch _infer_document_kind, case_like_flow, case_documents, or test_ai_builder_create_compiler.py."
+      - "Would use all_previous_steps as a blanket fallback instead of existing compare/aggregate architecture."
+      - "Verification fails twice for reasons not proven pre-existing."
+      - "Live eval regresses C3 plan creation/apply materially or promotes broad fan-in on every step."
+    peer_scope_expansion:
+      claude_artifact: ".codex/artifacts/claude-peer-loop-t036-scope-expansion-planning-state-20260506T044143Z.md"
+      summary: "Claude approved adding planning_state_builder.py after red tests proved accepted comparison_scope signals were dropped before PlanningState.resolved_slots."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T036-worker-c3-comparison-routing.md
+      summary: "High-confidence multi-source contradiction prompts now resolve multiple-document scope, same-run comparison scope, and compare architecture without changing ambiguous comparison prompts. This is a narrow deterministic improvement; latest live reruns still show broader builder flakiness and bounded-routing follow-up work."
+      changed_files:
+        - backend/src/intric/flows/ai_builder/ai_builder_discovery_signal_inference.py
+        - backend/src/intric/flows/ai_builder/ai_builder_framework_policy.py
+        - backend/src/intric/flows/ai_builder/planning_state_builder.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py
+        - backend/tests/unittests/flows/ai_builder/test_discovery_flow.py
+        - backend/tests/unittests/flows/ai_builder/test_planning_state_builder.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_architecture_derivation.py
+        - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+        - docs/goals/material-efficiency/notes/T035-judge-c3-comparison-routing.md
+        - docs/goals/material-efficiency/notes/T036-worker-c3-comparison-routing.md
+      red_evidence:
+        - "Scoped pytest initially failed because the new predicate did not exist and C3-style prompts still resolved flexible/linear."
+        - "After the first source fix, scoped pytest still failed because planning_state_builder.py dropped accepted comparison_scope signals before architecture derivation."
+      verification:
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_architecture_derivation.py -q"
+          status: pass
+          output: "173 passed"
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+          status: pass
+          output: "2047 passed, 4 skipped"
+        - cmd: "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_discovery_signal_inference.py src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_architecture_derivation.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_discovery_signal_inference.py src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_architecture_derivation.py"
+          status: pass
+          output: "All checks passed"
+        - cmd: "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_discovery_signal_inference.py src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_architecture_derivation.py"
+          status: pass
+          output: "7 files already formatted"
+      live_eval:
+        targeted_c3:
+          summary_json: "/tmp/material-efficiency-live-eval/20260506-064611-t036-c3-comparison-routing/summary.json"
+          output: "C3 applied 3/3; all runs had all_previous_steps_count=1."
+        user_requested_full_create_rerun:
+          summary_json: "/tmp/material-efficiency-live-eval/20260506-063602-user-rerun-full-create-3run-apply-publish/summary.json"
+          output: "C3 applied 2/3 with one self_correction_invalid_plan; successful C3 runs had all_previous_steps_count=1. V2 no_plan 2/3, C1/C2/C5 each had one cancelled-session or invalid-transition builder error."
+        user_requested_supplemental_rerun:
+          summary_json: "/tmp/material-efficiency-live-eval/20260506-065419-user-rerun-supplemental-n1-q1-h1-h2/summary.json"
+          output: "N1 and Q1 applied 3/3 with compact metrics; H1/H2 clarification_required 3/3."
+        user_requested_e1_edit_rerun:
+          summary_json: "/tmp/material-efficiency-live-eval/20260506-065957-user-rerun-e1-edit-unpublished-c1/summary.json"
+          output: "E1 edit apply failed 3/3 with HTTP 500 after generating plans; metrics were preserved from plan artifacts."
+        broad_create_suite:
+          summary_json: "/tmp/material-efficiency-live-eval/20260506-065049-t036-create-suite-regression/summary.json"
+          output: "V2/C1/C3/C5 applied; V1/V3/V4/V5/C4 clarification_required; C2 builder_error."
+        c2_regression_check:
+          summary_json: "/tmp/material-efficiency-live-eval/20260506-065712-t036-c2-regression-check/summary.json"
+          output: "C2 builder_error 2/2 with self_correction_invalid_plan; deterministic probe shows document_material_scope=single_document_case and no comparison_scope for C2."
+      claude_commit_gate:
+        artifact: ".codex/artifacts/claude-peer-loop-t036-implementation-review-20260506T051036Z.md"
+        verdict: green
+        min_score: 8
+        follow_up_verification:
+          status: pass
+          output: "Post-Claude deterministic probe closed the C2 scope gap: C2 kept single_document_case and no comparison_scope; V3 kept multiple_documents_case without comparison_scope; C3 resolved multiple_documents_case and same_run_compare."
+      follow_ups:
+        - "Before the next compare-routing slice, evaluate typed ComparisonEvidence on DiscoveryProfile."
+        - "Before the next slot-addition slice, evaluate collapsing planning_state_builder.py scalar-slot blocks into a list-driven resolver."
+
   - id: T999
     type: judge
     assignee: Judge

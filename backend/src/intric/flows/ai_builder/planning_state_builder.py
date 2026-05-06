@@ -328,6 +328,25 @@ def _resolve_slots(
             slot_value=document_material_scope,
         )
 
+    # No policy default: ambiguous comparison prompts must ask for architecture.
+    comparison_scope = _single_slot_value(
+        answer_signals=answer_signals,
+        flow_defaults=flow_defaults,
+        question_id="comparison_scope",
+    )
+    if comparison_scope is not None:
+        slots["comparison_scope"] = _build_slot(
+            name="comparison_scope",
+            value=comparison_scope,
+            question_id="comparison_scope",
+            conversation=conversation,
+            flow_defaults=flow_defaults,
+            requirements_state=requirements_state,
+            freeform_text=freeform_text,
+            summary_field=None,
+            slot_value=comparison_scope,
+        )
+
     structured_analysis_need = _single_slot_value(
         answer_signals=answer_signals,
         flow_defaults=flow_defaults,

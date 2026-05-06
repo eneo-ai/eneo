@@ -5,6 +5,9 @@ from uuid import uuid4
 import pytest
 
 from intric.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
+from intric.flows.ai_builder.ai_builder_discovery_signal_inference import (
+    is_high_confidence_source_to_source_comparison,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     build_framework_guardrails_block,
@@ -744,6 +747,101 @@ def test_extract_answer_signals_infers_structured_analysis_from_rich_docx_workfl
 
     assert "documents" in signals["input_material_mode"]
     assert "use_structured_analysis" in signals["structured_analysis_need"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        (
+            "Användaren laddar upp 2-5 underlagsfiler och flödet ska "
+            "identifiera motsägelser mellan källorna i ett separat analyssteg."
+        ),
+        (
+            "Låt användaren ladda upp flera filer och jämför vad de olika "
+            "filerna säger om samma fakta."
+        ),
+        (
+            "Upload several source documents and find inconsistencies between "
+            "the uploaded reports."
+        ),
+    ],
+)
+def test_high_confidence_source_comparison_requires_multiple_sources(
+    text: str,
+) -> None:
+    assert is_high_confidence_source_to_source_comparison(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Bygg ett flöde som jämför flera dokument och genererar en DOCX-rapport.",
+        "Bygg ett flöde som jämför ett avtal mot interna riktlinjer.",
+        "Låt användaren ladda upp flera filer och sammanfatta dem kort.",
+        (
+            "Användaren laddar ibland upp ett, ibland flera dokument och vill "
+            "identifiera motsägelser mellan källorna."
+        ),
+    ],
+)
+def test_high_confidence_source_comparison_rejects_ambiguous_or_one_sided_prompts(
+    text: str,
+) -> None:
+    assert not is_high_confidence_source_to_source_comparison(text)
+
+
+def test_extract_answer_signals_allows_high_confidence_comparison_freeform() -> None:
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "Användaren laddar upp 2-5 underlagsfiler. Flödet ska "
+                    "extrahera nyckelfakta som strukturerad JSON från varje fil "
+                    "och identifiera motsägelser mellan källorna."
+                ),
+            }
+        ]
+    )
+
+    assert signals["document_material_scope"] == {"multiple_documents_case"}
+    assert signals["comparison_scope"] == {"same_run_compare"}
+
+
+def test_requirements_summary_does_not_erase_high_confidence_comparison_signal() -> (
+    None
+):
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "Användaren laddar upp flera underlagsfiler och flödet ska "
+                    "identifiera motsägelser mellan källorna."
+                ),
+            },
+            {
+                "role": "tool",
+                "content": "",
+                "metadata": {
+                    "requirements_summary": {
+                        "input_description": "Primär indata vid körning: Dokument.",
+                        "output_description": (
+                            "Huvudsakligt slutresultat: Strukturerad JSON."
+                        ),
+                        "key_decisions": [
+                            {
+                                "topic": "Dokumentunderlag",
+                                "decision": "Ibland ett, ibland flera dokument",
+                            }
+                        ],
+                    }
+                },
+            },
+        ]
+    )
+
+    assert signals["comparison_scope"] == {"same_run_compare"}
 
 
 def test_extract_answer_signals_infers_common_runtime_metadata_field_names() -> None:
