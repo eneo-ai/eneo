@@ -33,7 +33,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T032
+active_task: null
 
 tasks:
   - id: T001
@@ -1689,7 +1689,7 @@ tasks:
   - id: T032
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe local slice after T031 blocked on backend log access, without guessing at the apply HTTP 500 root cause."
     inputs:
@@ -1710,7 +1710,96 @@ tasks:
       - "activate_worker | blocked | audit_needed"
       - "If activate_worker: exact objective, allowed_files, verify commands using -n 4, live eval command, and stop_if."
       - "If blocked: exact missing input or log access required."
-    receipt: null
+    receipt:
+      result: done
+      decision: "activate_worker"
+      note: docs/goals/material-efficiency/notes/T032-judge-next-worker.md
+      summary: "Selected a deterministic eval-harness reliability slice: abnormal live-eval exits should keep available plan-envelope material metrics instead of discarding diagnostics. This avoids guessing at the apply HTTP 500 root cause while improving measurable context/binding evidence for all flows."
+      selected_worker: T033
+      evidence:
+        - "run_flow_ai_builder_live_eval.py saves plan.json before apply."
+        - "HTTPError, URLError, and generic Exception branches hardcode missing_artifacts instead of using the existing metrics owner."
+        - "attach_material_metrics already computes flow_artifact or plan_envelope metrics and is covered by existing tests."
+        - "metrics_implementation consumer grep found no downstream assumption that automated means applied successfully."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t032-judge-next-worker-after-apply-log-blocker-20260506T035826Z.md"
+        - ".codex/artifacts/claude-peer-loop-t032-judge-next-worker-after-apply-log-blocker-revision-20260506T040129Z.md"
+      green_light: true
+      worker_scope:
+        objective: "Make every live-eval abnormal run exit attach available material metrics from saved artifacts before returning, so late HTTP/URL/generic errors keep plan-envelope material metrics instead of losing diagnostics."
+        allowed_files:
+          - docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py
+          - backend/tests/unittests/flows/ai_builder/test_live_eval_runner.py
+          - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+          - docs/goals/material-efficiency/notes/T032-judge-next-worker.md
+          - docs/goals/material-efficiency/notes/T033-live-eval-error-plan-metrics.md
+        verify:
+          - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_live_eval_runner.py -q -k 'http_error or connection_error or material_metrics'"
+          - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_live_eval_runner.py -q"
+          - "uv run --directory backend pyright ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+          - "uv run --directory backend ruff check ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+          - "uv run --directory backend ruff format --check ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+
+  - id: T033
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Make live-eval abnormal exits preserve available material metrics from saved artifacts."
+    allowed_files:
+      - docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py
+      - backend/tests/unittests/flows/ai_builder/test_live_eval_runner.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T032-judge-next-worker.md
+      - docs/goals/material-efficiency/notes/T033-live-eval-error-plan-metrics.md
+    verify:
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_live_eval_runner.py -q -k 'http_error or connection_error or material_metrics'"
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_live_eval_runner.py -q"
+      - "uv run --directory backend pyright ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+      - "uv run --directory backend ruff check ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+      - "uv run --directory backend ruff format --check ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+      - "uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --api-base http://localhost:8123 --api-key '<local-key>' --include-supplemental --case E1 --runs 1 --edit-flow-id fdd4abc5-35ca-41ed-bca3-10be5102dbc4 --apply --output-dir /tmp/material-efficiency-live-eval/<timestamp>-t033-e1-error-plan-metrics"
+    stop_if:
+      - "Need backend source behavior changes or files outside allowed_files."
+      - "Would require guessing the apply HTTP 500 root cause without backend telemetry/log classification."
+      - "Requires storing raw prompts, raw logs, API keys, or eval artifacts."
+      - "Would change score-axis semantics or count metrics differently."
+      - "Would add a parallel metrics implementation instead of reusing the existing owner."
+      - "Cannot produce a meaningful red test that fails on HEAD."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T033-live-eval-error-plan-metrics.md
+      summary: "Abnormal live-eval exits now preserve available plan/flow material metrics through the existing attach_material_metrics owner instead of hardcoding missing_artifacts."
+      changed_files:
+        - docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py
+        - backend/tests/unittests/flows/ai_builder/test_live_eval_runner.py
+        - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+        - docs/goals/material-efficiency/notes/T033-live-eval-error-plan-metrics.md
+      red_evidence:
+        - "New run_case HTTPError-after-plan test would fail on HEAD because the old branch set metrics_implementation to missing_artifacts."
+        - "New run_case URLError-after-plan test would fail on HEAD because the old branch set metrics_implementation to missing_artifacts."
+        - "New run_case generic-Exception-after-plan test would fail on HEAD because the old branch set metrics_implementation to missing_artifacts."
+      live_eval:
+        cmd: "uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --api-base http://localhost:8123 --api-key '<local-key>' --include-supplemental --case E1 --runs 1 --edit-flow-id fdd4abc5-35ca-41ed-bca3-10be5102dbc4 --apply --output-dir /tmp/material-efficiency-live-eval/20260506-060512-t033-e1-error-plan-metrics"
+        status: pass
+        output: "E1 run 1: http_error; summary kept metrics_implementation=automated with plan_envelope step metrics."
+        summary_json: "/tmp/material-efficiency-live-eval/20260506-060512-t033-e1-error-plan-metrics/summary.json"
+      verification:
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_live_eval_runner.py -q -k 'http_error or connection_error or material_metrics'"
+          status: pass
+          output: "4 passed"
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_live_eval_runner.py -q"
+          status: pass
+          output: "13 passed"
+        - cmd: "uv run --directory backend pyright ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "uv run --directory backend ruff check ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+          status: pass
+          output: "All checks passed"
+        - cmd: "uv run --directory backend ruff format --check ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+          status: pass
+          output: "2 files already formatted"
 
   - id: T999
     type: judge

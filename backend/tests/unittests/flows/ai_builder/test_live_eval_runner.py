@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import urllib.error
 from dataclasses import asdict
 from pathlib import Path
 from types import ModuleType
@@ -201,6 +202,140 @@ def test_publish_mode_fetches_run_contract_after_publish(tmp_path: Path) -> None
         ("GET", "/api/v1/flows/flow-1/run-contract/")
     )
     assert publish_index < run_contract_index
+
+
+def test_http_error_after_plan_keeps_plan_envelope_material_metrics(
+    tmp_path: Path,
+) -> None:
+    runner = load_live_eval_runner()
+    result = run_case_after_plan_apply_failure(
+        runner,
+        tmp_path,
+        urllib.error.HTTPError(
+            url="/apply",
+            code=500,
+            msg="apply failed",
+            hdrs={},
+            fp=None,
+        ),
+    )
+
+    assert result.status == "http_error"
+    assert result.metrics_implementation == "automated"
+    assert result.step_metrics
+    assert {row.metrics_source for row in result.step_metrics} == {"plan_envelope"}
+
+
+def test_connection_error_after_plan_keeps_plan_envelope_material_metrics(
+    tmp_path: Path,
+) -> None:
+    runner = load_live_eval_runner()
+    result = run_case_after_plan_apply_failure(
+        runner,
+        tmp_path,
+        urllib.error.URLError("connection lost"),
+    )
+
+    assert result.status == "connection_error"
+    assert result.metrics_implementation == "automated"
+    assert result.step_metrics
+    assert {row.metrics_source for row in result.step_metrics} == {"plan_envelope"}
+
+
+def test_generic_error_after_plan_keeps_plan_envelope_material_metrics(
+    tmp_path: Path,
+) -> None:
+    runner = load_live_eval_runner()
+    result = run_case_after_plan_apply_failure(
+        runner,
+        tmp_path,
+        RuntimeError("apply crashed"),
+    )
+
+    assert result.status == "error"
+    assert result.metrics_implementation == "automated"
+    assert result.step_metrics
+    assert {row.metrics_source for row in result.step_metrics} == {"plan_envelope"}
+
+
+def run_case_after_plan_apply_failure(
+    runner: ModuleType,
+    tmp_path: Path,
+    apply_error: Exception,
+) -> Any:
+    class FakeClient:
+        def __init__(self, error: Exception) -> None:
+            self.error = error
+
+        def post_stream(self, path: str, payload: dict[str, Any]) -> bytes:
+            return b'event: status\ndata: {"status":"architecture_committed"}\n\n'
+
+        def post_json(
+            self, path: str, payload: dict[str, Any] | None = None
+        ) -> dict[str, Any]:
+            if path.endswith("/sessions"):
+                return {"session_id": "session-1"}
+            if path.endswith("/approve"):
+                return {"ok": True}
+            if path.endswith("/apply"):
+                raise self.error
+            raise AssertionError(f"Unexpected POST path: {path}")
+
+        def get_json(self, path: str) -> dict[str, Any]:
+            if path.endswith("/sessions/session-1"):
+                return {"session_id": "session-1"}
+            if path.endswith("/sessions/session-1/plans"):
+                return {"plans": [{"plan_id": "plan-1"}]}
+            if path.endswith("/plans/plan-1"):
+                return plan_envelope_fixture()
+            raise AssertionError(f"Unexpected GET path: {path}")
+
+    return runner.run_case(
+        client=FakeClient(apply_error),
+        case=runner.EvalCase(
+            case_id="T1",
+            prompt="Skapa ett enkelt testflöde.",
+            tags=[],
+            desired_signal="",
+            failure_signal="",
+        ),
+        run_no=1,
+        space_id="space-1",
+        output_dir=tmp_path,
+        apply_plan=True,
+        publish=False,
+        edit_flow_id=None,
+    )
+
+
+def plan_envelope_fixture() -> dict[str, Any]:
+    return {
+        "plan_id": "plan-1",
+        "envelope": {
+            "spec": {
+                "flow_name": "Test",
+                "steps": [
+                    {
+                        "plan_step_ref": "step_a",
+                        "name": "Draft",
+                        "assistant_spec": {"instructions": "Draft."},
+                        "input_source": "flow_input",
+                        "input_type": "text",
+                        "output_type": "text",
+                    },
+                    {
+                        "plan_step_ref": "step_b",
+                        "name": "Revise",
+                        "assistant_spec": {"instructions": "Revise."},
+                        "input_source": "previous_step",
+                        "input_type": "text",
+                        "output_type": "text",
+                        "input_bindings": {"question": "{{ step_a.output.text }}"},
+                    },
+                ],
+            }
+        },
+    }
 
 
 def test_plan_only_run_computes_material_metrics_from_plan(tmp_path: Path) -> None:

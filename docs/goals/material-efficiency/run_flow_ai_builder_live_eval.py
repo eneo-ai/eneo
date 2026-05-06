@@ -36,6 +36,7 @@ JsonObject = dict[str, Any]
 JsonList = list[Any]
 MetricsImplementation = Literal["automated", "not_applicable", "missing_artifacts"]
 MetricsSource = Literal["flow_artifact", "plan_envelope"]
+RunErrorStatus = Literal["http_error", "connection_error", "error"]
 
 SCORE_AXES = [
     "clarification_restraint",
@@ -919,25 +920,42 @@ def run_case(
         result.status = "applied"
         return result
     except urllib.error.HTTPError as error:
-        result.status = "http_error"
-        result.error = format_http_error(error)
-        result.metrics_implementation = "missing_artifacts"
-        (case_dir / "error.txt").write_text(result.error, encoding="utf-8")
-        return result
-    except urllib.error.URLError as error:
-        result.status = "connection_error"
-        result.error = (
-            f"{error}. Is the backend listening at the configured --api-base?"
+        return _finalize_error_result(
+            result,
+            case_dir,
+            status="http_error",
+            error_text=format_http_error(error),
         )
-        result.metrics_implementation = "missing_artifacts"
-        (case_dir / "error.txt").write_text(result.error, encoding="utf-8")
-        return result
+    except urllib.error.URLError as error:
+        return _finalize_error_result(
+            result,
+            case_dir,
+            status="connection_error",
+            error_text=(
+                f"{error}. Is the backend listening at the configured --api-base?"
+            ),
+        )
     except Exception as error:  # noqa: BLE001 - outer eval runner boundary
-        result.status = "error"
-        result.error = str(error)
-        result.metrics_implementation = "missing_artifacts"
-        (case_dir / "error.txt").write_text(result.error, encoding="utf-8")
-        return result
+        return _finalize_error_result(
+            result,
+            case_dir,
+            status="error",
+            error_text=str(error),
+        )
+
+
+def _finalize_error_result(
+    result: CaseRunResult,
+    case_dir: Path,
+    *,
+    status: RunErrorStatus,
+    error_text: str,
+) -> CaseRunResult:
+    result.status = status
+    result.error = error_text
+    (case_dir / "error.txt").write_text(error_text, encoding="utf-8")
+    attach_material_metrics(result, case_dir)
+    return result
 
 
 def inspect_flow_authoring(client: ApiClient, flow_id: str, case_dir: Path) -> None:
