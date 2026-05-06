@@ -33,7 +33,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T024
+active_task: T025
 
 tasks:
   - id: T001
@@ -1276,7 +1276,7 @@ tasks:
   - id: T024
     type: scout
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Use the new automated metrics and saved live artifacts to identify the next long-term material-efficiency improvement, especially high source duplication/fan-in in C1 and C5."
     inputs:
@@ -1294,6 +1294,41 @@ tasks:
       - "Metric evidence table for C1/C5/N1/Q1."
       - "Root cause hypothesis with file:line evidence."
       - "Recommended next Worker objective, allowed_files, verify, and stop_if, or complete/no-op if no safe improvement exists."
+    receipt:
+      result: done
+      summary: "Automated metrics show repeated source-text reattachment in C1/C5. Most duplication comes from downstream JSON extractor chaining that adds both the immediately prior structured output and the original transcript as `Källmaterial`. N1/Q1 have zero source duplication, confirming this is specific to source-preserving audio/document chains, not the metric itself."
+      evidence:
+        - "C1 /tmp/material-efficiency-live-eval/20260506-030534-t021-live-eval-material-metrics/C1-run1/flow.json: 14 steps; source_duplication_count=11; final text composer fan_in_width=12 and binding_bytes=1081."
+        - "C1 steps 3-12 each use `{{ step_N.output.structured }} Källmaterial: {{ step_1.output.text }}`."
+        - "C5 /tmp/material-efficiency-live-eval/20260506-030534-t021-live-eval-material-metrics/C5-run1/flow.json: 9 steps; source_duplication_count=5; final text composer fan_in_width=7."
+        - "N1 has one step and source_duplication_count=0."
+        - "Q1 has three text quality-chain steps and source_duplication_count=0."
+      root_cause_hypothesis: "Source preservation is currently implemented by repeating the original transcript reference in many downstream JSON extraction prompts. That is safer than source loss, but for long chains it creates predictable binding growth and repeated transcript exposure."
+      recommended_next_task: T025
+
+  - id: T025
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Choose whether the next Worker should reduce repeated source-material bindings in long audio/document chains, and define the smallest safe canonical-owner slice."
+    inputs:
+      - "T024 receipt"
+      - backend/src/intric/flows/ai_builder/ai_builder_source_material.py
+      - backend/src/intric/flows/ai_builder/ai_builder_create_dataflow.py
+      - backend/src/intric/flows/ai_builder/ai_builder_step_transition_policy.py
+      - backend/src/intric/flows/ai_builder/ai_builder_material_metrics.py
+      - backend/tests/unittests/flows/ai_builder
+    constraints:
+      - "Do not implement in this Judge task."
+      - "Run Claude peer loop before activating any Worker."
+      - "Do not remove source preservation just to improve a metric."
+      - "Prefer a deterministic source-material routing invariant over prompt/case-specific text."
+      - "Require live eval verification after any chosen Worker."
+    expected_output:
+      - "activate_worker | blocked | no_change"
+      - "If activate_worker: exact objective, allowed_files, verify commands using -n 4, stop_if."
+      - "Risk analysis for source preservation vs context efficiency."
     receipt: null
 
   - id: T999
