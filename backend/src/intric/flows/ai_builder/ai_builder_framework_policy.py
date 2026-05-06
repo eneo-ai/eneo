@@ -675,10 +675,10 @@ def _resolve_direct_output_choice(
         ),
     ):
         return "structured_text"
-    if _looks_like_text_terminal_output(role_scoped_text or fallback_text):
-        return "structured_text"
     if _looks_like_final_json_output(role_scoped_text or fallback_text):
         return "structured_json"
+    if _looks_like_text_terminal_output(role_scoped_text or fallback_text):
+        return "structured_text"
     if _looks_like_pdf_template_expectation(role_scoped_text or fallback_text):
         return "pdf_document"
     return None
@@ -693,13 +693,22 @@ def _looks_like_text_terminal_output(text: str) -> bool:
             "docx",
             "word",
             "pdf",
-            "json",
             "spreadsheet",
             "kalkylblad",
             "excel",
         ),
     ):
         return False
+    if contains_any_phrase(
+        text,
+        (
+            "slutligen skriva en sammanställning",
+            "slutligen skriva en sammanstallning",
+            "till sist skriva en sammanställning",
+            "till sist skriva en sammanstallning",
+        ),
+    ):
+        return True
     return contains_any_phrase(
         text,
         (
@@ -711,6 +720,8 @@ def _looks_like_text_terminal_output(text: str) -> bool:
             "textresultat",
             "text output",
             "text response",
+            "sammanställning som text",
+            "sammanstallning som text",
         ),
     )
 
@@ -750,15 +761,15 @@ def _looks_like_final_json_output(text: str) -> bool:
     return contains_any_phrase(
         normalized,
         (
-            "structured json",
-            "strukturerad json",
             "json output",
             "output json",
             "output as json",
             "output ska vara json",
             "utdata ska vara json",
+            "slutresultatet ska vara strukturerad json",
             "slutresultat json",
             "slutresultatet ska vara json",
+            "final output should be structured json",
             "final output json",
             "final output should be json",
             "return json",

@@ -998,6 +998,146 @@ def test_resolve_output_intent_prefers_text_summary_over_pdf_input_reference() -
     assert intent.terminal_output == "structured_text"
 
 
+def test_intermediate_json_extraction_with_final_prose_does_not_resolve_json() -> None:
+    prompt = (
+        "Användaren laddar upp 2-5 underlagsfiler. Flödet ska extrahera "
+        "nyckelfakta som strukturerad JSON från varje fil eller från varje "
+        "dokumentdel, sedan identifiera motsägelser mellan källorna i ett "
+        "separat analyssteg, och slutligen skriva en sammanställning där "
+        "fakta och motsägelser presenteras tydligt."
+    )
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output == "structured_text"
+
+
+def test_bare_structured_json_phrase_does_not_resolve_terminal_output() -> None:
+    prompt = "Extrahera nyckelfakta som strukturerad JSON från varje dokument."
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output is None
+
+
+def test_explicit_terminal_json_survives_intermediate_json_mentions() -> None:
+    prompt = (
+        "Extrahera nyckelfakta som strukturerad JSON från varje fil och "
+        "jämför källorna. Slutresultatet ska vara JSON."
+    )
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output == "structured_json"
+
+
+def test_explicit_terminal_structured_json_survives_intermediate_json_mentions() -> (
+    None
+):
+    prompt = (
+        "Extrahera nyckelfakta som strukturerad JSON från varje fil och "
+        "jämför källorna. Slutresultatet ska vara strukturerad JSON."
+    )
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output == "structured_json"
+
+
+def test_explicit_terminal_json_wins_over_final_prose_wording() -> None:
+    prompt = (
+        "Extrahera nyckelfakta som strukturerad JSON från varje fil och "
+        "slutligen skriva en sammanställning för granskning. "
+        "Slutresultatet ska vara JSON."
+    )
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output == "structured_json"
+
+
+def test_artifact_output_wins_over_final_prose_wording() -> None:
+    prompt = "Bygg ett flöde där du slutligen skriva en sammanställning som Word-fil."
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output == "docx_document"
+
+
+def test_intermediate_json_extraction_with_final_docx_keeps_docx() -> None:
+    prompt = (
+        "Extrahera nyckelfakta som strukturerad JSON från varje fil och "
+        "skapa slutdokumentet som DOCX."
+    )
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output == "docx_document"
+
+
+def test_intermediate_json_extraction_with_final_pdf_keeps_pdf() -> None:
+    prompt = (
+        "Extrahera nyckelfakta som strukturerad JSON från varje fil och "
+        "skapa slutrapporten som PDF."
+    )
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output == "pdf_document"
+
+
+def test_requirements_summary_structured_text_does_not_become_json_output() -> None:
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "tool",
+                "content": "Requirements presented to user.",
+                "metadata": {
+                    "requirements_summary": {
+                        "output_description": "Strukturerad sammanställning som text."
+                    }
+                },
+            }
+        ]
+    )
+
+    assert signals["final_output_mode"] == {"structured_text"}
+
+
+def test_requirements_summary_ascii_structured_text_is_supported() -> None:
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "tool",
+                "content": "Requirements presented to user.",
+                "metadata": {
+                    "requirements_summary": {
+                        "output_description": "Strukturerad sammanstallning som text."
+                    }
+                },
+            }
+        ]
+    )
+
+    assert signals["final_output_mode"] == {"structured_text"}
+
+
 def test_resolve_output_intent_keeps_pdf_when_summary_phrase_describes_pdf_content() -> (
     None
 ):
