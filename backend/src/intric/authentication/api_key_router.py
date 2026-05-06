@@ -953,10 +953,27 @@ async def list_api_keys(
     policy: ApiKeyPolicyService = container.api_key_policy_service()
 
     ownership_value = ownership.value if ownership else None
-    # /account/api-keys is a personal listing — only show keys the caller owns,
-    # regardless of tenant-admin manageability. Tenant-wide listing is the
-    # responsibility of /admin/api-keys.
-    owner_filter = user.id
+    # Default: personal listing — only show keys the caller owns. Tenant-wide
+    # listing is the responsibility of /admin/api-keys.
+    # Exception: when the caller can administer the requested scope (space /
+    # assistant / app), drop the owner filter so service keys (owner_user_id
+    # is NULL by design) and other members' keys are visible to admins of
+    # that scope. Falls back to the personal filter when the caller is not
+    # a scope admin.
+    owner_filter: UUID | None = user.id
+    if (
+        scope_type is not None
+        and scope_type != ApiKeyScopeType.TENANT
+        and scope_id is not None
+    ):
+        try:
+            await policy.ensure_creator_authorized(
+                scope_type=scope_type, scope_id=scope_id
+            )
+            owner_filter = None
+        except ApiKeyValidationError:
+            pass
+
     if limit is not None and not previous:
         filtered_keys = await _collect_manageable_keys_for_page(
             repo=repo,

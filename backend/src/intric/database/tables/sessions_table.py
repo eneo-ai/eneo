@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from intric.database.tables.api_keys_v2_table import ApiKeysV2
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.base_class import BasePublic
 from intric.database.tables.group_chats_table import GroupChatsTable
@@ -15,7 +16,15 @@ if TYPE_CHECKING:
 
 
 class Sessions(BasePublic):
-    user_id: Mapped[UUID] = mapped_column(ForeignKey(Users.id, ondelete="CASCADE"))
+    # user_id is nullable so service-key sessions (which authenticate via an
+    # API key, not a real user) can be persisted. api_key_id carries the
+    # owning principal in that case. Exactly one of the two is set per row.
+    user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="CASCADE"), nullable=True
+    )
+    api_key_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(ApiKeysV2.id, ondelete="SET NULL"), nullable=True
+    )
     name: Mapped[str] = mapped_column()
     feedback_value: Mapped[Optional[int]] = mapped_column()
     feedback_text: Mapped[Optional[str]] = mapped_column()

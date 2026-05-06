@@ -35,6 +35,42 @@ Security considerations:
 from typing import Any, Mapping, Optional
 from uuid import UUID
 
+from intric.authentication.auth_models import is_service_api_key
+
+
+def _actor_snapshot(actor: Any) -> dict[str, Any]:
+    """Build the ``actor`` block for audit metadata.
+
+    Service keys resolve to a synthetic UserInDB whose id, email and
+    username are placeholders ("sk-xxxx@service.key", "Service Key (...)").
+    Surfacing those in the audit UI is misleading — there's no real user.
+    For service-key actors we emit a service-shaped block keyed by the
+    actual API key id and name, with no email field.
+
+    For real users we keep the existing shape (id, name, email).
+    """
+    if is_service_api_key(actor):
+        key = actor.active_api_key
+        return {
+            "type": "service_key",
+            "id": str(key.id),
+            "name": key.name,
+            "key_prefix": getattr(key, "key_prefix", None),
+        }
+
+    actor_name = (
+        getattr(actor, "username", None)
+        or getattr(actor, "name", None)
+        or (getattr(actor, "email", "") or "").split("@")[0]
+        or "unknown"
+    )
+    return {
+        "type": "user",
+        "id": str(actor.id),
+        "name": actor_name,
+        "email": getattr(actor, "email", None),
+    }
+
 
 class AuditMetadata:
     """Factory for standardized audit metadata structures."""
@@ -80,14 +116,6 @@ class AuditMetadata:
                 tenant=tenant,  # Includes tenant_id and tenant_name automatically
             )
         """
-        # Safe actor name: prefer username, fallback to email prefix, then "unknown"
-        actor_name = (
-            getattr(actor, "username", None)
-            or getattr(actor, "name", None)
-            or (getattr(actor, "email", "") or "").split("@")[0]
-            or "unknown"
-        )
-
         # Build target snapshot with all available context
         target_snapshot = {
             "id": str(target.id),
@@ -110,11 +138,7 @@ class AuditMetadata:
             target_snapshot["tenant_name"] = getattr(tenant, "name", None)
 
         metadata: dict[str, Any] = {
-            "actor": {
-                "id": str(actor.id),
-                "name": actor_name,
-                "email": getattr(actor, "email", None),
-            },
+            "actor": _actor_snapshot(actor),
             "target": target_snapshot,
         }
 
@@ -159,20 +183,8 @@ class AuditMetadata:
                 extra={"space_id": str(space.id), "space_name": space.name}
             )
         """
-        # Safe actor name: prefer username, fallback to email prefix, then "unknown"
-        actor_name = (
-            getattr(actor, "username", None)
-            or getattr(actor, "name", None)
-            or (getattr(actor, "email", "") or "").split("@")[0]
-            or "unknown"
-        )
-
         metadata: dict[str, Any] = {
-            "actor": {
-                "id": str(actor.id),
-                "name": actor_name,
-                "email": getattr(actor, "email", None),
-            },
+            "actor": _actor_snapshot(actor),
             "operation": operation,
             "targets": [
                 {
@@ -277,20 +289,8 @@ class AuditMetadata:
                 extra={"ip_address": request.client.host, "attempts": 3}
             )
         """
-        # Safe actor name: prefer username, fallback to email prefix, then "unknown"
-        actor_name = (
-            getattr(actor, "username", None)
-            or getattr(actor, "name", None)
-            or (getattr(actor, "email", "") or "").split("@")[0]
-            or "unknown"
-        )
-
         metadata: dict[str, Any] = {
-            "actor": {
-                "id": str(actor.id),
-                "name": actor_name,
-                "email": getattr(actor, "email", None),
-            },
+            "actor": _actor_snapshot(actor),
             "authentication_method": method,
             "success": success,
         }

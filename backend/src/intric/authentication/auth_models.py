@@ -12,6 +12,7 @@ from pydantic import (
     field_validator,
 )
 
+from intric.audit.domain.actor_types import ActorType
 from intric.main.config import get_settings
 
 if TYPE_CHECKING:
@@ -68,6 +69,19 @@ def is_service_api_key(user: "UserInDB") -> bool:
     if key is None:
         return False
     return key.ownership == ApiKeyOwnership.SERVICE
+
+
+def audit_actor_for(user: "UserInDB") -> tuple[UUID | None, ActorType]:
+    """Resolve (actor_id, actor_type) for an audit_log entry on this request.
+
+    Service keys have no real user row — passing the synthetic user.id into
+    audit_log.actor_id (FK to users.id) would FK-violate. Mirror the gating
+    pattern used by user_service._log_api_key_used: emit (None, SYSTEM) for
+    service keys, (user.id, USER) for real users.
+    """
+    if is_service_api_key(user):
+        return None, ActorType.SYSTEM
+    return user.id, ActorType.USER
 
 
 class ApiKeyType(str, Enum):
