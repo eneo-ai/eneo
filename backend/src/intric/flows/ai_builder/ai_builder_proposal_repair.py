@@ -27,6 +27,13 @@ _EXTRA_RETRY_FAILURE_KINDS: frozenset[ToolProcessingFailureKind] = frozenset(
 EventBatch = tuple[dict[str, str], ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ForcedToolRetryOutcome:
+    events: EventBatch | None = None
+    feedback: str | None = None
+    failure_kind: ToolProcessingFailureKind | None = None
+
+
 class BuildSelfCorrectionErrorEvent(Protocol):
     def __call__(
         self,
@@ -234,7 +241,7 @@ async def request_self_correction(
     target_tool_name: str,
     forced_tool_prompt: str,
     build_self_correction_error_event: BuildSelfCorrectionErrorEvent,
-    retry_forced_tool_after_text: Callable[..., Awaitable[EventBatch | None]],
+    retry_forced_tool_after_text: Callable[..., Awaitable[ForcedToolRetryOutcome]],
     process_tool_kwargs: dict[str, Any] | None = None,
     flow: Any = None,
     build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
@@ -365,7 +372,7 @@ async def request_self_correction(
             if looks_like_information_request(assistant_text):
                 yield build_text_event(assistant_text)
                 return
-            forced_events = await retry_forced_tool_after_text(
+            forced_outcome = await retry_forced_tool_after_text(
                 correction_messages=correction_messages,
                 assistant_text=assistant_text,
                 tool_schemas=tool_schemas,
@@ -384,8 +391,8 @@ async def request_self_correction(
                 flow=flow,
                 build_assistant_metadata=build_assistant_metadata,
             )
-            if forced_events is not None:
-                for event in forced_events:
+            if forced_outcome.events is not None:
+                for event in forced_outcome.events:
                     yield event
                 return
 
@@ -394,8 +401,8 @@ async def request_self_correction(
                 assistant_text,
             )
             yield build_self_correction_error_event(
-                feedback=None,
-                failure_kind="validation",
+                feedback=forced_outcome.feedback,
+                failure_kind=forced_outcome.failure_kind or "validation",
             )
             return
 
@@ -428,11 +435,11 @@ async def retry_forced_tool_after_text(
     process_tool_kwargs: dict[str, Any] | None = None,
     flow: Any = None,
     build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
-) -> EventBatch | None:
+) -> ForcedToolRetryOutcome:
     if looks_like_information_request(assistant_text):
-        return None
+        return ForcedToolRetryOutcome()
 
-    direct_events = await _try_process_json_text_as_tool_arguments(
+    direct_outcome = await _try_process_json_text_as_tool_arguments(
         assistant_text=assistant_text,
         session_id=session_id,
         conversation=conversation,
@@ -445,8 +452,12 @@ async def retry_forced_tool_after_text(
         flow=flow,
         build_assistant_metadata=build_assistant_metadata,
     )
-    if direct_events is not None:
-        return direct_events
+    if (
+        direct_outcome.events is not None
+        or direct_outcome.feedback is not None
+        or direct_outcome.failure_kind is not None
+    ):
+        return direct_outcome
 
     forced_messages = list(correction_messages) + [
         {"role": "assistant", "content": assistant_text},
@@ -471,12 +482,12 @@ async def retry_forced_tool_after_text(
         )
     except Exception as error:
         logger.error("Forced proposal retry failed", exc_info=error)
-        return None
+        return ForcedToolRetryOutcome()
 
     choice = response.choices[0]
     message = choice.message
     if not (hasattr(message, "tool_calls") and message.tool_calls):
-        return None
+        return ForcedToolRetryOutcome()
 
     for tool_call in message.tool_calls:
         if tool_call.function.name != target_tool_name:
@@ -485,7 +496,10 @@ async def retry_forced_tool_after_text(
             arguments = json.loads(tool_call.function.arguments)
         except Exception as error:
             logger.warning("Forced proposal retry returned invalid payload: %s", error)
-            return None
+            return ForcedToolRetryOutcome(
+                feedback=_invalid_tool_arguments_message(error),
+                failure_kind="parse",
+            )
 
         invocation_kwargs = _build_process_tool_kwargs(
             process_tool_arguments=process_tool_arguments,
@@ -514,11 +528,14 @@ async def retry_forced_tool_after_text(
                 tool_result.failure_kind or "unknown",
                 tool_result.feedback or "missing feedback",
             )
-            return None
+            return ForcedToolRetryOutcome(
+                feedback=tool_result.feedback,
+                failure_kind=tool_result.failure_kind,
+            )
 
-        return _tool_result_events(tool_result)
+        return ForcedToolRetryOutcome(events=_tool_result_events(tool_result))
 
-    return None
+    return ForcedToolRetryOutcome()
 
 
 async def _try_process_json_text_as_tool_arguments(
@@ -534,10 +551,10 @@ async def _try_process_json_text_as_tool_arguments(
     process_tool_kwargs: dict[str, Any] | None,
     flow: Any,
     build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
-) -> EventBatch | None:
+) -> ForcedToolRetryOutcome:
     arguments = _parse_json_object_text(assistant_text)
     if arguments is None:
-        return None
+        return ForcedToolRetryOutcome()
 
     invocation_kwargs = _build_process_tool_kwargs(
         process_tool_arguments=process_tool_arguments,
@@ -565,7 +582,7 @@ async def _try_process_json_text_as_tool_arguments(
             "Accepted %s arguments returned as JSON text during forced retry.",
             target_tool_name,
         )
-        return _tool_result_events(tool_result)
+        return ForcedToolRetryOutcome(events=_tool_result_events(tool_result))
 
     logger.warning(
         "JSON text fallback for %s returned %s issue: %s",
@@ -573,7 +590,10 @@ async def _try_process_json_text_as_tool_arguments(
         tool_result.failure_kind or "unknown",
         tool_result.feedback or "missing feedback",
     )
-    return None
+    return ForcedToolRetryOutcome(
+        feedback=tool_result.feedback,
+        failure_kind=tool_result.failure_kind,
+    )
 
 
 def _parse_json_object_text(text: str) -> dict[str, Any] | None:

@@ -115,6 +115,9 @@ from intric.flows.ai_builder.ai_builder_plan_store import (
     warnings_for_quality_retry,
 )
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
+    ForcedToolRetryOutcome,
+)
+from intric.flows.ai_builder.ai_builder_proposal_repair import (
     request_self_correction as run_request_self_correction,
 )
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
@@ -1626,7 +1629,9 @@ class AIBuilderProposalProcessor:
                 counts_as_repair=True,
             )
 
-        async def _retry_forced_tool_after_text(**kwargs: Any) -> EventBatch | None:
+        async def _retry_forced_tool_after_text(
+            **kwargs: Any,
+        ) -> ForcedToolRetryOutcome:
             return await self.retry_forced_tool_after_text(
                 **kwargs,
                 usage_tracker=ctx.usage_tracker,
@@ -1700,7 +1705,7 @@ class AIBuilderProposalProcessor:
         usage_tracker: ProposalTurnTelemetry | None = None,
         request_id: str | None = None,
         build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
-    ) -> EventBatch | None:
+    ) -> ForcedToolRetryOutcome:
         merged_process_kwargs = dict(process_tool_kwargs or {})
         if resource_catalog is not None:
             merged_process_kwargs.setdefault("resource_catalog", resource_catalog)
@@ -1743,12 +1748,14 @@ class AIBuilderProposalProcessor:
                 request_id=resolved_request_id,
                 tool_name=target_tool_name,
             )
-            return (
-                _build_architecture_error_event(
-                    error,
-                    request_id=resolved_request_id,
-                    tool_name=target_tool_name,
-                ),
+            return ForcedToolRetryOutcome(
+                events=(
+                    _build_architecture_error_event(
+                        error,
+                        request_id=resolved_request_id,
+                        tool_name=target_tool_name,
+                    ),
+                )
             )
 
     async def retry_forced_proposal_after_text(
@@ -1787,7 +1794,7 @@ class AIBuilderProposalProcessor:
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
         )
-        return await self.retry_forced_tool_after_text(
+        outcome = await self.retry_forced_tool_after_text(
             correction_messages=correction_messages,
             assistant_text=assistant_text,
             tool_schemas=tool_schemas,
@@ -1815,6 +1822,8 @@ class AIBuilderProposalProcessor:
                 )
             ),
         )
+        # Feedback is consumed only by the self-correction boundary; legacy callers get events.
+        return outcome.events
 
     async def request_non_question_continuation(
         self,

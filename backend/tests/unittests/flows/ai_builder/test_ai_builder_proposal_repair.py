@@ -12,6 +12,7 @@ from intric.flows.ai_builder.ai_builder_proposal_processor import (
     MAX_SELF_CORRECTION_RETRIES,
 )
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
+    ForcedToolRetryOutcome,
     _build_retry_feedback,
     request_self_correction,
     retry_forced_tool_after_text,
@@ -100,7 +101,7 @@ async def test_retry_forced_tool_after_text_does_not_inject_flow_into_processors
         flow=None,
     )
 
-    assert result == ({"event": "plan", "data": "{}"},)
+    assert result.events == ({"event": "plan", "data": "{}"},)
     assert processed_arguments["flow_name"] == "Test"
 
 
@@ -154,8 +155,131 @@ async def test_retry_forced_tool_after_text_accepts_json_arguments_returned_as_t
         flow=None,
     )
 
-    assert result == ({"event": "plan", "data": "{}"},)
+    assert result.events == ({"event": "plan", "data": "{}"},)
     assert processed_arguments["flow_name"] == "Text JSON outline"
+    call_proposal_completion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_retry_forced_tool_after_text_preserves_json_text_validation_feedback() -> (
+    None
+):
+    call_proposal_completion = AsyncMock()
+
+    async def process_create_arguments(**_: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            event=None,
+            feedback="Validation errors:\n1. Missing required field report_period.",
+            failure_kind="validation",
+        )
+
+    result = await retry_forced_tool_after_text(
+        correction_messages=[{"role": "system", "content": "Prompt"}],
+        assistant_text=json.dumps(
+            {
+                "flow_name": "Invalid text JSON outline",
+                "plan_rationale": "The model returned invalid JSON as prose.",
+                "steps": [],
+            }
+        ),
+        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        session_id=uuid4(),
+        conversation=[],
+        new_messages_start=0,
+        available_model_refs=None,
+        available_kb_refs=None,
+        max_output_tokens=1024,
+        target_tool_name="outline_flow",
+        forced_tool_prompt="Call outline_flow.",
+        forced_proposal_temperature=0.1,
+        call_proposal_completion=call_proposal_completion,
+        process_tool_arguments=process_create_arguments,
+        process_tool_kwargs=None,
+        flow=None,
+    )
+
+    assert result.events is None
+    assert result.feedback == (
+        "Validation errors:\n1. Missing required field report_period."
+    )
+    assert result.failure_kind == "validation"
+    call_proposal_completion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_retry_forced_tool_after_text_preserves_forced_payload_parse_feedback() -> (
+    None
+):
+    tool_call = SimpleNamespace(
+        id="call_invalid",
+        function=SimpleNamespace(name="outline_flow", arguments="{not json"),
+    )
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content=None, tool_calls=[tool_call])
+            )
+        ]
+    )
+
+    result = await retry_forced_tool_after_text(
+        correction_messages=[{"role": "system", "content": "Prompt"}],
+        assistant_text="Här är mitt förslag.",
+        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        session_id=uuid4(),
+        conversation=[],
+        new_messages_start=0,
+        available_model_refs=None,
+        available_kb_refs=None,
+        max_output_tokens=1024,
+        target_tool_name="outline_flow",
+        forced_tool_prompt="Call outline_flow.",
+        forced_proposal_temperature=0.1,
+        call_proposal_completion=AsyncMock(return_value=response),
+        process_tool_arguments=AsyncMock(),
+        process_tool_kwargs=None,
+        flow=None,
+    )
+
+    assert result.events is None
+    assert result.feedback is not None
+    assert "Invalid tool call arguments:" in result.feedback
+    assert "Expecting property name enclosed" in result.feedback
+    assert result.failure_kind == "parse"
+
+
+@pytest.mark.asyncio
+async def test_retry_forced_tool_after_text_preserves_information_request_empty_outcome() -> (
+    None
+):
+    call_proposal_completion = AsyncMock()
+
+    result = await retry_forced_tool_after_text(
+        correction_messages=[{"role": "system", "content": "Prompt"}],
+        assistant_text="Vilken modell ska jag använda?",
+        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        session_id=uuid4(),
+        conversation=[],
+        new_messages_start=0,
+        available_model_refs=None,
+        available_kb_refs=None,
+        max_output_tokens=1024,
+        target_tool_name="outline_flow",
+        forced_tool_prompt="Call outline_flow.",
+        forced_proposal_temperature=0.1,
+        call_proposal_completion=call_proposal_completion,
+        process_tool_arguments=AsyncMock(),
+        process_tool_kwargs=None,
+        flow=None,
+    )
+
+    assert result == ForcedToolRetryOutcome()
     call_proposal_completion.assert_not_awaited()
 
 
@@ -262,7 +386,7 @@ async def _run_repair_capturing(
             "event": "error",
             "data": feedback or "",
         },
-        retry_forced_tool_after_text=AsyncMock(return_value=None),
+        retry_forced_tool_after_text=AsyncMock(return_value=ForcedToolRetryOutcome()),
         process_tool_kwargs=None,
         flow=None,
     ):
@@ -384,7 +508,7 @@ async def test_request_self_correction_emits_error_event_when_planner_bails_to_c
             "event": "error",
             "data": feedback or "",
         },
-        retry_forced_tool_after_text=AsyncMock(return_value=None),
+        retry_forced_tool_after_text=AsyncMock(return_value=ForcedToolRetryOutcome()),
         process_tool_kwargs=None,
         flow=None,
     ):
@@ -409,6 +533,69 @@ async def test_request_self_correction_emits_error_event_when_planner_bails_to_c
     assert "platta ut JSON-fälten" not in combined_payload, (
         f"The planner's bail phrasing must not reach the user; got: {combined_payload}"
     )
+
+
+@pytest.mark.asyncio
+async def test_request_self_correction_includes_forced_retry_validation_feedback() -> (
+    None
+):
+    text_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content="Här är en korrigerad plan.",
+                    tool_calls=None,
+                )
+            )
+        ]
+    )
+
+    async def call_proposal_completion(**_: Any) -> SimpleNamespace:
+        return text_response
+
+    forced_retry = AsyncMock(
+        return_value=ForcedToolRetryOutcome(
+            feedback="Validation errors:\n1. Invalid step reference 'step_k'.",
+            failure_kind="validation",
+        )
+    )
+
+    events: list[dict[str, str]] = []
+    async for event in request_self_correction(
+        session_id=uuid4(),
+        conversation=[],
+        new_messages_start=0,
+        error_message="Invalid outline_flow draft.",
+        llm_messages=[{"role": "user", "content": "build flow"}],
+        tool_call=_original_tool_call(),
+        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        available_model_refs=None,
+        available_kb_refs=None,
+        max_output_tokens=1024,
+        self_correction_temperature=0.35,
+        self_correction_bumped_temperature=0.6,
+        max_self_correction_retries=3,
+        call_proposal_completion=call_proposal_completion,
+        process_tool_arguments=AsyncMock(),
+        target_tool_name="outline_flow",
+        forced_tool_prompt="Call outline_flow.",
+        build_self_correction_error_event=lambda *, feedback, failure_kind: {
+            "event": "error",
+            "data": feedback or "",
+        },
+        retry_forced_tool_after_text=forced_retry,
+        process_tool_kwargs=None,
+        flow=None,
+    ):
+        events.append(event)
+
+    assert events[-1] == {
+        "event": "error",
+        "data": "Validation errors:\n1. Invalid step reference 'step_k'.",
+    }
+    forced_retry.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -460,7 +647,7 @@ async def test_request_self_correction_still_yields_text_for_legitimate_info_req
             "event": "error",
             "data": feedback or "",
         },
-        retry_forced_tool_after_text=AsyncMock(return_value=None),
+        retry_forced_tool_after_text=AsyncMock(return_value=ForcedToolRetryOutcome()),
         process_tool_kwargs=None,
         flow=None,
     ):

@@ -2006,6 +2006,125 @@ tasks:
         - "Before the next compare-routing slice, evaluate typed ComparisonEvidence on DiscoveryProfile."
         - "Before the next slot-addition slice, evaluate collapsing planning_state_builder.py scalar-slot blocks into a list-driven resolver."
 
+  - id: T037
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Decide the next safe Worker slice for the C2 self_correction_invalid_plan live failure without coupling it to C3 comparison routing."
+    inputs:
+      - "/tmp/material-efficiency-live-eval/20260506-065712-t036-c2-regression-check/summary.json"
+      - "/tmp/material-efficiency-live-eval/20260506-065049-t036-create-suite-regression/summary.json"
+      - "backend/src/intric/flows/ai_builder"
+      - "backend/tests/unittests/flows/ai_builder"
+      - "docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml"
+    constraints:
+      - "Read-only Judge task; do not implement."
+      - "Use source/artifact evidence to identify the canonical owner before selecting any Worker."
+      - "Prefer a long-term repair/validation-contract fix over making C2 pass by prompt tuning."
+      - "Run Claude peer loop before activating any Worker."
+      - "If evidence is insufficient, choose a Scout task instead of guessing."
+      - "Do not stage or commit unrelated dirty files."
+    expected_output:
+      - "activate_worker | activate_scout | blocked | no_change"
+      - "Root-cause hypothesis with artifact/source evidence."
+      - "If activate_worker: exact objective, allowed_files, verify commands using -n 4, eval command, and stop_if."
+    receipt:
+      result: done
+      decision: "activate_worker"
+      selected_worker: T038
+      note: docs/goals/material-efficiency/notes/T037-judge-c2-repair-feedback.md
+      summary: "Selected a repair-boundary contract slice: preserve forced-tool retry validation feedback through self-correction error events so C2 and future invalid-plan failures are diagnosable before fixing the underlying validator issue."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t037-judge-c2-repair-feedback-20260506T051932Z.md"
+        - ".codex/artifacts/claude-peer-loop-t037-revised-judge-c2-repair-feedback-20260506T052337Z.md"
+      green_light: true
+      worker_scope:
+        objective: "Preserve forced-tool retry validation feedback through the typed proposal-repair outcome contract without changing successful proposal behavior."
+        allowed_files:
+          - backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py
+          - backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py
+          - backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py
+          - backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py
+          - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+          - docs/goals/material-efficiency/notes/T037-judge-c2-repair-feedback.md
+          - docs/goals/material-efficiency/notes/T038-worker-repair-feedback-preservation.md
+        verify:
+          - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q"
+          - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+          - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+          - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+          - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+          - "uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --api-base http://localhost:8123 --api-key '<local-key>' --case C2 --runs 1 --apply --publish --output-dir /tmp/material-efficiency-live-eval/<timestamp>-t038-c2-repair-feedback"
+
+  - id: T038
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Preserve forced-tool retry validation feedback through self-correction error events."
+    allowed_files:
+      - backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py
+      - backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T037-judge-c2-repair-feedback.md
+      - docs/goals/material-efficiency/notes/T038-worker-repair-feedback-preservation.md
+    verify:
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q"
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --api-base http://localhost:8123 --api-key '<local-key>' --case C2 --runs 1 --apply --publish --output-dir /tmp/material-efficiency-live-eval/<timestamp>-t038-c2-repair-feedback"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Cannot produce red tests for feedback loss before source edits."
+      - "Clean implementation requires public SSE schema changes instead of existing message feedback."
+      - "Fix would expose raw model output, API keys, or sensitive prompt/body content beyond existing sanitized validator feedback."
+      - "Worker starts tuning C2 planning behavior instead of preserving repair feedback."
+      - "Verification fails twice for reasons not proven pre-existing."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T038-worker-repair-feedback-preservation.md
+      summary: "Forced-tool retry outcomes now preserve sanitized feedback and failure_kind through the self-correction error boundary while legacy callers still receive event batches."
+      changed_files:
+        - backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py
+        - backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py
+        - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+        - docs/goals/material-efficiency/notes/T037-judge-c2-repair-feedback.md
+        - docs/goals/material-efficiency/notes/T038-worker-repair-feedback-preservation.md
+      red_evidence:
+        - "Targeted tests failed before source edits because forced retry validation and parse feedback were discarded before self-correction emitted the final error event."
+      verification:
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q"
+          status: pass
+          output: "65 passed"
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+          status: pass
+          output: "2052 passed, 4 skipped"
+        - cmd: "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+          status: pass
+          output: "All checks passed"
+        - cmd: "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+          status: pass
+          output: "4 files already formatted"
+      live_eval:
+        first_c2_rerun:
+          summary_json: "/tmp/material-efficiency-live-eval/20260506-073527-t038-c2-repair-feedback/summary.json"
+          output: "C2 builder_error with invalid_session_transition cancelled -> awaiting_approval; did not exercise forced-retry feedback path."
+        second_c2_rerun:
+          summary_json: "/tmp/material-efficiency-live-eval/20260506-073651-t038-c2-repair-feedback-rerun2/summary.json"
+          output: "C2 applied; metrics binding_bytes=1632, fan_in_width=7, structured_field_count=12, all_previous_steps_count=0."
+      follow_ups:
+        - "Investigate invalid_session_transition cancelled -> awaiting_approval as a builder session lifecycle issue."
+
   - id: T999
     type: judge
     assignee: Judge

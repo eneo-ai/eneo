@@ -49,6 +49,9 @@ from intric.flows.ai_builder.ai_builder_proposal_processor import (
     _active_submission_tool_schemas,
     terminal_output_type_for_conversation,
 )
+from intric.flows.ai_builder.ai_builder_proposal_repair import (
+    ForcedToolRetryOutcome,
+)
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
@@ -1449,7 +1452,7 @@ async def test_forced_tool_architecture_error_uses_sanitized_event() -> None:
             )
         ),
     ):
-        events = await processor.retry_forced_tool_after_text(
+        outcome = await processor.retry_forced_tool_after_text(
             correction_messages=[{"role": "user", "content": "Build"}],
             assistant_text="Här är planen.",
             tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
@@ -1468,9 +1471,9 @@ async def test_forced_tool_architecture_error_uses_sanitized_event() -> None:
             request_id="req-forced-architecture",
         )
 
-    assert events is not None
-    assert [event["event"] for event in events] == ["error"]
-    payload = json.loads(events[0]["data"])
+    assert outcome.events is not None
+    assert [event["event"] for event in outcome.events] == ["error"]
+    payload = json.loads(outcome.events[0]["data"])
     assert payload["code"] == "architecture_materialization_failed"
     telemetry = tracker.build_planner_telemetry()
     assert telemetry["proposal_first_attempt_failure_kind"] == "architecture"
@@ -2802,7 +2805,11 @@ async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mod
 
     with patch(
         "intric.flows.ai_builder.ai_builder_proposal_processor.run_retry_forced_tool_after_text",
-        new=AsyncMock(return_value={"event": "plan", "data": "{}"}),
+        new=AsyncMock(
+            return_value=ForcedToolRetryOutcome(
+                events=({"event": "plan", "data": "{}"},)
+            )
+        ),
     ) as retry_forced_tool:
         result = await processor.retry_forced_proposal_after_text(
             correction_messages=[{"role": "system", "content": "Prompt"}],
@@ -2820,7 +2827,7 @@ async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mod
             flow=None,
         )
 
-    assert result == {"event": "plan", "data": "{}"}
+    assert result == ({"event": "plan", "data": "{}"},)
     kwargs = retry_forced_tool.await_args.kwargs
     assert kwargs["target_tool_name"] == OUTLINE_FLOW_TOOL_NAME
     assert kwargs["process_tool_arguments"] == processor._process_outline_arguments
