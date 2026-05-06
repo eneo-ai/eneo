@@ -270,6 +270,23 @@ def test_validate_form_schema_rejects_duplicate_field_names_case_insensitive():
         )
 
 
+def test_validate_form_schema_reserved_field_name_error_names_field_and_aliases():
+    with pytest.raises(BadRequestException) as exc_info:
+        validate_form_schema(
+            {
+                "form_schema": {
+                    "fields": [{"name": "step_input", "type": "text"}],
+                }
+            }
+        )
+
+    message = str(exc_info.value)
+    assert "metadata_json.form_schema.fields[0].name 'step_input' is reserved" in message
+    assert "Reserved aliases:" in message
+    assert "flow_input" in message
+    assert "datum" in message
+
+
 def test_validate_steps_rejects_template_fill_for_non_docx_output():
     with pytest.raises(
         BadRequestException, match="template_fill requires output_type 'docx'"

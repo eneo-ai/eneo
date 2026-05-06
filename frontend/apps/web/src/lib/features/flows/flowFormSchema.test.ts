@@ -63,7 +63,9 @@ describe("flowFormSchema", () => {
   });
 
   it("rejects field names that the backend resolver does not expose as aliases", () => {
+    expect(getFlowFormFieldNameIssue("datum")).toBe("reserved");
     expect(getFlowFormFieldNameIssue("flow_input")).toBe("reserved");
+    expect(getFlowFormFieldNameIssue("step_input")).toBe("reserved");
     expect(getFlowFormFieldNameIssue("step_1")).toBe("step_alias");
     expect(getFlowFormFieldNameIssue("step_2.output.text")).toBe("step_alias");
     expect(getFlowFormFieldNameIssue("titel.sv")).toBe("dot");

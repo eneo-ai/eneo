@@ -158,6 +158,19 @@ class NewStepDraft(BaseModel):
         return normalized or None
 
     @field_validator(
+        "knowledge_refs",
+        "mcp_server_refs",
+        "mcp_tool_refs",
+        "uses_form_fields",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_missing_string_lists(cls, values: object) -> object:
+        if values is None:
+            return []
+        return values
+
+    @field_validator(
         "knowledge_refs", "mcp_server_refs", "mcp_tool_refs", "uses_form_fields"
     )
     @classmethod

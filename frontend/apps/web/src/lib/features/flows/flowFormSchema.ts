@@ -32,17 +32,20 @@ export type NormalizedFlowFormField = {
 
 const LEGACY_TEXT_TYPES = new Set(["email", "textarea", "string"]);
 const OPTION_FIELD_TYPES = new Set<NormalizedFlowFormFieldType>(["select", "multiselect"]);
-const FLOW_FORM_RESERVED_VARIABLE_NAMES = new Set([
+export const FLOW_FORM_RESERVED_VARIABLE_NAMES = [
+  "datum",
   "flow",
   "flow_input",
+  "step_input",
   "transkribering",
   "föregående_steg",
   "indata_text",
   "indata_json",
   "indata_filer"
-]);
+] as const;
+export const FLOW_FORM_RESERVED_VARIABLE_NAMES_DISPLAY = FLOW_FORM_RESERVED_VARIABLE_NAMES.join(", ");
 const FLOW_FORM_RESERVED_VARIABLE_NAMES_NORMALIZED = new Set(
-  [...FLOW_FORM_RESERVED_VARIABLE_NAMES].map((name) => name.toLowerCase())
+  FLOW_FORM_RESERVED_VARIABLE_NAMES.map((name) => name.toLowerCase())
 );
 const FLOW_FORM_STEP_ALIAS_PATTERN = /^step_\d+($|[._])/i;
 

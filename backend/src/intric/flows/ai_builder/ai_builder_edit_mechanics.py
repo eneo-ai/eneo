@@ -57,15 +57,20 @@ def _fill_add_payload_mechanics(
     *,
     insert_index: int,
 ) -> AddStepPayload:
+    updates: dict[str, object] = {}
+    input_source = payload.input_source
+    if insert_index == 0 and input_source != InputSource.FLOW_INPUT:
+        input_source = InputSource.FLOW_INPUT
+        updates["input_source"] = InputSource.FLOW_INPUT
+
     if (
         insert_index != 0
-        or payload.input_source != InputSource.FLOW_INPUT
+        or input_source != InputSource.FLOW_INPUT
         or payload.input_type not in _FILE_INPUT_TYPES
     ):
-        return payload
+        return payload.model_copy(update=updates) if updates else payload
 
-    updates: dict[str, object] = {}
-    if "runtime_upload" not in payload.model_fields_set:
+    if not payload.runtime_upload:
         updates["runtime_upload"] = True
     if "runtime_required" not in payload.model_fields_set:
         updates["runtime_required"] = True

@@ -14,6 +14,17 @@ _LEGACY_FORM_FIELD_TYPE_NORMALIZATION = {
     "textarea": "text",
 }
 _STEP_ALIAS_PATTERN = re.compile(r"^step_\d+($|[._])")
+_RESERVED_RUNTIME_VARIABLES_DISPLAY = ", ".join(
+    sorted(RESERVED_RUNTIME_VARIABLES_NORMALIZED)
+)
+
+
+def _reserved_form_field_name_message(index: int, field_name: str) -> str:
+    return (
+        f"metadata_json.form_schema.fields[{index}].name '{field_name}' is reserved for "
+        "Flow runtime variables. Use another field name. Reserved aliases: "
+        f"{_RESERVED_RUNTIME_VARIABLES_DISPLAY}."
+    )
 
 
 def validate_form_schema(metadata_json: JsonObject | None) -> None:
@@ -59,7 +70,7 @@ def validate_form_schema(metadata_json: JsonObject | None) -> None:
             )
         if normalized_name in RESERVED_RUNTIME_VARIABLES_NORMALIZED:
             raise BadRequestException(
-                f"metadata_json.form_schema.fields[{index}].name uses a reserved variable alias."
+                _reserved_form_field_name_message(index=index, field_name=field_name.strip())
             )
         if _STEP_ALIAS_PATTERN.match(normalized_name):
             raise BadRequestException(
@@ -209,7 +220,7 @@ def validate_variable_alias_collisions(
                 continue
             if normalized in normalized_reserved:
                 raise BadRequestException(
-                    f"metadata_json.form_schema.fields[{index}].name is reserved."
+                    _reserved_form_field_name_message(index=index, field_name=raw_name.strip())
                 )
             if _STEP_ALIAS_PATTERN.match(normalized):
                 raise BadRequestException(

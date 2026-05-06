@@ -3,6 +3,8 @@
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import {
     flowFormFieldHasOptions,
+    FLOW_FORM_RESERVED_VARIABLE_NAMES_DISPLAY,
+    getFlowFormFieldNameIssue,
     getFlowFormFieldVariableToken,
     getFlowFormSchemaMetadata,
     getFlowFormStats,
@@ -71,16 +73,43 @@
     return normalizeFlowFormFields(fields).map((field) => ({ ...field, _localId: uid() }));
   }
 
-  function hasCompleteFieldNames(fields: LocalFormField[]): boolean {
-    return fields.every((field) => field.name.trim().length > 0);
+  type FieldNameIssue = "reserved" | "step_alias" | "dot" | "duplicate";
+
+  function getFieldNameIssue(field: LocalFormField, fieldIndex: number): FieldNameIssue | null {
+    const baseIssue = getFlowFormFieldNameIssue(field.name);
+    if (baseIssue !== null) return baseIssue;
+
+    const normalized = field.name.trim().toLowerCase();
+    if (!normalized) return null;
+    const firstMatchingIndex = localFields.findIndex(
+      (candidate) => candidate.name.trim().toLowerCase() === normalized
+    );
+    return firstMatchingIndex !== fieldIndex ? "duplicate" : null;
+  }
+
+  function getFieldNameIssueMessage(issue: FieldNameIssue): string {
+    if (issue === "reserved") {
+      return m.flow_form_field_name_reserved({
+        aliases: FLOW_FORM_RESERVED_VARIABLE_NAMES_DISPLAY
+      });
+    }
+    if (issue === "step_alias") return m.flow_form_field_name_step_alias();
+    if (issue === "dot") return m.flow_form_field_name_dot();
+    return m.flow_form_field_name_duplicate();
+  }
+
+  function hasPersistableFieldNames(fields: LocalFormField[]): boolean {
+    return fields.every((field, index) => {
+      return field.name.trim().length > 0 && getFieldNameIssue(field, index) === null;
+    });
   }
 
   function syncToStore(fields: LocalFormField[]) {
     flowEditor.replaceFormSchemaFields(fields);
   }
 
-  function commitIfComplete(fields: LocalFormField[]) {
-    if (hasCompleteFieldNames(fields)) {
+  function commitIfPersistable(fields: LocalFormField[]) {
+    if (hasPersistableFieldNames(fields)) {
       syncToStore(fields);
     }
   }
@@ -128,7 +157,7 @@
     localFields = localFields
       .filter((_, i) => i !== index)
       .map((field, i) => ({ ...field, order: i + 1 }));
-    commitIfComplete(localFields);
+    commitIfPersistable(localFields);
   }
 
   function moveField(index: number, direction: -1 | 1) {
@@ -138,7 +167,7 @@
     const updated = [...localFields];
     [updated[index], updated[nextIndex]] = [updated[nextIndex], updated[index]];
     localFields = updated.map((field, i) => ({ ...field, order: i + 1 }));
-    commitIfComplete(localFields);
+    commitIfPersistable(localFields);
   }
 
   function updateField(index: number, patch: Partial<Omit<LocalFormField, "_localId">>) {
@@ -252,8 +281,7 @@
             FIELD_TYPES.find((t) => t.value === currentType)?.label() ?? FIELD_TYPES[0].label()}
           {@const hasValidVariable =
             field.name.trim() && isFlowFormFieldNameUsableAsVariable(field.name)}
-          {@const hasUnusableName =
-            field.name.trim() && !isFlowFormFieldNameUsableAsVariable(field.name)}
+          {@const fieldNameIssue = getFieldNameIssue(field, index)}
           <div class="group/field hover:bg-hover-dimmer/30 px-4 py-3.5 transition-colors">
             <!-- Row 1: Move handles + Name input + Delete -->
             <div class="flex items-center gap-2">
@@ -381,9 +409,9 @@
                     {getFlowFormFieldVariableToken(field.name)}
                   </span>
                 </span>
-              {:else if hasUnusableName}
+              {:else if fieldNameIssue}
                 <span class="text-warning-stronger text-xs">
-                  {m.flow_form_field_variable_unavailable()}
+                  {getFieldNameIssueMessage(fieldNameIssue)}
                 </span>
               {/if}
             </div>

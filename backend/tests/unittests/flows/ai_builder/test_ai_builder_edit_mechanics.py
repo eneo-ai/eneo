@@ -58,6 +58,60 @@ def test_fill_edit_draft_mechanics_defaults_first_file_flow_input() -> None:
     assert add_payload.runtime_required is True
 
 
+def test_fill_edit_draft_mechanics_repairs_invalid_first_audio_step_mechanics() -> None:
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="add",
+                placement=StepPlacement(position="append"),
+                add_payload=AddStepPayload(
+                    name="Transkribera ljud",
+                    instructions="Transkribera ljudfilen.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.AUDIO,
+                    runtime_upload=False,
+                ),
+            )
+        ]
+    )
+
+    filled = fill_edit_draft_mechanics(draft, current_steps=[])
+
+    add_payload = filled.operations[0].add_payload
+    assert add_payload is not None
+    assert add_payload.input_source == InputSource.FLOW_INPUT
+    assert add_payload.runtime_upload is True
+    assert add_payload.runtime_required is True
+
+
+def test_flow_edit_draft_accepts_null_resource_ref_lists_as_empty_lists() -> None:
+    draft = FlowEditDraft.model_validate(
+        {
+            "operations": [
+                {
+                    "op": "add",
+                    "placement": {"position": "append"},
+                    "add_payload": {
+                        "name": "Transkribera ljud",
+                        "instructions": "Transkribera ljudfilen.",
+                        "input_source": "flow_input",
+                        "input_type": "audio",
+                        "knowledge_refs": None,
+                        "mcp_server_refs": None,
+                        "mcp_tool_refs": None,
+                    },
+                }
+            ]
+        }
+    )
+
+    add_payload = draft.operations[0].add_payload
+    assert add_payload is not None
+    assert add_payload.knowledge_refs == []
+    assert add_payload.mcp_server_refs == []
+    assert add_payload.mcp_tool_refs == []
+
+
 def test_fill_edit_draft_mechanics_preserves_explicit_runtime_choices() -> None:
     draft = FlowEditDraft(
         operations=[

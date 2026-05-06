@@ -2147,7 +2147,10 @@ async def test_create_flow_rejects_reserved_form_field_alias_names(user):
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
 
-    with pytest.raises(BadRequestException, match="reserved"):
+    with pytest.raises(
+        BadRequestException,
+        match="metadata_json.form_schema.fields\\[0\\].name 'flow_input' is reserved",
+    ):
         await service.create_flow(
             space_id=uuid4(),
             name="Flow",
