@@ -3137,7 +3137,7 @@ def test_compile_outline_audio_docx_four_phase_body_step_fans_in_prior_work() ->
     body_step = draft.steps[-2]
     assert body_step.name == "Bygg DOCX-dokument"
     assert body_step.input_source.value == "previous_step"
-    assert body_step.input_type.value == "json"
+    assert body_step.input_type.value == "text"
     assert body_step.output_type.value == "text"
     assert body_step.uses_previous_fields, (
         "body composer must auto-bind explicit field refs when JSON predecessors exist"
@@ -3240,7 +3240,7 @@ def test_compile_outline_audio_docx_body_step_auto_authors_targeted_refs_when_js
     assert body_step.name == "Skriv strukturerad rapport"
     assert body_step.output_type.value == "text"
     assert body_step.input_source.value == "previous_step"
-    assert body_step.input_type.value == "json"
+    assert body_step.input_type.value == "text"
     assert body_step.uses_previous_fields, (
         "body step must auto-bind uses_previous_fields when JSON predecessors exist"
     )
@@ -3546,7 +3546,7 @@ def test_auto_bind_targeted_underlag_rewrites_nonterminal_all_previous_composer(
     assert result is not steps_before
     body_composer = result[3]
     assert body_composer.input_source.value == "previous_step"
-    assert body_composer.input_type.value == "json"
+    assert body_composer.input_type.value == "text"
     field_refs = {
         (ref.from_step, ref.field_path) for ref in body_composer.uses_previous_fields
     }
@@ -3844,6 +3844,111 @@ def test_auto_bind_targeted_underlag_rewrites_previous_step_composer_with_multip
     assert len(field_refs) == 4, (
         f"expected 4 field refs across 3 JSON priors, got {len(field_refs)}"
     )
+
+
+def test_normalize_create_draft_mechanics_treats_prebound_targeted_text_composer_as_text_input() -> (
+    None
+):
+    from intric.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
+
+    draft = FlowCreateDraft(
+        flow_name="Förbunden rapport",
+        plan_rationale="LLM-authored targeted refs should normalize to text input.",
+        steps=[
+            CreateStepDraft(
+                name="Extrahera produktdata",
+                instructions="x",
+                input_source="flow_input",
+                input_type="text",
+                output_type="json",
+                output_fields=[_field("product_name", "string")],
+            ),
+            CreateStepDraft(
+                name="Extrahera kunddata",
+                instructions="x",
+                input_source="previous_step",
+                input_type="json",
+                output_type="json",
+                output_fields=[_field("customer_segment", "string")],
+            ),
+            CreateStepDraft(
+                name="Skriv sammanfattning",
+                instructions="x",
+                input_source="previous_step",
+                input_type="json",
+                output_type="text",
+                uses_previous_fields=[
+                    PreviousFieldRef(
+                        from_step=1,
+                        field_path="product_name",
+                        label="Produktnamn",
+                    ),
+                    PreviousFieldRef(
+                        from_step=2,
+                        field_path="customer_segment",
+                        label="Kundsegment",
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    normalized = normalize_create_draft_mechanics(draft)
+
+    composer = normalized.steps[-1]
+    assert composer.input_type.value == "text", (
+        "explicit targeted underlag is text prompt material even when the "
+        "immediate predecessor emits JSON"
+    )
+    assert {
+        (ref.from_step, ref.field_path) for ref in composer.uses_previous_fields
+    } == {(1, "product_name"), (2, "customer_segment")}
+
+
+def test_normalize_create_draft_mechanics_treats_previous_output_text_composer_as_text_input() -> (
+    None
+):
+    from intric.flows.ai_builder.ai_builder_new_step_models import PreviousOutputRef
+
+    draft = FlowCreateDraft(
+        flow_name="Förbunden textsammanfattning",
+        plan_rationale="LLM-authored output refs should normalize to text input.",
+        steps=[
+            CreateStepDraft(
+                name="Förbered text",
+                instructions="x",
+                input_source="flow_input",
+                input_type="text",
+                output_type="text",
+            ),
+            CreateStepDraft(
+                name="Extrahera struktur",
+                instructions="x",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+                output_fields=[_field("summary", "string")],
+            ),
+            CreateStepDraft(
+                name="Skriv sluttext",
+                instructions="x",
+                input_source="previous_step",
+                input_type="json",
+                output_type="text",
+                uses_previous_outputs=[
+                    PreviousOutputRef(from_step=1, label="Källtext")
+                ],
+            ),
+        ],
+    )
+
+    normalized = normalize_create_draft_mechanics(draft)
+
+    composer = normalized.steps[-1]
+    assert composer.input_type.value == "text"
+    assert [(ref.from_step, ref.label) for ref in composer.uses_previous_outputs] == [
+        (1, "Källtext")
+    ]
 
 
 def test_auto_bind_targeted_underlag_skips_previous_step_composer_with_single_json_prior() -> (
@@ -4325,7 +4430,7 @@ def test_compile_outline_audio_pdf_protocol_step_auto_authors_targeted_underlag(
 
     protocol_step = draft.steps[3]
     assert protocol_step.input_source.value == "previous_step"
-    assert protocol_step.input_type.value == "json"
+    assert protocol_step.input_type.value == "text"
     assert protocol_step.output_type.value == "text"
     field_paths = {ref.field_path for ref in protocol_step.uses_previous_fields}
     assert "transcription_text" in field_paths

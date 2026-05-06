@@ -155,6 +155,17 @@ def _normalize_step_mechanics(
         input_type = InputType.TEXT
         updates["input_type"] = input_type
 
+    if (
+        input_source != InputSource.FLOW_INPUT
+        and output_type == OutputType.TEXT
+        and input_type == InputType.JSON
+        and (step.uses_previous_fields or step.uses_previous_outputs)
+    ):
+        # Explicit refs compile into input_bindings.question, which the runtime
+        # treats as complete text input rather than augmenting structured JSON.
+        input_type = InputType.TEXT
+        updates["input_type"] = input_type
+
     if input_source != InputSource.FLOW_INPUT and input_type in _FILE_INPUT_TYPES:
         input_type = InputType.TEXT
         updates["input_type"] = input_type
@@ -371,17 +382,9 @@ def _bind_targeted_underlag_for_composer(
             )
         )
 
-    immediate_predecessor = steps[composer_index - 1]
-    new_input_type = (
-        InputType.JSON
-        if immediate_predecessor.output_type == OutputType.JSON
-        else InputType.TEXT
-    )
-
     rewritten = composer.model_copy(
         update={
             "input_source": InputSource.PREVIOUS_STEP,
-            "input_type": new_input_type,
             "uses_previous_fields": new_field_refs,
             "uses_previous_outputs": new_output_refs,
         }
