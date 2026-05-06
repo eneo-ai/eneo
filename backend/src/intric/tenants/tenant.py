@@ -261,6 +261,8 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         - ai_builder.conversation_safety_buffer_tokens
         - ai_builder.minimum_conversation_budget_tokens
         - ai_builder.unknown_model_context_window_tokens
+        - runtime_policy.default_step_timeout_seconds
+        - runtime_policy.max_step_timeout_seconds
         """
         if not v:
             return {}
@@ -332,6 +334,18 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
                         raise ValueError(
                             f"flow_settings.evidence_policy.classification_3.{key} must be a boolean"
                         )
+
+        runtime_policy = v.get("runtime_policy")
+        if runtime_policy is not None:
+            from intric.flows.flow_runtime_policy import (
+                validate_flow_runtime_policy_object,
+            )
+            from intric.main.exceptions import BadRequestException
+
+            try:
+                validate_flow_runtime_policy_object(runtime_policy)
+            except BadRequestException as error:
+                raise ValueError(str(error)) from error
 
         return v
 

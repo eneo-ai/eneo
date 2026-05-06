@@ -108,6 +108,7 @@ def validate_steps(
     for step in sorted_steps:
         seen.add(step.step_order)
         _validate_step_enum_values(step)
+        _validate_step_timeout(step)
         _validate_review_policy(step)
         _validate_citation_mode(step)
         if step.input_source in ("http_get", "http_post"):
@@ -196,6 +197,19 @@ def _validate_step_enum_values(step: FlowStep) -> None:
     if step.mcp_policy not in _ALLOWED_FLOW_MCP_POLICIES:
         raise BadRequestException(
             f"Step {step.step_order}: unsupported mcp_policy '{_enum_value(step.mcp_policy)}'."
+        )
+
+
+def _validate_step_timeout(step: FlowStep) -> None:
+    if step.timeout_seconds is None:
+        return
+    if isinstance(step.timeout_seconds, bool):
+        raise BadRequestException(
+            f"Step {step.step_order}: timeout_seconds must be an integer."
+        )
+    if step.timeout_seconds <= 0:
+        raise BadRequestException(
+            f"Step {step.step_order}: timeout_seconds must be greater than zero."
         )
 
 

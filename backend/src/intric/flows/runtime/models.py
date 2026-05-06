@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from intric.flows.domain.flow import FlowStepResult
 from intric.flows.flow_review_policy import FlowStepReviewPolicy
+from intric.flows.flow_run_provenance import AttemptStartProvenance
 
 if TYPE_CHECKING:
     from intric.files.file_models import File
@@ -20,6 +22,10 @@ def _empty_step_names_by_order() -> dict[int, str]:
 
 
 def _empty_step_ref_mapping() -> dict[str, int]:
+    return {}
+
+
+def _empty_attempt_start_by_step() -> dict[UUID, AttemptStartProvenance]:
     return {}
 
 
@@ -43,6 +49,7 @@ class RuntimeStep:
     existing_step_ref: str | None = None
     assistant_snapshot: dict[str, Any] | None = None
     review_policy: FlowStepReviewPolicy | None = None
+    timeout_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -115,6 +122,10 @@ class RunExecutionState:
     assistant_cache: dict[UUID, Any]
     json_mode_supported: dict[str, bool]
     file_cache: dict[frozenset[UUID], list[Any]]
+    attempt_start_by_step: dict[UUID, AttemptStartProvenance] = field(
+        default_factory=_empty_attempt_start_by_step
+    )
+    in_flight_llm_task: asyncio.Task[Any] | None = None
     step_names_by_order: dict[int, str] = field(
         default_factory=_empty_step_names_by_order
     )

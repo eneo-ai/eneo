@@ -24,6 +24,7 @@ from intric.flows.runtime.models import (
     StepInputValue,
 )
 from intric.flows.runtime.step_execution_runtime import (
+    FlowStepCancelledError,
     PreparedStepExecution,
     StepExecutionRuntimeDeps,
     apply_prompt_context_trace,
@@ -752,6 +753,146 @@ async def test_complete_step_execution_times_out_llm_request():
     assert getattr(exc_info.value, "effective_prompt") == "Prompt"
     failed_input_payload = getattr(exc_info.value, "input_payload_json")
     assert failed_input_payload["input_source"] == "all_previous_steps"
+
+
+@pytest.mark.asyncio
+async def test_complete_step_execution_cancels_llm_request_when_run_is_cancelled():
+    run = _run()
+    state = _state()
+    step = _step(output_type="text")
+    cancelled = asyncio.Event()
+
+    async def blocked_response(**_kwargs: object) -> object:
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        return SimpleNamespace(total_token_count=4, completion="too late")
+
+    assistant = MagicMock()
+    assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
+    assistant.get_response = AsyncMock(side_effect=blocked_response)
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello",
+            source_text="hello",
+            input_source="flow_input",
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={
+            "text": "hello",
+            "source_text": "hello",
+            "input_source": "flow_input",
+        },
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(
+            return_value=([], {"status": "skipped_no_service"}, [])
+        ),
+        process_typed_output=AsyncMock(return_value=(None, None)),
+        apply_output_cap=AsyncMock(return_value=("too late", [])),
+        attach_typed_failure_context=attach_typed_failure_context,
+        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
+        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
+        is_json_mode_rejection=lambda exc: False,
+        count_tokens=lambda text: len(text),
+        llm_request_timeout_seconds=10,
+        run_cancelled=AsyncMock(return_value=True),
+        run_cancel_poll_interval_seconds=0.001,
+    )
+
+    with pytest.raises(FlowStepCancelledError):
+        await complete_step_execution(
+            step=step,
+            run=run,
+            state=state,
+            prepared=prepared,
+            deps=deps,
+        )
+
+    assert cancelled.is_set()
+    assert state.in_flight_llm_task is None
+
+
+@pytest.mark.asyncio
+async def test_complete_step_execution_returns_when_cancelled_llm_suppresses_cancel():
+    run = _run()
+    state = _state()
+    step = _step(output_type="text")
+    cancelled = asyncio.Event()
+    release = asyncio.Event()
+
+    async def blocked_response(**_kwargs: object) -> object:
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            cancelled.set()
+            await release.wait()
+        return SimpleNamespace(total_token_count=4, completion="too late")
+
+    assistant = MagicMock()
+    assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
+    assistant.get_response = AsyncMock(side_effect=blocked_response)
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello",
+            source_text="hello",
+            input_source="flow_input",
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={
+            "text": "hello",
+            "source_text": "hello",
+            "input_source": "flow_input",
+        },
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(
+            return_value=([], {"status": "skipped_no_service"}, [])
+        ),
+        process_typed_output=AsyncMock(return_value=(None, None)),
+        apply_output_cap=AsyncMock(return_value=("too late", [])),
+        attach_typed_failure_context=attach_typed_failure_context,
+        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
+        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
+        is_json_mode_rejection=lambda exc: False,
+        count_tokens=lambda text: len(text),
+        llm_request_timeout_seconds=10,
+        run_cancelled=AsyncMock(return_value=True),
+        run_cancel_poll_interval_seconds=0.001,
+        llm_task_cancellation_grace_seconds=0.001,
+    )
+
+    with pytest.raises(FlowStepCancelledError):
+        await complete_step_execution(
+            step=step,
+            run=run,
+            state=state,
+            prepared=prepared,
+            deps=deps,
+        )
+
+    assert cancelled.is_set()
+    assert state.in_flight_llm_task is None
+    release.set()
+    await asyncio.sleep(0)
 
 
 @pytest.mark.asyncio

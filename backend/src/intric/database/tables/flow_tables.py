@@ -149,6 +149,7 @@ class FlowSteps(BasePublic):
         nullable=False,
     )
     step_order: Mapped[int] = mapped_column(nullable=False)
+    timeout_seconds: Mapped[Optional[int]] = mapped_column(nullable=True)
     user_description: Mapped[Optional[str]] = mapped_column(nullable=True)
     input_source: Mapped[str] = mapped_column(
         sa.String(64),
@@ -215,6 +216,10 @@ class FlowSteps(BasePublic):
         ),
         CheckConstraint(
             "mcp_policy IN ('inherit','restricted')", name="ck_flow_steps_mcp_policy"
+        ),
+        CheckConstraint(
+            "timeout_seconds IS NULL OR timeout_seconds > 0",
+            name="ck_flow_steps_timeout_seconds_positive",
         ),
         ForeignKeyConstraint(
             ["flow_id", "tenant_id"],

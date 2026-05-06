@@ -48,6 +48,10 @@ from intric.flows.enums import (
     FlowRunReviewCheckpointState,
 )
 from intric.flows.flow_factory import FlowFactory
+from intric.flows.flow_run_provenance import (
+    AttemptStartProvenance,
+    FlowAttemptProvenance,
+)
 from intric.flows.flow_run_rerun_graph import RerunInvalidatedStep
 from intric.flows.flow_run_step_result_file import (
     FlowRunStepResultFile,
@@ -1912,6 +1916,45 @@ class FlowRunRepository:
             )
         if row is None:
             raise NotFoundException("Could not create or fetch flow step attempt.")
+        return self.factory.from_flow_step_attempt_db(row)
+
+    async def record_attempt_start_provenance(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        tenant_id: UUID,
+        requested_model: str | None,
+        provider: str | None,
+        attempt_start: AttemptStartProvenance,
+    ) -> FlowStepAttempt | None:
+        provenance_json = FlowAttemptProvenance(
+            attempt_start=attempt_start
+        ).to_payload()
+        row = await self.session.scalar(
+            sa.update(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.step_id == step_id)
+            .where(FlowStepAttempts.attempt_no == attempt_no)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .where(
+                FlowStepAttempts.status.in_(
+                    (
+                        FlowStepAttemptStatus.STARTED.value,
+                        FlowStepAttemptStatus.RETRIED.value,
+                    )
+                )
+            )
+            .values(
+                requested_model=requested_model,
+                provider=provider,
+                provenance_json=provenance_json,
+            )
+            .returning(FlowStepAttempts)
+        )
+        if row is None:
+            return None
         return self.factory.from_flow_step_attempt_db(row)
 
     async def finish_attempt(

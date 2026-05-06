@@ -28,6 +28,10 @@ from intric.flows.flow_retention_policy import (
     apply_flow_retention_policy_patch,
     resolve_flow_retention_policy,
 )
+from intric.flows.flow_runtime_policy import (
+    apply_flow_runtime_policy_patch,
+    resolve_flow_runtime_policy,
+)
 from intric.main.config import get_settings as get_app_settings
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
@@ -43,6 +47,8 @@ from intric.settings.settings import (
     FlowInputLimitsUpdate,
     FlowRetentionPolicyPublic,
     FlowRetentionPolicyUpdate,
+    FlowRuntimePolicyPublic,
+    FlowRuntimePolicyUpdate,
     SettingsInDB,
     SettingsPublic,
     SettingsUpsert,
@@ -303,6 +309,55 @@ class SettingService:
             description="Updated flow document render limits",
             metadata={
                 "setting": "flow_document_render_limits",
+                "changes": {
+                    key: {
+                        "old": getattr(previous, key),
+                        "new": getattr(updated, key),
+                    }
+                    for key in patch
+                },
+            },
+        )
+        return updated
+
+    @validate_permissions(Permission.ADMIN)
+    async def get_flow_runtime_policy(self) -> FlowRuntimePolicyPublic:
+        tenant = await self._get_tenant_for_flow_settings()
+        policy = resolve_flow_runtime_policy(getattr(tenant, "flow_settings", None))
+        return FlowRuntimePolicyPublic(
+            default_step_timeout_seconds=policy.default_step_timeout_seconds,
+            max_step_timeout_seconds=policy.max_step_timeout_seconds,
+            hard_ceiling_seconds=policy.hard_ceiling_seconds,
+        )
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_flow_runtime_policy(
+        self,
+        payload: FlowRuntimePolicyUpdate,
+    ) -> FlowRuntimePolicyPublic:
+        patch = payload.model_dump(exclude_unset=True)
+        if not patch:
+            raise BadRequestException(
+                "At least one flow runtime policy field must be provided."
+            )
+        previous = await self.get_flow_runtime_policy()
+        tenant = await self._get_tenant_for_flow_settings()
+        next_flow_settings = apply_flow_runtime_policy_patch(
+            cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
+            remove_keys={key for key, value in patch.items() if value is None},
+            **{key: value for key, value in patch.items() if value is not None},
+        )
+        await self._persist_flow_settings(next_flow_settings)
+        updated = await self.get_flow_runtime_policy()
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            actor_id=self.user.id,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description="Updated flow runtime policy",
+            metadata={
+                "setting": "flow_runtime_policy",
                 "changes": {
                     key: {
                         "old": getattr(previous, key),

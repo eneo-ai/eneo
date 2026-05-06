@@ -302,6 +302,7 @@ class Settings(BaseSettings):
     flow_task_timeout_seconds: int = 3600
     flow_max_inline_text_bytes: int = 1_048_576
     flow_llm_request_timeout_seconds: int = 600
+    flow_runtime_step_timeout_hard_ceiling_seconds: int = 3600
     flow_http_request_timeout_seconds: int = 30
     flow_http_max_timeout_seconds: int = 120
     flow_http_allow_private_networks: bool = False
@@ -636,6 +637,13 @@ class Settings(BaseSettings):
             logging.error(
                 "FLOW_LLM_REQUEST_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
                 self.flow_llm_request_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.flow_runtime_step_timeout_hard_ceiling_seconds <= 0:
+            logging.error(
+                "FLOW_RUNTIME_STEP_TIMEOUT_HARD_CEILING_SECONDS must be greater than zero. Current value: %s",
+                self.flow_runtime_step_timeout_hard_ceiling_seconds,
             )
             sys.exit(1)
 

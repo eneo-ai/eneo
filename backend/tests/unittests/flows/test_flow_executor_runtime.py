@@ -28,6 +28,11 @@ from intric.flows.flow import (
 from intric.flows.flow import (
     FlowVersion as FlowVersionModel,
 )
+from intric.flows.flow_run_provenance import (
+    AttemptStartProvenance,
+    ModelParameterSnapshot,
+)
+from intric.flows.flow_runtime_policy import FlowRuntimePolicy
 from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 from intric.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from intric.flows.runtime.executor import (
@@ -324,11 +329,15 @@ def test_executor_accepts_grouped_config(user):
         http_request_timeout_seconds=11.0,
         http_max_timeout_seconds=22.0,
         http_allow_private_networks=True,
-        llm_request_timeout_seconds=33.0,
         rag_retrieval_timeout_seconds=44.0,
         rag_max_reference_sources=12,
         rag_max_chunks_per_source=6,
         document_render_limits=DocumentRenderLimits(max_source_chars=123),
+        runtime_policy=FlowRuntimePolicy(
+            default_step_timeout_seconds=70,
+            max_step_timeout_seconds=100,
+            hard_ceiling_seconds=100,
+        ),
     )
 
     executor = FlowRunExecutor(
@@ -351,11 +360,21 @@ def test_executor_accepts_grouped_config(user):
     assert executor.http_request_timeout_seconds == 11.0
     assert executor.http_max_timeout_seconds == 22.0
     assert executor.http_allow_private_networks is True
-    assert executor.llm_request_timeout_seconds == 33.0
     assert executor.rag_retrieval_timeout_seconds == 44.0
     assert executor.rag_max_reference_sources == 12
     assert executor.rag_max_chunks_per_source == 6
     assert executor.document_render_service.limits.max_source_chars == 123
+    assert executor._step_deadline_seconds(RuntimeStep(
+        step_id=uuid4(),
+        step_order=1,
+        assistant_id=uuid4(),
+        user_description=None,
+        input_source="flow_input",
+        input_bindings=None,
+        input_config=None,
+        output_mode="pass_through",
+        output_config=None,
+    )) == 70.0
 
 
 def _assistant_for_execute_step(*, has_knowledge: bool):
@@ -378,6 +397,19 @@ def _assistant_for_execute_step(*, has_knowledge: bool):
         )
     )
     return assistant
+
+
+def _attempt_start_provenance() -> AttemptStartProvenance:
+    return AttemptStartProvenance(
+        requested_model="openai/gpt-5.4-nano",
+        provider="openai",
+        deadline_at=datetime.now(timezone.utc),
+        resolved_timeout_seconds=1200,
+        effective_prompt_length=42,
+        input_text_length=12,
+        input_tokens_estimate=3,
+        model_parameter_snapshot=ModelParameterSnapshot(reasoning_effort="high"),
+    )
 
 
 @pytest.mark.asyncio
@@ -1470,6 +1502,82 @@ async def test_typed_validation_failure_partial_typed_exc_falls_back_field_indep
         "stays null and triage of stuck runs becomes impossible."
     )
     assert finish_kwargs["provider"] == "openai"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_step_retains_attempt_start_provenance(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    flow_run_repo.finish_attempt = AsyncMock()
+    executor._rollback = AsyncMock()
+    executor._commit = AsyncMock()
+    step = _step_for_execute_step()
+    state = _empty_execution_state()
+    attempt_start = _attempt_start_provenance()
+    state.attempt_start_by_step[step.step_id] = attempt_start
+
+    result = await executor._handle_cancelled_step(
+        run_id=uuid4(),
+        tenant_id=user.tenant_id,
+        step=step,
+        attempt_no=1,
+        state=state,
+    )
+
+    assert result == {"status": "skipped", "reason": "run_cancelled"}
+    finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
+    assert finish_kwargs["status"] == FlowStepAttemptStatus.CANCELLED
+    assert finish_kwargs["requested_model"] == "openai/gpt-5.4-nano"
+    assert finish_kwargs["provider"] == "openai"
+    assert (
+        finish_kwargs["provenance_json"]["attempt_start"]["requested_model"]
+        == "openai/gpt-5.4-nano"
+    )
+    assert "deadline_at" in finish_kwargs["provenance_json"]["attempt_start"]
+
+
+@pytest.mark.asyncio
+async def test_llm_timeout_failure_retains_attempt_start_provenance(user):
+    executor, flow_repo, flow_run_repo, _ = _build_executor(user)
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_repo.save_step_result = AsyncMock()
+    executor._terminalize_run = AsyncMock()
+    executor._rollback = AsyncMock()
+    step = _step_for_execute_step()
+    state = _empty_execution_state()
+    attempt_start = _attempt_start_provenance()
+    state.attempt_start_by_step[step.step_id] = attempt_start
+    claimed = _claimed_step_result(
+        run_id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=user.tenant_id,
+        step_id=step.step_id,
+        assistant_id=step.assistant_id,
+    )
+    typed_exc = TypedIOValidationException(
+        "Step 1: LLM request exceeded 1200s timeout.",
+        code="flow_llm_request_timeout",
+    )
+
+    await executor._handle_typed_step_failure(
+        run_id=claimed.flow_run_id,
+        tenant_id=user.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=typed_exc,
+        failed_input_payload=None,
+        state=state,
+    )
+
+    finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
+    assert finish_kwargs["error_code"] == "flow_llm_request_timeout"
+    assert finish_kwargs["requested_model"] == "openai/gpt-5.4-nano"
+    assert finish_kwargs["provider"] == "openai"
+    persisted_attempt_start = finish_kwargs["provenance_json"]["attempt_start"]
+    assert persisted_attempt_start["resolved_timeout_seconds"] == 1200
+    assert persisted_attempt_start["deadline_at"] == attempt_start.model_dump(
+        mode="json"
+    )["deadline_at"]
 
 
 @pytest.mark.asyncio
@@ -2622,6 +2730,47 @@ def test_parse_runtime_steps_accepts_transcribe_only_output_mode(user):
     assert parsed[0].output_mode == "transcribe_only"
 
 
+def test_parse_runtime_steps_accepts_step_timeout(user):
+    executor, _, _, _ = _build_executor(user)
+
+    parsed = executor._parse_runtime_steps(
+        {
+            "steps": [
+                {
+                    "step_id": str(uuid4()),
+                    "step_order": 1,
+                    "assistant_id": str(uuid4()),
+                    "input_source": "flow_input",
+                    "output_mode": "pass_through",
+                    "timeout_seconds": 1800,
+                }
+            ]
+        }
+    )
+
+    assert parsed[0].timeout_seconds == 1800
+
+
+def test_parse_runtime_steps_rejects_boolean_step_timeout(user):
+    executor, _, _, _ = _build_executor(user)
+
+    with pytest.raises(BadRequestException, match="timeout_seconds must be an integer"):
+        executor._parse_runtime_steps(
+            {
+                "steps": [
+                    {
+                        "step_id": str(uuid4()),
+                        "step_order": 1,
+                        "assistant_id": str(uuid4()),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                        "timeout_seconds": True,
+                    }
+                ]
+            }
+        )
+
+
 def test_parse_runtime_steps_rejects_non_object_webhook_headers(user):
     executor, _, _, _ = _build_executor(user)
 
@@ -3007,6 +3156,43 @@ async def test_validate_assistant_snapshots_requires_schema_versioned_snapshots(
         )
 
     executor._load_assistant.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_step_records_attempt_start_before_llm_dispatch(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _step_for_execute_step()
+    state = _empty_execution_state()
+    assistant = _assistant_for_execute_step(has_knowledge=False)
+    assistant.get_prompt_text.return_value = "Prompt"
+    flow_run_repo.record_attempt_start_provenance = AsyncMock()
+
+    async def _get_response(**_kwargs):
+        flow_run_repo.record_attempt_start_provenance.assert_awaited_once()
+        return SimpleNamespace(completion="answer", total_token_count=42)
+
+    assistant.get_response = AsyncMock(side_effect=_get_response)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text="hello", source_text="hello", input_source="flow_input"
+        )
+    )
+    executor._process_typed_output = AsyncMock(return_value=(None, None))
+    executor._apply_output_cap = AsyncMock(return_value=("answer", []))
+    executor._commit = AsyncMock()
+
+    await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    record_kwargs = flow_run_repo.record_attempt_start_provenance.await_args.kwargs
+    attempt_start = record_kwargs["attempt_start"]
+    assert attempt_start.requested_model == "gpt-4o-mini"
+    assert attempt_start.provider == "openai"
+    assert attempt_start.resolved_timeout_seconds == 600
+    assert attempt_start.input_text_length == 5
+    assert attempt_start.effective_prompt_length >= 5
+    assert state.attempt_start_by_step[step.step_id] == attempt_start
 
 
 @pytest.mark.asyncio

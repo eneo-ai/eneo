@@ -851,6 +851,30 @@ export interface paths {
     patch: operations["update_flow_document_render_limits_api_v1_settings_flow_document_render_limits_patch"];
     trace?: never;
   };
+  "/api/v1/settings/flow-runtime-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get flow runtime policy
+     * @description Return tenant-level per-step LLM runtime timeout policy for flow executions.
+     */
+    get: operations["get_flow_runtime_policy_api_v1_settings_flow_runtime_policy_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update flow runtime policy
+     * @description Update tenant-level per-step LLM timeout policy for flow executions. Omit a field to leave it unchanged. Send null to remove the tenant override and fall back to the deployment default.
+     */
+    patch: operations["update_flow_runtime_policy_api_v1_settings_flow_runtime_policy_patch"];
+    trace?: never;
+  };
   "/api/v1/settings/flow-evidence-policy": {
     parameters: {
       query?: never;
@@ -4019,6 +4043,14 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
+    /**
+     * Get active flow run review checkpoint
+     * @description Return the active human review checkpoint for a paused run.
+     *
+     *     The endpoint returns `null` with `200 OK` when the run has no active checkpoint.
+     *     Current visibility follows run-detail visibility: service-key principals can read only
+     *     checkpoints for runs they own, while human callers follow the existing flow view policy.
+     */
     get: operations["get_active_flow_run_review_checkpoint"];
     put?: never;
     post?: never;
@@ -4041,6 +4073,13 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
+    /**
+     * Edit flow run review checkpoint
+     * @description Edit the current payload for a human review checkpoint.
+     *
+     *     The request uses `expected_checkpoint_revision` as the checkpoint compare token. On success,
+     *     the checkpoint payload and the current step-result projection are updated together.
+     */
     patch: operations["edit_flow_run_review_checkpoint"];
     trace?: never;
   };
@@ -4053,6 +4092,13 @@ export interface paths {
     };
     get?: never;
     put?: never;
+    /**
+     * Approve flow run review checkpoint
+     * @description Approve the current payload for a human review checkpoint.
+     *
+     *     Approval advances the checkpoint revision. Resume is a separate command so clients can make
+     *     the decision durable before dispatching more runtime work.
+     */
     post: operations["approve_flow_run_review_checkpoint"];
     delete?: never;
     options?: never;
@@ -4069,6 +4115,13 @@ export interface paths {
     };
     get?: never;
     put?: never;
+    /**
+     * Reject flow run review checkpoint
+     * @description Reject a human review checkpoint and cancel the run.
+     *
+     *     The rejection reason is written to lifecycle audit metadata and the run is terminalized with
+     *     `cancelled` status using the `review_rejected` lifecycle source.
+     */
     post: operations["reject_flow_run_review_checkpoint"];
     delete?: never;
     options?: never;
@@ -4085,6 +4138,13 @@ export interface paths {
     };
     get?: never;
     put?: never;
+    /**
+     * Resume flow run review checkpoint
+     * @description Resume a run after an approved human review checkpoint.
+     *
+     *     Use the `Idempotency-Key` header for retries. Replaying the same key returns the current
+     *     checkpoint and run without dispatching another worker task.
+     */
     post: operations["resume_flow_run_review_checkpoint"];
     delete?: never;
     options?: never;
@@ -7517,6 +7577,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/healthz/flows": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Flow Runtime Health */
+    get: operations["flow_runtime_health_api_healthz_flows_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/healthz/crawler": {
     parameters: {
       query?: never;
@@ -7907,6 +7984,12 @@ export interface components {
       | "flow_run_artifact_downloaded"
       | "flow_evidence_viewed"
       | "flow_evidence_exported_json"
+      | "flow_run_review_checkpoint_opened"
+      | "flow_run_review_checkpoint_edited"
+      | "flow_run_review_checkpoint_approved"
+      | "flow_run_review_checkpoint_rejected"
+      | "flow_run_review_checkpoint_resumed"
+      | "flow_run_review_checkpoint_cancelled"
       | "ai_builder_session_created"
       | "ai_builder_plan_proposed"
       | "ai_builder_plan_approved"
@@ -11374,6 +11457,7 @@ export interface components {
       | "mcp_server_tool"
       | "flow"
       | "flow_run"
+      | "flow_run_review_checkpoint"
       | "ai_builder_session";
     /**
      * ErrorCodes
@@ -12854,6 +12938,38 @@ export interface components {
      *             "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808"
      *           }
      *         ],
+     *         "review_checkpoints": [
+     *           {
+     *             "approved_at": "2026-03-17T10:07:30Z",
+     *             "attempt_no": 1,
+     *             "created_at": "2026-03-17T10:05:30Z",
+     *             "current_payload_json": {
+     *               "text": "Reviewed answer."
+     *             },
+     *             "decision": "approved",
+     *             "edited_at": "2026-03-17T10:06:30Z",
+     *             "flow_id": "00000000-0000-0000-0000-000000000001",
+     *             "flow_run_id": "00000000-0000-0000-0000-000000000301",
+     *             "id": "00000000-0000-0000-0000-000000000901",
+     *             "next_step_ids": [
+     *               "00000000-0000-0000-0000-000000000102"
+     *             ],
+     *             "original_payload_json": {
+     *               "text": "Draft answer."
+     *             },
+     *             "requester_principal_type": "user",
+     *             "requester_user_id": "00000000-0000-0000-0000-000000000030",
+     *             "resume_key_present": true,
+     *             "resumed_at": "2026-03-17T10:08:00Z",
+     *             "revision": 3,
+     *             "schema_version": 1,
+     *             "state": "resumed",
+     *             "step_id": "00000000-0000-0000-0000-000000000101",
+     *             "step_order": 1,
+     *             "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *             "updated_at": "2026-03-17T10:05:30Z"
+     *           }
+     *         ],
      *         "run": {
      *           "created_at": "2026-03-17T10:05:00Z",
      *           "flow_id": "00000000-0000-0000-0000-000000000001",
@@ -12959,6 +13075,20 @@ export interface components {
      *           "retention_purged_count": 0,
      *           "tombstone_count": 0,
      *           "tracking_state": "not_tracked"
+     *         },
+     *         "review_checkpoint_summary": {
+     *           "active_checkpoint_conflict": false,
+     *           "any_edited": true,
+     *           "any_resumed": true,
+     *           "by_state": {
+     *             "approved": 0,
+     *             "awaiting_review": 0,
+     *             "cancelled": 0,
+     *             "edited": 0,
+     *             "rejected": 0,
+     *             "resumed": 1
+     *           },
+     *           "count": 1
      *         },
      *         "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
      *         "schema_version": "flow-evidence-export.v5",
@@ -13087,6 +13217,20 @@ export interface components {
      *           "prompt_context_inclusion_tracked": true,
      *           "retrieval_tracked": true,
      *           "selection_basis": "semantic_search_ranked_chunks_grouped_by_source"
+     *         },
+     *         "review_checkpoints": {
+     *           "active_checkpoint_conflict": false,
+     *           "any_edited": true,
+     *           "any_resumed": true,
+     *           "by_state": {
+     *             "approved": 0,
+     *             "awaiting_review": 0,
+     *             "cancelled": 0,
+     *             "edited": 0,
+     *             "rejected": 0,
+     *             "resumed": 1
+     *           },
+     *           "count": 1
      *         },
      *         "status": "completed",
      *         "step_overview": [
@@ -13331,6 +13475,38 @@ export interface components {
      *           "step_order": 1,
      *           "step_result_id": "00000000-0000-0000-0000-000000000401",
      *           "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808"
+     *         }
+     *       ],
+     *       "review_checkpoints": [
+     *         {
+     *           "approved_at": "2026-03-17T10:07:30Z",
+     *           "attempt_no": 1,
+     *           "created_at": "2026-03-17T10:05:30Z",
+     *           "current_payload_json": {
+     *             "text": "Reviewed answer."
+     *           },
+     *           "decision": "approved",
+     *           "edited_at": "2026-03-17T10:06:30Z",
+     *           "flow_id": "00000000-0000-0000-0000-000000000001",
+     *           "flow_run_id": "00000000-0000-0000-0000-000000000301",
+     *           "id": "00000000-0000-0000-0000-000000000901",
+     *           "next_step_ids": [
+     *             "00000000-0000-0000-0000-000000000102"
+     *           ],
+     *           "original_payload_json": {
+     *             "text": "Draft answer."
+     *           },
+     *           "requester_principal_type": "user",
+     *           "requester_user_id": "00000000-0000-0000-0000-000000000030",
+     *           "resume_key_present": true,
+     *           "resumed_at": "2026-03-17T10:08:00Z",
+     *           "revision": 3,
+     *           "schema_version": 1,
+     *           "state": "resumed",
+     *           "step_id": "00000000-0000-0000-0000-000000000101",
+     *           "step_order": 1,
+     *           "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *           "updated_at": "2026-03-17T10:05:30Z"
      *         }
      *       ],
      *       "run": {
@@ -14237,6 +14413,93 @@ export interface components {
        */
       availability: "available" | "content_purged";
     };
+    /** FlowRuntimeAuditOutboxSummary */
+    FlowRuntimeAuditOutboxSummary: {
+      /**
+       * Pending Count
+       * @default 0
+       */
+      pending_count?: number;
+      /**
+       * Delivery Backlog Count
+       * @default 0
+       */
+      delivery_backlog_count?: number;
+      /**
+       * Dead Lettered Count
+       * @default 0
+       */
+      dead_lettered_count?: number;
+      /** Oldest Delivery Backlog Age Seconds */
+      oldest_delivery_backlog_age_seconds?: number | null;
+      /** Oldest Dead Lettered Age Seconds */
+      oldest_dead_lettered_age_seconds?: number | null;
+    };
+    /** FlowRuntimeDataIntegrity */
+    FlowRuntimeDataIntegrity: {
+      /**
+       * Terminal Runs With Open Attempts Count
+       * @default 0
+       */
+      terminal_runs_with_open_attempts_count?: number;
+      /** Oldest Terminal Run With Open Attempts Age Seconds */
+      oldest_terminal_run_with_open_attempts_age_seconds?: number | null;
+      /**
+       * Terminal Runs With Active Step Results Count
+       * @default 0
+       */
+      terminal_runs_with_active_step_results_count?: number;
+      /** Oldest Terminal Run With Active Step Results Age Seconds */
+      oldest_terminal_run_with_active_step_results_age_seconds?: number | null;
+    };
+    /**
+     * FlowRuntimeHealthFlag
+     * @enum {string}
+     */
+    FlowRuntimeHealthFlag:
+      | "STALE_QUEUED_RUNS"
+      | "STALE_RUNNING_RUNS"
+      | "STALE_RUNNING_RECONCILER_LAG"
+      | "TERMINAL_RUNS_WITH_OPEN_ATTEMPTS"
+      | "TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS"
+      | "AUDIT_OUTBOX_DELIVERY_BACKLOG"
+      | "AUDIT_OUTBOX_DEAD_LETTERS";
+    /** FlowRuntimeHealthResponse */
+    FlowRuntimeHealthResponse: {
+      status: components["schemas"]["FlowRuntimeHealthStatus"];
+      /** Status Flags */
+      status_flags?: components["schemas"]["FlowRuntimeHealthFlag"][];
+      /** Status Reason */
+      status_reason: string;
+      /**
+       * Response Timestamp Utc
+       * Format: date-time
+       */
+      response_timestamp_utc: string;
+      probe: components["schemas"]["FlowRuntimeProbe"];
+      runs?: components["schemas"]["FlowRuntimeRunSummary"];
+      data_integrity?: components["schemas"]["FlowRuntimeDataIntegrity"];
+      audit_outbox?: components["schemas"]["FlowRuntimeAuditOutboxSummary"];
+      thresholds: components["schemas"]["FlowRuntimeHealthThresholds"];
+    };
+    /**
+     * FlowRuntimeHealthStatus
+     * @enum {string}
+     */
+    FlowRuntimeHealthStatus: "HEALTHY" | "DEGRADED" | "UNHEALTHY" | "UNKNOWN";
+    /** FlowRuntimeHealthThresholds */
+    FlowRuntimeHealthThresholds: {
+      /** Stale Queued After Seconds */
+      stale_queued_after_seconds: number;
+      /** Stale Running After Seconds */
+      stale_running_after_seconds: number;
+      /** Stale Running Unhealthy After Seconds */
+      stale_running_unhealthy_after_seconds: number;
+      /** Terminal Integrity Lookback Hours */
+      terminal_integrity_lookback_hours: number;
+      /** Audit Outbox Backlog Grace Seconds */
+      audit_outbox_backlog_grace_seconds: number;
+    };
     /** FlowRuntimeInputContractPublic */
     FlowRuntimeInputContractPublic: {
       /**
@@ -14292,6 +14555,49 @@ export interface components {
       /** Artifact Signed Url Template */
       artifact_signed_url_template: string;
     };
+    /** FlowRuntimePolicyPublic */
+    FlowRuntimePolicyPublic: {
+      /** Default Step Timeout Seconds */
+      default_step_timeout_seconds: number;
+      /** Max Step Timeout Seconds */
+      max_step_timeout_seconds: number;
+      /**
+       * Hard Ceiling Seconds
+       * @description Deployment hard ceiling after reserving worker task shutdown buffer.
+       */
+      hard_ceiling_seconds: number;
+    };
+    /** FlowRuntimePolicyUpdate */
+    FlowRuntimePolicyUpdate: {
+      /**
+       * Default Step Timeout Seconds
+       * @description Set the tenant default per-step LLM timeout, or send null to use the deployment default.
+       */
+      default_step_timeout_seconds?: number | null;
+      /**
+       * Max Step Timeout Seconds
+       * @description Set the tenant maximum per-step LLM timeout, or send null to use the deployment ceiling.
+       */
+      max_step_timeout_seconds?: number | null;
+    };
+    /** FlowRuntimeProbe */
+    FlowRuntimeProbe: {
+      /**
+       * Scope
+       * @default db_only
+       */
+      scope?: string;
+      /** Db Query Ok */
+      db_query_ok: boolean;
+      /** Db Query Duration Ms */
+      db_query_duration_ms?: number | null;
+      db_query_failure?: components["schemas"]["FlowRuntimeProbeFailure"] | null;
+    };
+    /**
+     * FlowRuntimeProbeFailure
+     * @enum {string}
+     */
+    FlowRuntimeProbeFailure: "TIMEOUT" | "ERROR";
     /**
      * FlowRuntimePublic
      * @example {
@@ -14340,6 +14646,38 @@ export interface components {
       /** Updated At */
       updated_at?: string | null;
       runtime_paths: components["schemas"]["FlowRuntimePathsPublic"];
+    };
+    /** FlowRuntimeRunSummary */
+    FlowRuntimeRunSummary: {
+      /**
+       * Queued Count
+       * @default 0
+       */
+      queued_count?: number;
+      /**
+       * Running Count
+       * @default 0
+       */
+      running_count?: number;
+      /**
+       * Awaiting Review Count
+       * @default 0
+       */
+      awaiting_review_count?: number;
+      /**
+       * Stale Queued Count
+       * @default 0
+       */
+      stale_queued_count?: number;
+      /**
+       * Stale Running Count
+       * @default 0
+       */
+      stale_running_count?: number;
+      /** Oldest Stale Queued Age Seconds */
+      oldest_stale_queued_age_seconds?: number | null;
+      /** Oldest Stale Running Age Seconds */
+      oldest_stale_running_age_seconds?: number | null;
     };
     /**
      * FlowSparsePublic
@@ -14500,6 +14838,11 @@ export interface components {
       assistant_id: string;
       /** Step Order */
       step_order: number;
+      /**
+       * Timeout Seconds
+       * @description Optional per-step LLM timeout override in seconds.
+       */
+      timeout_seconds?: number | null;
       /** User Description */
       user_description?: string | null;
       input_source: components["schemas"]["FlowInputSource"];
@@ -14529,6 +14872,7 @@ export interface components {
       output_config?: {
         [key: string]: unknown;
       } | null;
+      review_policy?: components["schemas"]["FlowStepReviewPolicy"] | null;
     };
     /**
      * FlowStepPublic
@@ -14556,6 +14900,8 @@ export interface components {
       assistant_id: string;
       /** Step Order */
       step_order: number;
+      /** Timeout Seconds */
+      timeout_seconds?: number | null;
       /** User Description */
       user_description?: string | null;
       input_source: components["schemas"]["FlowInputSource"];
@@ -14585,6 +14931,7 @@ export interface components {
       output_config?: {
         [key: string]: unknown;
       } | null;
+      review_policy?: components["schemas"]["FlowStepReviewPolicy"] | null;
       /** Created At */
       created_at?: string | null;
       /** Updated At */
@@ -14595,6 +14942,15 @@ export interface components {
      * @enum {string}
      */
     FlowStepResultStatus: "pending" | "running" | "completed" | "failed" | "cancelled";
+    /**
+     * FlowStepReviewMode
+     * @enum {string}
+     */
+    FlowStepReviewMode: "view" | "edit";
+    /** FlowStepReviewPolicy */
+    FlowStepReviewPolicy: {
+      mode: components["schemas"]["FlowStepReviewMode"];
+    };
     /**
      * FlowTemplateAssetPublic
      * @example {
@@ -24906,6 +25262,73 @@ export interface operations {
       };
     };
   };
+  get_flow_runtime_policy_api_v1_settings_flow_runtime_policy_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRuntimePolicyPublic"];
+        };
+      };
+    };
+  };
+  update_flow_runtime_policy_api_v1_settings_flow_runtime_policy_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRuntimePolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRuntimePolicyPublic"];
+        };
+      };
+      /** @description Invalid flow runtime policy payload. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Caller lacks permission to update tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_flow_evidence_policy_api_v1_settings_flow_evidence_policy_get: {
     parameters: {
       query?: never;
@@ -35144,13 +35567,16 @@ export interface operations {
       query?: never;
       header?: never;
       path: {
+        /** @description Identifier of the flow that owns the requested run. */
         id: string;
+        /** @description Identifier of the run to inspect. */
         run_id: string;
       };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
+      /** @description Successful Response */
       200: {
         headers: {
           [name: string]: unknown;
@@ -35159,22 +35585,42 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunReviewCheckpointPublic"] | null;
         };
       };
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_tenant_permission` or `insufficient_space_permission` for callers without the required access, `flow_run_access_denied` when a caller tries to access a run outside the current visibility policy, and `flow_service_key_principal_not_supported` on flow surfaces that still require a user principal. */
       403: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Run not found for this flow and tenant. */
       404: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "Flow run not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Validation Error */
       422: {
         headers: {
           [name: string]: unknown;
@@ -35190,8 +35636,11 @@ export interface operations {
       query?: never;
       header?: never;
       path: {
+        /** @description Identifier of the flow that owns the run. */
         id: string;
+        /** @description Identifier of the run to mutate. */
         run_id: string;
+        /** @description Identifier of the review checkpoint to edit. */
         checkpoint_id: string;
       };
       cookie?: never;
@@ -35202,6 +35651,7 @@ export interface operations {
       };
     };
     responses: {
+      /** @description Successful Response */
       200: {
         headers: {
           [name: string]: unknown;
@@ -35210,30 +35660,58 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunReviewCheckpointPublic"];
         };
       };
+      /** @description Review edit failed. Representative machine-readable codes include flow_review_stale_revision, flow_review_not_active, and flow_review_step_result_not_found. */
       400: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "Review checkpoint revision is stale.",
+           *       "intric_error_code": 9007,
+           *       "code": "flow_review_stale_revision"
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_tenant_permission` or `insufficient_space_permission` for callers without the required access, `flow_run_access_denied` when a caller tries to access a run outside the current visibility policy, and `flow_service_key_principal_not_supported` on flow surfaces that still require a user principal. */
       403: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "You do not have permission to review flows.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_tenant_permission",
+           *       "context": {
+           *         "auth_layer": "tenant_role"
+           *       }
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Run or checkpoint not found for this flow and tenant. */
       404: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "Review checkpoint not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "flow_review_checkpoint_not_found"
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Validation Error */
       422: {
         headers: {
           [name: string]: unknown;
@@ -35249,8 +35727,11 @@ export interface operations {
       query?: never;
       header?: never;
       path: {
+        /** @description Identifier of the flow that owns the run. */
         id: string;
+        /** @description Identifier of the run to mutate. */
         run_id: string;
+        /** @description Identifier of the review checkpoint to approve. */
         checkpoint_id: string;
       };
       cookie?: never;
@@ -35261,6 +35742,7 @@ export interface operations {
       };
     };
     responses: {
+      /** @description Successful Response */
       200: {
         headers: {
           [name: string]: unknown;
@@ -35269,30 +35751,58 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunReviewCheckpointPublic"];
         };
       };
+      /** @description Review approval failed. Representative machine-readable codes include flow_review_stale_revision and flow_review_not_active. */
       400: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "Review checkpoint revision is stale.",
+           *       "intric_error_code": 9007,
+           *       "code": "flow_review_stale_revision"
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_tenant_permission` or `insufficient_space_permission` for callers without the required access, `flow_run_access_denied` when a caller tries to access a run outside the current visibility policy, and `flow_service_key_principal_not_supported` on flow surfaces that still require a user principal. */
       403: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "You do not have permission to review flows.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_tenant_permission",
+           *       "context": {
+           *         "auth_layer": "tenant_role"
+           *       }
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Run or checkpoint not found for this flow and tenant. */
       404: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "Review checkpoint not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "flow_review_checkpoint_not_found"
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Validation Error */
       422: {
         headers: {
           [name: string]: unknown;
@@ -35308,8 +35818,11 @@ export interface operations {
       query?: never;
       header?: never;
       path: {
+        /** @description Identifier of the flow that owns the run. */
         id: string;
+        /** @description Identifier of the run to mutate. */
         run_id: string;
+        /** @description Identifier of the review checkpoint to reject. */
         checkpoint_id: string;
       };
       cookie?: never;
@@ -35320,6 +35833,7 @@ export interface operations {
       };
     };
     responses: {
+      /** @description Successful Response */
       200: {
         headers: {
           [name: string]: unknown;
@@ -35328,30 +35842,58 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunReviewCheckpointPublic"];
         };
       };
+      /** @description Review rejection failed. Representative machine-readable codes include flow_review_stale_revision, flow_review_not_active, flow_review_reject_reason_required, and flow_review_reject_reason_too_long. */
       400: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "Review rejection reason is required.",
+           *       "intric_error_code": 9007,
+           *       "code": "flow_review_reject_reason_required"
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_tenant_permission` or `insufficient_space_permission` for callers without the required access, `flow_run_access_denied` when a caller tries to access a run outside the current visibility policy, and `flow_service_key_principal_not_supported` on flow surfaces that still require a user principal. */
       403: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "You do not have permission to review flows.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_tenant_permission",
+           *       "context": {
+           *         "auth_layer": "tenant_role"
+           *       }
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Run or checkpoint not found for this flow and tenant. */
       404: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "Review checkpoint not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "flow_review_checkpoint_not_found"
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Validation Error */
       422: {
         headers: {
           [name: string]: unknown;
@@ -35366,11 +35908,15 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
+        /** @description Required caller-supplied idempotency key for review resume retries. */
         "Idempotency-Key"?: string | null;
       };
       path: {
+        /** @description Identifier of the flow that owns the run. */
         id: string;
+        /** @description Identifier of the run to resume. */
         run_id: string;
+        /** @description Identifier of the approved review checkpoint. */
         checkpoint_id: string;
       };
       cookie?: never;
@@ -35381,6 +35927,7 @@ export interface operations {
       };
     };
     responses: {
+      /** @description Successful Response */
       202: {
         headers: {
           [name: string]: unknown;
@@ -35389,30 +35936,58 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunReviewCheckpointResumeResponse"];
         };
       };
+      /** @description Review resume failed. Representative machine-readable codes include flow_review_idempotency_key_required, flow_review_stale_revision, flow_review_not_approved, flow_review_already_resumed, flow_review_rejected, and flow_review_cancelled. */
       400: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "Review resume requires an Idempotency-Key header.",
+           *       "intric_error_code": 9007,
+           *       "code": "flow_review_idempotency_key_required"
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_tenant_permission` or `insufficient_space_permission` for callers without the required access, `flow_run_access_denied` when a caller tries to access a run outside the current visibility policy, and `flow_service_key_principal_not_supported` on flow surfaces that still require a user principal. */
       403: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "You do not have permission to resume flows.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_tenant_permission",
+           *       "context": {
+           *         "auth_layer": "tenant_role"
+           *       }
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Run or checkpoint not found for this flow and tenant. */
       404: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "Review checkpoint not found.",
+           *       "intric_error_code": 9000,
+           *       "code": "flow_review_checkpoint_not_found"
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Validation Error */
       422: {
         headers: {
           [name: string]: unknown;
@@ -43924,6 +44499,26 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+    };
+  };
+  flow_runtime_health_api_healthz_flows_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRuntimeHealthResponse"];
         };
       };
     };

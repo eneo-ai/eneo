@@ -62,6 +62,8 @@ export type UploadedFile = components["schemas"]["FilePublic"];
 export type Website = components["schemas"]["WebsitePublic"];
 export type Settings = components["schemas"]["SettingsPublic"];
 export type FlowInputLimits = components["schemas"]["FlowInputLimitsPublic"];
+export type FlowRuntimePolicy = components["schemas"]["FlowRuntimePolicyPublic"];
+export type FlowRuntimePolicyUpdate = components["schemas"]["FlowRuntimePolicyUpdate"];
 export type FlowEvidencePolicy = components["schemas"]["FlowEvidencePolicyPublic"];
 export type FlowRetentionPolicy = components["schemas"]["FlowRetentionPolicyPublic"];
 // SEAM: tracked in batch-5 journal; delete when schema.d.ts includes FlowDocumentRenderLimitsPublic.

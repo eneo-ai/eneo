@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Awaitable, Protocol, cast
+from typing import Any, Awaitable, Final, Protocol, cast
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import Completion
@@ -51,6 +52,7 @@ def _string_key_dict(value: object) -> dict[str, Any]:
 
 
 logger = logging.getLogger(__name__)
+LLM_TASK_CANCELLATION_GRACE_SECONDS: Final[float] = 2.0
 
 
 class VariableResolverProtocol(Protocol):
@@ -154,6 +156,20 @@ class JsonModeRejectionFn(Protocol):
     def __call__(self, exc: Exception) -> bool: ...
 
 
+class RunCancelledFn(Protocol):
+    def __call__(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID,
+        tenant_id: UUID,
+    ) -> Awaitable[bool]: ...
+
+
+class FlowStepCancelledError(Exception):
+    pass
+
+
 @dataclass
 class PreparedStepExecution:
     assistant: RuntimeAssistantProtocol
@@ -181,6 +197,9 @@ class StepExecutionRuntimeDeps:
     count_tokens: CountTokensFn
     logger: logging.Logger | None = None
     llm_request_timeout_seconds: float = 600
+    run_cancelled: RunCancelledFn | None = None
+    run_cancel_poll_interval_seconds: float = 2.0
+    llm_task_cancellation_grace_seconds: float = LLM_TASK_CANCELLATION_GRACE_SECONDS
     rag_retrieval_timeout_seconds: float = 30
 
 
@@ -269,6 +288,7 @@ async def call_assistant_with_timeout(
     *,
     step: RuntimeStep,
     run: FlowRun,
+    state: RunExecutionState,
     prepared: PreparedStepExecution,
     deps: StepExecutionRuntimeDeps,
     model_kwargs: Any,
@@ -280,12 +300,12 @@ async def call_assistant_with_timeout(
     # When a step deadline is supplied, the json-mode rejection retry shares
     # the same wall-clock budget as the initial call. Without this, a step
     # that consumes most of its timeout on the first attempt is granted a
-    # fresh per-call budget for the fallback retry — silently doubling the
+    # fresh per-call budget for the fallback retry, silently doubling the
     # bound the executor's outer asyncio.wait_for is supposed to enforce.
+    loop = asyncio.get_event_loop()
     if step_deadline_monotonic is None:
         timeout = deps.llm_request_timeout_seconds
     else:
-        loop = asyncio.get_event_loop()
         timeout = max(0.0, step_deadline_monotonic - loop.time())
 
     if timeout <= 0:
@@ -306,21 +326,152 @@ async def call_assistant_with_timeout(
             effective_prompt=prepared.effective_prompt,
         )
 
-    try:
-        return await asyncio.wait_for(
-            prepared.assistant.get_response(
-                question=prepared.step_input.text,
-                completion_service=deps.completion_service,
-                model_kwargs=model_kwargs,
-                files=prepared.llm_files,
-                info_blob_chunks=info_blob_chunks,
-                stream=False,
-                prompt_override=prompt_override,
-                version=version,
-            ),
-            timeout=timeout,
+    llm_task: asyncio.Task[Any] = asyncio.create_task(
+        prepared.assistant.get_response(
+            question=prepared.step_input.text,
+            completion_service=deps.completion_service,
+            model_kwargs=model_kwargs,
+            files=prepared.llm_files,
+            info_blob_chunks=info_blob_chunks,
+            stream=False,
+            prompt_override=prompt_override,
+            version=version,
         )
+    )
+    state.in_flight_llm_task = llm_task
+
+    def _consume_abandoned_llm_task(task: asyncio.Task[Any]) -> None:
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            if deps.logger is not None:
+                deps.logger.warning(
+                    "flow_executor.abandoned_llm_task_failed run_id=%s step_order=%d",
+                    run.id,
+                    step.step_order,
+                    exc_info=True,
+                )
+
+    async def _cancel_llm_task_with_grace() -> None:
+        if llm_task.done():
+            return
+        llm_task.cancel()
+        grace_seconds = max(0.0, deps.llm_task_cancellation_grace_seconds)
+        if grace_seconds <= 0:
+            llm_task.add_done_callback(_consume_abandoned_llm_task)
+            return
+        try:
+            await asyncio.wait_for(asyncio.shield(llm_task), timeout=grace_seconds)
+        except asyncio.CancelledError:
+            return
+        except TimeoutError:
+            llm_task.add_done_callback(_consume_abandoned_llm_task)
+        except Exception:
+            if deps.logger is not None:
+                deps.logger.warning(
+                    "flow_executor.llm_task_failed_after_cancel run_id=%s step_order=%d",
+                    run.id,
+                    step.step_order,
+                    exc_info=True,
+                )
+
+    async def _cancel_when_run_cancelled() -> bool:
+        if deps.run_cancelled is None:
+            return False
+        poll_interval = max(0.05, deps.run_cancel_poll_interval_seconds)
+        while not llm_task.done():
+            await asyncio.sleep(poll_interval)
+            try:
+                cancelled = await deps.run_cancelled(
+                    run_id=run.id,
+                    flow_id=run.flow_id,
+                    tenant_id=run.tenant_id,
+                )
+            except Exception:
+                if deps.logger is not None:
+                    deps.logger.warning(
+                        "flow_executor.cancel_watch_failed run_id=%s step_order=%d",
+                        run.id,
+                        step.step_order,
+                        exc_info=True,
+                    )
+                return False
+            if cancelled:
+                return True
+        return False
+
+    cancel_watcher = (
+        asyncio.create_task(_cancel_when_run_cancelled())
+        if deps.run_cancelled is not None
+        else None
+    )
+    try:
+        while True:
+            if step_deadline_monotonic is None:
+                wait_timeout = timeout
+            else:
+                wait_timeout = max(0.0, step_deadline_monotonic - loop.time())
+            if wait_timeout <= 0:
+                await _cancel_llm_task_with_grace()
+                if deps.logger is not None:
+                    deps.logger.warning(
+                        "flow_executor.llm_timeout run_id=%s step_order=%d timeout=%s",
+                        run.id,
+                        step.step_order,
+                        deps.llm_request_timeout_seconds,
+                    )
+                raise deps.attach_typed_failure_context(
+                    TypedIOValidationException(
+                        f"Step {step.step_order}: LLM request exceeded "
+                        f"{deps.llm_request_timeout_seconds:g}s timeout.",
+                        code="flow_llm_request_timeout",
+                    ),
+                    input_payload_for_result=prepared.input_payload_for_result,
+                    effective_prompt=prepared.effective_prompt,
+                )
+
+            wait_tasks: set[asyncio.Task[Any]] = {llm_task}
+            if cancel_watcher is not None:
+                wait_tasks.add(cancel_watcher)
+            done, _ = await asyncio.wait(
+                wait_tasks,
+                timeout=wait_timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if not done:
+                await _cancel_llm_task_with_grace()
+                if deps.logger is not None:
+                    deps.logger.warning(
+                        "flow_executor.llm_timeout run_id=%s step_order=%d timeout=%s",
+                        run.id,
+                        step.step_order,
+                        deps.llm_request_timeout_seconds,
+                    )
+                raise deps.attach_typed_failure_context(
+                    TypedIOValidationException(
+                        f"Step {step.step_order}: LLM request exceeded "
+                        f"{deps.llm_request_timeout_seconds:g}s timeout.",
+                        code="flow_llm_request_timeout",
+                    ),
+                    input_payload_for_result=prepared.input_payload_for_result,
+                    effective_prompt=prepared.effective_prompt,
+                )
+            if llm_task in done:
+                return llm_task.result()
+            if cancel_watcher is not None and cancel_watcher in done:
+                if cancel_watcher.result():
+                    await _cancel_llm_task_with_grace()
+                    raise FlowStepCancelledError(
+                        "Run was cancelled during step execution."
+                    )
+                cancel_watcher = None
+    except asyncio.CancelledError:
+        await _cancel_llm_task_with_grace()
+        raise
     except TimeoutError as exc:
+        await _cancel_llm_task_with_grace()
         if deps.logger is not None:
             deps.logger.warning(
                 "flow_executor.llm_timeout run_id=%s step_order=%d timeout=%s",
@@ -337,6 +488,13 @@ async def call_assistant_with_timeout(
             input_payload_for_result=prepared.input_payload_for_result,
             effective_prompt=prepared.effective_prompt,
         ) from exc
+    finally:
+        if cancel_watcher is not None:
+            cancel_watcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cancel_watcher
+        if state.in_flight_llm_task is llm_task:
+            state.in_flight_llm_task = None
 
 
 def build_output_payload(output: StepExecutionOutput) -> dict[str, Any]:
@@ -928,7 +1086,12 @@ async def complete_step_execution(
 
     if deps.logger is not None:
         deps.logger.info(
-            "flow_executor.llm_call run_id=%s step_order=%d", run.id, step.step_order
+            "flow_executor.llm_call run_id=%s step_order=%d timeout=%s "
+            "native_json_object_requested=%s",
+            run.id,
+            step.step_order,
+            deps.llm_request_timeout_seconds,
+            native_json_object_requested,
         )
     prompt_override = prepared.effective_prompt
     if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR:
@@ -948,6 +1111,7 @@ async def complete_step_execution(
         response = await call_assistant_with_timeout(
             step=step,
             run=run,
+            state=state,
             prepared=prepared,
             deps=deps,
             model_kwargs=model_kwargs,
@@ -962,6 +1126,7 @@ async def complete_step_execution(
             response = await call_assistant_with_timeout(
                 step=step,
                 run=run,
+                state=state,
                 prepared=prepared,
                 deps=deps,
                 model_kwargs=original_kwargs,
@@ -1039,9 +1204,12 @@ async def complete_step_execution(
 
     if deps.logger is not None:
         deps.logger.info(
-            "flow_executor.typed_output_done run_id=%s step_order=%d has_structured=%s has_artifacts=%s",
+            "flow_executor.typed_output_done run_id=%s step_order=%d output_type=%s "
+            "full_text_len=%d has_structured=%s has_artifacts=%s",
             run.id,
             step.step_order,
+            step.output_type,
+            len(full_text),
             structured_output is not None,
             artifacts is not None and len(artifacts) > 0,
         )

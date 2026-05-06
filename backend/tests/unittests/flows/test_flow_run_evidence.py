@@ -561,6 +561,38 @@ def test_parse_attempt_provenance_returns_tracked_current_payload() -> None:
     assert payload["schema_version"] == FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
 
 
+def test_parse_attempt_provenance_accepts_attempt_start_section() -> None:
+    result = parse_attempt_provenance(
+        {
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "attempt_start": {
+                "requested_model": "gpt-5.4-nano",
+                "provider": "openai",
+                "deadline_at": "2026-05-06T08:12:00Z",
+                "resolved_timeout_seconds": 1800,
+                "effective_prompt_length": 120,
+                "input_text_length": 8000,
+                "input_tokens_estimate": 2000,
+                "model_parameter_snapshot": {
+                    "temperature": None,
+                    "top_p": None,
+                    "reasoning_effort": "high",
+                    "verbosity": None,
+                },
+            },
+        }
+    )
+
+    assert result.status == "tracked"
+    assert result.provenance is not None
+    assert result.provenance.attempt_start is not None
+    assert result.provenance.attempt_start.resolved_timeout_seconds == 1800
+    assert (
+        result.provenance.attempt_start.model_parameter_snapshot.reasoning_effort
+        == "high"
+    )
+
+
 @pytest.mark.parametrize(
     ("raw", "error_code"),
     [

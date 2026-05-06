@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
@@ -42,12 +42,19 @@ from intric.flows.enums import (
     is_terminal_flow_run_status,
 )
 from intric.flows.flow_run_provenance import (
+    AttemptStartProvenance,
     FlowAttemptProvenance,
     LlmProvenance,
+    ModelParameterSnapshot,
     normalize_json_preview,
     normalize_text_preview,
 )
 from intric.flows.flow_run_step_result_file import build_step_result_file_references
+from intric.flows.flow_runtime_policy import (
+    FlowRuntimePolicy,
+    default_flow_runtime_policy,
+    resolve_step_timeout_seconds,
+)
 from intric.flows.flow_security_classification import (
     evaluate_step_security_classification,
 )
@@ -110,6 +117,7 @@ from intric.flows.runtime.step_attempt_runtime import (
 )
 from intric.flows.runtime.step_definition_parser import parse_runtime_steps
 from intric.flows.runtime.step_execution_runtime import (
+    FlowStepCancelledError,
     StepExecutionRuntimeDeps,
     attach_typed_failure_context,
     build_output_payload,
@@ -156,7 +164,9 @@ class FlowRunExecutorConfig:
     http_request_timeout_seconds: float = 30.0
     http_max_timeout_seconds: float = 30.0
     http_allow_private_networks: bool = False
-    llm_request_timeout_seconds: float = 600.0
+    runtime_policy: FlowRuntimePolicy = field(
+        default_factory=default_flow_runtime_policy
+    )
     rag_retrieval_timeout_seconds: float = 30.0
     rag_max_reference_sources: int = 25
     rag_max_chunks_per_source: int = 5
@@ -172,8 +182,12 @@ class FlowRunExecutorConfig:
         max_audio_files: int = 10,
         max_generic_files: int | None = None,
         document_render_limits: DocumentRenderLimits = DEFAULT_DOCUMENT_RENDER_LIMITS,
+        runtime_policy: FlowRuntimePolicy | None = None,
     ) -> "FlowRunExecutorConfig":
         settings = get_settings()
+        resolved_runtime_policy = runtime_policy or default_flow_runtime_policy(
+            defaults=settings
+        )
         return cls(
             max_inline_text_bytes=max_inline_text_bytes,
             max_audio_files=max_audio_files,
@@ -183,40 +197,98 @@ class FlowRunExecutorConfig:
             ),
             http_max_timeout_seconds=float(settings.flow_http_max_timeout_seconds),
             http_allow_private_networks=bool(settings.flow_http_allow_private_networks),
-            llm_request_timeout_seconds=float(
-                settings.flow_llm_request_timeout_seconds
-            ),
+            runtime_policy=resolved_runtime_policy,
             document_render_limits=document_render_limits,
         )
 
+    def step_deadline_seconds(self, step: RuntimeStep) -> float:
+        return float(
+            resolve_step_timeout_seconds(
+                step_timeout_seconds=step.timeout_seconds,
+                policy=self.runtime_policy,
+            )
+        )
 
-def _step_telemetry_from_state(
-    *,
-    state: RunExecutionState,
-    step: RuntimeStep,
-) -> tuple[str | None, str | None]:
-    """Best-effort (requested_model, provider) for failed/cancelled attempts.
 
-    Read from `state.assistant_cache`, which `prepare_step_execution` fills
-    before any LLM dispatch. When a step fails after dispatch, the cache
-    still carries the assistant we just tried. Returns (None, None) when
-    the assistant was never loaded, which keeps downstream `finish_attempt`
-    columns nullable instead of forcing a synthetic placeholder.
-    """
-    assistant = state.assistant_cache.get(step.assistant_id)
-    if assistant is None:
-        return None, None
+def _requested_model_from_assistant(
+    assistant: RuntimeAssistantProtocol,
+) -> str | None:
     completion_model = getattr(assistant, "completion_model", None)
     if completion_model is None:
-        return None, None
+        return None
     requested = getattr(completion_model, "litellm_model_name", None) or getattr(
         completion_model, "name", None
     )
+    return requested if isinstance(requested, str) else None
+
+
+def _provider_from_assistant(assistant: RuntimeAssistantProtocol) -> str | None:
+    completion_model = getattr(assistant, "completion_model", None)
+    if completion_model is None:
+        return None
     provider = getattr(completion_model, "provider_type", None)
-    return (
-        requested if isinstance(requested, str) else None,
-        provider if isinstance(provider, str) else None,
+    return provider if isinstance(provider, str) else None
+
+
+def _model_parameter_snapshot(
+    assistant: RuntimeAssistantProtocol,
+) -> ModelParameterSnapshot:
+    kwargs = assistant.completion_model_kwargs.model_dump(exclude_none=False)
+    temperature = kwargs.get("temperature")
+    top_p = kwargs.get("top_p")
+    reasoning_effort = kwargs.get("reasoning_effort")
+    verbosity = kwargs.get("verbosity")
+    return ModelParameterSnapshot(
+        temperature=temperature
+        if isinstance(temperature, int | float) and not isinstance(temperature, bool)
+        else None,
+        top_p=top_p
+        if isinstance(top_p, int | float) and not isinstance(top_p, bool)
+        else None,
+        reasoning_effort=reasoning_effort
+        if isinstance(reasoning_effort, str)
+        else None,
+        verbosity=verbosity if isinstance(verbosity, str) else None,
     )
+
+
+def _attempt_start_for_step(
+    *,
+    state: RunExecutionState | None,
+    step: RuntimeStep,
+) -> AttemptStartProvenance | None:
+    if state is None:
+        return None
+    return state.attempt_start_by_step.get(step.step_id)
+
+
+def _pre_attempt_start_model_from_state_cache(
+    *,
+    state: RunExecutionState | None,
+    step: RuntimeStep,
+) -> tuple[str | None, str | None]:
+    # Preparation can fail after the assistant is loaded but before
+    # attempt_start is persisted; preserve model triage data in that window.
+    if state is None:
+        return None, None
+    assistant = state.assistant_cache.get(step.assistant_id)
+    if assistant is None:
+        return None, None
+    return (
+        _requested_model_from_assistant(assistant),
+        _provider_from_assistant(assistant),
+    )
+
+
+def _build_incomplete_attempt_provenance(
+    *,
+    state: RunExecutionState | None,
+    step: RuntimeStep,
+) -> dict[str, Any] | None:
+    attempt_start = _attempt_start_for_step(state=state, step=step)
+    if attempt_start is None:
+        return None
+    return FlowAttemptProvenance(attempt_start=attempt_start).to_payload()
 
 
 def _build_attempt_provenance(
@@ -224,6 +296,7 @@ def _build_attempt_provenance(
     step: RuntimeStep,
     output: StepExecutionOutput,
     step_result: FlowStepResult,
+    attempt_start: AttemptStartProvenance | None = None,
 ) -> dict[str, Any]:
     provenance_payload: dict[str, Any] = {
         "llm": LlmProvenance(
@@ -238,6 +311,8 @@ def _build_attempt_provenance(
             else None,
         )
     }
+    if attempt_start is not None:
+        provenance_payload["attempt_start"] = attempt_start
     if output.rag_metadata is not None:
         provenance_payload["rag"] = output.rag_metadata
     if output.runtime_input_metadata is not None:
@@ -348,7 +423,8 @@ class FlowRunExecutor:
             max_timeout_seconds=self.http_max_timeout_seconds,
             allow_private_networks=self.http_allow_private_networks,
         )
-        self.llm_request_timeout_seconds = resolved_config.llm_request_timeout_seconds
+        self.runtime_policy = resolved_config.runtime_policy
+        self._step_deadline_seconds = resolved_config.step_deadline_seconds
         self.rag_retrieval_timeout_seconds = (
             resolved_config.rag_retrieval_timeout_seconds
         )
@@ -614,6 +690,15 @@ class FlowRunExecutor:
                     run=latest_run,
                     state=state,
                     version_metadata=version_metadata,
+                    attempt_no=attempt_no,
+                )
+            except FlowStepCancelledError:
+                return await self._handle_cancelled_step(
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                    step=step,
+                    attempt_no=attempt_no,
+                    state=state,
                 )
             except TypedIOValidationException as typed_exc:
                 contract_diag: dict[str, Any] | None = None
@@ -695,6 +780,7 @@ class FlowRunExecutor:
             )
             if latest_run.status == FlowRunStatus.CANCELLED:
                 model_params = output.model_parameters_json or {}
+                attempt_start = _attempt_start_for_step(state=state, step=step)
                 cancel_requested_model = (
                     model_params.get("model_name")
                     if isinstance(model_params.get("model_name"), str)
@@ -705,14 +791,10 @@ class FlowRunExecutor:
                     if isinstance(model_params.get("provider"), str)
                     else None
                 )
-                if cancel_requested_model is None or cancel_provider is None:
-                    state_model, state_provider = _step_telemetry_from_state(
-                        state=state, step=step
-                    )
-                    if cancel_requested_model is None:
-                        cancel_requested_model = state_model
-                    if cancel_provider is None:
-                        cancel_provider = state_provider
+                if cancel_requested_model is None and attempt_start is not None:
+                    cancel_requested_model = attempt_start.requested_model
+                if cancel_provider is None and attempt_start is not None:
+                    cancel_provider = attempt_start.provider
                 await self.flow_run_repo.finish_attempt(
                     run_id=run_id,
                     step_id=step.step_id,
@@ -725,6 +807,12 @@ class FlowRunExecutor:
                     provider=cancel_provider,
                     num_tokens_input=output.num_tokens_input or None,
                     num_tokens_output=output.num_tokens_output or None,
+                    provenance_json=_build_attempt_provenance(
+                        step=step,
+                        output=output,
+                        step_result=claimed_result,
+                        attempt_start=attempt_start,
+                    ),
                 )
                 await self._commit()
                 return {"status": "skipped", "reason": "run_cancelled"}
@@ -752,6 +840,7 @@ class FlowRunExecutor:
                 output=output,
                 step_result=step_result,
                 attempt_no=attempt_no,
+                attempt_start=_attempt_start_for_step(state=state, step=step),
             )
 
             state.append_completed(step_result)
@@ -905,6 +994,7 @@ class FlowRunExecutor:
         run: FlowRun,
         state: RunExecutionState | None = None,
         version_metadata: dict[str, Any] | None = None,
+        attempt_no: int | None = None,
     ) -> StepExecutionOutput:
         if state is None:
             state = RunExecutionState(
@@ -943,6 +1033,15 @@ class FlowRunExecutor:
                 state=state,
                 deps=template_fill_deps,
             )
+        try:
+            llm_timeout_seconds = self._step_deadline_seconds(step)
+        except BadRequestException as exc:
+            raise TypedIOValidationException(
+                str(exc),
+                code=exc.code,
+                context=exc.context,
+            ) from exc
+
         execution_deps = StepExecutionRuntimeDeps(
             variable_resolver=self.variable_resolver,
             completion_service=self.completion_service,
@@ -957,8 +1056,9 @@ class FlowRunExecutor:
             is_json_mode_rejection=is_json_mode_rejection,
             count_tokens=count_tokens,
             logger=logger,
-            llm_request_timeout_seconds=self.llm_request_timeout_seconds,
+            llm_request_timeout_seconds=llm_timeout_seconds,
             rag_retrieval_timeout_seconds=self.rag_retrieval_timeout_seconds,
+            run_cancelled=self._run_is_cancelled,
         )
         prepared = await prepare_step_execution(
             step=step,
@@ -967,6 +1067,52 @@ class FlowRunExecutor:
             version_metadata=version_metadata,
             deps=execution_deps,
         )
+        requested_model = _requested_model_from_assistant(prepared.assistant)
+        provider = _provider_from_assistant(prepared.assistant)
+        resolved_timeout_seconds = int(execution_deps.llm_request_timeout_seconds)
+        attempt_start = AttemptStartProvenance(
+            requested_model=requested_model,
+            provider=provider,
+            deadline_at=datetime.now(timezone.utc)
+            + timedelta(seconds=resolved_timeout_seconds),
+            resolved_timeout_seconds=resolved_timeout_seconds,
+            effective_prompt_length=len(prepared.effective_prompt),
+            input_text_length=len(prepared.step_input.text),
+            input_tokens_estimate=count_tokens(prepared.step_input.text),
+            model_parameter_snapshot=_model_parameter_snapshot(prepared.assistant),
+        )
+        state.attempt_start_by_step[step.step_id] = attempt_start
+        contract_validation = prepared.contract_validation or {}
+        logger.info(
+            "flow_executor.step_prepared run_id=%s step_order=%d requested_model=%s "
+            "provider=%s input_type=%s input_source=%s output_type=%s "
+            "used_question_binding=%s input_text_len=%d source_text_len=%d "
+            "effective_prompt_len=%d contract_parse_attempted=%s "
+            "contract_parse_succeeded=%s",
+            run.id,
+            step.step_order,
+            requested_model,
+            provider,
+            step.input_type,
+            prepared.step_input.input_source,
+            step.output_type,
+            prepared.step_input.used_question_binding,
+            len(prepared.step_input.text),
+            len(prepared.step_input.source_text),
+            len(prepared.effective_prompt),
+            contract_validation.get("parse_attempted"),
+            contract_validation.get("parse_succeeded"),
+        )
+        if attempt_no is not None:
+            await self.flow_run_repo.record_attempt_start_provenance(
+                run_id=run.id,
+                step_id=step.step_id,
+                attempt_no=attempt_no,
+                tenant_id=run.tenant_id,
+                requested_model=requested_model,
+                provider=provider,
+                attempt_start=attempt_start,
+            )
         await self._commit()
         return await complete_step_execution(
             step=step,
@@ -1002,6 +1148,20 @@ class FlowRunExecutor:
     async def _flow_is_active(self, *, flow_id: UUID, tenant_id: UUID) -> bool:
         return await self.flow_repo.is_active(flow_id=flow_id, tenant_id=tenant_id)
 
+    async def _run_is_cancelled(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID,
+        tenant_id: UUID,
+    ) -> bool:
+        run = await self.flow_run_repo.get(
+            run_id=run_id,
+            flow_id=flow_id,
+            tenant_id=tenant_id,
+        )
+        return run.status == FlowRunStatus.CANCELLED
+
     async def _handle_attempt_start_failure(
         self,
         *,
@@ -1034,6 +1194,43 @@ class FlowRunExecutor:
         )
         return failure_plan.return_result
 
+    async def _handle_cancelled_step(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        step: RuntimeStep,
+        attempt_no: int,
+        state: RunExecutionState | None,
+    ) -> dict[str, Any]:
+        await self._rollback()
+        attempt_start = _attempt_start_for_step(state=state, step=step)
+        requested_model, provider = (
+            (
+                attempt_start.requested_model,
+                attempt_start.provider,
+            )
+            if attempt_start is not None
+            else _pre_attempt_start_model_from_state_cache(state=state, step=step)
+        )
+        await self.flow_run_repo.finish_attempt(
+            run_id=run_id,
+            step_id=step.step_id,
+            attempt_no=attempt_no,
+            tenant_id=tenant_id,
+            status=FlowStepAttemptStatus.CANCELLED,
+            error_code="run_cancelled",
+            error_message="Run was cancelled during step execution.",
+            requested_model=requested_model,
+            provider=provider,
+            provenance_json=_build_incomplete_attempt_provenance(
+                state=state,
+                step=step,
+            ),
+        )
+        await self._commit()
+        return {"status": "skipped", "reason": "run_cancelled"}
+
     async def _handle_typed_step_failure(
         self,
         *,
@@ -1057,9 +1254,15 @@ class FlowRunExecutor:
         await self._rollback()
         requested_model = getattr(typed_exc, "requested_model", None)
         provider = getattr(typed_exc, "provider", None)
-        if state is not None and (requested_model is None or provider is None):
-            state_model, state_provider = _step_telemetry_from_state(
-                state=state, step=step
+        if requested_model is None or provider is None:
+            attempt_start = _attempt_start_for_step(state=state, step=step)
+            state_model, state_provider = (
+                (
+                    attempt_start.requested_model,
+                    attempt_start.provider,
+                )
+                if attempt_start is not None
+                else _pre_attempt_start_model_from_state_cache(state=state, step=step)
             )
             if requested_model is None:
                 requested_model = state_model
@@ -1077,6 +1280,10 @@ class FlowRunExecutor:
             if isinstance(requested_model, str)
             else None,
             provider=provider if isinstance(provider, str) else None,
+            provenance_json=_build_incomplete_attempt_provenance(
+                state=state,
+                step=step,
+            ),
         )
         await self.flow_repo.save_step_result(
             run_id, failure_plan.failed_result, tenant_id=tenant_id
@@ -1106,10 +1313,14 @@ class FlowRunExecutor:
             public_error=f"Flow step {step.step_order} execution failed.",
         )
         await self._rollback()
+        attempt_start = _attempt_start_for_step(state=state, step=step)
         requested_model, provider = (
-            _step_telemetry_from_state(state=state, step=step)
-            if state is not None
-            else (None, None)
+            (
+                attempt_start.requested_model,
+                attempt_start.provider,
+            )
+            if attempt_start is not None
+            else _pre_attempt_start_model_from_state_cache(state=state, step=step)
         )
         await self.flow_run_repo.finish_attempt(
             run_id=run_id,
@@ -1121,6 +1332,10 @@ class FlowRunExecutor:
             error_message=failure_plan.error_message,
             requested_model=requested_model,
             provider=provider,
+            provenance_json=_build_incomplete_attempt_provenance(
+                state=state,
+                step=step,
+            ),
         )
         await self.flow_repo.save_step_result(
             run_id, failure_plan.failed_result, tenant_id=tenant_id
@@ -1144,6 +1359,7 @@ class FlowRunExecutor:
         output: StepExecutionOutput,
         step_result: FlowStepResult,
         attempt_no: int,
+        attempt_start: AttemptStartProvenance | None,
     ) -> None:
         await self.flow_repo.save_step_result(
             run_id,
@@ -1177,6 +1393,7 @@ class FlowRunExecutor:
                 step=step,
                 output=output,
                 step_result=step_result,
+                attempt_start=attempt_start,
             ),
         )
         await self._commit()

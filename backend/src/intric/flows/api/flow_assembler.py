@@ -37,6 +37,7 @@ class FlowAssembler:
         return FlowStep(
             assistant_id=step.assistant_id,
             step_order=step.step_order,
+            timeout_seconds=step.timeout_seconds,
             user_description=step.user_description,
             input_source=step.input_source,
             input_type=step.input_type,

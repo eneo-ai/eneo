@@ -746,6 +746,7 @@ class FlowService:
         return {
             "step_id": str(step.id) if step.id is not None else None,
             "step_order": step.step_order,
+            "timeout_seconds": step.timeout_seconds,
             "assistant_id": str(step.assistant_id),
             "user_description": step.user_description,
             "input_source": step.input_source,

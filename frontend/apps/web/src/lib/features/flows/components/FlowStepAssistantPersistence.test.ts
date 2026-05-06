@@ -30,6 +30,20 @@ const models = [
   }
 ];
 
+const reasoningModels = [
+  {
+    id: "model-gpt-54",
+    name: "gpt-5.4-nano",
+    nickname: "GPT-5.4 nano",
+    description: "Reasoning-capable model",
+    token_limit: 128000,
+    provider_type: "openai",
+    provider_id: "provider-openai",
+    provider_name: "OpenAI",
+    reasoning: true
+  }
+];
+
 afterEach(() => {
   cleanup();
 });
@@ -55,5 +69,21 @@ describe("Flow step assistant persistence wiring", () => {
     expect(screen.getByTestId("save-call-count").textContent).toBe("1");
     expect(screen.getByTestId("last-save").textContent).toContain('"completion_model_kwargs"');
     expect(screen.getByTestId("last-save").textContent).toContain('"temperature":0.25');
+  });
+
+  it("shows the active assistant's reasoning effort after switching steps", async () => {
+    render(FlowStepAssistantPersistenceHarness, {
+      availableModels: reasoningModels
+    });
+
+    const reasoningSelect = screen.getByLabelText("Reasoning") as HTMLSelectElement;
+
+    expect(reasoningSelect.value).toBe("high");
+
+    await fireEvent.click(screen.getByTestId("select-second-assistant"));
+    expect(reasoningSelect.value).toBe("low");
+
+    await fireEvent.click(screen.getByTestId("select-first-assistant"));
+    expect(reasoningSelect.value).toBe("high");
   });
 });

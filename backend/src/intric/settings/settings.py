@@ -205,6 +205,28 @@ class FlowDocumentRenderLimitsUpdate(BaseModel):
     )
 
 
+class FlowRuntimePolicyPublic(BaseModel):
+    default_step_timeout_seconds: int = Field(ge=1)
+    max_step_timeout_seconds: int = Field(ge=1)
+    hard_ceiling_seconds: int = Field(
+        ge=1,
+        description="Deployment hard ceiling after reserving worker task shutdown buffer.",
+    )
+
+
+class FlowRuntimePolicyUpdate(BaseModel):
+    default_step_timeout_seconds: int | None = Field(
+        default=None,
+        ge=1,
+        description="Set the tenant default per-step LLM timeout, or send null to use the deployment default.",
+    )
+    max_step_timeout_seconds: int | None = Field(
+        default=None,
+        ge=1,
+        description="Set the tenant maximum per-step LLM timeout, or send null to use the deployment ceiling.",
+    )
+
+
 class AIBuilderBudgetSettingsPublic(BaseModel):
     conversation_safety_buffer_tokens: int
     minimum_conversation_budget_tokens: int

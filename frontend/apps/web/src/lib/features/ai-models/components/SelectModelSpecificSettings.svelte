@@ -23,13 +23,22 @@
   // Local state for the custom parameters
   let customReasoningEffort: string = "";
   let customVerbosity: string = "";
-  let initialized = false;
+  let previousReasoningEffort = "";
+  let previousVerbosity = "";
 
-  // Initialize custom values from kwArgs only once
-  $: if (kwArgs && !initialized) {
-    customReasoningEffort = kwArgs.reasoning_effort || "";
-    customVerbosity = kwArgs.verbosity || "";
-    initialized = true;
+  $: {
+    const nextReasoningEffort =
+      typeof kwArgs?.reasoning_effort === "string" ? kwArgs.reasoning_effort : "";
+    const nextVerbosity = typeof kwArgs?.verbosity === "string" ? kwArgs.verbosity : "";
+    if (
+      nextReasoningEffort !== previousReasoningEffort ||
+      nextVerbosity !== previousVerbosity
+    ) {
+      customReasoningEffort = nextReasoningEffort;
+      customVerbosity = nextVerbosity;
+      previousReasoningEffort = nextReasoningEffort;
+      previousVerbosity = nextVerbosity;
+    }
   }
 
   function updateKwArgs() {
@@ -50,11 +59,12 @@
     }
 
     kwArgs = args;
+    previousReasoningEffort = customReasoningEffort;
+    previousVerbosity = customVerbosity;
     dispatch("change", { kwArgs: args });
   }
 
   // Reactive updates for verbosity (since event handlers don't work reliably)
-  let previousVerbosity = customVerbosity;
   $: if (customVerbosity !== previousVerbosity) {
     previousVerbosity = customVerbosity;
     updateKwArgs();
@@ -76,6 +86,7 @@
     </div>
     <select
       bind:value={customReasoningEffort}
+      aria-label="Reasoning"
       on:change={updateKwArgs}
       class="border-default bg-primary ring-default rounded border px-3 py-2 focus:ring-2"
     >
@@ -105,6 +116,7 @@
     </div>
     <select
       bind:value={customVerbosity}
+      aria-label="Verbosity"
       on:change={updateKwArgs}
       class="border-default bg-primary ring-default rounded border px-3 py-2 focus:ring-2"
     >

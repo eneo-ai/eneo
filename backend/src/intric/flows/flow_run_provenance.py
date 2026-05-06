@@ -4,6 +4,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Literal, TypeAlias, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -62,6 +63,28 @@ class LlmProvenance(BaseModel):
     raw_completion_text: PayloadPreview | None = None
 
 
+class ModelParameterSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    temperature: float | None = None
+    top_p: float | None = None
+    reasoning_effort: str | None = None
+    verbosity: str | None = None
+
+
+class AttemptStartProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    requested_model: str | None = None
+    provider: str | None = None
+    deadline_at: datetime
+    resolved_timeout_seconds: int
+    effective_prompt_length: int
+    input_text_length: int
+    input_tokens_estimate: int | None = None
+    model_parameter_snapshot: ModelParameterSnapshot
+
+
 class RagProvenance(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -109,6 +132,7 @@ class FlowAttemptProvenance(BaseModel):
         FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
     )
     llm: LlmProvenance | None = None
+    attempt_start: AttemptStartProvenance | None = None
     rag: RagProvenance | None = None
     http: HttpProvenance | None = None
     template: TemplateProvenance | None = None
@@ -389,6 +413,9 @@ def _normalize_attempt_provenance_v1(raw: dict[str, Any]) -> FlowAttemptProvenan
     return FlowAttemptProvenance(
         schema_version=FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
         llm=llm,
+        attempt_start=_validate_extra_model(
+            AttemptStartProvenance, raw.get("attempt_start")
+        ),
         rag=_normalize_rag_provenance(raw.get("rag")),
         http=_validate_extra_model(HttpProvenance, raw.get("http")),
         template=_validate_extra_model(TemplateProvenance, raw.get("template")),

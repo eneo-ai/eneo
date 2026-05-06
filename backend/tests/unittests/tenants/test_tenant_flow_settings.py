@@ -213,3 +213,49 @@ def test_tenant_in_db_rejects_invalid_flow_evidence_policy_settings():
             },
             state=TenantState.ACTIVE,
         )
+
+
+def test_tenant_in_db_validates_flow_runtime_policy_settings():
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="Tenant",
+        display_name="Tenant",
+        quota_limit=1024**3,
+        modules=[],
+        api_credentials={},
+        federation_config={},
+        crawler_settings={},
+        api_key_policy={},
+        flow_settings={
+            "runtime_policy": {
+                "default_step_timeout_seconds": 1200,
+                "max_step_timeout_seconds": 2400,
+            }
+        },
+        state=TenantState.ACTIVE,
+    )
+
+    assert (
+        tenant.flow_settings["runtime_policy"]["default_step_timeout_seconds"] == 1200
+    )
+
+
+def test_tenant_in_db_rejects_invalid_flow_runtime_policy_settings():
+    with pytest.raises(ValueError, match="default_step_timeout_seconds"):
+        TenantInDB(
+            id=uuid4(),
+            name="Tenant",
+            display_name="Tenant",
+            quota_limit=1024**3,
+            modules=[],
+            api_credentials={},
+            federation_config={},
+            crawler_settings={},
+            api_key_policy={},
+            flow_settings={
+                "runtime_policy": {
+                    "default_step_timeout_seconds": "long",
+                }
+            },
+            state=TenantState.ACTIVE,
+        )

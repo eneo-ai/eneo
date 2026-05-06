@@ -17,6 +17,8 @@ from intric.settings.settings import (
     FlowInputLimitsUpdate,
     FlowRetentionPolicyPublic,
     FlowRetentionPolicyUpdate,
+    FlowRuntimePolicyPublic,
+    FlowRuntimePolicyUpdate,
 )
 from intric.settings.settings_router import (
     get_ai_builder_budget_settings,
@@ -24,11 +26,13 @@ from intric.settings.settings_router import (
     get_flow_evidence_policy,
     get_flow_input_limits,
     get_flow_retention_policy,
+    get_flow_runtime_policy,
     update_ai_builder_budget_settings,
     update_flow_document_render_limits,
     update_flow_evidence_policy,
     update_flow_input_limits,
     update_flow_retention_policy,
+    update_flow_runtime_policy,
 )
 
 
@@ -183,6 +187,48 @@ async def test_patch_flow_document_render_limits_delegates_to_service() -> None:
 
     assert response.max_source_chars == 800_000
     service.update_flow_document_render_limits.assert_awaited_once_with(payload)
+
+
+@pytest.mark.asyncio
+async def test_get_flow_runtime_policy_delegates_to_service() -> None:
+    container = MagicMock()
+    service = AsyncMock()
+    service.get_flow_runtime_policy.return_value = FlowRuntimePolicyPublic(
+        default_step_timeout_seconds=900,
+        max_step_timeout_seconds=1800,
+        hard_ceiling_seconds=3540,
+    )
+    container.settings_service.return_value = service
+    container.user.return_value = SimpleNamespace(
+        id="u", tenant_id="t", permissions=[Permission.ADMIN]
+    )
+
+    response = await get_flow_runtime_policy(container=container)
+
+    assert response.default_step_timeout_seconds == 900
+    assert response.max_step_timeout_seconds == 1800
+    service.get_flow_runtime_policy.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_patch_flow_runtime_policy_delegates_to_service() -> None:
+    container = MagicMock()
+    service = AsyncMock()
+    service.update_flow_runtime_policy.return_value = FlowRuntimePolicyPublic(
+        default_step_timeout_seconds=1200,
+        max_step_timeout_seconds=2400,
+        hard_ceiling_seconds=3540,
+    )
+    container.settings_service.return_value = service
+    container.user.return_value = SimpleNamespace(
+        id="u", tenant_id="t", permissions=[Permission.ADMIN]
+    )
+
+    payload = FlowRuntimePolicyUpdate(default_step_timeout_seconds=1200)
+    response = await update_flow_runtime_policy(payload=payload, container=container)
+
+    assert response.default_step_timeout_seconds == 1200
+    service.update_flow_runtime_policy.assert_awaited_once_with(payload)
 
 
 @pytest.mark.asyncio

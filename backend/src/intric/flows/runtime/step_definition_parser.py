@@ -32,6 +32,16 @@ def _optional_json_object(value: object) -> JsonObject | None:
     return cast(JsonObject, value) if isinstance(value, dict) else None
 
 
+def _optional_positive_int(value: object, field_name: str) -> int | None:
+    if value is None:
+        return None
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise BadRequestException(f"{field_name} must be an integer.")
+    if value <= 0:
+        raise BadRequestException(f"{field_name} must be greater than zero.")
+    return value
+
+
 def parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
     steps = definition_json.get("steps")
     if not isinstance(steps, list):
@@ -153,6 +163,10 @@ def parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
         output_contract = _optional_json_object(item_dict.get("output_contract"))
         input_contract = _optional_json_object(item_dict.get("input_contract"))
         assistant_snapshot = _optional_json_object(item_dict.get("assistant_snapshot"))
+        timeout_seconds = _optional_positive_int(
+            item_dict.get("timeout_seconds"),
+            "timeout_seconds",
+        )
         parsed.append(
             RuntimeStep(
                 step_id=step_id,
@@ -180,6 +194,7 @@ def parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
                 input_contract=input_contract,
                 assistant_snapshot=assistant_snapshot,
                 review_policy=review_policy,
+                timeout_seconds=timeout_seconds,
             )
         )
     step_orders = [step.step_order for step in parsed]

@@ -108,6 +108,32 @@ export function initSettings(client) {
     },
 
     /**
+     * Get flow runtime timeout policy for the current tenant.
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').FlowRuntimePolicy>}
+     */
+    getFlowRuntimePolicy: async () => {
+      const res = await client.fetch("/api/v1/settings/flow-runtime-policy", {
+        method: "get"
+      });
+      return res;
+    },
+
+    /**
+     * Update flow runtime timeout policy for the current tenant.
+     * @param {import('../types/resources').FlowRuntimePolicyUpdate} patch
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').FlowRuntimePolicy>}
+     */
+    updateFlowRuntimePolicy: async (patch) => {
+      const res = await client.fetch("/api/v1/settings/flow-runtime-policy", {
+        method: "patch",
+        requestBody: { "application/json": patch }
+      });
+      return res;
+    },
+
+    /**
      * Get flow evidence export policy for the current tenant.
      * @throws {IntricError}
      * @returns {Promise<import('../types/resources').FlowEvidencePolicy>}

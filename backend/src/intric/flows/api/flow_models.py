@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Literal, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from intric.authentication.principal_types import PrincipalType
 from intric.flows.enums import (
@@ -353,6 +353,11 @@ class FlowStepCreateRequest(BaseModel):
 
     assistant_id: UUID
     step_order: int
+    timeout_seconds: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional per-step LLM timeout override in seconds.",
+    )
     user_description: str | None = None
     input_source: FlowInputSource
     input_type: FlowInputType
@@ -366,6 +371,17 @@ class FlowStepCreateRequest(BaseModel):
     input_config: dict[str, Any] | None = None
     output_config: dict[str, Any] | None = None
     review_policy: FlowStepReviewPolicy | None = None
+
+    @field_validator("timeout_seconds", mode="before")
+    @classmethod
+    def _validate_timeout_seconds(cls, value: object) -> object:
+        if value is None:
+            return None
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise ValueError("timeout_seconds must be an integer.")
+        if value <= 0:
+            raise ValueError("timeout_seconds must be greater than zero.")
+        return value
 
 
 class FlowCreateRequest(BaseModel):
@@ -438,6 +454,7 @@ class FlowStepPublic(BaseModel):
     id: UUID | None = None
     assistant_id: UUID
     step_order: int
+    timeout_seconds: int | None = None
     user_description: str | None = None
     input_source: FlowInputSource
     input_type: FlowInputType

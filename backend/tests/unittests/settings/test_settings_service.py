@@ -10,6 +10,7 @@ from intric.settings.settings import (
     FlowEvidencePolicyUpdate,
     FlowInputLimitsUpdate,
     FlowRetentionPolicyUpdate,
+    FlowRuntimePolicyUpdate,
     SettingsInDB,
     SettingsPublic,
     SettingsUpsert,
@@ -656,6 +657,90 @@ async def test_update_ai_builder_budget_settings_rejects_empty_patch():
         BadRequestException, match="At least one AI Builder budget field"
     ):
         await service.update_ai_builder_budget_settings(AIBuilderBudgetSettingsUpdate())
+
+
+async def test_get_flow_runtime_policy_reads_tenant_override(monkeypatch):
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "runtime_policy": {
+                    "default_step_timeout_seconds": 1200,
+                    "max_step_timeout_seconds": 2400,
+                }
+            }
+        }
+    )
+
+    monkeypatch.setattr(
+        "intric.flows.flow_runtime_policy.get_settings",
+        lambda: SimpleNamespace(
+            flow_llm_request_timeout_seconds=600,
+            flow_task_timeout_seconds=3600,
+            flow_runtime_step_timeout_hard_ceiling_seconds=3600,
+        ),
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+    )
+
+    policy = await service.get_flow_runtime_policy()
+
+    assert policy.default_step_timeout_seconds == 1200
+    assert policy.max_step_timeout_seconds == 2400
+    assert policy.hard_ceiling_seconds == 3540
+
+
+async def test_update_flow_runtime_policy_persists_and_audits(monkeypatch):
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    audit_service = MockAuditService()
+    calls = []
+
+    async def _capture(*args, **kwargs):
+        calls.append(kwargs)
+
+    audit_service.log_async = _capture
+    monkeypatch.setattr(
+        "intric.flows.flow_runtime_policy.get_settings",
+        lambda: SimpleNamespace(
+            flow_llm_request_timeout_seconds=600,
+            flow_task_timeout_seconds=3600,
+            flow_runtime_step_timeout_hard_ceiling_seconds=3600,
+        ),
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=audit_service,
+    )
+
+    updated = await service.update_flow_runtime_policy(
+        FlowRuntimePolicyUpdate(
+            default_step_timeout_seconds=1200,
+            max_step_timeout_seconds=2400,
+        )
+    )
+
+    assert updated.default_step_timeout_seconds == 1200
+    assert updated.max_step_timeout_seconds == 2400
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert (
+        tenant.flow_settings["runtime_policy"]["default_step_timeout_seconds"] == 1200
+    )
+    assert calls[0]["metadata"]["setting"] == "flow_runtime_policy"
 
 
 async def test_get_flow_retention_policy_reads_tenant_override():

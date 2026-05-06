@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Optional, TypeAlias
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from intric.authentication.principal_types import PrincipalType
 from intric.flows.enums import (
@@ -36,6 +36,7 @@ class FlowStep(BaseModel):
     tenant_id: UUID | None = None
     assistant_id: UUID
     step_order: int
+    timeout_seconds: int | None = None
     user_description: Optional[str] = None
     input_source: FlowInputSource
     input_type: FlowInputType
@@ -51,6 +52,17 @@ class FlowStep(BaseModel):
     review_policy: FlowStepReviewPolicy | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+    @field_validator("timeout_seconds", mode="before")
+    @classmethod
+    def _validate_timeout_seconds(cls, value: object) -> object:
+        if value is None:
+            return None
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise ValueError("timeout_seconds must be an integer.")
+        if value <= 0:
+            raise ValueError("timeout_seconds must be greater than zero.")
+        return value
 
 
 class FlowRuntimeInputConfig(BaseModel):

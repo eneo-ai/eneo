@@ -93,6 +93,11 @@ export class FlowStepAssistantState {
   updateFields(changes: Record<string, unknown>, opts?: { immediate?: boolean }) {
     const activeStep = this.#getActiveStep();
     if (!activeStep?.assistant_id) return;
+    const loadedAssistantId =
+      this.assistant && typeof (this.assistant as { id?: unknown }).id === "string"
+        ? (this.assistant as { id: string }).id
+        : null;
+    if (loadedAssistantId !== null && loadedAssistantId !== activeStep.assistant_id) return;
     if (this.assistant) {
       this.assistant = { ...this.assistant, ...changes };
     }
@@ -154,6 +159,8 @@ export class FlowStepAssistantState {
     } else if (activeStep?.assistant_id && activeStep.assistant_id !== this.#lastLoadedId) {
       const targetId = activeStep.assistant_id;
       this.#lastLoadedId = targetId;
+      this.assistant = null;
+      this.loading = true;
       this.cancelUploadsAndClearQueue();
       void (async () => {
         await this.#flowEditor.flushAssistantSaves().catch(() => {});

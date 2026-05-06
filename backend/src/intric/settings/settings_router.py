@@ -23,6 +23,8 @@ from intric.settings.settings import (
     FlowInputLimitsUpdate,
     FlowRetentionPolicyPublic,
     FlowRetentionPolicyUpdate,
+    FlowRuntimePolicyPublic,
+    FlowRuntimePolicyUpdate,
     GetModelsResponse,
     SettingsPublic,
     ToggleSettingUpdate,
@@ -45,6 +47,10 @@ class _FlowSettingsServiceProtocol(Protocol):
     async def update_flow_document_render_limits(
         self, payload: FlowDocumentRenderLimitsUpdate
     ) -> FlowDocumentRenderLimitsPublic: ...
+    async def get_flow_runtime_policy(self) -> FlowRuntimePolicyPublic: ...
+    async def update_flow_runtime_policy(
+        self, payload: FlowRuntimePolicyUpdate
+    ) -> FlowRuntimePolicyPublic: ...
     async def get_flow_evidence_policy(self) -> FlowEvidencePolicyPublic: ...
     async def update_flow_evidence_policy(
         self, payload: FlowEvidencePolicyUpdate
@@ -182,6 +188,43 @@ async def update_flow_document_render_limits(
     validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_flow_document_render_limits(payload)
+
+
+@settings_admin_router.get(
+    "/flow-runtime-policy",
+    response_model=FlowRuntimePolicyPublic,
+    summary="Get flow runtime policy",
+    description="Return tenant-level per-step LLM runtime timeout policy for flow executions.",
+)
+async def get_flow_runtime_policy(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowRuntimePolicyPublic:
+    validate_permission(container.user(), Permission.ADMIN)
+    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
+    return await service.get_flow_runtime_policy()
+
+
+@settings_admin_router.patch(
+    "/flow-runtime-policy",
+    response_model=FlowRuntimePolicyPublic,
+    summary="Update flow runtime policy",
+    description=(
+        "Update tenant-level per-step LLM timeout policy for flow executions. "
+        "Omit a field to leave it unchanged. Send null to remove the tenant "
+        "override and fall back to the deployment default."
+    ),
+    responses={
+        400: {"description": "Invalid flow runtime policy payload."},
+        403: {"description": "Caller lacks permission to update tenant settings."},
+    },
+)
+async def update_flow_runtime_policy(
+    payload: FlowRuntimePolicyUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowRuntimePolicyPublic:
+    validate_permission(container.user(), Permission.ADMIN)
+    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
+    return await service.update_flow_runtime_policy(payload)
 
 
 @settings_admin_router.get(
