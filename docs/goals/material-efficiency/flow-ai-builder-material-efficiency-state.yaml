@@ -1399,24 +1399,25 @@ tasks:
         - cmd: "uv run --directory backend ruff check ... && uv run --directory backend ruff format --check ..."
           status: pass
           output: "All checks passed; 4 files already formatted."
-        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
-          status: pass
-          output: "2016 passed, 4 skipped"
         - cmd: "uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --include-supplemental --case C1 --case C5 --case N1 --case Q1 --runs 1 --apply --publish --output-dir /tmp/material-efficiency-live-eval/<timestamp>-t026-step-hotspots"
-          status: pass
-          output: "C1/C5/N1/Q1 all applied and published in one combined summary."
-        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flow-ai-builder-material-efficiency-t025-next-source-duplication-slice --phase commit-gate --iteration 3 --require-green --required-min-score 8 ..."
+          status: partial_pass
+          output: "First combined run exited 143 after writing complete C1 summary; tail run completed C5/N1/Q1."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flow-ai-builder-material-metrics-t026 --phase verification --iteration 2 --require-green --required-min-score 8 ..."
           status: pass
           output: "GREEN_LIGHT yes, MIN_SCORE 8"
       live_eval:
-        summary: "/tmp/material-efficiency-live-eval/20260506-035321-t026-step-hotspots/summary.json"
+        c1_summary: "/tmp/material-efficiency-live-eval/20260506-035321-t026-step-hotspots/summary.json"
+        tail_summary: "/tmp/material-efficiency-live-eval/20260506-035903-t026-step-hotspots-tail/summary.json"
         findings:
           - "C1 applied with 13 step metric rows; step 12 is the largest binding hotspot at 717 bytes and fan-in 11."
-          - "C5 applied with 9 step metric rows; step 8 is the largest binding hotspot at 705 bytes, fan-in 7, and 5 structured field refs."
+          - "C5 applied with 9 step metric rows; step 8 is the largest binding hotspot at 2082 bytes, fan-in 7, and 20 structured field refs."
           - "N1 and Q1 applied with small expected hotspot rows and zero source duplication."
           - "All rows had closed numeric keys and no raw question, prompt, binding body, preview, source text, or user-controlled material."
-      claude_artifact: ".codex/artifacts/claude-peer-loop-t026-implementation-review-20260506T020833Z.md"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t026-per-step-material-hotspots-implementation-20260506T021013Z.md"
+        - ".codex/artifacts/claude-peer-loop-t026-per-step-material-hotspots-verification-20260506T021551Z.md"
       green_light: true
+      final_claude_verdict: "GREEN_LIGHT yes, MIN_SCORE 8. Codex verified locally; Claude's mention of non-existent commit SHAs was ignored."
       follow_ups:
         - "Promote E1 edit-path invalid nested object-field payload into a deterministic regression task."
         - "Investigate C3 terminal/topology quality separately; it applied but produced a questionable terminal JSON step."
@@ -1432,6 +1433,7 @@ tasks:
       - "/tmp/material-efficiency-live-eval/20260506-032452-full-3run-apply/summary.json"
       - "/tmp/material-efficiency-live-eval/20260506-034404-e1-edit-c1-3run-apply/summary.json"
       - "/tmp/material-efficiency-live-eval/20260506-035321-t026-step-hotspots/summary.json"
+      - "/tmp/material-efficiency-live-eval/20260506-035903-t026-step-hotspots-tail/summary.json"
       - backend/src/intric/flows/ai_builder
       - backend/tests/unittests/flows/ai_builder
     constraints:
