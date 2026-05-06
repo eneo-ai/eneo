@@ -1619,7 +1619,7 @@ tasks:
       verification:
         - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
           status: pass
-          output: "2031 passed, 4 skipped, 42 warnings"
+          output: "2030 passed, 4 skipped, 42 warnings"
         - cmd: "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py src/intric/flows/ai_builder/ai_builder_materializer.py src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py"
           status: pass
           output: "0 errors, 0 warnings, 0 informations"
@@ -1630,14 +1630,17 @@ tasks:
           status: pass
           output: "6 files already formatted"
       live_eval:
-        c1_summary: "/tmp/material-efficiency-live-eval/20260506-052921-t030-c1-unpublished/summary.json"
-        c1_flow_id: "fdd4abc5-35ca-41ed-bca3-10be5102dbc4"
-        e1_summary: "/tmp/material-efficiency-live-eval/20260506-053319-t030-e1-apply-telemetry/summary.json"
+        smoke: "/tmp/material-efficiency-live-eval/20260506-043029-user-requested-smoke-rerun/summary.json"
+        full_create_supplemental: "/tmp/material-efficiency-live-eval/20260506-043103-user-requested-full-3run-apply-publish/summary.json"
+        c1_summary: "/tmp/material-efficiency-live-eval/20260506-053523-t030-c1-unpublished/summary.json"
+        c1_flow_id: "aadf96b2-7864-4569-9e4d-0d6e16643cc2"
+        e1_summary: "/tmp/material-efficiency-live-eval/20260506-054021-t030-e1-apply-telemetry/summary.json"
+        runtime_smoke: "/tmp/material-efficiency-live-eval/20260506-051824-user-requested-v2-runtime-run/"
         e1_statuses:
-          - "http_error: 9ef8be2d plan=b62a9a4a-4b0f-40e1-8abf-49775de76b96 session=f7050f7e-cc28-48a9-97c1-8c2dc9b79820"
-          - "http_error: 788f9eb3 plan=723bb44e-1527-4dde-8503-3c56e85a681b session=23b597a2-e015-43f7-8c8e-7bea50f3695e"
-          - "http_error: bdb9b1ce plan=f4c7c006-1e63-45fe-8d82-d7344f6b473b session=292ab772-cfc4-4d78-9c24-2164cbb15533"
-        classification: "deferred: eval artifacts do not include backend log rows; use new ai_builder_apply_telemetry rows in backend logs."
+          - "applied"
+          - "applied"
+          - "applied"
+        summary: "Fresh C1 unpublished flow applied. E1 edit against that flow applied 3/3. Full eval still found C3 underbuilt topology, one C2 no-plan flake, and a V2 runtime stall at step 2 after transcription."
       claude_artifacts:
         - ".codex/artifacts/claude-peer-loop-t029-judge-next-worker-after-e1-apply-500s-20260506T031632Z.md"
         - ".codex/artifacts/claude-peer-loop-t029-judge-next-worker-revised-apply-failure-slice-20260506T032030Z.md"
