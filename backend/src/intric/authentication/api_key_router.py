@@ -972,6 +972,10 @@ async def list_api_keys(
             )
             owner_filter = None
         except ApiKeyValidationError:
+            # Caller is not an admin of this scope — keep the personal
+            # owner_filter so they only see their own keys, never raise.
+            # The 403 from ensure_creator_authorized is intentional inside
+            # mutating endpoints; here it is just a permission probe.
             pass
 
     if limit is not None and not previous:
