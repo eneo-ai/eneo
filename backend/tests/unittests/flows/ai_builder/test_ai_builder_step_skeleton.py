@@ -214,6 +214,55 @@ def test_materialize_structured_quality_skeleton() -> None:
     assert skeleton[3].document_delivery_mode == "generated"
 
 
+def test_materialize_structured_quality_skeleton_text_terminal_reads_previous_step() -> (
+    None
+):
+    plan = materialize_step_skeleton(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.TEXT,
+        final_output_mode=OutputMode.PASS_THROUGH,
+        pattern_ids=("multi_step_quality_chain",),
+        chain_steps=_chain_steps("multi_step_quality_chain"),
+        aggregation_intent="compare",
+    )
+    skeleton = plan.minimum_slots
+
+    assert [slot.chain_token for slot in skeleton] == [
+        STRUCTURED_EXTRACTION_STEP,
+        None,
+        ANALYSIS_OR_QUALITY_REVIEW_STEP,
+        TERMINAL_ARTIFACT_STEP,
+    ]
+    assert _skeleton_type_modes(skeleton) == [
+        ("document", "json", "pass_through"),
+        ("json", "text", "pass_through"),
+        ("text", "text", "pass_through"),
+        ("text", "text", "pass_through"),
+    ]
+    assert skeleton[2].input_source == InputSource.ALL_PREVIOUS_STEPS
+    assert skeleton[-1].input_source == InputSource.PREVIOUS_STEP
+
+
+@pytest.mark.parametrize("final_output_type", [OutputType.DOCX, OutputType.PDF])
+@pytest.mark.parametrize("aggregation_intent", ["aggregate", "compare"])
+def test_materialize_structured_quality_skeleton_document_terminal_keeps_fan_in(
+    final_output_type: OutputType, aggregation_intent: str
+) -> None:
+    plan = materialize_step_skeleton(
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=final_output_type,
+        final_output_mode=OutputMode.PASS_THROUGH,
+        pattern_ids=("multi_step_quality_chain",),
+        chain_steps=_chain_steps("multi_step_quality_chain"),
+        aggregation_intent=aggregation_intent,
+    )
+    skeleton = plan.minimum_slots
+
+    assert skeleton[-1].chain_token == TERMINAL_ARTIFACT_STEP
+    assert skeleton[-1].input_source == InputSource.ALL_PREVIOUS_STEPS
+    assert skeleton[-1].output_type == final_output_type
+
+
 def test_materialize_structured_quality_skeleton_uses_swedish_fixed_step_names() -> (
     None
 ):

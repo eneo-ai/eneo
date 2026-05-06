@@ -2238,6 +2238,117 @@ tasks:
         - "Fix C3 final-step all_previous_steps fan-in with a targeted material-routing slice."
         - "Investigate C3 no_plan/remote-close flake separately from JSON terminal normalization."
 
+  - id: T041
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next long-term slice for C3 final text all_previous_steps fan-in without weakening legitimate compare fan-in."
+    inputs:
+      - "/tmp/material-efficiency-live-eval/20260506-084044-t040-c3-json-terminal-normalization-post-allprev-guard/summary.json"
+      - "backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_step_transition_policy.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_critic_invariants.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+    constraints:
+      - "Read-only Judge task; do not implement."
+      - "Use source and live artifact evidence before selecting a Worker."
+      - "Prefer canonical topology ownership over prompt tuning or downstream broad rewrites."
+      - "Run Claude peer loop with a 15 minute timeout before activating Worker."
+      - "Preserve legitimate compare/aggregate fan-in."
+      - "Use pytest -n 4, never -n auto."
+    expected_output:
+      - "activate_worker | blocked | no_change"
+      - "Canonical owner decision."
+      - "Exact Worker objective, allowed_files, verify commands, eval command, and stop_if."
+    receipt:
+      result: done
+      decision: "activate_worker"
+      selected_worker: T042
+      summary: "Selected a skeleton-owner fix: structured quality chains should not let text terminal finalizers read all_previous_steps, while true comparison skeleton fan-in and document artifact terminals remain intact."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t041-c3-final-all-previous-fan-in-judge-20260506T065256Z.md"
+        - ".codex/artifacts/claude-peer-loop-t041-c3-final-all-previous-fan-in-judge-20260506T065916Z.md"
+      green_light: false
+      accepted_claude_revisions:
+        - "Drop the broad normalizer rule because it risks rewiring legitimate two-step compare flows."
+        - "Skip a new critic invariant for this slice; the skeleton owns generated topology."
+        - "Pin the text terminal previous_step behavior, document-output terminal behavior, and two-step compare fan-in with tests."
+      worker_scope:
+        objective: "Make structured quality skeleton text finalizers read previous_step instead of all_previous_steps while preserving document terminal slots and legitimate comparison fan-in."
+        allowed_files:
+          - backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py
+          - backend/tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py
+          - backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py
+          - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+        verify:
+          - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q"
+          - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+          - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+          - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+          - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+          - "uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --api-base http://localhost:8123 --api-key '<local-key>' --case C3 --runs 3 --apply --publish --output-dir /tmp/material-efficiency-live-eval/<timestamp>-t042-c3-structured-quality-text-terminal"
+
+  - id: T042
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Make structured quality skeleton text finalizers read previous_step instead of all_previous_steps while preserving document terminal slots and legitimate comparison fan-in."
+    allowed_files:
+      - backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+    verify:
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q"
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --api-base http://localhost:8123 --api-key '<local-key>' --case C3 --runs 3 --apply --publish --output-dir /tmp/material-efficiency-live-eval/<timestamp>-t042-c3-structured-quality-text-terminal"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Cannot produce red tests for redundant text terminal fan-in and legitimate compare fan-in preservation."
+      - "Fix requires planner prompt, model policy, normalizer, or critic changes."
+      - "Verification fails twice for reasons not proven pre-existing."
+    receipt:
+      result: done
+      summary: "Structured quality skeleton compare flows now keep broad fan-in on the review/comparison step and route text terminal finalizers through previous_step, avoiding redundant final all_previous_steps material."
+      changed_files:
+        - backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py
+        - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      verification:
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q"
+          status: pass
+          output: "148 passed"
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+          status: pass
+          output: "2077 passed, 4 skipped"
+        - cmd: "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+          status: pass
+          output: "All checks passed"
+        - cmd: "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+          status: pass
+          output: "3 files already formatted"
+      live_eval:
+        c3_after_t042:
+          summary_json: "/tmp/material-efficiency-live-eval/20260506-092156-t042-c3-structured-quality-text-terminal-current/summary.json"
+          output: "C3 applied and published 3/3. Each generated flow retained exactly one all_previous_steps fan-in on a comparison/review step; final text steps used previous_step."
+          flow_ids:
+            - "3f048198-7ddd-4270-81f9-92a1df7083fe"
+            - "db442866-45f1-403f-879b-947943febaf3"
+            - "1cfa27f9-8103-4fee-8b4b-7008d543db01"
+      follow_ups:
+        - "Run the full V1-V5/C1-C5 create suite after this phase to ensure C1/C2/C5 remain stable."
+        - "Investigate remaining no_plan/remote-close flake separately if it reproduces outside the abandoned critic/dataflow experiment."
+
   - id: T999
     type: judge
     assignee: Judge

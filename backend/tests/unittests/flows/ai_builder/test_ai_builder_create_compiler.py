@@ -5083,6 +5083,58 @@ def test_compile_outline_flow_realizes_structured_quality_chain_from_pattern() -
     assert validation.valid
 
 
+def test_compile_outline_flow_structured_quality_text_terminal_uses_reviewed_output() -> (
+    None
+):
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Jämför dokument",
+            "plan_rationale": "Extrahera fakta, identifiera motsägelser och skriv svar.",
+            "steps": [
+                {
+                    "name": "Identifiera motsägelser",
+                    "task": "Identifiera motsägelser mellan källorna.",
+                }
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="document",
+                    output_type="text",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["multi_step_quality_chain"],
+            required_capabilities=["input_document", "output_mode_pass_through"],
+            aggregation_intent="compare",
+        )
+    )
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(
+            state,
+            ui_language="sv",
+        ),
+    )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert [step.name for step in draft.steps] == [
+        "Extrahera strukturerad grund",
+        "Identifiera motsägelser",
+        "Granska kvalitet och luckor",
+        "Skapa slutresultat",
+    ]
+    assert draft.steps[-1].input_source == InputSource.PREVIOUS_STEP
+    assert compiled.steps[-1].input_source == InputSource.PREVIOUS_STEP
+    assert validation.valid
+
+
 def test_compile_outline_flow_localizes_server_owned_final_step_name() -> None:
     outline = parse_outline_flow_arguments(
         {

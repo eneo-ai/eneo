@@ -1052,9 +1052,16 @@ def _materialize_structured_quality_skeleton(
 ) -> StepSkeletonPlan:
     if runtime_input_type not in {InputType.DOCUMENT, InputType.FILE}:
         raise ValueError("Structured quality skeleton requires document or file input")
+    compare_or_aggregate = aggregation_intent in {"aggregate", "compare"}
+    # Text terminals can use the reviewed output; document terminals compose sections.
     terminal_input_source = (
         InputSource.ALL_PREVIOUS_STEPS
-        if aggregation_intent in {"aggregate", "compare"}
+        if compare_or_aggregate and final_output_type in _DOCUMENT_OUTPUT_TYPES
+        else InputSource.PREVIOUS_STEP
+    )
+    quality_review_input_source = (
+        InputSource.ALL_PREVIOUS_STEPS
+        if compare_or_aggregate
         else InputSource.PREVIOUS_STEP
     )
     return _skeleton_plan(
@@ -1095,7 +1102,7 @@ def _materialize_structured_quality_skeleton(
             _backend_fixed_slot(
                 slot_ordinal=2,
                 chain_token=ANALYSIS_OR_QUALITY_REVIEW_STEP,
-                input_source=InputSource.PREVIOUS_STEP,
+                input_source=quality_review_input_source,
                 input_type=InputType.TEXT,
                 output_type=OutputType.TEXT,
                 output_mode=OutputMode.PASS_THROUGH,
