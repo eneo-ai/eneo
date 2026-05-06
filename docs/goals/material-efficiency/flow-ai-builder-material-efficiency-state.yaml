@@ -33,7 +33,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: null
+active_task: T034
 
 tasks:
   - id: T001
@@ -1800,6 +1800,38 @@ tasks:
         - cmd: "uv run --directory backend ruff format --check ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
           status: pass
           output: "2 files already formatted"
+
+  - id: T034
+    type: judge
+    assignee: Judge
+    status: blocked
+    reasoning_hint: medium
+    objective: "Classify whether the next source-code slice can safely start after T033."
+    inputs:
+      - "T033 receipt"
+      - "Current git status"
+      - ".codex/artifacts/claude-peer-loop-t032-next-safe-slice-after-live-eval-20260506T035802Z.md"
+    constraints:
+      - "Do not implement."
+      - "Do not revert or stage unrelated dirty files."
+      - "Reject source-code Worker activation if Flow AI Builder planner/policy files are dirty and unowned."
+    expected_output:
+      - "activate_worker | blocked"
+      - "If blocked: exact files and required owner input."
+    receipt:
+      result: blocked
+      decision: "blocked_on_dirty_builder_policy_baseline"
+      note: docs/goals/material-efficiency/notes/T034-post-t033-blocker.md
+      summary: "The next meaningful C3 comparison/material-routing source-code slice should not start while related Flow AI Builder policy/pattern files have unowned dirty edits."
+      dirty_blockers:
+        - backend/src/intric/flows/ai_builder/ai_builder_framework_policy.py
+        - backend/src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py
+        - scripts/run_codex_review.sh
+      required_owner_input:
+        - "Commit or assign the dirty Flow AI Builder policy/pattern edits to their own task."
+        - "Revert them if accidental."
+        - "Or explicitly authorize the next Worker to treat them as the current baseline and include them in review scope."
 
   - id: T999
     type: judge
