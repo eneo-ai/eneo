@@ -33,7 +33,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T027
+active_task: T029
 
 tasks:
   - id: T001
@@ -1425,7 +1425,7 @@ tasks:
   - id: T027
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe Worker after T026, using live eval evidence from E1 edit instability and C3 topology/material-routing quality."
     inputs:
@@ -1446,6 +1446,112 @@ tasks:
       - "activate_worker | blocked | no_change"
       - "If activate_worker: exact objective, allowed_files, verify commands using -n 4, and stop_if."
       - "Risk analysis for edit-path schema stability vs create-path material efficiency."
+    receipt:
+      result: done
+      decision: "activate_worker"
+      selected_worker: T028
+      note: docs/goals/material-efficiency/notes/T027-judge-next-worker.md
+      summary: "Choose E1 edit-path malformed add_payload.output_fields normalization over C3 topology tuning because E1 has a deterministic strict-parse failure and C3 lacks a falsifiable small Worker invariant."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t027-judge-next-worker-20260506T022026Z.md"
+        - ".codex/artifacts/claude-peer-loop-t027-judge-next-worker-revised-20260506T022404Z.md"
+        - ".codex/artifacts/claude-peer-loop-t027-judge-next-worker-final-20260506T022650Z.md"
+      green_light: true
+      risk_analysis:
+        - "Do not weaken StructuredFieldDraft strict validation; normalize loose LLM field payloads before the strict boundary."
+        - "Do not claim the E1 HTTP 500 is fixed without a stack trace tying it to the output_fields parse path."
+        - "Keep create-path behavior unchanged by extracting the existing normalizer instead of duplicating or rewriting it."
+
+  - id: T028
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Extract a shared structured-field normalizer and use it to normalize malformed edit add_payload.output_fields before strict FlowEditDraft parsing."
+    allowed_files:
+      - backend/src/intric/flows/ai_builder/ai_builder_structured_field_normalizer.py
+      - backend/src/intric/flows/ai_builder/ai_builder_create_outline.py
+      - backend/src/intric/flows/ai_builder/ai_builder_edit_normalizer.py
+      - backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_normalizer.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T028-edit-structured-field-normalizer.md
+    verify:
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_edit_normalizer.py -q"
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -k 'malformed_array_item_fields or output_fields'"
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q -k edit_flow"
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_structured_field_normalizer.py src/intric/flows/ai_builder/ai_builder_create_outline.py src/intric/flows/ai_builder/ai_builder_edit_normalizer.py src/intric/flows/ai_builder/ai_builder_edit_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_edit_normalizer.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_structured_field_normalizer.py src/intric/flows/ai_builder/ai_builder_create_outline.py src/intric/flows/ai_builder/ai_builder_edit_normalizer.py src/intric/flows/ai_builder/ai_builder_edit_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_edit_normalizer.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_structured_field_normalizer.py src/intric/flows/ai_builder/ai_builder_create_outline.py src/intric/flows/ai_builder/ai_builder_edit_normalizer.py src/intric/flows/ai_builder/ai_builder_edit_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_edit_normalizer.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "Create a fresh C1 flow with live eval, capture its flow ID, then run E1 with that flow ID using the live eval runner."
+    stop_if:
+      - "The fix would duplicate structured-field normalization instead of extracting the shared owner."
+      - "The fix would keep a compatibility wrapper for the old edit pre-parse function name."
+      - "The fix weakens StructuredFieldDraft strict validation."
+      - "The fix stores or logs raw prompt/source/binding material."
+      - "The implementation needs files outside allowed_files."
+      - "Red tests cannot reproduce the malformed edit output_fields parse failure locally."
+      - "Existing create-path output-field behavior assertions need weakening."
+      - "Any pytest command would require -n auto."
+    receipt:
+      result: done
+      summary: "Extracted create-mode loose structured-field normalization into a shared owner and reused it for edit add_payload.output_fields before strict FlowEditDraft parsing."
+      note: docs/goals/material-efficiency/notes/T028-edit-structured-field-normalizer.md
+      changed_files:
+        - backend/src/intric/flows/ai_builder/ai_builder_structured_field_normalizer.py
+        - backend/src/intric/flows/ai_builder/ai_builder_create_outline.py
+        - backend/src/intric/flows/ai_builder/ai_builder_edit_normalizer.py
+        - backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_normalizer.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py
+        - docs/goals/material-efficiency/notes/T028-edit-structured-field-normalizer.md
+        - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      verification:
+        - "Red evidence: focused edit-normalizer test failed before normalize_loose_edit_arguments existed."
+        - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_edit_normalizer.py -q -> 8 passed."
+        - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -k 'malformed_array_item_fields or output_fields' -> 3 passed."
+        - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q -k 'edit_flow or normalizes_loose_add_payload_output_fields' -> 3 passed."
+        - "uv run --directory backend pyright ... -> 0 errors, 0 warnings."
+        - "uv run --directory backend ruff check ... && uv run --directory backend ruff format --check ... -> passed."
+        - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q -> 2021 passed, 4 skipped, 42 warnings."
+      live_eval:
+        create_base: "/tmp/material-efficiency-live-eval/20260506-044206-t028-c1-unpublished-base-retry/summary.json"
+        edit_eval: "/tmp/material-efficiency-live-eval/20260506-044605-t028-e1-edit-normalizer-retry/summary.json"
+        summary: "C1 unpublished retry applied. E1 statuses were http_error, http_error, applied; no Object fields parse failure or self_correction_invalid_payload appeared in artifacts. The HTTP 500s remain separate follow-up evidence."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t028-implementation-review-20260506T030237Z.md"
+        - ".codex/artifacts/claude-peer-loop-t028-implementation-review-follow-up-20260506T030620Z.md"
+      green_light: true
+      follow_ups:
+        - "Triage E1 HTTP 500 apply failures b730ee9c and 2ef2bcf3 separately."
+        - "Add a one-line docstring to looks_like_structured_field_spec when the file is next touched."
+
+  - id: T029
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe slice after T028, focusing on the remaining E1 HTTP 500 apply failures without conflating them with structured-field parse normalization."
+    inputs:
+      - "T028 receipt"
+      - "/tmp/material-efficiency-live-eval/20260506-044605-t028-e1-edit-normalizer-retry/summary.json"
+      - "/tmp/material-efficiency-live-eval/20260506-044206-t028-c1-unpublished-base-retry/summary.json"
+      - "Backend logs if available for error IDs b730ee9c and 2ef2bcf3"
+      - backend/src/intric/flows/ai_builder
+      - backend/tests/unittests/flows/ai_builder
+    constraints:
+      - "Do not implement in this Judge task."
+      - "Run Claude peer loop before activating any Worker."
+      - "Do not claim T028 fixed the HTTP 500s."
+      - "Prefer deterministic local reproduction over broad live-only changes."
+      - "Keep one active task."
+    expected_output:
+      - "activate_worker | blocked | no_change"
+      - "If activate_worker: exact objective, allowed_files, verify commands using -n 4, live eval command, and stop_if."
+      - "Clear classification of whether the HTTP 500s are edit compile, apply, publish, persistence, or runtime-state failures."
     receipt: null
 
   - id: T999

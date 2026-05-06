@@ -17,7 +17,7 @@ from intric.flows.ai_builder.ai_builder_edit_mechanics import fill_edit_draft_me
 from intric.flows.ai_builder.ai_builder_edit_models import FlowEditDraft
 from intric.flows.ai_builder.ai_builder_edit_normalizer import (
     normalize_edit_draft_mechanics,
-    strip_malformed_edit_mechanics,
+    normalize_loose_edit_arguments,
 )
 from intric.flows.ai_builder.ai_builder_edit_repair import (
     should_attempt_description_repair,
@@ -107,7 +107,7 @@ async def process_edit_arguments(
         )
 
     try:
-        draft = FlowEditDraft.model_validate(strip_malformed_edit_mechanics(arguments))
+        draft = FlowEditDraft.model_validate(normalize_loose_edit_arguments(arguments))
     except Exception as exc:
         logger.warning("Failed to parse edit_flow arguments: %s", exc)
         return ToolProcessingResult(

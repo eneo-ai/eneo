@@ -22,18 +22,23 @@ from intric.flows.ai_builder.ai_builder_mechanical_refs import (
     clean_raw_previous_field_refs,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
+from intric.flows.ai_builder.ai_builder_structured_field_normalizer import (
+    normalize_structured_field_list,
+)
 from intric.flows.ai_builder.ai_builder_structured_field_paths import (
     missing_structured_output_path,
 )
 from intric.flows.flow import FlowStep
 
 
-def strip_malformed_edit_mechanics(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Drop malformed low-level edit refs before strict Pydantic parsing.
+def normalize_loose_edit_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Normalize loose edit output before strict Pydantic parsing.
 
     Edit-mode LLM output should express intended changes. Exact form-variable
     and previous-field wiring is backend-owned mechanics, so malformed nested
-    binding hints are treated as absent instead of forcing a repair round.
+    binding hints are treated as absent instead of forcing a repair round. Add
+    operations also share create-mode structured-field coercion because a new
+    edit step uses the same `NewStepDraft` contract as a create-mode step.
     """
 
     operations = arguments.get("operations")
@@ -49,15 +54,21 @@ def strip_malformed_edit_mechanics(arguments: dict[str, Any]) -> dict[str, Any]:
 
         operation = cast(dict[str, Any], raw_operation)
         updated_operation = dict(operation)
-        for payload_key in ("add_payload", "patch"):
-            raw_payload = operation.get(payload_key)
-            if not isinstance(raw_payload, dict):
-                continue
-            payload = cast(dict[str, Any], raw_payload)
-            cleaned_payload = _strip_malformed_payload_refs(payload)
-            if cleaned_payload != payload:
+        raw_add_payload = operation.get("add_payload")
+        if isinstance(raw_add_payload, dict):
+            add_payload = cast(dict[str, Any], raw_add_payload)
+            cleaned_payload = _normalize_loose_add_payload(add_payload)
+            if cleaned_payload != add_payload:
                 changed = True
-                updated_operation[payload_key] = cleaned_payload
+                updated_operation["add_payload"] = cleaned_payload
+
+        raw_patch = operation.get("patch")
+        if isinstance(raw_patch, dict):
+            patch = cast(dict[str, Any], raw_patch)
+            cleaned_patch = _strip_malformed_payload_refs(patch)
+            if cleaned_patch != patch:
+                changed = True
+                updated_operation["patch"] = cleaned_patch
         updated_operations.append(updated_operation)
 
     if not changed:
@@ -161,6 +172,26 @@ def _strip_malformed_payload_refs(payload: dict[str, Any]) -> dict[str, Any]:
                 updated["uses_form_fields"] = cleaned_fields
             else:
                 updated.pop("uses_form_fields", None)
+
+    return updated if changed else payload
+
+
+def _normalize_loose_add_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    cleaned_payload = _strip_malformed_payload_refs(payload)
+    updated = dict(cleaned_payload)
+    changed = cleaned_payload != payload
+
+    if "output_fields" in cleaned_payload:
+        normalized_fields = normalize_structured_field_list(
+            cleaned_payload.get("output_fields")
+        )
+        if normalized_fields:
+            if normalized_fields != cleaned_payload.get("output_fields"):
+                changed = True
+                updated["output_fields"] = normalized_fields
+        else:
+            changed = True
+            updated.pop("output_fields", None)
 
     return updated if changed else payload
 
@@ -317,6 +348,6 @@ def _step_order_from_ref(step_ref: str | None) -> int:
 
 
 __all__ = [
+    "normalize_loose_edit_arguments",
     "normalize_edit_draft_mechanics",
-    "strip_malformed_edit_mechanics",
 ]

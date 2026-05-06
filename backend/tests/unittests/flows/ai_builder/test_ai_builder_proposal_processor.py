@@ -1919,6 +1919,113 @@ async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> No
 
 
 @pytest.mark.asyncio
+async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> None:
+    processor = _make_processor()
+    flow = MagicMock()
+    flow.steps = []
+    flow.draft_revision = 7
+    flow.name = "Rapportflöde"
+    flow.description = "Skapar PDF idag."
+    flow.metadata_json = {}
+    arguments = {
+        "plan_rationale": "Lägg till granskning.",
+        "operations": [
+            {
+                "op": "add",
+                "placement": {"position": "append"},
+                "add_payload": {
+                    "name": "Granska rubriker",
+                    "instructions": "Kontrollera rubrikernas underlag.",
+                    "input_source": "previous_step",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "rubriker",
+                            "field_type": "array",
+                            "description": "Rubriker som ska granskas.",
+                            "item_fields": [
+                                {
+                                    "name": "rubrik",
+                                    "field_type": "string",
+                                    "description": "Rubrik.",
+                                },
+                                {
+                                    "name": "underlag",
+                                    "field_type": "object",
+                                    "description": "Underlag.",
+                                },
+                            ],
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+    compiled_spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
+    edit_result = MagicMock(compiled_spec=compiled_spec, advisories=[])
+    compiled_validation = MagicMock(valid=True, errors=[])
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
+            return_value=SimpleNamespace(
+                spec=compiled_spec,
+                validation=compiled_validation,
+                failure_feedback=None,
+            ),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
+            return_value=edit_result,
+        ) as compile_edit,
+        patch(
+            "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
+            return_value=SpecValidationResult(),
+        ),
+        patch.object(
+            processor,
+            "format_contextual_quality_feedback",
+            return_value="Quality issues:\nStop after compile for this test.",
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
+            new_callable=AsyncMock,
+            return_value=(MagicMock(), MagicMock()),
+        ),
+    ):
+        result = await process_edit_arguments(
+            processor=processor,
+            session_id=uuid4(),
+            conversation=[],
+            new_messages_start=0,
+            arguments=arguments,
+            assistant_content="Här är mitt förslag:",
+            tool_call_id="call_edit",
+            available_model_refs=None,
+            available_kb_refs=None,
+            flow=flow,
+            assistant_snapshots=None,
+            litellm_model="openai/gpt-4",
+            litellm_kwargs={"api_key": "sk-test"},
+            max_output_tokens=1024,
+            resource_catalog=None,
+        )
+
+    assert result.failure_kind == "quality"
+    draft = compile_edit.call_args.args[0]
+    payload = draft.operations[0].add_payload
+    assert payload is not None
+    assert payload.output_fields is not None
+    rubriker = payload.output_fields[0]
+    assert rubriker.field_type == "array"
+    assert rubriker.item_fields is not None
+    assert [(field.name, field.field_type) for field in rubriker.item_fields] == [
+        ("rubrik", "string"),
+        ("underlag", "string"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_edit_proposal_retries_on_contextual_quality_feedback() -> None:
     processor = _make_processor()
     flow = MagicMock()

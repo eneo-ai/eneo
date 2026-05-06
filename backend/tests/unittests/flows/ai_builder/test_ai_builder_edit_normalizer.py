@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import logging
 from uuid import uuid4
+
+import pytest
+from pydantic import ValidationError
 
 from intric.flows.ai_builder.ai_builder_edit_models import (
     AddStepPayload,
@@ -11,7 +15,7 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
 )
 from intric.flows.ai_builder.ai_builder_edit_normalizer import (
     normalize_edit_draft_mechanics,
-    strip_malformed_edit_mechanics,
+    normalize_loose_edit_arguments,
 )
 from intric.flows.ai_builder.ai_builder_edit_validator import validate_edit_draft
 from intric.flows.ai_builder.ai_builder_models import InputSource, OutputType
@@ -58,7 +62,7 @@ def _json_contract(*field_names: str) -> dict:
     }
 
 
-def test_strip_malformed_edit_mechanics_removes_nested_binding_noise() -> None:
+def test_normalize_loose_edit_arguments_removes_nested_binding_noise() -> None:
     arguments = {
         "plan_rationale": "Update wiring.",
         "operations": [
@@ -88,7 +92,7 @@ def test_strip_malformed_edit_mechanics_removes_nested_binding_noise() -> None:
         ],
     }
 
-    cleaned = strip_malformed_edit_mechanics(arguments)
+    cleaned = normalize_loose_edit_arguments(arguments)
 
     assert "uses_previous_fields" not in cleaned["operations"][0]["add_payload"]
     assert "uses_form_fields" not in cleaned["operations"][0]["add_payload"]
@@ -96,6 +100,195 @@ def test_strip_malformed_edit_mechanics_removes_nested_binding_noise() -> None:
         {"from_step": 1, "field_path": "summary"},
     ]
     assert cleaned["operations"][1]["patch"]["uses_form_fields"] == ["case_id"]
+
+
+def test_normalize_loose_edit_arguments_recovers_malformed_output_fields(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    arguments = {
+        "plan_rationale": "Add review step.",
+        "operations": [
+            {
+                "op": "add",
+                "placement": {"position": "before", "anchor_ref": "existing_step_3"},
+                "add_payload": {
+                    "name": "Granska underlag",
+                    "instructions": "Kontrollera att varje rubrik har underlag.",
+                    "input_source": "previous_step",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "rubriker",
+                            "field_type": "array",
+                            "description": "Rubriker som ska granskas.",
+                            "item_fields": [
+                                {
+                                    "name": "rubrik",
+                                    "field_type": "string",
+                                    "description": "Rubriknamn.",
+                                },
+                                {
+                                    "name": "underlag",
+                                    "field_type": "object",
+                                    "description": "Underlag per rubrik.",
+                                },
+                            ],
+                        },
+                        {
+                            "name": "granskning",
+                            "field_type": "object",
+                            "description": "Granskningsresultat.",
+                            "fields": [
+                                {
+                                    "name": "status",
+                                    "field_type": "string",
+                                    "description": "Granskningsstatus.",
+                                },
+                                {
+                                    "name": "json_underlag",
+                                    "field_type": "object",
+                                    "description": "JSON-underlag.",
+                                },
+                            ],
+                        },
+                    ],
+                },
+            }
+        ],
+    }
+
+    with pytest.raises(ValidationError, match="Object fields must declare"):
+        FlowEditDraft.model_validate(arguments)
+
+    caplog.set_level(logging.INFO)
+    cleaned = normalize_loose_edit_arguments(arguments)
+    draft = FlowEditDraft.model_validate(cleaned)
+
+    payload = draft.operations[0].add_payload
+    assert payload is not None
+    assert payload.output_fields is not None
+    rubriker = payload.output_fields[0]
+    granskning = payload.output_fields[1]
+    assert rubriker.field_type == "array"
+    assert rubriker.item_fields is not None
+    assert [(field.name, field.field_type) for field in rubriker.item_fields] == [
+        ("rubrik", "string"),
+        ("underlag", "string"),
+    ]
+    assert granskning.field_type == "object"
+    assert granskning.fields is not None
+    assert [(field.name, field.field_type) for field in granskning.fields] == [
+        ("status", "string"),
+        ("json_underlag", "string"),
+    ]
+    assert "ai_builder_structured_field_object_downgraded" in caplog.text
+    assert "Underlag per rubrik" not in caplog.text
+    assert "JSON-underlag" not in caplog.text
+
+
+def test_normalize_loose_edit_arguments_preserves_valid_output_fields() -> None:
+    arguments = {
+        "plan_rationale": "Add valid structured step.",
+        "operations": [
+            {
+                "op": "add",
+                "placement": {"position": "append"},
+                "add_payload": {
+                    "name": "Valid",
+                    "instructions": "Return valid JSON.",
+                    "input_source": "previous_step",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "review",
+                            "field_type": "object",
+                            "description": "Review.",
+                            "required": True,
+                            "fields": [
+                                {
+                                    "name": "status",
+                                    "field_type": "string",
+                                    "description": "Status.",
+                                    "required": True,
+                                }
+                            ],
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    cleaned = normalize_loose_edit_arguments(arguments)
+
+    assert cleaned == arguments
+    assert FlowEditDraft.model_validate(cleaned).operations[0].add_payload is not None
+
+
+def test_normalize_loose_edit_arguments_keeps_modify_patch_output_fields_out_of_scope() -> (
+    None
+):
+    arguments = {
+        "plan_rationale": "Modify bindings.",
+        "operations": [
+            {
+                "op": "modify",
+                "target_ref": "existing_step_2",
+                "patch": {
+                    "uses_previous_fields": [
+                        {"from_step": 0, "field_path": "summary"},
+                        {"from_step": 1, "field_path": "summary"},
+                    ],
+                    "output_fields": [
+                        {"name": "ignored", "field_type": "object"},
+                    ],
+                },
+            }
+        ],
+    }
+
+    cleaned = normalize_loose_edit_arguments(arguments)
+    draft = FlowEditDraft.model_validate(cleaned)
+
+    assert cleaned["operations"][0]["patch"]["uses_previous_fields"] == [
+        {"from_step": 1, "field_path": "summary"}
+    ]
+    assert cleaned["operations"][0]["patch"]["output_fields"] == [
+        {"name": "ignored", "field_type": "object"}
+    ]
+    patch = draft.operations[0].patch
+    assert patch is not None
+    assert [(ref.from_step, ref.field_path) for ref in patch.uses_previous_fields] == [
+        (1, "summary")
+    ]
+    assert not hasattr(patch, "output_fields")
+
+
+def test_normalize_loose_edit_arguments_logs_when_output_fields_are_dropped(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    arguments = {
+        "plan_rationale": "Add malformed field list.",
+        "operations": [
+            {
+                "op": "add",
+                "placement": {"position": "append"},
+                "add_payload": {
+                    "name": "Malformed",
+                    "instructions": "Return JSON.",
+                    "input_source": "previous_step",
+                    "output_type": "json",
+                    "output_fields": [None, 3],
+                },
+            }
+        ],
+    }
+
+    caplog.set_level(logging.INFO)
+    cleaned = normalize_loose_edit_arguments(arguments)
+
+    assert "output_fields" not in cleaned["operations"][0]["add_payload"]
+    assert "ai_builder_structured_field_list_dropped" in caplog.text
 
 
 def test_normalize_edit_draft_mechanics_prunes_invalid_nested_refs() -> None:
