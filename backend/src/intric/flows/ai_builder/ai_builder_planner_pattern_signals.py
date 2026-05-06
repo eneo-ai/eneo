@@ -144,6 +144,8 @@ _DIRECT_TEXT_TRANSFORM_MARKERS: tuple[str, ...] = (
     "summera den här",
     "summera denna",
 )
+# Boundary matching avoids shrinking a flow because of substrings such as
+# "rätta" inside "förrätta"; broader document markers are allowed to over-match.
 _DIRECT_TEXT_TRANSFORM_PATTERN = re.compile(
     r"\b(?:"
     + "|".join(re.escape(marker) for marker in _DIRECT_TEXT_TRANSFORM_MARKERS)

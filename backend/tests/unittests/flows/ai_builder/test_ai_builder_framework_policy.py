@@ -292,7 +292,7 @@ def test_resolve_output_intent_defaults_english_short_answer_flow_to_structured_
     None
 ):
     intent = resolve_output_intent(
-        "Create a flow that writes a short answer to an incoming question.",
+        "Create a flow that generates a brief answer to an incoming question.",
         {},
     )
 

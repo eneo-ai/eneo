@@ -700,8 +700,6 @@ def _looks_like_text_terminal_output(text: str) -> bool:
         (
             "kort svar",
             "short answer",
-            "skriver ett kort svar",
-            "write a short answer",
             "brief answer",
             "slutversion",
             "final version",

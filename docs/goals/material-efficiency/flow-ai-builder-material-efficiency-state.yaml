@@ -33,7 +33,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T034
+active_task: null
 
 tasks:
   - id: T001
@@ -1804,7 +1804,7 @@ tasks:
   - id: T034
     type: judge
     assignee: Judge
-    status: blocked
+    status: done
     reasoning_hint: medium
     objective: "Classify whether the next source-code slice can safely start after T033."
     inputs:
@@ -1819,19 +1819,40 @@ tasks:
       - "activate_worker | blocked"
       - "If blocked: exact files and required owner input."
     receipt:
-      result: blocked
-      decision: "blocked_on_dirty_builder_policy_baseline"
-      note: docs/goals/material-efficiency/notes/T034-post-t033-blocker.md
-      summary: "The next meaningful C3 comparison/material-routing source-code slice should not start while related Flow AI Builder policy/pattern files have unowned dirty edits."
-      dirty_blockers:
+      result: done
+      decision: "commit_builder_policy_cleanup"
+      note: docs/goals/material-efficiency/notes/T034-dirty-policy-baseline-resolution.md
+      previous_blocker_note: docs/goals/material-efficiency/notes/T034-post-t033-blocker.md
+      summary: "Classified and verified the dirty Flow AI Builder policy/pattern edits as a narrow T015 text-transform cleanup, separate from the future C3 comparison/material-routing slice."
+      changed_files:
         - backend/src/intric/flows/ai_builder/ai_builder_framework_policy.py
         - backend/src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py
         - backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py
+        - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+        - docs/goals/material-efficiency/notes/T034-dirty-policy-baseline-resolution.md
+      verification:
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py -q"
+          status: pass
+          output: "78 passed"
+        - cmd: "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py"
+          status: pass
+          output: "All checks passed"
+        - cmd: "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py"
+          status: pass
+          output: "4 files already formatted"
+      remaining_dirty_non_goal_files:
         - scripts/run_codex_review.sh
-      required_owner_input:
-        - "Commit or assign the dirty Flow AI Builder policy/pattern edits to their own task."
-        - "Revert them if accidental."
-        - "Or explicitly authorize the next Worker to treat them as the current baseline and include them in review scope."
+        - PRODUCT.md
+        - docs/refactor/flow-ai-builder-material-efficiency-review-handoff.md
+        - docs/refactor/goals.md
+        - docs/refactor/new/
+        - docs/refactor/runtime-hang-and-builder-rootcause.md
+        - flow_ai_builder_prd.md
+        - flow_ai_builder_review.md
+        - utvecklingssamtal.mp3
 
   - id: T999
     type: judge
