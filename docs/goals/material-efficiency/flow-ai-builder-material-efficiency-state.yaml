@@ -33,7 +33,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T023
+active_task: T024
 
 tasks:
   - id: T001
@@ -1218,7 +1218,7 @@ tasks:
   - id: T023
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Commit the verified T021/T022 tranche with explicit staging discipline, audit remaining goal gaps, and select the next long-term slice."
     inputs:
@@ -1235,6 +1235,65 @@ tasks:
       - "Commit SHA(s) or exact blocker."
       - "Remaining dirty-file classification."
       - "Next task decision."
+    receipt:
+      result: done
+      commit: "fa10c83a Add flow builder material metrics"
+      summary: "Committed the verified T021/T022 tranche with explicit staging. Remaining dirty files are outside this tranche. Fresh metrics show C1/C5 still have high source duplication/fan-in, so the next long-term slice should audit whether that represents necessary source preservation or reducible material duplication."
+      staged_paths:
+        - backend/src/intric/flows/ai_builder/ai_builder_material_metrics.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py
+        - backend/tests/unittests/flows/ai_builder/test_live_eval_runner.py
+        - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-goal.md
+        - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+        - docs/goals/material-efficiency/notes/T020-post-t019-audit.md
+        - docs/goals/material-efficiency/notes/T021-live-eval-material-metrics.md
+        - docs/goals/material-efficiency/notes/T022-targeted-composer-input-type-goldens.md
+        - docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py
+      remaining_dirty_files:
+        - "M backend/src/intric/flows/ai_builder/ai_builder_framework_policy.py (pre-existing unrelated)"
+        - "M backend/src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py (pre-existing unrelated)"
+        - "M backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py (pre-existing unrelated)"
+        - "M scripts/run_codex_review.sh (pre-existing unrelated)"
+        - "?? PRODUCT.md (pre-existing unrelated)"
+        - "?? docs/refactor/flow-ai-builder-material-efficiency-review-handoff.md (pre-existing docs)"
+        - "?? docs/refactor/goals.md (pre-existing docs)"
+        - "?? docs/refactor/new/ (pre-existing docs)"
+        - "?? docs/refactor/runtime-hang-and-builder-rootcause.md (pre-existing docs)"
+        - "?? flow_ai_builder_prd.md (pre-existing docs)"
+        - "?? flow_ai_builder_review.md (pre-existing docs)"
+        - "?? utvecklingssamtal.mp3 (local media; never commit)"
+      latest_verification:
+        - "Focused T021 tests: 44 passed."
+        - "Full AI Builder unit suite: 2014 passed, 4 skipped."
+        - "Pyright: 0 errors."
+        - "Ruff check/format: passed."
+        - "Live eval all+supplemental: 6 applied with automated metrics."
+        - "Live eval post-refactor C5/N1/Q1: all applied with automated metrics."
+      next_task: T024
+
+  - id: T024
+    type: scout
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Use the new automated metrics and saved live artifacts to identify the next long-term material-efficiency improvement, especially high source duplication/fan-in in C1 and C5."
+    inputs:
+      - "/tmp/material-efficiency-live-eval/20260506-030534-t021-live-eval-material-metrics/summary.json"
+      - "/tmp/material-efficiency-live-eval/20260506-032301-t021-post-review-refactor-metrics/summary.json"
+      - backend/src/intric/flows/ai_builder
+      - backend/tests/unittests/flows/ai_builder
+    constraints:
+      - "Read-only unless a later Worker is activated."
+      - "Do not optimize for a single prompt or case; identify canonical-owner behavior."
+      - "Prefer metric evidence from saved artifacts over subjective inspection."
+      - "Decide whether source_duplication_count is necessary source preservation or reducible duplicated material."
+      - "Use Claude peer loop before activating any non-trivial Worker."
+    expected_output:
+      - "Metric evidence table for C1/C5/N1/Q1."
+      - "Root cause hypothesis with file:line evidence."
+      - "Recommended next Worker objective, allowed_files, verify, and stop_if, or complete/no-op if no safe improvement exists."
     receipt: null
 
   - id: T999
