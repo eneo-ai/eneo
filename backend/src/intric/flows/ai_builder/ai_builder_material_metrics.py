@@ -146,11 +146,29 @@ def compute_step_material_metrics(
             if (reference.step_ref or reference.head) in source_step_refs
             and reference.tail == "output.text"
         ),
-        all_previous_steps_count=sum(
+        all_previous_steps_count=(
             1
-            for item in steps
-            if item.input_source == AIBuilderInputSource.ALL_PREVIOUS_STEPS.value
+            if step.input_source == AIBuilderInputSource.ALL_PREVIOUS_STEPS.value
+            else 0
         ),
+    )
+
+
+def compute_per_step_material_metrics(
+    steps: Sequence[MaterialMetricStep],
+    *,
+    form_field_names: Iterable[str] = (),
+) -> tuple[tuple[int, MaterialMetrics], ...]:
+    return tuple(
+        (
+            step.step_order,
+            compute_step_material_metrics(
+                steps,
+                step_order=step.step_order,
+                form_field_names=form_field_names,
+            ),
+        )
+        for step in steps
     )
 
 

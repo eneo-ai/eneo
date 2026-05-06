@@ -2,9 +2,21 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from dataclasses import asdict
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+
+EXPECTED_STEP_METRIC_ROW_KEYS = {
+    "step_order",
+    "metrics_source",
+    "binding_bytes",
+    "fan_in_width",
+    "source_duplication_count",
+    "whole_output_reference_count",
+    "structured_field_count",
+    "all_previous_steps_count",
+}
 
 
 def load_live_eval_runner() -> ModuleType:
@@ -173,6 +185,17 @@ def test_publish_mode_fetches_run_contract_after_publish(tmp_path: Path) -> None
     assert result.status == "applied"
     assert result.metrics_implementation == "automated"
     assert result.metrics.binding_bytes == len("{{ step_input.text }}".encode("utf-8"))
+    assert len(result.step_metrics) == 1
+    assert asdict(result.step_metrics[0]) == {
+        "step_order": 1,
+        "metrics_source": "flow_artifact",
+        "binding_bytes": len("{{ step_input.text }}".encode("utf-8")),
+        "fan_in_width": 0,
+        "source_duplication_count": 0,
+        "whole_output_reference_count": 0,
+        "structured_field_count": 0,
+        "all_previous_steps_count": 0,
+    }
     publish_index = client.calls.index(("POST", "/api/v1/flows/flow-1/publish/"))
     run_contract_index = client.calls.index(
         ("GET", "/api/v1/flows/flow-1/run-contract/")
@@ -240,6 +263,27 @@ def test_plan_only_run_computes_material_metrics_from_plan(tmp_path: Path) -> No
     assert result.metrics.fan_in_width == 2
     assert result.metrics.whole_output_reference_count == 2
     assert result.metrics.source_duplication_count == 0
+    assert [row.metrics_source for row in result.step_metrics] == [
+        "plan_envelope",
+        "plan_envelope",
+        "plan_envelope",
+    ]
+    assert [row.step_order for row in result.step_metrics] == [1, 2, 3]
+    assert all(
+        set(asdict(row)) == EXPECTED_STEP_METRIC_ROW_KEYS for row in result.step_metrics
+    )
+    assert sum(row.binding_bytes for row in result.step_metrics) == (
+        result.metrics.binding_bytes
+    )
+    assert sum(row.source_duplication_count for row in result.step_metrics) == (
+        result.metrics.source_duplication_count
+    )
+    assert sum(row.whole_output_reference_count for row in result.step_metrics) == (
+        result.metrics.whole_output_reference_count
+    )
+    assert sum(row.structured_field_count for row in result.step_metrics) == (
+        result.metrics.structured_field_count
+    )
     assert result.score_axes == {axis: None for axis in runner.SCORE_AXES}
 
 
@@ -283,6 +327,15 @@ def test_applied_edit_run_computes_material_metrics_from_flow_only(
     assert result.metrics_implementation == "automated"
     assert result.metrics.fan_in_width == 1
     assert result.metrics.source_duplication_count == 1
+    assert [row.metrics_source for row in result.step_metrics] == [
+        "flow_artifact",
+        "flow_artifact",
+    ]
+    assert [row.step_order for row in result.step_metrics] == [1, 2]
+    assert all(
+        set(asdict(row)) == EXPECTED_STEP_METRIC_ROW_KEYS for row in result.step_metrics
+    )
+    assert sum(row.source_duplication_count for row in result.step_metrics) == 1
 
 
 def test_missing_artifact_statuses_keep_empty_metrics(tmp_path: Path) -> None:
@@ -301,6 +354,7 @@ def test_missing_artifact_statuses_keep_empty_metrics(tmp_path: Path) -> None:
     assert result.metrics_implementation == "missing_artifacts"
     assert result.metrics.binding_bytes is None
     assert result.metrics.fan_in_width is None
+    assert result.step_metrics == []
 
 
 def test_malformed_artifact_marks_metrics_missing(tmp_path: Path) -> None:
@@ -318,6 +372,64 @@ def test_malformed_artifact_marks_metrics_missing(tmp_path: Path) -> None:
     runner.attach_material_metrics(result, tmp_path)
 
     assert result.metrics_implementation == "missing_artifacts"
+    assert result.step_metrics == []
+
+
+def test_redacted_baseline_summary_preserves_step_metrics(tmp_path: Path) -> None:
+    runner = load_live_eval_runner()
+    case_dir = tmp_path / "E1-run1"
+    case_dir.mkdir()
+    runner.write_json(
+        case_dir / "flow.json",
+        {
+            "steps": [
+                {
+                    "step_order": 1,
+                    "input_source": "flow_input",
+                    "input_type": "audio",
+                    "output_type": "text",
+                },
+                {
+                    "step_order": 2,
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "output_type": "text",
+                    "input_bindings": {"question": "{{ step_1.output.text }}"},
+                },
+            ]
+        },
+    )
+    result = runner.CaseRunResult(
+        case_id="E1",
+        run_no=1,
+        suite="edit",
+        space_id="space-1",
+        status="applied",
+        output_dir=str(case_dir),
+    )
+
+    runner.attach_material_metrics(result, case_dir)
+    summary = {
+        "generated_at": "2026-05-06T00:00:00+00:00",
+        "api_base": "http://localhost:8123",
+        "spaces": ["space-1"],
+        "runs": 1,
+        "applied": True,
+        "published": False,
+        "score_axes": runner.SCORE_AXES,
+        "scoring": {
+            "score_source": "manual",
+            "metrics_source": "automated_plan_or_flow_artifacts",
+        },
+        "aggregate": {},
+        "results": [asdict(result)],
+    }
+
+    redacted = runner.redacted_baseline_summary(summary)
+
+    assert redacted["results"][0]["step_metrics"] == [
+        asdict(row) for row in result.step_metrics
+    ]
 
 
 def test_live_eval_runner_does_not_assign_score_axes_from_metrics() -> None:

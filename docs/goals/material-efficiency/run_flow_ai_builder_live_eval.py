@@ -11,6 +11,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,7 @@ from intric.flows.ai_builder.ai_builder_material_metrics import (
     MaterialMetrics,
     MaterialMetricStep,
     compute_material_metrics,
+    compute_per_step_material_metrics,
     material_metric_steps_from_draft,
     question_from_input_bindings,
 )
@@ -33,6 +35,7 @@ DEFAULT_STATE_PATH = Path(__file__).with_name(
 JsonObject = dict[str, Any]
 JsonList = list[Any]
 MetricsImplementation = Literal["automated", "not_applicable", "missing_artifacts"]
+MetricsSource = Literal["flow_artifact", "plan_envelope"]
 
 SCORE_AXES = [
     "clarification_restraint",
@@ -55,31 +58,6 @@ class EvalCase:
     failure_signal: str
     suite: str = "create"
     notes: str | None = None
-
-
-@dataclass
-class CaseRunResult:
-    case_id: str
-    run_no: int
-    suite: str
-    space_id: str
-    status: str
-    session_id: str | None = None
-    plan_id: str | None = None
-    flow_id: str | None = None
-    output_dir: str | None = None
-    error: str | None = None
-    requirements_version: str | None = None
-    checkpoints: list[str] = field(default_factory=lambda: [])
-    builder_errors: list[str] = field(default_factory=lambda: [])
-    review_required: bool = True
-    score_axes: dict[str, int | None] = field(
-        default_factory=lambda: {axis: None for axis in SCORE_AXES}
-    )
-    metrics: "ResultMaterialMetrics" = field(
-        default_factory=lambda: ResultMaterialMetrics.empty()
-    )
-    metrics_implementation: MetricsImplementation = "not_applicable"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -112,6 +90,63 @@ class ResultMaterialMetrics:
             source_duplication_count=metrics.source_duplication_count,
             all_previous_steps_count=metrics.all_previous_steps_count,
         )
+
+
+@dataclass(frozen=True, kw_only=True)
+class StepMetricsRow:
+    step_order: int
+    metrics_source: MetricsSource
+    binding_bytes: int
+    fan_in_width: int
+    source_duplication_count: int
+    whole_output_reference_count: int
+    structured_field_count: int
+    all_previous_steps_count: int
+
+    @classmethod
+    def from_material_metrics(
+        cls,
+        *,
+        step_order: int,
+        metrics_source: MetricsSource,
+        metrics: MaterialMetrics,
+    ) -> "StepMetricsRow":
+        return cls(
+            step_order=step_order,
+            metrics_source=metrics_source,
+            binding_bytes=metrics.binding_bytes,
+            fan_in_width=metrics.fan_in_width,
+            source_duplication_count=metrics.source_duplication_count,
+            whole_output_reference_count=metrics.whole_output_reference_count,
+            structured_field_count=metrics.structured_field_count,
+            all_previous_steps_count=metrics.all_previous_steps_count,
+        )
+
+
+@dataclass
+class CaseRunResult:
+    case_id: str
+    run_no: int
+    suite: str
+    space_id: str
+    status: str
+    session_id: str | None = None
+    plan_id: str | None = None
+    flow_id: str | None = None
+    output_dir: str | None = None
+    error: str | None = None
+    requirements_version: str | None = None
+    checkpoints: list[str] = field(default_factory=lambda: [])
+    builder_errors: list[str] = field(default_factory=lambda: [])
+    review_required: bool = True
+    score_axes: dict[str, int | None] = field(
+        default_factory=lambda: {axis: None for axis in SCORE_AXES}
+    )
+    metrics: ResultMaterialMetrics = field(
+        default_factory=lambda: ResultMaterialMetrics.empty()
+    )
+    step_metrics: list[StepMetricsRow] = field(default_factory=lambda: [])
+    metrics_implementation: MetricsImplementation = "not_applicable"
 
 
 CREATE_CASES: list[EvalCase] = [
@@ -937,25 +972,61 @@ def inspect_endpoints(
 
 
 def attach_material_metrics(result: CaseRunResult, case_dir: Path) -> None:
-    metrics = material_metrics_from_saved_artifacts(case_dir)
-    if metrics is None:
+    artifact_metrics = material_metrics_from_saved_artifacts(case_dir)
+    if artifact_metrics is None:
         result.metrics = ResultMaterialMetrics.empty()
+        result.step_metrics = []
         result.metrics_implementation = "missing_artifacts"
         return
+    metrics, step_metrics = artifact_metrics
     result.metrics = ResultMaterialMetrics.from_material_metrics(metrics)
+    result.step_metrics = step_metrics
     result.metrics_implementation = "automated"
 
 
-def material_metrics_from_saved_artifacts(case_dir: Path) -> MaterialMetrics | None:
+def material_metrics_from_saved_artifacts(
+    case_dir: Path,
+) -> tuple[MaterialMetrics, list[StepMetricsRow]] | None:
     flow_steps = metric_steps_from_flow_json(case_dir / "flow.json")
     if flow_steps is not None:
-        return compute_material_metrics(flow_steps)
+        return material_metrics_for_steps(
+            flow_steps,
+            metrics_source="flow_artifact",
+        )
 
     draft_steps = metric_steps_from_plan_json(case_dir / "plan.json")
     if draft_steps is not None:
         steps, form_field_names = draft_steps
-        return compute_material_metrics(steps, form_field_names=form_field_names)
+        return material_metrics_for_steps(
+            steps,
+            form_field_names=form_field_names,
+            metrics_source="plan_envelope",
+        )
     return None
+
+
+def material_metrics_for_steps(
+    steps: tuple[MaterialMetricStep, ...],
+    *,
+    form_field_names: Iterable[str] = (),
+    metrics_source: MetricsSource,
+) -> tuple[MaterialMetrics, list[StepMetricsRow]]:
+    aggregate_metrics = compute_material_metrics(
+        steps,
+        form_field_names=form_field_names,
+    )
+    step_metrics = [
+        StepMetricsRow.from_material_metrics(
+            step_order=step_order,
+            metrics_source=metrics_source,
+            metrics=metrics,
+        )
+        for step_order, metrics in compute_per_step_material_metrics(
+            steps,
+            form_field_names=form_field_names,
+        )
+    ]
+    return aggregate_metrics, step_metrics
 
 
 def metric_steps_from_plan_json(
@@ -1204,6 +1275,7 @@ def redacted_baseline_summary(summary: dict[str, Any]) -> dict[str, Any]:
                 "review_required": result["review_required"],
                 "score_axes": result["score_axes"],
                 "metrics": result["metrics"],
+                "step_metrics": result["step_metrics"],
                 "metrics_implementation": result["metrics_implementation"],
                 "error": result.get("error"),
             }

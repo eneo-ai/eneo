@@ -3,6 +3,7 @@ from __future__ import annotations
 from intric.flows.ai_builder.ai_builder_material_metrics import (
     MaterialMetricStep,
     compute_material_metrics,
+    compute_per_step_material_metrics,
     compute_step_material_metrics,
 )
 
@@ -154,15 +155,72 @@ def test_whole_structured_reference_is_not_a_structured_field_reference() -> Non
     assert metrics.structured_field_count == 1
 
 
-def test_step_metrics_use_utf8_binding_bytes_and_global_all_previous_count() -> None:
+def test_step_metrics_use_utf8_binding_bytes_and_local_all_previous_count() -> None:
     steps = (
         _metric_step(ref="step_a", order=1, input_source="flow_input"),
         _metric_step(ref="step_b", order=2, input_source="all_previous_steps"),
         _metric_step(ref="step_c", order=3, question="{{ step_a.output.text }} åäö"),
     )
 
-    metrics = compute_step_material_metrics(steps, step_order=3)
+    targeted_metrics = compute_step_material_metrics(steps, step_order=3)
+    all_previous_metrics = compute_step_material_metrics(steps, step_order=2)
 
-    assert metrics.binding_bytes == len("{{ step_a.output.text }} åäö".encode("utf-8"))
-    assert metrics.fan_in_width == 1
-    assert metrics.all_previous_steps_count == 1
+    assert targeted_metrics.binding_bytes == len(
+        "{{ step_a.output.text }} åäö".encode("utf-8")
+    )
+    assert targeted_metrics.fan_in_width == 1
+    assert targeted_metrics.all_previous_steps_count == 0
+    assert all_previous_metrics.all_previous_steps_count == 1
+
+
+def test_per_step_metrics_sum_to_aggregate_for_additive_material_costs() -> None:
+    steps = (
+        _metric_step(
+            ref="step_a",
+            order=1,
+            input_source="flow_input",
+            input_type="audio",
+            output_type="text",
+        ),
+        _metric_step(
+            ref="step_b",
+            order=2,
+            output_type="json",
+            question="{{ step_a.output.text }}",
+        ),
+        _metric_step(
+            ref="step_c",
+            order=3,
+            output_type="json",
+            question=(
+                "{{ step_b.output.structured }}\n"
+                "{{ step_b.output.structured.summary }}\n"
+                "{{ step_a.output.text }}"
+            ),
+        ),
+    )
+
+    aggregate = compute_material_metrics(steps)
+    per_step = compute_per_step_material_metrics(steps)
+
+    assert [step_order for step_order, _metrics in per_step] == [1, 2, 3]
+    assert sum(metrics.binding_bytes for _step_order, metrics in per_step) == (
+        aggregate.binding_bytes
+    )
+    assert (
+        sum(metrics.source_duplication_count for _step_order, metrics in per_step)
+        == aggregate.source_duplication_count
+    )
+    assert (
+        sum(metrics.whole_output_reference_count for _step_order, metrics in per_step)
+        == aggregate.whole_output_reference_count
+    )
+    assert (
+        sum(metrics.structured_field_count for _step_order, metrics in per_step)
+        == aggregate.structured_field_count
+    )
+    assert aggregate.fan_in_width == 2
+    assert sum(metrics.fan_in_width for _step_order, metrics in per_step) == 3
+    assert sum(
+        metrics.all_previous_steps_count for _step_order, metrics in per_step
+    ) == (aggregate.all_previous_steps_count)
