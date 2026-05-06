@@ -10,6 +10,7 @@ from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     normalize_discovery_text,
 )
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
+    InputIntentResolution,
     resolve_input_intent,
 )
 from intric.flows.ai_builder.ai_builder_keywords import (
@@ -33,13 +34,16 @@ def infer_answer_signals_from_text(text: str) -> dict[str, set[str]]:
         return {}
 
     signals: dict[str, set[str]] = {}
-    _add_signal(signals, "document_kind", _infer_document_kind(normalized))
-    _add_signal(
-        signals,
-        "document_material_scope",
-        _infer_document_material_scope(normalized),
-    )
-    _add_signal(signals, "input_material_mode", _infer_input_material_mode(normalized))
+    input_intent = resolve_input_intent(normalized, {})
+    input_material_mode = _infer_input_material_mode(normalized, input_intent)
+    if _document_signals_apply(input_intent, input_material_mode):
+        _add_signal(signals, "document_kind", _infer_document_kind(normalized))
+        _add_signal(
+            signals,
+            "document_material_scope",
+            _infer_document_material_scope(normalized),
+        )
+    _add_signal(signals, "input_material_mode", input_material_mode)
     _add_signal(
         signals,
         "flow_input_architecture",
@@ -241,17 +245,22 @@ def _infer_document_material_scope(text: str) -> str | None:
     return None
 
 
-def _infer_input_material_mode(text: str) -> str | None:
-    primary = resolve_input_intent(text, {}).primary_runtime_input
+def _infer_input_material_mode(
+    text: str,
+    input_intent: InputIntentResolution,
+) -> str | None:
+    primary = input_intent.primary_runtime_input
     if primary != "unknown":
         return primary
+    input_text = build_role_scoped_text(text).preferred_input_text()
     if _contains_any(
-        text,
+        input_text,
         (
             "pdf",
             "dokument",
             "document",
             "documents",
+            "underlag",
             "fil",
             "file",
             "files",
@@ -259,6 +268,18 @@ def _infer_input_material_mode(text: str) -> str | None:
     ):
         return "documents"
     return None
+
+
+def _document_signals_apply(
+    input_intent: InputIntentResolution,
+    input_material_mode: str | None,
+) -> bool:
+    if input_material_mode in {"documents", "text_and_documents"}:
+        return True
+    return (
+        not input_intent.audio_requested
+        or input_intent.document_runtime_input_requested
+    )
 
 
 def _infer_flow_input_architecture(text: str) -> str | None:

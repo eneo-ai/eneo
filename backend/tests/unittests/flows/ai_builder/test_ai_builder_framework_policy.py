@@ -27,7 +27,26 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
 )
 from intric.flows.ai_builder.ai_builder_keywords import OUTPUT_CHANGE_KEYWORDS
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage, OutputType
+from intric.flows.ai_builder.planning_state_builder import (
+    build_planning_state_from_conversation,
+)
 from intric.flows.flow import Flow, FlowStep
+
+
+_AUDIO_TO_WORD_REPORT_PROMPT = (
+    "Skapa ett flöde i Eneo Flödesbyggaren. "
+    "Flödet ska ta emot en ljudfil eller ljudinspelning från ett möte, "
+    "transkribera ljudet till svensk text och skapa ett välstrukturerat "
+    "slutdokument som Word-fil (.docx). "
+    "Indata är en ljudfil eller ljudinspelning. "
+    "Första steget i flödet ska alltid vara transkribering av ljudet till svensk text. "
+    "Ta emot ljudfilen och skapa en så korrekt svensk transkribering som möjligt. "
+    "Alla efterföljande steg ska arbeta mot transkriberingen som källa. "
+    "Varje analyssteg ska föra vidare tidigare ackumulerat underlag. "
+    "Slutrapporten ska inte följa en stel mall, utan struktureras utifrån "
+    "innehållet i mötet. "
+    "Flödet ska ge en färdig Word-fil (.docx) med rapporten."
+)
 
 
 def test_resolve_explicit_output_choice_detects_pdf_from_swedish_prompt() -> None:
@@ -194,6 +213,46 @@ def test_resolve_output_intent_keeps_docx_template_prompt_on_docx_path() -> None
     assert intent.terminal_output == "docx_document"
     assert intent.docx_output_mode == "template_fill_docx"
     assert intent.pdf_generation_mode is None
+
+
+def test_audio_to_word_report_prompt_infers_audio_input_not_document_input() -> None:
+    signals = extract_answer_signals(
+        [{"role": "user", "content": _AUDIO_TO_WORD_REPORT_PROMPT}]
+    )
+
+    assert signals.get("input_material_mode") == {"audio"}
+    assert "document_kind" not in signals
+    assert "document_material_scope" not in signals
+
+    state = build_planning_state_from_conversation(
+        [
+            ConversationMessage(
+                role="user",
+                content=_AUDIO_TO_WORD_REPORT_PROMPT,
+                metadata={"ui_language": "sv"},
+            )
+        ]
+    )
+
+    assert state.resolved_slots["primary_runtime_input"].value == "audio"
+    assert state.resolved_slots["terminal_output"].value == "docx_document"
+    assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
+    assert "document_material_scope" not in state.resolved_slots
+
+
+def test_resolve_docx_output_mode_treats_negated_rigid_template_as_generated_docx() -> (
+    None
+):
+    prompt = (
+        "Skapa ett Word-dokument. Rapporten ska inte följa en stel mall, "
+        "utan struktureras utifrån innehållet."
+    )
+
+    signals = extract_answer_signals([{"role": "user", "content": prompt}])
+    intent = resolve_output_intent(prompt, signals)
+
+    assert intent.terminal_output == "docx_document"
+    assert intent.docx_output_mode == "generated_docx"
 
 
 def test_resolve_docx_output_mode_defaults_when_docx_is_selected_via_structured_answer() -> (

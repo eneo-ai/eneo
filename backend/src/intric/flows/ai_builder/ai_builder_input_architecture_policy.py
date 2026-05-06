@@ -549,7 +549,29 @@ def _document_runtime_input_requested(text: str) -> bool:
 def _text_runtime_input_requested(text: str) -> bool:
     if _contains_any(text, _TEXT_INPUT_MARKERS):
         return True
+    if _looks_like_audio_transcription_output_text(text):
+        return False
     return _mentions_runtime_text_input(text)
+
+
+def _looks_like_audio_transcription_output_text(text: str) -> bool:
+    if not contains_any_token_prefix(text, ("transkrib", "transcrib")):
+        return False
+    if not contains_any_token_prefix(text, _AUDIO_REFERENCE_PREFIXES):
+        return False
+    return _contains_any(
+        text,
+        (
+            "till text",
+            "till svensk text",
+            "till skriven text",
+            "to text",
+            "to swedish text",
+            "into text",
+            "speech to text",
+            "tal till text",
+        ),
+    )
 
 
 def _mentions_runtime_text_input(text: str) -> bool:

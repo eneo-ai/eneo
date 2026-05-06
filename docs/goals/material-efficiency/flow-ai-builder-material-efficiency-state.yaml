@@ -2293,7 +2293,7 @@ tasks:
   - id: T042
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Make structured quality skeleton text finalizers read previous_step instead of all_previous_steps while preserving document terminal slots and legitimate comparison fan-in."
     allowed_files:
@@ -2337,6 +2337,9 @@ tasks:
         - cmd: "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
           status: pass
           output: "3 files already formatted"
+        - cmd: "git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_step_skeleton.py backend/tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+          status: pass
+          output: "no whitespace errors"
       live_eval:
         c3_after_t042:
           summary_json: "/tmp/material-efficiency-live-eval/20260506-092156-t042-c3-structured-quality-text-terminal-current/summary.json"
@@ -2345,9 +2348,71 @@ tasks:
             - "3f048198-7ddd-4270-81f9-92a1df7083fe"
             - "db442866-45f1-403f-879b-947943febaf3"
             - "1cfa27f9-8103-4fee-8b4b-7008d543db01"
+        c3_after_claude_revisions:
+          summary_json: "/tmp/material-efficiency-live-eval/20260506-093931-t042-c3-structured-quality-text-terminal-post-claude/summary.json"
+          output: "C3 applied and published 3/3 after Claude-requested test/readability revisions. Each generated flow retained exactly one all_previous_steps fan-in on a comparison/review step; final text steps used previous_step."
+          flow_ids:
+            - "f6b28895-4f8f-4db0-872c-4762813ec8a0"
+            - "6e31e06e-ce73-4a21-9262-1a3512a00986"
+            - "94a96104-546a-4491-9a8d-105bd3ae6aed"
       follow_ups:
         - "Run the full V1-V5/C1-C5 create suite after this phase to ensure C1/C2/C5 remain stable."
         - "Investigate remaining no_plan/remote-close flake separately if it reproduces outside the abandoned critic/dataflow experiment."
+
+  - id: T043
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Run post-T042 live regression, classify remaining high-ROI defects, and select the next safe implementation slice."
+    inputs:
+      - "T042 receipt"
+      - "docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py"
+      - "docs/goals/material-efficiency/flow-ai-builder-material-efficiency-codex-prompt.txt"
+      - "Current local API and database state"
+    constraints:
+      - "Do not implement production code in this task."
+      - "Do not commit API keys, raw eval outputs, uploaded media, or temporary artifacts."
+      - "Use /tmp for live eval outputs and keep only redacted summaries in board receipts."
+      - "If a live failure is selected for implementation, create a separate Worker task with allowed_files, verify, and stop_if."
+      - "Prefer deterministic tests before any production behavior change."
+    expected_output:
+      - "Smoke/API prerequisite result."
+      - "Post-T042 V1-V5/C1-C5 create-suite result."
+      - "High-ROI defect ranking with evidence."
+      - "Next Worker task or blocked/no-op decision."
+    receipt:
+      result: done
+      summary: "Post-T042 live regression found two flaky follow-ups plus a high-ROI user-facing audio-to-DOCX builder failure. The audio-to-DOCX failure was reproduced with the user's prompt, fixed at discovery/input-intent boundaries, peer-reviewed by Claude, unit-verified, and live-verified to produce a plan."
+      selected_defect:
+        issue: "Audio-to-Word prompt was summarized as document input and template-fill DOCX, then failed proposal with architecture_critic_invariant_failed."
+        root_cause: "Freeform discovery inferred document input from output/report wording and treated negated template wording as template-fill DOCX."
+      claude:
+        plan_artifact: ".codex/artifacts/claude-peer-loop-t043-audio-docx-discovery-root-cause-plan-20260506T110941Z.md"
+        commit_gate_artifact: ".codex/artifacts/claude-peer-loop-t043-audio-docx-discovery-implementation-review-20260506T111923Z.md"
+        verdict: "green"
+        min_score: 8
+      verification:
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_ai_builder_understanding_goldens.py tests/unittests/flows/ai_builder/test_ai_builder_specialty_recognizer_support.py -q"
+          status: pass
+          output: "123 passed"
+        - cmd: "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_discovery_signal_inference.py src/intric/flows/ai_builder/ai_builder_input_architecture_policy.py src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/ai_builder_keywords.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+      live_eval:
+        initial_repro:
+          output_dir: "/tmp/material-efficiency-live-eval/20260506-user-audio-docx-repro/USER-AUDIO-DOCX-run1"
+          status: "builder_error"
+          error: "architecture_critic_invariant_failed"
+        final_repro:
+          output_dir: "/tmp/material-efficiency-live-eval/20260506-user-audio-docx-postfix2/USER-AUDIO-DOCX-FIX2-run1"
+          status: "planned"
+          session_id: "d3bb0539-aa2c-4c41-ab7b-f44098758119"
+          plan_id: "43c8cfff-a0d7-4399-a319-cdea3579e6d2"
+          output: "Requirements now say runtime input is Ljud and DOCX is Genererad DOCX utan mall; plan step 1 is audio flow_input -> text transcribe_only."
+      follow_ups:
+        - "Investigate C2 duplicate semantic step-name self-correction flake."
+        - "Investigate C5 structured extraction quality flake."
 
   - id: T999
     type: judge
