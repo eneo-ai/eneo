@@ -118,13 +118,26 @@ def compute_step_material_metrics(
     selected = [step for step in steps if step.step_order == step_order]
     if not selected:
         raise ValueError(f"Unknown step_order: {step_order}")
-    step = selected[0]
+    return _compute_step_material_metrics(
+        step=selected[0],
+        steps=steps,
+        form_field_names=form_field_names,
+        source_step_refs=_source_surfacing_step_refs(steps),
+    )
+
+
+def _compute_step_material_metrics(
+    *,
+    step: MaterialMetricStep,
+    steps: Sequence[MaterialMetricStep],
+    form_field_names: Iterable[str],
+    source_step_refs: frozenset[str],
+) -> MaterialMetrics:
     references = _step_references(
         step=step,
         steps=steps,
         form_field_names=form_field_names,
     )
-    source_step_refs = _source_surfacing_step_refs(steps)
     return MaterialMetrics(
         binding_bytes=len(step.question.encode("utf-8")),
         fan_in_width=len(
@@ -159,13 +172,15 @@ def compute_per_step_material_metrics(
     *,
     form_field_names: Iterable[str] = (),
 ) -> tuple[tuple[int, MaterialMetrics], ...]:
+    source_step_refs = _source_surfacing_step_refs(steps)
     return tuple(
         (
             step.step_order,
-            compute_step_material_metrics(
-                steps,
-                step_order=step.step_order,
+            _compute_step_material_metrics(
+                step=step,
+                steps=steps,
                 form_field_names=form_field_names,
+                source_step_refs=source_step_refs,
             ),
         )
         for step in steps
