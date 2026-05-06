@@ -1390,6 +1390,9 @@ tasks:
         - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_live_eval_runner.py -q"
           status: pass
           output: "19 passed"
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+          status: pass
+          output: "2016 passed, 4 skipped, 42 warnings"
         - cmd: "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_live_eval_runner.py ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py"
           status: pass
           output: "0 errors, 0 warnings, 0 informations"
