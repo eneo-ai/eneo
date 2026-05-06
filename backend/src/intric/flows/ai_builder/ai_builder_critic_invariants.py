@@ -27,6 +27,7 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
 )
 from intric.flows.ai_builder.ai_builder_form_field_usage import (
     find_unused_form_fields,
+    step_references_form_field,
 )
 from intric.flows.ai_builder.ai_builder_form_intake_signals import (
     mentions_sectioned_form_intake,
@@ -1062,6 +1063,88 @@ def _previous_text_step_already_composes_structured_underlag(
     )
 
 
+def _prior_json_contract_count(spec: FlowDraftSpecCore, *, before_index: int) -> int:
+    return sum(
+        1
+        for step in spec.steps[:before_index]
+        if not _is_renderer_step(step)
+        and step.output_type == OutputType.JSON
+        and step.output_contract is not None
+    )
+
+
+def _redundant_terminal_json_format_tail_after_final_text_composer_evidence(
+    context: CriticContext,
+) -> bool:
+    spec = context.spec
+    if context.aggregation_intent in {"aggregate", "compare"}:
+        return False
+    if context.output_intent.terminal_output == "structured_json":
+        return False
+    if len(spec.steps) < 4:
+        return False
+
+    last_index = len(spec.steps) - 1
+    last_step = spec.steps[last_index]
+    if _is_renderer_step(last_step):
+        return False
+
+    tail_json_index = last_index
+    if last_step.output_type == OutputType.TEXT and last_index > 0:
+        previous = spec.steps[last_index - 1]
+        if (
+            previous.output_type == OutputType.JSON
+            and previous.output_contract is not None
+            and previous.input_source == InputSource.PREVIOUS_STEP
+        ):
+            tail_json_index = last_index - 1
+
+    tail_json_step = spec.steps[tail_json_index]
+    if tail_json_step.output_type != OutputType.JSON:
+        return False
+    if tail_json_step.output_contract is None:
+        return False
+    if tail_json_step.input_source != InputSource.PREVIOUS_STEP:
+        return False
+    if step_references_form_field(spec, tail_json_step):
+        return False
+    if tail_json_index == 0:
+        return False
+
+    composer_index = tail_json_index - 1
+    composer = spec.steps[composer_index]
+    if _is_renderer_step(composer):
+        return False
+    if composer.output_type != OutputType.TEXT:
+        return False
+    if _prior_json_contract_count(spec, before_index=composer_index) < 1:
+        return False
+    return True
+
+
+_REDUNDANT_TERMINAL_JSON_FORMAT_TAIL_AFTER_FINAL_TEXT_COMPOSER = CriticInvariant(
+    id="redundant_terminal_json_format_tail_after_final_text_composer",
+    kind="semantic",
+    description=(
+        "A flow that has already produced its final text answer should not "
+        "append an unrequested JSON formatting step, nor a JSON formatting "
+        "step followed by a text unwrap. This topology adds prompt cost and "
+        "one or two LLM hops without adding user-visible quality. Explicit "
+        "structured JSON terminal outputs, form-field-driven JSON outputs, "
+        "aggregate/compare flows, and document renderer terminals are owned "
+        "by their corresponding output contracts and stay outside this rule."
+    ),
+    evidence=_redundant_terminal_json_format_tail_after_final_text_composer_evidence,
+    remediation=(
+        "Flödet har redan ett textsteg som skriver slutversionen, men lägger "
+        "därefter till ett JSON-formateringssteg utan att JSON har begärts som "
+        "slutformat. Ta bort JSON-svansen och låt textsteget vara terminalt. "
+        "Behåll JSON-svansen endast om användaren uttryckligen har valt JSON "
+        "som slutformat eller om JSON-steget drivs av ett runtime-formulärfält."
+    ),
+)
+
+
 def _final_text_step_must_reference_relevant_structured_outputs_evidence(
     context: CriticContext,
 ) -> bool:
@@ -1092,6 +1175,8 @@ def _final_text_step_must_reference_relevant_structured_outputs_evidence(
       rule would suggest despite the nominal source shape.
     """
     spec = context.spec
+    if _redundant_terminal_json_format_tail_after_final_text_composer_evidence(context):
+        return False
     if context.aggregation_intent in {"aggregate", "compare"}:
         return False
     if len(spec.steps) < 2:
@@ -1353,6 +1438,7 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _MCP_SELECTION_REQUIRES_SEMANTIC_SUPPORT,
     _JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE,
     _PREFER_TARGETED_UNDERLAG_OVER_ALL_PREVIOUS_STEPS,
+    _REDUNDANT_TERMINAL_JSON_FORMAT_TAIL_AFTER_FINAL_TEXT_COMPOSER,
     _FINAL_TEXT_STEP_MUST_REFERENCE_RELEVANT_STRUCTURED_OUTPUTS,
     _FORM_FIELDS_DECLARED_MUST_BE_REFERENCED,
     _TEMPLATE_FILL_DOCX_REQUIRES_TEMPLATE_FILL_STEP,

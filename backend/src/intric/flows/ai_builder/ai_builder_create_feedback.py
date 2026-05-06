@@ -34,6 +34,9 @@ CREATE_CRITIC_REMEDIATION: dict[str, str] = {
     "prefer_targeted_underlag_over_all_previous_steps": (
         "Beskriv ett semantiskt syntessteg som sammanställer just de relevanta strukturerade resultaten från tidigare steg, i stället för att läsa allt tidigare innehåll."
     ),
+    "redundant_terminal_json_format_tail_after_final_text_composer": (
+        "Ta bort det extra JSON-formatsteget efter sluttexten när användaren inte har valt JSON som slutformat. Låt det semantiska textsteget som skriver slutversionen vara terminalt."
+    ),
     "final_text_step_must_reference_relevant_structured_outputs": (
         "Beskriv ett semantiskt kompositionssteg som väver in relevanta strukturerade resultat från flera tidigare steg, inte bara det senaste."
     ),

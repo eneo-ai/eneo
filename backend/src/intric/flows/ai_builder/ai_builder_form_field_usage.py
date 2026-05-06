@@ -23,6 +23,27 @@ def _iter_step_templates(step: StepSpec) -> list[str]:
     return templates
 
 
+def step_references_form_field(spec: FlowDraftSpecCore, step: StepSpec) -> bool:
+    declared_fields = {
+        field.name.strip() for field in (spec.form_fields or []) if field.name.strip()
+    }
+    if not declared_fields:
+        return False
+
+    step_refs = {
+        candidate.plan_step_ref: index for index, candidate in enumerate(spec.steps)
+    }
+    for template in _iter_step_templates(step):
+        refs = analyze_template(
+            template,
+            step_refs=step_refs,
+            form_field_names=declared_fields,
+        )
+        if referenced_form_fields(refs):
+            return True
+    return False
+
+
 def find_unused_form_fields(spec: FlowDraftSpecCore) -> list[str]:
     declared_fields = {
         field.name.strip() for field in (spec.form_fields or []) if field.name.strip()
@@ -42,4 +63,4 @@ def find_unused_form_fields(spec: FlowDraftSpecCore) -> list[str]:
     return sorted(declared_fields - used_fields)
 
 
-__all__ = ["find_unused_form_fields"]
+__all__ = ["find_unused_form_fields", "step_references_form_field"]

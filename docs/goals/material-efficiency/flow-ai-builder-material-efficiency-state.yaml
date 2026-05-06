@@ -33,7 +33,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T019
+active_task: null
 
 tasks:
   - id: T001
@@ -980,11 +980,13 @@ tasks:
   - id: T019
     type: worker
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Add a topology-only semantic critic invariant that rejects an unrequested terminal JSON-format tail after an already-final text composer."
     allowed_files:
       - backend/src/intric/flows/ai_builder/ai_builder_critic_invariants.py
+      - backend/src/intric/flows/ai_builder/ai_builder_create_feedback.py
+      - backend/src/intric/flows/ai_builder/ai_builder_form_field_usage.py
       - backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py
       - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
       - docs/goals/material-efficiency/notes/T017-q1-quality-chain-topology-scout.md
@@ -992,10 +994,11 @@ tasks:
     verify:
       - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q -k 'redundant_terminal or quality_chain'"
       - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q"
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py -q"
       - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
-      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_critic_invariants.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
-      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_critic_invariants.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
-      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_critic_invariants.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_critic_invariants.py src/intric/flows/ai_builder/ai_builder_create_feedback.py src/intric/flows/ai_builder/ai_builder_form_field_usage.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_critic_invariants.py src/intric/flows/ai_builder/ai_builder_create_feedback.py src/intric/flows/ai_builder/ai_builder_form_field_usage.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_critic_invariants.py src/intric/flows/ai_builder/ai_builder_create_feedback.py src/intric/flows/ai_builder/ai_builder_form_field_usage.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
     stop_if:
       - "The rule depends on conversation keywords, Q1 wording, Swedish/English prompt text, or PlannerPatternSignals.prefers_quality_step instead of StepSpec topology."
       - "The invariant collapses an explicit text -> JSON critique -> text revision chain to one step."
@@ -1003,7 +1006,48 @@ tasks:
       - "The implementation double-fires confusingly with final_text_step_must_reference_relevant_structured_outputs instead of making precedence explicit."
       - "Any blocked T016 source file, unrelated dirty source file, or scripts/run_codex_review.sh would be touched."
       - "Staging would require wholesale git add of the shared state file rather than T019-only hunks."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Added a topology-only semantic critic invariant that rejects unrequested terminal JSON-format tails after a final text composer, while preserving explicit JSON terminal output, renderer terminals, form-field-driven JSON, and aggregate/compare topologies."
+      changed_files:
+        - backend/src/intric/flows/ai_builder/ai_builder_critic_invariants.py
+        - backend/src/intric/flows/ai_builder/ai_builder_create_feedback.py
+        - backend/src/intric/flows/ai_builder/ai_builder_form_field_usage.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py
+        - docs/goals/material-efficiency/notes/T018-q1-quality-chain-topology.md
+      canonical_owner:
+        critic_rule: "backend/src/intric/flows/ai_builder/ai_builder_critic_invariants.py"
+        create_remediation: "backend/src/intric/flows/ai_builder/ai_builder_create_feedback.py"
+        form_field_predicate: "backend/src/intric/flows/ai_builder/ai_builder_form_field_usage.py"
+      verification:
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q -k 'redundant_terminal or quality_chain'"
+          output: "8 passed"
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q"
+          output: "102 passed"
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py -q"
+          output: "12 passed"
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+          output: "2000 passed, 4 skipped"
+        - cmd: "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_critic_invariants.py src/intric/flows/ai_builder/ai_builder_create_feedback.py src/intric/flows/ai_builder/ai_builder_form_field_usage.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "uv run --directory backend ruff check ... && uv run --directory backend ruff format --check ..."
+          output: "All checks passed; files already formatted"
+      live_eval:
+        - path: "/tmp/material-efficiency-live-eval/20260506-021515-t019-redundant-terminal-json-tail/summary.json"
+          output: "Q1 applied 3/3; manual topology inspection showed 3/3 exact text -> JSON critique -> final text chains."
+        - path: "/tmp/material-efficiency-live-eval/20260506-021700-t019-supplemental-regression/summary.json"
+          output: "C5, N1, Q1 applied 1/1 each; manual topology inspection showed N1 one step, Q1 three steps, C5 retained DOCX renderer."
+        - path: "/tmp/material-efficiency-live-eval/20260506-022944-t019-post-claude-fix-regression/summary.json"
+          output: "Post-Claude revision rerun: C5, N1, Q1 applied 1/1 each; manual topology inspection again showed N1 one step, Q1 three steps, C5 retained DOCX renderer."
+      claude:
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t019-redundant-terminal-json-tail-implementation-review-20260506T002554Z.md"
+          - ".codex/artifacts/claude-peer-loop-t019-redundant-terminal-json-tail-implementation-review-iteration-2-20260506T003442Z.md"
+        first_verdict: "changes_required; valid P1 duplicate form-field template walker and P2 branch coverage gaps."
+        final_verdict: "GREEN_LIGHT yes, MIN_SCORE 8."
+      follow_ups:
+        - "Optional: add a docstring to the redundant-tail predicate."
+        - "Optional separate slice: make OutputIntentResolution.terminal_output a Literal/enum instead of stringly typed values."
 
   - id: T999
     type: judge

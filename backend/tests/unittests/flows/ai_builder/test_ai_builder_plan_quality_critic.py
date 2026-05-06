@@ -58,6 +58,7 @@ EXPECTED_CRITIC_INVARIANT_KINDS = {
     "mcp_selection_requires_semantic_support": "semantic",
     "json_input_rejects_all_previous_steps_source": "architecture",
     "prefer_targeted_underlag_over_all_previous_steps": "semantic",
+    "redundant_terminal_json_format_tail_after_final_text_composer": "semantic",
     "final_text_step_must_reference_relevant_structured_outputs": "semantic",
     "form_fields_declared_must_be_referenced": "semantic",
     "template_fill_docx_requires_template_fill_step": "architecture",
@@ -78,6 +79,7 @@ def _step(
     output_type: OutputType = OutputType.TEXT,
     output_mode: OutputMode = OutputMode.PASS_THROUGH,
     output_contract: dict | None = None,
+    input_bindings: dict | None = None,
 ) -> StepSpec:
     return StepSpec(
         plan_step_ref=ref,
@@ -88,6 +90,7 @@ def _step(
         output_mode=output_mode,
         output_type=output_type,
         output_contract=output_contract,
+        input_bindings=input_bindings,
     )
 
 
@@ -2624,12 +2627,16 @@ class TestPreferTargetedUnderlagInvariant:
 _FINAL_TEXT_STEP_INVARIANT_ID = (
     "final_text_step_must_reference_relevant_structured_outputs"
 )
+_REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID = (
+    "redundant_terminal_json_format_tail_after_final_text_composer"
+)
 
 
 def _final_text_step_critic_context(
     spec: FlowDraftSpecCore,
     *,
     aggregation_intent: str = "linear",
+    terminal_output: str | None = None,
 ) -> "CriticContext":
     from intric.flows.ai_builder.ai_builder_critic_invariants import (
         CriticContext,
@@ -2649,10 +2656,332 @@ def _final_text_step_critic_context(
         requirements_text="",
         signal_text="",
         planner_patterns=PlannerPatternSignals(),
-        output_intent=OutputIntentResolution(terminal_output=None),
+        output_intent=OutputIntentResolution(terminal_output=terminal_output),
         mixed_audio_doc_input=False,
         aggregation_intent=cast("AggregationIntent", aggregation_intent),
     )
+
+
+def _json_contract(field_name: str) -> dict:
+    return {
+        "type": "object",
+        "properties": {field_name: {"type": "string"}},
+    }
+
+
+def _quality_chain_with_redundant_terminal_json_tail(
+    *,
+    terminal_text_unwrap: bool = True,
+    tail_input_bindings: dict | None = None,
+) -> FlowDraftSpecCore:
+    steps = [
+        _step(
+            "step_a",
+            "Skriv utkast",
+            "Skriv ett kort svar.",
+            output_type=OutputType.TEXT,
+        ),
+        _step(
+            "step_b",
+            "Granska utkast",
+            "Bedöm tydlighet och faktakoll som JSON.",
+            input_source=InputSource.PREVIOUS_STEP,
+            output_type=OutputType.JSON,
+            output_contract=_json_contract("critique"),
+        ),
+        _step(
+            "step_c",
+            "Skriv slutversion",
+            "Skriv en förbättrad slutversion.",
+            input_source=InputSource.PREVIOUS_STEP,
+            output_type=OutputType.TEXT,
+            input_bindings={
+                "question": (
+                    "Utkast: {{ step_a.output.text }}\n"
+                    "Kritik: {{ step_b.output.structured.critique }}\n"
+                    "Skriv slutversionen."
+                )
+            },
+        ),
+        _step(
+            "step_d",
+            "Formatera svar",
+            "Packa slutversionen i JSON.",
+            input_source=InputSource.PREVIOUS_STEP,
+            output_type=OutputType.JSON,
+            output_contract=_json_contract("answer"),
+            input_bindings=tail_input_bindings,
+        ),
+    ]
+    if terminal_text_unwrap:
+        steps.append(
+            _step(
+                "step_e",
+                "Returnera svar",
+                "Returnera svaret som text.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.TEXT,
+            )
+        )
+    return FlowDraftSpecCore(flow_name="Kvalitetskedja", steps=steps)
+
+
+class TestRedundantTerminalJsonFormatTailAfterFinalTextComposer:
+    def test_invariant_is_registered(self) -> None:
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CRITIC_INVARIANTS,
+            CriticInvariant,
+        )
+
+        ids = [inv.id for inv in CRITIC_INVARIANTS]
+        assert _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID in ids
+        inv = next(
+            item
+            for item in CRITIC_INVARIANTS
+            if item.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID
+        )
+        assert isinstance(inv, CriticInvariant)
+        assert callable(inv.evidence)
+        assert "JSON" in inv.remediation
+
+    @pytest.mark.parametrize("terminal_text_unwrap", [False, True])
+    def test_redundant_terminal_json_tail_fires_after_final_text_composer(
+        self, terminal_text_unwrap: bool
+    ) -> None:
+        spec = _quality_chain_with_redundant_terminal_json_tail(
+            terminal_text_unwrap=terminal_text_unwrap
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(
+            issue.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID for issue in issues
+        )
+        assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
+    def test_silent_on_three_step_text_revision_quality_chain(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Kvalitetskedja utan svans",
+            steps=_quality_chain_with_redundant_terminal_json_tail(
+                terminal_text_unwrap=False
+            ).steps[:3],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(
+            issue.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID for issue in issues
+        )
+
+    def test_silent_when_structured_json_is_requested_terminal_output(self) -> None:
+        spec = _quality_chain_with_redundant_terminal_json_tail(
+            terminal_text_unwrap=False
+        )
+
+        issues = evaluate_critic_invariants(
+            _final_text_step_critic_context(spec, terminal_output="structured_json")
+        )
+
+        assert not any(
+            issue.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID for issue in issues
+        )
+
+    def test_redundant_terminal_silent_when_no_prior_json_contract_exists(
+        self,
+    ) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Textkedja med JSON-slut",
+            steps=[
+                _step("step_a", "Skriv del", "Skriv del."),
+                _step(
+                    "step_b",
+                    "Skriv mer",
+                    "Skriv mer.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                ),
+                _step(
+                    "step_c",
+                    "Skriv sluttext",
+                    "Skriv sluttext.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                ),
+                _step(
+                    "step_d",
+                    "Skapa JSON",
+                    "Skapa JSON.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.JSON,
+                    output_contract=_json_contract("answer"),
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(
+            issue.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID for issue in issues
+        )
+
+    def test_redundant_terminal_silent_when_json_tail_reads_all_previous_steps(
+        self,
+    ) -> None:
+        spec = _quality_chain_with_redundant_terminal_json_tail(
+            terminal_text_unwrap=False
+        )
+        spec.steps[-1] = spec.steps[-1].model_copy(
+            update={"input_source": InputSource.ALL_PREVIOUS_STEPS}
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(
+            issue.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID for issue in issues
+        )
+
+    def test_redundant_terminal_silent_when_json_tail_has_no_output_contract(
+        self,
+    ) -> None:
+        spec = _quality_chain_with_redundant_terminal_json_tail(
+            terminal_text_unwrap=False
+        )
+        spec.steps[-1] = spec.steps[-1].model_copy(update={"output_contract": None})
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(
+            issue.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID for issue in issues
+        )
+
+    @pytest.mark.parametrize("intent", ["aggregate", "compare"])
+    def test_silent_on_aggregate_or_compare_topologies(self, intent: str) -> None:
+        spec = _quality_chain_with_redundant_terminal_json_tail(
+            terminal_text_unwrap=True
+        )
+
+        issues = evaluate_critic_invariants(
+            _final_text_step_critic_context(spec, aggregation_intent=intent)
+        )
+
+        assert not any(
+            issue.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID for issue in issues
+        )
+
+    def test_silent_when_terminal_output_is_document_renderer(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Rapport med renderer",
+            steps=[
+                *_quality_chain_with_redundant_terminal_json_tail(
+                    terminal_text_unwrap=False
+                ).steps[:3],
+                _step(
+                    "step_d",
+                    "Skapa Word-rapport",
+                    "Skapa ett dokument från slutversionen.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.DOCX,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(
+            issue.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID for issue in issues
+        )
+
+    def test_silent_when_json_tail_is_driven_by_form_field(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Formstyrd JSON",
+            form_fields=[
+                FormFieldSpec(
+                    name="schema_choice",
+                    type="select",
+                    label="Schema",
+                    required=True,
+                    options=["compact", "full"],
+                )
+            ],
+            steps=_quality_chain_with_redundant_terminal_json_tail(
+                terminal_text_unwrap=False,
+                tail_input_bindings={
+                    "question": (
+                        "Schema: {{ schema_choice }}\n"
+                        "Slutversion: {{ step_c.output.text }}"
+                    )
+                },
+            ).steps,
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(
+            issue.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID for issue in issues
+        )
+        assert not any(
+            issue.id == "form_fields_declared_must_be_referenced" for issue in issues
+        )
+
+    def test_redundant_terminal_json_tail_fires_in_edit_context(self) -> None:
+        from uuid import uuid4
+
+        from intric.flows.flow import Flow, FlowStep
+
+        flow = Flow(
+            id=uuid4(),
+            tenant_id=uuid4(),
+            space_id=uuid4(),
+            name="Kvalitetskedja",
+            steps=[
+                FlowStep(
+                    assistant_id=uuid4(),
+                    step_order=1,
+                    user_description="Skriv utkast",
+                    input_source="flow_input",
+                    input_type="text",
+                    output_mode="pass_through",
+                    output_type="text",
+                    mcp_policy="inherit",
+                ),
+                FlowStep(
+                    assistant_id=uuid4(),
+                    step_order=2,
+                    user_description="Granska utkast",
+                    input_source="previous_step",
+                    input_type="text",
+                    output_mode="pass_through",
+                    output_type="json",
+                    mcp_policy="inherit",
+                    output_contract=_json_contract("critique"),
+                ),
+                FlowStep(
+                    assistant_id=uuid4(),
+                    step_order=3,
+                    user_description="Skriv slutversion",
+                    input_source="previous_step",
+                    input_type="text",
+                    output_mode="pass_through",
+                    output_type="text",
+                    mcp_policy="inherit",
+                ),
+            ],
+        )
+        conversation = [
+            {
+                "role": "user",
+                "content": "Ändra flödet med minsta möjliga strukturförändring.",
+            }
+        ]
+        spec = _quality_chain_with_redundant_terminal_json_tail(
+            terminal_text_unwrap=True
+        )
+
+        issues = evaluate_critic_invariants(
+            build_conversation_critic_context(conversation, spec, flow=flow)
+        )
+
+        assert any(
+            issue.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID for issue in issues
+        )
 
 
 class TestFinalTextStepReferencesRelevantStructuredOutputs:
@@ -3467,6 +3796,7 @@ class TestCriticInvariantRegistry:
             "mcp_selection_requires_semantic_support",
             "json_input_rejects_all_previous_steps_source",
             "prefer_targeted_underlag_over_all_previous_steps",
+            "redundant_terminal_json_format_tail_after_final_text_composer",
             "final_text_step_must_reference_relevant_structured_outputs",
             "form_fields_declared_must_be_referenced",
             "template_fill_docx_requires_template_fill_step",
