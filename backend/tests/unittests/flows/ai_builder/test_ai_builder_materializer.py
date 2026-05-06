@@ -35,6 +35,9 @@ from intric.flows.ai_builder.ai_builder_models import (
     StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+    MaterializerProgressSnapshot,
+)
 from intric.flows.flow import Flow, FlowStep
 from intric.main.exceptions import BadRequestException
 
@@ -1196,6 +1199,131 @@ class TestExecuteCreateFlow:
         # Verify assistant IDs were remapped
         for i, step in enumerate(update_kwargs["steps"]):
             assert step.assistant_id == assistant_ids[i]
+
+    @pytest.mark.asyncio
+    async def test_execute_changeset_reports_bounded_progress_snapshots(self) -> None:
+        flow_id = uuid4()
+        space_id = uuid4()
+        assistant_ids = [uuid4(), uuid4()]
+
+        mock_flow_service = AsyncMock()
+        created_flow = _make_flow(flow_id=flow_id, space_id=space_id)
+        mock_flow_service.create_flow.return_value = created_flow
+
+        create_index = 0
+
+        async def mock_create_assistant(**kwargs):
+            nonlocal create_index
+            mock = MagicMock()
+            mock.id = assistant_ids[create_index]
+            create_index += 1
+            return mock, []
+
+        mock_flow_service.create_flow_assistant.side_effect = mock_create_assistant
+        mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
+
+        changeset = FlowChangeSet(
+            flow_name="Progress",
+            flow_description="",
+            assistants_to_create=[
+                AssistantToCreate(
+                    plan_step_ref=f"step_{c}",
+                    assistant_spec=AssistantSpec(instructions=f"Step {c}"),
+                )
+                for c in "ab"
+            ],
+            compiled_steps=[
+                _compiled_step(
+                    plan_step_ref=f"step_{c}",
+                    step_order=i + 1,
+                    change_kind=StepChangeKind.ADDED,
+                    user_description=f"Step {c.upper()}",
+                )
+                for i, c in enumerate("ab")
+            ],
+        )
+        snapshots: list[MaterializerProgressSnapshot] = []
+
+        await execute_changeset(
+            changeset=changeset,
+            flow_service=mock_flow_service,
+            space_id=space_id,
+            flow_id=None,
+            progress_callback=snapshots.append,
+        )
+
+        assert [snapshot.stage for snapshot in snapshots] == [
+            "flow_created",
+            "assistants_created",
+            "assistants_configured",
+            "assistants_created",
+            "assistants_configured",
+            "flow_updated",
+        ]
+        assert snapshots[-1] == MaterializerProgressSnapshot(
+            stage="flow_updated",
+            assistants_created=2,
+            assistants_configured=2,
+            assistants_updated=0,
+            assistants_deleted=0,
+            flow_created=True,
+            flow_updated=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_execute_changeset_keeps_last_progress_before_update_failure(
+        self,
+    ) -> None:
+        flow_id = uuid4()
+        space_id = uuid4()
+        assistant_id = uuid4()
+
+        mock_flow_service = AsyncMock()
+        created_flow = _make_flow(flow_id=flow_id, space_id=space_id)
+        mock_flow_service.create_flow.return_value = created_flow
+        mock_assistant = MagicMock()
+        mock_assistant.id = assistant_id
+        mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
+        mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
+        mock_flow_service.update_flow.side_effect = RuntimeError("update failed")
+
+        changeset = FlowChangeSet(
+            flow_name="Progress failure",
+            flow_description="",
+            assistants_to_create=[
+                AssistantToCreate(
+                    plan_step_ref="step_a",
+                    assistant_spec=AssistantSpec(instructions="Step A"),
+                )
+            ],
+            compiled_steps=[
+                _compiled_step(
+                    plan_step_ref="step_a",
+                    step_order=1,
+                    change_kind=StepChangeKind.ADDED,
+                )
+            ],
+        )
+        snapshots: list[MaterializerProgressSnapshot] = []
+
+        with pytest.raises(RuntimeError, match="update failed"):
+            await execute_changeset(
+                changeset=changeset,
+                flow_service=mock_flow_service,
+                space_id=space_id,
+                flow_id=None,
+                progress_callback=snapshots.append,
+            )
+
+        assert snapshots[-1] == MaterializerProgressSnapshot(
+            stage="assistants_configured",
+            assistants_created=1,
+            assistants_configured=1,
+            assistants_updated=0,
+            assistants_deleted=0,
+            flow_created=True,
+            flow_updated=False,
+        )
 
     @pytest.mark.asyncio
     async def test_assistant_configured_with_prompt(self) -> None:

@@ -10,6 +10,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     BuilderPlan,
     BuilderSession,
+    FlowChangeSet,
     FlowDraftSpecCore,
     InputSource,
     InputType,
@@ -20,6 +21,9 @@ from intric.flows.ai_builder.ai_builder_models import (
     TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
+from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+    MaterializerProgressSnapshot,
+)
 from intric.main.exceptions import BadRequestException
 
 
@@ -282,6 +286,235 @@ class TestAIBuilderPlanLifecycle:
             status=SessionStatus.AWAITING_APPROVAL,
         )
         flow_service.list_flows.assert_not_awaited()
+
+    @pytest.mark.anyio
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
+    async def test_apply_plan_logs_compile_runtime_failure_and_rolls_back(
+        self,
+        mock_compile,
+        mock_execute,
+        mock_log_apply_failed,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        flow_service = AsyncMock()
+        flow_id = uuid4()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=flow_id,
+            target_kind=TargetKind.EDIT,
+        )
+        plan = _make_plan(session_id=session.id, tenant_id=user.tenant_id)
+        flow_service.get_flow.return_value = SimpleNamespace(
+            id=flow_id,
+            space_id=session.space_id,
+            draft_revision=1,
+            published_version=None,
+            steps=[],
+        )
+        repo.get_plan.return_value = plan
+        repo.get_session.return_value = session
+        mock_compile.side_effect = RuntimeError("compile exploded")
+
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+        )
+
+        with pytest.raises(RuntimeError, match="compile exploded"):
+            await lifecycle.apply_plan(plan_id=plan.id, expected_revision=1)
+
+        mock_execute.assert_not_awaited()
+        mock_log_apply_failed.assert_called_once()
+        assert mock_log_apply_failed.call_args.kwargs["phase"] == "compile_changeset"
+        assert mock_log_apply_failed.call_args.kwargs["plan_id"] == plan.id
+        assert mock_log_apply_failed.call_args.kwargs["session_id"] == session.id
+        assert mock_log_apply_failed.call_args.kwargs["flow_id"] == flow_id
+        assert isinstance(
+            mock_log_apply_failed.call_args.kwargs["exception"], RuntimeError
+        )
+        assert mock_log_apply_failed.call_args.kwargs["changeset_counts"] is None
+        assert mock_log_apply_failed.call_args.kwargs["materializer_progress"] is None
+        repo.update_session_status.assert_any_await(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            status=SessionStatus.AWAITING_APPROVAL,
+        )
+
+    @pytest.mark.anyio
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
+    async def test_apply_plan_logs_compile_bad_request_code(
+        self,
+        mock_compile,
+        mock_execute,
+        mock_log_apply_failed,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        flow_service = AsyncMock()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        plan = _make_plan(session_id=session.id, tenant_id=user.tenant_id)
+        repo.get_plan.return_value = plan
+        repo.get_session.return_value = session
+        mock_compile.side_effect = BadRequestException(
+            "invalid compile",
+            code="invalid_compiled_spec",
+        )
+
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+        )
+
+        with pytest.raises(BadRequestException, match="invalid compile"):
+            await lifecycle.apply_plan(plan_id=plan.id)
+
+        mock_execute.assert_not_awaited()
+        assert mock_log_apply_failed.call_args.kwargs["phase"] == "compile_changeset"
+        exception = mock_log_apply_failed.call_args.kwargs["exception"]
+        assert isinstance(exception, BadRequestException)
+        assert exception.code == "invalid_compiled_spec"
+
+    @pytest.mark.anyio
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
+    async def test_apply_plan_logs_execute_runtime_failure_with_progress(
+        self,
+        mock_compile,
+        mock_execute,
+        mock_log_apply_failed,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        flow_service = AsyncMock()
+        flow_id = uuid4()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=flow_id,
+            target_kind=TargetKind.EDIT,
+        )
+        plan = _make_plan(session_id=session.id, tenant_id=user.tenant_id)
+        flow_service.get_flow.return_value = SimpleNamespace(
+            id=flow_id,
+            space_id=session.space_id,
+            draft_revision=1,
+            published_version=None,
+            steps=[],
+        )
+        repo.get_plan.return_value = plan
+        repo.get_session.return_value = session
+        changeset = FlowChangeSet(
+            flow_name="Flow",
+            flow_description="Desc",
+            assistants_to_create=[],
+            assistants_to_update=[],
+            assistants_to_delete=[],
+            compiled_steps=[],
+        )
+        mock_compile.return_value = changeset
+        progress = MaterializerProgressSnapshot(
+            stage="assistants_updated",
+            assistants_created=0,
+            assistants_configured=0,
+            assistants_updated=1,
+            assistants_deleted=0,
+            flow_created=False,
+            flow_updated=False,
+        )
+
+        async def fail_execute(**kwargs):
+            kwargs["progress_callback"](progress)
+            raise RuntimeError("execute exploded")
+
+        mock_execute.side_effect = fail_execute
+
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+        )
+
+        with pytest.raises(RuntimeError, match="execute exploded"):
+            await lifecycle.apply_plan(plan_id=plan.id, expected_revision=1)
+
+        mock_log_apply_failed.assert_called_once()
+        assert mock_log_apply_failed.call_args.kwargs["phase"] == "execute_changeset"
+        assert mock_log_apply_failed.call_args.kwargs["changeset_counts"] is not None
+        assert (
+            mock_log_apply_failed.call_args.kwargs["materializer_progress"] == progress
+        )
+        repo.update_session_status.assert_any_await(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            status=SessionStatus.AWAITING_APPROVAL,
+        )
+
+    @pytest.mark.anyio
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
+    async def test_apply_plan_logs_execute_bad_request_code(
+        self,
+        mock_compile,
+        mock_execute,
+        mock_log_apply_failed,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        flow_service = AsyncMock()
+        flow_id = uuid4()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=flow_id,
+            target_kind=TargetKind.EDIT,
+        )
+        plan = _make_plan(session_id=session.id, tenant_id=user.tenant_id)
+        flow_service.get_flow.return_value = SimpleNamespace(
+            id=flow_id,
+            space_id=session.space_id,
+            draft_revision=1,
+            published_version=None,
+            steps=[],
+        )
+        repo.get_plan.return_value = plan
+        repo.get_session.return_value = session
+        mock_compile.return_value = FlowChangeSet(
+            flow_name="Flow",
+            flow_description="Desc",
+        )
+        mock_execute.side_effect = BadRequestException(
+            "stale",
+            code="stale_revision",
+        )
+
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+        )
+
+        with pytest.raises(BadRequestException, match="stale"):
+            await lifecycle.apply_plan(plan_id=plan.id, expected_revision=1)
+
+        assert mock_log_apply_failed.call_args.kwargs["phase"] == "execute_changeset"
+        exception = mock_log_apply_failed.call_args.kwargs["exception"]
+        assert isinstance(exception, BadRequestException)
+        assert exception.code == "stale_revision"
 
     @pytest.mark.anyio
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")

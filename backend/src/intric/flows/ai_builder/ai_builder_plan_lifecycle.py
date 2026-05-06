@@ -17,12 +17,19 @@ from intric.flows.ai_builder.ai_builder_models import (
     ApplyResultResponse,
     BuilderPlan,
     BuilderSession,
+    FlowChangeSet,
     FlowDraftSpecCore,
     InputSource,
     InputType,
     PlanStatus,
     SessionStatus,
+    StepChangeKind,
     TargetKind,
+)
+from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+    ChangesetCountSummary,
+    MaterializerProgressSnapshot,
+    log_apply_failed,
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
@@ -47,6 +54,25 @@ if TYPE_CHECKING:
     from intric.users.user import UserInDB
 
 logger = get_logger(__name__)
+
+
+def _build_changeset_count_summary(changeset: FlowChangeSet) -> ChangesetCountSummary:
+    return ChangesetCountSummary(
+        steps_created=sum(
+            1
+            for step in changeset.compiled_steps
+            if step.change_kind == StepChangeKind.ADDED
+        ),
+        steps_updated=sum(
+            1
+            for step in changeset.compiled_steps
+            if step.change_kind == StepChangeKind.MODIFIED
+        ),
+        steps_removed=len(changeset.assistants_to_delete),
+        assistants_to_create=len(changeset.assistants_to_create),
+        assistants_to_update=len(changeset.assistants_to_update),
+        assistants_to_delete=len(changeset.assistants_to_delete),
+    )
 
 
 class AIBuilderPlanLifecycle:
@@ -152,14 +178,48 @@ class AIBuilderPlanLifecycle:
                     "applied_at": datetime.now(timezone.utc).isoformat(),
                 },
             )
+        except Exception as exc:
+            log_apply_failed(
+                phase="compile_changeset",
+                plan_id=plan.id,
+                session_id=session.id,
+                target_kind=session.target_kind,
+                flow_id=session.flow_id,
+                exception=exc,
+                changeset_counts=None,
+                materializer_progress=None,
+            )
+            await self._rollback_session_status(session.id)
+            raise
+
+        materializer_progress: MaterializerProgressSnapshot | None = None
+
+        def record_materializer_progress(
+            progress: MaterializerProgressSnapshot,
+        ) -> None:
+            nonlocal materializer_progress
+            materializer_progress = progress
+
+        try:
             result = await execute_changeset(
                 changeset=changeset,
                 flow_service=self.flow_service,
                 space_id=session.space_id,
                 flow_id=session.flow_id,
                 expected_revision=expected_revision,
+                progress_callback=record_materializer_progress,
             )
-        except Exception:
+        except Exception as exc:
+            log_apply_failed(
+                phase="execute_changeset",
+                plan_id=plan.id,
+                session_id=session.id,
+                target_kind=session.target_kind,
+                flow_id=session.flow_id,
+                exception=exc,
+                changeset_counts=_build_changeset_count_summary(changeset),
+                materializer_progress=materializer_progress,
+            )
             await self._rollback_session_status(session.id)
             raise
 

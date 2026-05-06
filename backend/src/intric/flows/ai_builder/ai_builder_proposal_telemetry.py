@@ -1,7 +1,7 @@
-"""Telemetry for the task-specific AI Builder proposal turn.
+"""Structured telemetry for AI Builder proposal and apply operations.
 
 The canonical `planner_telemetry` dict shape stays in `ai_builder_telemetry`;
-this module records proposal-only facts and forwards them to that builder.
+this module records proposal facts and apply failure facts.
 Structured log payload schema versions are bumped when emitted field names or
 field meanings change. Success rows omit failure fields because JSON logging
 does not need null-valued keys.
@@ -20,7 +20,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Literal
+from uuid import UUID
 
+from pydantic import BaseModel, ConfigDict
+
+from intric.flows.ai_builder.ai_builder_models import TargetKind
 from intric.flows.ai_builder.ai_builder_telemetry import build_planner_telemetry
 from intric.flows.ai_builder.ai_builder_token_usage import (
     CompletionTokenUsage,
@@ -48,9 +52,20 @@ ProposalRepairReason = Literal[
     "quality",
     "missing_submission_tool",
 ]
+ApplyFailurePhase = Literal["compile_changeset", "execute_changeset"]
+MaterializerProgressStage = Literal[
+    "flow_created",
+    "assistants_created",
+    "assistants_configured",
+    "assistants_updated",
+    "flow_updated",
+    "assistants_deleted",
+]
 
 PROPOSAL_TELEMETRY_LOG_KEY = "ai_builder_proposal_telemetry"
 PROPOSAL_TELEMETRY_SCHEMA_VERSION = 1
+APPLY_TELEMETRY_LOG_KEY = "ai_builder_apply_telemetry"
+APPLY_TELEMETRY_SCHEMA_VERSION = 1
 
 logger = get_logger(__name__)
 
@@ -185,6 +200,77 @@ class ProposalTurnTelemetry:
             proposal_repair_invocation_count=proposal_repair_count,
             proposal_repair_invocation_reasons=proposal_repair_reasons,
         )
+
+
+class ChangesetCountSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    steps_created: int
+    steps_updated: int
+    steps_removed: int
+    assistants_to_create: int
+    assistants_to_update: int
+    assistants_to_delete: int
+
+
+class MaterializerProgressSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    stage: MaterializerProgressStage
+    assistants_created: int = 0
+    assistants_configured: int = 0
+    assistants_updated: int = 0
+    assistants_deleted: int = 0
+    flow_created: bool = False
+    flow_updated: bool = False
+
+
+class ApplyFailureTelemetryPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    event: Literal["ai_builder.apply.failed"] = "ai_builder.apply.failed"
+    schema_version: int = APPLY_TELEMETRY_SCHEMA_VERSION
+    operation: Literal["apply_failed"] = "apply_failed"
+    phase: ApplyFailurePhase
+    plan_id: str
+    session_id: str
+    target_kind: str
+    flow_id: str | None
+    exception_class: str
+    code: str | None = None
+    changeset_counts: ChangesetCountSummary | None = None
+    materializer_progress: MaterializerProgressSnapshot | None = None
+
+
+def log_apply_failed(
+    *,
+    phase: ApplyFailurePhase,
+    plan_id: UUID | str,
+    session_id: UUID | str,
+    target_kind: TargetKind,
+    flow_id: UUID | str | None,
+    exception: Exception,
+    changeset_counts: ChangesetCountSummary | None,
+    materializer_progress: MaterializerProgressSnapshot | None,
+    event_logger: logging.Logger = logger,
+) -> None:
+    payload = ApplyFailureTelemetryPayload(
+        phase=phase,
+        plan_id=str(plan_id),
+        session_id=str(session_id),
+        target_kind=target_kind.value,
+        flow_id=None if flow_id is None else str(flow_id),
+        exception_class=type(exception).__name__,
+        code=_safe_str(getattr(exception, "code", None)),
+        changeset_counts=changeset_counts,
+        materializer_progress=materializer_progress,
+    )
+    event_logger.info(
+        "ai_builder_apply_failed",
+        extra={
+            APPLY_TELEMETRY_LOG_KEY: payload.model_dump(exclude_none=True),
+        },
+    )
 
 
 def log_proposal_first_attempt(

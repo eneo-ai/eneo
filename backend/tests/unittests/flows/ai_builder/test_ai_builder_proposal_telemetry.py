@@ -1,20 +1,32 @@
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import get_args
 from unittest.mock import MagicMock
+from uuid import uuid4
+
+import pytest
+from pydantic import ValidationError
 
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_models import TargetKind
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+    APPLY_TELEMETRY_LOG_KEY,
+    APPLY_TELEMETRY_SCHEMA_VERSION,
     PROPOSAL_TELEMETRY_LOG_KEY,
     PROPOSAL_TELEMETRY_SCHEMA_VERSION,
+    ApplyFailureTelemetryPayload,
+    ChangesetCountSummary,
+    MaterializerProgressSnapshot,
     ProposalFailureKind,
     ProposalRepairReason,
     ProposalTurnTelemetry,
     ToolProcessingFailureKind,
+    log_apply_failed,
     log_proposal_first_attempt,
     log_proposal_repair_invoked,
     proposal_repair_reason_from_tool_failure,
@@ -203,8 +215,153 @@ def test_proposal_repair_log_uses_nested_payload() -> None:
     }
 
 
+def test_apply_failure_log_uses_typed_apply_payload() -> None:
+    event_logger = MagicMock()
+    session_id = uuid4()
+    plan_id = uuid4()
+    flow_id = uuid4()
+
+    log_apply_failed(
+        phase="execute_changeset",
+        plan_id=plan_id,
+        session_id=session_id,
+        target_kind=TargetKind.EDIT,
+        flow_id=flow_id,
+        exception=BadRequestLike("stale", code="stale_revision"),
+        changeset_counts=ChangesetCountSummary(
+            steps_created=1,
+            steps_updated=2,
+            steps_removed=0,
+            assistants_to_create=1,
+            assistants_to_update=2,
+            assistants_to_delete=0,
+        ),
+        materializer_progress=MaterializerProgressSnapshot(
+            stage="flow_updated",
+            assistants_created=1,
+            assistants_configured=1,
+            assistants_updated=2,
+            assistants_deleted=0,
+            flow_created=False,
+            flow_updated=True,
+        ),
+        event_logger=event_logger,
+    )
+
+    event_logger.info.assert_called_once()
+    (message,) = event_logger.info.call_args.args
+    assert message == "ai_builder_apply_failed"
+    payload = event_logger.info.call_args.kwargs["extra"][APPLY_TELEMETRY_LOG_KEY]
+    assert payload == {
+        "event": "ai_builder.apply.failed",
+        "schema_version": APPLY_TELEMETRY_SCHEMA_VERSION,
+        "operation": "apply_failed",
+        "phase": "execute_changeset",
+        "plan_id": str(plan_id),
+        "session_id": str(session_id),
+        "target_kind": "edit",
+        "flow_id": str(flow_id),
+        "exception_class": "BadRequestLike",
+        "code": "stale_revision",
+        "changeset_counts": {
+            "steps_created": 1,
+            "steps_updated": 2,
+            "steps_removed": 0,
+            "assistants_to_create": 1,
+            "assistants_to_update": 2,
+            "assistants_to_delete": 0,
+        },
+        "materializer_progress": {
+            "stage": "flow_updated",
+            "assistants_created": 1,
+            "assistants_configured": 1,
+            "assistants_updated": 2,
+            "assistants_deleted": 0,
+            "flow_created": False,
+            "flow_updated": True,
+        },
+    }
+
+
+def test_compile_apply_failure_payload_omits_execute_only_fields() -> None:
+    payload = ApplyFailureTelemetryPayload(
+        phase="compile_changeset",
+        plan_id=str(uuid4()),
+        session_id=str(uuid4()),
+        target_kind="create",
+        flow_id=None,
+        exception_class="RuntimeError",
+        code=None,
+        changeset_counts=None,
+        materializer_progress=None,
+    ).model_dump(exclude_none=True)
+
+    assert payload["phase"] == "compile_changeset"
+    assert "code" not in payload
+    assert "changeset_counts" not in payload
+    assert "materializer_progress" not in payload
+
+
+def test_apply_failure_payload_forbids_extra_raw_material_fields() -> None:
+    with pytest.raises(ValidationError):
+        ApplyFailureTelemetryPayload(
+            phase="compile_changeset",
+            plan_id=str(uuid4()),
+            session_id=str(uuid4()),
+            target_kind="edit",
+            flow_id=None,
+            exception_class="RuntimeError",
+            prompt="raw prompt must not be accepted",
+        )
+
+
+def test_apply_failure_payload_json_excludes_sensitive_material() -> None:
+    sensitive_values = [
+        "sensitive prompt text",
+        "{{ step_a.output.secret }}",
+        "raw source transcript",
+    ]
+
+    payload = ApplyFailureTelemetryPayload(
+        phase="execute_changeset",
+        plan_id=str(uuid4()),
+        session_id=str(uuid4()),
+        target_kind="edit",
+        flow_id=str(uuid4()),
+        exception_class="RuntimeError",
+        code=None,
+        changeset_counts=ChangesetCountSummary(
+            steps_created=0,
+            steps_updated=1,
+            steps_removed=0,
+            assistants_to_create=0,
+            assistants_to_update=1,
+            assistants_to_delete=0,
+        ),
+        materializer_progress=MaterializerProgressSnapshot(
+            stage="assistants_updated",
+            assistants_created=0,
+            assistants_configured=0,
+            assistants_updated=1,
+            assistants_deleted=0,
+            flow_created=False,
+            flow_updated=False,
+        ),
+    ).model_dump_json(exclude_none=True)
+
+    json.loads(payload)
+    for value in sensitive_values:
+        assert value not in payload
+
+
 def test_emitted_failure_kinds_are_a_subset_of_the_taxonomy() -> None:
     emitted = _tool_processing_failure_kinds_from_source()
 
     assert emitted
     assert emitted <= set(get_args(ToolProcessingFailureKind))
+
+
+class BadRequestLike(Exception):
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code

@@ -33,7 +33,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T029
+active_task: T032
 
 tasks:
   - id: T001
@@ -1532,7 +1532,7 @@ tasks:
   - id: T029
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe slice after T028, focusing on the remaining E1 HTTP 500 apply failures without conflating them with structured-field parse normalization."
     inputs:
@@ -1552,6 +1552,161 @@ tasks:
       - "activate_worker | blocked | no_change"
       - "If activate_worker: exact objective, allowed_files, verify commands using -n 4, live eval command, and stop_if."
       - "Clear classification of whether the HTTP 500s are edit compile, apply, publish, persistence, or runtime-state failures."
+    receipt:
+      result: done
+      decision: "activate_worker"
+      note: docs/goals/material-efficiency/notes/T029-judge-next-worker.md
+      summary: "The remaining E1 failures are post-approval apply HTTP 500s, not structured-field parse failures. Because artifacts contain approve.json but no apply.json and retained server stack rows for error_ids b730ee9c/2ef2bcf3 were not available, the next long-term slice is typed phase-level apply telemetry before any materializer compensation behavior."
+      classification:
+        failure_surface: "POST /api/v1/flows/ai-builder/plans/{plan_id}/apply"
+        known_phase: "post-approval apply"
+        unknown_phase: "compile_changeset vs execute_changeset"
+        not_evidence_for:
+          - "structured-field parse normalization regression"
+          - "published-flow guard"
+          - "proposal generation failure"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t029-judge-next-worker-after-e1-apply-500s-20260506T031632Z.md"
+        - ".codex/artifacts/claude-peer-loop-t029-judge-next-worker-revised-apply-failure-slice-20260506T032030Z.md"
+      green_light: true
+      selected_worker: T030
+
+  - id: T030
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Add typed privacy-safe apply failure telemetry so post-approval AI Builder apply HTTP 500s can be classified by compile vs execute phase and bounded materializer progress without changing apply behavior."
+    allowed_files:
+      - backend/src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py
+      - backend/src/intric/flows/ai_builder/ai_builder_materializer.py
+      - backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_materializer.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T029-judge-next-worker.md
+      - docs/goals/material-efficiency/notes/T030-apply-failure-telemetry.md
+    verify:
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py -q -k apply"
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py -q -k 'telemetry or progress_callback or execute_changeset'"
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py src/intric/flows/ai_builder/ai_builder_materializer.py src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py"
+      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py src/intric/flows/ai_builder/ai_builder_materializer.py src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py"
+      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py src/intric/flows/ai_builder/ai_builder_materializer.py src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py"
+      - "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --api-base http://localhost:8123 --api-key <local-api-key> --case C1 --runs 1 --apply --output-dir /tmp/material-efficiency-live-eval/<timestamp>-t030-c1-unpublished"
+      - "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --api-base http://localhost:8123 --api-key <local-api-key> --case E1 --runs 3 --flow-id <unpublished-c1-flow-id> --apply --output-dir /tmp/material-efficiency-live-eval/<timestamp>-t030-e1-apply-telemetry"
+    stop_if:
+      - "Need to log raw prompt text, flow spec JSON, input bindings, source material, or user-provided document/audio content."
+      - "Need to change global 500 error_id ownership or duplicate the user-facing error_id generator."
+      - "Need materializer compensation or behavior changes instead of additive progress telemetry."
+      - "Need files outside allowed_files."
+      - "Cannot produce red tests for compile and execute failure classification before implementation."
+      - "Live eval cannot be run after local verification."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T030-apply-failure-telemetry.md
+      summary: "Added typed privacy-safe apply failure telemetry, split compile vs execute failure logging in apply_plan, and added bounded materializer progress snapshots without changing apply behavior or global 500 error-id ownership."
+      changed_files:
+        - backend/src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py
+        - backend/src/intric/flows/ai_builder/ai_builder_materializer.py
+        - backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_materializer.py
+      red_evidence:
+        - "Focused telemetry/lifecycle/materializer tests initially failed because ApplyFailureTelemetryPayload, MaterializerProgressSnapshot, log_apply_failed, and progress_callback did not exist."
+      verification:
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+          status: pass
+          output: "2031 passed, 4 skipped, 42 warnings"
+        - cmd: "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py src/intric/flows/ai_builder/ai_builder_materializer.py src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py src/intric/flows/ai_builder/ai_builder_materializer.py src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py"
+          status: pass
+          output: "All checks passed"
+        - cmd: "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py src/intric/flows/ai_builder/ai_builder_materializer.py src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_telemetry.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py"
+          status: pass
+          output: "6 files already formatted"
+      live_eval:
+        c1_summary: "/tmp/material-efficiency-live-eval/20260506-052921-t030-c1-unpublished/summary.json"
+        c1_flow_id: "fdd4abc5-35ca-41ed-bca3-10be5102dbc4"
+        e1_summary: "/tmp/material-efficiency-live-eval/20260506-053319-t030-e1-apply-telemetry/summary.json"
+        e1_statuses:
+          - "http_error: 9ef8be2d plan=b62a9a4a-4b0f-40e1-8abf-49775de76b96 session=f7050f7e-cc28-48a9-97c1-8c2dc9b79820"
+          - "http_error: 788f9eb3 plan=723bb44e-1527-4dde-8503-3c56e85a681b session=23b597a2-e015-43f7-8c8e-7bea50f3695e"
+          - "http_error: bdb9b1ce plan=f4c7c006-1e63-45fe-8d82-d7344f6b473b session=292ab772-cfc4-4d78-9c24-2164cbb15533"
+        classification: "deferred: eval artifacts do not include backend log rows; use new ai_builder_apply_telemetry rows in backend logs."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t029-judge-next-worker-after-e1-apply-500s-20260506T031632Z.md"
+        - ".codex/artifacts/claude-peer-loop-t029-judge-next-worker-revised-apply-failure-slice-20260506T032030Z.md"
+        - ".codex/artifacts/claude-peer-loop-t030-implementation-review-apply-failure-telemetry-20260506T034631Z.md"
+
+  - id: T031
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Classify the outstanding AI Builder apply HTTP 500s using backend logs and select the next safe behavior-fix Worker."
+    inputs:
+      - "T030 receipt"
+      - "Backend log stream rows for ai_builder_apply_failed / ai_builder_apply_telemetry"
+      - "Error IDs b730ee9c, 2ef2bcf3, 9ef8be2d, 788f9eb3, bdb9b1ce"
+      - "/tmp/material-efficiency-live-eval/20260506-044605-t028-e1-edit-normalizer-retry/summary.json"
+      - "/tmp/material-efficiency-live-eval/20260506-053319-t030-e1-apply-telemetry/summary.json"
+      - backend/src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py
+      - backend/src/intric/flows/ai_builder/ai_builder_materializer.py
+    constraints:
+      - "Do not implement."
+      - "Do not guess from HTTP 500 alone; require backend apply telemetry rows or explicitly mark blocked on log access."
+      - "Do not change materializer compensation, compiler behavior, or eval runner in this Judge task."
+      - "Run Claude peer loop before activating any Worker."
+    expected_output:
+      - "classified_execute | classified_compile | blocked_on_logs"
+      - "Exact next Worker objective if classified."
+      - "allowed_files, verify commands using -n 4, live eval command, and stop_if."
+      - "Clear table mapping error_id/plan_id/session_id to phase, exception_class, code, and materializer_progress."
+    receipt:
+      result: blocked
+      decision: "blocked_on_logs"
+      note: docs/goals/material-efficiency/notes/T031-apply-failure-log-classification.md
+      summary: "Could only classify the E1 failures as post-approval apply HTTP 500s. The local backend is served by Code Helper on port 8123, and no accessible repo/tmp log file contains ai_builder_apply_failed / ai_builder_apply_telemetry rows or the relevant error IDs."
+      evidence:
+        - "T028/T030 failed E1 runs contain approve.json and no apply.json."
+        - "lsof shows port 8123 owned by Code Helper."
+        - "repo/tmp log search found no ai_builder_apply_failed, ai_builder_apply_telemetry, b730ee9c, 2ef2bcf3, 9ef8be2d, 788f9eb3, or bdb9b1ce rows."
+      classification_table:
+        - "b730ee9c: post-approval apply HTTP 500; compile/execute phase unknown"
+        - "2ef2bcf3: post-approval apply HTTP 500; compile/execute phase unknown"
+        - "9ef8be2d: post-approval apply HTTP 500; compile/execute phase unknown"
+        - "788f9eb3: post-approval apply HTTP 500; compile/execute phase unknown"
+        - "bdb9b1ce: post-approval apply HTTP 500; compile/execute phase unknown"
+
+  - id: T032
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe local slice after T031 blocked on backend log access, without guessing at the apply HTTP 500 root cause."
+    inputs:
+      - "T031 receipt"
+      - "T030 receipt"
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-goal.md
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py
+      - backend/src/intric/flows/ai_builder
+      - backend/tests/unittests/flows/ai_builder
+    constraints:
+      - "Do not implement in this Judge task."
+      - "Run Claude peer loop before activating any Worker."
+      - "Do not choose a materializer/compiler behavior fix unless backend telemetry rows classify the failure phase."
+      - "Prefer a safe deterministic/local improvement that advances material efficiency, binding quality, source-material routing, form-field material use, or measurable context cost."
+      - "Keep one active task."
+    expected_output:
+      - "activate_worker | blocked | audit_needed"
+      - "If activate_worker: exact objective, allowed_files, verify commands using -n 4, live eval command, and stop_if."
+      - "If blocked: exact missing input or log access required."
     receipt: null
 
   - id: T999

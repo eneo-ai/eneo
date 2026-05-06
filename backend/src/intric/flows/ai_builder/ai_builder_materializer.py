@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 from uuid import UUID, uuid4
 
 from intric.flows.ai_builder.ai_builder_description_semantics import (
@@ -44,6 +44,10 @@ from intric.flows.ai_builder.ai_builder_models import (
     FlowDraftSpecCore,
     StepChangeKind,
     StepSpec,
+)
+from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+    MaterializerProgressSnapshot,
+    MaterializerProgressStage,
 )
 from intric.flows.ai_builder.ai_builder_reference_rewriter import (
     build_ref_to_order,
@@ -204,6 +208,7 @@ async def execute_changeset(
     space_id: UUID,
     flow_id: UUID | None,
     expected_revision: int | None = None,
+    progress_callback: Callable[[MaterializerProgressSnapshot], None] | None = None,
 ) -> ApplyResultResponse:
     """Execute a FlowChangeSet — all mutations in one logical pass.
 
@@ -225,6 +230,27 @@ async def execute_changeset(
     """
     is_create = flow_id is None
     created_flow_id: UUID | None = None
+    assistants_created = 0
+    assistants_configured = 0
+    assistants_updated = 0
+    assistants_deleted = 0
+    flow_created = False
+    flow_updated = False
+
+    def emit_progress(stage: MaterializerProgressStage) -> None:
+        if progress_callback is None:
+            return
+        progress_callback(
+            MaterializerProgressSnapshot(
+                stage=stage,
+                assistants_created=assistants_created,
+                assistants_configured=assistants_configured,
+                assistants_updated=assistants_updated,
+                assistants_deleted=assistants_deleted,
+                flow_created=flow_created,
+                flow_updated=flow_updated,
+            )
+        )
 
     try:
         # Step 1: Create new assistants and collect ref → real_id mapping
@@ -247,6 +273,8 @@ async def execute_changeset(
             )
             flow_id = temp_flow.id
             created_flow_id = flow_id
+            flow_created = True
+            emit_progress("flow_created")
             # Update changeset flow_name so the returned result reflects the actual name
             changeset = FlowChangeSet(
                 flow_name=unique_name,
@@ -269,6 +297,8 @@ async def execute_changeset(
                 name=assistant_to_create.plan_step_ref,
             )
             ref_to_assistant_id[assistant_to_create.plan_step_ref] = assistant.id
+            assistants_created += 1
+            emit_progress("assistants_created")
 
             # Configure the assistant with prompt, model, knowledge bases
             await _configure_assistant(
@@ -277,6 +307,8 @@ async def execute_changeset(
                 assistant_id=assistant.id,
                 assistant_spec=assistant_to_create.assistant_spec,
             )
+            assistants_configured += 1
+            emit_progress("assistants_configured")
 
         # Step 2: Update existing assistants
         for assistant_to_update in changeset.assistants_to_update:
@@ -290,6 +322,8 @@ async def execute_changeset(
                 assistant_id=assistant_to_update.existing_assistant_id,
                 assistant_spec=assistant_to_update.assistant_spec,
             )
+            assistants_updated += 1
+            emit_progress("assistants_updated")
 
         # Step 3: Build final FlowStep list with real assistant IDs
         final_steps: list[FlowStep] = []
@@ -324,6 +358,8 @@ async def execute_changeset(
                 flow_id=flow_id,
                 steps=final_steps,
             )
+            flow_updated = True
+            emit_progress("flow_updated")
         else:
             await flow_service.update_flow(
                 flow_id=flow_id,
@@ -333,6 +369,8 @@ async def execute_changeset(
                 metadata_json=changeset.metadata_json,
                 expected_revision=expected_revision,
             )
+            flow_updated = True
+            emit_progress("flow_updated")
 
         # Step 5: Delete removed assistants (after flow update removed references)
         for assistant_to_delete in changeset.assistants_to_delete:
@@ -340,6 +378,8 @@ async def execute_changeset(
                 flow_id=flow_id,
                 assistant_id=assistant_to_delete.assistant_id,
             )
+            assistants_deleted += 1
+            emit_progress("assistants_deleted")
 
         # Count changes
         steps_created = sum(
