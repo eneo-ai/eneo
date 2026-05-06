@@ -33,7 +33,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: null
+active_task: T023
 
 tasks:
   - id: T001
@@ -1048,6 +1048,194 @@ tasks:
       follow_ups:
         - "Optional: add a docstring to the redundant-tail predicate."
         - "Optional separate slice: make OutputIntentResolution.terminal_output a Literal/enum instead of stringly typed values."
+
+  - id: T020
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Audit the current post-T019 goal state, refresh evidence, and select the next safe long-term implementation slice or prove the tranche complete."
+    inputs:
+      - "Goal charter"
+      - "All task receipts through T019"
+      - "Current dirty worktree"
+      - "Latest unit, type, lint, and live eval receipts"
+      - "Goal Maker state checker output"
+    constraints:
+      - "PM/control-file work only unless the audit activates a later Worker with explicit allowed_files."
+      - "Do not implement source changes in this task."
+      - "Restate the original objective as concrete completion criteria."
+      - "Map each explicit goal requirement to current evidence or a missing gap."
+      - "Treat uncertainty, stale verification, manual-only metrics, or unclassified dirty files as not complete."
+      - "Choose a long-term canonical-owner slice, not a prompt- or flow-specific fix."
+      - "Honor test execution constraint: use pytest -n 4, never -n auto."
+      - "Run Claude peer loop before activating a risky Worker."
+    expected_output:
+      - "complete | not_complete"
+      - "Prompt-to-artifact checklist"
+      - "Current dirty-file classification"
+      - "Fresh verification/live-eval evidence or exact blocker"
+      - "Next Worker objective with allowed_files, verify, and stop_if if not complete"
+      - "Board updates and receipt"
+    receipt:
+      result: not_complete
+      note: docs/goals/material-efficiency/notes/T020-post-t019-audit.md
+      decision: "activate_worker"
+      full_outcome_complete: false
+      summary: "Post-T019 audit found the tranche is still not complete because live eval summaries cannot compute the required material-efficiency metrics automatically; every latest applied result still reports manual_review_required metrics. Claude green-lit a shared-helper Worker slice after three plan iterations."
+      evidence:
+        - "docs/goals/material-efficiency/flow-ai-builder-material-efficiency-goal.md:58"
+        - "docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py:69"
+        - "docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py:624"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py:99"
+      dirty_files_classified:
+        - "M backend/src/intric/flows/ai_builder/ai_builder_framework_policy.py (pre-existing unrelated)"
+        - "M backend/src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py (pre-existing unrelated)"
+        - "M backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py (pre-existing unrelated)"
+        - "M scripts/run_codex_review.sh (pre-existing unrelated)"
+        - "?? PRODUCT.md (pre-existing unrelated)"
+        - "?? docs/refactor/flow-ai-builder-material-efficiency-review-handoff.md (pre-existing docs)"
+        - "?? docs/refactor/goals.md (pre-existing docs)"
+        - "?? docs/refactor/new/ (pre-existing docs)"
+        - "?? docs/refactor/runtime-hang-and-builder-rootcause.md (pre-existing docs)"
+        - "?? flow_ai_builder_prd.md (pre-existing docs)"
+        - "?? flow_ai_builder_review.md (pre-existing docs)"
+        - "?? utvecklingssamtal.mp3 (local media; never commit)"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t020-next-slice-audit-live-eval-material-metrics-20260506T004601Z.md"
+        - ".codex/artifacts/claude-peer-loop-t020-next-slice-audit-shared-live-eval-material-metrics-20260506T005030Z.md"
+        - ".codex/artifacts/claude-peer-loop-t020-next-slice-audit-shared-live-eval-material-metrics-final-amendment-20260506T005446Z.md"
+      green_light: true
+      selected_worker: T021
+
+  - id: T021
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Promote material-efficiency metric computation into a shared typed helper and wire the live eval runner to emit automated numeric material metrics for planned/applied cases."
+    allowed_files:
+      - backend/src/intric/flows/ai_builder/ai_builder_material_metrics.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py
+      - docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py
+      - backend/tests/unittests/flows/ai_builder/test_live_eval_runner.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-goal.md
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T020-post-t019-audit.md
+      - docs/goals/material-efficiency/notes/T021-live-eval-material-metrics.md
+    verify:
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_live_eval_runner.py -q"
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_live_eval_runner.py ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py"
+      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_live_eval_runner.py ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py"
+      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_live_eval_runner.py ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py"
+      - "uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --include-supplemental --case N1 --case Q1 --case C5 --runs 1 --apply --publish --output-dir /tmp/material-efficiency-live-eval/<timestamp>-t021-live-eval-material-metrics"
+    stop_if:
+      - "The helper would require broad production planner changes or generated flow behavior changes."
+      - "Metric extraction requires prompt/case-specific logic."
+      - "The runner cannot import the shared helper through the backend uv invocation."
+      - "Tests cannot prove basic metric extraction without live API."
+      - "Pytest would need -n auto instead of -n 4."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T021-live-eval-material-metrics.md
+      summary: "Promoted material-efficiency metric computation into a shared typed helper and wired the live eval runner to emit automated numeric metrics for saved plan/flow artifacts."
+      changed_files:
+        - backend/src/intric/flows/ai_builder/ai_builder_material_metrics.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py
+        - docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py
+        - backend/tests/unittests/flows/ai_builder/test_live_eval_runner.py
+        - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-goal.md
+        - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+        - docs/goals/material-efficiency/notes/T020-post-t019-audit.md
+        - docs/goals/material-efficiency/notes/T021-live-eval-material-metrics.md
+      behavior:
+        - "Metric helper reuses template_reference_analyzer.analyze_template instead of duplicating template parsing in the runner."
+        - "Applied/planned live eval results now report metrics_implementation=automated with numeric binding/fan-in/source-duplication metrics."
+        - "Clarification/no-plan/skipped cases remain not_applicable; artifact failures report missing_artifacts."
+      verification:
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_live_eval_runner.py -q"
+          status: pass
+          output: "44 passed in 6.82s"
+        - cmd: "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_live_eval_runner.py ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "uv run --directory backend ruff check ... && uv run --directory backend ruff format --check ..."
+          status: pass
+          output: "All checks passed; 5 files already formatted"
+        - cmd: "uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --all --include-supplemental --runs 1 --apply --publish --output-dir /tmp/material-efficiency-live-eval/20260506-030534-t021-live-eval-material-metrics"
+          status: pass
+          output: "6 applied, 7 clarification_required, 1 no_plan, 2 skipped; applied C1/C2/C3/C5/N1/Q1 emitted automated numeric metrics"
+        - cmd: "uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --include-supplemental --case N1 --case Q1 --case C5 --runs 1 --apply --publish --output-dir /tmp/material-efficiency-live-eval/20260506-032301-t021-post-review-refactor-metrics"
+          status: pass
+          output: "C5, N1, Q1 applied and emitted automated numeric metrics"
+        - cmd: "git diff --check"
+          status: pass
+          output: "clean"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t021-implementation-review-20260506T012124Z.md"
+        - ".codex/artifacts/claude-peer-loop-t021-implementation-review-after-follow-up-fixes-20260506T012835Z.md"
+      green_light: true
+      final_claude_verdict: "GREEN_LIGHT yes, MIN_SCORE 9."
+      follow_ups:
+        - "Optional: replace runner ResultMaterialMetrics with MaterialMetrics | None if summary shape can tolerate metrics=null."
+
+  - id: T022
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Align stale compiler golden expectations with canonical targeted-underlag composer input-type semantics so the full AI Builder suite is green."
+    allowed_files:
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T022-targeted-composer-input-type-goldens.md
+    verify:
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -k 'audio_artifact_final_body_step_fans_in_prior_structured_work or audio_document_without_pattern_still_creates_transcript_source'"
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+    stop_if:
+      - "Production code must change."
+      - "Input-type semantics are ambiguous after reading ai_builder_create_dataflow.py."
+      - "Full AI Builder suite remains red."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T022-targeted-composer-input-type-goldens.md
+      summary: "Aligned two stale compiler golden expectations with existing dataflow mechanics: explicit targeted composer bindings are text prompt material, even when they reference structured JSON fields."
+      changed_files:
+        - backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py
+        - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+        - docs/goals/material-efficiency/notes/T022-targeted-composer-input-type-goldens.md
+      verification:
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -k 'audio_artifact_final_body_step_fans_in_prior_structured_work or audio_document_without_pattern_still_creates_transcript_source'"
+          status: pass
+          output: "4 passed in 9.88s"
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+          status: pass
+          output: "2014 passed, 4 skipped, 42 warnings in 52.86s"
+
+  - id: T023
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Commit the verified T021/T022 tranche with explicit staging discipline, audit remaining goal gaps, and select the next long-term slice."
+    inputs:
+      - "T021 receipt"
+      - "T022 receipt"
+      - "Current diff"
+      - "Latest full unit and live eval receipts"
+    constraints:
+      - "Do not stage unrelated dirty files."
+      - "Do not include secrets or /tmp eval artifacts in commits."
+      - "Use git plumbing if porcelain commit is unavailable."
+      - "If the tranche remains incomplete, choose a long-term canonical-owner next task."
+    expected_output:
+      - "Commit SHA(s) or exact blocker."
+      - "Remaining dirty-file classification."
+      - "Next task decision."
+    receipt: null
 
   - id: T999
     type: judge

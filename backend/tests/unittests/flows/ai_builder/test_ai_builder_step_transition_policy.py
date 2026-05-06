@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from intric.flows.ai_builder.ai_builder_material_metrics import (
+    compute_step_material_metrics,
+    material_metric_steps_from_draft,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -15,10 +19,6 @@ from intric.flows.ai_builder.ai_builder_source_material import (
 )
 from intric.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
-)
-from intric.flows.template_reference_analyzer import (
-    TemplateReferenceKind,
-    analyze_template,
 )
 
 
@@ -101,49 +101,16 @@ def _question_metrics(
     *,
     spec: FlowDraftSpecCore,
 ) -> dict[str, int]:
-    step_refs = {
-        step.plan_step_ref: index
-        for index, step in enumerate(spec.steps, start=1)
-        if step.plan_step_ref
-    }
-    references = analyze_template(
-        question,
-        step_refs=step_refs,
-        form_field_names=set(),
-    )
-    step_references = [
-        reference
-        for reference in references
-        if reference.kind is TemplateReferenceKind.STEP
-    ]
+    steps = material_metric_steps_from_draft(spec)
+    step_order = next(step.step_order for step in steps if step.question == question)
+    metrics = compute_step_material_metrics(steps, step_order=step_order)
     return {
-        "binding_byte_size": len(question.encode("utf-8")),
-        "fan_in_width": len(
-            {
-                reference.step_ref or str(reference.step_order)
-                for reference in step_references
-            }
-        ),
-        "structured_field_count": sum(
-            1
-            for reference in step_references
-            if reference.tail.startswith("output.structured.")
-        ),
-        "whole_output_reference_count": sum(
-            1
-            for reference in step_references
-            if reference.tail in {"output.text", "output.structured"}
-        ),
-        "source_duplication_count": sum(
-            1
-            for reference in step_references
-            if reference.step_ref == "step_a" and reference.tail == "output.text"
-        ),
-        "all_previous_steps_count": sum(
-            1
-            for step in spec.steps
-            if step.input_source == InputSource.ALL_PREVIOUS_STEPS
-        ),
+        "binding_byte_size": metrics.binding_bytes,
+        "fan_in_width": metrics.fan_in_width,
+        "structured_field_count": metrics.structured_field_count,
+        "whole_output_reference_count": metrics.whole_output_reference_count,
+        "source_duplication_count": metrics.source_duplication_count,
+        "all_previous_steps_count": metrics.all_previous_steps_count,
     }
 
 

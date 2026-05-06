@@ -3050,7 +3050,7 @@ def test_compile_outline_audio_artifact_final_body_step_fans_in_prior_structured
     body_step = draft.steps[-2]
     assert body_step.name == "Bygg dokument med rubriker och innehåll"
     assert body_step.input_source.value == "previous_step"
-    assert body_step.input_type.value == "json"
+    assert body_step.input_type.value == "text"
     assert body_step.output_type.value == "text"
     assert body_step.uses_previous_fields, (
         "body composer must auto-bind explicit field refs when JSON predecessors exist"
@@ -4517,7 +4517,7 @@ def test_compile_outline_audio_document_without_pattern_still_creates_transcript
         ("flow_input", "audio", "text"),
         ("previous_step", "text", "json"),
         ("previous_step", "text", "json"),
-        ("previous_step", "json", "text"),
+        ("previous_step", "text", "text"),
         ("previous_step", "text", final_output_type),
     ]
     assert [step.name for step in draft.steps[:4]] == [

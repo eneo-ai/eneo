@@ -108,9 +108,37 @@ def test_publish_mode_fetches_run_contract_after_publish(tmp_path: Path) -> None
             if path.endswith("/sessions/session-1/plans"):
                 return {"plans": [{"plan_id": "plan-1"}]}
             if path.endswith("/plans/plan-1"):
-                return {"plan_id": "plan-1"}
+                return {
+                    "plan_id": "plan-1",
+                    "envelope": {
+                        "spec": {
+                            "flow_name": "Test",
+                            "steps": [
+                                {
+                                    "plan_step_ref": "step_a",
+                                    "name": "Answer",
+                                    "assistant_spec": {"instructions": "Answer."},
+                                    "input_source": "flow_input",
+                                    "input_type": "text",
+                                    "output_type": "text",
+                                }
+                            ],
+                        }
+                    },
+                }
             if path.endswith("/flows/flow-1/"):
-                return {"id": "flow-1"}
+                return {
+                    "id": "flow-1",
+                    "steps": [
+                        {
+                            "step_order": 1,
+                            "input_source": "flow_input",
+                            "input_type": "text",
+                            "output_type": "text",
+                            "input_bindings": {"question": "{{ step_input.text }}"},
+                        }
+                    ],
+                }
             if path.endswith("/flows/flow-1/graph/"):
                 return {"nodes": []}
             if path.endswith("/flows/flow-1/input-policy/"):
@@ -143,8 +171,160 @@ def test_publish_mode_fetches_run_contract_after_publish(tmp_path: Path) -> None
     )
 
     assert result.status == "applied"
+    assert result.metrics_implementation == "automated"
+    assert result.metrics.binding_bytes == len("{{ step_input.text }}".encode("utf-8"))
     publish_index = client.calls.index(("POST", "/api/v1/flows/flow-1/publish/"))
     run_contract_index = client.calls.index(
         ("GET", "/api/v1/flows/flow-1/run-contract/")
     )
     assert publish_index < run_contract_index
+
+
+def test_plan_only_run_computes_material_metrics_from_plan(tmp_path: Path) -> None:
+    runner = load_live_eval_runner()
+
+    case_dir = tmp_path / "Q1-run1"
+    case_dir.mkdir()
+    runner.write_json(
+        case_dir / "plan.json",
+        {
+            "envelope": {
+                "spec": {
+                    "flow_name": "Quality chain",
+                    "steps": [
+                        {
+                            "plan_step_ref": "step_a",
+                            "name": "Draft",
+                            "assistant_spec": {"instructions": "Draft."},
+                            "input_source": "flow_input",
+                            "input_type": "text",
+                            "output_type": "text",
+                        },
+                        {
+                            "plan_step_ref": "step_b",
+                            "name": "Critique",
+                            "assistant_spec": {"instructions": "Critique."},
+                            "input_source": "previous_step",
+                            "input_type": "text",
+                            "output_type": "json",
+                        },
+                        {
+                            "plan_step_ref": "step_c",
+                            "name": "Revise",
+                            "assistant_spec": {"instructions": "Revise."},
+                            "input_source": "previous_step",
+                            "input_type": "json",
+                            "output_type": "text",
+                            "input_bindings": {
+                                "question": "{{ step_b.output.structured }}\n{{ step_a.output.text }}"
+                            },
+                        },
+                    ],
+                }
+            }
+        },
+    )
+
+    result = runner.CaseRunResult(
+        case_id="Q1",
+        run_no=1,
+        suite="supplemental",
+        space_id="space-1",
+        status="planned",
+        output_dir=str(case_dir),
+    )
+
+    runner.attach_material_metrics(result, case_dir)
+
+    assert result.metrics_implementation == "automated"
+    assert result.metrics.fan_in_width == 2
+    assert result.metrics.whole_output_reference_count == 2
+    assert result.metrics.source_duplication_count == 0
+    assert result.score_axes == {axis: None for axis in runner.SCORE_AXES}
+
+
+def test_applied_edit_run_computes_material_metrics_from_flow_only(
+    tmp_path: Path,
+) -> None:
+    runner = load_live_eval_runner()
+    case_dir = tmp_path / "E1-run1"
+    case_dir.mkdir()
+    runner.write_json(
+        case_dir / "flow.json",
+        {
+            "steps": [
+                {
+                    "step_order": 1,
+                    "input_source": "flow_input",
+                    "input_type": "audio",
+                    "output_type": "text",
+                },
+                {
+                    "step_order": 2,
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "output_type": "text",
+                    "input_bindings": {"question": "{{ step_1.output.text }}"},
+                },
+            ]
+        },
+    )
+    result = runner.CaseRunResult(
+        case_id="E1",
+        run_no=1,
+        suite="edit",
+        space_id="space-1",
+        status="applied",
+        output_dir=str(case_dir),
+    )
+
+    runner.attach_material_metrics(result, case_dir)
+
+    assert result.metrics_implementation == "automated"
+    assert result.metrics.fan_in_width == 1
+    assert result.metrics.source_duplication_count == 1
+
+
+def test_missing_artifact_statuses_keep_empty_metrics(tmp_path: Path) -> None:
+    runner = load_live_eval_runner()
+    result = runner.CaseRunResult(
+        case_id="C1",
+        run_no=1,
+        suite="create",
+        space_id="space-1",
+        status="builder_error",
+        output_dir=str(tmp_path),
+    )
+
+    runner.attach_material_metrics(result, tmp_path)
+
+    assert result.metrics_implementation == "missing_artifacts"
+    assert result.metrics.binding_bytes is None
+    assert result.metrics.fan_in_width is None
+
+
+def test_malformed_artifact_marks_metrics_missing(tmp_path: Path) -> None:
+    runner = load_live_eval_runner()
+    (tmp_path / "flow.json").write_text("{", encoding="utf-8")
+    result = runner.CaseRunResult(
+        case_id="C1",
+        run_no=1,
+        suite="create",
+        space_id="space-1",
+        status="applied",
+        output_dir=str(tmp_path),
+    )
+
+    runner.attach_material_metrics(result, tmp_path)
+
+    assert result.metrics_implementation == "missing_artifacts"
+
+
+def test_live_eval_runner_does_not_assign_score_axes_from_metrics() -> None:
+    runner_path = Path(__file__).resolve().parents[5] / (
+        "docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py"
+    )
+    source = runner_path.read_text(encoding="utf-8")
+
+    assert "score_axes: dict[str, int | None] = field(" in source
+    assert ".score_axes[" not in source

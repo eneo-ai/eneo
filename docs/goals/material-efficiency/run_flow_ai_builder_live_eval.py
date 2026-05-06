@@ -14,7 +14,16 @@ import urllib.request
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
+
+from intric.flows.ai_builder.ai_builder_domain_models import FlowDraftSpecCore
+from intric.flows.ai_builder.ai_builder_material_metrics import (
+    MaterialMetrics,
+    MaterialMetricStep,
+    compute_material_metrics,
+    material_metric_steps_from_draft,
+    question_from_input_bindings,
+)
 
 DEFAULT_API_BASE = "http://localhost:8123"
 DEFAULT_OUTPUT_ROOT = Path("/tmp/material-efficiency-live-eval")
@@ -23,6 +32,7 @@ DEFAULT_STATE_PATH = Path(__file__).with_name(
 )
 JsonObject = dict[str, Any]
 JsonList = list[Any]
+MetricsImplementation = Literal["automated", "not_applicable", "missing_artifacts"]
 
 SCORE_AXES = [
     "clarification_restraint",
@@ -66,17 +76,42 @@ class CaseRunResult:
     score_axes: dict[str, int | None] = field(
         default_factory=lambda: {axis: None for axis in SCORE_AXES}
     )
-    metrics: dict[str, int | None] = field(
-        default_factory=lambda: {
-            "binding_bytes": None,
-            "fan_in_width": None,
-            "structured_field_count": None,
-            "whole_output_reference_count": None,
-            "source_duplication_count": None,
-            "all_previous_steps_count": None,
-        }
+    metrics: "ResultMaterialMetrics" = field(
+        default_factory=lambda: ResultMaterialMetrics.empty()
     )
-    metrics_implementation: str = "manual_review_required"
+    metrics_implementation: MetricsImplementation = "not_applicable"
+
+
+@dataclass(frozen=True, kw_only=True)
+class ResultMaterialMetrics:
+    binding_bytes: int | None
+    fan_in_width: int | None
+    structured_field_count: int | None
+    whole_output_reference_count: int | None
+    source_duplication_count: int | None
+    all_previous_steps_count: int | None
+
+    @classmethod
+    def empty(cls) -> "ResultMaterialMetrics":
+        return cls(
+            binding_bytes=None,
+            fan_in_width=None,
+            structured_field_count=None,
+            whole_output_reference_count=None,
+            source_duplication_count=None,
+            all_previous_steps_count=None,
+        )
+
+    @classmethod
+    def from_material_metrics(cls, metrics: MaterialMetrics) -> "ResultMaterialMetrics":
+        return cls(
+            binding_bytes=metrics.binding_bytes,
+            fan_in_width=metrics.fan_in_width,
+            structured_field_count=metrics.structured_field_count,
+            whole_output_reference_count=metrics.whole_output_reference_count,
+            source_duplication_count=metrics.source_duplication_count,
+            all_previous_steps_count=metrics.all_previous_steps_count,
+        )
 
 
 CREATE_CASES: list[EvalCase] = [
@@ -623,8 +658,8 @@ def main() -> int:
         "invocation": redacted_invocation(args),
         "scoring": {
             "score_source": "manual",
-            "metrics_source": "manual_plan_or_flow_review",
-            "runner_metrics_implementation": "deferred_to_avoid_false_precision",
+            "metrics_source": "automated_plan_or_flow_artifacts",
+            "runner_metrics_implementation": "shared_material_metrics_helper",
         },
         "results": [],
     }
@@ -803,6 +838,7 @@ def run_case(
         if result.builder_errors and not result.plan_id:
             result.status = "builder_error"
             result.error = "; ".join(result.builder_errors)
+            result.metrics_implementation = "missing_artifacts"
             return result
         if not result.plan_id and stream_has_question(all_events):
             result.status = "clarification_required"
@@ -819,6 +855,7 @@ def run_case(
 
         if not apply_plan:
             result.status = "planned"
+            attach_material_metrics(result, case_dir)
             return result
 
         approved = client.post_json(
@@ -835,6 +872,7 @@ def run_case(
             result.flow_id = extract_first(applied_object.get("flow"), "flow_id", "id")
         if not result.flow_id:
             result.status = "applied_without_flow_id"
+            attach_material_metrics(result, case_dir)
             return result
 
         inspect_flow_authoring(client, result.flow_id, case_dir)
@@ -842,11 +880,13 @@ def run_case(
             published = client.post_json(f"/api/v1/flows/{result.flow_id}/publish/")
             write_json(case_dir / "publish.json", published)
             inspect_published_runtime(client, result.flow_id, case_dir)
+        attach_material_metrics(result, case_dir)
         result.status = "applied"
         return result
     except urllib.error.HTTPError as error:
         result.status = "http_error"
         result.error = format_http_error(error)
+        result.metrics_implementation = "missing_artifacts"
         (case_dir / "error.txt").write_text(result.error, encoding="utf-8")
         return result
     except urllib.error.URLError as error:
@@ -854,11 +894,13 @@ def run_case(
         result.error = (
             f"{error}. Is the backend listening at the configured --api-base?"
         )
+        result.metrics_implementation = "missing_artifacts"
         (case_dir / "error.txt").write_text(result.error, encoding="utf-8")
         return result
     except Exception as error:  # noqa: BLE001 - outer eval runner boundary
         result.status = "error"
         result.error = str(error)
+        result.metrics_implementation = "missing_artifacts"
         (case_dir / "error.txt").write_text(result.error, encoding="utf-8")
         return result
 
@@ -892,6 +934,104 @@ def inspect_endpoints(
             (case_dir / f"{filename}.error.txt").write_text(
                 format_http_error(error), encoding="utf-8"
             )
+
+
+def attach_material_metrics(result: CaseRunResult, case_dir: Path) -> None:
+    metrics = material_metrics_from_saved_artifacts(case_dir)
+    if metrics is None:
+        result.metrics = ResultMaterialMetrics.empty()
+        result.metrics_implementation = "missing_artifacts"
+        return
+    result.metrics = ResultMaterialMetrics.from_material_metrics(metrics)
+    result.metrics_implementation = "automated"
+
+
+def material_metrics_from_saved_artifacts(case_dir: Path) -> MaterialMetrics | None:
+    flow_steps = metric_steps_from_flow_json(case_dir / "flow.json")
+    if flow_steps is not None:
+        return compute_material_metrics(flow_steps)
+
+    draft_steps = metric_steps_from_plan_json(case_dir / "plan.json")
+    if draft_steps is not None:
+        steps, form_field_names = draft_steps
+        return compute_material_metrics(steps, form_field_names=form_field_names)
+    return None
+
+
+def metric_steps_from_plan_json(
+    path: Path,
+) -> tuple[tuple[MaterialMetricStep, ...], set[str]] | None:
+    data = read_json_object(path)
+    if data is None:
+        return None
+    envelope = data.get("envelope")
+    if not isinstance(envelope, dict):
+        return None
+    spec_payload = cast(JsonObject, envelope).get("spec")
+    if not isinstance(spec_payload, dict):
+        return None
+    try:
+        spec = FlowDraftSpecCore.model_validate(spec_payload)
+    except Exception:  # noqa: BLE001 - malformed saved eval artifact
+        return None
+    return material_metric_steps_from_draft(spec), {
+        field.name for field in spec.form_fields or []
+    }
+
+
+def metric_steps_from_flow_json(path: Path) -> tuple[MaterialMetricStep, ...] | None:
+    data = read_json_object(path)
+    if data is None:
+        return None
+    raw_steps = data.get("steps")
+    if not isinstance(raw_steps, list):
+        return None
+    steps: list[MaterialMetricStep] = []
+    raw_step_list = cast(JsonList, raw_steps)
+    for index, raw_step in enumerate(raw_step_list, start=1):
+        if not isinstance(raw_step, dict):
+            return None
+        step = metric_step_from_flow_step(cast(JsonObject, raw_step), index)
+        if step is None:
+            return None
+        steps.append(step)
+    return tuple(steps)
+
+
+def metric_step_from_flow_step(
+    raw_step: JsonObject,
+    fallback_order: int,
+) -> MaterialMetricStep | None:
+    order = raw_step.get("step_order")
+    step_order = order if isinstance(order, int) else fallback_order
+    input_source = raw_step.get("input_source")
+    input_type = raw_step.get("input_type")
+    output_type = raw_step.get("output_type")
+    if not (
+        isinstance(input_source, str)
+        and isinstance(input_type, str)
+        and isinstance(output_type, str)
+    ):
+        return None
+    return MaterialMetricStep(
+        # Published flow bindings are rewritten to runtime step_N references.
+        step_ref=f"step_{step_order}",
+        step_order=step_order,
+        input_source=input_source,
+        input_type=input_type,
+        output_type=output_type,
+        question=question_from_input_bindings(raw_step.get("input_bindings")),
+    )
+
+
+def read_json_object(path: Path) -> JsonObject | None:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return cast(JsonObject, data) if isinstance(data, dict) else None
 
 
 def extract_plan_id(payload: Any) -> str | None:

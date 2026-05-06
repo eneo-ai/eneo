@@ -81,9 +81,9 @@ mkdir -p "$ENEO_LIVE_EVAL_DIR"
 Use the local runner as the primary live-eval entry point:
 
 ```bash
-python docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --smoke
-python docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --all --runs 3 --apply
-python docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --all --include-supplemental --runs 3 --apply
+uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --smoke
+uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --all --runs 3 --apply
+uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --all --include-supplemental --runs 3 --apply
 ```
 
 The runner reads the canonical space list from `docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml`, stores raw API responses under `/tmp/material-efficiency-live-eval/...` by default, and keeps API credentials in process memory only. Manual curl is still useful for debugging a failed endpoint, but the runner should be the repeatable path used for baseline and after-change comparisons.
@@ -137,7 +137,7 @@ Record the baseline score, after-change score, binding byte size, fan-in width, 
 
 Run each case 3 times when API time allows. Report median score per axis and flag a case as flaky when any axis differs by 2 points across runs. If only one run is possible, label the result as single-run smoke rather than a stable baseline. Keep redacted cross-run baseline summaries under `/tmp/material-efficiency-live-eval/baselines/<commit-or-label>/summary.json` unless a reviewer explicitly requests a sanitized repo artifact.
 
-The live runner emits raw per-run records, manual score fields, and median/flake rollups after scores are filled. It does not compute binding/fan-in metrics automatically; use the saved plan/flow JSON plus deterministic tests for material-efficiency metrics.
+The live runner emits raw per-run records, manual score fields, automated material-efficiency metrics from saved plan/flow JSON, and median/flake rollups after manual scores are filled. Deterministic tests remain the regression fence for metric semantics; live metrics are diagnostics for comparing runs and finding the next failure mode.
 
 ## Stop Rule
 
