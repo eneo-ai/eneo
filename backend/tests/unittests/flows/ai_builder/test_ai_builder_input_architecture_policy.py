@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
@@ -127,6 +129,51 @@ def test_resolve_input_intent_treats_record_meeting_as_audio() -> None:
     assert intent.document_runtime_input_requested is False
 
 
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        (
+            "Bygg ett flöde där användaren spelar in eller laddar upp ett kundsamtal. "
+            "Flödet ska transkribera ljudet, extrahera beslut och åtgärder per "
+            "agendapunkt som separata JSON-underlag och skriva en slutgiltig "
+            "Word-rapport. Källmaterialet får inte ersättas av rapporttonen."
+        ),
+        (
+            "Skapa ett flöde där användaren spelar in en intervju. Flödet ska "
+            "transkribera intervjun, skapa JSON-underlag per fråga och skriva en "
+            "DOCX-sammanfattning som bygger på transkriptionen."
+        ),
+        (
+            "Bygg ett flöde där användaren laddar upp en ljudfil från ett möte. "
+            "Efter transkribering ska flödet skapa flera underlag som steg-output "
+            "och sedan skriva en Word-rapport."
+        ),
+    ],
+)
+def test_resolve_input_intent_treats_derived_underlag_as_audio_only(
+    prompt: str,
+) -> None:
+    intent = resolve_input_intent(prompt, {})
+
+    assert intent.primary_runtime_input == "audio"
+    assert intent.audio_requested is True
+    assert intent.document_runtime_input_requested is False
+    assert intent.needs_architecture_clarification is False
+
+
+def test_resolve_input_intent_does_not_treat_passive_underlag_as_document_input() -> (
+    None
+):
+    intent = resolve_input_intent(
+        "Skapa en rapport där varje avsnitt har tydligt underlag och slutsats.",
+        {},
+    )
+
+    assert intent.primary_runtime_input == "unknown"
+    assert intent.document_runtime_input_requested is False
+    assert intent.audio_requested is False
+
+
 def test_resolve_input_intent_still_requires_architecture_for_audio_and_document_file() -> (
     None
 ):
@@ -177,6 +224,27 @@ def test_resolve_input_intent_treats_uploaded_underlagsfiler_as_documents() -> N
             "Bygg ett flöde där användaren laddar upp flera underlagsfiler "
             "och en Word-mall."
         ),
+        {},
+    )
+
+    assert intent.primary_runtime_input == "documents"
+    assert intent.document_runtime_input_requested is True
+    assert intent.audio_requested is False
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Bygg ett flöde där användaren laddar upp underlag och en Word-mall.",
+        "Bygg ett flöde där användaren lämnar underlag och en Word-mall.",
+        "Build a flow where the user provides documents and a Word template.",
+    ],
+)
+def test_resolve_input_intent_treats_provided_underlag_as_documents(
+    prompt: str,
+) -> None:
+    intent = resolve_input_intent(
+        prompt,
         {},
     )
 

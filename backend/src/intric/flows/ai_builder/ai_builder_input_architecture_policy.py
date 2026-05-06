@@ -114,6 +114,9 @@ _RUNTIME_FILE_ACTION_PREFIXES: tuple[str, ...] = (
     "upload",
     "bifog",
     "attach",
+    "lämn",
+    "lamn",
+    "provide",
     "receiv",
     "skick",
 )
@@ -533,41 +536,8 @@ def _document_runtime_input_requested(text: str) -> bool:
         ),
     ):
         return True
-    if _mentions_runtime_document_input(text):
-        return True
-    if _mentions_source_material_underlag(text):
-        return True
-    if "underlag" in text and _contains_any(
-        text,
-        (
-            "ladda upp",
-            "upload",
-            "skicka in",
-            "send in",
-            "ta emot",
-            "receive",
-            "lämna underlag",
-            "provide source material",
-        ),
-    ):
-        return True
-    return _reference_has_nearby_runtime_action(
-        text,
-        reference_prefixes=_DOCUMENT_REFERENCE_PREFIXES,
-        action_prefixes=_RUNTIME_FILE_ACTION_PREFIXES,
-        action_phrases=_RUNTIME_FILE_ACTION_PHRASES,
-    )
-
-
-def _mentions_runtime_document_input(text: str) -> bool:
-    """Detect file/document runtime input without enumerating every phrasing.
-
-    The discovery layer only needs to know whether the user's text implies
-    uploaded/provided source files. Exact business-domain document kinds belong
-    elsewhere; this helper intentionally combines generic file-action prefixes
-    with generic document/file references.
-    """
-
+    # Document-like words such as "underlag" can describe derived step outputs.
+    # They imply runtime document input only when paired with a nearby file action.
     return _reference_has_nearby_runtime_action(
         text,
         reference_prefixes=_DOCUMENT_REFERENCE_PREFIXES,
@@ -599,10 +569,6 @@ def _has_explicit_input_resolution(explicit_question_ids: set[str] | None) -> bo
             {"flow_input_architecture", "input_material_mode"}
         )
     )
-
-
-def _mentions_source_material_underlag(text: str) -> bool:
-    return contains_any_phrase(text, ("underlag",))
 
 
 def _reference_has_nearby_runtime_action(

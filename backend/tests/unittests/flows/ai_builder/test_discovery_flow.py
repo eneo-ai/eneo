@@ -1100,6 +1100,90 @@ class TestExtendedClarificationHints:
         assert "final_output_mode" not in question_ids
         assert "docx_output_mode" not in question_ids
 
+    def test_audio_prompt_with_derived_underlag_does_not_trigger_mixed_input_question(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde där användaren spelar in eller laddar upp ett "
+                    "kundsamtal. Innan körning ska användaren ange ticket_id, "
+                    "kundnamn och önskad rapportton som inmatningsfält. Flödet ska "
+                    "transkribera ljudet, extrahera beslut och åtgärder per "
+                    "agendapunkt som separata JSON-underlag, skriva ett första "
+                    "Word-utkast, kritisera utkastet och revidera det till en "
+                    "slutgiltig Word-rapport. Rapportton ska styra utkast och "
+                    "revision, men den ska inte ersätta källmaterialet."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "input_material_mode" not in question_ids
+        assert "flow_input_architecture" not in question_ids
+        assert "primary_runtime_input" not in question_ids
+
+    def test_audio_edit_with_derived_underlag_does_not_trigger_mixed_input_question(
+        self,
+    ) -> None:
+        flow = Flow(
+            id=uuid4(),
+            tenant_id=uuid4(),
+            space_id=uuid4(),
+            name="Samtalsrapport",
+            description="Transkriberar samtal och skriver rapport.",
+            steps=[
+                FlowStep(
+                    assistant_id=uuid4(),
+                    step_order=1,
+                    user_description="Transkribera samtal",
+                    input_source="flow_input",
+                    input_type="audio",
+                    output_mode="transcribe_only",
+                    output_type="text",
+                    mcp_policy="inherit",
+                ),
+                FlowStep(
+                    assistant_id=uuid4(),
+                    step_order=2,
+                    user_description="Skriv rapport",
+                    input_source="previous_step",
+                    input_type="text",
+                    output_mode="pass_through",
+                    output_type="docx",
+                    mcp_policy="inherit",
+                ),
+            ],
+        )
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Behåll ljudflödet men lägg till fyra JSON-underlag per "
+                    "agendapunkt innan Word-rapporten skrivs."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation, flow=flow)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "input_material_mode" not in question_ids
+        assert "flow_input_architecture" not in question_ids
+
     def test_edit_flow_uses_existing_flow_defaults_before_reasking_output_or_metadata(
         self,
     ) -> None:

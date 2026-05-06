@@ -8,7 +8,7 @@ goal:
   slug: "flow-ai-builder-material-efficiency"
   kind: open_ended
   tranche: "Improve explicit material routing, binding efficiency, source-material preservation, and measurable context cost through successive safe verified slices."
-  status: blocked
+  status: active
 
 rules:
   pm_owns_state: true
@@ -33,7 +33,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: null
+active_task: T019
 
 tasks:
   - id: T001
@@ -839,6 +839,172 @@ tasks:
         - "C2/C3 remain live-variable; direct recheck applied, but topology quality still varies."
         - "Q1 still has topology variance: one live run added a redundant final formatting pair after the explicit quality chain."
 
+  - id: T016
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Stop derived underlag/source-material wording from being mistaken for a second document runtime input when an audio prompt already names the uploaded or recorded audio source."
+    allowed_files:
+      - backend/src/intric/flows/ai_builder/ai_builder_input_architecture_policy.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_input_architecture_policy.py
+      - backend/tests/unittests/flows/ai_builder/test_discovery_flow.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T016-audio-underlag-input-intent.md
+    verify:
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py -q"
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py"
+      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py"
+      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py"
+      - "python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --case C5 --runs 3 --apply --publish --output-dir /tmp/material-efficiency-live-eval/<timestamp>-t016-c5-audio-underlag-input-intent"
+    stop_if:
+      - "Fix requires special-casing the C5 prompt or Swedish customer-call wording."
+      - "Bare 'laddar upp underlag' no longer resolves as document runtime input."
+      - "Explicit audio plus document upload no longer asks for mixed-input architecture."
+      - "Rule adds a parallel material-planning abstraction instead of tightening input architecture ownership."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T016-audio-underlag-input-intent.md
+      summary: "Derived JSON-underlag/källmaterial no longer turns audio prompts into mixed audio+document input; keyed live C5 eval applied 3/3 with audio as the runtime source and the requested ticket/customer/tone form fields routed into draft/revision bindings."
+      live_eval: "/tmp/material-efficiency-live-eval/20260506-015927-t016-c5-audio-underlag-input-intent-keyed/summary.json"
+      verification:
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py -q"
+          status: pass
+          output: "79 passed, 4 warnings"
+        - cmd: "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+          status: pass
+          output: "1987 passed, 4 skipped, 42 warnings"
+        - cmd: "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py"
+          status: pass
+          output: "All checks passed!"
+        - cmd: "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_ai_builder_input_architecture_policy.py tests/unittests/flows/ai_builder/test_discovery_flow.py"
+          status: pass
+          output: "3 files already formatted"
+        - cmd: "ENEO_LOCAL_API_BASE=http://localhost:8123 ENEO_LOCAL_API_KEY=<provided local key> python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --case C5 --runs 3 --apply --publish --output-dir /tmp/material-efficiency-live-eval/20260506-015927-t016-c5-audio-underlag-input-intent-keyed --timeout 360"
+          status: pass
+          output: "C5 applied 3/3; generated flows use audio flow_input/transcribe_only and route ticket_id, kundnamn, and rapportton into draft/revision bindings."
+        - cmd: "ENEO_LOCAL_API_BASE=http://localhost:8123 ENEO_LOCAL_API_KEY=<backend .env local key variable> python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --case C5 --runs 3 --apply --publish --output-dir /tmp/material-efficiency-live-eval/20260506-015205-t016-c5-audio-underlag-input-intent-local-env"
+          status: blocked
+          output: "C5 run 1-3 http_error; HTTP 401 invalid_api_key."
+        - cmd: "ENEO_LOCAL_API_BASE=http://localhost:8123 ENEO_LOCAL_API_KEY=<alternate backend .env local key variable> python3 docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --case C5 --runs 3 --apply --publish --output-dir /tmp/material-efficiency-live-eval/20260506-015227-t016-c5-audio-underlag-input-intent-local-env-2"
+          status: blocked
+          output: "C5 run 1-3 http_error; HTTP 401 invalid_api_key."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t016-audio-underlag-input-intent-direct-plan-review-20260505T233511Z.md"
+        - ".codex/artifacts/claude-peer-loop-t016-audio-underlag-input-intent-implementation-review-20260505T234743Z.md"
+      next_step: "Run Claude verification and commit the T016 phase if green."
+
+  - id: T017
+    type: scout
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Find a deterministic owner and reproducer for Q1 topology variance where explicit quality-chain prompts sometimes add a redundant final formatting step."
+    inputs:
+      - "T015 receipt"
+      - "checks.live_eval.latest_findings"
+      - "docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml"
+      - "backend/src/intric/flows/ai_builder"
+      - "backend/tests/unittests/flows/ai_builder"
+    constraints:
+      - "Read-only except board and note receipt updates."
+      - "Do not edit implementation or tests."
+      - "Do not depend on live eval credentials."
+      - "Prefer a general quality-chain/topology owner over Q1-specific prompt wording."
+      - "Stop if the reproducer would require LLM nondeterminism or live API access."
+    expected_output:
+      - "Canonical owner recommendation with file:line evidence."
+      - "Whether Q1 redundant final formatting can be reproduced deterministically."
+      - "Candidate red tests and allowed_files for a later Worker task."
+      - "Verification commands."
+    receipt:
+      result: done
+      note: docs/goals/material-efficiency/notes/T017-q1-quality-chain-topology-scout.md
+      summary: "Found deterministic Q1 topology gap: the critic accepts both the intended 3-step text quality chain and a redundant 5-step text->JSON->text tail after the already-final text revision."
+      canonical_owner: "backend/src/intric/flows/ai_builder/ai_builder_critic_invariants.py"
+      evidence:
+        - "/tmp/material-efficiency-live-eval/20260506-011206-t015-boundary-marker-targeted/Q1-run1/plan.json: 3 LLM steps"
+        - "/tmp/material-efficiency-live-eval/20260506-011206-t015-boundary-marker-targeted/Q1-run2/plan.json: 3 LLM steps"
+        - "/tmp/material-efficiency-live-eval/20260506-011206-t015-boundary-marker-targeted/Q1-run3/plan.json: 5 LLM steps with redundant text->JSON->text tail"
+        - "backend/src/intric/flows/ai_builder/ai_builder_critic_invariants.py:688"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py:706"
+      deterministic_probe:
+        cmd: "uv run --directory backend python - <<'PY' ... build_conversation_aware_quality_feedback for good/bad Q1 specs ... PY"
+        output: "good None; bad None"
+      recommended_worker: T018
+
+  - id: T018
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Review T017 findings and decide whether to activate a narrow Worker for topology-only redundant terminal JSON-format tail restraint."
+    inputs:
+      - "T017 receipt"
+      - "docs/goals/material-efficiency/notes/T017-q1-quality-chain-topology-scout.md"
+      - "backend/src/intric/flows/ai_builder/ai_builder_critic_invariants.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "Current dirty worktree"
+    constraints:
+      - "Read-only except board and note receipt updates."
+      - "Run Claude peer loop before activating Worker."
+      - "Reject Q1-specific prompt wording."
+      - "Reject any rule that depends on conversation keywords instead of StepSpec topology."
+      - "Reject collapsing explicit quality chains to one step."
+      - "Reject changes that would block explicit JSON or document terminal outputs."
+      - "Do not activate Worker if dirty T016 changes make review scope unsafe."
+    expected_output:
+      - "activate_worker | blocked | defer"
+      - "Exact Worker objective."
+      - "allowed_files."
+      - "verify commands."
+      - "stop_if."
+    receipt:
+      result: done
+      decision: "activate_worker"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t018-q1-quality-chain-topology-judge-20260506T000051Z.md"
+        - ".codex/artifacts/claude-peer-loop-t018-topology-only-redundant-json-tail-judge-revision-20260506T000405Z.md"
+      green_light: true
+      summary: "Claude iteration 1 required a topology-only Worker brief and broader guard tests; iteration 2 returned GREEN_LIGHT yes, MIN_SCORE 8. Dirty T016 is file-disjoint and not a hard blocker if staging discipline is explicit."
+      required_revisions:
+        - "Frame the rule as redundant terminal JSON-format tail after final text composer, not a Q1 or prompt-quality-chain rule."
+        - "Require red/green tests for 5-step tail, 4-step no-unwrap tail, accepted 3-step chain, explicit JSON terminal, document/PDF/DOCX terminal, form-field-driven JSON, and edit context."
+        - "Forbid implementation touching blocked T016 source files or scripts/run_codex_review.sh."
+      selected_worker: T019
+
+  - id: T019
+    type: worker
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Add a topology-only semantic critic invariant that rejects an unrequested terminal JSON-format tail after an already-final text composer."
+    allowed_files:
+      - backend/src/intric/flows/ai_builder/ai_builder_critic_invariants.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      - docs/goals/material-efficiency/notes/T017-q1-quality-chain-topology-scout.md
+      - docs/goals/material-efficiency/notes/T018-q1-quality-chain-topology.md
+    verify:
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q -k 'redundant_terminal or quality_chain'"
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q"
+      - "uv run --directory backend pytest -n 4 tests/unittests/flows/ai_builder -q"
+      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_critic_invariants.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_critic_invariants.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_critic_invariants.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+    stop_if:
+      - "The rule depends on conversation keywords, Q1 wording, Swedish/English prompt text, or PlannerPatternSignals.prefers_quality_step instead of StepSpec topology."
+      - "The invariant collapses an explicit text -> JSON critique -> text revision chain to one step."
+      - "The invariant rejects explicit JSON terminal output, DOCX/PDF/template renderer output, form-field-driven JSON output, or aggregate/compare topologies."
+      - "The implementation double-fires confusingly with final_text_step_must_reference_relevant_structured_outputs instead of making precedence explicit."
+      - "Any blocked T016 source file, unrelated dirty source file, or scripts/run_codex_review.sh would be touched."
+      - "Staging would require wholesale git add of the shared state file rather than T019-only hunks."
+    receipt: null
+
   - id: T999
     type: judge
     assignee: Judge
@@ -912,6 +1078,7 @@ checks:
       n1_q1_after_t015: "/tmp/material-efficiency-live-eval/20260506-004653-t015-simple-transform-restraint/summary.json"
       n1_q1_c5_after_t015_boundary_fix: "/tmp/material-efficiency-live-eval/20260506-011206-t015-boundary-marker-targeted/summary.json"
       v2_c2_c3_after_t015_recheck: "/tmp/material-efficiency-live-eval/20260506-005642-t015-v2-c2-c3-recheck/summary.json"
+      c5_after_t016_audio_underlag_input_intent: "/tmp/material-efficiency-live-eval/20260506-015927-t016-c5-audio-underlag-input-intent-keyed/summary.json"
     latest_findings:
       - "V2 source-preserving audio-to-DOCX plans applied consistently and published with a valid run contract after T009."
       - "C1 was blocked/unstable before T013: builder_error or no_plan_after_requirements_confirmation."
@@ -934,6 +1101,7 @@ checks:
       - "User-requested full rerun before T015: C1 and V2 applied 3/3; N1 applied 3/3 but overbuilt trivial translation into 4-5 steps; C2/C3/Q1 remained flaky; C5 over-clarified material source."
       - "Post-T015 targeted N1/Q1 rerun: N1 applied 3/3 as exactly one text step; Q1 applied 2/3 with the explicit quality chain preserved and clarification_required 1/3."
       - "Post-T015 manual N1 runtime run completed in one model step with 46 input tokens and 10 output tokens."
+      - "Post-T016 targeted C5 rerun with provided local key applied 3/3; derived JSON-underlag no longer triggered mixed input clarification, and applied flows use audio flow_input plus ticket_id/kundnamn/rapportton form fields."
     spaces:
       - "ad300505-5602-47f4-8da1-f0232303cff8"
       - "e9372935-25fb-46a8-9dd0-cc11f7ea2f72"
