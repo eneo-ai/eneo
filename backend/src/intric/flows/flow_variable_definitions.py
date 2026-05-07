@@ -2,6 +2,13 @@ from __future__ import annotations
 
 import re
 from enum import Enum
+from typing import TypedDict
+
+
+class FlowVariableDefinitionManifest(TypedDict):
+    reservedRuntimeVariables: list[str]
+    formFieldNamespaceHeads: list[str]
+    primaryFlowInputKeys: list[str]
 
 
 class VariableShape(str, Enum):
@@ -118,3 +125,11 @@ def can_expose_form_field_bare_alias(name: str) -> bool:
 
 def form_field_reference_expression(field_name: str) -> str:
     return f"{{{{ flow_input.{field_name.strip()} }}}}"
+
+
+def flow_variable_definition_manifest() -> FlowVariableDefinitionManifest:
+    return {
+        "reservedRuntimeVariables": sorted(RESERVED_RUNTIME_VARIABLES),
+        "formFieldNamespaceHeads": sorted(FORM_FIELD_NAMESPACE_HEADS),
+        "primaryFlowInputKeys": sorted(PRIMARY_FLOW_INPUT_KEYS),
+    }

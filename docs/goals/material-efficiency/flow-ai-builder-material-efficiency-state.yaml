@@ -2818,6 +2818,82 @@ tasks:
         - "Decide and design the future label/variable_name split before changing the persisted form schema."
         - "Add a second VariablePicker test for the advanced primary flow_input.text branch when that area is next touched."
 
+  - id: T051
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Replace the frontend's manually mirrored flow variable reserved-name lists with a backend-owned checked-in manifest and a drift test."
+    inputs:
+      - "backend/src/intric/flows/flow_variable_definitions.py"
+      - "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts"
+      - "T050 remaining_follow_ups"
+    constraints:
+      - "Backend flow_variable_definitions.py remains canonical."
+      - "Do not change persisted form schema shape or introduce user_ / flow_fields namespaces."
+      - "Do not add broad OpenAPI/codegen plumbing for this small manifest."
+      - "Do not stage unrelated generated/local dirty files."
+      - "Claude plan gate was attempted twice and timed out; keep the slice narrow and record the tooling blocker."
+    allowed_files:
+      - backend/src/intric/flows/flow_variable_definitions.py
+      - backend/tests/unittests/flows/test_flow_variable_definitions_manifest.py
+      - frontend/apps/web/src/lib/features/flows/flowFormSchema.ts
+      - frontend/apps/web/src/lib/features/flows/flowVariableDefinitions.generated.json
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+    verify:
+      - "uv run --directory backend pytest tests/unittests/flows/test_flow_variable_definitions_manifest.py -q"
+      - "uv run --directory backend pyright src/intric/flows/flow_variable_definitions.py tests/unittests/flows/test_flow_variable_definitions_manifest.py"
+      - "uv run --directory backend ruff check src/intric/flows/flow_variable_definitions.py tests/unittests/flows/test_flow_variable_definitions_manifest.py"
+      - "uv run --directory backend ruff format --check src/intric/flows/flow_variable_definitions.py tests/unittests/flows/test_flow_variable_definitions_manifest.py"
+      - "cd frontend/apps/web && bunx vitest run src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/flowVariableTokens.test.ts src/lib/features/flows/components/VariablePicker.test.ts"
+      - "cd frontend/apps/web && bun run check"
+      - "cd frontend/apps/web && bunx prettier --check src/lib/features/flows/flowFormSchema.ts src/lib/features/flows/flowVariableDefinitions.generated.json"
+    stop_if:
+      - "Need to change the persisted form field schema."
+      - "Need to introduce a broad generated-types pipeline."
+      - "Frontend cannot consume JSON manifest cleanly with existing tsconfig."
+      - "Verification fails twice for reasons not proven pre-existing."
+    receipt:
+      result: done
+      summary: "Frontend flow form-field reserved-name validation now consumes a checked-in manifest derived from the backend flow variable owner, and a backend drift test fails when that manifest is stale."
+      changed_files:
+        - backend/src/intric/flows/flow_variable_definitions.py
+        - backend/tests/unittests/flows/test_flow_variable_definitions_manifest.py
+        - frontend/apps/web/src/lib/features/flows/flowFormSchema.ts
+        - frontend/apps/web/src/lib/features/flows/flowVariableDefinitions.generated.json
+      red_evidence:
+        - "uv run --directory backend pytest tests/unittests/flows/test_flow_variable_definitions_manifest.py -q initially failed because the hand-written frontend manifest order did not match flow_variable_definition_manifest()."
+      claude_status: "blocked_timeout"
+      claude_note: "Plan gate was attempted twice. The first process hung without output and was killed; the bounded retry timed out after 180 seconds with no review output or artifact. Slice was kept narrow and evidence-backed."
+      verification:
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/test_flow_variable_definitions_manifest.py -q"
+          status: pass
+          output: "1 passed"
+        - cmd: "cd frontend/apps/web && bunx vitest run src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/flowVariableTokens.test.ts src/lib/features/flows/components/VariablePicker.test.ts"
+          status: pass
+          output: "45 passed"
+        - cmd: "uv run --directory backend pyright src/intric/flows/flow_variable_definitions.py tests/unittests/flows/test_flow_variable_definitions_manifest.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "uv run --directory backend ruff check src/intric/flows/flow_variable_definitions.py tests/unittests/flows/test_flow_variable_definitions_manifest.py"
+          status: pass
+          output: "All checks passed"
+        - cmd: "uv run --directory backend ruff format --check src/intric/flows/flow_variable_definitions.py tests/unittests/flows/test_flow_variable_definitions_manifest.py"
+          status: pass
+          output: "2 files already formatted"
+        - cmd: "cd frontend/apps/web && bunx prettier --check src/lib/features/flows/flowFormSchema.ts src/lib/features/flows/flowVariableDefinitions.generated.json"
+          status: pass
+          output: "All matched files use Prettier code style"
+        - cmd: "cd frontend/apps/web && bun run check"
+          status: blocked_unrelated_failures
+          output: "svelte-check reported 2114 pre-existing Paraglide/message export errors under src/lib/paraglide and route files; targeted flow tests and the imported JSON manifest compiled under Vitest."
+        - cmd: "git diff --check -- backend/src/intric/flows/flow_variable_definitions.py backend/tests/unittests/flows/test_flow_variable_definitions_manifest.py frontend/apps/web/src/lib/features/flows/flowFormSchema.ts frontend/apps/web/src/lib/features/flows/flowVariableDefinitions.generated.json docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml"
+          status: pass
+          output: "no whitespace errors"
+      remaining_follow_ups:
+        - "Add an explicit documented regeneration command or tiny repo script if this manifest changes often."
+        - "Design the future label/variable_name split before changing persisted form schema."
+
   - id: T999
     type: judge
     assignee: Judge
@@ -2861,6 +2937,9 @@ checks:
       - "frontend/apps/web/project.inlang/README.md"
       - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte"
       - "frontend/apps/web/src/lib/features/flows/components/FlowRunsTable.svelte"
+      - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowPageHeader.svelte"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowSaveStatus.svelte"
       - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte"
       - "frontend/packages/ui/src/icons/types.d.ts"
     untracked:
@@ -2872,6 +2951,9 @@ checks:
       - "docs/refactor/runtime-hang-and-builder-rootcause.md"
       - "flow_ai_builder_prd.md"
       - "flow_ai_builder_review.md"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowSaveStatus.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/flowRunsOptimistic.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/flowRunsOptimistic.ts"
       - "utvecklingssamtal.mp3"
     classification: "Generated/local/unrelated files intentionally left unstaged and uncommitted."
   last_verification:

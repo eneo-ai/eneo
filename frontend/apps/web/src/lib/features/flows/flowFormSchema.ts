@@ -1,3 +1,5 @@
+import flowVariableDefinitions from "./flowVariableDefinitions.generated.json";
+
 export type FlowFormFieldType =
   | "text"
   | "number"
@@ -32,29 +34,9 @@ export type NormalizedFlowFormField = {
 
 const LEGACY_TEXT_TYPES = new Set(["email", "textarea", "string"]);
 const OPTION_FIELD_TYPES = new Set<NormalizedFlowFormFieldType>(["select", "multiselect"]);
-// Keep this UX mirror aligned with backend/src/intric/flows/flow_variable_definitions.py.
-const RESERVED_RUNTIME_VARIABLE_NAMES = new Set([
-  "datum",
-  "flow",
-  "flow_input",
-  "step_input",
-  "transkribering",
-  "föregående_steg",
-  "indata_text",
-  "indata_json",
-  "indata_filer"
-]);
-const FORM_FIELD_NAMESPACE_HEADS = new Set(["flow", "flow_input", "step_input"]);
-export const PRIMARY_FLOW_INPUT_KEYS = new Set([
-  "file_ids",
-  "json",
-  "structured",
-  "text",
-  "transcribed_text",
-  "transcription",
-  "transcript",
-  "transkribering"
-]);
+const RESERVED_RUNTIME_VARIABLE_NAMES = new Set(flowVariableDefinitions.reservedRuntimeVariables);
+const FORM_FIELD_NAMESPACE_HEADS = new Set(flowVariableDefinitions.formFieldNamespaceHeads);
+export const PRIMARY_FLOW_INPUT_KEYS = new Set(flowVariableDefinitions.primaryFlowInputKeys);
 const FLOW_FORM_STEP_ALIAS_PATTERN = /^step_\d+($|[._])/i;
 
 export type FlowFormFieldNameIssue = "namespace_head" | "primary_input_key" | "step_alias" | "dot";
