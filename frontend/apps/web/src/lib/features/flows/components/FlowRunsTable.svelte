@@ -19,6 +19,11 @@
   import { m } from "$lib/paraglide/messages";
   import type { FlowRunProgressSnapshot } from "./flowRunProgress";
   import {
+    getConfirmedOptimisticFlowRunIds,
+    mergeOptimisticFlowRuns,
+    shouldAutoFocusOptimisticFlowRun
+  } from "./flowRunsOptimistic";
+  import {
     canRedispatchFlowRun,
     FLOW_RUN_STATUS_FILTER_OPTIONS,
     isFlowRunActive,
@@ -37,17 +42,19 @@
     careDataPolicy = undefined,
     eneo,
     visible = true,
+    optimisticRuns = [],
     reloadTrigger = 0,
     latestRunPayload = $bindable(null),
-    pendingHighlightRunId = $bindable(null)
+    onOptimisticRunsConfirmed
   }: {
     flow: Flow;
     careDataPolicy?: FlowCareDataPolicy;
     eneo: Intric;
     visible?: boolean;
+    optimisticRuns?: FlowRun[];
     reloadTrigger?: number;
     latestRunPayload?: Record<string, unknown> | null;
-    pendingHighlightRunId?: string | null;
+    onOptimisticRunsConfirmed?: (runIds: string[]) => void;
   } = $props();
 
   let runs: FlowRun[] = $state([]);
@@ -120,6 +127,21 @@
     return sorted;
   });
 
+  // mergeOptimisticFlowRuns returns the original array when no merge is needed, which keeps
+  // this self-writing effect from looping after the backend list catches up.
+  $effect(() => {
+    const nextRuns = mergeOptimisticFlowRuns(runs, optimisticRuns);
+    if (nextRuns === runs) return;
+
+    runs = nextRuns;
+    const newestOptimisticRun = optimisticRuns[0];
+    if (shouldAutoFocusOptimisticFlowRun(newestOptimisticRun, lastOptimisticAutoFocusedRunId)) {
+      selectedRunId = newestOptimisticRun.id;
+      lastOptimisticAutoFocusedRunId = newestOptimisticRun.id;
+      latestRunPayload = newestOptimisticRun.input_payload_json ?? latestRunPayload;
+    }
+  });
+
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
       sortDir = sortDir === "asc" ? "desc" : "asc";
@@ -143,6 +165,7 @@
   let progressSnapshotsByRunId = $state<Record<string, FlowRunProgressSnapshot>>({});
   let isRunListPolling = $state(false);
   let lastAutoFocusedRunId: string | null = $state(null);
+  let lastOptimisticAutoFocusedRunId: string | null = $state(null);
 
   async function loadRuns() {
     if (isRunListPolling) return;
@@ -159,24 +182,23 @@
       const result = await eneo.flows.runs.list({ flowId: flow.id });
       const nextRuns = (result.items ?? result) as FlowRun[];
       runs = nextRuns;
+      const confirmedOptimisticRunIds = getConfirmedOptimisticFlowRunIds(nextRuns, optimisticRuns);
+      if (confirmedOptimisticRunIds.length > 0) {
+        onOptimisticRunsConfirmed?.(confirmedOptimisticRunIds);
+      }
       latestRunPayload = runs.length > 0 ? (runs[0].input_payload_json ?? null) : null;
-      if (pendingHighlightRunId && runs.some((r) => r.id === pendingHighlightRunId)) {
-        selectedRunId = pendingHighlightRunId;
-        pendingHighlightRunId = null;
-      } else {
-        const activeRunId = getActiveFlowRunId(nextRuns);
-        if (
-          activeRunId &&
-          shouldAutoFocusFlowRun({
-            runs: nextRuns,
-            activeRunId,
-            selectedRunId,
-            lastAutoFocusedRunId
-          })
-        ) {
-          selectedRunId = activeRunId;
-          lastAutoFocusedRunId = activeRunId;
-        }
+      const activeRunId = getActiveFlowRunId(nextRuns);
+      if (
+        activeRunId &&
+        shouldAutoFocusFlowRun({
+          runs: nextRuns,
+          activeRunId,
+          selectedRunId,
+          lastAutoFocusedRunId
+        })
+      ) {
+        selectedRunId = activeRunId;
+        lastAutoFocusedRunId = activeRunId;
       }
       isInitialLoad = false;
     } catch (e) {

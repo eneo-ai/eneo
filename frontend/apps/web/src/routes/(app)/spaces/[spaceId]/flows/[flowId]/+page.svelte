@@ -1,5 +1,8 @@
 <script lang="ts">
   import { Page } from "$lib/components/layout";
+  import { browser } from "$app/environment";
+  import { replaceState } from "$app/navigation";
+  import { page } from "$app/state";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getAppContext } from "$lib/core/AppContext";
   import { getFlowWizardMetadata, initFlowEditor } from "$lib/features/flows/FlowEditor";
@@ -23,7 +26,7 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { CheckCircle2 } from "lucide-svelte";
-  import { IntricError, type TranscriptionModel } from "@intric/intric-js";
+  import { IntricError, type FlowRun, type TranscriptionModel } from "@intric/intric-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
@@ -47,8 +50,8 @@
   let validationBannerExpanded = $state(false);
   let showRunDialog = $state(false);
   let runsReloadTrigger = $state(0);
+  let optimisticHistoryRuns = $state<FlowRun[]>([]);
   let latestHistoryPayload = $state<Record<string, unknown> | null>(null);
-  let pendingRunHighlight = $state<string | null>(null);
   let hasStepJsonValidationErrors = $state(false);
   let stepJsonValidationFields = $state<string[]>([]);
   type BuilderStageId = 1 | 2 | 3 | 4 | 5;
@@ -105,11 +108,54 @@
     };
   });
 
-  let activeTab = $state<"builder" | "history" | "ai-builder">("builder");
+  type FlowPageTab = "builder" | "history" | "ai-builder";
+
+  function isFlowPageTab(value: string | null): value is FlowPageTab {
+    return value === "builder" || value === "history" || value === "ai-builder";
+  }
+
+  function resolveInitialTab(): FlowPageTab {
+    const urlTab = page.url.searchParams.get("tab");
+    return isFlowPageTab(urlTab) ? urlTab : "builder";
+  }
+
+  function persistActiveTab(tab: FlowPageTab) {
+    if (!browser) return;
+
+    const url = new URL(page.url);
+    url.searchParams.set("tab", tab);
+    // resolve() requires a typed RouteId literal; this tab URL preserves the current
+    // dynamic flow route and only changes query state.
+    // eslint-disable-next-line svelte/no-navigation-without-resolve
+    replaceState(url, { ...page.state, tab });
+  }
+
+  function setActiveTab(tab: FlowPageTab) {
+    activeTab = tab;
+    persistActiveTab(tab);
+  }
+
+  let activeTab = $state<FlowPageTab>(resolveInitialTab());
   $effect(() => {
     if (!canUseAIBuilder && activeTab === "ai-builder") {
-      activeTab = "builder";
+      setActiveTab("builder");
     }
+  });
+
+  $effect(() => {
+    if (activeTab === "ai-builder" && canUseAIBuilder) {
+      ensureAIBuilder();
+    }
+  });
+
+  $effect(() => {
+    const urlTab = page.url.searchParams.get("tab");
+    if (!isFlowPageTab(urlTab) || urlTab === activeTab) return;
+    if (urlTab === "ai-builder" && !canUseAIBuilder) {
+      setActiveTab("builder");
+      return;
+    }
+    activeTab = urlTab;
   });
 
   const FLOW_BUILDER_STAGES: { id: BuilderStageId; labelKey: () => string }[] = [
@@ -235,14 +281,14 @@
   <FlowPageHeader
     flowName={$resource.name}
     backHref={`/spaces/${$currentSpace.routeId}/flows`}
-    bind:activeTab
+    {activeTab}
     tabs={[
       { value: "builder", label: m.flow_builder() },
       { value: "history", label: m.flow_history() },
       { value: "ai-builder", label: m.ai_builder_tab(), visible: canUseAIBuilder }
     ]}
     onTabChange={(v) => {
-      if (v === "ai-builder") ensureAIBuilder();
+      if (isFlowPageTab(v)) setActiveTab(v);
     }}
   >
     {#snippet actions()}
@@ -838,7 +884,7 @@
                 onBuildWithAI={canUseAIBuilder
                   ? () => {
                       ensureAIBuilder();
-                      activeTab = "ai-builder";
+                      setActiveTab("ai-builder");
                     }
                   : undefined}
                 onSelectStep={async (stepId) => {
@@ -1043,14 +1089,14 @@
                       >
                         {m.flow_run_trigger()}
                       </Button>
-                      <Button variant="outline" class="h-9" onclick={() => (activeTab = "history")}>
+                      <Button variant="outline" class="h-9" onclick={() => setActiveTab("history")}>
                         {m.flow_show_history()}
                       </Button>
                     </div>
                   {:else}
                     <div class="flex flex-wrap items-center gap-2">
                       <FlowDryRun flow={$resource} />
-                      <Button variant="outline" class="h-9" onclick={() => (activeTab = "history")}>
+                      <Button variant="outline" class="h-9" onclick={() => setActiveTab("history")}>
                         {m.flow_show_history()}
                       </Button>
                     </div>
@@ -1082,7 +1128,7 @@
                 stepCount: updated.steps?.length ?? 0,
                 requestedFocusStepIndex: detail.focusStepIndex
               });
-              activeTab = navigation.activeTab;
+              setActiveTab(navigation.activeTab);
               builderStage = navigation.builderStage;
               const focusedStepId = resolveApplyFocusedStepId(
                 updated.steps ?? [],
@@ -1110,9 +1156,13 @@
         {careDataPolicy}
         eneo={data.intric}
         visible={activeTab === "history"}
+        optimisticRuns={optimisticHistoryRuns}
         reloadTrigger={runsReloadTrigger}
         bind:latestRunPayload={latestHistoryPayload}
-        bind:pendingHighlightRunId={pendingRunHighlight}
+        onOptimisticRunsConfirmed={(runIds) => {
+          const confirmedIds = new Set(runIds);
+          optimisticHistoryRuns = optimisticHistoryRuns.filter((run) => !confirmedIds.has(run.id));
+        }}
       />
     </div>
   </Page.Main>
@@ -1125,8 +1175,11 @@
   intric={data.intric}
   lastInputPayload={latestHistoryPayload}
   onRunCreated={(detail) => {
-    activeTab = "history";
-    pendingRunHighlight = detail.runId;
+    optimisticHistoryRuns = [
+      detail.run,
+      ...optimisticHistoryRuns.filter((run) => run.id !== detail.run.id)
+    ];
+    setActiveTab("history");
     runsReloadTrigger++;
   }}
 />

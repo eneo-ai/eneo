@@ -1,20 +1,20 @@
-<script lang="ts">
+<script lang="ts" generics="TTab extends string">
   import * as Tabs from "$lib/components/ui/tabs/index.js";
   import type { Snippet } from "svelte";
 
   let {
     flowName,
     backHref,
-    activeTab = $bindable("builder"),
+    activeTab,
     tabs,
     onTabChange,
     actions
   }: {
     flowName: string;
     backHref: string;
-    activeTab?: string;
-    tabs: Array<{ value: string; label: string; visible?: boolean }>;
-    onTabChange?: (value: string) => void;
+    activeTab: TTab;
+    tabs: Array<{ value: TTab; label: string; visible?: boolean }>;
+    onTabChange?: (value: TTab) => void;
     actions?: Snippet;
   } = $props();
 </script>
@@ -58,7 +58,7 @@
 
   <!-- Row 2: Tabs — centered -->
   <div class="flex justify-center px-4 sm:px-5">
-    <Tabs.Root bind:value={activeTab} onValueChange={(v) => onTabChange?.(v)}>
+    <Tabs.Root value={activeTab} onValueChange={(v) => onTabChange?.(v as TTab)}>
       <Tabs.List variant="line" class="h-10">
         {#each tabs as tab (tab.value)}
           {#if tab.visible !== false}

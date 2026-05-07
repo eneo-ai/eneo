@@ -40,6 +40,7 @@ type FlowWizardMetadata = {
   transcription_model?: { id: string } | null;
   transcription_language?: string;
 };
+type FlowSaveStatus = "saved" | "saving" | "unsaved";
 
 function getFlowWizardMetadata(
   metadata: Flow["metadata_json"] | null | undefined
@@ -49,6 +50,16 @@ function getFlowWizardMetadata(
     return wizard as FlowWizardMetadata;
   }
   return {};
+}
+
+function getUnifiedFlowSaveStatus(
+  flowStatus: FlowSaveStatus,
+  assistantStatus: "idle" | "pending" | "saving" | "error"
+): FlowSaveStatus {
+  if (assistantStatus === "saving" || flowStatus === "saving") return "saving";
+  if (assistantStatus === "error" || assistantStatus === "pending") return "unsaved";
+  if (flowStatus === "unsaved") return "unsaved";
+  return "saved";
 }
 
 const [getFlowEditor, setFlowEditor] = createContext<FlowEditor>("Edit a flow");
@@ -362,12 +373,7 @@ function createFlowEditor(data: FlowEditorInitData) {
 
   // Unified save status combining flow + assistant saves
   const unifiedSaveStatus = derived([saveStatus, assistantSaveStatus], ([$flow, $assistant]) => {
-    if ($assistant === "saving" || $flow === "saving") {
-      return "saving" as const;
-    }
-    if ($assistant === "error") return "unsaved" as const;
-    if ($flow === "unsaved") return "unsaved" as const;
-    return "saved" as const;
+    return getUnifiedFlowSaveStatus($flow, $assistant);
   });
 
   function setName(name: string): void {
@@ -967,5 +973,11 @@ function initFlowEditor(data: FlowEditorInitData) {
 
 type FlowEditor = ReturnType<typeof createFlowEditor>;
 
-export { initFlowEditor, getFlowEditor, createFlowEditor, getFlowWizardMetadata };
+export {
+  initFlowEditor,
+  getFlowEditor,
+  createFlowEditor,
+  getFlowWizardMetadata,
+  getUnifiedFlowSaveStatus
+};
 export type { FlowEditor, FlowMetadataJson, FlowWizardMetadata };

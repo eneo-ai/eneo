@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { Flow, FlowStep, Intric } from "@intric/intric-js";
 
-import { createFlowEditor } from "./FlowEditor";
+import { createFlowEditor, getUnifiedFlowSaveStatus } from "./FlowEditor";
 
 function makeFlow(metadataJson: Flow["metadata_json"] = null, overrides: Partial<Flow> = {}): Flow {
   return {
@@ -136,6 +136,24 @@ describe("FlowEditor metadata commands", () => {
       }
     });
     expect(hasUnsavedChanges).toBe(true);
+  });
+});
+
+describe("getUnifiedFlowSaveStatus", () => {
+  it("treats queued assistant saves as unsaved until the save completes", () => {
+    expect(getUnifiedFlowSaveStatus("saved", "pending")).toBe("unsaved");
+  });
+
+  it("surfaces active assistant saves as saving", () => {
+    expect(getUnifiedFlowSaveStatus("saved", "saving")).toBe("saving");
+  });
+
+  it("keeps saved only when both flow and assistant saves are settled", () => {
+    expect(getUnifiedFlowSaveStatus("saved", "idle")).toBe("saved");
+  });
+
+  it("surfaces assistant save errors as unsaved", () => {
+    expect(getUnifiedFlowSaveStatus("saved", "error")).toBe("unsaved");
   });
 });
 

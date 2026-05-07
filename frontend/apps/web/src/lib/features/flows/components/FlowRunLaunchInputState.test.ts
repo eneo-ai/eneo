@@ -9,6 +9,7 @@ function field(
 ): NormalizedFlowFormField {
   return {
     name,
+    label: name,
     type: "text",
     required: false,
     options: [],

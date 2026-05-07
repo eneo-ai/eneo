@@ -22,10 +22,12 @@
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { IntricError } from "@intric/intric-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { getChipClasses } from "$lib/features/flows/flowVariableTokens";
+  import { Info } from "lucide-svelte";
   let {
     isPublished,
     onStatsChanged
@@ -127,9 +129,7 @@
         ]
       : [{ label: "ärendenummer", token: "{{flow_input.ärendenummer}}" }]
   );
-  const previewVariableTokens = $derived(
-    namedVariableTokens.slice(0, $userMode === "power_user" ? 4 : 2)
-  );
+  const previewVariableTokens = $derived(namedVariableTokens.slice(0, 2));
 
   $effect(() => {
     onStatsChanged?.(formStats);
@@ -283,13 +283,6 @@
         <p class="text-sm font-medium tracking-[-0.005em]">
           {m.flow_form_schema_live_hint()}
         </p>
-        {#if previewVariableTokens.length > 0}
-          <div class="flex flex-wrap items-center justify-end gap-1.5">
-            {#each previewVariableTokens as token (token)}
-              <span class={getChipClasses("field")}>{token}</span>
-            {/each}
-          </div>
-        {/if}
       </div>
 
       <!-- Field rows -->
@@ -350,14 +343,17 @@
                 </button>
               </div>
 
-              <Input
-                type="text"
-                class="h-9 min-w-0 flex-1 font-medium"
-                placeholder={m.flow_form_field_label()}
-                value={field.label}
-                disabled={isPublished}
-                oninput={(e) => updateFieldLabel(index, e.currentTarget.value)}
-              />
+              <label class="min-w-0 flex-1">
+                <span class="sr-only">{m.flow_form_field_label()}</span>
+                <Input
+                  type="text"
+                  class="h-9 min-w-0 font-medium"
+                  placeholder={m.flow_form_field_label()}
+                  value={field.label}
+                  disabled={isPublished}
+                  oninput={(e) => updateFieldLabel(index, e.currentTarget.value)}
+                />
+              </label>
 
               <div class="flex shrink-0 items-center gap-2">
                 {#if field.required}
@@ -417,24 +413,9 @@
                 <span>{m.flow_form_field_required()}</span>
               </label>
 
-              <label class="text-secondary inline-flex min-w-[13rem] items-center gap-2 text-xs">
-                <span>{m.flow_form_field_variable_name()}</span>
-                <Input
-                  type="text"
-                  class="h-8 w-40 font-mono text-xs"
-                  value={field.name}
-                  disabled={isPublished}
-                  onfocus={() => {
-                    nameBeforeEditById[field._localId] = field.name;
-                  }}
-                  oninput={(e) => updateFieldRuntimeName(index, e.currentTarget.value)}
-                  onchange={() => void rewriteVariablesOnCommittedRename(field)}
-                />
-              </label>
-
               {#if hasValidVariable}
                 <span class="text-muted inline-flex items-center gap-1.5 text-xs">
-                  <span aria-hidden="true">&rarr;</span>
+                  <span>{m.flow_form_field_variable_hint_label()}</span>
                   <span class={getChipClasses("field")}>
                     {getFlowFormFieldVariableToken(field.name)}
                   </span>
@@ -445,6 +426,40 @@
                 </span>
               {/if}
             </div>
+
+            {#if $userMode === "power_user"}
+              <div class="mt-2.5 pl-[56px]">
+                <label class="text-secondary inline-flex items-center gap-2 text-xs">
+                  <span class="inline-flex items-center gap-1">
+                    {m.flow_form_field_variable_name()}
+                    <Tooltip.Provider delayDuration={150}>
+                      <Tooltip.Root>
+                        <Tooltip.Trigger>
+                          <Info
+                            class="text-muted hover:text-primary size-3.5 transition-colors"
+                            aria-label={m.flow_form_field_variable_name_help_label()}
+                          />
+                        </Tooltip.Trigger>
+                        <Tooltip.Content class="max-w-72">
+                          {m.flow_form_field_variable_name_help()}
+                        </Tooltip.Content>
+                      </Tooltip.Root>
+                    </Tooltip.Provider>
+                  </span>
+                  <Input
+                    type="text"
+                    class="h-8 w-40 font-mono text-xs"
+                    value={field.name}
+                    disabled={isPublished}
+                    onfocus={() => {
+                      nameBeforeEditById[field._localId] = field.name;
+                    }}
+                    oninput={(e) => updateFieldRuntimeName(index, e.currentTarget.value)}
+                    onchange={() => void rewriteVariablesOnCommittedRename(field)}
+                  />
+                </label>
+              </div>
+            {/if}
 
             <!-- Options (for select / multiselect) -->
             {#if flowFormFieldHasOptions(currentType)}

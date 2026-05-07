@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick, untrack, type Snippet } from "svelte";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import type { FlowStep } from "@intric/intric-js";
   import { m } from "$lib/paraglide/messages";
   import {
@@ -120,13 +121,13 @@
     transcriptionEnabled: boolean,
     currentStepOrder: number
   ): VariableClassificationContext {
-    const knownFieldNames = new Set<string>();
+    const knownFieldNames = new SvelteSet<string>();
     for (const field of formSchema?.fields ?? []) {
       const name = (field.name ?? "").trim();
       if (isFlowFormFieldNameUsableAsVariable(name)) knownFieldNames.add(name);
     }
-    const knownStepNames = new Map<number, string>();
-    const stepOutputTypes = new Map<number, string>();
+    const knownStepNames = new SvelteMap<number, string>();
+    const stepOutputTypes = new SvelteMap<number, string>();
     for (const step of steps) {
       const name = (step.user_description ?? "").trim();
       if (name) knownStepNames.set(step.step_order, name);
@@ -205,6 +206,7 @@
     label: string;
     description: string;
     category: VariableCategory;
+    displayToken?: boolean;
   };
 
   function buildAvailableVariables(
@@ -216,11 +218,14 @@
 
     // Form fields
     for (const name of ctx.knownFieldNames) {
+      const token = getFlowFormFieldVariableExpression(name);
+      if (!token) continue;
       suggestions.push({
-        token: getFlowFormFieldVariableExpression(name),
+        token,
         label: name,
         description: m.flow_variable_form_field(),
-        category: "field"
+        category: "field",
+        displayToken: true
       });
     }
 
@@ -576,6 +581,9 @@
             onclick={() => void applySuggestion(suggestion)}
           >
             <span class={getChipClasses(suggestion.category)}>{suggestion.label}</span>
+            {#if suggestion.displayToken}
+              <span class="text-muted font-mono text-[10px]">{`{{${suggestion.token}}}`}</span>
+            {/if}
             <span class="text-muted text-[10px]">{suggestion.description}</span>
           </button>
         {/each}
@@ -594,7 +602,7 @@
           )} cursor-pointer transition-all hover:scale-105 hover:shadow-sm active:scale-95"
           onclick={() => void insertAtCursor(v.token)}
         >
-          {`{{${v.label}}}`}
+          {`{{${v.displayToken ? v.token : v.label}}}`}
         </button>
       {/each}
     </div>

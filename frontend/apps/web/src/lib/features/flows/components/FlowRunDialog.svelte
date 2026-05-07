@@ -1,6 +1,7 @@
 <script lang="ts">
   import type {
     Flow,
+    FlowRun,
     FlowRunContract,
     FlowRunContractStepInput,
     FlowRunContractTemplateReadiness,
@@ -86,7 +87,7 @@
     careDataPolicy?: FlowCareDataPolicy;
     intric: Intric;
     lastInputPayload: Record<string, unknown> | null;
-    onRunCreated?: (detail: { runId: string }) => void;
+    onRunCreated?: (detail: { run: FlowRun }) => void;
   } = $props();
 
   let isSubmitting = $state(false);
@@ -1059,7 +1060,7 @@
         idempotencyKey
       });
 
-      onRunCreated?.({ runId: createdRun.id });
+      onRunCreated?.({ run: createdRun });
       toast.success(m.flow_run_started_toast());
 
       // Clear all persisted sessions for this flow on success — the run was
