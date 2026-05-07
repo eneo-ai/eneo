@@ -2766,6 +2766,58 @@ tasks:
           C4: "next_issue=None, blocking=[]"
       conclusion: "No safe local production Worker is justified from stale clarification_required live artifacts. Continue when ENEO_LOCAL_API_BASE and ENEO_LOCAL_API_KEY are exported, then rerun the live create suite to see whether the planner path still asks unnecessary clarification questions."
 
+  - id: T050
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Make the variable picker insert custom inmatningsfält through the canonical flow_input namespace."
+    inputs:
+      - "User question about prefixed/reserved inmatningsfält variables."
+      - "Claude variable namespace UX architecture review artifacts."
+      - "frontend/apps/web/src/lib/features/flows/components/VariablePicker.svelte"
+      - "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts"
+    constraints:
+      - "Do not add a user_ prefix or a new flow_fields namespace."
+      - "Keep runtime compatibility for bare aliases; only stop the editor from inserting them."
+      - "Do not stage generated inlang/icon files or unrelated flow-run UI changes."
+      - "Use existing canonical flow form schema helpers rather than duplicating token construction."
+    receipt:
+      result: done
+      commit: "8e8d8f87 Use canonical flow input tokens from picker"
+      summary: "The variable picker now inserts custom form fields as {{flow_input.<field>}} by reusing getFlowFormFieldVariableExpression, so editor-authored prompts no longer teach the less explicit bare-alias form."
+      changed_files:
+        - frontend/apps/web/src/lib/features/flows/components/VariablePicker.svelte
+        - frontend/apps/web/src/lib/features/flows/components/VariablePicker.test.ts
+      verification:
+        - cmd: "cd frontend/apps/web && bunx vitest run src/lib/features/flows/components/VariablePicker.test.ts"
+          status: pass
+          output: "1 passed"
+        - cmd: "cd frontend/apps/web && bunx vitest run src/lib/features/flows/components/VariablePicker.test.ts src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/flowVariableTokens.test.ts"
+          status: pass
+          output: "45 passed"
+        - cmd: "cd frontend/apps/web && bun run check"
+          status: pass
+          output: "0 errors, 7 warnings in unrelated files"
+        - cmd: "cd frontend/apps/web && bunx prettier --check src/lib/features/flows/components/VariablePicker.svelte src/lib/features/flows/components/VariablePicker.test.ts"
+          status: pass
+          output: "All matched files use Prettier code style"
+        - cmd: "git diff --check -- frontend/apps/web/src/lib/features/flows/components/VariablePicker.svelte frontend/apps/web/src/lib/features/flows/components/VariablePicker.test.ts"
+          status: pass
+          output: "no whitespace errors"
+        - cmd: "cd frontend/apps/web && bunx vitest run src/lib/features/flows"
+          status: blocked_unrelated_failures
+          output: "VariablePicker.test.ts passed, but the broader flow suite has pre-existing unrelated failures: Swedish-rendered labels vs English test expectations, missing app context in FlowAIBuilder.test.ts, and missing happy-dom package for a test file."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-flow-field-variable-namespace-ux-architecture-20260507T131042Z.md"
+        - ".codex/artifacts/claude-peer-loop-flow-field-variable-namespace-ux-architecture-verification-20260507T131357Z.md"
+        - ".codex/artifacts/claude-peer-loop-t050-variable-picker-canonical-token-commit-gate-20260507T131914Z.md"
+      green_light: true
+      remaining_follow_ups:
+        - "Generate the frontend reserved-name set from the backend owner instead of maintaining a mirrored list in TypeScript."
+        - "Decide and design the future label/variable_name split before changing the persisted form schema."
+        - "Add a second VariablePicker test for the advanced primary flow_input.text branch when that area is next touched."
+
   - id: T999
     type: judge
     assignee: Judge
@@ -2807,6 +2859,10 @@ checks:
     tracked_unstaged:
       - "frontend/apps/web/project.inlang/.meta.json"
       - "frontend/apps/web/project.inlang/README.md"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowRunsTable.svelte"
+      - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte"
+      - "frontend/packages/ui/src/icons/types.d.ts"
     untracked:
       - ".devcontainer/devcontainer-lock.json"
       - "PRODUCT.md"
