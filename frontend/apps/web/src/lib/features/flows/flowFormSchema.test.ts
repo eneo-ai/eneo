@@ -7,6 +7,7 @@ import {
   getFlowFormFieldRuntimeKey,
   getFlowFormFieldVariableExpression,
   getFlowFormFieldVariableToken,
+  getSuggestedFlowFormFieldRuntimeKey,
   getFlowFormSchemaFields,
   getFlowFormSchemaMetadata,
   getFlowFormStats,
@@ -44,8 +45,22 @@ describe("flowFormSchema", () => {
     ]);
 
     expect(normalized).toEqual([
-      { name: "first", type: "text", required: false, options: ["ignored"], order: 1 },
-      { name: " second ", type: "multiselect", required: true, options: ["A", "B"], order: 2 }
+      {
+        name: "first",
+        label: "first",
+        type: "text",
+        required: false,
+        options: ["ignored"],
+        order: 1
+      },
+      {
+        name: " second ",
+        label: "second",
+        type: "multiselect",
+        required: true,
+        options: ["A", "B"],
+        order: 2
+      }
     ]);
   });
 
@@ -90,7 +105,23 @@ describe("flowFormSchema", () => {
     expect(getFlowFormFieldRuntimeKey(" titel ")).toBe("titel");
     expect(
       toPersistedFlowFormFields([{ name: " titel ", type: "text", required: true, options: [] }])
-    ).toEqual([{ name: "titel", type: "text", required: true, order: 1 }]);
+    ).toEqual([{ name: "titel", label: "titel", type: "text", required: true, order: 1 }]);
+  });
+
+  it("keeps user-facing labels separate from runtime variable names", () => {
+    expect(
+      toPersistedFlowFormFields([
+        { name: "user_text", label: "Text", type: "text", required: true, options: [] }
+      ])
+    ).toEqual([{ name: "user_text", label: "Text", type: "text", required: true, order: 1 }]);
+  });
+
+  it("suggests safe runtime names from labels without prefixing normal fields", () => {
+    expect(getSuggestedFlowFormFieldRuntimeKey("Kundnamn")).toBe("kundnamn");
+    expect(getSuggestedFlowFormFieldRuntimeKey("Text")).toBe("user_text");
+    expect(getSuggestedFlowFormFieldRuntimeKey("flow_input")).toBe("user_flow_input");
+    expect(getSuggestedFlowFormFieldRuntimeKey("step 1")).toBe("user_step_1");
+    expect(getSuggestedFlowFormFieldRuntimeKey("Text", ["user_text"])).toBe("user_text_2");
   });
 
   it("builds metadata with explicit form schema fields while preserving unrelated keys", () => {
@@ -111,8 +142,8 @@ describe("flowFormSchema", () => {
       wizard: { transcription_enabled: true },
       form_schema: {
         fields: [
-          { name: "titel", type: "text", required: true, order: 1 },
-          { name: "val", type: "select", required: false, order: 2, options: ["A"] }
+          { name: "titel", label: "titel", type: "text", required: true, order: 1 },
+          { name: "val", label: "val", type: "select", required: false, order: 2, options: ["A"] }
         ]
       }
     });

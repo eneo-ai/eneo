@@ -20,7 +20,9 @@
   }: {
     steps: FlowStep[];
     currentStepOrder: number;
-    formSchema: { fields: { name: string; type: string; required?: boolean }[] } | undefined;
+    formSchema:
+      | { fields: { name: string; label?: string | null; type: string; required?: boolean }[] }
+      | undefined;
     isAdvancedMode?: boolean;
     transcriptionEnabled?: boolean;
     onInsert?: (variable: string) => void;
@@ -39,6 +41,11 @@
   function matchesSearch(label: string): boolean {
     if (!searchQuery.trim()) return true;
     return label.toLowerCase().includes(searchQuery.trim().toLowerCase());
+  }
+
+  function getFieldLabel(field: { name: string; label?: string | null }): string {
+    const label = field.label?.trim();
+    return label || field.name;
   }
 
   function handleDropdownOpen(open: boolean) {
@@ -106,21 +113,24 @@
     </div>
 
     <!-- Flow Input Section -->
-    {#if formFields.length > 0 ? formFields.some( (f) => matchesSearch(f.name) ) : isAdvancedMode && matchesSearch("flow_input.text")}
+    {#if formFields.length > 0 ? formFields.some((f) => matchesSearch(getFieldLabel(f)) || matchesSearch(f.name)) : isAdvancedMode && matchesSearch("flow_input.text")}
       <div class="px-3 pt-2 pb-1">
         <span class="text-secondary text-xs font-semibold">{m.flow_variable_flow_input()}</span>
       </div>
       {#if formFields.length > 0}
         {#each formFields as field (field.name)}
-          {#if matchesSearch(field.name)}
+          {#if matchesSearch(getFieldLabel(field)) || matchesSearch(field.name)}
             <DropdownMenu.Item
               class="!justify-start !px-3 !py-1.5 !text-sm"
               onclick={() => insert(getFlowFormFieldVariableExpression(field.name))}
             >
               <span class="flex items-center gap-2">
                 <span class={getChipClasses("field")}>
-                  {field.name}
+                  {getFieldLabel(field)}
                 </span>
+                {#if getFieldLabel(field) !== field.name}
+                  <span class="text-muted font-mono text-xs">{field.name}</span>
+                {/if}
                 <span class="text-muted text-xs">{field.type}</span>
               </span>
             </DropdownMenu.Item>

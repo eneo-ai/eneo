@@ -7,7 +7,10 @@
   import { IconInfo } from "@intric/icons/info";
   import { m } from "$lib/paraglide/messages";
   import type { FlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
-  import type { NormalizedFlowFormField } from "$lib/features/flows/flowFormSchema";
+  import {
+    getFlowFormFieldLabel,
+    type NormalizedFlowFormField
+  } from "$lib/features/flows/flowFormSchema";
   import type { FlowRunBlocker, FlowRunReviewSummaryItem } from "$lib/features/flows/flowRunWizard";
   import type { FlowRunDialogLabels } from "./flowRunDialogLabels";
 
@@ -114,7 +117,7 @@
         {#each completedFormFieldSummaries as item (item.field.name)}
           <div class="border-default bg-secondary/25 rounded-lg border px-3 py-2.5">
             <dt class="text-muted text-[0.6875rem] font-medium tracking-[0.08em] uppercase">
-              {item.field.name}
+              {getFlowFormFieldLabel(item.field)}
             </dt>
             <dd class="text-primary mt-1 text-sm leading-relaxed break-words">{item.value}</dd>
           </div>

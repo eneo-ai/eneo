@@ -12,6 +12,7 @@ export type FlowFormFieldType =
 
 export type FlowFormField = {
   name: string;
+  label?: string | null;
   type: FlowFormFieldType | string;
   required?: boolean;
   options?: string[];
@@ -26,6 +27,7 @@ export type NormalizedFlowFormFieldType = "text" | "number" | "date" | "select" 
 
 export type NormalizedFlowFormField = {
   name: string;
+  label: string;
   type: NormalizedFlowFormFieldType;
   required: boolean;
   options: string[];
@@ -61,6 +63,7 @@ export function normalizeFlowFormFields(fields: FlowFormField[]): NormalizedFlow
   return [...fields]
     .map((field, index) => ({
       name: typeof field.name === "string" ? field.name : "",
+      label: getFlowFormFieldLabel(field),
       type: normalizeFlowFormFieldType(field.type),
       required: Boolean(field.required),
       options: Array.isArray(field.options)
@@ -78,8 +81,10 @@ export function normalizeFlowFormFields(fields: FlowFormField[]): NormalizedFlow
 export function toPersistedFlowFormFields(fields: FlowFormField[]): FlowFormField[] {
   return fields.map((field, index) => {
     const type = normalizeFlowFormFieldType(field.type);
+    const name = getFlowFormFieldRuntimeKey(field.name);
     const normalized: FlowFormField = {
-      name: getFlowFormFieldRuntimeKey(field.name),
+      name,
+      label: getFlowFormFieldLabel(field),
       type,
       required: Boolean(field.required),
       order: index + 1
@@ -133,6 +138,41 @@ export function getFlowFormStats(fields: Array<Pick<FlowFormField, "required">>)
 
 export function getFlowFormFieldRuntimeKey(name: string): string {
   return name.trim();
+}
+
+export function getFlowFormFieldLabel(
+  field: Pick<FlowFormField, "name"> & { label?: string | null }
+): string {
+  const label = typeof field.label === "string" ? field.label.trim() : "";
+  return label || getFlowFormFieldRuntimeKey(field.name);
+}
+
+export function getSuggestedFlowFormFieldRuntimeKey(
+  label: string,
+  existingNames: string[] = []
+): string {
+  const existing = new Set(
+    existingNames
+      .map((name) => getFlowFormFieldRuntimeKey(name).toLowerCase())
+      .filter((name) => name.length > 0)
+  );
+  const rawBase =
+    label
+      .trim()
+      .normalize("NFKC")
+      .toLowerCase()
+      .replace(/\s+/g, "_")
+      .replace(/[^\p{L}\p{N}_]+/gu, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "") || "field";
+  const base = getFlowFormFieldNameIssue(rawBase) === null ? rawBase : `user_${rawBase}`;
+  let candidate = getFlowFormFieldNameIssue(base) === null ? base : "user_field";
+  let suffix = 2;
+  while (existing.has(candidate.toLowerCase())) {
+    candidate = `${base}_${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
 }
 
 export function getFlowFormFieldNameIssue(name: string): FlowFormFieldNameIssue | null {

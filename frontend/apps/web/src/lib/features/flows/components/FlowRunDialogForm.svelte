@@ -1,5 +1,8 @@
 <script lang="ts">
-  import type { NormalizedFlowFormField } from "$lib/features/flows/flowFormSchema";
+  import {
+    getFlowFormFieldLabel,
+    type NormalizedFlowFormField
+  } from "$lib/features/flows/flowFormSchema";
   import {
     readFlowRunFieldMultiValue,
     readFlowRunFieldValue
@@ -32,7 +35,7 @@
   }
 
   function getRequiredErrorMessage(field: NormalizedFlowFormField): string {
-    const trimmed = field.name.trim();
+    const trimmed = getFlowFormFieldLabel(field);
     return trimmed.length > 0
       ? m.flow_run_trigger_field_required({ name: trimmed })
       : m.flow_run_trigger_field_required_generic();
@@ -58,7 +61,7 @@
     {@const describedBy = invalid ? fieldErrorId(fieldIndex) : undefined}
     <Field.Field data-invalid={invalid ? "true" : undefined}>
       <Field.Label for={inputId} class="flex items-center gap-1 text-sm font-medium">
-        {field.name}
+        {getFlowFormFieldLabel(field)}
         {#if field.required}
           <span class="text-destructive" aria-hidden="true">*</span>
           <span class="sr-only">({labels.requiredBadge})</span>

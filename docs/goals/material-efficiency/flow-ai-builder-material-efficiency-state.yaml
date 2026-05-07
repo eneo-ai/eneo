@@ -2894,6 +2894,67 @@ tasks:
         - "Add an explicit documented regeneration command or tiny repo script if this manifest changes often."
         - "Design the future label/variable_name split before changing persisted form schema."
 
+  - id: T052
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Split manual form-field labels from runtime variable keys in the frontend without adding a parallel persisted variable_name field."
+    inputs:
+      - "User report: reserved-variable errors are confusing while editing flow input fields."
+      - "User question: should user input fields be prefixed so reserved variables can still be mapped?"
+      - backend/src/intric/flows/flow_validators_form.py
+      - backend/src/intric/flows/ai_builder/ai_builder_create_models.py
+      - backend/src/intric/flows/ai_builder/ai_builder_create_compiler.py
+      - backend/src/intric/flows/ai_builder/ai_builder_materializer.py
+      - frontend/apps/web/src/lib/features/flows/flowFormSchema.ts
+      - frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte
+    constraints:
+      - "Do not add persisted form_schema.fields[].variable_name; backend already owns name as the runtime key and label as display text."
+      - "Do not prefix every user field; only generate user_ prefixes when a derived runtime key would collide with reserved runtime names."
+      - "Avoid touching unrelated dirty frontend files."
+    receipt:
+      result: done
+      summary: "Manual form fields now preserve label as the user-visible field text and keep name as the stable runtime key. New labels auto-suggest safe variable keys, prefixing only unsafe generated keys such as Text -> user_text."
+      canonical_decision:
+        persisted_schema: "metadata_json.form_schema.fields[].name remains the canonical runtime key; optional label is the display label."
+        prefix_policy: "No blanket prefix. Generated keys use user_ only when the label-derived key is reserved, a primary flow_input key, a namespace head, a step alias, or otherwise invalid."
+      changed_files:
+        - frontend/apps/web/messages/en.json
+        - frontend/apps/web/messages/sv.json
+        - frontend/apps/web/src/lib/features/flows/flowFormSchema.ts
+        - frontend/apps/web/src/lib/features/flows/flowFormSchema.test.ts
+        - frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte
+        - frontend/apps/web/src/lib/features/flows/components/VariablePicker.svelte
+        - frontend/apps/web/src/lib/features/flows/components/FlowRunDialogForm.svelte
+        - frontend/apps/web/src/lib/features/flows/components/FlowRunDialogReview.svelte
+      claude_peer_loop:
+        status: blocked_timeout
+        session: flow-form-field-label-key-t052
+        note: "Iteration 1 was started with a focused plan brief but the local Claude runner produced no output after more than two minutes; the process was killed and the implementation proceeded from local source evidence. Iteration 2 commit-gate review was retried with a 180s timeout and also returned CLAUDE_TIMEOUT."
+      verification:
+        - cmd: "cd frontend/apps/web && bun run i18n:compile"
+          status: pass
+          output: "Successfully compiled inlang project."
+        - cmd: "cd frontend/apps/web && bunx vitest run src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/flowVariableTokens.test.ts"
+          status: pass
+          output: "2 passed; 46 tests passed"
+        - cmd: "cd frontend/apps/web && bunx vitest run src/lib/features/flows/flowRunContract.test.ts src/lib/features/flows/components/FlowRunLaunchInputState.test.ts src/lib/features/flows/flowRunWizard.test.ts"
+          status: pass
+          output: "3 passed; 22 tests passed"
+        - cmd: "cd frontend/apps/web && bunx vitest run src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/flowVariableTokens.test.ts src/lib/features/flows/components/VariablePicker.test.ts"
+          status: blocked_unrelated_failures
+          output: "VariablePicker suite is blocked by the existing generated Paraglide _index.js importing missing message modules such as ./about.js after i18n compile; the two non-Svelte suites passed."
+        - cmd: "cd frontend/apps/web && bunx prettier --check src/lib/features/flows/flowFormSchema.ts src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/components/FlowFormSchemaEditor.svelte src/lib/features/flows/components/VariablePicker.svelte src/lib/features/flows/components/FlowRunDialogForm.svelte src/lib/features/flows/components/FlowRunDialogReview.svelte messages/en.json messages/sv.json"
+          status: pass
+          output: "All matched files use Prettier code style."
+        - cmd: "git diff --check -- frontend/apps/web/src/lib/features/flows/flowFormSchema.ts frontend/apps/web/src/lib/features/flows/flowFormSchema.test.ts frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte frontend/apps/web/src/lib/features/flows/components/VariablePicker.svelte frontend/apps/web/src/lib/features/flows/components/FlowRunDialogForm.svelte frontend/apps/web/src/lib/features/flows/components/FlowRunDialogReview.svelte frontend/apps/web/messages/en.json frontend/apps/web/messages/sv.json"
+          status: pass
+          output: "no whitespace errors"
+      remaining_follow_ups:
+        - "Add a component-level VariablePicker test once the generated Paraglide module issue is fixed or the test has a stable message mock."
+        - "Consider showing the variable-key control only behind an advanced disclosure if user testing shows the extra field is noisy."
+
   - id: T999
     type: judge
     assignee: Judge
