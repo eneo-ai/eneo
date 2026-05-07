@@ -247,14 +247,18 @@ class ApiKeyLifecycleService:
             rotated_from_key_id=key.id,
         )
 
-        tenant = getattr(user, "tenant", None)
-        policy = cast(
-            dict[str, int | None], getattr(tenant, "api_key_policy", None) or {}
-        )
-        grace_hours = policy.get("rotation_grace_hours")
-        if grace_hours is None:
-            grace_hours = self.settings.api_key_rotation_grace_hours
-        grace_until = datetime.now(timezone.utc) + timedelta(hours=grace_hours)
+        disable_grace = bool(request and request.disable_grace_period)
+        if disable_grace:
+            grace_until = datetime.now(timezone.utc)
+        else:
+            tenant = getattr(user, "tenant", None)
+            policy = cast(
+                dict[str, int | None], getattr(tenant, "api_key_policy", None) or {}
+            )
+            grace_hours = policy.get("rotation_grace_hours")
+            if grace_hours is None:
+                grace_hours = self.settings.api_key_rotation_grace_hours
+            grace_until = datetime.now(timezone.utc) + timedelta(hours=grace_hours)
         await self.api_key_repo.update(
             key_id=key.id,
             tenant_id=key.tenant_id,
@@ -275,6 +279,7 @@ class ApiKeyLifecycleService:
                     extra={
                         "old_key_id": str(key.id),
                         "rotation_grace_until": grace_until.isoformat(),
+                        "grace_period_disabled": disable_grace,
                     },
                 ),
                 ip_address=ip_address,

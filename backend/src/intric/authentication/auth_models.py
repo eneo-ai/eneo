@@ -286,6 +286,7 @@ class ApiKeyExtendRequest(BaseModel):
 class ApiKeyRotateRequest(BaseModel):
     update_expiration: bool = False
     expires_at: Optional[datetime] = None
+    disable_grace_period: bool = False
 
 
 class ApiKeyUserSnapshot(BaseModel):

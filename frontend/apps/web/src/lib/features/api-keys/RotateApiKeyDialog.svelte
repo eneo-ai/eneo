@@ -27,6 +27,7 @@
 
   let rotationGraceHours = $state(24);
   let alsoExtend = $state(false);
+  let disableGracePeriod = $state(false);
   let newExpiresAt = $state<string | null>(null);
   let maxDays = $state<number | null>(null);
   let requireExpiration = $state(false);
@@ -37,6 +38,7 @@
   $effect(() => {
     if (open) {
       alsoExtend = false;
+      disableGracePeriod = false;
       newExpiresAt = apiKey.expires_at ?? null;
       void loadConstraints();
     }
@@ -68,9 +70,19 @@
   async function rotate() {
     actionPending = true;
     try {
-      const params = alsoExtend
-        ? { id: apiKey.id, update_expiration: true, expires_at: newExpiresAt }
-        : { id: apiKey.id };
+      const params: {
+        id: string;
+        update_expiration?: boolean;
+        expires_at?: string | null;
+        disable_grace_period?: boolean;
+      } = { id: apiKey.id };
+      if (alsoExtend) {
+        params.update_expiration = true;
+        params.expires_at = newExpiresAt;
+      }
+      if (disableGracePeriod) {
+        params.disable_grace_period = true;
+      }
       const response = isAdmin
         ? await intric.apiKeys.admin.rotate(params)
         : await intric.apiKeys.rotate(params);
@@ -107,7 +119,11 @@
         <div class="flex items-center justify-between">
           <span class="text-muted text-xs">{m.api_keys_rotate_grace_period_label()}</span>
           <span class="text-default text-sm font-medium">
-            {m.api_keys_rotate_grace_period_value({ hours: rotationGraceHours })}
+            {#if disableGracePeriod}
+              {m.api_keys_rotate_grace_period_disabled_value()}
+            {:else}
+              {m.api_keys_rotate_grace_period_value({ hours: rotationGraceHours })}
+            {/if}
           </span>
         </div>
         {#if apiKey.last_used_at}
@@ -127,28 +143,55 @@
             </span>
           </div>
         {/if}
+
+        <Alert.Root class="mt-2" variant={disableGracePeriod ? "destructive" : "default"}>
+          <AlertCircle />
+          <Alert.Description class="text-xs">
+            {#if disableGracePeriod}
+              {m.api_keys_rotate_disable_grace_warning()}
+            {:else}
+              {m.api_keys_rotate_grace_info({ hours: rotationGraceHours })}
+            {/if}
+          </Alert.Description>
+        </Alert.Root>
+
+        <label class="border-default mt-3 flex items-start gap-2 border-t pt-3 text-sm">
+          <Checkbox
+            class="mt-0.5"
+            checked={disableGracePeriod}
+            disabled={actionPending}
+            onCheckedChange={(v) => (disableGracePeriod = v === true)}
+          />
+          <span>
+            <span class="text-default block font-medium">
+              {m.api_keys_rotate_disable_grace_label()}
+            </span>
+            <span class="text-muted block text-xs">
+              {m.api_keys_rotate_disable_grace_help()}
+            </span>
+          </span>
+        </label>
       </div>
 
-      <Alert.Root>
-        <AlertCircle />
-        <Alert.Description class="text-xs">
-          {m.api_keys_rotate_grace_info({ hours: rotationGraceHours })}
-        </Alert.Description>
-      </Alert.Root>
+      <div class="space-y-2">
+        <label class="flex items-center gap-2 text-sm">
+          <Checkbox
+            checked={alsoExtend}
+            disabled={actionPending}
+            onCheckedChange={(v) => (alsoExtend = v === true)}
+          />
+          <span>{m.api_keys_rotate_also_extend_label()}</span>
+        </label>
 
-      <label class="flex items-center gap-2 text-sm">
-        <Checkbox checked={alsoExtend} onCheckedChange={(v) => (alsoExtend = v === true)} />
-        <span>{m.api_keys_rotate_also_extend_label()}</span>
-      </label>
-
-      {#if alsoExtend}
-        <ExpirationPicker
-          bind:value={newExpiresAt}
-          {maxDays}
-          {requireExpiration}
-          disabled={actionPending}
-        />
-      {/if}
+        {#if alsoExtend}
+          <ExpirationPicker
+            bind:value={newExpiresAt}
+            {maxDays}
+            {requireExpiration}
+            disabled={actionPending}
+          />
+        {/if}
+      </div>
     </div>
 
     <Dialog.Footer>

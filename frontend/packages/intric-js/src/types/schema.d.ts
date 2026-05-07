@@ -7301,6 +7301,11 @@ export interface components {
       update_expiration?: boolean;
       /** Expires At */
       expires_at?: string | null;
+      /**
+       * Disable Grace Period
+       * @default false
+       */
+      disable_grace_period?: boolean;
     };
     /**
      * ApiKeyScopeType

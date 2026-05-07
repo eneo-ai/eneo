@@ -108,19 +108,27 @@ export function initApiKeys(client) {
     },
 
     /**
-     * Rotate an API key. Optionally also change the expiration in the same call.
-     * @param {{id: string, update_expiration?: boolean, expires_at?: string | null}} params
+     * Rotate an API key. Optionally also change the expiration in the same call,
+     * or disable the grace period so the rotated-out key is revoked immediately.
+     * @param {{id: string, update_expiration?: boolean, expires_at?: string | null, disable_grace_period?: boolean}} params
      * @returns {Promise<ApiKeyCreatedResponse>}
      * @throws {IntricError}
      * */
-    rotate: async ({ id, update_expiration, expires_at }) => {
-      if (update_expiration) {
+    rotate: async ({ id, update_expiration, expires_at, disable_grace_period }) => {
+      if (update_expiration || disable_grace_period) {
+        /** @type {Record<string, unknown>} */
+        const body = {};
+        if (update_expiration) {
+          body.update_expiration = true;
+          body.expires_at = expires_at ?? null;
+        }
+        if (disable_grace_period) {
+          body.disable_grace_period = true;
+        }
         const options = /** @type {any} */ ({
           method: "post",
           params: { path: { id } },
-          requestBody: {
-            "application/json": { update_expiration: true, expires_at: expires_at ?? null }
-          }
+          requestBody: { "application/json": body }
         });
         return await client.fetch("/api/v1/api-keys/{id}/rotate", options);
       }
@@ -448,19 +456,28 @@ export function initApiKeys(client) {
       },
 
       /**
-       * Rotate an API key (admin only). Optionally also change the expiration in the same call.
-       * @param {{id: string, update_expiration?: boolean, expires_at?: string | null}} params
+       * Rotate an API key (admin only). Optionally also change the expiration in
+       * the same call, or disable the grace period so the rotated-out key is
+       * revoked immediately.
+       * @param {{id: string, update_expiration?: boolean, expires_at?: string | null, disable_grace_period?: boolean}} params
        * @returns {Promise<ApiKeyCreatedResponse>}
        * @throws {IntricError}
        * */
-      rotate: async ({ id, update_expiration, expires_at }) => {
-        if (update_expiration) {
+      rotate: async ({ id, update_expiration, expires_at, disable_grace_period }) => {
+        if (update_expiration || disable_grace_period) {
+          /** @type {Record<string, unknown>} */
+          const body = {};
+          if (update_expiration) {
+            body.update_expiration = true;
+            body.expires_at = expires_at ?? null;
+          }
+          if (disable_grace_period) {
+            body.disable_grace_period = true;
+          }
           const options = /** @type {any} */ ({
             method: "post",
             params: { path: { id } },
-            requestBody: {
-              "application/json": { update_expiration: true, expires_at: expires_at ?? null }
-            }
+            requestBody: { "application/json": body }
           });
           return await client.fetch("/api/v1/admin/api-keys/{id}/rotate", options);
         }
