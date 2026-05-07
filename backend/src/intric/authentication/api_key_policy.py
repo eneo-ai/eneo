@@ -10,6 +10,7 @@ from intric.allowed_origins.origin_matching import origin_matches_pattern
 from intric.authentication.api_key_request_context import resolve_client_ip
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.auth_models import (
+    RESOURCE_PERMISSION_FIELDS,
     ApiKeyCreateRequest,
     ApiKeyOwnership,
     ApiKeyPermission,
@@ -17,7 +18,10 @@ from intric.authentication.auth_models import (
     ApiKeyState,
     ApiKeyType,
     ApiKeyV2InDB,
+    ResourcePermissionLevel,
+    ResourcePermissions,
     compute_effective_state,
+    default_public_resource_permissions,
     derive_permission_from_resource_permissions,
 )
 from intric.main.config import get_settings
@@ -30,6 +34,24 @@ if TYPE_CHECKING:
     from intric.spaces.space import Space
     from intric.spaces.space_service import SpaceService
     from intric.users.user import UserInDB
+
+
+def _validate_public_resource_permissions(rp: ResourcePermissions) -> None:
+    disallowed = [
+        field
+        for field in RESOURCE_PERMISSION_FIELDS
+        if getattr(rp, field)
+        not in (
+            ResourcePermissionLevel.NONE,
+            ResourcePermissionLevel.READ,
+        )
+    ]
+    if disallowed:
+        raise ApiKeyValidationError(
+            status_code=400,
+            code="invalid_request",
+            message=("pk_ keys only support 'none' or 'read' resource permissions."),
+        )
 
 
 class ApiKeyPolicyService:
@@ -129,6 +151,10 @@ class ApiKeyPolicyService:
                 )
             for origin in request.allowed_origins:
                 self._validate_origin_format(origin)
+            if request.resource_permissions is None:
+                request.resource_permissions = default_public_resource_permissions()
+            else:
+                _validate_public_resource_permissions(request.resource_permissions)
 
         if request.key_type == ApiKeyType.SK and request.allowed_origins is not None:
             raise ApiKeyValidationError(
@@ -145,13 +171,7 @@ class ApiKeyPolicyService:
         await self._validate_rate_limit(request.rate_limit)
 
         if request.resource_permissions is not None:
-            if request.key_type == ApiKeyType.PK:
-                raise ApiKeyValidationError(
-                    status_code=400,
-                    code="invalid_request",
-                    message="Public keys (pk_) do not support fine-grained resource permissions.",
-                )
-            if request.scope_type in (
+            if request.key_type == ApiKeyType.SK and request.scope_type in (
                 ApiKeyScopeType.ASSISTANT,
                 ApiKeyScopeType.APP,
             ):
@@ -338,13 +358,16 @@ class ApiKeyPolicyService:
 
         if "resource_permissions" in updates:
             raw_rp = updates.get("resource_permissions")
-            if raw_rp is not None:
-                if ApiKeyType(key.key_type) == ApiKeyType.PK:
-                    raise ApiKeyValidationError(
-                        status_code=400,
-                        code="invalid_request",
-                        message="Public keys (pk_) do not support fine-grained resource permissions.",
+            if key_type == ApiKeyType.PK:
+                if raw_rp is None:
+                    updates["resource_permissions"] = (
+                        default_public_resource_permissions().model_dump(mode="json")
                     )
+                else:
+                    rp = ResourcePermissions.model_validate(raw_rp)
+                    _validate_public_resource_permissions(rp)
+                    updates["resource_permissions"] = rp.model_dump(mode="json")
+            elif raw_rp is not None:
                 if ApiKeyScopeType(key.scope_type) in (
                     ApiKeyScopeType.ASSISTANT,
                     ApiKeyScopeType.APP,

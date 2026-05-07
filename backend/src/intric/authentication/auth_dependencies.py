@@ -204,19 +204,24 @@ FILES_READ_OVERRIDES: frozenset[str] = frozenset(
 def require_resource_permission_for_method(
     resource_type: str, read_override_endpoints: frozenset[str] | None = None
 ) -> Callable[..., Awaitable[None]]:
-    """Router-level dependency: stores method→permission config for post-auth check.
+    """Dependency: stores method→permission config for post-auth check.
 
     The actual permission check runs in ``_resolve_api_key`` (user_service)
-    after authentication has set ``request.state.api_key``.  Router-level
-    dependencies execute *before* route-level ``Depends()``, so we cannot
-    inspect ``request.state.api_key`` here.
+    after authentication has set ``request.state.api_key``.  Multiple guards may
+    be attached to one route, e.g. a conversation endpoint can require both the
+    assistant read capability and the conversation history capability.
     """
 
     async def _resource_permission_dep(request: Request) -> None:
-        request.state._resource_perm_config = {
+        config = {
             "resource_type": resource_type,
             "read_override_endpoints": read_override_endpoints,
         }
+        configs = list(getattr(request.state, "_resource_perm_configs", []))
+        configs.append(config)
+        request.state._resource_perm_configs = configs
+        if not hasattr(request.state, "_resource_perm_config"):
+            request.state._resource_perm_config = config
 
     return _resource_permission_dep
 

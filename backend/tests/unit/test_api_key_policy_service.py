@@ -11,6 +11,8 @@ from intric.authentication.auth_models import (
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyType,
+    ResourcePermissionLevel,
+    ResourcePermissions,
 )
 from intric.roles.permissions import Permission
 
@@ -167,6 +169,74 @@ async def test_update_request_rejects_non_read_permission_for_pk():
         assert exc.value.status_code == 400
         assert exc.value.code == "invalid_request"
         assert "can only have read permission" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_create_pk_defaults_to_safe_public_resource_permissions():
+    service = _service_with_user(permissions=[Permission.ADMIN])
+
+    request = ApiKeyCreateRequest(
+        name="Public key",
+        key_type=ApiKeyType.PK,
+        permission=ApiKeyPermission.READ,
+        scope_type=ApiKeyScopeType.TENANT,
+        scope_id=None,
+        allowed_origins=["http://localhost:3000"],
+    )
+
+    await service.validate_create_request(request=request)
+
+    assert request.resource_permissions == ResourcePermissions(
+        assistants=ResourcePermissionLevel.READ,
+        apps=ResourcePermissionLevel.READ,
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_pk_rejects_write_resource_permissions():
+    service = _service_with_user(permissions=[Permission.ADMIN])
+
+    request = ApiKeyCreateRequest(
+        name="Public key",
+        key_type=ApiKeyType.PK,
+        permission=ApiKeyPermission.READ,
+        scope_type=ApiKeyScopeType.TENANT,
+        scope_id=None,
+        allowed_origins=["http://localhost:3000"],
+        resource_permissions=ResourcePermissions(files=ResourcePermissionLevel.WRITE),
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_create_request(request=request)
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+    assert "pk_ keys only support" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_update_pk_null_resource_permissions_normalizes_to_public_default():
+    service = _service()
+    key = SimpleNamespace(
+        key_type=ApiKeyType.PK.value,
+        tenant_id=uuid4(),
+        permission=ApiKeyPermission.READ.value,
+        resource_permissions=None,
+    )
+    updates = {"resource_permissions": None}
+
+    await service.validate_update_request(key=key, updates=updates)  # type: ignore[arg-type]
+
+    assert updates["resource_permissions"] == {
+        "assistants": "read",
+        "apps": "read",
+        "spaces": "none",
+        "knowledge": "none",
+        "conversations": "none",
+        "files": "none",
+        "jobs": "none",
+        "prompts": "none",
+    }
 
 
 # ---------------------------------------------------------------------------

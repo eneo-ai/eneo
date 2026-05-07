@@ -136,20 +136,36 @@ class ResourcePermissionLevel(str, Enum):
 
 
 class ResourcePermissions(BaseModel):
-    """Per-resource-type permission overrides for sk_ keys.
+    """Per-resource-type permission overrides for API keys.
 
     For sk_ keys, the top-level ``permission`` field is derived automatically
-    as ``max(assistants, apps, spaces, knowledge)`` by
-    :func:`derive_permission_from_resource_permissions`.  pk_ keys do not
-    support fine-grained permissions.
+    as the maximum configured level by
+    :func:`derive_permission_from_resource_permissions`.  pk_ keys may use the
+    same shape, but policy validation caps each resource at ``read``.
     """
 
     assistants: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     apps: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     spaces: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     knowledge: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    conversations: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    files: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    jobs: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    prompts: ResourcePermissionLevel = ResourcePermissionLevel.NONE
 
     model_config = ConfigDict(extra="forbid")
+
+
+RESOURCE_PERMISSION_FIELDS: tuple[str, ...] = (
+    "assistants",
+    "apps",
+    "spaces",
+    "knowledge",
+    "conversations",
+    "files",
+    "jobs",
+    "prompts",
+)
 
 
 _LEVEL_TO_PERMISSION: dict[int, ApiKeyPermission] = {
@@ -169,12 +185,18 @@ def derive_permission_from_resource_permissions(
     If all resource types are ``none``, defaults to ``read``.
     """
     max_level = max(
-        PERMISSION_LEVEL_ORDER.get(rp.assistants.value, 0),
-        PERMISSION_LEVEL_ORDER.get(rp.apps.value, 0),
-        PERMISSION_LEVEL_ORDER.get(rp.spaces.value, 0),
-        PERMISSION_LEVEL_ORDER.get(rp.knowledge.value, 0),
+        PERMISSION_LEVEL_ORDER.get(getattr(rp, field).value, 0)
+        for field in RESOURCE_PERMISSION_FIELDS
     )
     return _LEVEL_TO_PERMISSION.get(max_level, ApiKeyPermission.READ)
+
+
+def default_public_resource_permissions() -> ResourcePermissions:
+    """Safe default allowlist for newly created browser/public keys."""
+    return ResourcePermissions(
+        assistants=ResourcePermissionLevel.READ,
+        apps=ResourcePermissionLevel.READ,
+    )
 
 
 class ApiKeyScopeType(str, Enum):
