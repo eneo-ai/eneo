@@ -384,17 +384,19 @@ bun run lint
 
 ```mermaid
 gitgraph
-    commit id: "main"
+    commit id: "develop"
     branch feature/new-assistant-type
     checkout feature/new-assistant-type
     commit id: "feat: add domain entity"
     commit id: "feat: add service layer"
     commit id: "feat: add API endpoints"
     commit id: "test: add comprehensive tests"
-    checkout main
+    checkout develop
     merge feature/new-assistant-type
     commit id: "merge: new assistant type"
 ```
+
+> Features always flow back to `develop`. Version tags live on `release/v1.X` branches, not on `develop`. See [DEPLOYMENT_WORKFLOW.md](./DEPLOYMENT_WORKFLOW.md) for the full release flow.
 
 **Branch Naming:**
 - `feature/description` - New features

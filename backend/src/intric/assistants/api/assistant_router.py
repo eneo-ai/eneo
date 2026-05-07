@@ -25,7 +25,11 @@ from intric.authentication.api_key_router_helpers import (
     error_responses as api_key_error_responses,
 )
 from intric.authentication.auth_dependencies import get_scope_filter
-from intric.authentication.auth_models import ApiKey, ApiKeyNotificationTargetType
+from intric.authentication.auth_models import (
+    ApiKey,
+    ApiKeyNotificationTargetType,
+    audit_actor_for,
+)
 from intric.database.database import AsyncSession
 from intric.main.config import get_settings
 from intric.main.container.container import Container
@@ -778,9 +782,11 @@ async def ask_assistant(
     }
 
     audit_service = container.audit_service()
+    actor_id, actor_type = audit_actor_for(user)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        actor_id=actor_id,
+        actor_type=actor_type,
         action=ActionType.SESSION_STARTED,
         entity_type=EntityType.ASSISTANT,
         entity_id=id,
@@ -883,9 +889,11 @@ async def delete_assistant_session(
     }
 
     audit_service = container.audit_service()
+    actor_id, actor_type = audit_actor_for(user)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        actor_id=actor_id,
+        actor_type=actor_type,
         action=ActionType.SESSION_ENDED,
         entity_type=EntityType.ASSISTANT,
         entity_id=id,

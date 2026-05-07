@@ -1857,6 +1857,35 @@
                                       : m.audit_failure()}
                                   </p>
                                 </div>
+                                <div class="border-default bg-primary rounded-lg border p-3">
+                                  <p class="text-muted mb-1 text-xs font-medium">
+                                    {m.audit_ip_address()}
+                                  </p>
+                                  <p class="text-default font-mono text-sm">
+                                    {log.ip_address ?? m.audit_not_recorded()}
+                                  </p>
+                                </div>
+                                <div class="border-default bg-primary rounded-lg border p-3">
+                                  <p class="text-muted mb-1 text-xs font-medium">
+                                    {m.audit_request_id()}
+                                  </p>
+                                  <p
+                                    class="text-default font-mono text-sm break-all"
+                                    title={log.request_id ?? undefined}
+                                  >
+                                    {log.request_id ?? m.audit_not_recorded()}
+                                  </p>
+                                </div>
+                                <div
+                                  class="border-default bg-primary rounded-lg border p-3 md:col-span-2"
+                                >
+                                  <p class="text-muted mb-1 text-xs font-medium">
+                                    {m.audit_user_agent()}
+                                  </p>
+                                  <p class="text-default text-sm break-all">
+                                    {log.user_agent ?? m.audit_not_recorded()}
+                                  </p>
+                                </div>
                               </div>
                               {#if log.metadata && Object.keys(log.metadata).length > 0}
                                 <div class="border-default bg-primary rounded-lg border p-3">

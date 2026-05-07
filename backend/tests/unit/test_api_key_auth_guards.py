@@ -354,7 +354,6 @@ class TestPolicyMaxRateLimit:
         tenant = SimpleNamespace(api_key_policy={"max_rate_limit_override": 100})
         user = SimpleNamespace(tenant=tenant, permissions=[])
         service = ApiKeyPolicyService(
-            allowed_origin_repo=SimpleNamespace(),
             space_service=SimpleNamespace(),
             user=user,
         )
@@ -620,7 +619,6 @@ class TestAuthFailureAuditEnrichment:
             auth_service=AsyncMock(),
             api_key_auth_resolver=AsyncMock(),
             api_key_v2_repo=AsyncMock(),
-            allowed_origin_repo=AsyncMock(),
             audit_service=audit,
             settings_repo=AsyncMock(),
             tenant_repo=AsyncMock(),

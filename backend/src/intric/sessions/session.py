@@ -30,7 +30,10 @@ class SessionBase(BaseModel):
 
 
 class SessionAdd(SessionBase):
-    user_id: UUID
+    # Exactly one of user_id (real user) or api_key_id (service-key principal)
+    # is set per session. The session_service write paths enforce this invariant.
+    user_id: Optional[UUID] = None
+    api_key_id: Optional[UUID] = None
     assistant_id: Optional[UUID] = None
     group_chat_id: Optional[UUID] = None
 
@@ -40,7 +43,8 @@ class SessionUpdate(SessionBase):
 
 
 class SessionInDB(SessionBase, InDB):
-    user_id: UUID
+    user_id: Optional[UUID] = None
+    api_key_id: Optional[UUID] = None
     feedback_value: Optional[Literal[-1, 1]] = None
     feedback_text: Optional[str] = None
 

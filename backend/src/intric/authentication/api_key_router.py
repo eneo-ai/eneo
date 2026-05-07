@@ -11,7 +11,6 @@ from fastapi import (
     Depends,
     HTTPException,
     Query,
-    Request,
     Response,
     status,
 )
@@ -24,7 +23,6 @@ from intric.authentication.api_key_router_helpers import (
     build_api_key_usage_page,
     build_api_key_usage_summary,
     error_responses,
-    extract_audit_context,
     paginate_keys,
     raise_api_key_http_error,
 )
@@ -386,6 +384,7 @@ async def _collect_manageable_keys_for_page(
     state: ApiKeyState | None,
     key_type: ApiKeyType | None,
     ownership: str | None = None,
+    owner_user_id: UUID | None = None,
 ) -> list[ApiKeyV2InDB]:
     """Collect enough manageable keys to produce one filtered page.
 
@@ -409,6 +408,7 @@ async def _collect_manageable_keys_for_page(
             state=state,
             key_type=key_type.value if key_type else None,
             ownership=ownership,
+            owner_user_id=owner_user_id,
         )
         if not raw_keys:
             break
@@ -900,7 +900,6 @@ async def get_api_key_usage(
     },
 )
 async def create_api_key(
-    http_request: Request,
     payload: Annotated[ApiKeyCreateRequest, Body(examples=[_CREATE_API_KEY_EXAMPLE])],
     container: Annotated[Container, Depends(get_container(with_user=True))],
     _session_guard: None = Depends(require_session_auth),
@@ -912,13 +911,9 @@ async def create_api_key(
     _api_key_guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyCreatedResponse:
     lifecycle = container.api_key_lifecycle_service()
-    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         return await lifecycle.create_key(
             request=payload,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
@@ -958,6 +953,31 @@ async def list_api_keys(
     policy: ApiKeyPolicyService = container.api_key_policy_service()
 
     ownership_value = ownership.value if ownership else None
+    # Default: personal listing — only show keys the caller owns. Tenant-wide
+    # listing is the responsibility of /admin/api-keys.
+    # Exception: when the caller can administer the requested scope (space /
+    # assistant / app), drop the owner filter so service keys (owner_user_id
+    # is NULL by design) and other members' keys are visible to admins of
+    # that scope. Falls back to the personal filter when the caller is not
+    # a scope admin.
+    owner_filter: UUID | None = user.id
+    if (
+        scope_type is not None
+        and scope_type != ApiKeyScopeType.TENANT
+        and scope_id is not None
+    ):
+        try:
+            await policy.ensure_creator_authorized(
+                scope_type=scope_type, scope_id=scope_id
+            )
+            owner_filter = None
+        except ApiKeyValidationError:
+            # Caller is not an admin of this scope — keep the personal
+            # owner_filter so they only see their own keys, never raise.
+            # The 403 from ensure_creator_authorized is intentional inside
+            # mutating endpoints; here it is just a permission probe.
+            pass
+
     if limit is not None and not previous:
         filtered_keys = await _collect_manageable_keys_for_page(
             repo=repo,
@@ -970,6 +990,7 @@ async def list_api_keys(
             state=state,
             key_type=key_type,
             ownership=ownership_value,
+            owner_user_id=owner_filter,
         )
     else:
         raw_keys = await repo.list_paginated(
@@ -982,6 +1003,7 @@ async def list_api_keys(
             state=state,
             key_type=key_type.value if key_type else None,
             ownership=ownership_value,
+            owner_user_id=owner_filter,
         )
 
         filtered_keys, _auth_cache = await _filter_manageable_keys(
@@ -998,6 +1020,7 @@ async def list_api_keys(
             state=state,
             key_type=key_type.value if key_type else None,
             ownership=ownership_value,
+            owner_user_id=owner_filter,
         )
 
     return ApiKeyListResponse.model_validate(
@@ -1063,7 +1086,6 @@ async def get_api_key(
 )
 async def update_api_key(
     id: UUID,
-    http_request: Request,
     payload: Annotated[
         ApiKeyUpdateRequest,
         Body(
@@ -1076,14 +1098,10 @@ async def update_api_key(
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         return await lifecycle.update_key(
             key_id=id,
             request=payload,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
@@ -1104,18 +1122,13 @@ async def update_api_key(
 )
 async def revoke_api_key_deprecated(
     id: UUID,
-    http_request: Request,
     container: Annotated[Container, Depends(get_container(with_user=True))],
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> Response:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         await lifecycle.revoke_key(
             key_id=id,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
@@ -1140,7 +1153,6 @@ async def revoke_api_key_deprecated(
 )
 async def revoke_api_key(
     id: UUID,
-    http_request: Request,
     container: Annotated[Container, Depends(get_container(with_user=True))],
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[
@@ -1149,14 +1161,10 @@ async def revoke_api_key(
     ] = None,
 ) -> ApiKeyV2:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         return await lifecycle.revoke_key(
             key_id=id,
             request=payload,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
@@ -1178,20 +1186,15 @@ async def revoke_api_key(
 )
 async def rotate_api_key(
     id: UUID,
-    http_request: Request,
     container: Annotated[Container, Depends(get_container(with_user=True))],
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[ApiKeyRotateRequest | None, Body()] = None,
 ) -> ApiKeyCreatedResponse:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         return await lifecycle.rotate_key(
             key_id=id,
             request=payload,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
@@ -1216,7 +1219,6 @@ async def rotate_api_key(
 )
 async def extend_api_key_expiration(
     id: UUID,
-    http_request: Request,
     payload: Annotated[
         ApiKeyExtendRequest,
         Body(examples=[{"expires_at": "2030-01-01T00:00:00Z"}]),
@@ -1225,14 +1227,10 @@ async def extend_api_key_expiration(
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         return await lifecycle.extend_expiration(
             key_id=id,
             request=payload,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
@@ -1255,18 +1253,13 @@ async def extend_api_key_expiration(
 )
 async def purge_api_key(
     id: UUID,
-    http_request: Request,
     container: Annotated[Container, Depends(get_container(with_user=True))],
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> Response:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         await lifecycle.purge_key(
             key_id=id,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
@@ -1293,7 +1286,6 @@ async def purge_api_key(
 )
 async def suspend_api_key(
     id: UUID,
-    http_request: Request,
     container: Annotated[Container, Depends(get_container(with_user=True))],
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[
@@ -1302,14 +1294,10 @@ async def suspend_api_key(
     ] = None,
 ) -> ApiKeyV2:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         return await lifecycle.suspend_key(
             key_id=id,
             request=payload,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
@@ -1331,18 +1319,13 @@ async def suspend_api_key(
 )
 async def reactivate_api_key(
     id: UUID,
-    http_request: Request,
     container: Annotated[Container, Depends(get_container(with_user=True))],
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         return await lifecycle.reactivate_key(
             key_id=id,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
