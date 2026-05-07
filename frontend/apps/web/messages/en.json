@@ -2025,6 +2025,8 @@
   "add_model_to_get_started": "Add a model to get started.",
   "no_providers_title": "No providers configured",
   "no_providers_description": "Add your first AI provider to start configuring models for your organization. You can connect to OpenAI, Anthropic, Google, and more.",
+  "no_models_for_this_type_title": "No models in this section yet",
+  "no_models_for_this_type_description": "Click Add provider to pick an existing provider or set up a new one, then add a model to it.",
   "add_first_provider": "Add your first provider",
   "no_providers_helper": "Providers manage authentication and access to AI models.",
   "add_model_to_provider": "Add model",

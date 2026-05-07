@@ -2061,6 +2061,8 @@
   "add_model_to_get_started": "Lägg till en modell för att komma igång.",
   "no_providers_title": "Inga leverantörer konfigurerade",
   "no_providers_description": "Lägg till din första AI-leverantör för att börja konfigurera modeller för din organisation. Du kan ansluta till OpenAI, Anthropic, Google och fler.",
+  "no_models_for_this_type_title": "Inga modeller i denna sektion ännu",
+  "no_models_for_this_type_description": "Klicka på Lägg till leverantör för att välja en befintlig leverantör eller konfigurera en ny, och lägg sedan till en modell.",
   "add_first_provider": "Lägg till din första leverantör",
   "no_providers_helper": "Leverantörer hanterar autentisering och åtkomst till AI-modeller.",
   "add_model_to_provider": "Lägg till modell",

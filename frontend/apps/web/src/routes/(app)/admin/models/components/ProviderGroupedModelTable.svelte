@@ -142,7 +142,20 @@
   $: table.update(tenantModels);
 
   // --- Provider grouping ------------------------------------------------
-  $: groups = providers.map((provider) => ({
+  // Only show providers that already have at least one model in this
+  // section. A provider that the tenant configured for completion but
+  // hasn't given any embedding models stays hidden from the embedding
+  // tab — the user reaches it via "Add Provider", which lets them pick
+  // an existing provider in the wizard and add a model to it.
+  $: visibleProviders = providers.filter((p) =>
+    tenantModels.some((model) => model.provider_id === p.id)
+  );
+  // True when the user has providers configured but none of them have a
+  // model in the current section. Surfaces a focused hint with the same
+  // "Add Provider" CTA so the wizard can take it from there.
+  $: noModelsForThisType = providers.length > 0 && visibleProviders.length === 0;
+
+  $: groups = visibleProviders.map((provider) => ({
     key: provider.id,
     name: provider.name,
     modelCount: tenantModels.filter((model) => model.provider_id === provider.id).length
@@ -188,6 +201,14 @@
 
 {#if providers.length === 0}
   <PageEmptyState onAddProvider={openAddProvider} />
+{:else if noModelsForThisType}
+  <PageEmptyState
+    onAddProvider={openAddProvider}
+    title={m.no_models_for_this_type_title()}
+    description={m.no_models_for_this_type_description()}
+    ctaLabel={m.add_provider()}
+    helper=""
+  />
 {:else}
   <div class="flex flex-col gap-4">
     {#if deprecatedCount > 0}
