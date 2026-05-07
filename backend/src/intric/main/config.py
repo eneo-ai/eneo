@@ -398,8 +398,6 @@ class Settings(BaseSettings):
     api_key_rate_limit_assistant_default: int = 1000
     api_key_rate_limit_app_default: int = 1000
     api_key_enforce_resource_permissions: bool = True
-    api_key_origin_cache_ttl_seconds: int = 30
-    api_key_allow_localhost_origin: bool = False
     trusted_proxy_count: int = 0
     trusted_proxy_headers: list[str] = ["x-forwarded-for", "x-real-ip"]
     jwt_audience: str

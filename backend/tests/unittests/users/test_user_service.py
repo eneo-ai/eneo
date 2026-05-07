@@ -26,7 +26,6 @@ def service_with_mocks():
         auth_service=AsyncMock(),
         api_key_auth_resolver=AsyncMock(),
         api_key_v2_repo=AsyncMock(),
-        allowed_origin_repo=AsyncMock(),
         audit_service=AsyncMock(),
         settings_repo=AsyncMock(),
         tenant_repo=AsyncMock(),

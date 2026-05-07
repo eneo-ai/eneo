@@ -3,7 +3,7 @@ from typing import Annotated, Literal, cast
 from uuid import UUID
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.admin.admin_models import (
@@ -27,7 +27,6 @@ from intric.authentication.api_key_router_helpers import (
     build_api_key_usage_page,
     build_api_key_usage_summary,
     error_responses,
-    extract_audit_context,
     paginate_keys,
     raise_api_key_http_error,
 )
@@ -1619,7 +1618,6 @@ async def get_api_key_admin(
 )
 async def update_api_key_admin(
     id: UUID,
-    http_request: Request,
     payload: ApiKeyUpdateRequest,
     container: AdminContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
@@ -1627,15 +1625,11 @@ async def update_api_key_admin(
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         return await lifecycle.update_key(
             key_id=id,
             request=payload,
             skip_manage_authorization=True,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
@@ -1656,21 +1650,16 @@ async def update_api_key_admin(
 )
 async def revoke_api_key_admin_deprecated(
     id: UUID,
-    http_request: Request,
     container: AdminContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> Response:
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         await lifecycle.revoke_key(
             key_id=id,
             skip_manage_authorization=True,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
@@ -1697,7 +1686,6 @@ async def revoke_api_key_admin_deprecated(
 )
 async def revoke_api_key_admin(
     id: UUID,
-    http_request: Request,
     container: AdminContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[
@@ -1708,15 +1696,11 @@ async def revoke_api_key_admin(
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         return await lifecycle.revoke_key(
             key_id=id,
             request=payload,
             skip_manage_authorization=True,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
@@ -1742,7 +1726,6 @@ async def revoke_api_key_admin(
 )
 async def suspend_api_key_admin(
     id: UUID,
-    http_request: Request,
     container: AdminContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[
@@ -1753,15 +1736,11 @@ async def suspend_api_key_admin(
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         return await lifecycle.suspend_key(
             key_id=id,
             request=payload,
             skip_manage_authorization=True,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
@@ -1783,21 +1762,16 @@ async def suspend_api_key_admin(
 )
 async def reactivate_api_key_admin(
     id: UUID,
-    http_request: Request,
     container: AdminContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         return await lifecycle.reactivate_key(
             key_id=id,
             skip_manage_authorization=True,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
@@ -1821,7 +1795,6 @@ async def reactivate_api_key_admin(
 )
 async def rotate_api_key_admin(
     id: UUID,
-    http_request: Request,
     container: AdminContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[ApiKeyRotateRequest | None, Body()] = None,
@@ -1829,15 +1802,11 @@ async def rotate_api_key_admin(
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         return await lifecycle.rotate_key(
             key_id=id,
             request=payload,
             skip_manage_authorization=True,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
@@ -1861,7 +1830,6 @@ async def rotate_api_key_admin(
 )
 async def extend_api_key_expiration_admin(
     id: UUID,
-    http_request: Request,
     payload: Annotated[
         ApiKeyExtendRequest,
         Body(examples=[{"expires_at": "2030-01-01T00:00:00Z"}]),
@@ -1872,15 +1840,11 @@ async def extend_api_key_expiration_admin(
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         return await lifecycle.extend_expiration(
             key_id=id,
             request=payload,
             skip_manage_authorization=True,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)
@@ -1903,21 +1867,16 @@ async def extend_api_key_expiration_admin(
 )
 async def purge_api_key_admin(
     id: UUID,
-    http_request: Request,
     container: AdminContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> Response:
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    ip_address, request_id, user_agent = extract_audit_context(http_request)
     try:
         await lifecycle.purge_key(
             key_id=id,
             skip_manage_authorization=True,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
     except ApiKeyValidationError as exc:
         raise_api_key_http_error(exc)

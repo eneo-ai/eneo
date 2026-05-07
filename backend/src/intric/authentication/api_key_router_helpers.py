@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
-from intric.authentication.api_key_request_context import resolve_client_ip
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.auth_models import (
     ApiKeyUsageEvent,
@@ -191,31 +190,6 @@ def paginate_keys(
         "next_cursor": cursor,
         "previous_cursor": previous_cursor,
     }
-
-
-def extract_audit_context(
-    request: Request | None,
-) -> tuple[str | None, UUID | None, str | None]:
-    if request is None:
-        return None, None, None
-
-    settings = get_settings()
-    ip_address = resolve_client_ip(
-        request,
-        trusted_proxy_count=settings.trusted_proxy_count,
-        trusted_proxy_headers=settings.trusted_proxy_headers,
-    )
-    user_agent = request.headers.get("user-agent")
-    request_id_raw = request.headers.get("x-request-id") or request.headers.get(
-        "x-correlation-id"
-    )
-    request_id: UUID | None = None
-    if request_id_raw:
-        try:
-            request_id = UUID(request_id_raw)
-        except ValueError:
-            request_id = None
-    return ip_address, request_id, user_agent
 
 
 async def build_api_key_usage_summary(
