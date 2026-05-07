@@ -9,6 +9,7 @@ from pydantic import (
     EmailStr,
     Field,
     ValidationInfo,
+    field_serializer,
     field_validator,
 )
 
@@ -356,6 +357,14 @@ class ApiKeyV2(BaseModel):
     search_match_reasons: Optional[list[ApiKeySearchMatchReason]] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("resource_permissions")
+    def _serialize_resource_permissions(
+        self, resource_permissions: ResourcePermissions | None
+    ) -> dict[str, str] | None:
+        if resource_permissions is None:
+            return None
+        return resource_permissions.model_dump(mode="json", exclude_unset=True)
 
 
 class ApiKeyV2InDB(ApiKeyV2):
