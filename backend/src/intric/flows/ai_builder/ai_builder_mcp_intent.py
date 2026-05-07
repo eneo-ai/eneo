@@ -28,6 +28,8 @@ _MCP_NAME_AFTER_MARKER_RE = re.compile(
 )
 _NO_MCP_EXTERNAL_VERB_RE = re.compile(
     r"\b(fetch(?:es|ing)?|retrieve(?:s|ing)?|call(?:s|ing)?|query(?:ing|ies)?|"
+    r"send(?:s|ing)?|deliver(?:s|ing)?|post(?:s|ing)?|skicka|skickar|skickas|"
+    r"leverera|levererar|posta|postar|"
     r"hämta|hämtar|hämtas|inhämta|inhämtar|anropa|anropar)\b",
     re.IGNORECASE,
 )
@@ -397,9 +399,11 @@ def mcp_selection_policy_feedback(
             if _claims_external_capability_without_mcp(spec):
                 return (
                     "The user selected 'continue without MCP', but the plan still "
-                    "claims it can fetch live/external data without a tool. Rewrite "
-                    "the plan so any live, current, or external value is provided as "
-                    "runtime input, or make the limitation explicit."
+                    "claims it can fetch live/external data or deliver results to "
+                    "an external system without a tool. Rewrite the plan so any "
+                    "live, current, external, or outbound delivery dependency is "
+                    "provided as runtime input, handled by an enabled integration, "
+                    "or called out as unsupported."
                 )
             return None
         return (

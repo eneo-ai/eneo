@@ -4,6 +4,9 @@ from intric.flows.ai_builder.ai_builder_discovery_decision_engine import (
     apply_discovery_decision_engine,
 )
 from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
+    EXTERNAL_DELIVERY_UNSUPPORTED_ISSUE_ID,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     comparison_architecture_is_clear as _comparison_architecture_is_clear,
 )
 from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
@@ -11,6 +14,9 @@ from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
 )
 from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     document_kind_is_vague as _document_kind_is_vague,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
+    external_delivery_requested as _external_delivery_requested,
 )
 from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     final_output_scope_is_vague as _final_output_scope_is_vague,
@@ -85,6 +91,7 @@ from intric.flows.ai_builder.ai_builder_discovery_questions import (
     document_kind_question,
     document_material_scope_question,
     docx_output_mode_question,
+    external_delivery_internal_output_question,
     final_output_mode_question,
     final_output_scope_question,
     final_pdf_type_question,
@@ -255,6 +262,22 @@ def analyze_discovery(
                     "The comparison architecture is unresolved.",
                 ),
                 suggestion=comparison_scope_question(profile.language),
+                question_level="blocking",
+            )
+        )
+
+    if _external_delivery_requested(profile) and "final_output_mode" not in answers:
+        raw_issues.append(
+            DiscoveryIssue(
+                issue_id=EXTERNAL_DELIVERY_UNSUPPORTED_ISSUE_ID,
+                category="output",
+                severity="blocking",
+                message=localized_text(
+                    profile.language,
+                    "Användaren vill skicka resultatet till ett externt API eller system, men AI Builder kan inte skapa ett utgående API-leveranssteg automatiskt i nya flöden ännu.",
+                    "The user wants to send the result to an external API or system, but AI Builder cannot automatically create an outbound API delivery step in new flows yet.",
+                ),
+                suggestion=external_delivery_internal_output_question(profile.language),
                 question_level="blocking",
             )
         )
@@ -718,6 +741,12 @@ def build_discovery_followup_text(
             language,
             "Jag behöver förstå vilken typ av slut-PDF användaren vill ha innan jag kan sammanfatta lösningen.",
             "I need to understand what kind of final PDF the user wants before I can summarize the solution.",
+        )
+    if issue.issue_id == EXTERNAL_DELIVERY_UNSUPPORTED_ISSUE_ID:
+        return localized_text(
+            language,
+            "AI Builder kan inte skapa ett utgående API-leveranssteg automatiskt ännu. Jag behöver därför välja vilket internt resultat flödet ska skapa för vidare hantering, till exempel JSON som kan användas av en integration eller ett konfigurerat HTTP POST-steg.",
+            "AI Builder cannot automatically create an outbound API delivery step yet. I need to choose which internal result the flow should create for downstream handling, such as JSON that can be used by an integration or a configured HTTP POST step.",
         )
     if issue.issue_id == "pdf_generation_mode":
         return localized_text(

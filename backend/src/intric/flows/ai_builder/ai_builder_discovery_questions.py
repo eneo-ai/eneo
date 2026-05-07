@@ -384,6 +384,24 @@ def final_output_mode_question(
     )
 
 
+def external_delivery_internal_output_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    base = final_output_mode_question(language)
+    return DiscoveryQuestionSuggestion(
+        question_id=base.question_id,
+        question=localized_text(
+            language,
+            "AI Builder kan inte skapa ett utgående API-leveranssteg automatiskt ännu. Vilket internt resultat ska flödet skapa för vidare hantering?",
+            "AI Builder cannot automatically create an outbound API delivery step yet. What internal result should the flow create for downstream handling?",
+        ),
+        options=base.options,
+        selection_mode=base.selection_mode,
+        allow_custom=base.allow_custom,
+        exposure=base.exposure,
+    )
+
+
 def docx_output_mode_question(
     language: DiscoveryLanguage,
 ) -> DiscoveryQuestionSuggestion:

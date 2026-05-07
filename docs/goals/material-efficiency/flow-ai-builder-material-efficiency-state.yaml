@@ -2604,6 +2604,76 @@ tasks:
       green_light: true
       follow_ups: []
 
+  - id: T047
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Clarify unsupported outbound API delivery intent without pretending create-flow http_post output is available."
+    inputs:
+      - "Live V5 prompt: Jag vill läsa ett dokument, extrahera viktig information och skicka resultatet till ett API."
+      - "Claude plan critique: .codex/artifacts/claude-peer-loop-t047-api-output-clarification-plan-20260507T124043Z.md"
+      - "backend/src/intric/flows/ai_builder/ai_builder_discovery.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_discovery_issue_rules.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_discovery_priority.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_discovery_questions.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_mcp_intent.py"
+    constraints:
+      - "Do not add a new structured question id or output mode."
+      - "Do not add http_post create-flow authoring."
+      - "Use final_output_mode only as the internal result-format question, with copy that explains outbound API delivery is not a native Flow output."
+      - "Cover Swedish and English outbound-delivery synonyms, not only the exact live-eval sentence."
+      - "Close the proposal-stage no-MCP external-capability verb gap for send/post/skicka/posta."
+    allowed_files:
+      - backend/src/intric/flows/ai_builder/ai_builder_discovery.py
+      - backend/src/intric/flows/ai_builder/ai_builder_discovery_issue_rules.py
+      - backend/src/intric/flows/ai_builder/ai_builder_discovery_questions.py
+      - backend/src/intric/flows/ai_builder/ai_builder_mcp_intent.py
+      - backend/tests/unittests/flows/ai_builder/test_discovery_flow.py
+      - backend/tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py
+      - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+    verify:
+      - "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py -q -k 'external or api or output_mode or mcp'"
+      - "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_discovery.py src/intric/flows/ai_builder/ai_builder_discovery_issue_rules.py src/intric/flows/ai_builder/ai_builder_discovery_questions.py src/intric/flows/ai_builder/ai_builder_mcp_intent.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py"
+      - "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_discovery.py src/intric/flows/ai_builder/ai_builder_discovery_issue_rules.py src/intric/flows/ai_builder/ai_builder_discovery_questions.py src/intric/flows/ai_builder/ai_builder_mcp_intent.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py"
+      - "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_discovery.py src/intric/flows/ai_builder/ai_builder_discovery_issue_rules.py src/intric/flows/ai_builder/ai_builder_discovery_questions.py src/intric/flows/ai_builder/ai_builder_mcp_intent.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py"
+      - "git diff --check"
+    stop_if:
+      - "The fix requires a new question id, generated client changes, or frontend translation churn."
+      - "The implementation would imply API delivery/http_post is supported by create flows."
+      - "A red test cannot be written without OR-shaped assertions."
+    receipt:
+      summary: "Unsupported outbound API delivery wording now gets a specific discovery clarification before the planner can pretend create-flow authoring supports an outbound HTTP delivery step."
+      behavior:
+        - "Discovery detects Swedish and English outbound-delivery phrases such as skicka, posta, anropa, send, POST, API, webhook, and external system."
+        - "The follow-up uses the existing final_output_mode question id as the internal-result-format owner; no new question id, output mode, or http_post authoring path was added."
+        - "The user-facing copy explains that AI Builder cannot automatically create an outbound API delivery step yet and asks which internal result the flow should produce for downstream handling."
+        - "The no-MCP proposal safety net now treats send/post/deliver/skicka/posta wording as external capability claims when paired with API/integration context."
+      verification:
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py -q -k 'external or api or output_mode or mcp'"
+          status: pass
+          output: "33 passed, 59 deselected"
+        - cmd: "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_discovery.py src/intric/flows/ai_builder/ai_builder_discovery_issue_rules.py src/intric/flows/ai_builder/ai_builder_discovery_priority.py src/intric/flows/ai_builder/ai_builder_discovery_questions.py src/intric/flows/ai_builder/ai_builder_mcp_intent.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py"
+          status: pass
+          output: "All checks passed"
+        - cmd: "uv run --directory backend pyright src/intric/flows/ai_builder/ai_builder_discovery.py src/intric/flows/ai_builder/ai_builder_discovery_issue_rules.py src/intric/flows/ai_builder/ai_builder_discovery_priority.py src/intric/flows/ai_builder/ai_builder_discovery_questions.py src/intric/flows/ai_builder/ai_builder_mcp_intent.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "uv run --directory backend ruff format --check src/intric/flows/ai_builder/ai_builder_discovery.py src/intric/flows/ai_builder/ai_builder_discovery_issue_rules.py src/intric/flows/ai_builder/ai_builder_discovery_priority.py src/intric/flows/ai_builder/ai_builder_discovery_questions.py src/intric/flows/ai_builder/ai_builder_mcp_intent.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py"
+          status: pass
+          output: "7 files already formatted"
+        - cmd: "git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_discovery.py backend/src/intric/flows/ai_builder/ai_builder_discovery_issue_rules.py backend/src/intric/flows/ai_builder/ai_builder_discovery_priority.py backend/src/intric/flows/ai_builder/ai_builder_discovery_questions.py backend/src/intric/flows/ai_builder/ai_builder_mcp_intent.py backend/tests/unittests/flows/ai_builder/test_discovery_flow.py backend/tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml"
+          status: pass
+          output: "no whitespace errors"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t047-api-output-clarification-plan-20260507T124043Z.md"
+        - ".codex/artifacts/claude-peer-loop-t047-api-output-clarification-commit-gate-20260507T125717Z.md"
+        - ".codex/artifacts/claude-peer-loop-t047-api-output-clarification-commit-gate-retry-20260507T130029Z.md"
+      green_light: false
+      peer_review_note: "Claude plan critique was addressed. Commit-gate was attempted twice and timed out without actionable findings; local deterministic verification is the commit evidence."
+      follow_ups:
+        - "If Claude CLI responsiveness returns, run a post-commit review of T047."
+
   - id: T999
     type: judge
     assignee: Judge

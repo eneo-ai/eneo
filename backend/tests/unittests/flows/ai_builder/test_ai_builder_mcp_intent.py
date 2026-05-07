@@ -463,6 +463,33 @@ def test_policy_feedback_rejects_live_data_claim_after_user_declined_mcp() -> No
     assert "fetch live/external data" in feedback
 
 
+def test_policy_feedback_rejects_outbound_api_delivery_after_user_declined_mcp() -> (
+    None
+):
+    feedback = mcp_selection_policy_feedback(
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="Fortsätt utan MCP",
+                metadata={
+                    "question_answer": {
+                        "question_id": "mcp_resource_selection",
+                        "selected_values": ["without_mcp"],
+                    }
+                },
+            )
+        ],
+        spec=_spec_with_step(
+            name="Leverera resultat",
+            instructions="Skicka den extraherade informationen till ett API via POST.",
+        ),
+        catalog=_time_catalog(),
+    )
+
+    assert feedback is not None
+    assert "live/external data" in feedback
+
+
 def test_policy_feedback_allows_runtime_input_after_user_declined_mcp() -> None:
     feedback = mcp_selection_policy_feedback(
         conversation=[

@@ -8,6 +8,7 @@ DISCOVERY_ISSUE_PRIORITY: dict[str, int] = {
     "input_material_mode": 20,
     "flow_input_architecture": 25,
     "final_output_mode": 30,
+    "external_delivery_unsupported": 30,
     "document_kind": 40,
     "document_material_scope": 50,
     "comparison_scope": 60,

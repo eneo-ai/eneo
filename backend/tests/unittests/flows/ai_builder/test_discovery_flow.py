@@ -1547,6 +1547,91 @@ class TestExtendedClarificationHints:
 
         assert "final_output_mode" not in question_ids
 
+    @pytest.mark.parametrize(
+        ("prompt", "language", "assistant_snippet", "question_snippet"),
+        [
+            (
+                "Jag vill läsa ett dokument, extrahera viktig information och skicka resultatet till ett API.",
+                "sv",
+                "kan inte skapa ett utgående API-leveranssteg automatiskt",
+                "Vilket internt resultat ska flödet skapa",
+            ),
+            (
+                "Extrahera fält från dokumentet och posta resultatet till en webhook.",
+                "sv",
+                "kan inte skapa ett utgående API-leveranssteg automatiskt",
+                "Vilket internt resultat ska flödet skapa",
+            ),
+            (
+                "Extrahera informationen och anropa ett externt API med resultatet.",
+                "sv",
+                "kan inte skapa ett utgående API-leveranssteg automatiskt",
+                "Vilket internt resultat ska flödet skapa",
+            ),
+            (
+                "Read a document, extract the important fields, and send the result to an external system.",
+                "en",
+                "cannot automatically create an outbound API delivery step",
+                "What internal result should the flow create",
+            ),
+            (
+                "Extract data from the uploaded document and POST the result to a webhook.",
+                "en",
+                "cannot automatically create an outbound API delivery step",
+                "What internal result should the flow create",
+            ),
+        ],
+    )
+    def test_external_delivery_request_uses_specific_unsupported_delivery_followup(
+        self,
+        prompt: str,
+        language: str,
+        assistant_snippet: str,
+        question_snippet: str,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=prompt,
+                metadata={"ui_language": language},
+            )
+        ]
+
+        followup = build_discovery_followup(conversation)
+
+        assert followup is not None
+        issue, question_data, assistant_text = followup
+        assert issue.issue_id == "external_delivery_unsupported"
+        assert question_data["question_id"] == "final_output_mode"
+        assert assistant_snippet in assistant_text
+        assert question_snippet in question_data["question"]
+
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "Jag vill kombinera API-data från olika dokument.",
+            "Anropa en intern API-katalog för referens.",
+            "Skicka resultatet till mig.",
+        ],
+    )
+    def test_external_delivery_followup_does_not_fire_for_near_misses(
+        self,
+        prompt: str,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=prompt,
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        issues = analyze_discovery(conversation).issues
+
+        assert {issue.issue_id for issue in issues}.isdisjoint(
+            {"external_delivery_unsupported"}
+        )
+
     def test_uploaded_word_template_fill_output_does_not_reask_output_mode(
         self,
     ) -> None:

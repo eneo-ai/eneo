@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+from typing import Final
+
 from intric.flows.ai_builder.ai_builder_discovery_decision_engine import (
     implies_single_case,
     implies_single_primary_document,
@@ -19,6 +22,8 @@ from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     detect_planner_pattern_signals,
 )
+
+EXTERNAL_DELIVERY_UNSUPPORTED_ISSUE_ID: Final = "external_delivery_unsupported"
 
 _DOCUMENT_PACKAGE_PHRASES: tuple[str, ...] = (
     "dokumentpaket",
@@ -45,6 +50,29 @@ def question_category(question_id: str) -> str:
         "final_output_scope": "output",
         "runtime_metadata_fields": "input",
     }.get(question_id, "output")
+
+
+_EXTERNAL_DELIVERY_ACTION_RE = re.compile(
+    r"(?<![\w-])(?:"
+    r"anropa|anropar|skicka|skickar|posta|postar|"
+    r"send|sends|deliver|delivers|post|posts"
+    r")(?![\w-])",
+    re.IGNORECASE,
+)
+_EXTERNAL_DELIVERY_DESTINATION_RE = re.compile(
+    r"(?<![\w-])(?:api|webhook)(?![\w-])|"
+    r"\bexternal\s+(?:system|api|integration)\b|"
+    r"\bexternt\s+(?:system|api)\b|"
+    r"\bextern\s+integration\b",
+    re.IGNORECASE,
+)
+
+
+def external_delivery_requested(profile: DiscoveryProfile) -> bool:
+    return bool(
+        _EXTERNAL_DELIVERY_ACTION_RE.search(profile.text)
+        and _EXTERNAL_DELIVERY_DESTINATION_RE.search(profile.text)
+    )
 
 
 def latest_pending_question_id(
@@ -110,6 +138,8 @@ def looks_like_output_is_vague(profile: DiscoveryProfile) -> bool:
         return False
     text = profile.text
     if profile.output_intent.terminal_output is not None:
+        return False
+    if external_delivery_requested(profile):
         return False
     if mentions_output_change(text):
         return False
