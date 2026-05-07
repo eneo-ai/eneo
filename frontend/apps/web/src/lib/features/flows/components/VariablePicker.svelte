@@ -4,7 +4,10 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { isFlowFormFieldNameUsableAsVariable } from "$lib/features/flows/flowFormSchema";
+  import {
+    getFlowFormFieldVariableExpression,
+    isFlowFormFieldNameUsableAsVariable
+  } from "$lib/features/flows/flowFormSchema";
   import { getChipClasses } from "$lib/features/flows/flowVariableTokens";
 
   let {
@@ -112,7 +115,7 @@
           {#if matchesSearch(field.name)}
             <DropdownMenu.Item
               class="!justify-start !px-3 !py-1.5 !text-sm"
-              onclick={() => insert(field.name)}
+              onclick={() => insert(getFlowFormFieldVariableExpression(field.name))}
             >
               <span class="flex items-center gap-2">
                 <span class={getChipClasses("field")}>
