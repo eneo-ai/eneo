@@ -45,7 +45,7 @@ const RESERVED_RUNTIME_VARIABLE_NAMES = new Set([
   "indata_filer"
 ]);
 const FORM_FIELD_NAMESPACE_HEADS = new Set(["flow", "flow_input", "step_input"]);
-const PRIMARY_FLOW_INPUT_KEYS = new Set([
+export const PRIMARY_FLOW_INPUT_KEYS = new Set([
   "file_ids",
   "json",
   "structured",

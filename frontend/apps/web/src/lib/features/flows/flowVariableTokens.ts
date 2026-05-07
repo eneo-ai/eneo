@@ -1,4 +1,4 @@
-import { isFlowFormFieldBareAliasSafe } from "./flowFormSchema";
+import { isFlowFormFieldBareAliasSafe, PRIMARY_FLOW_INPUT_KEYS } from "./flowFormSchema";
 
 const TEMPLATE_TOKEN_PATTERN = /\{\{\s*([^{}]+)\s*\}\}/g;
 const STEP_ORDER_TOKEN_PATTERN = /^step_(\d+)(\..+)?$/;
@@ -10,13 +10,6 @@ const SYSTEM_VARIABLE_NAMES = new Set([
   "indata_json",
   "indata_filer"
 ]);
-const TECHNICAL_TOKEN_PATTERNS = [
-  /^flow_input\./,
-  /^flow\.input\./,
-  /^step_input\./,
-  /^step_\d+(\..+)?$/
-];
-
 export type StepOrderRemapResult = {
   text: string;
   changed: boolean;
@@ -116,13 +109,11 @@ export function remapStepOrderTemplateTokens(
 
 export function collectUnresolvedTemplateTokens(
   text: string,
-  availableFriendlyTokens: Set<string>
+  context: VariableClassificationContext
 ): string[] {
   const unresolved = new Set<string>();
   for (const token of extractTemplateTokens(text)) {
-    if (availableFriendlyTokens.has(token)) continue;
-    if (TECHNICAL_TOKEN_PATTERNS.some((pattern) => pattern.test(token))) continue;
-    unresolved.add(token);
+    if (classifyVariable(token, context) === "unknown") unresolved.add(token);
   }
   return [...unresolved];
 }
@@ -190,8 +181,13 @@ export function classifyVariable(
   const flowInputFieldName = token.startsWith("flow_input.")
     ? token.slice("flow_input.".length)
     : null;
-  if (flowInputFieldName !== null && context.knownFieldNames.has(flowInputFieldName)) {
-    return "field";
+  if (flowInputFieldName !== null) {
+    if (context.knownFieldNames.has(flowInputFieldName)) return "field";
+    if (PRIMARY_FLOW_INPUT_KEYS.has(flowInputFieldName.toLowerCase())) return "technical";
+    // Multi-segment paths are JSON-shaped at runtime; the editor cannot lint them without a schema.
+    if (flowInputFieldName.includes(".")) return "technical";
+    if (context.knownFieldNames.size > 0) return "unknown";
+    return "technical";
   }
 
   // 2. System variables
@@ -218,9 +214,8 @@ export function classifyVariable(
   const stepMatch = /^step_(\d+)(\.|$)/.exec(token);
   if (stepMatch) return "step";
 
-  // 7. Technical flow_input / step_input references
+  // 7. Technical flow / step_input references
   if (
-    token.startsWith("flow_input.") ||
     token.startsWith("flow.input.") ||
     token.startsWith("step_input.")
   )

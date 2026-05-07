@@ -2547,6 +2547,63 @@ tasks:
         - "Consider generated shared variable-policy metadata only if frontend/backend deny-list drift becomes recurring; current owner-plus-mirror is simpler."
         - "Audit large AI Builder modules for ownership-based extraction opportunities, but split only when the new module has a clear reason to change."
 
+  - id: T046
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Catch obvious misspelled namespaced form-field prompt tokens without breaking advanced flow_input JSON paths."
+    inputs:
+      - "T045 follow-up for {{flow_input.datm}}-style prompt typo UX."
+      - "Claude plan review artifact: .codex/artifacts/claude-peer-loop-t046-flow-input-typo-ux-plan-20260507T122108Z.md"
+      - "frontend/apps/web/src/lib/features/flows/flowVariableTokens.ts"
+      - "frontend/apps/web/src/lib/features/flows/flowVariableTokens.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowPromptEditor.svelte"
+      - "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts"
+    constraints:
+      - "Use classifyVariable as the single prompt-token validity source so chip color and unresolved count agree."
+      - "Reuse the frontend flow input primary-key policy from flowFormSchema.ts; do not create another whitelist."
+      - "Do not use fuzzy/similarity matching."
+      - "Do not flag multi-segment JSON-shaped paths such as {{flow_input.customer.id}}."
+      - "Do not touch backend runtime behavior in this slice."
+    expected_output:
+      - "A red frontend test proves {{flow_input.datm}} is unresolved/unknown when datum is a declared field."
+      - "Primary runtime keys and multi-segment JSON-shaped flow_input paths remain accepted."
+      - "FlowPromptEditor unresolved count uses the typed classification context."
+      - "Focused frontend verification and Claude commit-gate review."
+    receipt:
+      result: done
+      summary: "Prompt unresolved-variable detection now uses the same classifier as variable chip coloring, so obvious misspelled namespaced form-field tokens such as {{flow_input.datm}} are flagged without marking primary flow_input keys or JSON-shaped flow_input paths invalid."
+      commit: "d0d07679 Improve flow prompt variable typo feedback"
+      changed_files:
+        - frontend/apps/web/src/lib/features/flows/components/FlowPromptEditor.svelte
+        - frontend/apps/web/src/lib/features/flows/flowFormSchema.ts
+        - frontend/apps/web/src/lib/features/flows/flowVariableTokens.ts
+        - frontend/apps/web/src/lib/features/flows/flowVariableTokens.test.ts
+        - docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml
+      behavior:
+        - "collectUnresolvedTemplateTokens now takes VariableClassificationContext and projects classifyVariable(...)=unknown."
+        - "FlowPromptEditor unresolved counts and token chip colors now share one policy."
+        - "PRIMARY_FLOW_INPUT_KEYS is exported from flowFormSchema.ts and reused by flowVariableTokens.ts instead of being redefined."
+        - "Single-segment unknown flow_input names are flagged only when form fields exist; multi-segment JSON-shaped flow_input paths and primary keys remain technical."
+        - "Backend runtime remains the safety net: variable_resolver.py raises BadRequestException for missing flow_input keys instead of silently substituting empty values."
+      verification:
+        - cmd: "bun test src/lib/features/flows/flowVariableTokens.test.ts src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/FlowEditor.test.ts"
+          status: pass
+          output: "69 pass"
+        - cmd: "cd frontend/apps/web && bun run check"
+          status: pass
+          output: "0 errors, 7 pre-existing Svelte warnings"
+        - cmd: "git diff --check -- frontend/apps/web/src/lib/features/flows/components/FlowPromptEditor.svelte frontend/apps/web/src/lib/features/flows/flowFormSchema.ts frontend/apps/web/src/lib/features/flows/flowVariableTokens.ts frontend/apps/web/src/lib/features/flows/flowVariableTokens.test.ts docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml"
+          status: pass
+          output: "no whitespace errors"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t046-flow-input-typo-ux-plan-20260507T122108Z.md"
+        - ".codex/artifacts/claude-peer-loop-t046-flow-input-typo-ux-implementation-20260507T122625Z.md"
+        - ".codex/artifacts/claude-peer-loop-t046-flow-input-typo-ux-implementation-review-20260507T122702Z.md"
+      green_light: true
+      follow_ups: []
+
   - id: T999
     type: judge
     assignee: Judge

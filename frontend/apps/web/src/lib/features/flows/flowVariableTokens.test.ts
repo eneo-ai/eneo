@@ -86,17 +86,88 @@ describe("remapStepOrderTemplateTokens", () => {
 });
 
 describe("collectUnresolvedTemplateTokens", () => {
+  const context: VariableClassificationContext = {
+    knownFieldNames: new Set(["datum"]),
+    knownStepNames: new Map([[1, "Sammanfattning"]]),
+    stepOutputTypes: new Map([[1, "text"]]),
+    transcriptionEnabled: true,
+    currentStepOrder: 2
+  };
+
   it("accepts friendly and technical tokens, flags unknown aliases", () => {
     const input =
       "{{Namn på brukare}} {{flow_input.text}} {{step_1.output.text}} {{okänd_variabel}}";
-    const unresolved = collectUnresolvedTemplateTokens(input, new Set(["Namn på brukare"]));
+    const unresolved = collectUnresolvedTemplateTokens(input, {
+      ...context,
+      knownFieldNames: new Set(["Namn på brukare"])
+    });
     expect(unresolved).toEqual(["okänd_variabel"]);
   });
 
   it("treats step_input.* as a resolved technical token on document-input steps", () => {
     const input = "{{step_input.text}} och {{step_input.file_ids}}";
-    const unresolved = collectUnresolvedTemplateTokens(input, new Set());
+    const unresolved = collectUnresolvedTemplateTokens(input, context);
     expect(unresolved).toEqual([]);
+  });
+
+  it("flags misspelled single-segment flow_input form field references", () => {
+    const input = "{{flow_input.datm}}";
+    const unresolved = collectUnresolvedTemplateTokens(input, context);
+    expect(unresolved).toEqual(["flow_input.datm"]);
+    expect(classifyVariable("flow_input.datm", context)).toBe("unknown");
+  });
+
+  it("keeps primary flow_input keys and JSON-shaped paths resolved", () => {
+    const input =
+      "{{flow_input.text}} {{flow_input.file_ids}} {{flow_input.customer.id}} {{flow_input.datm.foo}}";
+    const unresolved = collectUnresolvedTemplateTokens(input, context);
+    expect(unresolved).toEqual([]);
+    expect(classifyVariable("flow_input.text", context)).toBe("technical");
+    expect(classifyVariable("flow_input.customer.id", context)).toBe("technical");
+    expect(classifyVariable("flow_input.datm.foo", context)).toBe("technical");
+  });
+
+  it("flags bare or empty flow_input references as unresolved", () => {
+    const unresolved = collectUnresolvedTemplateTokens("{{flow_input}} {{flow_input.}}", context);
+
+    expect(unresolved).toEqual(["flow_input", "flow_input."]);
+    expect(classifyVariable("flow_input", context)).toBe("unknown");
+    expect(classifyVariable("flow_input.", context)).toBe("unknown");
+  });
+
+  it("does not apply form-field typo detection to step_input paths", () => {
+    const unresolved = collectUnresolvedTemplateTokens("{{step_input.datm}}", context);
+
+    expect(unresolved).toEqual([]);
+    expect(classifyVariable("step_input.datm", context)).toBe("technical");
+  });
+
+  it("does not flag unknown single-segment flow_input references when no form fields are declared", () => {
+    const input = "{{flow_input.unknown}}";
+    const unresolved = collectUnresolvedTemplateTokens(input, {
+      ...context,
+      knownFieldNames: new Set()
+    });
+    expect(unresolved).toEqual([]);
+  });
+
+  it("keeps chip classification and unresolved collection coherent", () => {
+    const tokens = [
+      "flow_input.datm",
+      "flow_input.datum",
+      "flow_input.text",
+      "flow_input.customer.id",
+      "flow_input",
+      "flow_input.",
+      "step_input.text",
+      "step_1.output.text",
+      "okänd_variabel"
+    ];
+
+    for (const token of tokens) {
+      const unresolved = collectUnresolvedTemplateTokens(`{{${token}}}`, context);
+      expect(unresolved.length > 0).toBe(classifyVariable(token, context) === "unknown");
+    }
   });
 });
 
@@ -168,6 +239,16 @@ describe("classifyVariable", () => {
   it("classifies non-field flow_input references as 'technical'", () => {
     expect(classifyVariable("flow_input.text", baseContext)).toBe("technical");
     expect(classifyVariable("flow.input.text", baseContext)).toBe("technical");
+  });
+
+  it("classifies unknown single-segment flow_input references as unknown when form fields exist", () => {
+    const context = {
+      ...baseContext,
+      knownFieldNames: new Set(["datum"])
+    };
+
+    expect(classifyVariable("flow_input.datm", context)).toBe("unknown");
+    expect(classifyVariable("flow_input.datm.extra", context)).toBe("technical");
   });
 
   it("classifies step_input.* references as 'technical'", () => {

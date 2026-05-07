@@ -279,13 +279,7 @@
 
   // Unresolved count
   const unresolvedCount = $derived(
-    collectUnresolvedTemplateTokens(
-      currentEditorValue,
-      new Set([
-        ...availableVariables.map((v) => v.token),
-        ...classificationContext.knownFieldNames
-      ])
-    ).length
+    collectUnresolvedTemplateTokens(currentEditorValue, classificationContext).length
   );
   const invalidStructuredReferences = $derived(
     collectInvalidStructuredOutputReferences(currentEditorValue, steps, currentStepOrder)
