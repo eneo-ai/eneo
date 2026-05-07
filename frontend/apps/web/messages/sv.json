@@ -2401,6 +2401,8 @@
   "api_keys_of_enabled": "{count} av 8 aktiverade",
   "api_keys_resource_access": "Resursåtkomst",
   "api_keys_resource_access_desc": "Välj åtkomstnivå för varje resurstyp",
+  "api_keys_scope_resource_access_link_tenant": "Resursåtkomst gäller inom organisationsomfånget du valde ovan.",
+  "api_keys_scope_resource_access_link_space": "Resursåtkomst gäller bara inom den valda ytan.",
   "api_keys_public_resource_access": "Resursåtkomst för publik nyckel",
   "api_keys_public_resource_access_desc": "Välj vilka resurser den webbsäkra nyckeln får läsa",
   "api_keys_resource_assistants": "Assistenter",

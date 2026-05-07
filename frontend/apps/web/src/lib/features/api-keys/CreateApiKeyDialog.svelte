@@ -162,9 +162,7 @@
   let jobsPermission = $state<ResourcePermission>("read");
   let promptsPermission = $state<ResourcePermission>("read");
 
-  const usesResourcePermissions = $derived(
-    keyType === "pk_" || (keyType === "sk_" && scopeAllowsFineGrained)
-  );
+  const usesResourcePermissions = $derived(scopeAllowsFineGrained);
 
   // Step 3: Security settings
   let allowedOrigins = $state<string[]>([]);
@@ -694,11 +692,10 @@
 
     errorMessage = null;
 
-    // Tenant/space sk_ keys and all pk_ keys persist per-resource permissions.
-    // Narrow sk_ scopes rely on the flat `permission` field because they can
-    // only reach one resource.
+    // Tenant/space keys persist per-resource permissions. Assistant/app scopes
+    // rely on the flat `permission` field because the scope already bounds access.
     const editScopeAllowsFineGrained =
-      apiKey.key_type === "pk_" || apiKey.scope_type === "tenant" || apiKey.scope_type === "space";
+      apiKey.scope_type === "tenant" || apiKey.scope_type === "space";
     const nextResourcePermissions = editScopeAllowsFineGrained
       ? buildResourcePermissionsRequest()
       : null;
@@ -909,7 +906,7 @@
   }
 
   function shouldSendResourcePermissions() {
-    return keyType === "pk_" || (keyType === "sk_" && scopeAllowsFineGrained);
+    return scopeAllowsFineGrained;
   }
 
   // Permission level display config — uses eneo's semantic state tokens
@@ -1508,6 +1505,16 @@
                     {/if}
 
                     {#if usesResourcePermissions}
+                      <div
+                        class="border-default/70 bg-subtle/50 text-muted flex items-start gap-2 rounded-lg border px-3 py-2 text-xs"
+                      >
+                        <Info class="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        <span>
+                          {scopeType === "tenant"
+                            ? m.api_keys_scope_resource_access_link_tenant()
+                            : m.api_keys_scope_resource_access_link_space()}
+                        </span>
+                      </div>
                       <fieldset>
                         <legend class="sr-only">
                           {keyType === "pk_"

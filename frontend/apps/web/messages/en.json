@@ -2365,6 +2365,8 @@
   "api_keys_of_enabled": "{count} of 8 enabled",
   "api_keys_resource_access": "Resource access",
   "api_keys_resource_access_desc": "Choose the access level for each resource type",
+  "api_keys_scope_resource_access_link_tenant": "Resource access applies across the tenant scope selected above.",
+  "api_keys_scope_resource_access_link_space": "Resource access applies only inside the selected space.",
   "api_keys_public_resource_access": "Public key resource access",
   "api_keys_public_resource_access_desc": "Choose which resources this browser-safe key can read",
   "api_keys_resource_assistants": "Assistants",
