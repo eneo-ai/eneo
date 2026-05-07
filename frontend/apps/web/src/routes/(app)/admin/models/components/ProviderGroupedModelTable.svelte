@@ -9,8 +9,8 @@
     - passing `completionModels` through to ModelNameCell + ModelActions
       (used by the migrate flow, which is completion-only)
 
-  All other concerns — grouping, status badges, "Add model" CTA, empty
-  state — are identical and live here.
+  All other concerns — grouping, "Add model" CTA, empty state — are
+  identical and live here.
 -->
 
 <script lang="ts" generics="M extends CompletionModel | EmbeddingModel | TranscriptionModel">
@@ -40,7 +40,6 @@
   import ProviderActions from "../ProviderActions.svelte";
   import ProviderDialog from "../ProviderDialog.svelte";
   import ProviderGlyph from "./ProviderGlyph.svelte";
-  import ProviderStatusBadge from "./ProviderStatusBadge.svelte";
   import PageEmptyState from "./PageEmptyState.svelte";
   import ProviderEmptyState from "./ProviderEmptyState.svelte";
   import { AddWizard } from "../AddWizard/index.js";
@@ -269,7 +268,6 @@
                     : m.provider_model_count_other({ count: modelCount })}
                 </span>
                 <span class="bg-border-dimmer h-4 w-px"></span>
-                <ProviderStatusBadge {provider} />
                 <button
                   class="text-muted hover:bg-hover-dimmer hover:text-primary focus:ring-accent-default flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors duration-150 focus:ring-1 focus:outline-none"
                   on:click|stopPropagation={() => handleAddModelToProvider(provider.id)}

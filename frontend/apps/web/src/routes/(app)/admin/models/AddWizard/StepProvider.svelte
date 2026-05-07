@@ -27,7 +27,6 @@
   import { Button } from "$lib/components/ui/button/index.js";
 
   import ProviderGlyph from "../components/ProviderGlyph.svelte";
-  import ProviderStatusBadge from "../components/ProviderStatusBadge.svelte";
   import {
     formatProviderLabel,
     listProviderOptions,
@@ -152,7 +151,6 @@
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-2">
                     <span class="text-foreground truncate font-medium">{provider.name}</span>
-                    <ProviderStatusBadge {provider} />
                   </div>
                 </div>
               </button>

@@ -322,7 +322,7 @@
         {/if}
       </div>
 
-      <Dialog.Footer class="border-border border-t px-6 py-4">
+      <div class="border-border flex justify-end gap-2 border-t px-6 py-4">
         <Button type="button" variant="outline" onclick={handleCancel}>{m.cancel()}</Button>
         <Button type="submit" disabled={isSubmitting || capabilitiesLoading}>
           {#if isSubmitting}
@@ -332,7 +332,7 @@
             {m.save_changes()}
           {/if}
         </Button>
-      </Dialog.Footer>
+      </div>
     </form>
   </Dialog.Content>
 </Dialog.Root>

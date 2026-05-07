@@ -286,7 +286,7 @@
       step="0.000001"
       min="0"
       bind:value={draft.costPerMinuteStr}
-      placeholder="0.006"
+      placeholder={m.cost_input_placeholder()}
     />
     <Field.Description>{m.cost_currency_hint()}</Field.Description>
   </Field.Field>
@@ -303,7 +303,7 @@
         step="0.01"
         min="0"
         bind:value={draft.inputCostPerTokenStr}
-        placeholder="0.15"
+        placeholder={m.cost_input_placeholder()}
       />
       <Field.Description>{m.cost_currency_hint()}</Field.Description>
     </Field.Field>
@@ -318,7 +318,7 @@
         step="0.01"
         min="0"
         bind:value={draft.outputCostPerTokenStr}
-        placeholder="0.60"
+        placeholder={m.cost_input_placeholder()}
       />
     </Field.Field>
   </div>

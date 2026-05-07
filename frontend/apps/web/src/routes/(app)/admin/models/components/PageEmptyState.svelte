@@ -6,7 +6,19 @@
   import { Plus, Cpu, Sparkles } from "lucide-svelte";
   import { fly, fade } from "svelte/transition";
 
-  let { onAddProvider }: { onAddProvider: () => void } = $props();
+  let {
+    onAddProvider,
+    title,
+    description,
+    ctaLabel,
+    helper
+  }: {
+    onAddProvider: () => void;
+    title?: string;
+    description?: string;
+    ctaLabel?: string;
+    helper?: string;
+  } = $props();
 </script>
 
 <div class="flex flex-col items-center justify-center px-8 py-20" in:fade={{ duration: 300 }}>
@@ -36,10 +48,10 @@
     in:fly={{ y: 10, duration: 400, delay: 200 }}
   >
     <h3 class="text-primary text-lg font-semibold">
-      {m.no_providers_title()}
+      {title ?? m.no_providers_title()}
     </h3>
     <p class="text-muted/80 text-sm leading-relaxed">
-      {m.no_providers_description()}
+      {description ?? m.no_providers_description()}
     </p>
   </div>
 
@@ -47,14 +59,16 @@
   <div class="mt-8" in:fly={{ y: 10, duration: 400, delay: 300 }}>
     <Button onclick={onAddProvider} class="px-6">
       <Plus />
-      {m.add_first_provider()}
+      {ctaLabel ?? m.add_first_provider()}
     </Button>
   </div>
 
-  <p
-    class="text-muted/50 mt-6 max-w-xs text-center text-[11px] tracking-wide"
-    in:fly={{ y: 10, duration: 400, delay: 400 }}
-  >
-    {m.no_providers_helper()}
-  </p>
+  {#if helper !== ""}
+    <p
+      class="text-muted/50 mt-6 max-w-xs text-center text-[11px] tracking-wide"
+      in:fly={{ y: 10, duration: 400, delay: 400 }}
+    >
+      {helper ?? m.no_providers_helper()}
+    </p>
+  {/if}
 </div>
