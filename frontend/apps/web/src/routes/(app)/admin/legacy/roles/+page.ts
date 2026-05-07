@@ -8,14 +8,15 @@ export const load = async (event) => {
   event.depends("admin:roles:load");
 
   const { intric } = await event.parent();
-  const [roles, permissions] = await Promise.all([
+  const [roles, permissions, templates] = await Promise.all([
     intric.roles.list(),
-    intric.roles.listPermissions()
+    intric.roles.listPermissions(),
+    intric.roles.listTemplates()
   ]);
 
   return {
-    customRoles: roles.roles,
-    defaultRoles: roles.predefined_roles,
-    permissions: permissions.filter((permission) => permission.name !== "flows")
+    allRoles: [...roles.roles, ...roles.predefined_roles],
+    permissions,
+    templates
   };
 };

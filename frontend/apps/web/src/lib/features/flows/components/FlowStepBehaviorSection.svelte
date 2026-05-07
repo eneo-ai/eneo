@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { FlowStep } from "@intric/intric-js";
+  import type { CompletionModel, FlowStep, PromptSparse } from "@intric/intric-js";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -13,8 +13,11 @@
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import FlowPromptEditor from "./FlowPromptEditor.svelte";
+  import type { FlowFormSchemaMetadata } from "$lib/features/flows/flowFormSchema";
+  import type { LoadedAssistant } from "./FlowStepAssistantState.svelte";
+  import type { FlowStepUxCopy } from "$lib/features/flows/flowStepUxCopy";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
-  import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
+  import { supportsBehaviorPresets } from "$lib/features/ai-models/ModelKwargCapabilities.js";
   import { buildNextFlowPrompt } from "$lib/features/flows/flowPromptDraft";
 
   let {
@@ -43,18 +46,18 @@
     isPublished: boolean;
     isAdvancedMode: boolean;
     isTranscribeOnly: boolean;
-    assistant: any | null;
+    assistant: LoadedAssistant | null;
     assistantLoading: boolean;
-    availableModels: any[];
+    availableModels: CompletionModel[];
     steps: FlowStep[];
-    formSchema: any;
+    formSchema: FlowFormSchemaMetadata | undefined;
     transcriptionEnabled: boolean;
     hasAudioInputSteps: boolean;
-    stepUxCopy: any;
+    stepUxCopy: FlowStepUxCopy;
     instructionText: string;
     canRevealInputTemplate: boolean;
     showInputTemplate: boolean;
-    loadPromptVersions: (assistantId: string) => Promise<any[]>;
+    loadPromptVersions: (assistantId: string) => Promise<PromptSparse[]>;
     onAssistantFieldChange?: (detail: { field: string; value: unknown }) => void;
     onInstructionDraft?: (detail: { value: string }) => void;
     onInstructionCommit?: (detail: { value: string }) => void;
@@ -106,7 +109,7 @@
       <SelectBehaviourV2
         bind:kwArgs={currentAssistant.completion_model_kwargs}
         selectedModel={currentAssistant.completion_model}
-        isDisabled={!supportsTemperature(currentAssistant.completion_model?.name)}
+        isDisabled={!supportsBehaviorPresets(currentAssistant.completion_model)}
         on:change={() =>
           updateAssistantField("completion_model_kwargs", currentAssistant.completion_model_kwargs)}
       />

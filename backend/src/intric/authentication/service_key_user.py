@@ -26,7 +26,6 @@ def build_service_key_user(*, key: ApiKeyV2InDB, tenant: TenantInDB) -> UserInDB
         tenant=tenant,
         active_api_key=key,
         roles=[],
-        predefined_roles=[],
         used_tokens=0,
         email_verified=True,
         is_active=True,

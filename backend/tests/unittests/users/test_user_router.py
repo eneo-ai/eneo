@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 from intric.main.models import ModelId
-from intric.predefined_roles.predefined_role import PredefinedRoleInDB
+from intric.roles.role import RoleInDB
 from intric.roles.permissions import Permission
 from intric.users import user_router
 from intric.users.user import PropUserInvite, PropUserUpdate, UserState
@@ -36,7 +36,7 @@ async def test_invite_user_passes_tenant_to_service():
     audit_service.log_async.assert_awaited()
 
 
-async def test_invite_user_fetches_predefined_role_details():
+async def test_invite_user_fetches_role_details():
     user_service = AsyncMock()
     audit_service = AsyncMock()
     session = AsyncMock()
@@ -56,7 +56,7 @@ async def test_invite_user_fetches_predefined_role_details():
     )
 
     user_invite = PropUserInvite(
-        email="invitee@test.com", predefined_role=ModelId(id=role_id)
+        email="invitee@test.com", role=ModelId(id=role_id)
     )
 
     result = await user_router.invite_user(user_invite=user_invite, container=container)
@@ -71,17 +71,18 @@ async def test_update_user_maps_prop_update_to_user_update_public():
     audit_service = AsyncMock()
 
     role_id = uuid4()
-    predefined_role = PredefinedRoleInDB(
+    role_in_db = RoleInDB(
         id=role_id,
         name="Editor",
         permissions=[Permission.ADMIN],
+        tenant_id=TEST_USER.tenant_id,
     )
 
     old_user = TEST_USER
     updated_user = TEST_USER.model_copy(
         update={
             "state": UserState.INACTIVE,
-            "predefined_roles": [predefined_role],
+            "roles": [role_in_db],
         }
     )
 
@@ -95,7 +96,7 @@ async def test_update_user_maps_prop_update_to_user_update_public():
     )
 
     user_update = PropUserUpdate(
-        predefined_role=ModelId(id=role_id),
+        role=ModelId(id=role_id),
         state=UserState.INACTIVE,
     )
 
@@ -110,5 +111,5 @@ async def test_update_user_maps_prop_update_to_user_update_public():
     _, kwargs = user_service.update_user.call_args
     update_public = kwargs["user_update_public"]
     assert update_public.state == UserState.INACTIVE
-    assert update_public.predefined_roles == [ModelId(id=role_id)]
+    assert update_public.roles == [ModelId(id=role_id)]
     audit_service.log_async.assert_awaited()

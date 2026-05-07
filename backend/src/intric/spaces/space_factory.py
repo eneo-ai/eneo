@@ -10,6 +10,7 @@ from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.group_chats_table import GroupChatsTable
 from intric.database.tables.service_table import Services
 from intric.database.tables.spaces_table import Spaces
+from intric.database.tables.users_table import Users
 from intric.group_chat.domain.factories.group_chat_factory import GroupChatFactory
 from intric.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
@@ -179,16 +180,16 @@ class SpaceFactory:
             if space_user.user.deleted_at is None
         }
 
-        # Build group members from database
         group_members: dict[UUID, SpaceGroupMember] = {}
         for space_group in getattr(space_in_db, "group_members", []) or []:
             user_group = space_group.user_group
             if user_group:
+                users = cast(list[Users], user_group.users or [])
                 group_members[user_group.id] = SpaceGroupMember(
                     id=user_group.id,
                     name=user_group.name,
                     role=cast(SpaceRoleValue, space_group.role),
-                    user_count=len(user_group.users) if user_group.users else 0,
+                    user_count=len(users),
                 )
 
         space_collections: list[Collection] = []

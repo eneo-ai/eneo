@@ -16,8 +16,8 @@ export class UserList {
   totalCount = $state(0);
   filteredUsers = $state<UserSparse[]>([]);
 
-  constructor(intric = getIntric()) {
-    this.#intric = intric;
+  constructor(options?: { intric?: Intric }) {
+    this.#intric = options?.intric ?? getIntric();
     onMount(this.loadUsers);
   }
 

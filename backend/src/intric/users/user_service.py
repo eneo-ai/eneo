@@ -8,7 +8,6 @@ import jwt
 import sqlalchemy as sa
 from starlette.requests import Request
 
-from intric.allowed_origins.allowed_origin_repo import AllowedOriginRepository
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
@@ -22,7 +21,6 @@ from intric.authentication.api_key_resolver import (
     ApiKeyValidationError,
     check_resource_permission,
 )
-from intric.authentication.api_key_router_helpers import extract_audit_context
 from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.auth_models import (
     METHOD_PERMISSION_MAP,
@@ -60,8 +58,7 @@ from intric.main.exceptions import (
 )
 from intric.main.logging import get_logger
 from intric.main.models import ModelId
-from intric.predefined_roles.predefined_role import PredefinedRoleName
-from intric.predefined_roles.predefined_roles_repo import PredefinedRolesRepository
+from intric.main.request_context import get_request_context
 from intric.roles.permissions import Permission
 from intric.settings.settings import SettingsUpsert
 from intric.settings.settings_repo import SettingsRepository
@@ -191,13 +188,11 @@ class UserService:
         auth_service: AuthService,
         api_key_auth_resolver: ApiKeyAuthResolver,
         api_key_v2_repo: ApiKeysV2Repository,
-        allowed_origin_repo: AllowedOriginRepository,
         audit_service: Optional[AuditService],
         settings_repo: SettingsRepository,
         tenant_repo: TenantRepository,
         info_blob_repo: InfoBlobRepository,
         space_service: Optional["SpaceService"] = None,
-        predefined_roles_repo: Optional[PredefinedRolesRepository] = None,
         api_key_rate_limiter: Optional[ApiKeyRateLimiter] = None,
         feature_flag_service: Optional["FeatureFlagService"] = None,
         session: Optional["AsyncSession"] = None,
@@ -207,12 +202,10 @@ class UserService:
         self.auth_service = auth_service
         self.api_key_auth_resolver = api_key_auth_resolver
         self.api_key_v2_repo = api_key_v2_repo
-        self.allowed_origin_repo = allowed_origin_repo
         self.space_service = space_service
         self.audit_service = audit_service
         self.settings_repo = settings_repo
         self.tenant_repo = tenant_repo
-        self.predefined_roles_repo = predefined_roles_repo
         self.info_blob_repo = info_blob_repo
         self.api_key_rate_limiter = api_key_rate_limiter
         self.feature_flag_service = feature_flag_service
@@ -517,34 +510,38 @@ class UserService:
                     "System configuration error: Tenant does not exist"
                 )
 
-            # The hack continues
-            if self.predefined_roles_repo is None:
-                logger.error(
-                    "Predefined roles repository is not configured",
-                    extra={"correlation_id": correlation_id},
+            # Assign default role if configured on tenant
+            roles = []
+            if tenant.default_role_id:
+                roles = [ModelId(id=tenant.default_role_id)]
+                logger.info(
+                    "OIDC: Assigning default role to new user",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "default_role_id": str(tenant.default_role_id),
+                    },
                 )
-                raise AuthenticationException(
-                    "System configuration error: Predefined roles repository not configured"
-                )
-
-            user_role = await self.predefined_roles_repo.get_predefined_role_by_name(
-                PredefinedRoleName.USER
-            )
-
-            if user_role is None:
-                logger.error(
-                    "Predefined USER role not found in database",
-                    extra={"correlation_id": correlation_id},
-                )
-                raise AuthenticationException(
-                    "System configuration error: User role not found"
+            else:
+                # WARNING (not INFO): a role-less user cannot create
+                # shared spaces, use assistants, apps, or any other
+                # permission-gated feature. This almost always indicates
+                # a misconfigured tenant or a seeder failure — operators
+                # should see it in log alerting.
+                logger.warning(
+                    "OIDC: No default role configured; creating user "
+                    "without role — user will have zero permissions "
+                    "until an admin assigns roles",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "tenant_id": str(tenant_id),
+                    },
                 )
 
             new_user = UserAdd(
                 email=email,
                 username=username.lower(),
                 tenant_id=tenant_id,
-                predefined_roles=[ModelId(id=user_role.id)],
+                roles=roles,
                 state=UserState.ACTIVE,
             )
 
@@ -640,8 +637,26 @@ class UserService:
             salt = None
             hashed_pass = None
 
+        payload = new_user.model_dump(exclude={"password"})
+
+        # Apply tenant default role when caller didn't specify any.
+        # Mirrors the federated-login path so sysadmin-created users can
+        # operate on shared spaces out of the box.
+        if not payload.get("roles"):
+            if tenant.default_role_id is not None:
+                payload["roles"] = [ModelId(id=tenant.default_role_id)]
+            else:
+                # See S7 rationale in the OIDC path — a role-less user
+                # hits 403 on every permission-gated feature.
+                logger.warning(
+                    "Admin create-user: no default role configured on "
+                    "tenant and no roles passed; user will have zero "
+                    "permissions until an admin assigns roles",
+                    extra={"tenant_id": str(tenant.id)},
+                )
+
         user_add = UserAdd(
-            **new_user.model_dump(exclude={"password"}),
+            **payload,
             password=hashed_pass,
             salt=salt,
             state=UserState.ACTIVE,
@@ -652,7 +667,9 @@ class UserService:
         settings_upsert = SettingsUpsert(user_id=user_in_db.id)
         await self.settings_repo.add(settings_upsert)
 
-        api_key = await self.generate_api_key(user_id=user_in_db.id)
+        api_key = await self.auth_service.create_user_api_key_v2(
+            user_id=user_in_db.id, tenant_id=user_in_db.tenant_id
+        )
 
         access_token = AccessToken(
             access_token=self.auth_service.create_access_token_for_user(
@@ -803,15 +820,12 @@ class UserService:
         # (e.g. SpaceAssembler) can reflect effective permissions accurately.
         user.active_api_key = resolved.key
 
-        ip_address, request_id, user_agent = extract_audit_context(request)
-
         policy_service = ApiKeyPolicyService(
-            allowed_origin_repo=self.allowed_origin_repo,
             space_service=self.space_service,
             user=None,
         )
         origin = request.headers.get("origin") if request else None
-        client_ip = ip_address
+        client_ip = get_request_context().get("ip_address")
         # Permission check runs after rate-limiting and last_used_at intentionally:
         # 1. Guardrails (IP/origin/expiry) block stolen keys before any logic
         # 2. Rate limiting before authz prevents permission-probing resource exhaustion
@@ -829,9 +843,6 @@ class UserService:
                 user,
                 resolved.key,
                 exc,
-                ip_address=ip_address,
-                request_id=request_id,
-                user_agent=user_agent,
                 request=request,
             )
             raise
@@ -878,9 +889,6 @@ class UserService:
                     user,
                     resolved.key,
                     exc,
-                    ip_address=ip_address,
-                    request_id=request_id,
-                    user_agent=user_agent,
                     request=request,
                 )
                 raise exc
@@ -899,9 +907,6 @@ class UserService:
                     user,
                     resolved.key,
                     exc,
-                    ip_address=ip_address,
-                    request_id=request_id,
-                    user_agent=user_agent,
                     request=request,
                 )
                 raise
@@ -914,9 +919,6 @@ class UserService:
                     user,
                     resolved.key,
                     exc,
-                    ip_address=ip_address,
-                    request_id=request_id,
-                    user_agent=user_agent,
                     request=request,
                 )
                 raise
@@ -931,9 +933,6 @@ class UserService:
                     user,
                     resolved.key,
                     exc,
-                    ip_address=ip_address,
-                    request_id=request_id,
-                    user_agent=user_agent,
                     request=request,
                 )
                 raise
@@ -955,9 +954,6 @@ class UserService:
                     user,
                     resolved.key,
                     exc,
-                    ip_address=ip_address,
-                    request_id=request_id,
-                    user_agent=user_agent,
                     request=request,
                 )
                 raise
@@ -965,9 +961,6 @@ class UserService:
         await self._maybe_log_api_key_used(
             user,
             resolved.key,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
             request=request,
         )
 
@@ -1441,9 +1434,6 @@ class UserService:
         user: "UserInDB",
         key: ApiKeyV2InDB,
         *,
-        ip_address: str | None = None,
-        request_id: UUID | None = None,
-        user_agent: str | None = None,
         request: Request | None = None,
     ) -> None:
         if self.audit_service is None:
@@ -1495,9 +1485,6 @@ class UserService:
             entity_id=key.id,
             description="Service API key used" if is_service else "API key used",
             metadata=metadata,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
 
     async def _log_api_key_auth_failed(
@@ -1506,9 +1493,6 @@ class UserService:
         key: ApiKeyV2InDB,
         exc: ApiKeyValidationError,
         *,
-        ip_address: str | None = None,
-        request_id: UUID | None = None,
-        user_agent: str | None = None,
         request: Request | None = None,
     ) -> None:
         if self.audit_service is None:
@@ -1563,9 +1547,6 @@ class UserService:
             metadata=metadata,
             outcome=Outcome.FAILURE,
             error_message=exc.message,
-            ip_address=ip_address,
-            request_id=request_id,
-            user_agent=user_agent,
         )
 
         logger.warning(
@@ -1689,7 +1670,6 @@ class UserService:
                 request=request,
                 expected_tenant_id=assistant_tenant_id,
             )
-            ip_addr, req_id, ua = extract_audit_context(request)
             try:
                 if assistant_id is not None:
                     await self._require_api_key_scope_for_assistant(
@@ -1707,9 +1687,6 @@ class UserService:
                     user_in_db,
                     key,
                     exc,
-                    ip_address=ip_addr,
-                    request_id=req_id,
-                    user_agent=ua,
                     request=request,
                 )
                 raise
@@ -1729,7 +1706,9 @@ class UserService:
         await self.repo.update(user_update)
 
     async def get_total_count(
-        self, tentant_id: Optional[UUID] = None, filters: Optional[str] = None
+        self,
+        tentant_id: Optional[UUID] = None,
+        filters: Optional[str] = None,
     ) -> int:
         count = await self.repo.get_total_count(tenant_id=tentant_id, filters=filters)
         return count or 0
@@ -1766,15 +1745,13 @@ class UserService:
             raise BadRequestException(f"Tenant {tenant_id} does not exist")
 
         state = user_invite.state or UserState.INVITED
-        predefined_roles = (
-            [user_invite.predefined_role] if user_invite.predefined_role else []
-        )
+        roles = [user_invite.role] if user_invite.role else []
 
         user_add = UserAdd(
             email=user_invite.email,
             tenant_id=tenant_id,
             state=state,
-            predefined_roles=predefined_roles,
+            roles=roles,
         )
 
         user_in_db = await self.repo.add(user_add)
@@ -1787,6 +1764,66 @@ class UserService:
     async def update_user(self, user_id: UUID, user_update_public: UserUpdatePublic):
         await self._validate_email(user_update_public.email)
         await self._validate_username(user_update_public.username)
+
+        # If roles are being changed, check admin safety
+        if user_update_public.roles is not None:
+            current_user = await self.repo.get_user_by_id(user_id)
+            if current_user is not None:
+                had_admin = Permission.ADMIN in current_user.permissions
+
+                if had_admin:
+                    # Fetch the actual new roles from DB to check their permissions
+                    new_role_ids = {r.id for r in user_update_public.roles}
+                    will_have_admin = False
+
+                    # Check against current roles that are being kept
+                    for role in current_user.roles:
+                        if (
+                            role.id in new_role_ids
+                            and Permission.ADMIN in role.permissions
+                        ):
+                            will_have_admin = True
+                            break
+
+                    # Also check new roles not in current set (role swap A→B)
+                    if not will_have_admin:
+                        new_ids_not_in_current = new_role_ids - {
+                            r.id for r in current_user.roles
+                        }
+                        if new_ids_not_in_current:
+                            new_roles = await self.repo.get_roles_by_ids(
+                                [ModelId(id=rid) for rid in new_ids_not_in_current],
+                                current_user.tenant_id,
+                            )
+                            for role_record in new_roles:
+                                if "admin" in (role_record.permissions or []):
+                                    will_have_admin = True
+                                    break
+
+                    if not will_have_admin:
+                        # This user is losing admin — check if others remain
+                        admin_count = await self.repo.count_users_with_admin_permission(
+                            current_user.tenant_id
+                        )
+                        # admin_count includes this user, so if only 1, this is the last
+                        if admin_count <= 1:
+                            raise BadRequestException(
+                                "Cannot remove admin permissions from the last admin user. "
+                                "At least one user must retain admin access."
+                            )
+
+        # If state is being changed to inactive/deleted, check admin safety
+        if user_update_public.state in (UserState.INACTIVE, UserState.DELETED):
+            target_user = await self.repo.get_user_by_id(user_id)
+            if target_user is not None and Permission.ADMIN in target_user.permissions:
+                admin_count = await self.repo.count_users_with_admin_permission(
+                    target_user.tenant_id
+                )
+                if admin_count <= 1:
+                    raise BadRequestException(
+                        "Cannot deactivate the last admin user. "
+                        "At least one user must retain admin access."
+                    )
 
         user_update = UserUpdate(
             id=user_id, **user_update_public.model_dump(exclude_unset=True)
@@ -1809,6 +1846,18 @@ class UserService:
         return user_in_db
 
     async def delete_user(self, user_id: UUID):
+        # Check if deleting this user would leave tenant without admin
+        user = await self.repo.get_user_by_id(user_id)
+        if user is not None and Permission.ADMIN in user.permissions:
+            admin_count = await self.repo.count_users_with_admin_permission(
+                user.tenant_id
+            )
+            if admin_count <= 1:
+                raise BadRequestException(
+                    "Cannot delete the last admin user. "
+                    "At least one user must retain admin access."
+                )
+
         deleted_user = await self.repo.delete(user_id)
 
         if deleted_user is None:

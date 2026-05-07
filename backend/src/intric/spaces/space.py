@@ -111,6 +111,10 @@ class Space:
     def is_organization(self):
         return (self.user_id is None) and (self.tenant_space_id is None)
 
+    def is_shared(self) -> bool:
+        """Collaborative Delat-tab space (not personal, not the org hub)."""
+        return (not self.is_personal()) and (not self.is_organization())
+
     def is_embedding_model_in_space(self, embedding_model_id: UUID | None) -> bool:
         return embedding_model_id in [model.id for model in self.embedding_models]
 

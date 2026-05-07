@@ -174,7 +174,7 @@
     localDirty = true;
     localFields[index] = { ...localFields[index], ...patch };
     localFields = localFields;
-    commitIfComplete(localFields);
+    commitIfPersistable(localFields);
   }
 
   function updateOption(index: number, optionIndex: number, value: string) {

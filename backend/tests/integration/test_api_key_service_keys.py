@@ -204,7 +204,13 @@ async def _remove_space_member(db_container, space_id: str, user_id: UUID):
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_service_key_creation_rejected_for_non_admin(client, regular_user_token):
-    """Non-admin user cannot create ownership=service keys."""
+    """A user without Permission.API_KEYS cannot create service-owned keys.
+
+    The role-level gate (require_permission(Permission.API_KEYS)) fires before
+    the policy-level "service keys require admin" check, so the underlying
+    rejection layer differs from earlier versions — but the security
+    invariant (unprivileged user → 403) is unchanged.
+    """
     resp = await _create_service_key(
         client,
         token=regular_user_token,
@@ -212,7 +218,6 @@ async def test_service_key_creation_rejected_for_non_admin(client, regular_user_
         permission="read",
     )
     assert resp.status_code == 403, resp.text
-    assert "admin" in resp.json()["message"].lower()
 
 
 @pytest.mark.integration
@@ -330,10 +335,11 @@ async def test_service_key_survives_owner_deletion(
         session = container.session()
         await session.execute(
             sa.text(
-                "INSERT INTO users_predefined_roles (user_id, predefined_role_id) "
-                "SELECT :uid, id FROM predefined_roles WHERE name = 'Owner' LIMIT 1"
+                "INSERT INTO users_roles (user_id, role_id) "
+                "SELECT :uid, id FROM roles "
+                "WHERE name = 'Owner' AND tenant_id = :tid LIMIT 1"
             ),
-            {"uid": str(creator.id)},
+            {"uid": str(creator.id), "tid": str(creator.tenant_id)},
         )
 
     # Re-fetch creator so permissions include the admin role

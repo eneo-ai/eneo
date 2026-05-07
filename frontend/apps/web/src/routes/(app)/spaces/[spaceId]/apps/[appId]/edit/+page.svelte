@@ -11,6 +11,11 @@
   import AppSettingsAttachments from "./AppSettingsAttachments.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
+  import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
+  import {
+    filterSupportedModelKwargs,
+    hasModelSpecificSettings
+  } from "$lib/features/ai-models/ModelKwargCapabilities";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
   import dayjs from "dayjs";
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
@@ -42,6 +47,19 @@
   );
 
   let cancelUploadsAndClearQueue = $state<() => void>(() => {});
+
+  let hasBehaviorChanges = $derived.by(() => {
+    if (!$currentChanges.diff.completion_model_kwargs) return false;
+
+    if (hasModelSpecificSettings($update.completion_model)) {
+      const original = $resource.completion_model_kwargs || {};
+      const updated = $update.completion_model_kwargs || {};
+
+      return original.temperature !== updated.temperature;
+    }
+
+    return true;
+  });
 
   // Icon state
   let currentIconId = $state<string | null>($resource.icon_id ?? null);
@@ -141,6 +159,10 @@
           class="w-32"
           on:click={async () => {
             cancelUploadsAndClearQueue();
+            $update.completion_model_kwargs = filterSupportedModelKwargs(
+              $update.completion_model_kwargs,
+              $update.completion_model
+            );
             await saveChanges();
             showSavesChangedNotice = true;
             setTimeout(() => {
@@ -304,15 +326,35 @@
         <Settings.Row
           title={m.model_behaviour()}
           description={m.model_behaviour_description()}
-          hasChanges={$currentChanges.diff.completion_model_kwargs !== undefined}
+          hasChanges={hasBehaviorChanges}
           revertFn={() => {
             discardChanges("completion_model_kwargs");
           }}
           let:aria
         >
-          <SelectBehaviourV2 bind:kwArgs={$update.completion_model_kwargs} isDisabled={false} {aria}
+          <SelectBehaviourV2
+            bind:kwArgs={$update.completion_model_kwargs}
+            selectedModel={$update.completion_model}
+            isDisabled={!$update.completion_model}
+            {aria}
           ></SelectBehaviourV2>
         </Settings.Row>
+
+        {#if hasModelSpecificSettings($update.completion_model)}
+          <Settings.Row
+            title={m.model_settings()}
+            description={m.model_settings_description()}
+            hasChanges={$currentChanges.diff.completion_model_kwargs !== undefined}
+            revertFn={() => {
+              discardChanges("completion_model_kwargs");
+            }}
+          >
+            <SelectModelSpecificSettings
+              bind:kwArgs={$update.completion_model_kwargs}
+              selectedModel={$update.completion_model}
+            ></SelectModelSpecificSettings>
+          </Settings.Row>
+        {/if}
       </Settings.Group>
 
       <Settings.Group title={m.security_and_privacy()}>

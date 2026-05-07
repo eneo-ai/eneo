@@ -1,0 +1,86 @@
+---
+title: Security for Contributors
+---
+
+# Security for Contributors
+
+This page explains the security checks contributors see when they open a pull request. The canonical security policy is [`docs/SECURITY.md`](https://github.com/eneo-ai/eneo/blob/develop/docs/SECURITY.md).
+
+Do not report sensitive vulnerabilities in public issues, pull requests, or discussions. Email security reports to `security@sundsvall.se`.
+
+## Pull Request Checks
+
+Pull requests into `develop` run three security and quality gates:
+
+### CI
+
+`CI / CI` is the main app check. It runs backend quality checks, backend tests, frontend checks, package lint, and the frontend production build.
+
+Backend dependency installs use `uv sync --frozen --all-groups`. Frontend dependency installs use `bun install --frozen-lockfile`. This matters because dependency PRs should prove that the committed lockfiles still install and the app still builds.
+
+The CI workflow also builds the backend, frontend, and devcontainer Docker images without pushing them. This catches Dockerfile and base-image update problems before Dependabot Docker PRs merge.
+
+Ruff currently checks `backend/src/intric`. Tests and Alembic are not part of the Ruff gate yet.
+
+### Dependency Review
+
+`Dependency Review / Dependency Review` checks dependency and lockfile changes in pull requests. It fails if a PR introduces a known vulnerable dependency at `high` severity or above.
+
+When this check fails, update the dependency to a safe version, remove it, or document why the vulnerable code is not reachable. Do not dismiss the warning just to make the PR green.
+
+### CodeQL
+
+`CodeQL / CodeQL gate` runs GitHub code scanning from the repository workflow. It scans Python, JavaScript/TypeScript, and GitHub Actions workflows.
+
+For the initial rollout, high and critical CodeQL alerts should block merges. Medium and low findings still matter, but the team should triage them after the baseline is stable.
+
+## Required Checks in Branch Protection
+
+The `develop` ruleset should require these checks:
+
+- `CI / CI`
+- `Dependency Review / Dependency Review`
+- `CodeQL / CodeQL gate`
+
+Remove older required status checks if they appear as `Expected` and never report:
+
+- `Backend checks (Ruff)`
+- `Frontend basic checks`
+- `Run unit tests`
+- `Run integration tests`
+- `Test Docker builds`
+
+Those names belonged to the previous PR workflows. They are not queued work; GitHub is waiting for checks that no longer exist on this branch.
+
+The old `Test Docker builds` check is replaced by Docker build subjobs inside `CI / CI`.
+
+## Dependency Updates
+
+Dependabot opens weekly PRs for:
+
+- backend Python dependencies in `backend`
+- frontend Bun dependencies in `frontend`
+- GitHub Actions
+- Dockerfiles
+- devcontainer configuration
+
+Routine minor and patch updates are grouped to reduce PR noise. Do not enable auto-merge until CI, Dependency Review, and CodeQL have been stable for long enough that failures are rare and understandable.
+
+For packages that handle prompts, files, provider keys, network calls, authentication, authorization, Docker images, or GitHub Actions, read the changelog before merging.
+
+## Handling Alerts
+
+Use this order when triaging security alerts:
+
+1. Same day: malware, exposed secrets, critical runtime vulnerabilities, authentication or authorization issues, file parsing issues, SSRF, RCE, deserialization, and LLM provider credential exposure.
+2. Within 48-72 hours: high runtime vulnerabilities, vulnerable production Docker base images, and vulnerable GitHub Actions in trusted workflows.
+3. Within 1-2 weeks: medium runtime vulnerabilities and critical or high build-time vulnerabilities.
+4. Monthly: low severity findings, dev-only issues without a practical exploit path, and major version update backlog.
+
+If a fix cannot be merged quickly, create a GitHub issue or security tracking item with an owner, risk, mitigation, target date, and review date.
+
+## Secrets
+
+Use GitHub Actions secrets for CI and deployment credentials. Use Dependabot secrets only for private package registries. Do not put runtime application secrets in Dependabot secrets.
+
+If a secret enters the repository, rotate it first. Then remove it from history if needed, inspect logs and artifacts, and add a secret scanning pattern if the format is specific to Eneo.

@@ -77,8 +77,6 @@ class SpaceMember(UserSparse):
 
 
 class SpaceGroupMember(InDB):
-    """A user group that is a member of a space with a specific role."""
-
     name: str
     role: SpaceRoleValue
     user_count: int = 0

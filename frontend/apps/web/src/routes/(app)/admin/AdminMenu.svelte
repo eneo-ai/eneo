@@ -14,7 +14,14 @@
   import { IconHistory } from "@intric/icons/history";
   import { page } from "$app/stores";
   import { Navigation } from "$lib/components/layout";
-  import { ChartPie, LayoutTemplate, Cloud, Plug, SlidersHorizontal } from "lucide-svelte";
+  import {
+    ChartPie,
+    LayoutTemplate,
+    Cloud,
+    Plug,
+    ShieldCheck,
+    SlidersHorizontal
+  } from "lucide-svelte";
   import { IconKey } from "@intric/icons/key";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
@@ -59,7 +66,7 @@
   <Navigation.Link
     href={localizeHref("/admin/security-classifications")}
     isActive={isSelected("/admin/security-classifications", currentRoute)}
-    icon={IconKey}
+    icon={ShieldCheck}
     label={m.security()}
   />
   <Navigation.Link

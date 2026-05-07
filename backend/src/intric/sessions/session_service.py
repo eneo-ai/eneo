@@ -6,6 +6,7 @@ from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import CompletionModel
 from intric.assistants.assistant_service import AssistantService
+from intric.authentication.auth_models import is_service_api_key
 from intric.files.file_models import File
 from intric.group_chat.application.group_chat_service import GroupChatService
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
@@ -57,6 +58,36 @@ class SessionService:
         async with session.begin():
             yield
 
+    def _principal_columns(self) -> tuple[UUID | None, UUID | None]:
+        """Return (user_id, api_key_id) for the current authenticated principal.
+
+        Service keys resolve to a synthetic UserInDB whose id is not in the
+        users table, so we cannot persist self.user.id as sessions.user_id.
+        Instead we record the API key id; the resolver-supplied UserInDB
+        carries it on .active_api_key.
+
+        Exactly one of the returned values is non-None.
+        """
+        if is_service_api_key(self.user):
+            key = self.user.active_api_key
+            assert key is not None  # guaranteed by is_service_api_key
+            return None, key.id
+        return self.user.id, None
+
+    def _is_owner(self, session: SessionInDB) -> bool:
+        """Match the session's principal against the current request's principal.
+
+        Both branches require a non-None match; we never treat NULL == NULL
+        as a match (defends against the synthetic-user/no-user trap where two
+        unrelated NULL fields would otherwise compare equal).
+        """
+        user_id, api_key_id = self._principal_columns()
+        if user_id is not None:
+            return session.user_id == user_id
+        if api_key_id is not None:
+            return session.api_key_id == api_key_id
+        return False
+
     def _check_exists_and_belongs_to_user(
         self,
         session: SessionInDB | None,
@@ -66,8 +97,8 @@ class SessionService:
         if session is None:
             raise NotFoundException("Session not found")
 
-        if session.user_id != self.user.id:
-            raise UnauthorizedException("Session belongs to other user")
+        if not self._is_owner(session):
+            raise UnauthorizedException("Session belongs to other principal")
 
         # Handle cross-endpoint access attempt
         if assistant_id is not None and session.group_chat_id is not None:
@@ -108,9 +139,11 @@ class SessionService:
         previous: bool = False,
         name_filter: str | None = None,
     ) -> tuple[list[SessionInDB], int]:
+        user_id, api_key_id = self._principal_columns()
         return await self.session_repo.get_by_assistant(
             assistant_id=assistant_id,
-            user_id=self.user.id,
+            user_id=user_id,
+            api_key_id=api_key_id,
             limit=limit,
             cursor=cursor,
             previous=previous,
@@ -139,9 +172,11 @@ class SessionService:
         assistant_id: UUID | None = None,
         group_chat_id: UUID | None = None,
     ) -> SessionInDB:
+        user_id, api_key_id = self._principal_columns()
         session_add = SessionAdd(
             name=name,
-            user_id=self.user.id,
+            user_id=user_id,
+            api_key_id=api_key_id,
             assistant_id=assistant_id,
             group_chat_id=group_chat_id,
         )
@@ -211,9 +246,11 @@ class SessionService:
         previous: bool = False,
         name_filter: str | None = None,
     ) -> tuple[list[SessionInDB], int]:
+        user_id, api_key_id = self._principal_columns()
         return await self.session_repo.get_by_group_chat(
             group_chat_id=group_chat_id,
-            user_id=self.user.id,
+            user_id=user_id,
+            api_key_id=api_key_id,
             limit=limit,
             cursor=cursor,
             previous=previous,

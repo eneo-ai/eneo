@@ -766,6 +766,10 @@ class AssistantService:
                                     # Update existing entry with approval status
                                     existing.approved = tc.approved
                                     existing.result_status = tc.result_status
+                                    # The TOOL_CALL chunk after execution carries the
+                                    # tool output; keep it so later turns can replay.
+                                    if tc.result is not None:
+                                        existing.result = tc.result
                                 else:
                                     # Add new tool call
                                     tool_calls.append(
@@ -779,6 +783,8 @@ class AssistantService:
                                             tool_call_id=tc.tool_call_id or "",
                                             approved=tc.approved,
                                             result_status=tc.result_status,
+                                            result=tc.result,
+                                            mcp_tool_name=tc.mcp_tool_name,
                                         )
                                     )
                         yield chunk
@@ -797,6 +803,7 @@ class AssistantService:
                                         tool_call_id=tc.tool_call_id or "",
                                         approved=None,
                                         result_status=tc.result_status,
+                                        mcp_tool_name=tc.mcp_tool_name,
                                     )
                                 )
                         yield chunk
@@ -862,6 +869,7 @@ class AssistantService:
                                             approved=False,
                                             result_status=tc.result_status
                                             or "timeout_denied",
+                                            mcp_tool_name=tc.mcp_tool_name,
                                         )
                                     )
                         yield chunk

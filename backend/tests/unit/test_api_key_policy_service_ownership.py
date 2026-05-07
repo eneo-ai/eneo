@@ -32,12 +32,14 @@ class DummySpaceService:
 
 
 def _service_with_user(patterns: list[str], *, permissions: list[object] | None = None):
+    """patterns is unused after the central allowlist gate was dropped — kept
+    in the signature for back-compat with existing call sites."""
+    del patterns  # noqa: keep signature stable
     tenant = SimpleNamespace(api_key_policy={})
     user = SimpleNamespace(
         tenant=tenant, permissions=permissions or [], tenant_id=uuid4()
     )
     return ApiKeyPolicyService(
-        allowed_origin_repo=DummyOriginRepo(patterns),
         space_service=DummySpaceService(),
         user=user,
     )

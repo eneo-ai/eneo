@@ -9,8 +9,12 @@
   import RoleEditor from "./RoleEditor.svelte";
   import RolesTable from "./RolesTable.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { getAppContext } from "$lib/core/AppContext";
 
   export let data;
+
+  const { tenant } = getAppContext();
+  const defaultRoleId = tenant.default_role_id ?? null;
 </script>
 
 <svelte:head>
@@ -20,21 +24,11 @@
 <Page.Root>
   <Page.Header>
     <Page.Title title={m.roles()}></Page.Title>
-    <Page.Tabbar>
-      <Page.TabTrigger tab="custom_roles">{m.custom_roles()}</Page.TabTrigger>
-      <Page.TabTrigger tab="default_roles">{m.default_roles()}</Page.TabTrigger>
-    </Page.Tabbar>
-    <RoleEditor mode="create" permissions={data.permissions}></RoleEditor>
+    <RoleEditor mode="create" permissions={data.permissions} templates={data.templates}
+    ></RoleEditor>
   </Page.Header>
 
   <Page.Main>
-    <Page.Tab id="custom_roles">
-      <RolesTable roles={data.customRoles} permissions={data.permissions} />
-    </Page.Tab>
-    <Page.Tab id="default_roles">
-      {#if data.defaultRoles.length > 0}
-        <RolesTable roles={data.defaultRoles} permissions={data.permissions} editabel={false} />
-      {/if}
-    </Page.Tab>
+    <RolesTable roles={data.allRoles} permissions={data.permissions} {defaultRoleId} />
   </Page.Main>
 </Page.Root>

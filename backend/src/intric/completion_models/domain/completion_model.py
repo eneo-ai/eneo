@@ -3,6 +3,11 @@ from typing import TYPE_CHECKING, Optional
 from typing_extensions import override
 
 from intric.ai_models.ai_model import AIModel
+from intric.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
+    coerce_model_kwargs_capabilities,
+    resolve_supported_model_kwargs,
+)
 from intric.model_providers.domain.model_defaults import lookup_model_defaults
 from intric.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
@@ -45,6 +50,9 @@ class CompletionModel(AIModel):
         token_limit: Optional[int] = None,
         base_url: Optional[str] = None,
         litellm_model_name: Optional[str] = None,
+        model_kwargs_capabilities: SupportedModelKwargs
+        | dict[str, object]
+        | None = None,
         security_classification: Optional[SecurityClassification] = None,
         tenant_id: Optional["UUID"] = None,
         provider_id: Optional["UUID"] = None,
@@ -93,6 +101,11 @@ class CompletionModel(AIModel):
 
         self.base_url = base_url
         self.litellm_model_name = litellm_model_name
+        self.model_kwargs_capabilities = coerce_model_kwargs_capabilities(
+            model_kwargs_capabilities,
+            completion_model_id=id,
+            tenant_id=tenant_id,
+        )
         self.is_org_default = is_org_default
         self.reasoning = reasoning
         self.vision = vision
@@ -110,6 +123,16 @@ class CompletionModel(AIModel):
     def token_limit(self) -> int:
         """Backward-compat alias: returns max_input_tokens."""
         return self.max_input_tokens
+
+    def get_supported_model_kwargs(self) -> SupportedModelKwargs:
+        return resolve_supported_model_kwargs(
+            model_kwargs_capabilities=self.model_kwargs_capabilities,
+            reasoning=self.reasoning,
+            provider_type=self.provider_type,
+            litellm_model_name=self.litellm_model_name,
+            completion_model_id=self.id,
+            tenant_id=self.tenant_id,
+        )
 
     @override
     def get_credential_provider_name(self) -> str:
@@ -174,6 +197,7 @@ class CompletionModel(AIModel):
             token_limit=token_limit,
             base_url=completion_model_db.base_url,
             litellm_model_name=completion_model_db.litellm_model_name,
+            model_kwargs_capabilities=completion_model_db.model_kwargs_capabilities,
             security_classification=SecurityClassification.to_domain(
                 db_security_classification=completion_model_db.security_classification
             ),

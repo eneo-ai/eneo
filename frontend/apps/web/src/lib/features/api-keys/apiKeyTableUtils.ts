@@ -1,4 +1,4 @@
-import type { ApiKeyV2 } from "@intric/intric-js";
+import type { ApiKeyState, ApiKeyV2 } from "@intric/intric-js";
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
 import {
@@ -52,6 +52,9 @@ export type ApiKeyUsageResponse = {
   limit?: number;
   next_cursor?: string | null;
 };
+
+// "" represents "All states" in filter UIs
+export type ApiKeyStateFilterValue = ApiKeyState | "";
 
 // ---------------------------------------------------------------------------
 // Status / state helpers

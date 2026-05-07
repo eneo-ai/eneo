@@ -24,9 +24,6 @@ class GroupRepository:
             Group,
             with_options=[
                 selectinload(CollectionsTable.user).selectinload(Users.roles),
-                selectinload(CollectionsTable.user).selectinload(
-                    Users.predefined_roles
-                ),
                 selectinload(CollectionsTable.embedding_model),
             ],
         )

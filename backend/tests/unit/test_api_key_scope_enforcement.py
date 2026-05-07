@@ -681,7 +681,6 @@ class TestResolveApiKeyScopeWiring:
                 )
             )
         )
-        svc.allowed_origin_repo = AsyncMock()
         svc.space_service = AsyncMock()
         svc.api_key_rate_limiter = None
         svc._session = None
@@ -914,7 +913,14 @@ class TestScopeRouteGuardCoverage:
         )
 
     def test_user_admin_endpoints_have_router_level_admin_guards(self):
-        """User admin endpoints should have router-level admin scope + key guards."""
+        """User admin-mutation endpoints should have admin guards for API keys.
+
+        Includes GET /users/ (get_tenant_users): mounted on the non-admin
+        `router` but with *route-level* `_scope_check_dep` +
+        `_api_key_permission_dep` so scoped API keys cannot enumerate the
+        tenant directory. Those guards are no-ops for bearer tokens — see
+        TestUserListingEndpointSplitGate in test_api_key_contract_matrix.py.
+        """
         from intric.server.routers import router
 
         admin_routes = []
@@ -943,7 +949,7 @@ class TestScopeRouteGuardCoverage:
                 )
 
         assert len(admin_routes) >= 5, (
-            f"Expected at least 5 user admin routes, found {len(admin_routes)}"
+            f"Expected at least 5 user admin-gated routes, found {len(admin_routes)}"
         )
         for path, methods, has_scope_dep, has_admin_key_dep in admin_routes:
             assert has_scope_dep, (
@@ -1660,7 +1666,6 @@ class TestTenantScopeForDeleteEnforcement:
                 )
             )
         )
-        svc.allowed_origin_repo = AsyncMock()
         svc.space_service = AsyncMock()
         svc.api_key_rate_limiter = None
         svc._session = None

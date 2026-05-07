@@ -759,147 +759,15 @@ async def test_space_scoped_key_delete_files_denied_403(api_client, bearer_token
 
 # ---------------------------------------------------------------------------
 # 2A: Admin Route Guards
+#
+# Admin-endpoint access control ({tenant, space, assistant, app} scopes ×
+# {storage, integrations, user-groups}) is covered by:
+#   - tests/integration/test_api_key_access_matrix.py::test_collect_access_matrix
+#     (probes every admin endpoint with every key config + CSV output)
+#   - tests/unit/test_api_key_route_coverage.py::TestTenantAdminApiKeyGuards
+#     (structurally asserts every admin router carries both scope and admin
+#     permission deps)
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_space_scoped_key_cannot_access_storage_admin(client, bearer_token):
-    """Space-scoped key accessing /storage/ (admin route) → 403."""
-    space = await _create_space(client, token=bearer_token)
-    key = await _create_api_key(
-        client, token=bearer_token, scope_type="space", scope_id=space
-    )
-
-    resp = await client.get(
-        "/api/v1/storage/",
-        headers={"X-API-Key": key},
-    )
-    # Should be blocked by TENANT_ADMIN_API_KEY_GUARDS
-    assert resp.status_code == 403, resp.text
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_tenant_read_key_cannot_access_storage_admin(client, bearer_token):
-    """Tenant-scoped READ key accessing /storage/ (requires ADMIN) → 403."""
-    key = await _create_api_key(
-        client, token=bearer_token, scope_type="tenant", permission="read"
-    )
-
-    resp = await client.get(
-        "/api/v1/storage/",
-        headers={"X-API-Key": key},
-    )
-    assert resp.status_code == 403, resp.text
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_tenant_admin_key_can_access_storage(client, bearer_token):
-    """Tenant-scoped ADMIN key accessing /storage/ → success."""
-    key = await _create_api_key(
-        client, token=bearer_token, scope_type="tenant", permission="admin"
-    )
-
-    resp = await client.get(
-        "/api/v1/storage/",
-        headers={"X-API-Key": key},
-    )
-    # Should succeed (may return empty data, but not 403)
-    assert resp.status_code == 200, resp.text
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_space_scoped_key_cannot_access_integrations_admin(client, bearer_token):
-    """Space-scoped key accessing /integrations/ (admin route) → 403."""
-    space = await _create_space(client, token=bearer_token)
-    key = await _create_api_key(
-        client, token=bearer_token, scope_type="space", scope_id=space
-    )
-
-    resp = await client.get(
-        "/api/v1/integrations/",
-        headers={"X-API-Key": key},
-    )
-    assert resp.status_code == 403, resp.text
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_tenant_read_key_cannot_access_integrations_admin(client, bearer_token):
-    """Tenant-scoped READ key cannot access integration admin routes (ADMIN required)."""
-    key = await _create_api_key(
-        client, token=bearer_token, scope_type="tenant", permission="read"
-    )
-
-    resp = await client.get(
-        "/api/v1/integrations/",
-        headers={"X-API-Key": key},
-    )
-    assert resp.status_code == 403, resp.text
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_tenant_admin_key_can_access_integrations_admin(client, bearer_token):
-    """Tenant-scoped ADMIN key can access integration admin routes."""
-    key = await _create_api_key(
-        client, token=bearer_token, scope_type="tenant", permission="admin"
-    )
-
-    resp = await client.get(
-        "/api/v1/integrations/",
-        headers={"X-API-Key": key},
-    )
-    assert resp.status_code == 200, resp.text
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_space_scoped_key_cannot_access_user_groups_admin(client, bearer_token):
-    """Space-scoped key accessing /user-groups/ (admin route) → 403."""
-    space = await _create_space(client, token=bearer_token)
-    key = await _create_api_key(
-        client, token=bearer_token, scope_type="space", scope_id=space
-    )
-
-    resp = await client.get(
-        "/api/v1/user-groups/",
-        headers={"X-API-Key": key},
-    )
-    assert resp.status_code == 403, resp.text
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_tenant_read_key_cannot_access_user_groups_admin(client, bearer_token):
-    """Tenant-scoped READ key cannot access user-groups admin routes."""
-    key = await _create_api_key(
-        client, token=bearer_token, scope_type="tenant", permission="read"
-    )
-
-    resp = await client.get(
-        "/api/v1/user-groups/",
-        headers={"X-API-Key": key},
-    )
-    assert resp.status_code == 403, resp.text
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_tenant_admin_key_can_access_user_groups_admin(client, bearer_token):
-    """Tenant-scoped ADMIN key can access user-groups admin routes."""
-    key = await _create_api_key(
-        client, token=bearer_token, scope_type="tenant", permission="admin"
-    )
-
-    resp = await client.get(
-        "/api/v1/user-groups/",
-        headers={"X-API-Key": key},
-    )
-    assert resp.status_code == 200, resp.text
 
 
 # ---------------------------------------------------------------------------

@@ -61,7 +61,7 @@
   }>();
 
   /** Type-safe view of selectedMCPServers */
-  let servers = $derived(selectedMCPServers as unknown as MCPServer[]);
+  let servers = $derived((selectedMCPServers ?? []) as unknown as MCPServer[]);
 
   let modelSupportsTools = $derived(selectedModel?.supports_tool_calling !== false);
 

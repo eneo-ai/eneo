@@ -154,6 +154,23 @@ def require_api_key_permission(
     return _api_key_permission_dep
 
 
+async def require_session_auth(
+    _: Annotated[UserInDB, Depends(get_current_active_user)],
+    request: Request,
+) -> None:
+    """Reject API-key-authenticated callers; require a session token.
+
+    Depends on ``get_current_active_user`` so authentication has run and
+    populated ``request.state.api_key`` (when applicable) by the time we
+    inspect it.
+    """
+    if getattr(request.state, "api_key", None) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint requires a session token.",
+        )
+
+
 ASSISTANTS_READ_OVERRIDES: frozenset[str] = frozenset(
     {
         "ask_assistant",

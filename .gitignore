@@ -47,6 +47,10 @@ specs/
 .speckit/
 .playwright-mcp/
 
+# OpenAI Codex configuration
+.codex
+AGENTS.md
+
 # ── GSD baseline (auto-generated) ──
 .gsd
 .gsd-id

@@ -25,7 +25,6 @@ from intric.authentication.api_key_resolver import (
     check_resource_permission,
 )
 from intric.authentication.auth_models import (
-    METHOD_PERMISSION_MAP,
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyV2InDB,
@@ -292,94 +291,21 @@ class TestAuthPrecedence:
         svc._resolve_api_key.assert_not_called()
 
 
-class TestCorsOptionsBypass:
-    """OPTIONS requests use read permission — always allowed for CORS preflight."""
-
-    def test_options_mapped_to_read_permission(self):
-        """OPTIONS in METHOD_PERMISSION_MAP → 'read' (lowest level, always passes)."""
-        assert METHOD_PERMISSION_MAP.get("OPTIONS") == "read"
-
-    def test_options_request_passes_for_read_key(self):
-        """Read key + OPTIONS → pass (CORS preflight must not require credentials)."""
-        key = _make_key(permission=ApiKeyPermission.READ)
-        request = _fake_request("OPTIONS")
-        # Should not raise
-        _check_basic_method_permission(request, key)
-
-
 # ---------------------------------------------------------------------------
-# Part 2D: Contract Matrix — Permission × Scope × Method Boundaries
+# Part 2D: Contract Matrix — Scope and Management Boundaries
+#
+# Layer-1 and layer-2 (permission × method) enumeration is covered by
+# tests/unit/test_api_key_property.py and tests/unit/test_api_key_auth_guards.py
+# (TestMethodAwarePermissionCheck). What lives here are the layers the oracle
+# does not reach.
 # ---------------------------------------------------------------------------
 
 
 class TestContractMatrixBoundaries:
-    """Boundary tests for the 4 enforcement layers:
-    Layer 1: Resource permission (check_resource_permission)
-    Layer 2: Basic method permission (_check_basic_method_permission)
+    """Boundary tests for:
     Layer 3: Scope enforcement (_enforce_api_key_scope)
     Layer 4: Management guards (_check_management_permission)
     """
-
-    # -- Layer 1 + 2: Permission enforcement --
-
-    def test_read_key_get_resource_guarded_passes(self, monkeypatch):
-        """1. read key + GET resource-guarded → 200."""
-        monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
-            lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
-        )
-        key = _make_key(permission=ApiKeyPermission.READ)
-        request = _fake_request("GET")
-        # No resource_permissions → falls back to basic permission ceiling
-        _check_method_resource_permission(request, key, _config("assistants"))
-
-    def test_read_key_post_resource_guarded_blocked(self, monkeypatch):
-        """2. read key + POST resource-guarded (non-override) → 403."""
-        monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
-            lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
-        )
-        key = _make_key(permission=ApiKeyPermission.READ)
-        request = _fake_request("POST")
-        with pytest.raises(ApiKeyValidationError) as exc_info:
-            _check_method_resource_permission(request, key, _config("assistants"))
-        # Method-level permission is always enforced before fine-grained resource checks.
-        assert exc_info.value.code == "insufficient_permission"
-
-    def test_read_key_post_override_endpoint_passes(self, monkeypatch):
-        """3. read key + POST on override endpoint → 200 (read-override)."""
-        monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
-            lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
-        )
-        from intric.authentication.auth_dependencies import ASSISTANTS_READ_OVERRIDES
-
-        key = _make_key(permission=ApiKeyPermission.READ)
-        request = _fake_request("POST", endpoint_name="ask_assistant")
-        _check_method_resource_permission(
-            request, key, _config("assistants", ASSISTANTS_READ_OVERRIDES)
-        )
-
-    def test_write_key_delete_resource_guarded_blocked(self, monkeypatch):
-        """4. write key + DELETE resource-guarded → 403."""
-        monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
-            lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
-        )
-        key = _make_key(permission=ApiKeyPermission.WRITE)
-        request = _fake_request("DELETE")
-        with pytest.raises(ApiKeyValidationError):
-            _check_method_resource_permission(request, key, _config("assistants"))
-
-    def test_admin_key_delete_resource_guarded_passes(self, monkeypatch):
-        """5. admin key + DELETE resource-guarded → 200."""
-        monkeypatch.setattr(
-            "intric.authentication.api_key_resolver.get_settings",
-            lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
-        )
-        key = _make_key(permission=ApiKeyPermission.ADMIN)
-        request = _fake_request("DELETE")
-        _check_method_resource_permission(request, key, _config("assistants"))
 
     # -- Layer 4: Management guards --
 
@@ -446,16 +372,6 @@ class TestContractMatrixBoundaries:
         with pytest.raises(ApiKeyValidationError) as exc_info:
             await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
-
-    # -- Layer 2: Basic method permission (no resource guard) --
-
-    def test_read_key_basic_delete_blocked(self):
-        """11. read key + DELETE on unguarded route → 403."""
-        key = _make_key(permission=ApiKeyPermission.READ)
-        request = _fake_request("DELETE")
-        with pytest.raises(ApiKeyValidationError) as exc_info:
-            _check_basic_method_permission(request, key)
-        assert exc_info.value.code == "insufficient_permission"
 
 
 # ---------------------------------------------------------------------------
@@ -842,12 +758,22 @@ class TestGuardrailPolicyEnforcement:
 # ---------------------------------------------------------------------------
 
 
-class TestUserListingEndpointGuards:
-    """Verify GET /users/ has router-level admin scope + permission guards.
+class TestUserListingEndpointSplitGate:
+    """Verify GET /users/ is bearer-open but API-key-admin-gated.
 
-    The listing endpoint is on users_admin_router (mounted with router-level
-    guards) rather than the main users router, so the config-stash pattern
-    works correctly.
+    The listing endpoint returns UserSparse (id, email, username, timestamps)
+    — a strict subset of the Microsoft 365 GAL already available to every
+    authenticated tenant member. It is mounted on the non-admin `router`
+    with route-level API-key guards that stash deferred-enforcement state
+    consumed by `_resolve_api_key`. Those guards are no-ops for bearer auth
+    (where `request.state.api_key` is never set), so space-admins can
+    populate member/group pickers with their bearer token while scoped API
+    keys (space/assistant/app/etc.) cannot enumerate the tenant directory
+    outside their scope.
+
+    The handler body does NOT call `validate_permission(ADMIN)`; bearer-token
+    tenant members pass through. Mutating endpoints on /users/admin/* remain
+    admin-gated; see TestAdminApiKeyGuardContract below.
     """
 
     def _get_users_listing_route(self):
@@ -871,79 +797,37 @@ class TestUserListingEndpointGuards:
                     return True
         return False
 
-    def test_space_scoped_read_key_denied_by_scope(self):
-        """Space-scoped read key -> GET /users/ => 403 insufficient_scope."""
-        key = _make_key(
-            permission=ApiKeyPermission.READ.value,
-            scope_type=ApiKeyScopeType.SPACE.value,
-            scope_id=str(uuid4()),
-        )
-        request = _scope_request()
-
-        svc = _make_user_service()
-
-        with pytest.raises(ApiKeyValidationError) as exc_info:
-            import asyncio
-
-            asyncio.get_event_loop().run_until_complete(
-                svc._enforce_api_key_scope(
-                    request,
-                    key,
-                    {"resource_type": "admin", "path_param": None},
-                )
-            )
-        assert exc_info.value.code == "insufficient_scope"
-
-    def test_tenant_scoped_read_key_denied_by_permission(self):
-        """Tenant-scoped read key -> GET /users/ => 403 insufficient_permission.
-
-        The router-level require_api_key_permission(ADMIN) blocks read keys.
-        """
-        key = _make_key(
-            permission=ApiKeyPermission.READ.value,
-            scope_type=ApiKeyScopeType.TENANT.value,
-        )
-
-        with pytest.raises(ApiKeyValidationError) as exc_info:
-            _check_management_permission(key, ApiKeyPermission.ADMIN.value)
-        assert exc_info.value.code == "insufficient_permission"
-
-    def test_tenant_scoped_admin_key_passes(self):
-        """Tenant-scoped admin key + admin user => passes all guards."""
-        key = _make_key(
-            permission=ApiKeyPermission.ADMIN.value,
-            scope_type=ApiKeyScopeType.TENANT.value,
-        )
-
-        # Scope enforcement: tenant-scoped keys always pass
-        request = _scope_request()
-        svc = _make_user_service()
-        import asyncio
-
-        # Should NOT raise — tenant scope bypasses all scope checks
-        asyncio.get_event_loop().run_until_complete(
-            svc._enforce_api_key_scope(
-                request,
-                key,
-                {"resource_type": "admin", "path_param": None},
-            )
-        )
-
-        # Permission check: admin key passes admin requirement
-        _check_management_permission(key, ApiKeyPermission.ADMIN.value)
-
-    def test_listing_route_has_router_level_scope_guard(self):
-        """GET /users/ must have require_api_key_scope_check at router level."""
+    def test_listing_route_has_route_level_scope_guard(self):
+        """GET /users/ must have route-level admin scope guard for API keys."""
         route = self._get_users_listing_route()
         assert self._route_has_dependency(route, "_scope_check_dep"), (
-            "GET /users/ missing router-level require_api_key_scope_check"
+            "GET /users/ missing route-level require_api_key_scope_check; "
+            "scoped API keys must not enumerate the tenant directory"
         )
 
-    def test_listing_route_has_router_level_permission_guard(self):
-        """GET /users/ must have require_api_key_permission at router level."""
+    def test_listing_route_has_route_level_permission_guard(self):
+        """GET /users/ must have route-level admin permission guard for API keys."""
         route = self._get_users_listing_route()
         assert self._route_has_dependency(route, "_api_key_permission_dep"), (
-            "GET /users/ missing router-level require_api_key_permission"
+            "GET /users/ missing route-level require_api_key_permission; "
+            "API keys below admin must not list the tenant directory"
+        )
+
+    def test_listing_handler_has_no_validate_permission_call(self):
+        """Handler body must not call validate_permission(ADMIN).
+
+        Bearer-token tenant members (including space-admins without
+        tenant-admin) must pass through. API-key enforcement happens via
+        the route-level guards above and `_resolve_api_key`.
+        """
+        import inspect
+
+        from intric.users.user_router import get_tenant_users
+
+        source = inspect.getsource(get_tenant_users)
+        assert "validate_permission" not in source, (
+            "get_tenant_users unexpectedly contains validate_permission; "
+            "the endpoint was intentionally relaxed for bearer-auth pickers"
         )
 
 

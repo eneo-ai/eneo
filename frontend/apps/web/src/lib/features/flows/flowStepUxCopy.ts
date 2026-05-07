@@ -24,6 +24,8 @@ export function getFlowStepUxCopy({
   };
 }
 
+export type FlowStepUxCopy = ReturnType<typeof getFlowStepUxCopy>;
+
 function getDefaultHint(locale: FlowLocale, inputSource: string | null | undefined): string {
   const copy = FLOW_STEP_COPY[locale];
   switch (inputSource) {

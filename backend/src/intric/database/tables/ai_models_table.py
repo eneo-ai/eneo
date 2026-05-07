@@ -10,9 +10,11 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.base_class import BasePublic
+from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.security_classifications_table import (
     SecurityClassification as SecurityClassificationsTable,
 )
@@ -40,6 +42,9 @@ class CompletionModels(BasePublic):
     supports_tool_calling: Mapped[bool] = mapped_column(server_default="False")
     base_url: Mapped[Optional[str]] = mapped_column()
     litellm_model_name: Mapped[Optional[str]] = mapped_column()
+    model_kwargs_capabilities: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSONB, nullable=True
+    )
 
     # Tenant model support: NULL = global model, NOT NULL = tenant-specific model
     tenant_id: Mapped[Optional[UUID]] = mapped_column(
@@ -58,6 +63,7 @@ class CompletionModels(BasePublic):
     security_classification: Mapped[Optional["SecurityClassificationsTable"]] = (
         relationship(back_populates="completion_models")
     )
+    provider: Mapped[Optional[ModelProviders]] = relationship()
 
     __table_args__ = (
         CheckConstraint(

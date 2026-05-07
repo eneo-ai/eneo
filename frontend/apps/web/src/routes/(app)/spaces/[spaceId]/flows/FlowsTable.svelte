@@ -1,6 +1,5 @@
 <script lang="ts">
   import type { FlowSparse } from "@intric/intric-js";
-  import { resolve } from "$app/paths";
   import { IconWorkflow } from "@intric/icons/workflow";
   import { IconChevronRight } from "@intric/icons/chevron-right";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -8,6 +7,7 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import FlowActions from "./FlowActions.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { localizeHref } from "$lib/paraglide/runtime";
 
   let { flows }: { flows: FlowSparse[] } = $props();
 
@@ -84,8 +84,9 @@
         {#each flows as flow (flow.id)}
           <Table.Row class="group border-default hover:bg-muted/40 transition-colors last:border-0">
             <Table.Cell class="border-default border-b p-0 align-middle">
+              <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing for dynamic flow paths -->
               <a
-                href={resolve(flowPath(flow))}
+                href={localizeHref(flowPath(flow))}
                 class="text-primary focus-visible:ring-ring/40 flex min-h-[3.25rem] items-center gap-3 px-4 py-3 font-medium outline-none focus-visible:ring-2 focus-visible:ring-inset"
               >
                 <span
@@ -96,6 +97,7 @@
                 </span>
                 <span class="min-w-0 truncate">{flow.name}</span>
               </a>
+              <!-- eslint-enable svelte/no-navigation-without-resolve -->
             </Table.Cell>
             <Table.Cell
               class="text-secondary border-default border-b px-4 py-3 align-middle tabular-nums"
@@ -129,8 +131,9 @@
     {#each flows as flow (flow.id)}
       <li class="border-default bg-primary relative rounded-xl border shadow-xs">
         <div class="flex items-stretch">
+          <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing for dynamic flow paths -->
           <a
-            href={resolve(flowPath(flow))}
+            href={localizeHref(flowPath(flow))}
             class="focus-visible:ring-ring/40 flex min-h-[4.25rem] flex-1 items-center gap-3 rounded-l-xl px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-inset"
           >
             <span
@@ -157,6 +160,7 @@
             </div>
             <IconChevronRight class="text-muted size-4 shrink-0" aria-hidden="true" />
           </a>
+          <!-- eslint-enable svelte/no-navigation-without-resolve -->
           <div class="flex items-center pr-2">
             <FlowActions {flow} />
           </div>

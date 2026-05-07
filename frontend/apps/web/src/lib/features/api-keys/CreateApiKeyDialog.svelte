@@ -54,6 +54,7 @@
   const intric = getIntric();
   const { user } = getAppContext();
   const isAdmin = user.hasPermission("admin");
+  const canCreateApiKeys = user.hasPermission("api_keys");
 
   type DialogMode = "create" | "edit" | "view";
 
@@ -134,6 +135,11 @@
   let scopeId = $state<string | null>(untrack(() => lockedScopeId ?? null));
   let manualScopeId = $state("");
 
+  // Narrow scopes (assistant/app) can only ever reach one resource type, so
+  // the per-resource-type matrix surfaces dead knobs. Only tenant- and
+  // space-scoped keys expose fine-grained permissions.
+  const scopeAllowsFineGrained = $derived(scopeType === "tenant" || scopeType === "space");
+
   // Fine-grained permissions (HuggingFace-style)
   type ResourcePermission = "none" | "read" | "write" | "admin";
 
@@ -198,6 +204,81 @@
     ).length
   );
 
+  // Scope-aware capability preview rows for the "What this key can do" box.
+  // Each row is rendered with a check (allow) or ban (deny) icon.
+  type CapabilityRow = { kind: "allow" | "deny"; msg: string };
+  const capabilityRows: CapabilityRow[] = $derived.by(() => {
+    if (scopeType === "tenant" || scopeType === "space") {
+      const isSpace = scopeType === "space";
+      if (permission === "read") {
+        return [
+          { kind: "allow", msg: m.api_keys_capability_read_resources() },
+          { kind: "deny", msg: m.api_keys_capability_no_create() },
+          ...(isSpace
+            ? [{ kind: "deny" as const, msg: m.api_keys_capability_no_space_settings() }]
+            : [])
+        ];
+      }
+      if (permission === "write") {
+        return [
+          { kind: "allow", msg: m.api_keys_capability_read_resources() },
+          { kind: "allow", msg: m.api_keys_capability_write_resources() },
+          { kind: "deny", msg: m.api_keys_capability_no_delete() },
+          ...(isSpace
+            ? [{ kind: "deny" as const, msg: m.api_keys_capability_no_space_settings() }]
+            : [])
+        ];
+      }
+      return [
+        { kind: "allow", msg: m.api_keys_capability_read_resources() },
+        { kind: "allow", msg: m.api_keys_capability_write_resources() },
+        { kind: "allow", msg: m.api_keys_capability_delete_resources() },
+        ...(isSpace ? [{ kind: "allow" as const, msg: m.api_keys_capability_admin_space() }] : [])
+      ];
+    }
+    if (scopeType === "assistant") {
+      if (permission === "read") {
+        return [
+          { kind: "allow", msg: m.api_keys_capability_assistant_call_read() },
+          { kind: "deny", msg: m.api_keys_capability_no_edit_assistant() }
+        ];
+      }
+      if (permission === "write") {
+        return [
+          { kind: "allow", msg: m.api_keys_capability_assistant_call_read() },
+          { kind: "allow", msg: m.api_keys_capability_assistant_edit() },
+          { kind: "deny", msg: m.api_keys_capability_no_delete_assistant() }
+        ];
+      }
+      return [
+        { kind: "allow", msg: m.api_keys_capability_assistant_call_read() },
+        { kind: "allow", msg: m.api_keys_capability_assistant_edit() },
+        { kind: "allow", msg: m.api_keys_capability_assistant_delete() }
+      ];
+    }
+    if (scopeType === "app") {
+      if (permission === "read") {
+        return [
+          { kind: "allow", msg: m.api_keys_capability_app_run_read() },
+          { kind: "deny", msg: m.api_keys_capability_no_edit_app() }
+        ];
+      }
+      if (permission === "write") {
+        return [
+          { kind: "allow", msg: m.api_keys_capability_app_run_read() },
+          { kind: "allow", msg: m.api_keys_capability_app_edit() },
+          { kind: "deny", msg: m.api_keys_capability_no_delete_app() }
+        ];
+      }
+      return [
+        { kind: "allow", msg: m.api_keys_capability_app_run_read() },
+        { kind: "allow", msg: m.api_keys_capability_app_edit() },
+        { kind: "allow", msg: m.api_keys_capability_app_delete() }
+      ];
+    }
+    return [];
+  });
+
   // Effect: Reset permission to read for public keys
   $effect(() => {
     if (keyType === "pk_" && permission !== "read") {
@@ -207,9 +288,11 @@
   });
 
   // When the simple permission level changes, sync all fine-grained
-  // permissions to match — simple mode acts as a "set all" shortcut.
+  // permissions to match — simple mode acts as a "set all" shortcut. Only
+  // runs for scopes that expose the fine-grained matrix; narrow scopes
+  // never read the per-resource state.
   $effect(() => {
-    if (permissionMode === "simple") {
+    if (permissionMode === "simple" && scopeAllowsFineGrained) {
       const level =
         permission === "read"
           ? "read"
@@ -230,6 +313,15 @@
     if (scopeType && !scopeLocked) {
       scopeId = null;
       manualScopeId = "";
+    }
+  });
+
+  // Narrow scopes don't support fine-grained mode — snap back to simple so
+  // a user who flipped the toggle under a wide scope and then switched to a
+  // narrow one doesn't end up with a hidden-but-active fine-grained state.
+  $effect(() => {
+    if (!scopeAllowsFineGrained && permissionMode === "fine-grained") {
+      permissionMode = "simple";
     }
   });
 
@@ -340,7 +432,7 @@
 
   async function loadCreationConstraints() {
     try {
-      const constraints = await intric.apiKeys.getCreationConstraints();
+      const constraints = await intric.apiKeys.getPolicyConstraints();
       requireExpiration = constraints.require_expiration ?? false;
       maxExpirationDays = constraints.max_expiration_days ?? null;
       maxRateLimit = constraints.max_rate_limit ?? null;
@@ -362,7 +454,8 @@
     allowedIps = key.allowed_ips ?? [];
     expiresAt = key.expires_at ?? null;
     rateLimit = key.rate_limit?.toString() ?? "";
-    if (key.resource_permissions) {
+    const scopeSupportsFineGrained = key.scope_type === "tenant" || key.scope_type === "space";
+    if (key.resource_permissions && scopeSupportsFineGrained) {
       permissionMode = "fine-grained";
       assistantsPermission = (key.resource_permissions.assistants ?? "none") as ResourcePermission;
       appsPermission = (key.resource_permissions.apps ?? "none") as ResourcePermission;
@@ -478,7 +571,7 @@
       expires_at: expiresAt,
       rate_limit: rateLimit ? Number(rateLimit) : null,
       resource_permissions:
-        keyType === "sk_"
+        keyType === "sk_" && scopeAllowsFineGrained && permissionMode === "fine-grained"
           ? {
               assistants: assistantsPermission as ResourcePermissionLevel,
               apps: appsPermission as ResourcePermissionLevel,
@@ -507,10 +600,14 @@
 
     errorMessage = null;
 
-    // For sk_ keys, always send resource_permissions — backend derives
-    // the effective permission ceiling automatically.
+    // resource_permissions only persists when the user explicitly picked
+    // fine-grained. Simple mode (and narrow scopes, which have no fine-grained
+    // UI) rely on the flat `permission` field — the backend falls back to it
+    // as a uniform ceiling when resource_permissions is null.
+    const editScopeAllowsFineGrained =
+      apiKey.scope_type === "tenant" || apiKey.scope_type === "space";
     const nextResourcePermissions =
-      apiKey.key_type === "sk_"
+      apiKey.key_type === "sk_" && editScopeAllowsFineGrained && permissionMode === "fine-grained"
         ? {
             assistants: assistantsPermission as ResourcePermissionLevel,
             apps: appsPermission as ResourcePermissionLevel,
@@ -727,7 +824,7 @@
     if (!open) handleOpenChange(false);
   }}
 >
-  {#if isCreateMode}
+  {#if isCreateMode && canCreateApiKeys}
     <Dialog.Trigger>
       {#snippet child({ props })}
         <Button {...props} variant={triggerVariant === "outlined" ? "outline" : "default"}>
@@ -1058,7 +1155,10 @@
                 <!-- Step 2: Scope & Permissions -->
                 <div class="space-y-6">
                   <h3 class="sr-only">{m.api_keys_step_scope_sr()}</h3>
-                  <!-- Permission Mode Toggle (hidden for public keys: only simple mode is supported) -->
+                  <!-- Permission Mode Toggle (hidden for public keys; disabled for narrow
+                       scopes since they can only ever reach one resource type and the
+                       per-resource matrix would just surface dead knobs — keeping it
+                       rendered prevents the step from reflowing when scope changes) -->
                   {#if keyType !== "pk_"}
                     <div class="border-default flex items-center justify-between border-b pb-4">
                       <div>
@@ -1067,19 +1167,24 @@
                           class="text-default text-sm font-semibold tracking-wide"
                           >{m.api_keys_permission_type()}</span
                         >
-                        <p class="text-muted mt-0.5 text-xs">{m.api_keys_permission_choose()}</p>
+                        <p class="text-muted mt-0.5 text-xs">
+                          {scopeAllowsFineGrained
+                            ? m.api_keys_permission_choose()
+                            : m.api_keys_permission_narrow_scope_hint()}
+                        </p>
                       </div>
                       <div
                         role="group"
                         aria-labelledby="permission-type-label"
-                        class="border-default bg-subtle flex items-center gap-1 rounded-lg border p-1 {readonly
-                          ? 'pointer-events-none opacity-70'
+                        class="border-default bg-subtle flex items-center gap-1 rounded-lg border p-1 {readonly ||
+                        !scopeAllowsFineGrained
+                          ? 'pointer-events-none opacity-60'
                           : ''}"
                       >
                         <button
                           type="button"
                           onclick={() => (permissionMode = "simple")}
-                          disabled={readonly}
+                          disabled={readonly || !scopeAllowsFineGrained}
                           class="rounded-md px-4 py-2 text-sm font-medium transition-all
                                {permissionMode === 'simple'
                             ? 'bg-primary text-default shadow-sm'
@@ -1090,7 +1195,7 @@
                         <button
                           type="button"
                           onclick={() => (permissionMode = "fine-grained")}
-                          disabled={readonly}
+                          disabled={readonly || !scopeAllowsFineGrained}
                           class="rounded-md px-4 py-2 text-sm font-medium transition-all
                                {permissionMode === 'fine-grained'
                             ? 'bg-primary text-default shadow-sm'
@@ -1167,7 +1272,7 @@
                     {/if}
                   {/if}
 
-                  {#if permissionMode === "simple"}
+                  {#if permissionMode === "simple" || !scopeAllowsFineGrained}
                     <!-- Simple Mode -->
                     <div class="space-y-6">
                       {#if scopeLocked}
@@ -1393,100 +1498,29 @@
                           {m.api_keys_capability_summary_title()}
                         </p>
                         <div class="space-y-2">
-                          {#if permission === "read"}
+                          {#each capabilityRows as row (row.msg)}
                             <div class="flex items-center gap-2.5">
                               <div
-                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
+                                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full {row.kind ===
+                                'allow'
+                                  ? 'bg-positive-default/15'
+                                  : 'bg-negative-default/10'}"
                               >
-                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
+                                {#if row.kind === "allow"}
+                                  <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
+                                {:else}
+                                  <Ban class="text-negative-stronger h-3 w-3" strokeWidth={2.5} />
+                                {/if}
                               </div>
-                              <span class="text-default text-sm"
-                                >{m.api_keys_capability_read_resources()}</span
+                              <span
+                                class="text-sm {row.kind === 'allow'
+                                  ? 'text-default'
+                                  : 'text-muted'}"
                               >
+                                {row.msg}
+                              </span>
                             </div>
-                            <div class="flex items-center gap-2.5">
-                              <div
-                                class="bg-negative-default/10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                              >
-                                <Ban class="text-negative-stronger h-3 w-3" strokeWidth={2.5} />
-                              </div>
-                              <span class="text-muted text-sm"
-                                >{m.api_keys_capability_no_create()}</span
-                              >
-                            </div>
-                            <div class="flex items-center gap-2.5">
-                              <div
-                                class="bg-negative-default/10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                              >
-                                <Ban class="text-negative-stronger h-3 w-3" strokeWidth={2.5} />
-                              </div>
-                              <span class="text-muted text-sm"
-                                >{m.api_keys_capability_no_space_settings()}</span
-                              >
-                            </div>
-                          {:else if permission === "write"}
-                            <div class="flex items-center gap-2.5">
-                              <div
-                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                              >
-                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
-                              </div>
-                              <span class="text-default text-sm"
-                                >{m.api_keys_capability_read_resources()}</span
-                              >
-                            </div>
-                            <div class="flex items-center gap-2.5">
-                              <div
-                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                              >
-                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
-                              </div>
-                              <span class="text-default text-sm"
-                                >{m.api_keys_capability_write_resources()}</span
-                              >
-                            </div>
-                            <div class="flex items-center gap-2.5">
-                              <div
-                                class="bg-negative-default/10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                              >
-                                <Ban class="text-negative-stronger h-3 w-3" strokeWidth={2.5} />
-                              </div>
-                              <span class="text-muted text-sm"
-                                >{m.api_keys_capability_no_space_settings()}</span
-                              >
-                            </div>
-                          {:else if permission === "admin"}
-                            <div class="flex items-center gap-2.5">
-                              <div
-                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                              >
-                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
-                              </div>
-                              <span class="text-default text-sm"
-                                >{m.api_keys_capability_read_resources()}</span
-                              >
-                            </div>
-                            <div class="flex items-center gap-2.5">
-                              <div
-                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                              >
-                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
-                              </div>
-                              <span class="text-default text-sm"
-                                >{m.api_keys_capability_write_resources()}</span
-                              >
-                            </div>
-                            <div class="flex items-center gap-2.5">
-                              <div
-                                class="bg-positive-default/15 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                              >
-                                <Check class="text-positive-stronger h-3 w-3" strokeWidth={3} />
-                              </div>
-                              <span class="text-default text-sm"
-                                >{m.api_keys_capability_admin_space()}</span
-                              >
-                            </div>
-                          {/if}
+                          {/each}
 
                           <div class="border-default mt-2 border-t pt-2">
                             <div class="flex items-center gap-2.5">

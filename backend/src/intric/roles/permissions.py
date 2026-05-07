@@ -25,6 +25,8 @@ class Permission(str, Enum):
     ADMIN = "admin"
     WEBSITES = "websites"
     INTEGRATIONS = "integrations"
+    SHARED_SPACES = "shared_spaces"
+    API_KEYS = "api_keys"
     FLOWS = "flows"
     FLOWS_VIEW = "flows_view"
     FLOWS_RUN = "flows_run"
@@ -34,6 +36,9 @@ class Permission(str, Enum):
 
 
 _FLOW_PERMISSION_ALIASES: dict[Permission, tuple[Permission, ...]] = {
+    # Existing tenants may still carry the pre-granular `flows` grant in role
+    # rows. Keep the compatibility rule centralized here so routers and
+    # services can require the explicit permission they actually need.
     Permission.FLOWS_VIEW: (
         Permission.FLOWS_VIEW,
         Permission.FLOWS_RUN,
@@ -76,7 +81,7 @@ def validate_permissions(permission: Permission) -> Callable[[_F], _F]:
 
     def _validate(func: _F) -> _F:
         async def _inner(self: Any, *args: Any, **kwargs: Any) -> Any:
-            if permission not in self.user.permissions:
+            if not has_permission(self.user.permissions, permission):
                 raise UnauthorizedException(
                     f"Need permission {permission.value} in order to access"
                 )

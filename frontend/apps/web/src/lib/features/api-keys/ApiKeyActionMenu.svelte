@@ -5,11 +5,13 @@
     Ban,
     Bell,
     BellOff,
+    CalendarClock,
     Eye,
     MoreVertical,
     Pencil,
     RefreshCw,
-    RotateCcw
+    RotateCcw,
+    Trash2
   } from "lucide-svelte";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
@@ -21,10 +23,13 @@
   } from "$lib/features/api-keys/notificationPreferences";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
+  import ExtendExpirationDialog from "$lib/features/api-keys/ExtendExpirationDialog.svelte";
+  import RotateApiKeyDialog from "$lib/features/api-keys/RotateApiKeyDialog.svelte";
 
   const intric = getIntric();
 
@@ -55,15 +60,18 @@
   let showRevokeDialog = $state(false);
   let showSuspendDialog = $state(false);
   let showRotateDialog = $state(false);
+  let showExtendDialog = $state(false);
+  let showPurgeDialog = $state(false);
   let actionPending = $state(false);
   let errorMessage = $state<string | null>(null);
   let reasonText = $state("");
   let followLoading = $state(false);
-  let rotationGraceHours = $state(24);
 
   const isActive = $derived(apiKey.state === "active");
   const isSuspended = $derived(apiKey.state === "suspended");
   const canRotate = $derived(apiKey.state === "active");
+  const canExtendExpiration = $derived(apiKey.state === "active" || apiKey.state === "suspended");
+  const canPurge = $derived(apiKey.state === "revoked" || apiKey.state === "expired");
   const isAdmin = $derived(mode === "admin");
   const reasonCode = $derived(isAdmin ? ("admin_action" as const) : ("user_request" as const));
   // In user mode, personal keys can only be managed by their owner; service keys are
@@ -75,49 +83,6 @@
       apiKey.ownership === "service" ||
       apiKey.owner_user_id === currentUserId
   );
-
-  function formatLastUsed(lastUsedAt: string | null | undefined): string | null {
-    if (!lastUsedAt) return null;
-    const last = new Date(lastUsedAt);
-    const now = new Date();
-    const diffMs = now.getTime() - last.getTime();
-    const diffMin = Math.floor(diffMs / 60_000);
-    if (diffMin < 1) return m.api_keys_rotate_last_used_just_now();
-    if (diffMin < 60) return m.api_keys_rotate_last_used_minutes({ minutes: diffMin });
-    const diffHours = Math.floor(diffMin / 60);
-    if (diffHours < 24) return m.api_keys_rotate_last_used_hours({ hours: diffHours });
-    const diffDays = Math.floor(diffHours / 24);
-    return m.api_keys_rotate_last_used_days({ days: diffDays });
-  }
-
-  async function openRotateDialog() {
-    try {
-      const constraints = await intric.apiKeys.getCreationConstraints();
-      rotationGraceHours = constraints.rotation_grace_hours ?? 24;
-    } catch {
-      // Fall back to default
-    }
-    showRotateDialog = true;
-  }
-
-  async function rotateKey() {
-    actionPending = true;
-    try {
-      const response = isAdmin
-        ? await intric.apiKeys.admin.rotate({ id: apiKey.id })
-        : await intric.apiKeys.rotate({ id: apiKey.id });
-      if (!response?.secret) {
-        throw new Error("rotate_missing_secret");
-      }
-      showRotateDialog = false;
-      onSecret(response);
-    } catch (error) {
-      console.error(error);
-      toast.error(getErrorMessage(error));
-    } finally {
-      actionPending = false;
-    }
-  }
 
   async function revokeKey() {
     errorMessage = null;
@@ -186,6 +151,25 @@
     }
   }
 
+  async function purgeKey() {
+    actionPending = true;
+    try {
+      if (isAdmin) {
+        await intric.apiKeys.admin.purge({ id: apiKey.id });
+      } else {
+        await intric.apiKeys.purge({ id: apiKey.id });
+      }
+      onChanged();
+      showPurgeDialog = false;
+      toast.success(m.api_keys_action_purge());
+    } catch (error) {
+      console.error(error);
+      toast.error(getErrorMessage(error));
+    } finally {
+      actionPending = false;
+    }
+  }
+
   async function toggleFollow() {
     followLoading = true;
     try {
@@ -204,7 +188,7 @@
   }
 </script>
 
-{#if apiKey.state !== "revoked" || isAdmin}
+{#if apiKey.state !== "revoked" || isAdmin || canPurge}
   <DropdownMenu.Root>
     <DropdownMenu.Trigger>
       {#snippet child({ props })}
@@ -230,9 +214,16 @@
       {/if}
 
       {#if canRotate}
-        <DropdownMenu.Item onclick={openRotateDialog} disabled={!canManage}>
+        <DropdownMenu.Item onclick={() => (showRotateDialog = true)} disabled={!canManage}>
           <RotateCcw />
           {isAdmin ? m.api_keys_admin_action_rotate() : m.api_keys_action_rotate()}
+        </DropdownMenu.Item>
+      {/if}
+
+      {#if canExtendExpiration}
+        <DropdownMenu.Item onclick={() => (showExtendDialog = true)} disabled={!canManage}>
+          <CalendarClock />
+          {isAdmin ? m.api_keys_admin_action_extend() : m.api_keys_action_extend()}
         </DropdownMenu.Item>
       {/if}
 
@@ -286,6 +277,18 @@
         >
           <Ban />
           {isAdmin ? m.api_keys_admin_action_revoke() : m.api_keys_action_revoke()}
+        </DropdownMenu.Item>
+      {/if}
+
+      {#if canPurge}
+        <DropdownMenu.Separator />
+        <DropdownMenu.Item
+          variant="destructive"
+          onclick={() => (showPurgeDialog = true)}
+          disabled={!canManage}
+        >
+          <Trash2 />
+          {isAdmin ? m.api_keys_admin_action_purge() : m.api_keys_action_purge()}
         </DropdownMenu.Item>
       {/if}
     </DropdownMenu.Content>
@@ -370,69 +373,29 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<!-- Rotate confirmation dialog -->
-<Dialog.Root bind:open={showRotateDialog}>
-  <Dialog.Content class="sm:max-w-md">
-    <Dialog.Header>
-      <Dialog.Title>
-        {m.api_keys_rotate_confirm_title()}
-      </Dialog.Title>
-      <Dialog.Description>
-        {m.api_keys_rotate_confirm_description()}
-      </Dialog.Description>
-    </Dialog.Header>
+<RotateApiKeyDialog {apiKey} {mode} bind:open={showRotateDialog} {onSecret} />
 
-    <div class="space-y-3">
-      <div class="bg-subtle border-default rounded-lg border p-3">
-        <p class="text-default text-sm font-medium">{apiKey.name}</p>
-        <p class="text-muted mt-0.5 font-mono text-xs">
-          {apiKey.key_prefix}...{apiKey.key_suffix}
-        </p>
-      </div>
+<ExtendExpirationDialog {apiKey} {mode} bind:open={showExtendDialog} {onChanged} />
 
-      <div class="bg-subtle border-default space-y-1.5 rounded-lg border p-3">
-        <div class="flex items-center justify-between">
-          <span class="text-muted text-xs">{m.api_keys_rotate_grace_period_label()}</span>
-          <span class="text-default text-sm font-medium">
-            {m.api_keys_rotate_grace_period_value({ hours: rotationGraceHours })}
-          </span>
-        </div>
-        {#if apiKey.last_used_at}
-          {@const lastUsedText = formatLastUsed(apiKey.last_used_at)}
-          {#if lastUsedText}
-            <div class="flex items-center justify-between">
-              <span class="text-muted text-xs">{m.api_keys_rotate_last_used_label()}</span>
-              <span class="text-default text-sm">{lastUsedText}</span>
-            </div>
-          {/if}
-        {/if}
-        {#if apiKey.expires_at}
-          <div class="flex items-center justify-between">
-            <span class="text-muted text-xs">{m.api_keys_rotate_expires_label()}</span>
-            <span class="text-default text-sm">
-              {new Date(apiKey.expires_at).toLocaleDateString()}
-            </span>
-          </div>
-        {/if}
-      </div>
-
-      <Alert.Root>
-        <AlertCircle />
-        <Alert.Description class="text-xs">
-          {m.api_keys_rotate_grace_info({ hours: rotationGraceHours })}
-        </Alert.Description>
-      </Alert.Root>
+<AlertDialog.Root bind:open={showPurgeDialog}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.api_keys_purge_dialog_title()}</AlertDialog.Title>
+      <AlertDialog.Description>
+        {m.api_keys_purge_dialog_description()}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <div class="bg-subtle border-default rounded-lg border p-3">
+      <p class="text-default text-sm font-medium">{apiKey.name}</p>
+      <p class="text-muted mt-0.5 font-mono text-xs">
+        {apiKey.key_prefix}...{apiKey.key_suffix}
+      </p>
     </div>
-
-    <Dialog.Footer>
-      <Dialog.Close>
-        {#snippet child({ props })}
-          <Button variant="outline" {...props}>{m.cancel()}</Button>
-        {/snippet}
-      </Dialog.Close>
-      <Button onclick={rotateKey} disabled={actionPending}>
-        {isAdmin ? m.api_keys_admin_action_rotate() : m.api_keys_action_rotate()}
-      </Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action variant="destructive" onclick={purgeKey} disabled={actionPending}>
+        {m.api_keys_purge_confirm()}
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

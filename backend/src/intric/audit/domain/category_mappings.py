@@ -31,6 +31,8 @@ CATEGORY_MAPPINGS = {
     ActionType.API_KEY_SUSPENDED.value: "admin_actions",
     ActionType.API_KEY_REACTIVATED.value: "admin_actions",
     ActionType.API_KEY_ROTATED.value: "admin_actions",
+    ActionType.API_KEY_EXPIRATION_EXTENDED.value: "admin_actions",
+    ActionType.API_KEY_PURGED.value: "admin_actions",
     ActionType.API_KEY_EXPIRED.value: "admin_actions",
     ActionType.API_KEY_USED.value: "admin_actions",
     ActionType.API_KEY_AUTH_FAILED.value: "admin_actions",
