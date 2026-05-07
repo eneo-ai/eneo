@@ -168,6 +168,9 @@ RESOURCE_PERMISSION_FIELDS: tuple[str, ...] = (
 )
 
 
+PK_FORBIDDEN_RESOURCE_FIELDS: tuple[str, ...] = ("jobs", "prompts")
+
+
 _LEVEL_TO_PERMISSION: dict[int, ApiKeyPermission] = {
     0: ApiKeyPermission.READ,
     1: ApiKeyPermission.READ,

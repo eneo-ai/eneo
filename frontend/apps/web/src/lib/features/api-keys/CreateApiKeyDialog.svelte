@@ -243,12 +243,19 @@
     return "read";
   });
 
-  const resourcePermissionOptions: ReadonlyArray<{
+  type ResourcePermissionOption = {
     key: ResourcePermissionKey;
     label: () => string;
     description: () => string;
     icon: typeof MessageSquare;
-  }> = [
+  };
+
+  // jobs/prompts are infrastructure concepts that browser-side end-users do
+  // not understand; the backend rejects them on pk_ keys, so the UI hides
+  // them too.
+  const PK_FORBIDDEN_RESOURCES: ReadonlySet<ResourcePermissionKey> = new Set(["jobs", "prompts"]);
+
+  const allResourcePermissionOptions: ReadonlyArray<ResourcePermissionOption> = [
     {
       key: "assistants",
       label: () => m.api_keys_resource_assistants(),
@@ -298,6 +305,12 @@
       icon: Pencil
     }
   ];
+
+  const resourcePermissionOptions = $derived(
+    keyType === "pk_"
+      ? allResourcePermissionOptions.filter((opt) => !PK_FORBIDDEN_RESOURCES.has(opt.key))
+      : allResourcePermissionOptions
+  );
 
   // Scope-aware capability preview rows for the "What this key can do" box.
   // Each row is rendered with a check (allow) or ban (deny) icon.
@@ -378,6 +391,15 @@
   $effect(() => {
     if (keyType === "pk_" && permission !== "read") {
       permission = "read";
+    }
+  });
+
+  // Effect: clear forbidden resources when switching to pk_ so a stale value
+  // (e.g. from editing an sk_ key, then toggling type) never reaches submit.
+  $effect(() => {
+    if (keyType === "pk_") {
+      if (jobsPermission !== "none") jobsPermission = "none";
+      if (promptsPermission !== "none") promptsPermission = "none";
     }
   });
 

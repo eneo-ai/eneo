@@ -215,6 +215,72 @@ async def test_create_pk_rejects_write_resource_permissions():
 
 
 @pytest.mark.asyncio
+async def test_create_pk_rejects_jobs_resource_permission():
+    """jobs is on the pk_ denylist regardless of level — even read is too much."""
+    service = _service_with_user(permissions=[Permission.ADMIN])
+
+    request = ApiKeyCreateRequest(
+        name="Public key",
+        key_type=ApiKeyType.PK,
+        permission=ApiKeyPermission.READ,
+        scope_type=ApiKeyScopeType.TENANT,
+        scope_id=None,
+        allowed_origins=["http://localhost:3000"],
+        resource_permissions=ResourcePermissions(jobs=ResourcePermissionLevel.READ),
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_create_request(request=request)
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+    assert "jobs" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_create_pk_rejects_prompts_resource_permission():
+    service = _service_with_user(permissions=[Permission.ADMIN])
+
+    request = ApiKeyCreateRequest(
+        name="Public key",
+        key_type=ApiKeyType.PK,
+        permission=ApiKeyPermission.READ,
+        scope_type=ApiKeyScopeType.TENANT,
+        scope_id=None,
+        allowed_origins=["http://localhost:3000"],
+        resource_permissions=ResourcePermissions(prompts=ResourcePermissionLevel.READ),
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_create_request(request=request)
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+    assert "prompts" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_update_pk_rejects_jobs_resource_permission():
+    service = _service()
+    key = SimpleNamespace(
+        key_type=ApiKeyType.PK.value,
+        tenant_id=uuid4(),
+        permission=ApiKeyPermission.READ.value,
+        resource_permissions=None,
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_update_request(
+            key=key,
+            updates={"resource_permissions": {"jobs": "read"}},
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+    assert "jobs" in exc.value.message
+
+
+@pytest.mark.asyncio
 async def test_update_pk_null_resource_permissions_normalizes_to_public_default():
     service = _service()
     key = SimpleNamespace(

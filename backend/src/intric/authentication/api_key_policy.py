@@ -10,6 +10,7 @@ from intric.allowed_origins.origin_matching import origin_matches_pattern
 from intric.authentication.api_key_request_context import resolve_client_ip
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.auth_models import (
+    PK_FORBIDDEN_RESOURCE_FIELDS,
     RESOURCE_PERMISSION_FIELDS,
     ApiKeyCreateRequest,
     ApiKeyOwnership,
@@ -51,6 +52,21 @@ def _validate_public_resource_permissions(rp: ResourcePermissions) -> None:
             status_code=400,
             code="invalid_request",
             message=("pk_ keys only support 'none' or 'read' resource permissions."),
+        )
+
+    forbidden = [
+        field
+        for field in PK_FORBIDDEN_RESOURCE_FIELDS
+        if getattr(rp, field) != ResourcePermissionLevel.NONE
+    ]
+    if forbidden:
+        raise ApiKeyValidationError(
+            status_code=400,
+            code="invalid_request",
+            message=(
+                "pk_ keys do not support these resource permissions: "
+                f"{', '.join(forbidden)}."
+            ),
         )
 
 
