@@ -14,6 +14,7 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     StructuredFieldDraft,
 )
+from intric.flows.flow_variable_definitions import form_field_reference_expression
 
 
 def compile_new_step_draft(
@@ -157,7 +158,7 @@ def compile_input_bindings(
     sections.extend(explicit_previous_outputs)
     if step_draft.uses_form_fields:
         form_field_lines = [
-            f"{field_name}: {{{{ {field_name} }}}}"
+            f"{field_name}: {form_field_reference_expression(field_name)}"
             for field_name in step_draft.uses_form_fields
         ]
         sections.append("\n".join(form_field_lines))
@@ -228,7 +229,7 @@ def compile_assistant_instructions(
         )
     if input_bindings is None and step_draft.uses_form_fields:
         form_lines = "\n".join(
-            f"- {field_name}: {{{{ {field_name} }}}}"
+            f"- {field_name}: {form_field_reference_expression(field_name)}"
             for field_name in step_draft.uses_form_fields
         )
         instructions = (

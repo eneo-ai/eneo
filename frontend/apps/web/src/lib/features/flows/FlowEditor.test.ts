@@ -234,6 +234,75 @@ describe("FlowEditor basic settings commands", () => {
   });
 });
 
+describe("FlowEditor form field reference rewrites", () => {
+  it("rewrites safe bare and namespaced field references to the canonical namespaced token", async () => {
+    const flow = makeFlow(null, {
+      steps: [
+        makeStep(1, {
+          input_bindings: {
+            question: "Case {{case_id}} and again {{ flow_input.case_id }}"
+          } as never
+        })
+      ]
+    });
+    const editor = createFlowEditor({ flow, intric: makeIntric() });
+    try {
+      await editor.rewriteInputFieldVariableReferences("case_id", "kundnamn");
+
+      const [step] = get(editor.state.update).steps ?? [];
+      expect(step.input_bindings).toEqual({
+        question: "Case {{flow_input.kundnamn}} and again {{flow_input.kundnamn}}"
+      });
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("does not rewrite bare shadowed system variables when renaming a reserved field", async () => {
+    const flow = makeFlow(null, {
+      steps: [
+        makeStep(1, {
+          input_bindings: {
+            question: "System date {{datum}} and field {{ flow_input.datum }}"
+          } as never
+        })
+      ]
+    });
+    const editor = createFlowEditor({ flow, intric: makeIntric() });
+    try {
+      await editor.rewriteInputFieldVariableReferences("datum", "mötesdatum");
+
+      const [step] = get(editor.state.update).steps ?? [];
+      expect(step.input_bindings).toEqual({
+        question: "System date {{datum}} and field {{flow_input.mötesdatum}}"
+      });
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("leaves references unchanged when the new field name is not usable", async () => {
+    const flow = makeFlow(null, {
+      steps: [
+        makeStep(1, {
+          input_bindings: { question: "Case {{flow_input.case_id}}" } as never
+        })
+      ]
+    });
+    const editor = createFlowEditor({ flow, intric: makeIntric() });
+    try {
+      await editor.rewriteInputFieldVariableReferences("case_id", "flow_input");
+
+      const [step] = get(editor.state.update).steps ?? [];
+      expect(step.input_bindings).toEqual({
+        question: "Case {{flow_input.case_id}}"
+      });
+    } finally {
+      editor.destroy();
+    }
+  });
+});
+
 describe("FlowEditor step mutation commands", () => {
   it("replaces one step while preserving neighbors and step order", () => {
     const editor = createFlowEditor({

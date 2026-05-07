@@ -61,6 +61,7 @@ from intric.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
 )
 from intric.flows.domain.flow import FlowStep
+from intric.flows.flow_variable_definitions import form_field_reference_expression
 
 _RUNTIME_STEP_ALIAS_PATTERN = re.compile(r"\{\{\s*step_(\d+)(\.[^{}]+?)\s*\}\}")
 
@@ -1052,7 +1053,7 @@ def _compile_patch_input_bindings(
     if uses_form_fields:
         sections.append(
             "\n".join(
-                f"{field_name}: {{{{ {field_name} }}}}"
+                f"{field_name}: {form_field_reference_expression(field_name)}"
                 for field_name in uses_form_fields
             )
         )
@@ -1119,7 +1120,8 @@ def _compile_patch_input_instruction_hint(
             )
     if uses_form_fields:
         form_lines = [
-            f"- {field_name}: {{{{ {field_name} }}}}" for field_name in uses_form_fields
+            f"- {field_name}: {form_field_reference_expression(field_name)}"
+            for field_name in uses_form_fields
         ]
         sections.append(
             "Beakta också följande formulärfält vid analysen:\n" + "\n".join(form_lines)

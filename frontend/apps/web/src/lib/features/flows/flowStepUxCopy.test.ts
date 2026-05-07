@@ -15,7 +15,7 @@ describe("flowStepUxCopy", () => {
       "Här bygger du den text AI:n ska arbeta med. Lämna tomt om steget ska använda sitt vanliga underlag."
     );
     expect(copy.inputTemplatePlaceholder).toBe(
-      "t.ex. Rubrik: {{titel}}\nText: {{step_1.output.text}}"
+      "t.ex. Rubrik: {{flow_input.titel}}\nText: {{step_1.output.text}}"
     );
   });
 
@@ -44,7 +44,7 @@ describe("flowStepUxCopy", () => {
       "Here you build the text the AI should work with. Leave it empty if the step should use its normal material."
     );
     expect(copy.inputTemplatePlaceholder).toBe(
-      "e.g. Title: {{title}}\nText: {{step_1.output.text}}"
+      "e.g. Title: {{flow_input.title}}\nText: {{step_1.output.text}}"
     );
     expect(copy.inputTemplateDefaultHint).toBe(
       "If you leave this empty, the text sent in when the flow runs will be used."

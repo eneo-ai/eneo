@@ -4,6 +4,7 @@ from intric.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,
     consumes_runtime_input,
+    referenced_form_fields,
 )
 
 
@@ -26,6 +27,20 @@ def test_consumes_runtime_input_for_step_input_expression() -> None:
 
     assert consumes_runtime_input(refs) is True
     assert refs[0].kind is TemplateReferenceKind.RUNTIME
+
+
+def test_flow_input_path_counts_as_declared_form_field_reference() -> None:
+    refs = analyze_template(
+        "Case: {{ flow_input.case_id }} and raw input {{ flow_input.text }}",
+        step_refs={},
+        form_field_names={"case_id"},
+    )
+
+    assert refs[0].kind is TemplateReferenceKind.RUNTIME
+    assert refs[0].head == "flow_input"
+    assert refs[0].form_field_name == "case_id"
+    assert refs[1].kind is TemplateReferenceKind.RUNTIME
+    assert referenced_form_fields(refs) == {"case_id"}
 
 
 def test_marks_scalar_runtime_tail_as_invalid() -> None:

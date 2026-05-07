@@ -934,7 +934,7 @@ class TestUntouchedStepsPreserved:
         )
 
         assert result.compiled_spec.steps[1].input_bindings == {
-            "question": "{{ step_a.output.structured }}\n\ncase_id: {{ case_id }}"
+            "question": "{{ step_a.output.structured }}\n\ncase_id: {{ flow_input.case_id }}"
         }
         validation = validate_spec(result.compiled_spec)
         assert validation.valid
@@ -1001,7 +1001,7 @@ class TestUntouchedStepsPreserved:
         assert "Beakta särskilt följande strukturerade fält" in (
             step.assistant_spec.instructions
         )
-        assert "case_id: {{ case_id }}" in step.assistant_spec.instructions
+        assert "case_id: {{ flow_input.case_id }}" in step.assistant_spec.instructions
         validation = validate_spec(result.compiled_spec)
         assert validation.valid
 
@@ -1076,7 +1076,7 @@ class TestTransitionNormalization:
                 input_type="json",
                 output_type="json",
                 input_bindings={
-                    "question": "{{ step_2.output.structured }}\n\nreferensnummer: {{ referensnummer }}"
+                    "question": "{{ step_2.output.structured }}\n\nreferensnummer: {{ flow_input.referensnummer }}"
                 },
                 output_contract={
                     "type": "object",
@@ -1468,8 +1468,8 @@ class TestCompiledResultApproval:
                 output_type="docx",
                 input_bindings={
                     "question": (
-                        "Brukare: {{ Brukarens namn }}\n"
-                        "Kontext: {{ Handläggningskontext }}\n"
+                        "Brukare: {{ flow_input.Brukarens namn }}\n"
+                        "Kontext: {{ flow_input.Handläggningskontext }}\n"
                         "Behov: {{ step_1.output.structured.brukare.kan_uttrycka_behov_sjalv }}"
                     )
                 },
@@ -1528,8 +1528,8 @@ class TestCompiledResultApproval:
         assert generated_docx_step.input_bindings is not None
         assert (
             generated_docx_step.input_bindings["question"]
-            == "Brukare: {{ Brukarens namn }}\n"
-            "Kontext: {{ Handläggningskontext }}\n"
+            == "Brukare: {{ flow_input.Brukarens namn }}\n"
+            "Kontext: {{ flow_input.Handläggningskontext }}\n"
             "Behov: {{ step_b.output.structured.brukare.kan_uttrycka_behov_sjalv }}"
         )
 
@@ -1542,8 +1542,9 @@ class TestCompiledResultApproval:
         )
         assert rewritten.input_bindings is not None
         assert (
-            rewritten.input_bindings["question"] == "Brukare: {{ Brukarens namn }}\n"
-            "Kontext: {{ Handläggningskontext }}\n"
+            rewritten.input_bindings["question"]
+            == "Brukare: {{ flow_input.Brukarens namn }}\n"
+            "Kontext: {{ flow_input.Handläggningskontext }}\n"
             "Behov: {{ step_2.output.structured.brukare.kan_uttrycka_behov_sjalv }}"
         )
 

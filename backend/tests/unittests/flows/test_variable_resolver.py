@@ -184,6 +184,25 @@ def test_build_context_does_not_overwrite_reserved_keys_from_friendly_aliases():
     assert context["Namn på brukare"] == "Anna"
 
 
+def test_namespaced_flow_input_reads_reserved_user_field_without_overwriting_system_alias():
+    resolver = FlowVariableResolver()
+    context = resolver.build_context(
+        flow_input={"datum": "2026-05-06", "flow_input": "user supplied value"},
+        prior_results=[],
+    )
+
+    assert context["flow_input"]["datum"] == "2026-05-06"
+    assert (
+        resolver.interpolate(template="{{ flow_input.datum }}", context=context)
+        == "2026-05-06"
+    )
+    assert (
+        resolver.interpolate(template="{{ flow_input.flow_input }}", context=context)
+        == "user supplied value"
+    )
+    assert resolver.interpolate(template="{{ datum }}", context=context) != "2026-05-06"
+
+
 def test_iter_template_expressions_extracts_all_expressions():
     expressions = iter_template_expressions(
         "Hej {{ flow_input.name }} och {{step_1.output.summary}} med {{ custom.value }}"

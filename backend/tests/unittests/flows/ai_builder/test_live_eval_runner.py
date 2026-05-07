@@ -69,11 +69,11 @@ def test_stream_error_messages_include_code_and_message() -> None:
     events = runner.parse_builder_stream(
         b"event: error\n"
         b'data: {"code":"self_correction_invalid_plan",'
-        b'"message":"Plan still invalid after correction."}\n\n'
+        b'"message":"The corrected plan is still not a valid flow."}\n\n'
     )
 
     assert runner.stream_error_messages(events) == [
-        "self_correction_invalid_plan: Plan still invalid after correction."
+        "self_correction_invalid_plan: The corrected plan is still not a valid flow."
     ]
 
 

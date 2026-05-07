@@ -1,5 +1,15 @@
+import { isFlowFormFieldBareAliasSafe } from "./flowFormSchema";
+
 const TEMPLATE_TOKEN_PATTERN = /\{\{\s*([^{}]+)\s*\}\}/g;
 const STEP_ORDER_TOKEN_PATTERN = /^step_(\d+)(\..+)?$/;
+const SYSTEM_VARIABLE_NAMES = new Set([
+  "datum",
+  "transkribering",
+  "föregående_steg",
+  "indata_text",
+  "indata_json",
+  "indata_filer"
+]);
 const TECHNICAL_TOKEN_PATTERNS = [
   /^flow_input\./,
   /^flow\.input\./,
@@ -176,19 +186,26 @@ export function classifyVariable(
   token: string,
   context: VariableClassificationContext
 ): VariableCategory {
-  // 1. Form field name match
-  if (context.knownFieldNames.has(token)) return "field";
+  // 1. Namespaced form field reference
+  const flowInputFieldName = token.startsWith("flow_input.")
+    ? token.slice("flow_input.".length)
+    : null;
+  if (flowInputFieldName !== null && context.knownFieldNames.has(flowInputFieldName)) {
+    return "field";
+  }
 
   // 2. System variables
-  if (token === "transkribering" || token.startsWith("indata_")) return "system";
-  if (token === "föregående_steg") return "system";
+  if (SYSTEM_VARIABLE_NAMES.has(token)) return "system";
 
-  // 3. Step name alias (matches a previous step's user_description)
+  // 3. Backward-compatible bare form field reference
+  if (context.knownFieldNames.has(token) && isFlowFormFieldBareAliasSafe(token)) return "field";
+
+  // 4. Step name alias (matches a previous step's user_description)
   for (const [order, name] of context.knownStepNames) {
     if (order < context.currentStepOrder && name === token) return "step";
   }
 
-  // 4. Structured step output (step_N.output.structured.*)
+  // 5. Structured step output (step_N.output.structured.*)
   const structuredMatch = /^step_(\d+)\.output\.structured(?:\.|$)/.exec(token);
   if (structuredMatch) {
     const stepOrder = Number(structuredMatch[1]);
@@ -197,11 +214,11 @@ export function classifyVariable(
     return "structured";
   }
 
-  // 5. Step output reference (step_N.output.* or step_N.*)
+  // 6. Step output reference (step_N.output.* or step_N.*)
   const stepMatch = /^step_(\d+)(\.|$)/.exec(token);
   if (stepMatch) return "step";
 
-  // 6. Technical flow_input / step_input references
+  // 7. Technical flow_input / step_input references
   if (
     token.startsWith("flow_input.") ||
     token.startsWith("flow.input.") ||
@@ -209,7 +226,7 @@ export function classifyVariable(
   )
     return "technical";
 
-  // 7. Unknown
+  // 8. Unknown
   return "unknown";
 }
 

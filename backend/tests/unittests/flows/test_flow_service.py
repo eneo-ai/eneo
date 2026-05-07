@@ -2142,25 +2142,24 @@ async def test_create_flow_normalizes_legacy_form_field_types(user):
 
 
 @pytest.mark.asyncio
-async def test_create_flow_rejects_reserved_form_field_alias_names(user):
+async def test_create_flow_allows_scalar_runtime_reserved_form_field_names(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
+    flow_repo.create.side_effect = lambda flow, tenant_id: flow
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
 
-    with pytest.raises(
-        BadRequestException,
-        match="metadata_json.form_schema.fields\\[0\\].name 'flow_input' is reserved",
-    ):
-        await service.create_flow(
-            space_id=uuid4(),
-            name="Flow",
-            steps=[_step()],
-            metadata_json={
-                "form_schema": {
-                    "fields": [{"name": "flow_input", "type": "text", "required": True}]
-                }
-            },
-        )
+    created = await service.create_flow(
+        space_id=uuid4(),
+        name="Flow",
+        steps=[_step()],
+        metadata_json={
+            "form_schema": {
+                "fields": [{"name": "datum", "type": "date", "required": True}]
+            }
+        },
+    )
+
+    assert created.metadata_json["form_schema"]["fields"][0]["name"] == "datum"
 
 
 @pytest.mark.asyncio

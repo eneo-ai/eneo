@@ -29,6 +29,7 @@ class TemplateReference:
     step_ref: str | None = None
     step_order: int | None = None
     structured_path: tuple[str, ...] | None = None
+    form_field_name: str | None = None
     path_error_code: str | None = None
     path_error_context: dict[str, object] | None = None
 
@@ -69,11 +70,17 @@ def referenced_step_refs(references: list[TemplateReference]) -> set[str]:
 
 
 def referenced_form_fields(references: list[TemplateReference]) -> set[str]:
-    return {
+    fields = {
         reference.head
         for reference in references
         if reference.kind is TemplateReferenceKind.FORM_FIELD
     }
+    fields.update(
+        reference.form_field_name
+        for reference in references
+        if reference.form_field_name is not None
+    )
+    return fields
 
 
 def _analyze_expression(
@@ -97,11 +104,13 @@ def _analyze_expression(
             step_ref=head,
             step_order=step_refs[head],
         )
+    form_field_name = _flow_input_form_field_name(tail, form_field_names)
     if head in RESERVED_RUNTIME_VARIABLES:
         return _build_runtime_reference(
             expression=expression,
             head=head,
             tail=tail,
+            form_field_name=form_field_name if head == "flow_input" else None,
         )
     if head.startswith("step_"):
         step_order = _runtime_step_order(head)
@@ -164,6 +173,7 @@ def _build_runtime_reference(
     expression: str,
     head: str,
     tail: str,
+    form_field_name: str | None = None,
 ) -> TemplateReference:
     path_error_code: str | None = None
     path_error_context: dict[str, object] | None = None
@@ -181,9 +191,17 @@ def _build_runtime_reference(
         head=head,
         tail=tail,
         kind=TemplateReferenceKind.RUNTIME,
+        form_field_name=form_field_name,
         path_error_code=path_error_code,
         path_error_context=path_error_context,
     )
+
+
+def _flow_input_form_field_name(tail: str, form_field_names: set[str]) -> str | None:
+    if not tail:
+        return None
+    field_name = tail.split(".", maxsplit=1)[0].strip()
+    return field_name if field_name in form_field_names else None
 
 
 def _validate_step_input_path(tail: str) -> tuple[str | None, dict[str, object] | None]:

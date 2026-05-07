@@ -257,7 +257,7 @@ def test_validate_steps_allows_string_contract_for_all_previous_text_input():
 
 
 def test_validate_form_schema_rejects_duplicate_field_names_case_insensitive():
-    with pytest.raises(BadRequestException, match="name must be unique"):
+    with pytest.raises(BadRequestException, match="already uses that name") as exc_info:
         validate_form_schema(
             {
                 "form_schema": {
@@ -269,22 +269,66 @@ def test_validate_form_schema_rejects_duplicate_field_names_case_insensitive():
             }
         )
 
+    assert exc_info.value.code == "flow_form_field_name_duplicate"
+    assert exc_info.value.context == {"field_index": 1, "field_name": "caseid"}
 
-def test_validate_form_schema_reserved_field_name_error_names_field_and_aliases():
+
+def test_validate_form_schema_allows_scalar_runtime_reserved_field_names():
+    validate_form_schema(
+        {
+            "form_schema": {
+                "fields": [
+                    {"name": "datum", "type": "date"},
+                    {"name": "föregående_steg", "type": "text"},
+                    {"name": "indata_text", "type": "text"},
+                ],
+            }
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "code"),
+    [
+        ("flow", "flow_form_field_name_namespace_head"),
+        ("flow_input", "flow_form_field_name_namespace_head"),
+        ("step_input", "flow_form_field_name_namespace_head"),
+        ("text", "flow_form_field_name_primary_input_key"),
+        ("json", "flow_form_field_name_primary_input_key"),
+        ("structured", "flow_form_field_name_primary_input_key"),
+        ("file_ids", "flow_form_field_name_primary_input_key"),
+        ("transcription", "flow_form_field_name_primary_input_key"),
+        ("transcript", "flow_form_field_name_primary_input_key"),
+        ("transcribed_text", "flow_form_field_name_primary_input_key"),
+        ("transkribering", "flow_form_field_name_primary_input_key"),
+    ],
+)
+def test_validate_form_schema_rejects_runtime_payload_field_names(field_name, code):
     with pytest.raises(BadRequestException) as exc_info:
         validate_form_schema(
             {
                 "form_schema": {
-                    "fields": [{"name": "step_input", "type": "text"}],
+                    "fields": [{"name": field_name, "type": "text"}],
                 }
             }
         )
 
-    message = str(exc_info.value)
-    assert "metadata_json.form_schema.fields[0].name 'step_input' is reserved" in message
-    assert "Reserved aliases:" in message
-    assert "flow_input" in message
-    assert "datum" in message
+    assert exc_info.value.code == code
+    assert exc_info.value.context == {"field_index": 0, "field_name": field_name}
+
+
+def test_validate_form_schema_rejects_step_alias_field_name_with_context():
+    with pytest.raises(BadRequestException, match="Names like step_1") as exc_info:
+        validate_form_schema(
+            {
+                "form_schema": {
+                    "fields": [{"name": "step_2", "type": "text"}],
+                }
+            }
+        )
+
+    assert exc_info.value.code == "flow_form_field_name_step_alias"
+    assert exc_info.value.context == {"field_index": 0, "field_name": "step_2"}
 
 
 def test_validate_steps_rejects_template_fill_for_non_docx_output():
@@ -457,6 +501,20 @@ def test_validate_variable_alias_collisions_rejects_step_name_matching_form_fiel
                 "form_schema": {
                     "fields": [
                         {"name": "caseid", "type": "text"},
+                    ]
+                }
+            },
+        )
+
+
+def test_validate_variable_alias_collisions_still_rejects_reserved_step_names():
+    with pytest.raises(BadRequestException, match="that name is reserved"):
+        validate_variable_alias_collisions(
+            steps=[_step(user_description="datum")],
+            metadata_json={
+                "form_schema": {
+                    "fields": [
+                        {"name": "mötesdatum", "type": "date"},
                     ]
                 }
             },

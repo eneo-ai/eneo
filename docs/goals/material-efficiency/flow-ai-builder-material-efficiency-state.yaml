@@ -2477,6 +2477,76 @@ tasks:
       follow_ups:
         - "Review whether V1/V3/V4/V5/C4 clarification_required is desired product behavior or should be narrowed in a separate requirements/discovery slice."
 
+  - id: T045
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Normalize Flow form-field variable references and improve reserved-name UX."
+    inputs:
+      - "User-reported repeated reserved-variable toast: metadata_json.form_schema.fields[0].name uses a reserved variable alias."
+      - "Flow form schema editor and prompt/template binding UX."
+      - "Backend variable resolver, template reference analyzer, AI Builder compilers, and validation quality lints."
+      - "Claude namespace plan and implementation review artifacts."
+    constraints:
+      - "Keep one canonical backend owner for runtime variable policy."
+      - "Do not make localized prefixes such as inmatningsfält_<name> part of the runtime contract."
+      - "Preserve existing safe bare aliases for backward compatibility."
+      - "Do not let form fields shadow scalar system variables such as datum."
+      - "Do not commit generated inlang metadata churn, API keys, eval artifacts, or unrelated local files."
+    expected_output:
+      - "Canonical form-field references use {{flow_input.<field_name>}}."
+      - "Reserved names remain usable as form-field names only through the namespaced reference where safe."
+      - "Frontend editor explains namespace/primary-input/step-alias naming mistakes clearly."
+      - "AI Builder and template-fill suggestions emit namespaced form-field references."
+      - "Backend resolver, analyzer, lints, and tests agree with frontend UX."
+    receipt:
+      result: done
+      summary: "Form fields now have a canonical {{flow_input.<field_name>}} reference path across backend resolution, AI Builder compilation, template analysis, template-fill suggestions, prompt chips, and field-rename rewrites. Bare aliases remain only for safe non-reserved legacy names, while shadowed names such as datum continue to resolve as system variables unless the prompt uses flow_input.datum."
+      canonical_owner:
+        backend: "backend/src/intric/flows/flow_variable_definitions.py"
+        frontend_mirror: "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts"
+        note: "The frontend mirror exists only for immediate editor feedback and points at the backend policy owner."
+      changed_behavior:
+        - "Form-field chips and suggestions now show {{flow_input.<field>}} instead of bare {{field}}."
+        - "Fields named datum no longer make {{datum}} look like a form-field token; {{datum}} remains the built-in date token."
+        - "Template-fill auto-binding suppresses the bare system-date suggestion when a form field is named datum."
+        - "AI Builder compiled bindings for runtime form fields use the flow_input namespace."
+        - "Validation quality reports shadowed bare aliases with a concrete namespaced replacement."
+      claude:
+        plan_artifact: ".codex/artifacts/claude-peer-loop-flow-field-namespace-revision-20260507T114228Z.md"
+        commit_gate_artifact: ".codex/artifacts/claude-peer-loop-flow-field-namespace-implementation-review-20260507T120733Z.md"
+        final_verdict: "green"
+        green_light: true
+        min_score: 8
+      verification:
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_service.py tests/unittests/flows/test_variable_resolver.py tests/unittests/flows/test_template_reference_analyzer.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_usage.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py -q"
+          status: pass
+          output: "287 passed, 1 warning"
+        - cmd: "uv run --directory backend pyright src/intric/flows/flow_variable_definitions.py src/intric/flows/variable_resolver.py src/intric/flows/flow_validators_form.py src/intric/flows/template_reference_analyzer.py src/intric/flows/ai_builder/ai_builder_new_step_compiler.py src/intric/flows/ai_builder/ai_builder_edit_compiler.py src/intric/flows/ai_builder/ai_builder_validation_quality.py src/intric/flows/ai_builder/ai_builder_validation_references.py src/intric/flows/ai_builder/ai_builder_validator.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_service.py tests/unittests/flows/test_variable_resolver.py tests/unittests/flows/test_template_reference_analyzer.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_usage.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "uv run --directory backend ruff check src/intric/flows/flow_variable_definitions.py src/intric/flows/variable_resolver.py src/intric/flows/flow_validators_form.py src/intric/flows/template_reference_analyzer.py src/intric/flows/ai_builder/ai_builder_new_step_compiler.py src/intric/flows/ai_builder/ai_builder_edit_compiler.py src/intric/flows/ai_builder/ai_builder_validation_quality.py src/intric/flows/ai_builder/ai_builder_validation_references.py src/intric/flows/ai_builder/ai_builder_validator.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_service.py tests/unittests/flows/test_variable_resolver.py tests/unittests/flows/test_template_reference_analyzer.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_usage.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+          status: pass
+          output: "All checks passed"
+        - cmd: "uv run --directory backend ruff format --check src/intric/flows/flow_variable_definitions.py src/intric/flows/variable_resolver.py src/intric/flows/flow_validators_form.py src/intric/flows/template_reference_analyzer.py src/intric/flows/ai_builder/ai_builder_new_step_compiler.py src/intric/flows/ai_builder/ai_builder_edit_compiler.py src/intric/flows/ai_builder/ai_builder_validation_quality.py src/intric/flows/ai_builder/ai_builder_validation_references.py src/intric/flows/ai_builder/ai_builder_validator.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_service.py tests/unittests/flows/test_variable_resolver.py tests/unittests/flows/test_template_reference_analyzer.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_usage.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_live_eval_runner.py"
+          status: pass
+          output: "20 files already formatted"
+        - cmd: "bun test src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/flowVariableTokens.test.ts src/lib/features/flows/templateFillConfig.test.ts src/lib/features/flows/flowStepUxCopy.test.ts src/lib/features/flows/FlowEditor.test.ts"
+          status: pass
+          output: "85 pass, 0 fail"
+        - cmd: "cd frontend/apps/web && bun run check"
+          status: pass
+          output: "0 errors, 7 pre-existing Svelte warnings"
+        - cmd: "git diff --check"
+          status: pass
+          output: "no whitespace errors"
+      follow_ups:
+        - "Tighten unresolved-token feedback for misspelled namespaced form-field references such as {{flow_input.datm}} without breaking JSON-shaped flow_input references."
+        - "Complete structured frontend error mapping for every backend validate_form_schema error code if more machine messages surface."
+        - "Consider generated shared variable-policy metadata only if frontend/backend deny-list drift becomes recurring; current owner-plus-mirror is simpler."
+        - "Audit large AI Builder modules for ownership-based extraction opportunities, but split only when the new module has a clear reason to change."
+
   - id: T999
     type: judge
     assignee: Judge

@@ -19,6 +19,8 @@ import { shouldSaveAssistantImmediately } from "./assistantSavePolicy";
 import { AssistantSaveManager } from "./flowAssistantSaveManager";
 import {
   buildFlowFormSchemaMetadata,
+  getFlowFormFieldVariableExpression,
+  isFlowFormFieldBareAliasSafe,
   toPersistedFlowFormFields,
   type FlowFormField
 } from "./flowFormSchema";
@@ -807,8 +809,16 @@ function createFlowEditor(data: FlowEditorInitData) {
     newName: string
   ): Promise<number> {
     const fromToken = oldName.trim();
-    const toToken = newName.trim();
-    if (!fromToken || !toToken || fromToken === toToken) return 0;
+    const toToken = getFlowFormFieldVariableExpression(newName);
+    if (!fromToken || !toToken) return 0;
+
+    function rewriteFormFieldReferences(text: string): string {
+      let rewritten = replaceExactTemplateToken(text, `flow_input.${fromToken}`, toToken);
+      if (isFlowFormFieldBareAliasSafe(fromToken)) {
+        rewritten = replaceExactTemplateToken(rewritten, fromToken, toToken);
+      }
+      return rewritten;
+    }
 
     let rewrittenCount = 0;
     const steps = get(editor.state.update).steps ?? [];
@@ -819,7 +829,7 @@ function createFlowEditor(data: FlowEditorInitData) {
 
       const prompt = (assistant as { prompt?: { text?: unknown; description?: unknown } }).prompt;
       const currentText = typeof prompt?.text === "string" ? prompt.text : "";
-      const nextText = replaceExactTemplateToken(currentText, fromToken, toToken);
+      const nextText = rewriteFormFieldReferences(currentText);
       if (nextText !== currentText) {
         const nextPrompt = {
           text: nextText,
@@ -834,7 +844,7 @@ function createFlowEditor(data: FlowEditorInitData) {
       const bindings = (step.input_bindings as Record<string, unknown> | null | undefined) ?? null;
       const question = typeof bindings?.question === "string" ? bindings.question : null;
       if (!question) return step;
-      const rewritten = replaceExactTemplateToken(question, fromToken, toToken);
+      const rewritten = rewriteFormFieldReferences(question);
       if (rewritten === question) return step;
       return {
         ...step,

@@ -290,6 +290,47 @@ def _build_architecture_error_event(
     )
 
 
+def _self_correction_user_message(
+    *,
+    feedback: str | None,
+    failure_kind: ToolProcessingFailureKind | None,
+) -> str:
+    details = (feedback or "").casefold()
+    if failure_kind in {"parse", "recoverable_parse"}:
+        return (
+            "The AI Builder returned an incomplete plan configuration and could "
+            "not repair it automatically. Try again, or use a more capable model "
+            "if the same error repeats."
+        )
+    if "flow must have at least one step" in details or "empty_steps" in details:
+        return (
+            "The corrected plan did not contain any flow steps. Ask for at least "
+            "one concrete step, such as transcribing audio or summarizing text, "
+            "then try again."
+        )
+    if (
+        "input_source 'flow_input'" in details
+        or "runtime_upload" in details
+        or "first step" in details
+    ):
+        return (
+            "The corrected plan still could not connect the flow input to the "
+            "first step. For audio or file flows, the first step must receive the "
+            "uploaded file at runtime before later steps analyze the result."
+        )
+    if failure_kind == "quality":
+        return (
+            "The corrected plan still failed the AI Builder quality checks. "
+            "Revise the request with the exact input, output, and main steps you "
+            "want, then try again."
+        )
+    return (
+        "The corrected plan is still not a valid flow. Revise the request with "
+        "the input, output, and the concrete steps the flow should contain, then "
+        "try again."
+    )
+
+
 def _resolve_ui_language(
     conversation: list[ConversationMessage],
 ) -> Literal["sv", "en"] | None:
@@ -918,23 +959,19 @@ class AIBuilderProposalProcessor:
         feedback: str | None,
         failure_kind: ToolProcessingFailureKind | None,
     ) -> dict[str, str]:
+        message = _self_correction_user_message(
+            feedback=feedback,
+            failure_kind=failure_kind,
+        )
         if failure_kind in {"parse", "recoverable_parse"}:
-            return build_error_event(
-                message=f"Self-correction failed: {feedback or 'Invalid flow specification.'}",
-                code="self_correction_invalid_payload",
-                phase="self_correction",
-            )
-
-        message = "Plan still invalid after correction."
-        if feedback:
-            message = f"{message}\n{feedback}"
+            code = "self_correction_invalid_payload"
+        elif failure_kind == "quality":
+            code = "self_correction_quality_failure"
+        else:
+            code = "self_correction_invalid_plan"
         return build_error_event(
             message=message,
-            code=(
-                "self_correction_quality_failure"
-                if failure_kind == "quality"
-                else "self_correction_invalid_plan"
-            ),
+            code=code,
             phase="self_correction",
         )
 

@@ -171,7 +171,7 @@ def test_single_step_outline_form_field_fallback_binds_only_available_step() -> 
     question = _question_binding(compiled.steps[-1].input_bindings)
 
     assert [step.uses_form_fields for step in draft.steps] == [[], ["report_title"]]
-    assert "report_title: {{ report_title }}" in question
+    assert "report_title: {{ flow_input.report_title }}" in question
     assert find_unused_form_fields(compiled) == []
     assert validate_spec(compiled).valid
 
@@ -220,9 +220,9 @@ def test_intermediate_form_field_use_flows_through_structured_previous_field() -
 
     assert draft.steps[0].uses_form_fields == ["case_id"]
     assert draft.steps[-1].uses_form_fields == []
-    assert first_question.count("{{ case_id }}") == 1
+    assert first_question.count("{{ flow_input.case_id }}") == 1
     assert final_question == "Risk score: {{ step_a.output.structured.risk_score }}"
-    assert "{{ case_id }}" not in final_question
+    assert "{{ flow_input.case_id }}" not in final_question
     assert compiled.steps[-1].input_contract is None
     assert validate_spec(compiled).valid
 
@@ -274,8 +274,8 @@ def test_one_input_field_can_feed_two_step_bindings_once_each() -> None:
     assert draft.steps[-1].uses_form_fields == ["audience"]
     assert compiled.form_fields is not None
     assert [field.name for field in compiled.form_fields] == ["audience"]
-    assert first_question.count("{{ audience }}") == 1
-    assert final_question.count("{{ audience }}") == 1
+    assert first_question.count("{{ flow_input.audience }}") == 1
+    assert final_question.count("{{ flow_input.audience }}") == 1
     assert validate_spec(compiled).valid
 
 
@@ -328,8 +328,8 @@ def test_edit_form_field_multi_reference_feeds_two_step_bindings_once_each() -> 
 
     assert result.compiled_spec.form_fields is not None
     assert [field.name for field in result.compiled_spec.form_fields] == ["audience"]
-    assert first_question.count("{{ audience }}") == 1
-    assert final_question.count("{{ audience }}") == 1
+    assert first_question.count("{{ flow_input.audience }}") == 1
+    assert final_question.count("{{ flow_input.audience }}") == 1
     assert validate_spec(result.compiled_spec).valid
 
 

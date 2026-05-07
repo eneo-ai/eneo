@@ -80,10 +80,10 @@ Alla variabler skrivs som `{{ variabelnamn }}` med dubbla klammerparenteser.
 ## Variabeltyper
 
 ### 1. Flödesindata-variabler (form fields)
-Om flödet har ett formulär (form_fields) blir varje fälts namn en variabel:
-- `{{ Referens-ID }}` — värdet av formulärfältet "Referens-ID"
-- `{{ Bakgrund som text }}` — värdet av formulärfältet "Bakgrund som text"
-- `{{ Rekommendation }}` — värdet av formulärfältet "Rekommendation"
+Om flödet har ett formulär (form_fields) ligger fältvärdena under `flow_input`:
+- `{{ flow_input.Referens-ID }}` — värdet av formulärfältet "Referens-ID"
+- `{{ flow_input.Bakgrund som text }}` — värdet av formulärfältet "Bakgrund som text"
+- `{{ flow_input.Rekommendation }}` — värdet av formulärfältet "Rekommendation"
 
 ### 2. Steg-utdata-variabler (step outputs)
 Varje steg producerar utdata som är tillgängligt för efterföljande steg:
@@ -209,14 +209,14 @@ BEGRÄNSNINGAR:
 ### Exempel:
 ```json
 {
-  "question": "REFERENSDATA:\\n{{ Referens-ID }}\\n\\nBAKGRUND:\\n{{ Bakgrund som text }}\\n\\nBEDÖMNING:\\n{{ Överväganden }}\\n\\nREKOMMENDATION:\\n{{ Rekommendation }}"
+  "question": "REFERENSDATA:\\n{{ flow_input.Referens-ID }}\\n\\nBAKGRUND:\\n{{ flow_input.Bakgrund som text }}\\n\\nBEDÖMNING:\\n{{ flow_input.Överväganden }}\\n\\nREKOMMENDATION:\\n{{ flow_input.Rekommendation }}"
 }
 ```
 
 ### Exempel med formdata + runtime input + tidigare steg:
 ```json
 {
-  "question": "FORMULÄRDATA:\\nDokumentets namn: {{ Dokumentets namn }}\\nKontext: {{ Granskningskontext }}\\n\\nKÖRNINGSDATA:\\n{{ step_input.text }}\\n\\nSTRUKTURERAD ANALYS:\\nSammanfattning: {{ step_a.output.structured.sammanfattning }}\\nRisk: {{ step_a.output.structured.risk }}\\n\\nTIDIGARE BEDÖMNING:\\n{{ step_b.output.text }}"
+  "question": "FORMULÄRDATA:\\nDokumentets namn: {{ flow_input.Dokumentets namn }}\\nKontext: {{ flow_input.Granskningskontext }}\\n\\nKÖRNINGSDATA:\\n{{ step_input.text }}\\n\\nSTRUKTURERAD ANALYS:\\nSammanfattning: {{ step_a.output.structured.sammanfattning }}\\nRisk: {{ step_a.output.structured.risk }}\\n\\nTIDIGARE BEDÖMNING:\\n{{ step_b.output.text }}"
 }
 ```
 

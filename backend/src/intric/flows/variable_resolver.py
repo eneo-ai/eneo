@@ -7,11 +7,10 @@ from difflib import get_close_matches
 from typing import Any, cast
 
 from intric.flows.domain.flow import FlowStepResult, JsonObject
-from intric.flows.flow_variable_definitions import RESERVED_RUNTIME_VARIABLES_NORMALIZED
+from intric.flows.flow_variable_definitions import can_expose_form_field_bare_alias
 from intric.main.exceptions import BadRequestException
 
 _TEMPLATE_VAR_PATTERN = re.compile(r"\{\{\s*([^{}]+)\s*\}\}")
-_STEP_ALIAS_PATTERN = re.compile(r"^step_\d+($|[._])")
 
 
 def iter_template_expressions(template: str) -> list[str]:
@@ -47,11 +46,7 @@ class FlowVariableResolver:
                 continue
             if normalized_key in context:
                 continue
-            if normalized_key.casefold() in RESERVED_RUNTIME_VARIABLES_NORMALIZED:
-                continue
-            if _STEP_ALIAS_PATTERN.match(normalized_key.casefold()):
-                continue
-            if "." in normalized_key:
+            if not can_expose_form_field_bare_alias(normalized_key):
                 continue
             context[normalized_key] = value
 

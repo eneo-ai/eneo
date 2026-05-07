@@ -3,7 +3,6 @@
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import {
     flowFormFieldHasOptions,
-    FLOW_FORM_RESERVED_VARIABLE_NAMES_DISPLAY,
     getFlowFormFieldNameIssue,
     getFlowFormFieldVariableToken,
     getFlowFormSchemaMetadata,
@@ -73,7 +72,7 @@
     return normalizeFlowFormFields(fields).map((field) => ({ ...field, _localId: uid() }));
   }
 
-  type FieldNameIssue = "reserved" | "step_alias" | "dot" | "duplicate";
+  type FieldNameIssue = "namespace_head" | "primary_input_key" | "step_alias" | "dot" | "duplicate";
 
   function getFieldNameIssue(field: LocalFormField, fieldIndex: number): FieldNameIssue | null {
     const baseIssue = getFlowFormFieldNameIssue(field.name);
@@ -88,11 +87,8 @@
   }
 
   function getFieldNameIssueMessage(issue: FieldNameIssue): string {
-    if (issue === "reserved") {
-      return m.flow_form_field_name_reserved({
-        aliases: FLOW_FORM_RESERVED_VARIABLE_NAMES_DISPLAY
-      });
-    }
+    if (issue === "namespace_head") return m.flow_form_field_name_namespace_head();
+    if (issue === "primary_input_key") return m.flow_form_field_name_primary_input_key();
     if (issue === "step_alias") return m.flow_form_field_name_step_alias();
     if (issue === "dot") return m.flow_form_field_name_dot();
     return m.flow_form_field_name_duplicate();
@@ -124,10 +120,10 @@
   const emptyStateExamples = $derived(
     $userMode === "power_user"
       ? [
-          { label: "ärendenummer", token: "{{ärendenummer}}" },
-          { label: "verksamhet", token: "{{verksamhet}}" }
+          { label: "ärendenummer", token: "{{flow_input.ärendenummer}}" },
+          { label: "verksamhet", token: "{{flow_input.verksamhet}}" }
         ]
-      : [{ label: "ärendenummer", token: "{{ärendenummer}}" }]
+      : [{ label: "ärendenummer", token: "{{flow_input.ärendenummer}}" }]
   );
   const previewVariableTokens = $derived(
     namedVariableTokens.slice(0, $userMode === "power_user" ? 4 : 2)

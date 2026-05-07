@@ -49,7 +49,7 @@ const FLOW_STEP_COPY = {
     inputTemplateTitle: "Underlag till steget",
     inputTemplateDescription:
       "Här bygger du den text AI:n ska arbeta med. Lämna tomt om steget ska använda sitt vanliga underlag.",
-    inputTemplatePlaceholder: "t.ex. Rubrik: {{titel}}\nText: {{step_1.output.text}}",
+    inputTemplatePlaceholder: "t.ex. Rubrik: {{flow_input.titel}}\nText: {{step_1.output.text}}",
     inputTemplateCtaTitle: "Anpassa underlaget (frivilligt)",
     inputTemplateCtaAction: "Anpassa underlaget",
     inputTemplateDefaultPreviousStep:
@@ -68,7 +68,7 @@ const FLOW_STEP_COPY = {
     inputTemplateTitle: "Material for the step",
     inputTemplateDescription:
       "Here you build the text the AI should work with. Leave it empty if the step should use its normal material.",
-    inputTemplatePlaceholder: "e.g. Title: {{title}}\nText: {{step_1.output.text}}",
+    inputTemplatePlaceholder: "e.g. Title: {{flow_input.title}}\nText: {{step_1.output.text}}",
     inputTemplateCtaTitle: "Adjust the material (optional)",
     inputTemplateCtaAction: "Adjust the material",
     inputTemplateDefaultPreviousStep:

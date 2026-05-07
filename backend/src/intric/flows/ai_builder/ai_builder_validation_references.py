@@ -38,6 +38,9 @@ def validate_variable_references(
             if field.name.strip()
         ),
     }
+    form_field_names = {
+        field.name.strip() for field in (spec.form_fields or []) if field.name.strip()
+    }
 
     for index, step in enumerate(spec.steps, start=1):
         for expression in _iter_step_template_expressions(step):
@@ -45,6 +48,7 @@ def validate_variable_references(
                 expression,
                 steps_by_plan_ref,
                 allowed_roots=allowed_roots,
+                form_field_names=form_field_names,
             )
             if reference.kind is TemplateReferenceKind.UNKNOWN:
                 suggestion = _suggest_similar(
@@ -202,10 +206,8 @@ def _parse_reference_expression(
     steps_by_plan_ref: dict[str, tuple[int, StepSpec]],
     *,
     allowed_roots: set[str],
+    form_field_names: set[str],
 ) -> TemplateReference:
-    form_field_names = {
-        root for root in allowed_roots if root not in RESERVED_RUNTIME_VARIABLES
-    }
     return analyze_template(
         f"{{{{ {expression} }}}}",
         step_refs={root: order for root, (order, _) in steps_by_plan_ref.items()},

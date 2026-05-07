@@ -171,9 +171,14 @@ describe("templateFillConfig", () => {
 
     expect(suggestions).toEqual(
       expect.arrayContaining([
-        { value: "{{titel}}", label: "Form field: titel", group: "form", outputType: "text" },
         {
-          value: "{{författare}}",
+          value: "{{flow_input.titel}}",
+          label: "Form field: titel",
+          group: "form",
+          outputType: "text"
+        },
+        {
+          value: "{{flow_input.författare}}",
           label: "Form field: författare",
           group: "form",
           outputType: "text"
@@ -210,6 +215,23 @@ describe("templateFillConfig", () => {
     expect(groups.map((group) => group.key)).toEqual(["form", "step", "system"]);
   });
 
+  it("does not suggest bare system date when a form field is named datum", () => {
+    const suggestions = buildTemplateBindingSuggestions({
+      currentStepOrder: 1,
+      labels,
+      formSchema: { fields: [{ name: "datum", type: "date" }] },
+      steps: []
+    });
+
+    expect(suggestions).toContainEqual({
+      value: "{{flow_input.datum}}",
+      label: "Form field: datum",
+      group: "form",
+      outputType: "text"
+    });
+    expect(suggestions.some((item) => item.value === "{{datum}}")).toBe(false);
+  });
+
   it("builds auto-bindings from matching form fields and prior step names", () => {
     expect(
       buildTemplateBindingAutoSuggestions({
@@ -228,7 +250,7 @@ describe("templateFillConfig", () => {
         ] as never
       })
     ).toEqual({
-      författare: "{{Författare}}",
+      författare: "{{flow_input.Författare}}",
       sammanfatta: "{{step_2.output.structured}}"
     });
   });

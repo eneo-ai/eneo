@@ -370,7 +370,7 @@ class TestSemanticVariableValidation:
                 _step(
                     ref="step_a",
                     name="Use form variable",
-                    instructions="Use {{ Ärendenummer }} in the summary.",
+                    instructions="Use {{ flow_input.Ärendenummer }} in the summary.",
                 )
             ],
             form_fields=[
@@ -384,6 +384,34 @@ class TestSemanticVariableValidation:
         )
         result = validate_spec(spec)
         assert result.valid
+
+    def test_shadowed_form_field_bare_reference_warns(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Form flow",
+            steps=[
+                _step(
+                    ref="step_a",
+                    name="Use form variable",
+                    instructions="Use {{ datum }} in the summary.",
+                )
+            ],
+            form_fields=[
+                FormFieldSpec(
+                    name="datum",
+                    type="date",
+                    label="Datum",
+                    required=True,
+                )
+            ],
+        )
+
+        result = validate_spec(spec)
+
+        assert result.valid
+        assert any(
+            warning.code == "shadowed_form_field_bare_reference"
+            for warning in result.warnings
+        )
 
     def test_reserved_runtime_variable_allowed(self) -> None:
         result = validate_spec(
@@ -691,7 +719,7 @@ class TestSemanticVariableValidation:
 
 
 class TestProductionParityValidation:
-    def test_reserved_form_field_alias_rejected(self) -> None:
+    def test_runtime_reserved_form_field_name_is_allowed(self) -> None:
         spec = FlowDraftSpecCore(
             flow_name="Form flow",
             steps=[_step()],
@@ -704,8 +732,7 @@ class TestProductionParityValidation:
             ],
         )
         result = validate_spec(spec)
-        assert not result.valid
-        assert any("reserved" in e.message.lower() for e in result.errors)
+        assert result.valid
 
     def test_multiselect_requires_options(self) -> None:
         spec = FlowDraftSpecCore.model_validate(

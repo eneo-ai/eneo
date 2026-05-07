@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import cast
 
 from intric.flows.ai_builder.ai_builder_domain_models import JsonObject
@@ -11,6 +12,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     InputSource,
     LintSeverity,
     OutputType,
+    StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_source_material import (
     SourceMaterialBindingStatus,
@@ -194,6 +196,44 @@ def lint_unused_form_fields(
         )
 
 
+def lint_shadowed_form_field_bare_references(
+    spec: FlowDraftSpecCore, result: SpecValidationResult
+) -> None:
+    form_fields = {
+        field.name.strip() for field in (spec.form_fields or []) if field.name.strip()
+    }
+    if not form_fields:
+        return
+
+    step_refs = {step.plan_step_ref: index + 1 for index, step in enumerate(spec.steps)}
+    warned: set[tuple[str, str]] = set()
+    for step in spec.steps:
+        for template in _iter_step_templates(step):
+            refs = analyze_template(
+                template, step_refs=step_refs, form_field_names=form_fields
+            )
+            for reference in refs:
+                if (
+                    reference.kind is TemplateReferenceKind.RUNTIME
+                    and reference.head in form_fields
+                    and not reference.tail
+                ):
+                    warning_key = (step.plan_step_ref, reference.head)
+                    if warning_key in warned:
+                        continue
+                    warned.add(warning_key)
+                    result.add_warning(
+                        step_ref=step.plan_step_ref,
+                        code="shadowed_form_field_bare_reference",
+                        message=(
+                            f"Variable '{{{{{reference.head}}}}}' resolves to an Eneo "
+                            f"runtime value. Use '{{{{flow_input.{reference.head}}}}}' "
+                            "to read the form field."
+                        ),
+                        severity=LintSeverity.INFO,
+                    )
+
+
 def lint_all_previous_with_specific_refs(
     spec: FlowDraftSpecCore, result: SpecValidationResult
 ) -> None:
@@ -294,3 +334,11 @@ def _question_binding(input_bindings: JsonObject | None) -> str | None:
     if isinstance(question, str) and question.strip():
         return question
     return None
+
+
+def _iter_step_templates(step: StepSpec) -> list[str]:
+    templates = [step.assistant_spec.instructions]
+    for payload in (step.input_bindings, step.output_config):
+        if payload is not None:
+            templates.append(json.dumps(payload, ensure_ascii=False))
+    return templates

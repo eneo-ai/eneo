@@ -39,6 +39,7 @@ def _step(
     [
         ([], _step("Skriv svar."), []),
         ([_field("audience")], _step("Skriv för {{ audience }}."), []),
+        ([_field("audience")], _step("Skriv för {{ flow_input.audience }}."), []),
         (
             [_field("audience")],
             _step("Skriv svar.", input_bindings={"question": "{{ audience }}"}),

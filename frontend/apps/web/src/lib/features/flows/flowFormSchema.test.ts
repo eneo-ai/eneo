@@ -5,6 +5,7 @@ import {
   flowFormFieldHasOptions,
   getFlowFormFieldNameIssue,
   getFlowFormFieldRuntimeKey,
+  getFlowFormFieldVariableExpression,
   getFlowFormFieldVariableToken,
   getFlowFormSchemaFields,
   getFlowFormSchemaMetadata,
@@ -58,14 +59,18 @@ describe("flowFormSchema", () => {
   });
 
   it("builds variable tokens only for named fields", () => {
-    expect(getFlowFormFieldVariableToken("titel")).toBe("{{titel}}");
+    expect(getFlowFormFieldVariableToken("titel")).toBe("{{flow_input.titel}}");
+    expect(getFlowFormFieldVariableToken("datum")).toBe("{{flow_input.datum}}");
     expect(getFlowFormFieldVariableToken("   ")).toBe("");
+    expect(getFlowFormFieldVariableExpression("titel")).toBe("flow_input.titel");
   });
 
-  it("rejects field names that the backend resolver does not expose as aliases", () => {
-    expect(getFlowFormFieldNameIssue("datum")).toBe("reserved");
-    expect(getFlowFormFieldNameIssue("flow_input")).toBe("reserved");
-    expect(getFlowFormFieldNameIssue("step_input")).toBe("reserved");
+  it("rejects field names that cannot be referenced through flow_input", () => {
+    expect(getFlowFormFieldNameIssue("datum")).toBeNull();
+    expect(getFlowFormFieldNameIssue("flow_input")).toBe("namespace_head");
+    expect(getFlowFormFieldNameIssue("step_input")).toBe("namespace_head");
+    expect(getFlowFormFieldNameIssue("text")).toBe("primary_input_key");
+    expect(getFlowFormFieldNameIssue("file_ids")).toBe("primary_input_key");
     expect(getFlowFormFieldNameIssue("step_1")).toBe("step_alias");
     expect(getFlowFormFieldNameIssue("step_2.output.text")).toBe("step_alias");
     expect(getFlowFormFieldNameIssue("titel.sv")).toBe("dot");
@@ -74,7 +79,9 @@ describe("flowFormSchema", () => {
 
   it("matches UI variable availability to backend-safe field names", () => {
     expect(isFlowFormFieldNameUsableAsVariable("titel")).toBe(true);
-    expect(isFlowFormFieldNameUsableAsVariable("föregående_steg")).toBe(false);
+    expect(isFlowFormFieldNameUsableAsVariable("föregående_steg")).toBe(true);
+    expect(isFlowFormFieldNameUsableAsVariable("text")).toBe(false);
+    expect(isFlowFormFieldNameUsableAsVariable("flow_input")).toBe(false);
     expect(isFlowFormFieldNameUsableAsVariable("step_3")).toBe(false);
     expect(isFlowFormFieldNameUsableAsVariable("del.1")).toBe(false);
   });

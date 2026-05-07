@@ -1,4 +1,5 @@
 import type { FlowStep } from "@intric/intric-js";
+import { getFlowFormFieldVariableToken } from "./flowFormSchema";
 
 export type FlowTemplatePlaceholder = {
   name: string;
@@ -218,8 +219,14 @@ export function buildTemplateBindingSuggestions(params: {
     suggestions.push({ value, label, group, outputType });
   };
 
+  const fieldNames = new Set(
+    (params.formSchema?.fields ?? []).map((field) => field.name.trim().toLowerCase())
+  );
   for (const field of params.formSchema?.fields ?? []) {
-    addSuggestion(`{{${field.name}}}`, params.labels.formFieldItem(field.name), "form", "text");
+    const variableToken = getFlowFormFieldVariableToken(field.name);
+    if (variableToken) {
+      addSuggestion(variableToken, params.labels.formFieldItem(field.name), "form", "text");
+    }
   }
 
   for (const step of params.steps) {
@@ -241,7 +248,9 @@ export function buildTemplateBindingSuggestions(params: {
     }
   }
 
-  addSuggestion("{{datum}}", params.labels.todayDate, "system", "text");
+  if (!fieldNames.has("datum")) {
+    addSuggestion("{{datum}}", params.labels.todayDate, "system", "text");
+  }
 
   return suggestions;
 }
@@ -288,7 +297,10 @@ export function buildTemplateBindingAutoSuggestions(params: {
 }): Record<string, string> {
   const fieldMatches = new Map<string, string>();
   for (const field of params.formSchema?.fields ?? []) {
-    fieldMatches.set(normalizeTemplateToken(field.name), `{{${field.name}}}`);
+    const variableToken = getFlowFormFieldVariableToken(field.name);
+    if (variableToken) {
+      fieldMatches.set(normalizeTemplateToken(field.name), variableToken);
+    }
   }
 
   const stepMatches = new Map<string, string>();

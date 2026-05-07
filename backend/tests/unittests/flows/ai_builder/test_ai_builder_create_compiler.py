@@ -171,7 +171,7 @@ def test_compile_create_draft_generates_runtime_upload_contracts_and_form_fields
     assert runtime_input["max_files"] == 5
     assert runtime_input["input_format"] == "document"
     assert first_step.input_bindings == {
-        "question": "{{ step_input.text }}\n\nreferensnummer: {{ referensnummer }}\nansvarig_enhet: {{ ansvarig_enhet }}"
+        "question": "{{ step_input.text }}\n\nreferensnummer: {{ flow_input.referensnummer }}\nansvarig_enhet: {{ flow_input.ansvarig_enhet }}"
     }
     assert "Required JSON fields:" in first_step.assistant_spec.instructions
     assert "risker" in first_step.assistant_spec.instructions
@@ -265,7 +265,7 @@ def test_compile_create_draft_uses_previous_fields_to_generate_field_level_bindi
     assert second_step.input_bindings["question"] == (
         "Sammanfattning: {{ step_a.output.structured.sammanfattning }}\n\n"
         "Första riskrubrik: {{ step_a.output.structured.risker.0.rubrik }}\n\n"
-        "referensnummer: {{ referensnummer }}"
+        "referensnummer: {{ flow_input.referensnummer }}"
     )
 
 
@@ -1539,7 +1539,7 @@ def test_compile_outline_flow_derives_runtime_input_fields_and_final_docx() -> N
     assert compiled.form_fields is not None
     assert compiled.form_fields[0].name == "case_id"
     assert compiled.steps[1].input_bindings == {
-        "question": "{{ step_a.output.structured }}\n\ncase_id: {{ case_id }}"
+        "question": "{{ step_a.output.structured }}\n\ncase_id: {{ flow_input.case_id }}"
     }
     assert compiled.steps[2].input_bindings is None
     validation = validate_spec(compiled)
@@ -1635,7 +1635,7 @@ def test_compile_outline_flow_keeps_hint_when_planner_referenced_it_via_uses_inp
     assert compiled.form_fields is not None
     assert [field.name for field in compiled.form_fields] == ["audience"]
     first_question = compiled.steps[0].input_bindings or {}
-    assert "{{ audience }}" in str(first_question.get("question") or "")
+    assert "{{ flow_input.audience }}" in str(first_question.get("question") or "")
     assert validation.valid
     assert find_unused_form_fields(compiled) == []
 
@@ -1823,7 +1823,7 @@ def test_compile_outline_flow_overlap_planner_declared_field_and_hint_with_same_
     assert compiled.form_fields is not None
     assert [field.name for field in compiled.form_fields] == ["audience"]
     first_question = str((compiled.steps[0].input_bindings or {}).get("question") or "")
-    assert first_question.count("{{ audience }}") == 1
+    assert first_question.count("{{ flow_input.audience }}") == 1
     assert validation.valid
     assert find_unused_form_fields(compiled) == []
 
@@ -2008,7 +2008,7 @@ def test_compile_outline_flow_keeps_secondary_text_metadata_for_text_input() -> 
     assert draft.steps[1].uses_form_fields == ["audience"]
     assert compiled.form_fields is not None
     assert compiled.steps[1].input_bindings == {
-        "question": "{{ step_a.output.structured }}\n\naudience: {{ audience }}"
+        "question": "{{ step_a.output.structured }}\n\naudience: {{ flow_input.audience }}"
     }
     assert validation.valid
 
@@ -2348,7 +2348,7 @@ def test_compile_outline_flow_preserves_leading_step_with_form_field_usage() -> 
     ]
     assert draft.steps[0].uses_form_fields == ["audience"]
     assert compiled.steps[0].input_bindings == {
-        "question": "{{ indata_text }}\n\naudience: {{ audience }}"
+        "question": "{{ indata_text }}\n\naudience: {{ flow_input.audience }}"
     }
     assert validation.valid
 
@@ -5703,7 +5703,10 @@ def test_compile_outline_flow_all_previous_with_form_fields_avoids_relisting_sou
 
     assert draft.steps[2].input_source.value == "all_previous_steps"
     assert compiled.steps[2].input_bindings is None
-    assert "audience: {{ audience }}" in compiled.steps[2].assistant_spec.instructions
+    assert (
+        "audience: {{ flow_input.audience }}"
+        in compiled.steps[2].assistant_spec.instructions
+    )
     assert validation.valid
     assert not any(
         warning.code == "all_previous_overuse" for warning in validation.warnings

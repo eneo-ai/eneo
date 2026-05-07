@@ -118,12 +118,33 @@ describe("classifyVariable", () => {
   it("classifies form field names as 'field'", () => {
     expect(classifyVariable("Namn", baseContext)).toBe("field");
     expect(classifyVariable("Personnummer", baseContext)).toBe("field");
+    expect(classifyVariable("flow_input.Namn", baseContext)).toBe("field");
+  });
+
+  it("classifies bare shadowed form field names as system variables", () => {
+    const context: VariableClassificationContext = {
+      ...baseContext,
+      knownFieldNames: new Set(["datum"])
+    };
+
+    expect(classifyVariable("datum", context)).toBe("system");
+    expect(classifyVariable("flow_input.datum", context)).toBe("field");
   });
 
   it("classifies system variables", () => {
     expect(classifyVariable("transkribering", baseContext)).toBe("system");
     expect(classifyVariable("föregående_steg", baseContext)).toBe("system");
     expect(classifyVariable("indata_text", baseContext)).toBe("system");
+  });
+
+  it("keeps bare system variables classified as system even when a form field has the same name", () => {
+    const context = {
+      ...baseContext,
+      knownFieldNames: new Set(["datum"])
+    };
+
+    expect(classifyVariable("datum", context)).toBe("system");
+    expect(classifyVariable("flow_input.datum", context)).toBe("field");
   });
 
   it("classifies step name aliases as 'step'", () => {
@@ -144,7 +165,7 @@ describe("classifyVariable", () => {
     expect(classifyVariable("step_2.output", baseContext)).toBe("step");
   });
 
-  it("classifies flow_input references as 'technical'", () => {
+  it("classifies non-field flow_input references as 'technical'", () => {
     expect(classifyVariable("flow_input.text", baseContext)).toBe("technical");
     expect(classifyVariable("flow.input.text", baseContext)).toBe("technical");
   });

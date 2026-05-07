@@ -176,6 +176,35 @@ def _make_tool_call(
     return tool_call
 
 
+def test_self_correction_error_event_keeps_internal_feedback_out_of_user_message() -> (
+    None
+):
+    event = AIBuilderProposalProcessor._build_self_correction_error_event(
+        feedback=(
+            "Compiled edit spec validation failed: Flow must have at least one step."
+        ),
+        failure_kind="validation",
+    )
+
+    payload = json.loads(event["data"])
+    assert payload["code"] == "self_correction_invalid_plan"
+    assert "did not contain any flow steps" in payload["message"]
+    assert "Compiled edit spec" not in payload["message"]
+    assert "Flow must have at least one step" not in payload["message"]
+
+
+def test_self_correction_parse_error_uses_actionable_user_message() -> None:
+    event = AIBuilderProposalProcessor._build_self_correction_error_event(
+        feedback="Invalid edit_flow arguments: operations.0.add_payload.knowledge_refs",
+        failure_kind="parse",
+    )
+
+    payload = json.loads(event["data"])
+    assert payload["code"] == "self_correction_invalid_payload"
+    assert "incomplete plan configuration" in payload["message"]
+    assert "operations.0" not in payload["message"]
+
+
 @pytest.mark.asyncio
 async def test_call_proposal_completion_strips_planner_response_format_kwargs() -> None:
     processor = _make_processor()

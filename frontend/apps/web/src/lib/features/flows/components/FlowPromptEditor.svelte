@@ -2,7 +2,10 @@
   import { tick, untrack, type Snippet } from "svelte";
   import type { FlowStep } from "@intric/intric-js";
   import { m } from "$lib/paraglide/messages";
-  import { isFlowFormFieldNameUsableAsVariable } from "$lib/features/flows/flowFormSchema";
+  import {
+    getFlowFormFieldVariableExpression,
+    isFlowFormFieldNameUsableAsVariable
+  } from "$lib/features/flows/flowFormSchema";
   import {
     getChipClasses,
     parsePromptSegments,
@@ -214,7 +217,7 @@
     // Form fields
     for (const name of ctx.knownFieldNames) {
       suggestions.push({
-        token: name,
+        token: getFlowFormFieldVariableExpression(name),
         label: name,
         description: m.flow_variable_form_field(),
         category: "field"
@@ -278,7 +281,10 @@
   const unresolvedCount = $derived(
     collectUnresolvedTemplateTokens(
       currentEditorValue,
-      new Set(availableVariables.map((v) => v.token))
+      new Set([
+        ...availableVariables.map((v) => v.token),
+        ...classificationContext.knownFieldNames
+      ])
     ).length
   );
   const invalidStructuredReferences = $derived(
