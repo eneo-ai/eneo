@@ -2653,6 +2653,9 @@ tasks:
         - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py -q -k 'external or api or output_mode or mcp'"
           status: pass
           output: "33 passed, 59 deselected"
+        - cmd: "uv run --directory backend pytest tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py -q"
+          status: pass
+          output: "95 passed"
         - cmd: "uv run --directory backend ruff check src/intric/flows/ai_builder/ai_builder_discovery.py src/intric/flows/ai_builder/ai_builder_discovery_issue_rules.py src/intric/flows/ai_builder/ai_builder_discovery_priority.py src/intric/flows/ai_builder/ai_builder_discovery_questions.py src/intric/flows/ai_builder/ai_builder_mcp_intent.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py"
           status: pass
           output: "All checks passed"
@@ -2665,14 +2668,103 @@ tasks:
         - cmd: "git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_discovery.py backend/src/intric/flows/ai_builder/ai_builder_discovery_issue_rules.py backend/src/intric/flows/ai_builder/ai_builder_discovery_priority.py backend/src/intric/flows/ai_builder/ai_builder_discovery_questions.py backend/src/intric/flows/ai_builder/ai_builder_mcp_intent.py backend/tests/unittests/flows/ai_builder/test_discovery_flow.py backend/tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py docs/goals/material-efficiency/flow-ai-builder-material-efficiency-state.yaml"
           status: pass
           output: "no whitespace errors"
+        - cmd: "uv run --directory backend pytest tests/ -x -q"
+          status: blocked_unrelated_collection_error
+          output: "Collection stopped in tests/integration/flows/test_ai_builder_edit_apply_regressions.py: ModuleNotFoundError: No module named 'intric.ai_models.model_enums'."
       claude_artifacts:
         - ".codex/artifacts/claude-peer-loop-t047-api-output-clarification-plan-20260507T124043Z.md"
-        - ".codex/artifacts/claude-peer-loop-t047-api-output-clarification-commit-gate-20260507T125717Z.md"
-        - ".codex/artifacts/claude-peer-loop-t047-api-output-clarification-commit-gate-retry-20260507T130029Z.md"
-      green_light: false
-      peer_review_note: "Claude plan critique was addressed. Commit-gate was attempted twice and timed out without actionable findings; local deterministic verification is the commit evidence."
+        - ".codex/artifacts/claude-peer-loop-t047-external-delivery-implementation-review-20260507T125619Z.md"
+        - ".codex/artifacts/claude-peer-loop-t047-external-delivery-implementation-review-iteration-3-20260507T130208Z.md"
+      green_light: true
+      peer_review_note: "Claude iteration 2 required regex cleanup and false-positive tests; iteration 3 returned GREEN_LIGHT yes with MIN_SCORE 8."
       follow_ups:
-        - "If Claude CLI responsiveness returns, run a post-commit review of T047."
+        - "Replace the follow-up wording 'HTTP POST-steg' with the product label used by the flow editor."
+        - "Audit edit-mode family gating for external-delivery clarification."
+        - "Consider a shared discovery issue-id constants module if more issue ids need cross-module reuse without import cycles."
+
+  - id: T048
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Post-T047 board hygiene and next-slice classification."
+    inputs:
+      - "T047 receipt and commit 335780bf"
+      - "Current git status"
+      - "T044 follow-up: Review whether V1/V3/V4/V5/C4 clarification_required is desired product behavior or should be narrowed."
+      - "Current environment variables for live eval"
+    constraints:
+      - "Do not implement production code."
+      - "Do not stage generated i18n files or unrelated local files."
+      - "Do not paste or commit API keys."
+      - "Do not claim the tranche is complete without a fresh completion audit."
+    expected_output:
+      - "Current dirty-file classification."
+      - "Whether live eval can run from environment variables."
+      - "Next safe local slice."
+    receipt:
+      result: done
+      full_outcome_complete: false
+      summary: "T047 is committed and verified. The full material-efficiency tranche remains active because live eval credentials are not available in the environment and the broader V1/V3/V4/C4 clarification-restraint/product-behavior question still needs either live evidence or deterministic product decisions."
+      current_commits:
+        - "bfe8d552 Improve flow prompt variable typo feedback"
+        - "335780bf Clarify unsupported API delivery in AI Builder"
+      live_eval_environment:
+        ENEO_LOCAL_API_BASE: missing
+        ENEO_LOCAL_API_KEY: missing
+        decision: "Do not run live eval from pasted command-line secrets; wait for env vars or owner-provided shell setup."
+      dirty_files:
+        generated_or_local_unstaged:
+          - "frontend/apps/web/project.inlang/.meta.json"
+          - "frontend/apps/web/project.inlang/README.md"
+        unrelated_untracked:
+          - ".devcontainer/devcontainer-lock.json"
+          - "PRODUCT.md"
+          - "docs/refactor/flow-ai-builder-material-efficiency-review-handoff.md"
+          - "docs/refactor/goals.md"
+          - "docs/refactor/new/"
+          - "docs/refactor/runtime-hang-and-builder-rootcause.md"
+          - "flow_ai_builder_prd.md"
+          - "flow_ai_builder_review.md"
+          - "utvecklingssamtal.mp3"
+      next_safe_slice:
+        recommendation: "Deterministically classify V1/V3/V4/C4 clarification_required behavior before changing production code."
+        rationale:
+          - "T047 addressed V5 by making the unsupported API-delivery clarification specific and honest."
+          - "T044 still records V1/V3/V4/C4 as clarification_required; some are desired restraint cases, while others may be unnecessary friction."
+          - "Without live env vars, local discovery tests and product-copy review are the safe next evidence source."
+        candidate_task: "Create a Scout/Judge task that maps each remaining clarification case to desired product behavior, existing deterministic tests, and either a no-change receipt or a narrow Worker with red tests."
+
+  - id: T049
+    type: scout
+    assignee: PM
+    status: blocked
+    reasoning_hint: medium
+    objective: "Classify remaining V1/V3/V4/C4 clarification_required behavior after T047."
+    inputs:
+      - "T044 follow-up: V1/V3/V4/V5/C4 returned clarification_required."
+      - "T047 fixed V5 unsupported outbound API delivery clarification."
+      - "docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py case prompts"
+      - "backend/src/intric/flows/ai_builder/ai_builder_discovery.py"
+    constraints:
+      - "Read-only deterministic probe first."
+      - "Do not implement production code without a reproduced current defect."
+      - "Do not run live eval without credentials in environment variables."
+    expected_output:
+      - "For V1/V3/V4/C4, whether current deterministic discovery still blocks."
+      - "If deterministic evidence is clean, exact blocker for continuing."
+    receipt:
+      result: blocked
+      blocker: "Current deterministic discovery does not reproduce V1/V3/V4/C4 clarification_required, and live eval credentials are not present in environment variables."
+      deterministic_probe:
+        cmd: "uv run --directory backend python - <<'PY' ... analyze_discovery/build_discovery_followup for V1,V3,V4,C4 prompts ... PY"
+        status: pass
+        output:
+          V1: "next_issue=None, blocking=[]"
+          V3: "next_issue=None, blocking=[]"
+          V4: "next_issue=None, blocking=[]"
+          C4: "next_issue=None, blocking=[]"
+      conclusion: "No safe local production Worker is justified from stale clarification_required live artifacts. Continue when ENEO_LOCAL_API_BASE and ENEO_LOCAL_API_KEY are exported, then rerun the live create suite to see whether the planner path still asks unnecessary clarification questions."
 
   - id: T999
     type: judge
@@ -2711,7 +2803,21 @@ tasks:
         - "b12b7a0c Record flow builder live eval blocker"
 
 checks:
-  dirty_fingerprint: unknown
+  dirty_fingerprint:
+    tracked_unstaged:
+      - "frontend/apps/web/project.inlang/.meta.json"
+      - "frontend/apps/web/project.inlang/README.md"
+    untracked:
+      - ".devcontainer/devcontainer-lock.json"
+      - "PRODUCT.md"
+      - "docs/refactor/flow-ai-builder-material-efficiency-review-handoff.md"
+      - "docs/refactor/goals.md"
+      - "docs/refactor/new/"
+      - "docs/refactor/runtime-hang-and-builder-rootcause.md"
+      - "flow_ai_builder_prd.md"
+      - "flow_ai_builder_review.md"
+      - "utvecklingssamtal.mp3"
+    classification: "Generated/local/unrelated files intentionally left unstaged and uncommitted."
   last_verification:
     result: pass
     task: T015
