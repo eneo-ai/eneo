@@ -45,6 +45,7 @@
     type WizardStepId,
     type WizardModelDraft
   } from "./wizardState";
+  import { isCostValueOverflow, MAX_COST_INPUT } from "./models/draft";
 
   type ModelType = "completion" | "embedding" | "transcription";
 
@@ -238,6 +239,16 @@
 
       if (modelsToCreate.length === 0) throw new Error(m.add_at_least_one_model());
 
+      for (const model of modelsToCreate) {
+        if (
+          isCostValueOverflow(model.inputCostPerToken) ||
+          isCostValueOverflow(model.outputCostPerToken) ||
+          isCostValueOverflow(model.costPerMinute, true)
+        ) {
+          throw new Error(m.cost_value_too_large({ max: MAX_COST_INPUT.toLocaleString("en-US") }));
+        }
+      }
+
       isValidating = true;
       const warnings = await collectValidationWarnings(modelsToCreate, providerId);
       isValidating = false;
@@ -307,10 +318,7 @@
 
   async function createModels(models: WizardModelDraft[], providerId: string) {
     for (const model of models) {
-      const created = await createOneModel(model, providerId);
-      if (model.securityClassification && created?.id) {
-        await applySecurityClassification(created.id, model.securityClassification);
-      }
+      await createOneModel(model, providerId);
     }
 
     toast.success(
@@ -341,7 +349,10 @@
         is_active: true,
         description: model.description ?? null,
         input_cost_per_token: model.inputCostPerToken ?? null,
-        output_cost_per_token: model.outputCostPerToken ?? null
+        output_cost_per_token: model.outputCostPerToken ?? null,
+        security_classification: model.securityClassification
+          ? { id: model.securityClassification.id }
+          : null
       });
     }
     if (modelType === "embedding") {
@@ -356,7 +367,10 @@
         is_active: true,
         description: model.description ?? null,
         input_cost_per_token: model.inputCostPerToken ?? null,
-        output_cost_per_token: model.outputCostPerToken ?? null
+        output_cost_per_token: model.outputCostPerToken ?? null,
+        security_classification: model.securityClassification
+          ? { id: model.securityClassification.id }
+          : null
       });
     }
     return intric.tenantModels.createTranscription({
@@ -367,32 +381,11 @@
       hosting: model.hosting ?? "swe",
       is_active: true,
       description: model.description ?? null,
-      cost_per_minute: model.costPerMinute ?? null
+      cost_per_minute: model.costPerMinute ?? null,
+      security_classification: model.securityClassification
+        ? { id: model.securityClassification.id }
+        : null
     });
-  }
-
-  async function applySecurityClassification(
-    modelId: string,
-    classification: NonNullable<WizardModelDraft["securityClassification"]>
-  ) {
-    // Branched so the discriminated-union parameter types of `models.update`
-    // narrow correctly without an unsafe cast.
-    if (modelType === "completion") {
-      await intric.models.update({
-        completionModel: { id: modelId },
-        update: { security_classification: classification }
-      });
-    } else if (modelType === "embedding") {
-      await intric.models.update({
-        embeddingModel: { id: modelId },
-        update: { security_classification: classification }
-      });
-    } else {
-      await intric.models.update({
-        transcriptionModel: { id: modelId },
-        update: { security_classification: classification }
-      });
-    }
   }
 
   async function reloadAndClose() {

@@ -4,13 +4,29 @@ from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.database.database import AsyncSession, get_session_with_transaction
+from intric.database.tables.ai_models_table import TranscriptionModels
+from intric.database.tables.model_providers_table import ModelProviders
+from intric.main.exceptions import (
+    BadRequestException,
+    ModelInUseException,
+    NotFoundException,
+    UnauthorizedException,
+)
+from intric.main.models import ModelId
 from intric.roles.permissions import Permission, validate_permission
+from intric.security_classifications.tenant_validation import (
+    resolve_tenant_security_classification,
+)
 from intric.server.protocol import responses
+from intric.transcription_models.domain.transcription_model_repo import (
+    TranscriptionModelRepository,
+)
 from intric.transcription_models.presentation.transcription_model_models import (
     TranscriptionModelPublic,
 )
@@ -40,6 +56,9 @@ class TenantTranscriptionModelCreate(BaseModel):
     cost_per_minute: Decimal | None = Field(
         default=None, description="Indicative USD per minute of audio"
     )
+    security_classification: ModelId | None = Field(
+        default=None, description="Security classification"
+    )
 
 
 class TenantTranscriptionModelUpdate(BaseModel):
@@ -68,12 +87,6 @@ async def create_tenant_transcription_model(
     """Create a new tenant-specific transcription model."""
     validate_permission(user, Permission.ADMIN)
 
-    import sqlalchemy as sa
-
-    from intric.database.tables.ai_models_table import TranscriptionModels
-    from intric.database.tables.model_providers_table import ModelProviders
-    from intric.main.exceptions import BadRequestException, NotFoundException
-
     # Verify provider exists and belongs to user's tenant
     stmt = sa.select(ModelProviders).where(
         ModelProviders.id == model_create.provider_id,
@@ -99,6 +112,12 @@ async def create_tenant_transcription_model(
         )
         await session.execute(stmt)
 
+    security_classification_id = await resolve_tenant_security_classification(
+        session,
+        model_create.security_classification,
+        user.tenant_id,
+    )
+
     # Create the transcription model with settings directly on it
     new_model = TranscriptionModels(
         **dict(  # type: ignore[call-arg]
@@ -120,7 +139,7 @@ async def create_tenant_transcription_model(
             # Settings (now directly on model)
             is_enabled=model_create.is_active,
             is_default=model_create.is_default,
-            security_classification_id=None,
+            security_classification_id=security_classification_id,
         )
     )
 
@@ -128,10 +147,6 @@ async def create_tenant_transcription_model(
     await session.flush()
 
     # Load the model BEFORE committing
-    from intric.transcription_models.domain.transcription_model_repo import (
-        TranscriptionModelRepository,
-    )
-
     repo = TranscriptionModelRepository(session, user)
     transcription_model = await repo.one(new_model.id)
 
@@ -155,11 +170,6 @@ async def update_tenant_transcription_model(
     """Update a tenant-specific transcription model."""
     validate_permission(user, Permission.ADMIN)
 
-    import sqlalchemy as sa
-
-    from intric.database.tables.ai_models_table import TranscriptionModels
-    from intric.main.exceptions import NotFoundException, UnauthorizedException
-
     # Verify model exists and belongs to user's tenant
     stmt = sa.select(TranscriptionModels).where(
         TranscriptionModels.id == model_id,
@@ -177,10 +187,12 @@ async def update_tenant_transcription_model(
     if model.tenant_id is None:
         raise UnauthorizedException("Cannot update global models")
 
+    provided = model_update.model_fields_set
+
     # Update fields that were provided
     if model_update.display_name is not None:
         model.name = model_update.display_name
-    if model_update.description is not None:
+    if "description" in provided:
         model.description = model_update.description
     if model_update.hosting is not None:
         model.hosting = model_update.hosting
@@ -188,16 +200,12 @@ async def update_tenant_transcription_model(
         model.open_source = model_update.open_source
     if model_update.stability is not None:
         model.stability = model_update.stability
-    if model_update.cost_per_minute is not None:
+    if "cost_per_minute" in provided:
         model.cost_per_minute = model_update.cost_per_minute
 
     await session.flush()
 
     # Load the updated model
-    from intric.transcription_models.domain.transcription_model_repo import (
-        TranscriptionModelRepository,
-    )
-
     repo = TranscriptionModelRepository(session, user)
     transcription_model = await repo.one(model.id)
 
@@ -217,15 +225,6 @@ async def delete_tenant_transcription_model(
 ):
     """Delete a tenant-specific transcription model."""
     validate_permission(user, Permission.ADMIN)
-
-    import sqlalchemy as sa
-
-    from intric.database.tables.ai_models_table import TranscriptionModels
-    from intric.main.exceptions import (
-        ModelInUseException,
-        NotFoundException,
-        UnauthorizedException,
-    )
 
     # Verify model exists and belongs to user's tenant
     stmt = sa.select(TranscriptionModels).where(

@@ -33,9 +33,11 @@
   } from "$lib/features/ai-models/components/ModelStatusIcons.svelte";
   import { getChartColour } from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import { getDeprecationStatus } from "$lib/features/ai-models/formatModelStats";
+  import { getSecurityContext } from "$lib/features/security-classifications/SecurityContext";
 
   import ModelEnableSwitch from "../ModelEnableSwitch.svelte";
   import ModelActions from "../ModelActions.svelte";
+  import ModelClassificationCell from "../ModelClassificationCell.svelte";
   import ModelNameCell from "../ModelNameCell.svelte";
   import ProviderActions from "../ProviderActions.svelte";
   import ProviderDialog from "../ProviderDialog.svelte";
@@ -65,6 +67,14 @@
   $: tenantModels = models.filter((model) => model.provider_id != null && !isMigratedModel(model));
   $: wizardModelType = wizardModelTypeFor[modelType];
   $: showDeprecationBanner = modelType === "completionModel";
+  // Show the classification column only when the tenant has configured at
+  // least one classification — otherwise the column would be all em-dashes.
+  // Read once at mount: classifications are managed on a different route
+  // (/admin/security-classifications), so any change forces a navigation back
+  // here, which remounts this component with a fresh `getSecurityContext()`
+  // value seeded by the parent page's `setSecurityContext(data.security…)`.
+  // No same-mount mutation of classifications happens, so a const is enough.
+  const hasClassifications = getSecurityContext().security_classifications.length > 0;
 
   // --- Wizard / edit-provider dialogs ----------------------------------
   const addWizardOpen = writable(false);
@@ -111,6 +121,24 @@
       cell: (item) => createRender(ModelEnableSwitch, { model: item.value, type: modelType }),
       plugins: { sort: { getSortValue: (value) => (value.is_org_enabled ? 1 : 0) } }
     }),
+
+    ...(hasClassifications
+      ? [
+          table.column({
+            accessor: (model: M) => model,
+            header: m.security_classification(),
+            cell: (item) => createRender(ModelClassificationCell, { model: item.value }),
+            plugins: {
+              sort: {
+                getSortValue: (value) => value.security_classification?.security_level ?? -1
+              },
+              tableFilter: {
+                getFilterValue: (value) => value.security_classification?.name ?? ""
+              }
+            }
+          })
+        ]
+      : []),
 
     table.column({
       accessor: (model: M) => model,

@@ -14608,6 +14608,8 @@ export interface components {
       input_cost_per_token?: number | string | null;
       /** Output Cost Per Token */
       output_cost_per_token?: number | string | null;
+      /** Security Classification */
+      security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TenantCompletionModelUpdate */
     TenantCompletionModelUpdate: {
@@ -14705,6 +14707,11 @@ export interface components {
        * @description Indicative USD per output token (usually 0)
        */
       output_cost_per_token?: number | string | null;
+      /**
+       * Security Classification
+       * @description Security classification
+       */
+      security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TenantEmbeddingModelUpdate */
     TenantEmbeddingModelUpdate: {
@@ -15066,6 +15073,11 @@ export interface components {
        * @description Indicative USD per minute of audio
        */
       cost_per_minute?: number | string | null;
+      /**
+       * Security Classification
+       * @description Security classification
+       */
+      security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TenantTranscriptionModelUpdate */
     TenantTranscriptionModelUpdate: {

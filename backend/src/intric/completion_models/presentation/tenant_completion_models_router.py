@@ -4,14 +4,33 @@ from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from intric.ai_models.completion_models.completion_models_repo import (
+    CompletionModelsRepository,
+)
 from intric.authentication.auth_dependencies import get_current_active_user
+from intric.completion_models.domain.completion_model_repo import (
+    CompletionModelRepository,
+)
 from intric.completion_models.presentation import CompletionModelPublic
 from intric.database.database import AsyncSession, get_session_with_transaction
+from intric.database.tables.ai_models_table import CompletionModels
+from intric.database.tables.model_providers_table import ModelProviders
 from intric.main.container.container import Container
+from intric.main.exceptions import (
+    BadRequestException,
+    ModelInUseException,
+    NotFoundException,
+    UnauthorizedException,
+)
+from intric.main.models import ModelId
 from intric.roles.permissions import Permission, validate_permission
+from intric.security_classifications.tenant_validation import (
+    resolve_tenant_security_classification,
+)
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.users.user import UserInDB
@@ -37,6 +56,7 @@ class TenantCompletionModelCreate(BaseModel):
     # manually by the admin. NULL = not tracked.
     input_cost_per_token: Decimal | None = None
     output_cost_per_token: Decimal | None = None
+    security_classification: ModelId | None = None
 
 
 class TenantCompletionModelUpdate(BaseModel):
@@ -68,11 +88,6 @@ async def create_tenant_completion_model(
 ):
     """Create a new tenant-specific completion model."""
     validate_permission(user, Permission.ADMIN)
-    import sqlalchemy as sa
-
-    from intric.database.tables.ai_models_table import CompletionModels
-    from intric.database.tables.model_providers_table import ModelProviders
-    from intric.main.exceptions import BadRequestException, NotFoundException
 
     assembler = container.completion_model_assembler()
 
@@ -101,6 +116,12 @@ async def create_tenant_completion_model(
         )
         await session.execute(stmt)
 
+    security_classification_id = await resolve_tenant_security_classification(
+        session,
+        model_create.security_classification,
+        user.tenant_id,
+    )
+
     # Create the completion model with settings directly on it
     # Note: litellm_model_name is set to None - TenantModelAdapter constructs it
     # at runtime as f"{provider.provider_type}/{model.name}"
@@ -121,30 +142,24 @@ async def create_tenant_completion_model(
     new_model.org = None
     new_model.stability = "stable"
     new_model.open_source = False
-    new_model.description = f"Tenant model: {model_create.display_name}"
+    new_model.description = model_create.description
     new_model.nr_billion_parameters = None
     new_model.hf_link = None
     new_model.is_deprecated = False
     new_model.deployment_name = None
     new_model.base_url = None
-    # Optional admin-supplied description and ratecard
-    if model_create.description is not None:
-        new_model.description = model_create.description
+    # Optional admin-supplied ratecard
     new_model.input_cost_per_token = model_create.input_cost_per_token
     new_model.output_cost_per_token = model_create.output_cost_per_token
     # Settings (now directly on model)
     new_model.is_enabled = model_create.is_active
     new_model.is_default = model_create.is_default
-    new_model.security_classification_id = None
+    new_model.security_classification_id = security_classification_id
 
     session.add(new_model)
     await session.flush()
 
     # Load the model BEFORE committing
-    from intric.completion_models.domain.completion_model_repo import (
-        CompletionModelRepository,
-    )
-
     repo = CompletionModelRepository(session, user)
     completion_model = await repo.one(model_id=new_model.id)
 
@@ -168,10 +183,6 @@ async def update_tenant_completion_model(
 ):
     """Update a tenant-specific completion model."""
     validate_permission(user, Permission.ADMIN)
-    import sqlalchemy as sa
-
-    from intric.database.tables.ai_models_table import CompletionModels
-    from intric.main.exceptions import NotFoundException, UnauthorizedException
 
     assembler = container.completion_model_assembler()
 
@@ -192,12 +203,14 @@ async def update_tenant_completion_model(
     if model.tenant_id is None:
         raise UnauthorizedException("Cannot update global models")
 
+    provided = model_update.model_fields_set
+
     # Update fields that were provided
     if model_update.name is not None:
         model.name = model_update.name
     if model_update.display_name is not None:
         model.nickname = model_update.display_name
-    if model_update.description is not None:
+    if "description" in provided:
         model.description = model_update.description
     if model_update.max_input_tokens is not None:
         model.max_input_tokens = model_update.max_input_tokens
@@ -215,18 +228,14 @@ async def update_tenant_completion_model(
         model.open_source = model_update.open_source
     if model_update.stability is not None:
         model.stability = model_update.stability
-    if model_update.input_cost_per_token is not None:
+    if "input_cost_per_token" in provided:
         model.input_cost_per_token = model_update.input_cost_per_token
-    if model_update.output_cost_per_token is not None:
+    if "output_cost_per_token" in provided:
         model.output_cost_per_token = model_update.output_cost_per_token
 
     await session.flush()
 
     # Load the updated model
-    from intric.completion_models.domain.completion_model_repo import (
-        CompletionModelRepository,
-    )
-
     repo = CompletionModelRepository(session, user)
     completion_model = await repo.one(model_id=model.id)
 
@@ -246,18 +255,6 @@ async def delete_tenant_completion_model(
 ):
     """Soft-delete a tenant-specific completion model."""
     validate_permission(user, Permission.ADMIN)
-
-    import sqlalchemy as sa
-
-    from intric.ai_models.completion_models.completion_models_repo import (
-        CompletionModelsRepository,
-    )
-    from intric.database.tables.ai_models_table import CompletionModels
-    from intric.main.exceptions import (
-        ModelInUseException,
-        NotFoundException,
-        UnauthorizedException,
-    )
 
     # Verify model exists and belongs to user's tenant
     stmt = sa.select(CompletionModels).where(

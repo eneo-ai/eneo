@@ -25,7 +25,11 @@ from intric.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
+from intric.main.models import ModelId
 from intric.roles.permissions import Permission, validate_permission
+from intric.security_classifications.tenant_validation import (
+    resolve_tenant_security_classification,
+)
 from intric.server.protocol import responses
 from intric.users.user import UserInDB
 
@@ -54,6 +58,9 @@ class TenantEmbeddingModelCreate(BaseModel):
     )
     output_cost_per_token: Decimal | None = Field(
         default=None, description="Indicative USD per output token (usually 0)"
+    )
+    security_classification: ModelId | None = Field(
+        default=None, description="Security classification"
     )
 
 
@@ -114,6 +121,12 @@ async def create_tenant_embedding_model(
         )
         await session.execute(stmt)
 
+    security_classification_id = await resolve_tenant_security_classification(
+        session,
+        model_create.security_classification,
+        user.tenant_id,
+    )
+
     # Create the embedding model with settings directly on it
     new_model = EmbeddingModels(
         **dict(  # type: ignore[call-arg]
@@ -139,7 +152,7 @@ async def create_tenant_embedding_model(
             # Settings (now directly on model)
             is_enabled=model_create.is_active,
             is_default=model_create.is_default,
-            security_classification_id=None,
+            security_classification_id=security_classification_id,
         )
     )
 
@@ -187,16 +200,18 @@ async def update_tenant_embedding_model(
     if model.tenant_id is None:
         raise UnauthorizedException("Cannot update global models")
 
+    provided = model_update.model_fields_set
+
     # Update fields that were provided
     if model_update.display_name is not None:
         model.nickname = model_update.display_name
-    if model_update.description is not None:
+    if "description" in provided:
         model.description = model_update.description
     if model_update.family is not None:
         model.family = model_update.family
-    if model_update.dimensions is not None:
+    if "dimensions" in provided:
         model.dimensions = model_update.dimensions
-    if model_update.max_input is not None:
+    if "max_input" in provided:
         model.max_input = model_update.max_input
     if model_update.hosting is not None:
         model.hosting = model_update.hosting
@@ -204,9 +219,9 @@ async def update_tenant_embedding_model(
         model.open_source = model_update.open_source
     if model_update.stability is not None:
         model.stability = model_update.stability
-    if model_update.input_cost_per_token is not None:
+    if "input_cost_per_token" in provided:
         model.input_cost_per_token = model_update.input_cost_per_token
-    if model_update.output_cost_per_token is not None:
+    if "output_cost_per_token" in provided:
         model.output_cost_per_token = model_update.output_cost_per_token
 
     await session.flush()
