@@ -1461,6 +1461,16 @@
                         </span>
                       </div>
                     {/if}
+                    {#if ownership === "service"}
+                      <div
+                        class="border-label-default/30 bg-label-dimmer/40 text-secondary dark:bg-label-dimmer/20 rounded-lg border p-3 text-xs"
+                      >
+                        <span class="inline-flex items-start gap-1.5">
+                          <AlertCircle class="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+                          <span>{m.api_keys_ownership_service_user_endpoints_hint()}</span>
+                        </span>
+                      </div>
+                    {/if}
                   {/if}
 
                   <div class="space-y-6">

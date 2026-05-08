@@ -25,6 +25,7 @@ from intric.authentication.auth_dependencies import (
     require_api_key_permission,
     require_api_key_scope_check,
     require_permission,
+    require_user_identity,
 )
 from intric.authentication.auth_models import (
     AccessToken,
@@ -750,6 +751,7 @@ async def get_currently_authenticated_user(
         UserInDB, Depends(auth_dependencies.get_current_active_user_with_quota)
     ],
     container: Annotated[Container, Depends(get_container())],
+    _user_identity_guard: None = Depends(require_user_identity),
 ):
     api_key_repo = container.api_key_v2_repo()
     latest_key = await api_key_repo.get_latest_active_by_owner(
@@ -802,6 +804,7 @@ async def generate_api_key(
         UserInDB, Depends(auth_dependencies.get_current_active_user)
     ],
     container: Annotated[Container, Depends(get_container())],
+    _user_identity_guard: None = Depends(require_user_identity),
 ):
     """Generating a new api key will delete the old key.
     Make sure to copy the key since it will only be showed once,
@@ -866,6 +869,7 @@ async def revoke_legacy_api_key(
         UserInDB, Depends(auth_dependencies.get_current_active_user)
     ],
     container: Annotated[Container, Depends(get_container())],
+    _user_identity_guard: None = Depends(require_user_identity),
 ):
     if current_user.api_key is None:
         raise HTTPException(status_code=404, detail="No legacy API key found.")
