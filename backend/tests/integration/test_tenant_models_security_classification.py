@@ -589,6 +589,81 @@ async def test_update_transcription_can_clear_cost_per_minute(
 
 
 # ---------------------------------------------------------------------------
+# Security classification deletion guard
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_delete_classification_blocked_when_referenced_by_model(
+    client,
+    admin_token,
+    tenant_provider_id,
+    tenant_classification,
+):
+    """Deleting a classification that's still referenced by a tenant model
+    must be refused (default behaviour). Otherwise the FK's `ON DELETE
+    SET NULL` would silently strip the classification from every model
+    that had it, opening them up to spaces that previously couldn't see
+    them."""
+    create = await client.post(
+        "/api/v1/admin/tenant-models/completion/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json=_completion_payload(
+            tenant_provider_id,
+            security_classification={"id": str(tenant_classification)},
+        ),
+    )
+    assert create.status_code == 200, create.text
+
+    delete = await client.delete(
+        f"/api/v1/security-classifications/{tenant_classification}/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert delete.status_code == 400, delete.text
+    assert "in use" in delete.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_delete_classification_allowed_with_force_flag(
+    client,
+    admin_token,
+    tenant_provider_id,
+    tenant_classification,
+    db_container,
+):
+    """`?force=true` is the explicit opt-in for the loosen-everything
+    behaviour. We verify the dependent model survives but loses its
+    classification, matching the FK's `ON DELETE SET NULL`."""
+    create = await client.post(
+        "/api/v1/admin/tenant-models/completion/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json=_completion_payload(
+            tenant_provider_id,
+            security_classification={"id": str(tenant_classification)},
+        ),
+    )
+    assert create.status_code == 200, create.text
+    model_id = create.json()["id"]
+
+    delete = await client.delete(
+        f"/api/v1/security-classifications/{tenant_classification}/?force=true",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert delete.status_code == 204, delete.text
+
+    async with db_container() as container:
+        session = container.session()
+        stored = await session.execute(
+            sa.select(CompletionModels.security_classification_id).where(
+                CompletionModels.id == model_id
+            )
+        )
+        assert stored.scalar_one() is None
+
+
+# ---------------------------------------------------------------------------
 # Tenant isolation on update
 # ---------------------------------------------------------------------------
 

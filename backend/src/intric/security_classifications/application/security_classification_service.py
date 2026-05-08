@@ -111,7 +111,32 @@ class SecurityClassificationService:
         return result
 
     @validate_permissions(Permission.ADMIN)
-    async def delete_security_classification(self, id: UUID) -> None:
+    async def delete_security_classification(
+        self, id: UUID, *, force: bool = False
+    ) -> None:
+        """Delete a security classification.
+
+        By default this refuses if any model, space or MCP server still
+        references the classification — the FK is `ON DELETE SET NULL`,
+        so dropping a referenced row would silently downgrade every
+        dependent record to "no classification" and may make models
+        available in spaces that previously couldn't see them. The
+        admin must reassign or explicitly opt in via `force=True`.
+        """
+        if not force:
+            usages = await self.repo.count_usages(id)
+            total = sum(usages.values())
+            if total > 0:
+                # Format e.g. "3 completion_models, 1 space" so the
+                # admin can act on it without scraping a generic count.
+                detail = ", ".join(
+                    f"{count} {label}" for label, count in usages.items() if count > 0
+                )
+                raise BadRequestException(
+                    f"Security classification is in use ({detail}). "
+                    "Reassign these resources to another classification "
+                    "before deleting, or pass `force=true` to clear them."
+                )
         await self.repo.delete(id)
         db_security_classifications = await self.repo.all()
         for i, sc in enumerate(db_security_classifications):
