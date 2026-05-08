@@ -70,6 +70,55 @@ def _validate_public_resource_permissions(rp: ResourcePermissions) -> None:
         )
 
 
+_SCOPE_RESOURCE_PERMISSION_FIELDS: dict[ApiKeyScopeType, tuple[str, ...]] = {
+    ApiKeyScopeType.TENANT: RESOURCE_PERMISSION_FIELDS,
+    ApiKeyScopeType.SPACE: RESOURCE_PERMISSION_FIELDS,
+    ApiKeyScopeType.ASSISTANT: ("assistants", "conversations", "files"),
+    ApiKeyScopeType.APP: ("apps", "files"),
+}
+
+_SCOPE_REQUIRED_RESOURCE_PERMISSION_FIELD: dict[ApiKeyScopeType, str] = {
+    ApiKeyScopeType.ASSISTANT: "assistants",
+    ApiKeyScopeType.APP: "apps",
+}
+
+
+def _validate_scope_resource_permissions(
+    scope_type: ApiKeyScopeType,
+    rp: ResourcePermissions,
+) -> None:
+    allowed_fields = set(_SCOPE_RESOURCE_PERMISSION_FIELDS[scope_type])
+    disallowed = [
+        field
+        for field in RESOURCE_PERMISSION_FIELDS
+        if field not in allowed_fields
+        and getattr(rp, field) != ResourcePermissionLevel.NONE
+    ]
+    if disallowed:
+        raise ApiKeyValidationError(
+            status_code=400,
+            code="invalid_request",
+            message=(
+                f"{scope_type.value}-scoped keys do not support these "
+                f"resource permissions: {', '.join(disallowed)}."
+            ),
+        )
+
+    required_field = _SCOPE_REQUIRED_RESOURCE_PERMISSION_FIELD.get(scope_type)
+    if (
+        required_field is not None
+        and getattr(rp, required_field) == ResourcePermissionLevel.NONE
+    ):
+        raise ApiKeyValidationError(
+            status_code=400,
+            code="invalid_request",
+            message=(
+                f"{scope_type.value}-scoped keys require "
+                f"'{required_field}' resource permission."
+            ),
+        )
+
+
 class ApiKeyPolicyService:
     def __init__(
         self,
@@ -109,20 +158,9 @@ class ApiKeyPolicyService:
                 message="scope_id must be null for tenant-scoped keys.",
             )
 
-        scope_allows_resource_permissions = request.scope_type in (
-            ApiKeyScopeType.TENANT,
-            ApiKeyScopeType.SPACE,
-        )
-        if request.resource_permissions is not None and (
-            not scope_allows_resource_permissions
-        ):
-            raise ApiKeyValidationError(
-                status_code=400,
-                code="invalid_request",
-                message=(
-                    "Assistant- and app-scoped keys use a flat permission "
-                    "level; resource_permissions is not supported."
-                ),
+        if request.resource_permissions is not None:
+            _validate_scope_resource_permissions(
+                request.scope_type, request.resource_permissions
             )
 
         effective_permission = request.permission
@@ -183,9 +221,9 @@ class ApiKeyPolicyService:
                 )
             for origin in request.allowed_origins:
                 self._validate_origin_format(origin)
-            if (
-                request.resource_permissions is None
-                and scope_allows_resource_permissions
+            if request.resource_permissions is None and request.scope_type in (
+                ApiKeyScopeType.TENANT,
+                ApiKeyScopeType.SPACE,
             ):
                 request.resource_permissions = default_public_resource_permissions()
             elif request.resource_permissions is not None:
@@ -379,30 +417,21 @@ class ApiKeyPolicyService:
 
         if "resource_permissions" in updates:
             raw_rp = updates.get("resource_permissions")
-            scope_allows_resource_permissions = ApiKeyScopeType(key.scope_type) in (
-                ApiKeyScopeType.TENANT,
-                ApiKeyScopeType.SPACE,
-            )
-            if not scope_allows_resource_permissions:
-                if raw_rp is not None:
-                    raise ApiKeyValidationError(
-                        status_code=400,
-                        code="invalid_request",
-                        message=(
-                            "Assistant- and app-scoped keys use a flat permission "
-                            "level; resource_permissions is not supported."
-                        ),
-                    )
-                updates["resource_permissions"] = None
-            elif key_type == ApiKeyType.PK:
-                if raw_rp is None:
+            scope_type = ApiKeyScopeType(key.scope_type)
+            if raw_rp is None:
+                if key_type == ApiKeyType.PK and scope_type in (
+                    ApiKeyScopeType.TENANT,
+                    ApiKeyScopeType.SPACE,
+                ):
                     updates["resource_permissions"] = (
                         default_public_resource_permissions().model_dump(mode="json")
                     )
-                else:
-                    rp = ResourcePermissions.model_validate(raw_rp)
+            else:
+                rp = ResourcePermissions.model_validate(raw_rp)
+                _validate_scope_resource_permissions(scope_type, rp)
+                if key_type == ApiKeyType.PK:
                     _validate_public_resource_permissions(rp)
-                    updates["resource_permissions"] = rp.model_dump(mode="json")
+                updates["resource_permissions"] = rp.model_dump(mode="json")
 
     async def ensure_ownership_authorized(self, *, key: ApiKeyV2InDB):
         """Service keys: any scope-authorized user can manage.

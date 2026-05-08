@@ -135,11 +135,6 @@
   let scopeId = $state<string | null>(untrack(() => lockedScopeId ?? null));
   let manualScopeId = $state("");
 
-  // Narrow scopes (assistant/app) can only ever reach one resource type, so
-  // the per-resource-type matrix surfaces dead knobs. Only tenant- and
-  // space-scoped keys expose fine-grained permissions.
-  const scopeAllowsFineGrained = $derived(scopeType === "tenant" || scopeType === "space");
-
   // Fine-grained permissions (HuggingFace-style)
   type ResourcePermission = "none" | "read" | "write" | "admin";
   type ResourcePermissionKey =
@@ -151,6 +146,44 @@
     | "files"
     | "jobs"
     | "prompts";
+
+  const ALL_RESOURCE_PERMISSION_KEYS: ReadonlyArray<ResourcePermissionKey> = [
+    "assistants",
+    "apps",
+    "spaces",
+    "knowledge",
+    "conversations",
+    "files",
+    "jobs",
+    "prompts"
+  ];
+
+  // Keep in sync with backend `_SCOPE_RESOURCE_PERMISSION_FIELDS` and
+  // `_SCOPE_REQUIRED_RESOURCE_PERMISSION_FIELD` in
+  // backend/src/intric/authentication/api_key_policy.py — drift will surface
+  // as a 400 from the policy validator when the form submits.
+  const SCOPE_RESOURCE_PERMISSION_KEYS: Record<
+    ApiKeyScopeType,
+    ReadonlyArray<ResourcePermissionKey>
+  > = {
+    tenant: ALL_RESOURCE_PERMISSION_KEYS,
+    space: ALL_RESOURCE_PERMISSION_KEYS,
+    assistant: ["assistants", "conversations", "files"],
+    app: ["apps", "files"]
+  };
+
+  const scopeAllowsFineGrained = $derived(scopeType in SCOPE_RESOURCE_PERMISSION_KEYS);
+  const scopeResourcePermissionKeys = $derived(SCOPE_RESOURCE_PERMISSION_KEYS[scopeType] ?? []);
+  const requiredResourcePermissionKey = $derived.by<ResourcePermissionKey | null>(() => {
+    switch (scopeType) {
+      case "assistant":
+        return "assistants";
+      case "app":
+        return "apps";
+      default:
+        return null;
+    }
+  });
 
   // Per-resource permission levels
   let assistantsPermission = $state<ResourcePermission>("read");
@@ -210,32 +243,23 @@
   const flyX = $derived(stepDirection === "forward" ? 30 : -30);
 
   // Count active fine-grained permissions
+  const visibleResourceCount = $derived(
+    scopeResourcePermissionKeys.filter(
+      (key) => keyType !== "pk_" || (key !== "jobs" && key !== "prompts")
+    ).length
+  );
   const activeResourceCount = $derived(
-    [
-      assistantsPermission,
-      appsPermission,
-      spacesPermission,
-      knowledgePermission,
-      conversationsPermission,
-      filesPermission,
-      jobsPermission,
-      promptsPermission
-    ].filter((p) => p !== "none").length
+    scopeResourcePermissionKeys.filter(
+      (key) =>
+        (keyType !== "pk_" || (key !== "jobs" && key !== "prompts")) &&
+        getResourcePermission(key) !== "none"
+    ).length
   );
   const effectivePermission = $derived.by<ApiKeyPermission>(() => {
     if (keyType === "pk_") return "read";
     if (!usesResourcePermissions) return permission;
 
-    const levels = [
-      assistantsPermission,
-      appsPermission,
-      spacesPermission,
-      knowledgePermission,
-      conversationsPermission,
-      filesPermission,
-      jobsPermission,
-      promptsPermission
-    ];
+    const levels = scopeResourcePermissionKeys.map(getResourcePermission);
     if (levels.includes("admin")) return "admin";
     if (levels.includes("write")) return "write";
     return "read";
@@ -256,14 +280,26 @@
   const allResourcePermissionOptions: ReadonlyArray<ResourcePermissionOption> = [
     {
       key: "assistants",
-      label: () => m.api_keys_resource_assistants(),
-      description: () => m.api_keys_resource_assistants_desc(),
+      label: () =>
+        scopeType === "assistant"
+          ? m.api_keys_resource_selected_assistant()
+          : m.api_keys_resource_assistants(),
+      description: () =>
+        scopeType === "assistant"
+          ? m.api_keys_resource_selected_assistant_desc()
+          : m.api_keys_resource_assistants_desc(),
       icon: MessageSquare
     },
     {
       key: "apps",
-      label: () => m.api_keys_resource_applications(),
-      description: () => m.api_keys_resource_applications_desc(),
+      label: () =>
+        scopeType === "app"
+          ? m.api_keys_resource_selected_app()
+          : m.api_keys_resource_applications(),
+      description: () =>
+        scopeType === "app"
+          ? m.api_keys_resource_selected_app_desc()
+          : m.api_keys_resource_applications_desc(),
       icon: AppWindow
     },
     {
@@ -305,9 +341,11 @@
   ];
 
   const resourcePermissionOptions = $derived(
-    keyType === "pk_"
-      ? allResourcePermissionOptions.filter((opt) => !PK_FORBIDDEN_RESOURCES.has(opt.key))
-      : allResourcePermissionOptions
+    allResourcePermissionOptions.filter(
+      (opt) =>
+        scopeResourcePermissionKeys.includes(opt.key) &&
+        (keyType !== "pk_" || !PK_FORBIDDEN_RESOURCES.has(opt.key))
+    )
   );
 
   // Scope-aware capability preview rows for the "What this key can do" box.
@@ -538,8 +576,7 @@
     allowedIps = key.allowed_ips ?? [];
     expiresAt = key.expires_at ?? null;
     rateLimit = key.rate_limit?.toString() ?? "";
-    const scopeSupportsFineGrained =
-      key.key_type === "pk_" || key.scope_type === "tenant" || key.scope_type === "space";
+    const scopeSupportsFineGrained = key.scope_type in SCOPE_RESOURCE_PERMISSION_KEYS;
     if (key.resource_permissions && scopeSupportsFineGrained) {
       assistantsPermission = (key.resource_permissions.assistants ?? "none") as ResourcePermission;
       appsPermission = (key.resource_permissions.apps ?? "none") as ResourcePermission;
@@ -692,10 +729,9 @@
 
     errorMessage = null;
 
-    // Tenant/space keys persist per-resource permissions. Assistant/app scopes
-    // rely on the flat `permission` field because the scope already bounds access.
-    const editScopeAllowsFineGrained =
-      apiKey.scope_type === "tenant" || apiKey.scope_type === "space";
+    // Fine-grained permissions are scope-aware; hidden resource types are sent
+    // as "none" so the backend can reject unexpected access consistently.
+    const editScopeAllowsFineGrained = apiKey.scope_type in SCOPE_RESOURCE_PERMISSION_KEYS;
     const nextResourcePermissions = editScopeAllowsFineGrained
       ? buildResourcePermissionsRequest()
       : null;
@@ -808,16 +844,23 @@
     }
   }
 
-  // Quick action to set all fine-grained permissions
+  // Quick action to set all fine-grained permissions. Honors the same
+  // invariants as the per-row setter — required scope fields can't be "none"
+  // (clamped to "read") and pk_ keys can't go above "read" (clamped to "none").
   function setAllPermissions(level: ResourcePermission) {
-    assistantsPermission = level;
-    appsPermission = level;
-    spacesPermission = level;
-    knowledgePermission = level;
-    conversationsPermission = level;
-    filesPermission = level;
-    jobsPermission = level;
-    promptsPermission = level;
+    const clamp = (key: ResourcePermissionKey): ResourcePermission => {
+      if (isLevelAllowed(key, level)) return level;
+      if (key === requiredResourcePermissionKey && level === "none") return "read";
+      return "none";
+    };
+    assistantsPermission = clamp("assistants");
+    appsPermission = clamp("apps");
+    spacesPermission = clamp("spaces");
+    knowledgePermission = clamp("knowledge");
+    conversationsPermission = clamp("conversations");
+    filesPermission = clamp("files");
+    jobsPermission = clamp("jobs");
+    promptsPermission = clamp("prompts");
   }
 
   function applyPublicKeyDefaults() {
@@ -843,27 +886,34 @@
   }
 
   function getResourcePermission(key: ResourcePermissionKey): ResourcePermission {
-    switch (key) {
-      case "assistants":
-        return assistantsPermission;
-      case "apps":
-        return appsPermission;
-      case "spaces":
-        return spacesPermission;
-      case "knowledge":
-        return knowledgePermission;
-      case "conversations":
-        return conversationsPermission;
-      case "files":
-        return filesPermission;
-      case "jobs":
-        return jobsPermission;
-      case "prompts":
-        return promptsPermission;
-    }
+    const permission = (() => {
+      switch (key) {
+        case "assistants":
+          return assistantsPermission;
+        case "apps":
+          return appsPermission;
+        case "spaces":
+          return spacesPermission;
+        case "knowledge":
+          return knowledgePermission;
+        case "conversations":
+          return conversationsPermission;
+        case "files":
+          return filesPermission;
+        case "jobs":
+          return jobsPermission;
+        case "prompts":
+          return promptsPermission;
+      }
+    })();
+
+    if (key === requiredResourcePermissionKey && permission === "none") return "read";
+    return permission;
   }
 
   function setResourcePermission(key: ResourcePermissionKey, level: ResourcePermission) {
+    if (!isLevelAllowed(key, level)) return;
+
     switch (key) {
       case "assistants":
         assistantsPermission = level;
@@ -893,20 +943,50 @@
   }
 
   function buildResourcePermissionsRequest() {
+    const allowedKeys = new Set(scopeResourcePermissionKeys);
     return {
-      assistants: assistantsPermission as ResourcePermissionLevel,
-      apps: appsPermission as ResourcePermissionLevel,
-      spaces: spacesPermission as ResourcePermissionLevel,
-      knowledge: knowledgePermission as ResourcePermissionLevel,
-      conversations: conversationsPermission as ResourcePermissionLevel,
-      files: filesPermission as ResourcePermissionLevel,
-      jobs: jobsPermission as ResourcePermissionLevel,
-      prompts: promptsPermission as ResourcePermissionLevel
+      assistants: (allowedKeys.has("assistants")
+        ? getResourcePermission("assistants")
+        : "none") as ResourcePermissionLevel,
+      apps: (allowedKeys.has("apps")
+        ? getResourcePermission("apps")
+        : "none") as ResourcePermissionLevel,
+      spaces: (allowedKeys.has("spaces")
+        ? getResourcePermission("spaces")
+        : "none") as ResourcePermissionLevel,
+      knowledge: (allowedKeys.has("knowledge")
+        ? getResourcePermission("knowledge")
+        : "none") as ResourcePermissionLevel,
+      conversations: (allowedKeys.has("conversations")
+        ? getResourcePermission("conversations")
+        : "none") as ResourcePermissionLevel,
+      files: (allowedKeys.has("files")
+        ? getResourcePermission("files")
+        : "none") as ResourcePermissionLevel,
+      jobs: (allowedKeys.has("jobs")
+        ? getResourcePermission("jobs")
+        : "none") as ResourcePermissionLevel,
+      prompts: (allowedKeys.has("prompts")
+        ? getResourcePermission("prompts")
+        : "none") as ResourcePermissionLevel
     };
   }
 
   function shouldSendResourcePermissions() {
     return scopeAllowsFineGrained;
+  }
+
+  function getResourceAccessScopeMessage() {
+    switch (scopeType) {
+      case "tenant":
+        return m.api_keys_scope_resource_access_link_tenant();
+      case "space":
+        return m.api_keys_scope_resource_access_link_space();
+      case "assistant":
+        return m.api_keys_scope_resource_access_link_assistant();
+      case "app":
+        return m.api_keys_scope_resource_access_link_app();
+    }
   }
 
   // Permission level display config — uses eneo's semantic state tokens
@@ -975,7 +1055,8 @@
     return id ? `${label} ${id.slice(0, 8)}` : label;
   }
 
-  function isLevelAllowed(level: ResourcePermission): boolean {
+  function isLevelAllowed(key: ResourcePermissionKey, level: ResourcePermission): boolean {
+    if (key === requiredResourcePermissionKey && level === "none") return false;
     return keyType !== "pk_" || level === "none" || level === "read";
   }
 </script>
@@ -1510,9 +1591,7 @@
                       >
                         <Info class="mt-0.5 h-3.5 w-3.5 shrink-0" />
                         <span>
-                          {scopeType === "tenant"
-                            ? m.api_keys_scope_resource_access_link_tenant()
-                            : m.api_keys_scope_resource_access_link_space()}
+                          {getResourceAccessScopeMessage()}
                         </span>
                       </div>
                       <fieldset>
@@ -1535,7 +1614,10 @@
                             </p>
                           </div>
                           <span class="text-muted shrink-0 text-xs">
-                            {m.api_keys_of_enabled({ count: activeResourceCount })}
+                            {m.api_keys_of_enabled({
+                              count: activeResourceCount,
+                              total: visibleResourceCount
+                            })}
                           </span>
                         </div>
                         <div class="border-default overflow-hidden rounded-lg border">
@@ -1567,7 +1649,7 @@
                               >
                                 {#each ["none", "read", "write", "admin"] as level (level)}
                                   {@const typedLevel = level as ResourcePermission}
-                                  {@const allowed = isLevelAllowed(typedLevel)}
+                                  {@const allowed = isLevelAllowed(option.key, typedLevel)}
                                   <button
                                     type="button"
                                     role="radio"
