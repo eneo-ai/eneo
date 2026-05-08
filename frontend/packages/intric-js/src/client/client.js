@@ -133,6 +133,11 @@ function parseUrl(baseUrl, endpoint, params) {
 
   if (params?.path) {
     Object.entries(params.path).forEach(([param, value]) => {
+      if (value === undefined || value === null || value === "undefined" || value === "null") {
+        throw new Error(
+          `Missing path parameter "${param}" for endpoint "${endpoint}" (got ${value === undefined ? "undefined" : JSON.stringify(value)}).`
+        );
+      }
       endpoint = endpoint.replace(`{${param}}`, value);
     });
   }

@@ -96,6 +96,7 @@
     <SelectAIModelV2
       bind:selectedModel={completionModel}
       availableModels={$currentSpace.completion_models}
+      showCost={false}
     />
 
     <SelectBehaviourV2

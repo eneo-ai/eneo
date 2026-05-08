@@ -25,7 +25,9 @@
     onChanged: () => void;
   } = $props();
 
-  let pickerValue = $state<string | null>(apiKey.expires_at ?? null);
+  // Initialised on open via the $effect below — keeping it null here avoids
+  // capturing the initial $props value statically (state_referenced_locally).
+  let pickerValue = $state<string | null>(null);
   let maxDays = $state<number | null>(null);
   let requireExpiration = $state(false);
   let constraintsLoaded = $state(false);
