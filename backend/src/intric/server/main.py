@@ -215,6 +215,61 @@ def _remove_invalid_defaults(schema: dict[str, Any]) -> None:
                 _remove_invalid_defaults(sub_schema)
 
 
+def _resolve_openapi_schema_ref(
+    openapi_schema: dict[str, Any], schema: Any
+) -> dict[str, Any]:
+    if not isinstance(schema, dict):
+        return {}
+
+    schema_obj = cast(dict[str, Any], schema)
+    ref = schema_obj.get("$ref")
+    if not isinstance(ref, str):
+        return schema_obj
+
+    prefix = "#/components/schemas/"
+    if not ref.startswith(prefix):
+        return {}
+
+    component_name = ref.removeprefix(prefix)
+    components = _json_obj(openapi_schema.get("components"))
+    schemas = _json_obj(components.get("schemas"))
+    return _json_obj(schemas.get(component_name))
+
+
+def _normalize_multipart_upload_file_schemas(openapi_schema: dict[str, Any]) -> None:
+    """Expose UploadFile fields in the shape most OpenAPI client generators expect."""
+    paths = _json_obj(openapi_schema.get("paths"))
+
+    for path_item in paths.values():
+        if not isinstance(path_item, dict):
+            continue
+        path_operations = cast(dict[str, Any], path_item)
+        for operation in path_operations.values():
+            if not isinstance(operation, dict):
+                continue
+
+            operation_obj = cast(dict[str, Any], operation)
+            request_body = _json_obj(operation_obj.get("requestBody"))
+            content = _json_obj(request_body.get("content"))
+            multipart = _json_obj(content.get("multipart/form-data"))
+            request_schema = _resolve_openapi_schema_ref(
+                openapi_schema, multipart.get("schema")
+            )
+            properties = _json_obj(request_schema.get("properties"))
+
+            for property_schema in properties.values():
+                if not isinstance(property_schema, dict):
+                    continue
+                property_schema_obj = cast(dict[str, Any], property_schema)
+                if (
+                    property_schema_obj.get("type") == "string"
+                    and property_schema_obj.get("contentMediaType")
+                    == "application/octet-stream"
+                ):
+                    property_schema_obj.pop("contentMediaType", None)
+                    property_schema_obj["format"] = "binary"
+
+
 def _retag_flow_ai_builder_operations(openapi_schema: dict[str, Any]) -> None:
     """Keep AI Builder operations grouped under their dedicated tag in OpenAPI.
 
@@ -317,6 +372,7 @@ def get_application():
             if isinstance(schema, dict):
                 _remove_invalid_defaults(cast(dict[str, Any], schema))
 
+        _normalize_multipart_upload_file_schemas(openapi_schema)
         _retag_flow_ai_builder_operations(openapi_schema)
 
         # Fix only the missing SSE-related schemas that FastAPI doesn't auto-detect

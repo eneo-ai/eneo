@@ -30,10 +30,21 @@ Return the canonical run-time contract for a published flow.
 
 Use this endpoint before rendering a run form to discover:
 - published flow version for stale-submit protection
+- terminal output type and delivery mode, so clients know whether the successful run
+  yields a payload, generated file, or outbound HTTP delivery
 - structured form fields
 - step-specific runtime input requirements
+- steps that can pause for human review, including the output shape a review UI should render
 - aggregate file limits
 - published template readiness and capability state
+
+Recommended consumer flow:
+1. Render `form_fields` as the run form.
+2. Upload files before run creation and attach each file id through `step_inputs[step_id].file_ids`.
+3. Prebuild optional review screens from `steps_requiring_review`.
+4. Start the run with `expected_flow_version=published_flow_version`.
+5. When a run reaches `awaiting_review`, call the active checkpoint endpoint for the immutable
+   step snapshot and editable payload.
 
 Service-key principals may use this endpoint for published-flow runtime only.
     """,
@@ -77,8 +88,7 @@ async def get_flow_run_contract(
         allow_service_key_principals=True,
         require_published_for_service_key=True,
     )
-    contract = await common.flow_upload_service(container).get_run_contract(flow_id=id)
-    return FlowRunContractPublic.model_validate(contract)
+    return await common.flow_run_contract_service(container).get_run_contract(flow_id=id)
 
 
 @router.get(

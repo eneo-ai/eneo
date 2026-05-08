@@ -4,7 +4,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Protocol, cast
+from typing import Protocol
 from uuid import UUID
 
 import magic
@@ -18,7 +18,7 @@ from intric.files.mime_support import (
     supported_image_mimes,
     supported_text_mimes,
 )
-from intric.flows.domain.flow import Flow, FlowStep, FlowTemplateAsset, FlowVersion
+from intric.flows.domain.flow import Flow, FlowStep, FlowVersion
 from intric.flows.flow_input_limits import (
     FlowInputLimits,
     effective_flow_input_limit,
@@ -130,18 +130,6 @@ class _FlowVersionRepositoryProtocol(Protocol):
     async def get(
         self, flow_id: UUID, version: int, tenant_id: UUID
     ) -> FlowVersion: ...
-
-
-class _FlowTemplateAssetRepositoryProtocol(Protocol):
-    async def get(self, *, asset_id: UUID, tenant_id: UUID) -> FlowTemplateAsset: ...
-
-    async def get_by_flow_file(
-        self,
-        *,
-        flow_id: UUID,
-        file_id: UUID,
-        tenant_id: UUID,
-    ) -> FlowTemplateAsset: ...
 
 
 @dataclass(frozen=True)
@@ -272,13 +260,11 @@ class FlowFileUploadService:
         file_service: FileService,
         settings_service: _SettingsServiceProtocol,
         flow_version_repo: _FlowVersionRepositoryProtocol | None = None,
-        template_asset_repo: _FlowTemplateAssetRepositoryProtocol | None = None,
     ):
         self.flow_service = flow_service
         self.file_service = file_service
         self.settings_service = settings_service
         self.flow_version_repo = flow_version_repo
-        self.template_asset_repo = template_asset_repo
 
     async def get_input_policy(self, *, flow_id: UUID) -> FlowFileInputPolicy:
         flow = await self.flow_service.get_flow(flow_id)
@@ -294,165 +280,6 @@ class FlowFileUploadService:
             upload_file=upload_file,
             policy=policy,
         )
-
-    async def get_run_contract(self, *, flow_id: UUID) -> dict[str, object]:
-        if self.flow_version_repo is None or self.template_asset_repo is None:
-            raise BadRequestException(
-                "Published flow runtime contract dependencies are unavailable.",
-                code="flow_runtime_contract_unavailable",
-            )
-        flow = await self.flow_service.get_flow(flow_id)
-        persisted_flow_id = _require_flow_id(flow)
-        if flow.published_version is None:
-            raise BadRequestException(
-                "Flow must be published before a run contract can be created.",
-                code="flow_not_published",
-            )
-
-        version = await self.flow_version_repo.get(
-            flow_id=persisted_flow_id,
-            version=flow.published_version,
-            tenant_id=flow.tenant_id,
-        )
-        limits = await self.settings_service.get_flow_input_limits_resolved()
-        steps = parse_published_runtime_steps(version.definition_json)
-        steps_requiring_input: list[dict[str, object]] = []
-        aggregate_max_files: int | None = 0
-
-        for step in steps:
-            runtime_input = build_runtime_input_config(step.input_config)
-            if not runtime_input.enabled:
-                continue
-
-            max_files = effective_runtime_max_files(
-                input_type=runtime_input.input_format,
-                step_max_files=runtime_input.max_files,
-                limits=limits,
-            )
-            if aggregate_max_files is not None:
-                if max_files is None:
-                    aggregate_max_files = None
-                else:
-                    aggregate_max_files += max_files
-
-            steps_requiring_input.append(
-                {
-                    "step_id": step.step_id,
-                    "step_order": step.step_order,
-                    "label": runtime_input.label,
-                    "description": runtime_input.description,
-                    "required": runtime_input.required,
-                    "input_format": runtime_input.input_format,
-                    "max_files": max_files,
-                    "max_file_size_bytes": effective_flow_input_limit(
-                        input_type=runtime_input.input_format,
-                        limits=limits,
-                    ),
-                    "accepted_mimetypes": runtime_input_accept_mimetypes(runtime_input),
-                }
-            )
-
-        template_readiness: list[dict[str, object]] = []
-        for step in steps:
-            if step.output_mode != "template_fill" or not isinstance(
-                step.output_config, dict
-            ):
-                continue
-            asset_id_raw = step.output_config.get("template_asset_id")
-            asset_status = "unavailable"
-            template_name = step.output_config.get("template_name")
-            template_file_id = step.output_config.get("template_file_id")
-            checksum = step.output_config.get("template_checksum")
-            asset_id = None
-            if asset_id_raw is not None:
-                try:
-                    asset_id = UUID(str(asset_id_raw))
-                    asset = await self.template_asset_repo.get(
-                        asset_id=asset_id,
-                        tenant_id=flow.tenant_id,
-                    )
-                    asset_status = "ready"
-                    template_name = asset.name
-                    template_file_id = asset.file_id
-                    checksum = asset.checksum
-                except Exception:
-                    logger.warning(
-                        "Failed to resolve template asset readiness for published flow contract.",
-                        extra={
-                            "flow_id": str(persisted_flow_id),
-                            "step_id": str(step.step_id),
-                            "template_asset_id": str(asset_id_raw),
-                        },
-                        exc_info=True,
-                    )
-                    asset_status = "unavailable"
-            elif template_file_id is not None:
-                try:
-                    legacy_file_id = UUID(str(template_file_id))
-                    asset = await self.template_asset_repo.get_by_flow_file(
-                        flow_id=persisted_flow_id,
-                        file_id=legacy_file_id,
-                        tenant_id=flow.tenant_id,
-                    )
-                    asset_id = asset.id
-                    asset_status = "ready"
-                    template_name = asset.name
-                    template_file_id = asset.file_id
-                    checksum = asset.checksum
-                except Exception:
-                    logger.warning(
-                        "Failed to resolve template asset readiness for published flow contract.",
-                        extra={
-                            "flow_id": str(persisted_flow_id),
-                            "step_id": str(step.step_id),
-                            "template_file_id": str(template_file_id),
-                        },
-                        exc_info=True,
-                    )
-                    asset_status = "unavailable"
-            template_readiness.append(
-                {
-                    "step_id": step.step_id,
-                    "template_asset_id": asset_id,
-                    "template_file_id": template_file_id,
-                    "template_name": template_name,
-                    "checksum": checksum,
-                    "published_flow_version": flow.published_version,
-                    "status": asset_status,
-                    "can_edit": False,
-                    "can_download": asset_id is not None,
-                    "message_code": None
-                    if asset_status == "ready"
-                    else "flow_template_not_accessible",
-                }
-            )
-
-        form_fields: list[dict[str, object]] = []
-        form_schema = (
-            (flow.metadata_json or {}).get("form_schema")
-            if isinstance(flow.metadata_json, dict)
-            else None
-        )
-        if isinstance(form_schema, dict):
-            form_schema_dict = cast(dict[str, object], form_schema)
-            fields_value = form_schema_dict.get("fields")
-        else:
-            fields_value = None
-        if isinstance(fields_value, list):
-            form_fields = [
-                cast(dict[str, object], field)
-                for field in cast(list[object], fields_value)
-                if isinstance(field, dict)
-            ]
-
-        return {
-            "flow_id": persisted_flow_id,
-            "published_flow_version": flow.published_version,
-            "form_fields": form_fields,
-            "steps_requiring_input": steps_requiring_input,
-            "aggregate_max_files": aggregate_max_files,
-            "template_readiness": template_readiness,
-        }
 
     async def upload_runtime_file_for_step(
         self,

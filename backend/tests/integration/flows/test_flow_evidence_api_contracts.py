@@ -29,6 +29,7 @@ from intric.flows import (
     FlowVersionRepository,
 )
 from intric.flows.enums import (
+    FlowOutputType,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
     FlowRunReviewCheckpointState,
@@ -40,6 +41,7 @@ from intric.flows.flow_retention_tombstone import (
     FlowRetentionTombstone,
     RunDebugAttemptRetentionCounts,
 )
+from intric.flows.flow_review_policy import FlowStepReviewMode
 from intric.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION,
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
@@ -47,7 +49,7 @@ from intric.flows.flow_run_provenance import (
 from intric.main.container.container import Container
 from intric.roles.permissions import Permission
 from intric.spaces.api.space_models import SpaceRoleValue
-from intric.users.user import UserAdd, UserState
+from intric.users.user import UserAdd, UserInDB, UserState
 
 
 def _build_flow(
@@ -102,8 +104,12 @@ def _build_flow(
     )
 
 
-async def _create_view_only_user_and_token(
-    *, db_container, patch_auth_service_jwt, tenant_id: UUID
+async def _create_user_with_flow_permissions_and_token(
+    *,
+    db_container,
+    tenant_id: UUID,
+    role_name_prefix: str,
+    permissions: list[Permission],
 ):
     async with db_container() as container:
         session = container.session()
@@ -120,8 +126,8 @@ async def _create_view_only_user_and_token(
         )
 
         role = Roles(
-            name=f"Flow Viewer {uuid4().hex[:8]}",
-            permissions=[Permission.FLOWS_VIEW.value],
+            name=f"{role_name_prefix} {uuid4().hex[:8]}",
+            permissions=[permission.value for permission in permissions],
             tenant_id=tenant_id,
         )
         session.add(role)
@@ -134,6 +140,30 @@ async def _create_view_only_user_and_token(
         refreshed = await user_repo.get_user_by_email(user.email)
         token = auth_service.create_access_token_for_user(refreshed)
         return refreshed, token
+
+
+async def _create_view_only_user_and_token(
+    *, db_container, patch_auth_service_jwt, tenant_id: UUID
+):
+    _ = patch_auth_service_jwt
+    return await _create_user_with_flow_permissions_and_token(
+        db_container=db_container,
+        tenant_id=tenant_id,
+        role_name_prefix="Flow Viewer",
+        permissions=[Permission.FLOWS_VIEW],
+    )
+
+
+async def _create_trace_view_user_and_token(
+    *, db_container, patch_auth_service_jwt, tenant_id: UUID
+):
+    _ = patch_auth_service_jwt
+    return await _create_user_with_flow_permissions_and_token(
+        db_container=db_container,
+        tenant_id=tenant_id,
+        role_name_prefix="Flow Trace Viewer",
+        permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
+    )
 
 
 async def _add_space_membership(*, db_container, space_id: UUID, user_id: UUID) -> None:
@@ -409,6 +439,10 @@ async def _seed_flow_run_contract_data(
                 step_id=step.id,
                 step_order=1,
                 attempt_no=1,
+                step_label=step.user_description,
+                review_mode=FlowStepReviewMode.EDIT.value,
+                output_type=FlowOutputType.JSON.value,
+                output_contract_json=step.output_contract,
                 state=FlowRunReviewCheckpointState.RESUMED.value,
                 revision=4,
                 schema_version=1,
@@ -541,6 +575,36 @@ async def _seed_flow_run_contract_data(
         return seeded
 
 
+async def _seed_trace_view_flow_run_contract_data(
+    *,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user: UserInDB,
+    attempt_provenance_json: dict[str, Any] | None = None,
+    include_rerun_lineage: bool = False,
+    include_review_checkpoint_lineage: bool = False,
+) -> tuple[dict[str, str], UserInDB, str]:
+    trace_user, trace_token = await _create_trace_view_user_and_token(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        tenant_id=admin_user.tenant_id,
+    )
+    seeded = await _seed_flow_run_contract_data(
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=trace_user,
+        attempt_provenance_json=attempt_provenance_json,
+        include_rerun_lineage=include_rerun_lineage,
+        include_review_checkpoint_lineage=include_review_checkpoint_lineage,
+    )
+    return seeded, trace_user, trace_token
+
+
 def _attempt_retention_marker_payload(
     *,
     tenant_id: UUID,
@@ -578,8 +642,9 @@ async def test_flow_run_steps_endpoint_rejects_view_only_access_to_other_users_r
     assistant_factory,
     admin_user,
 ):
-    seeded = await _seed_flow_run_contract_data(
+    seeded, _, _ = await _seed_trace_view_flow_run_contract_data(
         db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         assistant_factory=assistant_factory,
@@ -617,8 +682,9 @@ async def test_flow_run_evidence_endpoint_requires_trace_permission(
     assistant_factory,
     admin_user,
 ):
-    seeded = await _seed_flow_run_contract_data(
+    seeded, _, _ = await _seed_trace_view_flow_run_contract_data(
         db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         assistant_factory=assistant_factory,
@@ -656,8 +722,9 @@ async def test_flow_run_evidence_endpoint_includes_rerun_lineage(
     assistant_factory,
     admin_user,
 ):
-    seeded = await _seed_flow_run_contract_data(
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
         db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         assistant_factory=assistant_factory,
@@ -665,13 +732,9 @@ async def test_flow_run_evidence_endpoint_includes_rerun_lineage(
         include_rerun_lineage=True,
     )
 
-    async with db_container() as container:
-        auth_service = container.auth_service()
-        admin_token = auth_service.create_access_token_for_user(admin_user)
-
     response = await client.get(
         f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={"Authorization": f"Bearer {trace_token}"},
     )
 
     assert response.status_code == 200, response.text
@@ -727,8 +790,9 @@ async def test_flow_run_evidence_endpoint_includes_review_checkpoint_lineage(
     assistant_factory,
     admin_user,
 ):
-    seeded = await _seed_flow_run_contract_data(
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
         db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         assistant_factory=assistant_factory,
@@ -736,13 +800,9 @@ async def test_flow_run_evidence_endpoint_includes_review_checkpoint_lineage(
         include_review_checkpoint_lineage=True,
     )
 
-    async with db_container() as container:
-        auth_service = container.auth_service()
-        admin_token = auth_service.create_access_token_for_user(admin_user)
-
     response = await client.get(
         f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={"Authorization": f"Bearer {trace_token}"},
     )
 
     assert response.status_code == 200, response.text
@@ -754,6 +814,12 @@ async def test_flow_run_evidence_endpoint_includes_review_checkpoint_lineage(
     assert checkpoint["revision"] == 4
     assert checkpoint["resume_key_present"] is True
     assert "resume_idempotency_key" not in checkpoint
+    assert checkpoint["step_label"] == "Summarize the case"
+    assert checkpoint["review_mode"] == "edit"
+    assert checkpoint["output_type"] == "json"
+    assert checkpoint["step_snapshot_available"] is True
+    assert checkpoint["output_contract"] == {"type": "object"}
+    assert "output_contract_json" not in checkpoint
     assert checkpoint["original_payload_json"]["summary"] == "Looks good"
     assert checkpoint["current_payload_json"]["summary"] == "Reviewed by human"
     assert checkpoint["current_payload_json"]["api_key"] == "[REDACTED]"
@@ -774,8 +840,9 @@ async def test_flow_run_evidence_export_preserves_rerun_lineage_redaction_shape(
     assistant_factory,
     admin_user,
 ):
-    seeded = await _seed_flow_run_contract_data(
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
         db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         assistant_factory=assistant_factory,
@@ -783,28 +850,24 @@ async def test_flow_run_evidence_export_preserves_rerun_lineage_redaction_shape(
         include_rerun_lineage=True,
     )
 
-    async with db_container() as container:
-        auth_service = container.auth_service()
-        admin_token = auth_service.create_access_token_for_user(admin_user)
-
     export_path = (
         f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export"
     )
     redacted_response = await client.get(
         f"{export_path}?format=json",
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={"Authorization": f"Bearer {trace_token}"},
     )
     raw_response = await client.get(
         f"{export_path}?format=json&detail=raw&reason=rerun-lineage-audit",
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={"Authorization": f"Bearer {trace_token}"},
     )
     repeated_raw_response = await client.get(
         f"{export_path}?format=json&detail=raw&reason=rerun-lineage-audit-repeat",
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={"Authorization": f"Bearer {trace_token}"},
     )
     repeated_redacted_response = await client.get(
         f"{export_path}?format=json",
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={"Authorization": f"Bearer {trace_token}"},
     )
 
     assert redacted_response.status_code == 200, redacted_response.text
@@ -877,8 +940,9 @@ async def test_flow_run_evidence_export_preserves_review_checkpoint_lineage(
     assistant_factory,
     admin_user,
 ):
-    seeded = await _seed_flow_run_contract_data(
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
         db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         assistant_factory=assistant_factory,
@@ -886,20 +950,16 @@ async def test_flow_run_evidence_export_preserves_review_checkpoint_lineage(
         include_review_checkpoint_lineage=True,
     )
 
-    async with db_container() as container:
-        auth_service = container.auth_service()
-        admin_token = auth_service.create_access_token_for_user(admin_user)
-
     export_path = (
         f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export"
     )
     redacted_response = await client.get(
         f"{export_path}?format=json",
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={"Authorization": f"Bearer {trace_token}"},
     )
     raw_response = await client.get(
         f"{export_path}?format=json&detail=raw&reason=review-lineage-audit",
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={"Authorization": f"Bearer {trace_token}"},
     )
 
     assert redacted_response.status_code == 200, redacted_response.text
@@ -916,6 +976,12 @@ async def test_flow_run_evidence_export_preserves_review_checkpoint_lineage(
     assert raw_checkpoint["current_payload_json"]["summary"] == "Reviewed by human"
     assert raw_checkpoint["current_payload_json"]["api_key"] == "super-secret"
     assert redacted_checkpoint["current_payload_json"]["api_key"] == "[REDACTED]"
+    assert raw_checkpoint["step_label"] == "Summarize the case"
+    assert raw_checkpoint["review_mode"] == "edit"
+    assert raw_checkpoint["output_type"] == "json"
+    assert raw_checkpoint["step_snapshot_available"] is True
+    assert raw_checkpoint["output_contract"] == {"type": "object"}
+    assert "output_contract_json" not in raw_checkpoint
     assert raw_checkpoint["resume_key_present"] is True
     assert "resume_idempotency_key" not in raw_checkpoint
     assert "review-resume-key" not in json.dumps(raw_payload, sort_keys=True)
@@ -951,21 +1017,18 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     assistant_factory,
     admin_user,
 ):
-    seeded = await _seed_flow_run_contract_data(
+    seeded, trace_user, trace_token = await _seed_trace_view_flow_run_contract_data(
         db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         assistant_factory=assistant_factory,
         admin_user=admin_user,
     )
 
-    async with db_container() as container:
-        auth_service = container.auth_service()
-        admin_token = auth_service.create_access_token_for_user(admin_user)
-
     response = await client.get(
         f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export?format=json",
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={"Authorization": f"Bearer {trace_token}"},
     )
 
     assert response.status_code == 200, response.text
@@ -975,14 +1038,14 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     assert payload["schema_version"] == "flow-evidence-export.v5"
     assert payload["manifest"]["schema_version"] == payload["schema_version"]
     assert payload["manifest"]["run_id"] == seeded["run_id"]
-    assert payload["manifest"]["tenant_id"] == str(admin_user.tenant_id)
+    assert payload["manifest"]["tenant_id"] == str(trace_user.tenant_id)
     assert payload["manifest"]["trace_id"] == seeded["trace_id"]
     assert payload["manifest"]["content_hash"] == payload["content_hash"]
     assert payload["manifest"]["content_hash_input"] == "redacted"
     assert payload["manifest"]["exported_at"] == payload["generated_at"]
     assert payload["manifest"]["detail_mode"] == "redacted"
     assert payload["manifest"]["export_reason"] == "support_debug"
-    assert payload["manifest"]["exported_by_user_id"] == str(admin_user.id)
+    assert payload["manifest"]["exported_by_user_id"] == str(trace_user.id)
     assert payload["manifest"]["redaction_applied"] is True
     assert payload["manifest"]["provenance_persisted_version_status"] == "tracked"
     assert payload["manifest"]["retention_state_summary"]["tracking_state"] == (
@@ -1115,8 +1178,9 @@ async def test_flow_run_evidence_export_marks_corrupt_attempt_provenance(
     assistant_factory,
     admin_user,
 ):
-    seeded = await _seed_flow_run_contract_data(
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
         db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         assistant_factory=assistant_factory,
@@ -1124,13 +1188,9 @@ async def test_flow_run_evidence_export_marks_corrupt_attempt_provenance(
         attempt_provenance_json={"llm": {"prompt": "missing version"}},
     )
 
-    async with db_container() as container:
-        auth_service = container.auth_service()
-        admin_token = auth_service.create_access_token_for_user(admin_user)
-
     response = await client.get(
         f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export?format=json",
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={"Authorization": f"Bearer {trace_token}"},
     )
 
     assert response.status_code == 200, response.text
@@ -1164,8 +1224,9 @@ async def test_flow_run_evidence_export_marks_corrupt_with_retention_tombstone(
     assistant_factory,
     admin_user,
 ):
-    seeded = await _seed_flow_run_contract_data(
+    seeded, trace_user, trace_token = await _seed_trace_view_flow_run_contract_data(
         db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         assistant_factory=assistant_factory,
@@ -1183,7 +1244,7 @@ async def test_flow_run_evidence_export_marks_corrupt_with_retention_tombstone(
                 id=purged_attempt_id,
                 flow_run_id=run_id,
                 flow_id=flow_id,
-                tenant_id=admin_user.tenant_id,
+                tenant_id=trace_user.tenant_id,
                 step_id=None,
                 step_order=2,
                 attempt_no=2,
@@ -1199,7 +1260,7 @@ async def test_flow_run_evidence_export_marks_corrupt_with_retention_tombstone(
                 num_tokens_input=0,
                 num_tokens_output=0,
                 provenance_json=_attempt_retention_marker_payload(
-                    tenant_id=admin_user.tenant_id,
+                    tenant_id=trace_user.tenant_id,
                     run_id=run_id,
                     trace_id=seeded["trace_id"],
                     object_id=purged_attempt_id,
@@ -1209,12 +1270,10 @@ async def test_flow_run_evidence_export_marks_corrupt_with_retention_tombstone(
             )
         )
         await session.flush()
-        auth_service = container.auth_service()
-        admin_token = auth_service.create_access_token_for_user(admin_user)
 
     response = await client.get(
         f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export?format=json",
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={"Authorization": f"Bearer {trace_token}"},
     )
 
     assert response.status_code == 200, response.text
@@ -1241,8 +1300,9 @@ async def test_flow_run_evidence_fails_closed_when_audit_logging_is_unavailable(
     assistant_factory,
     admin_user,
 ):
-    seeded = await _seed_flow_run_contract_data(
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
         db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         assistant_factory=assistant_factory,
@@ -1255,15 +1315,11 @@ async def test_flow_run_evidence_fails_closed_when_audit_logging_is_unavailable(
 
     audit_service.log_async = _raise
 
-    async with db_container() as container:
-        auth_service = container.auth_service()
-        admin_token = auth_service.create_access_token_for_user(admin_user)
-
     Container.audit_service.override(providers.Object(audit_service))
     try:
         response = await client.get(
             f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
-            headers={"Authorization": f"Bearer {admin_token}"},
+            headers={"Authorization": f"Bearer {trace_token}"},
         )
     finally:
         Container.audit_service.reset_last_overriding()
@@ -1285,8 +1341,9 @@ async def test_flow_run_evidence_export_fails_closed_when_audit_logging_is_unava
     assistant_factory,
     admin_user,
 ):
-    seeded = await _seed_flow_run_contract_data(
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
         db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         assistant_factory=assistant_factory,
@@ -1299,15 +1356,11 @@ async def test_flow_run_evidence_export_fails_closed_when_audit_logging_is_unava
 
     audit_service.log_async = _raise
 
-    async with db_container() as container:
-        auth_service = container.auth_service()
-        admin_token = auth_service.create_access_token_for_user(admin_user)
-
     Container.audit_service.override(providers.Object(audit_service))
     try:
         response = await client.get(
             f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export?format=json",
-            headers={"Authorization": f"Bearer {admin_token}"},
+            headers={"Authorization": f"Bearer {trace_token}"},
         )
     finally:
         Container.audit_service.reset_last_overriding()

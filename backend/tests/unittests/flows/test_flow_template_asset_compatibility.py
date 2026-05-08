@@ -11,8 +11,9 @@ from docx import Document
 
 from intric.flows.application.flow_service import FlowService
 from intric.flows.flow import Flow, FlowStep
-from intric.flows.flow_file_upload_service import FlowFileUploadService
 from intric.flows.flow_input_limits import FlowInputLimits
+from intric.flows.flow_run_contract_service import FlowRunContractService
+from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 from intric.main.exceptions import BadRequestException, NotFoundException
 
 
@@ -284,7 +285,6 @@ async def test_run_contract_marks_legacy_template_file_selection_as_ready_when_a
     None
 ):
     flow_service = AsyncMock()
-    file_service = AsyncMock()
     settings_service = AsyncMock()
     flow_version_repo = AsyncMock()
     template_asset_repo = AsyncMock()
@@ -312,6 +312,8 @@ async def test_run_contract_marks_legacy_template_file_selection_as_ready_when_a
     )
     flow_version_repo.get.return_value = SimpleNamespace(
         definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
             "steps": [
                 {
                     "step_id": str(template_step.id),
@@ -334,9 +336,8 @@ async def test_run_contract_marks_legacy_template_file_selection_as_ready_when_a
         checksum="published-checksum",
     )
 
-    service = FlowFileUploadService(
+    service = FlowRunContractService(
         flow_service=flow_service,
-        file_service=file_service,
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
         template_asset_repo=template_asset_repo,
@@ -344,8 +345,8 @@ async def test_run_contract_marks_legacy_template_file_selection_as_ready_when_a
 
     contract = await service.get_run_contract(flow_id=flow.id)
 
-    assert contract["template_readiness"][0]["status"] == "ready"
-    assert contract["template_readiness"][0]["template_asset_id"] == template_asset_id
+    assert contract.template_readiness[0].status == "ready"
+    assert contract.template_readiness[0].template_asset_id == template_asset_id
     template_asset_repo.get_by_flow_file.assert_awaited_once_with(
         flow_id=flow.id,
         file_id=template_file_id,

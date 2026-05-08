@@ -157,12 +157,47 @@ class PaginatedPermissions(PaginatedResponse[T], ResourcePermissionsMixin, Gener
 
 
 class GeneralError(BaseModel):
-    message: str
-    intric_error_code: ErrorCodes
-    code: str | None = None
-    context: dict[str, object] | None = None
-    request_id: str | None = None
-    details: dict[str, Any] | None = None
+    message: str = Field(
+        description=(
+            "Human-readable error message suitable for showing in logs or support "
+            "tools. Clients should branch on `code`, not this text."
+        )
+    )
+    intric_error_code: ErrorCodes = Field(
+        description=(
+            "Stable numeric Eneo error category retained for existing clients. "
+            "Prefer the string `code` field for new control flow."
+        )
+    )
+    code: str | None = Field(
+        default=None,
+        description=(
+            "Machine-readable error code for client and LLM tool control flow. "
+            "Examples on each endpoint list representative values."
+        ),
+    )
+    context: dict[str, object] | None = Field(
+        default=None,
+        description=(
+            "Small structured context that explains why the request failed, such as "
+            "the authorization layer or conflicting field. Values are safe for API "
+            "consumers to log."
+        ),
+    )
+    request_id: str | None = Field(
+        default=None,
+        description=(
+            "Correlation id for support and server logs. Echoes `x-correlation-id` "
+            "or `x-request-id` when supplied."
+        ),
+    )
+    details: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Optional structured diagnostics for errors that need extra machine-readable "
+            "data, such as token limits or validation details."
+        ),
+    )
 
 
 class DeleteResponse(BaseModel):

@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from typing import AsyncIterator
+from typing import AsyncGenerator
 
 import redis.asyncio as aioredis
 from dependency_injector import containers, providers
@@ -109,6 +109,7 @@ from intric.flows.application.flow_run_audit_outbox_delivery import (
 )
 from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from intric.flows.flow_file_upload_service import FlowFileUploadService
+from intric.flows.flow_run_contract_service import FlowRunContractService
 from intric.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from intric.flows.flow_template_asset_service import FlowTemplateAssetService
 from intric.flows.infrastructure.flow_run_audit_outbox_repo import (
@@ -1168,6 +1169,12 @@ class Container(containers.DeclarativeContainer):
         file_service=file_service,
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
+    )
+    flow_run_contract_service = providers.Factory(
+        FlowRunContractService,
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
         template_asset_repo=flow_template_asset_repo,
     )
     ai_builder_repo = providers.Factory(
@@ -1540,7 +1547,7 @@ class Container(containers.DeclarativeContainer):
 
     @staticmethod
     @asynccontextmanager
-    async def session_scope() -> AsyncIterator[AsyncSession]:
+    async def session_scope() -> AsyncGenerator[AsyncSession, None]:
         """Provide a short-lived session for explicit DB operations.
 
         Use this for Unit-of-Work pattern in long-running tasks (crawlers,

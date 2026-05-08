@@ -23,7 +23,7 @@ from intric.flows.enums import (
     FlowTemplateAssetStatus,
     RerunDependencyKind,
 )
-from intric.flows.flow_review_policy import FlowStepReviewPolicy
+from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 
 JsonObject: TypeAlias = dict[str, Any]
 
@@ -290,6 +290,26 @@ class FlowRunReviewCheckpoint(BaseModel):
     schema_version: int = 1
     original_payload_json: JsonObject | None = None
     current_payload_json: JsonObject | None = None
+    step_label: str | None = Field(
+        default=None,
+        description="Snapshot of the reviewed step's user-facing label.",
+    )
+    review_mode: FlowStepReviewMode | None = Field(
+        default=None,
+        description="Snapshot of the review mode configured on the reviewed step.",
+    )
+    output_type: FlowOutputType | None = Field(
+        default=None,
+        description="Snapshot of the reviewed step's output type.",
+    )
+    output_contract_json: JsonObject | None = Field(
+        default=None,
+        description=(
+            "Snapshot of FlowStep.output_contract at checkpoint creation. "
+            "Null means the reviewed step had no output contract, or this is a "
+            "legacy checkpoint created before step snapshots were persisted."
+        ),
+    )
     requester_user_id: UUID | None = None
     requester_principal_type: PrincipalType
     decided_by_user_id: UUID | None = None
@@ -303,3 +323,7 @@ class FlowRunReviewCheckpoint(BaseModel):
     cancelled_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+    @property
+    def step_snapshot_available(self) -> bool:
+        return self.review_mode is not None and self.output_type is not None

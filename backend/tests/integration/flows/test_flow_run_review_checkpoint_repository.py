@@ -29,6 +29,7 @@ from intric.flows import (
 )
 from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from intric.flows.enums import (
+    FlowOutputType,
     FlowRunLifecycleSource,
     FlowRunReviewCheckpointState,
     FlowRunStatus,
@@ -550,6 +551,10 @@ async def test_open_review_checkpoint_transitions_run_and_writes_outbox(
             step_id=scenario.step_ids[0],
             step_order=1,
             attempt_no=1,
+            step_label="Draft answer",
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
+            output_contract_json={"type": "object"},
             requester_principal=FlowPrincipal.from_user(admin_user),
             next_step_ids=(scenario.step_ids[1],),
         )
@@ -572,6 +577,10 @@ async def test_open_review_checkpoint_transitions_run_and_writes_outbox(
     assert opened.checkpoint.original_payload_json == {"answer": "ready for review"}
     assert opened.checkpoint.current_payload_json == {"answer": "ready for review"}
     assert opened.checkpoint.next_step_ids_json == [scenario.step_ids[1]]
+    assert opened.checkpoint.step_label == "Draft answer"
+    assert opened.checkpoint.review_mode == FlowStepReviewMode.VIEW
+    assert opened.checkpoint.output_type == FlowOutputType.JSON
+    assert opened.checkpoint.output_contract_json == {"type": "object"}
     assert outbox_values == (
         opened.checkpoint.id,
         opened.checkpoint.revision,

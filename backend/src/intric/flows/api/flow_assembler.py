@@ -143,10 +143,15 @@ class FlowAssembler:
         self,
         checkpoint: FlowRunReviewCheckpoint,
     ) -> FlowRunReviewCheckpointPublic:
+        # Public API names omit persistence-only `_json` suffixes because every
+        # response is already JSON-serialized; keep the suffix on domain fields
+        # where it records the backing column convention.
         return FlowRunReviewCheckpointPublic.model_validate(
             {
                 **checkpoint.model_dump(),
                 "next_step_ids": checkpoint.next_step_ids_json,
+                "step_snapshot_available": checkpoint.step_snapshot_available,
+                "output_contract": checkpoint.output_contract_json,
             }
         )
 

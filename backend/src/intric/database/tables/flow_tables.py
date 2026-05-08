@@ -39,6 +39,7 @@ from intric.flows.enums import (
     FlowStepResultStatus,
     FlowTemplateAssetStatus,
 )
+from intric.flows.flow_review_policy import FlowStepReviewMode
 
 FLOW_STEP_INPUT_SOURCE_VALUES = tuple(item.value for item in FlowInputSource)
 FLOW_STEP_INPUT_TYPE_VALUES = tuple(item.value for item in FlowInputType)
@@ -56,6 +57,7 @@ FLOW_RUN_LIFECYCLE_SOURCE_VALUES = tuple(item.value for item in FlowRunLifecycle
 FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES = tuple(
     item.value for item in FlowRunReviewCheckpointState
 )
+FLOW_STEP_REVIEW_MODE_VALUES = tuple(item.value for item in FlowStepReviewMode)
 FLOW_RUN_ACTIVE_REVIEW_CHECKPOINT_STATE_VALUES = (
     FlowRunReviewCheckpointState.AWAITING_REVIEW.value,
     FlowRunReviewCheckpointState.EDITED.value,
@@ -950,6 +952,13 @@ class FlowRunReviewCheckpoints(BasePublic):
         JSONB,
         nullable=True,
     )
+    step_label: Mapped[Optional[str]] = mapped_column(sa.Text(), nullable=True)
+    review_mode: Mapped[Optional[str]] = mapped_column(sa.String(16), nullable=True)
+    output_type: Mapped[Optional[str]] = mapped_column(sa.String(32), nullable=True)
+    output_contract_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
     requester_user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(
             Users.id,
@@ -1014,6 +1023,16 @@ class FlowRunReviewCheckpoints(BasePublic):
         CheckConstraint(
             "schema_version >= 1",
             name="ck_flow_run_review_checkpoints_schema_version",
+        ),
+        CheckConstraint(
+            "review_mode IS NULL "
+            f"OR review_mode IN ({_check_values(FLOW_STEP_REVIEW_MODE_VALUES)})",
+            name="ck_flow_run_review_checkpoints_review_mode",
+        ),
+        CheckConstraint(
+            "output_type IS NULL "
+            f"OR output_type IN ({_check_values(FLOW_STEP_OUTPUT_TYPE_VALUES)})",
+            name="ck_flow_run_review_checkpoints_output_type",
         ),
         CheckConstraint(
             "requester_principal_type IN ('user','service_key')",

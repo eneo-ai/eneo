@@ -6,13 +6,37 @@ import pytest
 import sqlalchemy as sa
 
 from intric.database.tables.flow_tables import FlowStepResults
+from intric.database.tables.roles_table import Roles
+from intric.database.tables.users_table import users_roles_table
+from intric.roles.permissions import Permission
+
+
+async def _noop_dispatch_flow_run_after_commit(**kwargs: object) -> None:
+    _ = kwargs
 
 
 @pytest.fixture
 async def admin_token(db_container, patch_auth_service_jwt, admin_user) -> str:
+    _ = patch_auth_service_jwt
     async with db_container() as container:
+        session = container.session()
+        user_repo = container.user_repo()
         auth_service = container.auth_service()
-        return auth_service.create_access_token_for_user(admin_user)
+
+        role = Roles(
+            name=f"Flow Consumer Test {uuid4().hex[:8]}",
+            permissions=[Permission.FLOWS_MANAGE.value, Permission.FLOWS_RUN.value],
+            tenant_id=admin_user.tenant_id,
+        )
+        session.add(role)
+        await session.flush()
+        await session.execute(
+            sa.insert(users_roles_table).values(user_id=admin_user.id, role_id=role.id)
+        )
+        await session.flush()
+
+        refreshed_user = await user_repo.get_user_by_email(admin_user.email)
+        return auth_service.create_access_token_for_user(refreshed_user)
 
 
 async def _create_space(client, *, token: str) -> str:
@@ -109,7 +133,13 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     client,
     db_container,
     admin_token,
+    monkeypatch,
 ):
+    monkeypatch.setattr(
+        "intric.flows.api.flow_router_common.dispatch_flow_run_after_commit",
+        _noop_dispatch_flow_run_after_commit,
+    )
+
     space_id = await _create_space(client, token=admin_token)
     flow = await _create_published_flow(client, token=admin_token, space_id=space_id)
     flow_id = flow["id"]
@@ -231,4 +261,11 @@ async def test_flow_run_create_rejects_removed_top_level_file_ids_before_body_sh
     )
 
     assert response.status_code == 400, response.text
-    assert response.json()["code"] == "flow_run_top_level_file_ids_not_supported"
+    payload = response.json()
+    assert payload["code"] == "flow_run_top_level_file_ids_not_supported"
+    assert "step_inputs[step_id].file_ids" in payload["message"]
+    assert payload["context"] == {
+        "invalid_field": "file_ids",
+        "expected_field": "step_inputs[step_id].file_ids",
+        "contract_endpoint": "/api/v1/flows/{id}/run-contract/",
+    }

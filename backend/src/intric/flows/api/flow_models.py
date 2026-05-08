@@ -18,13 +18,36 @@ from intric.flows.enums import (
     FlowRunRerunOperationStatus,
     FlowRunReviewCheckpointState,
     FlowRunStatus,
-    FlowRuntimeInputFormat,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
     FlowTemplateAssetStatus,
     RerunDependencyKind,
 )
-from intric.flows.flow_review_policy import FlowStepReviewPolicy
+from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
+from intric.flows.flow_run_contract_models import (
+    FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE as FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE,
+)
+from intric.flows.flow_run_contract_models import (
+    FlowFinalOutputContractPublic as FlowFinalOutputContractPublic,
+)
+from intric.flows.flow_run_contract_models import (
+    FlowOutputDelivery as FlowOutputDelivery,
+)
+from intric.flows.flow_run_contract_models import (
+    FlowReviewStepContractPublic as FlowReviewStepContractPublic,
+)
+from intric.flows.flow_run_contract_models import (
+    FlowRunContractPublic as FlowRunContractPublic,
+)
+from intric.flows.flow_run_contract_models import (
+    FlowRuntimeInputContractPublic as FlowRuntimeInputContractPublic,
+)
+from intric.flows.flow_run_contract_models import (
+    FlowTemplateReadinessPublic as FlowTemplateReadinessPublic,
+)
+from intric.flows.flow_run_contract_models import (
+    FormFieldPublic as FormFieldPublic,
+)
 from intric.flows.flow_run_evidence_export_manifest import EvidenceExportManifest
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.main.exceptions import BadRequestException
@@ -183,47 +206,6 @@ FLOW_TEMPLATE_ASSET_PUBLIC_EXAMPLE: dict[str, Any] = {
     "updated_at": "2026-03-17T09:45:00Z",
 }
 
-FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
-    "flow_id": "00000000-0000-0000-0000-000000000001",
-    "published_flow_version": 3,
-    "form_fields": [
-        {
-            "name": "employee_name",
-            "type": "text",
-            "label": "Employee name",
-            "required": True,
-        }
-    ],
-    "steps_requiring_input": [
-        {
-            "step_id": "00000000-0000-0000-0000-000000000101",
-            "step_order": 1,
-            "label": "Upload audio",
-            "description": "Provide the recorded review conversation.",
-            "required": True,
-            "input_format": "audio",
-            "max_files": 1,
-            "max_file_size_bytes": 52428800,
-            "accepted_mimetypes": ["audio/wav", "audio/mpeg"],
-        }
-    ],
-    "aggregate_max_files": 1,
-    "template_readiness": [
-        {
-            "step_id": "00000000-0000-0000-0000-000000000102",
-            "template_asset_id": None,
-            "template_file_id": None,
-            "template_name": None,
-            "checksum": None,
-            "published_flow_version": 3,
-            "status": "unavailable",
-            "can_edit": False,
-            "can_download": False,
-            "message_code": None,
-        }
-    ],
-}
-
 FLOW_RUN_REDISPATCH_RESPONSE_EXAMPLE: dict[str, Any] = {
     "run": FLOW_RUN_PUBLIC_EXAMPLE,
     "redispatched_count": 1,
@@ -270,6 +252,14 @@ FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE: dict[str, Any] = {
     "schema_version": 1,
     "original_payload_json": {"text": "Draft answer."},
     "current_payload_json": {"text": "Draft answer."},
+    "step_label": "Review draft answer",
+    "review_mode": "edit",
+    "output_type": "json",
+    "step_snapshot_available": True,
+    "output_contract": {
+        "type": "object",
+        "properties": {"text": {"type": "string"}},
+    },
     "next_step_ids": ["00000000-0000-0000-0000-000000000102"],
     "requester_user_id": "00000000-0000-0000-0000-000000000030",
     "requester_principal_type": "user",
@@ -535,7 +525,14 @@ class FlowRuntimePublic(BaseModel):
 
 
 class StepRunInput(BaseModel):
-    file_ids: list[UUID] = Field(default_factory=lambda: cast(list[UUID], []))
+    file_ids: list[UUID] = Field(
+        default_factory=lambda: cast(list[UUID], []),
+        description=(
+            "Uploaded file ids to attach to this specific step. Use the step ids "
+            "from `GET /api/v1/flows/{id}/run-contract/` rather than sending all "
+            "files to the first step."
+        ),
+    )
 
 
 class FlowRunCreateRequest(BaseModel):
@@ -555,17 +552,44 @@ class FlowRunCreateRequest(BaseModel):
         }
     )
 
-    expected_flow_version: int | None = None
-    input_payload_json: dict[str, Any] | None = None
-    step_inputs: dict[UUID, StepRunInput] | None = None
+    expected_flow_version: int | None = Field(
+        default=None,
+        description=(
+            "Published flow version the caller prepared against. Send the "
+            "`published_flow_version` returned by the run contract to avoid starting "
+            "a run after the flow was republished with different inputs."
+        ),
+    )
+    input_payload_json: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Structured form/runtime values for the flow. Field names should come "
+            "from `form_fields` in the run contract."
+        ),
+    )
+    step_inputs: dict[UUID, StepRunInput] | None = Field(
+        default=None,
+        description=(
+            "Per-step runtime inputs keyed by step id. This is the supported way to "
+            "route uploads to step 3, 5, 8, or any other step that declares runtime "
+            "input in the run contract."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
     def reject_removed_top_level_file_ids(cls, data: object) -> object:
         if isinstance(data, Mapping) and "file_ids" in data:
             raise BadRequestException(
-                "Top-level file_ids is no longer supported. Use step_inputs[step_id].file_ids.",
+                "Top-level file_ids is no longer supported. Call the run contract endpoint "
+                "to find the target step id, then send uploaded files as "
+                "step_inputs[step_id].file_ids.",
                 code="flow_run_top_level_file_ids_not_supported",
+                context={
+                    "invalid_field": "file_ids",
+                    "expected_field": "step_inputs[step_id].file_ids",
+                    "contract_endpoint": "/api/v1/flows/{id}/run-contract/",
+                },
             )
         return cast(object, data)
 
@@ -628,6 +652,43 @@ class FlowRunReviewCheckpointPublic(BaseModel):
     schema_version: int
     original_payload_json: dict[str, Any] | None = None
     current_payload_json: dict[str, Any] | None = None
+    step_label: str | None = Field(
+        default=None,
+        description=(
+            "Immutable snapshot of the reviewed step label. Null when the step had "
+            "no label or for legacy checkpoints created before step snapshots."
+        ),
+    )
+    review_mode: FlowStepReviewMode | None = Field(
+        default=None,
+        description=(
+            "Immutable snapshot of the reviewed step's review mode. Null only for "
+            "legacy checkpoints created before step snapshots."
+        ),
+    )
+    output_type: FlowOutputType | None = Field(
+        default=None,
+        description=(
+            "Immutable snapshot of the reviewed step's output type. Null only for "
+            "legacy checkpoints created before step snapshots."
+        ),
+    )
+    step_snapshot_available: bool = Field(
+        default=False,
+        description=(
+            "True when this checkpoint includes immutable step metadata needed by "
+            "external review UIs. False only for legacy checkpoints created before "
+            "step snapshots were persisted."
+        ),
+    )
+    output_contract: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Immutable snapshot of the reviewed step's output contract. Null means "
+            "the step had no output contract, or this is a legacy checkpoint where "
+            "`step_snapshot_available` is false."
+        ),
+    )
     next_step_ids: list[UUID] | None = None
     requester_user_id: UUID | None = None
     requester_principal_type: PrincipalType
@@ -648,8 +709,19 @@ class FlowRunReviewCheckpointEditRequest(BaseModel):
         json_schema_extra={"example": FLOW_RUN_REVIEW_CHECKPOINT_EDIT_REQUEST_EXAMPLE},
     )
 
-    expected_checkpoint_revision: int = Field(ge=1)
-    current_payload_json: dict[str, Any]
+    expected_checkpoint_revision: int = Field(
+        ge=1,
+        description=(
+            "Checkpoint revision observed by the reviewer. Stale values return "
+            "`400` with code `flow_review_stale_revision`."
+        ),
+    )
+    current_payload_json: dict[str, Any] = Field(
+        description=(
+            "Full corrected payload for the reviewed step. Send the complete payload, "
+            "not a JSON Patch document."
+        )
+    )
 
 
 class FlowRunReviewCheckpointApproveRequest(BaseModel):
@@ -660,7 +732,13 @@ class FlowRunReviewCheckpointApproveRequest(BaseModel):
         },
     )
 
-    expected_checkpoint_revision: int = Field(ge=1)
+    expected_checkpoint_revision: int = Field(
+        ge=1,
+        description=(
+            "Checkpoint revision observed by the approver. Stale values return "
+            "`400` with code `flow_review_stale_revision`."
+        ),
+    )
 
 
 class FlowRunReviewCheckpointRejectRequest(BaseModel):
@@ -671,8 +749,18 @@ class FlowRunReviewCheckpointRejectRequest(BaseModel):
         },
     )
 
-    expected_checkpoint_revision: int = Field(ge=1)
-    reason: str = Field(min_length=1, max_length=1024)
+    expected_checkpoint_revision: int = Field(
+        ge=1,
+        description=(
+            "Checkpoint revision observed by the reviewer. Stale values return "
+            "`400` with code `flow_review_stale_revision`."
+        ),
+    )
+    reason: str = Field(
+        min_length=1,
+        max_length=1024,
+        description="Human-readable rejection reason stored with the run audit trail.",
+    )
 
 
 class FlowRunReviewCheckpointResumeRequest(BaseModel):
@@ -683,7 +771,13 @@ class FlowRunReviewCheckpointResumeRequest(BaseModel):
         },
     )
 
-    expected_checkpoint_revision: int = Field(ge=1)
+    expected_checkpoint_revision: int = Field(
+        ge=1,
+        description=(
+            "Approved checkpoint revision to resume from. Use the latest revision "
+            "returned by approve or active-checkpoint polling."
+        ),
+    )
 
 
 class FlowRunReviewCheckpointResumeResponse(BaseModel):
@@ -908,61 +1002,6 @@ class FlowTemplateAssetPublic(BaseModel):
     can_inspect: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
-
-
-class FlowRuntimeInputContractPublic(BaseModel):
-    step_id: UUID
-    step_order: int
-    label: str | None = None
-    description: str | None = None
-    required: bool
-    input_format: FlowRuntimeInputFormat
-    max_files: int | None = None
-    max_file_size_bytes: int | None = None
-    accepted_mimetypes: list[str] = Field(default_factory=list)
-
-
-class FlowTemplateReadinessPublic(BaseModel):
-    step_id: UUID
-    template_asset_id: UUID | None = None
-    template_file_id: UUID | None = None
-    template_name: str | None = None
-    checksum: str | None = None
-    published_flow_version: int | None = None
-    status: FlowTemplateAssetStatus
-    can_edit: bool = False
-    can_download: bool = False
-    message_code: str | None = None
-
-
-class FormFieldPublic(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    name: str
-    type: str
-    label: str | None = None
-    required: bool = False
-    options: list[str] | None = None
-    order: int | None = None
-
-
-class FlowRunContractPublic(BaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={"example": FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE}
-    )
-
-    flow_id: UUID
-    published_flow_version: int
-    form_fields: list[FormFieldPublic] = Field(
-        default_factory=lambda: cast(list[FormFieldPublic], [])
-    )
-    steps_requiring_input: list[FlowRuntimeInputContractPublic] = Field(
-        default_factory=lambda: cast(list[FlowRuntimeInputContractPublic], [])
-    )
-    aggregate_max_files: int | None = None
-    template_readiness: list[FlowTemplateReadinessPublic] = Field(
-        default_factory=lambda: cast(list[FlowTemplateReadinessPublic], [])
-    )
 
 
 class FlowRunDebugIoTypes(BaseModel):
@@ -1416,6 +1455,43 @@ class FlowRunReviewCheckpointEvidencePublic(BaseModel):
     schema_version: int
     original_payload_json: dict[str, Any] | None = None
     current_payload_json: dict[str, Any] | None = None
+    step_label: str | None = Field(
+        default=None,
+        description=(
+            "Immutable snapshot of the reviewed step label. Null when the step had "
+            "no label or for legacy checkpoints created before step snapshots."
+        ),
+    )
+    review_mode: FlowStepReviewMode | None = Field(
+        default=None,
+        description=(
+            "Immutable snapshot of the reviewed step's review mode. Null only for "
+            "legacy checkpoints created before step snapshots."
+        ),
+    )
+    output_type: FlowOutputType | None = Field(
+        default=None,
+        description=(
+            "Immutable snapshot of the reviewed step's output type. Null only for "
+            "legacy checkpoints created before step snapshots."
+        ),
+    )
+    step_snapshot_available: bool = Field(
+        default=False,
+        description=(
+            "True when this checkpoint includes immutable step metadata needed by "
+            "external review UIs. False only for legacy checkpoints created before "
+            "step snapshots were persisted."
+        ),
+    )
+    output_contract: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Immutable snapshot of the reviewed step's output contract. Null means "
+            "the step had no output contract, or this is a legacy checkpoint where "
+            "`step_snapshot_available` is false."
+        ),
+    )
     decision: Literal["approved", "rejected", "cancelled"] | None = None
     next_step_ids: list[UUID] | None = None
     resume_key_present: bool

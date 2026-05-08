@@ -23,6 +23,7 @@ from intric.flows.api.flow_models import (
 from intric.flows.application import flow_dispatch
 from intric.flows.flow_access_policy import FlowApiAction
 from intric.flows.flow_file_upload_service import FlowFileUploadService
+from intric.flows.flow_run_contract_service import FlowRunContractService
 from intric.main.container.container import Container
 
 dispatch_flow_run_after_commit = flow_dispatch.dispatch_flow_run_after_commit
@@ -144,8 +145,11 @@ def flow_upload_service(container: Container) -> FlowFileUploadService:
         file_service=container.file_service(),
         settings_service=cast(Any, container.settings_service()),  # pyright: ignore[reportUnknownMemberType]
         flow_version_repo=cast(Any, container.flow_version_repo()),  # pyright: ignore[reportUnknownMemberType]
-        template_asset_repo=cast(Any, container.flow_template_asset_repo()),  # pyright: ignore[reportUnknownMemberType]
     )
+
+
+def flow_run_contract_service(container: Container) -> FlowRunContractService:
+    return container.flow_run_contract_service()
 
 
 async def enforce_flow_scope_for_request(

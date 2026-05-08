@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
+from intric.authentication.principal_types import PrincipalType
+from intric.flows.api.flow_assembler import FlowAssembler
 from intric.flows.api.flow_models import (
+    FlowOutputDelivery,
     FlowRunContractPublic,
     FlowRunCreateRequest,
     FlowRunDebugAttempt,
@@ -22,7 +26,15 @@ from intric.flows.api.flow_models import (
     HttpTestResponse,
     StepRunInput,
 )
-from intric.flows.enums import FlowRunRerunOperationStatus, FlowStepAttemptStatus
+from intric.flows.domain.flow import FlowRunReviewCheckpoint
+from intric.flows.enums import (
+    FlowOutputMode,
+    FlowOutputType,
+    FlowRunRerunOperationStatus,
+    FlowRunReviewCheckpointState,
+    FlowStepAttemptStatus,
+)
+from intric.flows.flow_review_policy import FlowStepReviewMode
 from intric.main.exceptions import BadRequestException
 
 
@@ -96,6 +108,12 @@ def test_flow_run_create_request_rejects_removed_top_level_file_ids() -> None:
         FlowRunCreateRequest.model_validate({"file_ids": [str(uuid4())]})
 
     assert exc_info.value.code == "flow_run_top_level_file_ids_not_supported"
+    assert "run contract endpoint" in str(exc_info.value)
+    assert exc_info.value.context == {
+        "invalid_field": "file_ids",
+        "expected_field": "step_inputs[step_id].file_ids",
+        "contract_endpoint": "/api/v1/flows/{id}/run-contract/",
+    }
 
 
 def test_graph_response_parses_typed_nodes_and_edges() -> None:
@@ -134,10 +152,20 @@ def test_graph_response_parses_typed_nodes_and_edges() -> None:
 
 
 def test_flow_run_contract_public_parses_typed_form_fields() -> None:
+    final_step_id = uuid4()
     contract = FlowRunContractPublic.model_validate(
         {
             "flow_id": str(uuid4()),
             "published_flow_version": 3,
+            "final_output": {
+                "step_id": str(final_step_id),
+                "step_order": 3,
+                "label": "Create Word report",
+                "output_type": "docx",
+                "output_mode": "pass_through",
+                "delivery": "artifact",
+                "output_contract": None,
+            },
             "form_fields": [
                 {
                     "name": "employee_name",
@@ -151,6 +179,84 @@ def test_flow_run_contract_public_parses_typed_form_fields() -> None:
 
     assert isinstance(contract.form_fields[0], FormFieldPublic)
     assert contract.form_fields[0].name == "employee_name"
+    assert contract.final_output is not None
+    assert contract.final_output.step_id == final_step_id
+    assert contract.final_output.output_type == FlowOutputType.DOCX
+    assert contract.final_output.output_mode == FlowOutputMode.PASS_THROUGH
+    assert contract.final_output.delivery == FlowOutputDelivery.ARTIFACT
+
+
+def test_review_checkpoint_public_exposes_render_contract() -> None:
+    now = datetime(2026, 3, 17, 10, 5, tzinfo=timezone.utc)
+    checkpoint = FlowRunReviewCheckpoint(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        flow_id=uuid4(),
+        flow_run_id=uuid4(),
+        step_id=uuid4(),
+        step_order=1,
+        attempt_no=1,
+        state=FlowRunReviewCheckpointState.AWAITING_REVIEW,
+        revision=1,
+        schema_version=1,
+        original_payload_json={"transcription": "draft"},
+        current_payload_json={"transcription": "draft"},
+        step_label="Review transcription",
+        review_mode=FlowStepReviewMode.EDIT,
+        output_type=FlowOutputType.JSON,
+        output_contract_json={
+            "type": "object",
+            "properties": {"transcription": {"type": "string"}},
+        },
+        requester_principal_type=PrincipalType.USER,
+        requester_user_id=uuid4(),
+        next_step_ids_json=[uuid4()],
+        created_at=now,
+        updated_at=now,
+    )
+
+    public = FlowAssembler().to_review_checkpoint_public(checkpoint)
+
+    assert public.step_label == "Review transcription"
+    assert public.review_mode == FlowStepReviewMode.EDIT
+    assert public.output_type == FlowOutputType.JSON
+    assert public.step_snapshot_available is True
+    assert public.output_contract == {
+        "type": "object",
+        "properties": {"transcription": {"type": "string"}},
+    }
+    assert not hasattr(public, "output_contract_json")
+
+
+def test_legacy_review_checkpoint_public_marks_missing_step_snapshot() -> None:
+    now = datetime(2026, 3, 17, 10, 5, tzinfo=timezone.utc)
+    checkpoint = FlowRunReviewCheckpoint(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        flow_id=uuid4(),
+        flow_run_id=uuid4(),
+        step_id=uuid4(),
+        step_order=1,
+        attempt_no=1,
+        state=FlowRunReviewCheckpointState.AWAITING_REVIEW,
+        revision=1,
+        schema_version=1,
+        original_payload_json={"text": "draft"},
+        current_payload_json={"text": "draft"},
+        requester_principal_type=PrincipalType.USER,
+        requester_user_id=uuid4(),
+        next_step_ids_json=[],
+        created_at=now,
+        updated_at=now,
+    )
+
+    public = FlowAssembler().to_review_checkpoint_public(checkpoint)
+
+    assert public.step_snapshot_available is False
+    assert public.step_label is None
+    assert public.review_mode is None
+    assert public.output_type is None
+    assert public.output_contract is None
 
 
 def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
@@ -164,6 +270,11 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
     rerun_operation_id = uuid4()
     rerun_invalidated_step_id = uuid4()
     replacement_attempt_id = uuid4()
+    review_checkpoint_id = uuid4()
+    review_checkpoint_contract = {
+        "type": "object",
+        "properties": {"summary": {"type": "string"}},
+    }
 
     response = FlowRunEvidenceResponse.model_validate(
         {
@@ -276,6 +387,36 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                     "new_attempt_id": str(replacement_attempt_id),
                     "created_at": "2026-03-20T12:01:00Z",
                     "updated_at": "2026-03-20T12:01:05Z",
+                }
+            ],
+            "review_checkpoints": [
+                {
+                    "id": str(review_checkpoint_id),
+                    "tenant_id": str(tenant_id),
+                    "flow_id": str(flow_id),
+                    "flow_run_id": str(run_id),
+                    "step_id": str(step_id),
+                    "step_order": 1,
+                    "attempt_no": 1,
+                    "state": "awaiting_review",
+                    "revision": 1,
+                    "schema_version": 1,
+                    "original_payload_json": {"summary": "draft"},
+                    "current_payload_json": {"summary": "reviewed"},
+                    "step_label": "Review summary",
+                    "review_mode": "edit",
+                    "output_type": "json",
+                    "step_snapshot_available": True,
+                    "output_contract": review_checkpoint_contract,
+                    "decision": None,
+                    "next_step_ids": [],
+                    "resume_key_present": False,
+                    "requester_user_id": str(uuid4()),
+                    "requester_principal_type": "user",
+                    "decided_by_user_id": None,
+                    "decided_by_principal_type": None,
+                    "created_at": "2026-03-20T12:00:05Z",
+                    "updated_at": "2026-03-20T12:00:05Z",
                 }
             ],
             "debug_export": {
@@ -414,6 +555,12 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
     assert response.step_results[0].flow_step_execution_hash == "abc123"
     assert response.result_files[0].file_id == file_id
     assert response.result_files[0].availability == "available"
+    assert response.review_checkpoints[0].id == review_checkpoint_id
+    assert response.review_checkpoints[0].step_label == "Review summary"
+    assert response.review_checkpoints[0].review_mode == FlowStepReviewMode.EDIT
+    assert response.review_checkpoints[0].output_type == FlowOutputType.JSON
+    assert response.review_checkpoints[0].step_snapshot_available is True
+    assert response.review_checkpoints[0].output_contract == review_checkpoint_contract
     assert isinstance(response.debug_export.steps[0].attempts[0], FlowRunDebugAttempt)
     assert response.debug_export.steps[0].attempts[0].response_model == "gpt-4.1-mini"
     assert response.debug_export.steps[0].rag is not None

@@ -17,7 +17,9 @@ from intric.database.tables.flow_tables import (
     FlowRuns,
     FlowStepAttempts,
     FlowStepResults,
+    FlowSteps,
 )
+from intric.flows.api.flow_assembler import FlowAssembler
 from intric.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
     stable_hash,
@@ -30,6 +32,7 @@ from intric.flows.domain.flow import (
     FlowStepResultStatus,
 )
 from intric.flows.enums import (
+    FlowOutputType,
     FlowRunLifecycleSource,
     FlowRunReviewCheckpointState,
 )
@@ -103,6 +106,8 @@ def _build_review_pause_flow(
     user_id: UUID,
     assistant_id: UUID,
     include_downstream_steps: bool = True,
+    first_step_output_type: str = "text",
+    first_step_output_contract: dict[str, object] | None = None,
 ) -> Flow:
     steps = [
         FlowStep(
@@ -116,8 +121,8 @@ def _build_review_pause_flow(
             input_type="text",
             input_contract=None,
             output_mode="pass_through",
-            output_type="text",
-            output_contract=None,
+            output_type=first_step_output_type,
+            output_contract=first_step_output_contract,
             input_bindings={"question": "{{flow.input.question}}"},
             output_classification_override=None,
             mcp_policy="inherit",
@@ -208,6 +213,8 @@ def _definition_step(
     }
     if step.review_policy is not None:
         payload["review_policy"] = step.review_policy.model_dump(mode="json")
+    if step.output_contract is not None:
+        payload["output_contract"] = step.output_contract
     return payload
 
 
@@ -221,6 +228,8 @@ async def _create_review_pause_runtime_context(
     assistant_factory,
     completion_service: SimpleNamespace,
     include_downstream_steps: bool = True,
+    first_step_output_type: str = "text",
+    first_step_output_contract: dict[str, object] | None = None,
 ) -> _ReviewPauseRuntimeContext:
     enable_autobegin_for_flow_task_session(session)
     container = Container(
@@ -245,6 +254,8 @@ async def _create_review_pause_runtime_context(
             user_id=admin_user.id,
             assistant_id=assistant.id,
             include_downstream_steps=include_downstream_steps,
+            first_step_output_type=first_step_output_type,
+            first_step_output_contract=first_step_output_contract,
         ),
         tenant_id=admin_user.tenant_id,
     )
@@ -472,6 +483,92 @@ async def test_executor_pauses_after_review_policy_step_and_duplicate_delivery_s
     assert outbox_rows[0].target_status == (
         FlowRunReviewCheckpointState.AWAITING_REVIEW.value
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_review_checkpoint_snapshot_is_enough_to_render_consumer_review_ui(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    output_contract = {
+        "type": "object",
+        "required": ["summary"],
+        "properties": {"summary": {"type": "string"}},
+        "additionalProperties": False,
+    }
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(
+            return_value=SimpleNamespace(
+                completion='{"summary":"This answer needs review."}',
+                total_token_count=17,
+            )
+        )
+    )
+
+    async with sessionmanager.session() as session:
+        context = await _create_review_pause_runtime_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+            include_downstream_steps=False,
+            first_step_output_type="json",
+            first_step_output_contract=output_contract,
+        )
+
+        pause_result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            celery_task_id=f"review-pause-json-{uuid4()}",
+            retry_count=0,
+        )
+        checkpoint = (
+            await context.container.flow_run_service().get_active_review_checkpoint(
+                flow_id=context.flow_id,
+                run_id=context.run_id,
+            )
+        )
+        assert checkpoint is not None
+
+        await session.execute(
+            sa.update(FlowSteps)
+            .where(FlowSteps.id == context.first_step_id)
+            .values(
+                user_description="Changed after checkpoint opened",
+                output_contract={"type": "object", "properties": {}},
+            )
+        )
+
+        unchanged_checkpoint = (
+            await context.container.flow_run_service().get_active_review_checkpoint(
+                flow_id=context.flow_id,
+                run_id=context.run_id,
+            )
+        )
+
+    assert pause_result == {"status": FlowRunStatus.AWAITING_REVIEW.value}
+    assert unchanged_checkpoint is not None
+
+    public = FlowAssembler().to_review_checkpoint_public(unchanged_checkpoint)
+    assert public.step_label == "Draft answer for review"
+    assert public.review_mode == FlowStepReviewMode.VIEW
+    assert public.output_type == FlowOutputType.JSON
+    assert public.step_snapshot_available is True
+    assert public.output_contract == output_contract
+    assert public.current_payload_json == {
+        "text": '{"summary":"This answer needs review."}',
+        "structured": {"summary": "This answer needs review."},
+        "webhook_delivered": False,
+    }
 
 
 @pytest.mark.asyncio

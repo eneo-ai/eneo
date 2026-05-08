@@ -37,6 +37,7 @@ from intric.flows.domain.flow import (
     JsonObject,
 )
 from intric.flows.enums import (
+    FlowOutputType,
     FlowRunLifecycleSource,
     FlowRunRerunInvalidationRole,
     is_terminal_flow_run_status,
@@ -1420,6 +1421,10 @@ class FlowRunExecutor:
                 steps=steps,
                 reviewed_step=step,
             ),
+            step_label=step.user_description,
+            review_mode=step.review_policy.mode if step.review_policy else None,
+            output_type=FlowOutputType(step.output_type),
+            output_contract_json=step.output_contract,
         )
         await self._commit()
         logger.info(

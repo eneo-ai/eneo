@@ -38,7 +38,16 @@ class PublishedFlowDefinition:
     definition_json: JsonObject
 
     def runtime_steps(self) -> list[RuntimeStep]:
-        return parse_published_runtime_steps(self.definition_json)
+        try:
+            return parse_runtime_steps(self.definition_json)
+        except BadRequestException as exc:
+            if exc.code is not None:
+                raise
+            raise BadRequestException(
+                str(exc),
+                code=FLOW_DEFINITION_STEPS_INVALID,
+                context=exc.context,
+            ) from exc
 
     def checksum(self) -> str:
         return published_definition_checksum(self.definition_json)
@@ -123,17 +132,14 @@ def parse_published_definition(
 def parse_published_runtime_steps(
     definition_json: Mapping[str, object],
 ) -> list[RuntimeStep]:
-    try:
-        parsed = parse_published_definition(definition_json)
-        return parse_runtime_steps(parsed.definition_json)
-    except BadRequestException as exc:
-        if exc.code is not None:
-            raise
-        raise BadRequestException(
-            str(exc),
-            code=FLOW_DEFINITION_STEPS_INVALID,
-            context=exc.context,
-        ) from exc
+    """Return runtime steps in published execution order.
+
+    Published definitions are written through `build_published_definition_json`,
+    which sorts by `step_order`. The runtime parser also rejects snapshots whose
+    stored step order is not contiguous and ascending, so callers can safely use
+    the final list item as the terminal step.
+    """
+    return parse_published_definition(definition_json).runtime_steps()
 
 
 def published_definition_checksum(definition_json: Mapping[str, object]) -> str:

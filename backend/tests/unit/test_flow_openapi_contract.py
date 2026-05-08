@@ -131,7 +131,11 @@ REQUIRED_SCHEMAS = {
     "FlowRunRerunOperationPublic",
     "FlowRunRerunInvalidatedStepPublic",
     "FlowRunEvidenceResponse",
+    "FlowFinalOutputContractPublic",
+    "FlowOutputDelivery",
+    "FormFieldPublic",
     "FlowRuntimeInputContractPublic",
+    "FlowReviewStepContractPublic",
     "FlowRunStepPublic",
     "FlowInputLimitsPublic",
     "FlowTemplateAssetPublic",
@@ -535,6 +539,11 @@ def test_openapi_flow_review_checkpoint_schema_is_public_contract(
         "schema_version",
         "original_payload_json",
         "current_payload_json",
+        "step_label",
+        "review_mode",
+        "output_type",
+        "step_snapshot_available",
+        "output_contract",
         "next_step_ids",
         "requester_user_id",
         "requester_principal_type",
@@ -549,6 +558,85 @@ def test_openapi_flow_review_checkpoint_schema_is_public_contract(
         "updated_at",
     } <= set(properties)
     assert "resume_idempotency_key" not in properties
+
+
+def test_openapi_flow_review_checkpoint_schema_documents_consumer_snapshot(
+    openapi_spec: dict,
+) -> None:
+    schema = (
+        openapi_spec.get("components", {})
+        .get("schemas", {})
+        .get("FlowRunReviewCheckpointPublic", {})
+    )
+    properties = schema.get("properties", {})
+
+    snapshot_available = properties.get("step_snapshot_available", {})
+    output_contract = properties.get("output_contract", {})
+    assert snapshot_available.get("type") == "boolean"
+    assert "external review UIs" in snapshot_available.get("description", "")
+    assert "legacy checkpoints" in snapshot_available.get("description", "")
+    assert "step_snapshot_available" in output_contract.get("description", "")
+    assert "output contract" in output_contract.get("description", "").lower()
+
+
+def test_openapi_run_contract_guides_consumer_forms_uploads_and_review(
+    openapi_spec: dict,
+) -> None:
+    operation = _get_operation(
+        openapi_spec,
+        "/api/v1/flows/{id}/run-contract/",
+        "get",
+    )
+    description = operation.get("description", "")
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    run_contract = schemas.get("FlowRunContractPublic", {}).get("properties", {})
+    final_output = schemas.get("FlowFinalOutputContractPublic", {}).get("properties", {})
+    form_field = schemas.get("FormFieldPublic", {}).get("properties", {})
+    review_step = schemas.get("FlowReviewStepContractPublic", {}).get("properties", {})
+
+    assert "step_inputs[step_id].file_ids" in description
+    assert "terminal output type" in description
+    assert "steps_requiring_review" in description
+    assert "awaiting_review" in description
+    assert "generated file download" in run_contract["final_output"]["description"]
+    assert "artifact" in final_output["delivery"]["description"]
+    assert "generated file download" in final_output["output_type"]["description"]
+    assert "input_payload_json" in form_field["name"]["description"]
+    assert "review screens" in run_contract["steps_requiring_review"]["description"]
+    assert "Review behavior" in review_step["review_mode"]["description"]
+    assert "output contract" in review_step["output_contract"]["description"]
+
+
+def test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients(
+    openapi_spec: dict,
+) -> None:
+    active_operation = _get_operation(
+        openapi_spec,
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/",
+        "get",
+    )
+    edit_operation = _get_operation(
+        openapi_spec,
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/",
+        "patch",
+    )
+    resume_operation = _get_operation(
+        openapi_spec,
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
+        "post",
+    )
+
+    active_description = active_operation.get("description", "")
+    edit_description = edit_operation.get("description", "")
+    resume_description = resume_operation.get("description", "")
+
+    assert "status` is `awaiting_review`" in active_description
+    assert "step_snapshot_available" in active_description
+    assert "without reading the mutable flow draft" in active_description
+    assert "full corrected `current_payload_json`, not a patch" in edit_description
+    assert "flow_review_stale_revision" in edit_description
+    assert "202 Accepted" in resume_description
+    assert "Idempotency-Key" in resume_description
 
 
 def test_openapi_active_review_checkpoint_response_is_nullable(
@@ -833,6 +921,20 @@ def test_openapi_flow_run_create_schema_removes_top_level_file_ids(
     properties = schema.get("properties", {})
     assert "file_ids" not in properties
     assert "step_inputs" in properties
+
+
+def test_openapi_flow_run_create_schema_documents_step_file_routing(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    create_properties = schemas.get("FlowRunCreateRequest", {}).get("properties", {})
+    step_run_input = schemas.get("StepRunInput", {}).get("properties", {})
+
+    assert "run contract" in create_properties["expected_flow_version"]["description"]
+    assert "form_fields" in create_properties["input_payload_json"]["description"]
+    assert "Per-step runtime inputs" in create_properties["step_inputs"]["description"]
+    assert "route uploads" in create_properties["step_inputs"]["description"]
+    assert "specific step" in step_run_input["file_ids"]["description"]
 
 
 def test_openapi_flow_run_step_rerun_contract(openapi_spec: dict) -> None:
@@ -1137,6 +1239,20 @@ def test_openapi_flow_error_responses_include_general_error_examples(
             )
             assert "intric_error_code" in example
             assert isinstance(example.get("code"), str) and example["code"].strip()
+
+
+def test_openapi_general_error_schema_guides_client_control_flow(
+    openapi_spec: dict,
+) -> None:
+    schema = (
+        openapi_spec.get("components", {}).get("schemas", {}).get("GeneralError", {})
+    )
+    properties = schema.get("properties", {})
+
+    assert "branch on `code`" in properties["message"]["description"]
+    assert "LLM tool control flow" in properties["code"]["description"]
+    assert "Correlation id" in properties["request_id"]["description"]
+    assert "machine-readable data" in properties["details"]["description"]
 
 
 def test_openapi_flow_file_upload_error_codes_are_machine_readable(

@@ -55,6 +55,7 @@ from intric.flows.api.flow_models import (
     FlowCreateRequest,
     FlowInputSource,
     FlowInputType,
+    FlowRunContractPublic,
     FlowRunCreateRequest,
     FlowRunStepRerunRequest,
     FlowStepCreateRequest,
@@ -1349,10 +1350,12 @@ async def test_upload_flow_template_file_enforces_scope_and_uses_docx_template_s
 async def test_get_flow_run_contract_enforces_scope_and_returns_contract(monkeypatch):
     flow_id = uuid4()
     container = MagicMock()
-    upload_service = AsyncMock()
+    run_contract_service = AsyncMock()
     container.flow_service.return_value = AsyncMock()
     monkeypatch.setattr(
-        router_common_module, "flow_upload_service", lambda _container: upload_service
+        router_common_module,
+        "flow_run_contract_service",
+        lambda _container: run_contract_service,
     )
 
     async def fake_enforce(
@@ -1373,14 +1376,14 @@ async def test_get_flow_run_contract_enforces_scope_and_returns_contract(monkeyp
     monkeypatch.setattr(
         router_common_module, "enforce_flow_scope_for_request", fake_enforce
     )
-    upload_service.get_run_contract.return_value = {
-        "flow_id": flow_id,
-        "published_flow_version": 2,
-        "form_fields": [],
-        "steps_requiring_input": [],
-        "aggregate_max_files": 3,
-        "template_readiness": [],
-    }
+    run_contract_service.get_run_contract.return_value = FlowRunContractPublic(
+        flow_id=flow_id,
+        published_flow_version=2,
+        form_fields=[],
+        steps_requiring_input=[],
+        aggregate_max_files=3,
+        template_readiness=[],
+    )
 
     result = await get_flow_run_contract(
         id=flow_id,
@@ -1388,7 +1391,7 @@ async def test_get_flow_run_contract_enforces_scope_and_returns_contract(monkeyp
         container=container,
     )
 
-    upload_service.get_run_contract.assert_awaited_once_with(flow_id=flow_id)
+    run_contract_service.get_run_contract.assert_awaited_once_with(flow_id=flow_id)
     assert result.published_flow_version == 2
 
 

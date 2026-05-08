@@ -127,6 +127,18 @@ _FLOW_RUN_REVIEW_ACTIVE_DESCRIPTION = """
 Return the active human review checkpoint for a paused run.
 
 The endpoint returns `null` with `200 OK` when the run has no active checkpoint.
+Consumer sequence for human-in-the-loop apps:
+1. Poll the run until `status` is `awaiting_review`.
+2. Call this endpoint and render the returned `current_payload_json`.
+3. Use `step_label`, `review_mode`, `output_type`, and `output_contract` to choose the
+   review UI without reading the mutable flow draft.
+4. When `step_snapshot_available` is `false`, the checkpoint is from older runtime data;
+   render a generic JSON/text review UI and avoid depending on step metadata.
+
+`output_contract` is the reviewed step's JSON Schema-style output contract when one exists.
+It may be `null` for unstructured text/document steps even when `step_snapshot_available`
+is `true`.
+
 Current visibility follows run-detail visibility: service-key principals can read only
 checkpoints for runs they own, while human callers follow the existing flow view policy.
     """
@@ -135,14 +147,20 @@ _FLOW_RUN_REVIEW_EDIT_DESCRIPTION = """
 Edit the current payload for a human review checkpoint.
 
 The request uses `expected_checkpoint_revision` as the checkpoint compare token. On success,
-the checkpoint payload and the current step-result projection are updated together.
+the checkpoint payload and the current step-result projection are updated together. Use the
+revision returned from the active-checkpoint response; if another reviewer changed the checkpoint
+first, the API returns `400` with code `flow_review_stale_revision` and the client should refetch.
+
+Send the full corrected `current_payload_json`, not a patch. For structured steps, keep the same
+top-level payload shape returned by the active checkpoint unless the UI deliberately changes it.
     """
 
 _FLOW_RUN_REVIEW_APPROVE_DESCRIPTION = """
 Approve the current payload for a human review checkpoint.
 
 Approval advances the checkpoint revision. Resume is a separate command so clients can make
-the decision durable before dispatching more runtime work.
+the decision durable before dispatching more runtime work. Use the latest checkpoint `revision`;
+stale approvals return `400` with code `flow_review_stale_revision`.
     """
 
 _FLOW_RUN_REVIEW_REJECT_DESCRIPTION = """
@@ -156,7 +174,8 @@ _FLOW_RUN_REVIEW_RESUME_DESCRIPTION = """
 Resume a run after an approved human review checkpoint.
 
 Use the `Idempotency-Key` header for retries. Replaying the same key returns the current
-checkpoint and run without dispatching another worker task.
+checkpoint and run without dispatching another worker task. A successful response is
+`202 Accepted`: poll the run and step endpoints after this call to observe resumed execution.
     """
 
 

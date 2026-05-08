@@ -42,12 +42,14 @@ from intric.flows.enums import (
     ACTIVE_FLOW_RUN_STATUSES,
     CANCELLABLE_FLOW_RUN_STATUSES,
     TERMINAL_FLOW_RUN_STATUSES,
+    FlowOutputType,
     FlowRunLifecycleSource,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
     FlowRunReviewCheckpointState,
 )
 from intric.flows.flow_factory import FlowFactory
+from intric.flows.flow_review_policy import FlowStepReviewMode
 from intric.flows.flow_run_provenance import (
     AttemptStartProvenance,
     FlowAttemptProvenance,
@@ -281,6 +283,10 @@ class FlowRunRepository:
         current_payload_json: JsonObject | None,
         requester_principal_type: PrincipalType,
         requester_user_id: UUID | None,
+        step_label: str | None = None,
+        review_mode: FlowStepReviewMode | None = None,
+        output_type: FlowOutputType | None = None,
+        output_contract_json: JsonObject | None = None,
         next_step_ids: Sequence[UUID] | None = None,
     ) -> FlowRunReviewCheckpoint:
         next_step_ids_json = (
@@ -302,6 +308,10 @@ class FlowRunRepository:
                 schema_version=1,
                 original_payload_json=original_payload_json,
                 current_payload_json=current_payload_json,
+                step_label=step_label,
+                review_mode=review_mode.value if review_mode is not None else None,
+                output_type=output_type.value if output_type is not None else None,
+                output_contract_json=output_contract_json,
                 requester_principal_type=requester_principal_type.value,
                 requester_user_id=requester_user_id,
                 next_step_ids_json=next_step_ids_json,
@@ -334,6 +344,10 @@ class FlowRunRepository:
         attempt_no: int,
         requester_principal: FlowPrincipal,
         next_step_ids: Sequence[UUID],
+        step_label: str | None = None,
+        review_mode: FlowStepReviewMode | None = None,
+        output_type: FlowOutputType | None = None,
+        output_contract_json: JsonObject | None = None,
     ) -> FlowRunReviewCheckpointOpenResult:
         """Open a checkpoint for a step the caller resolved from the published run graph.
 
@@ -411,6 +425,10 @@ class FlowRunRepository:
             attempt_no=attempt_no,
             original_payload_json=step_result_row.output_payload_json,
             current_payload_json=step_result_row.output_payload_json,
+            step_label=step_label,
+            review_mode=review_mode,
+            output_type=output_type,
+            output_contract_json=output_contract_json,
             requester_principal_type=requester_principal.principal_type,
             requester_user_id=requester_principal.principal_user_id,
             next_step_ids=next_step_ids,
