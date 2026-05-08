@@ -44,6 +44,7 @@ from intric.flows.ai_builder.ai_builder_models import (
 )
 from intric.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_new_step_draft,
+    compile_review_policy,
     default_previous_field_label,
     derive_new_step_output_mode,
 )
@@ -426,6 +427,7 @@ def _flow_step_to_spec(
         output_contract=step.output_contract,
         input_config=step.input_config,
         output_config=step.output_config,
+        review_policy=step.review_policy,
     )
 
     if patch is not None:
@@ -493,6 +495,8 @@ def _flow_step_to_spec(
             updates["input_config"] = patch.input_config
         if "output_config" in patch.model_fields_set:
             updates["output_config"] = patch.output_config
+        if "review_mode" in patch.model_fields_set:
+            updates["review_policy"] = compile_review_policy(patch.review_mode)
         if updates:
             spec = spec.model_copy(update=updates)
         if "output_mode" not in patch.model_fields_set:

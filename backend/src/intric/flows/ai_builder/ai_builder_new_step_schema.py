@@ -12,6 +12,7 @@ from intric.flows.ai_builder.ai_builder_models import InputType, OutputType
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     MAX_STRUCTURED_FIELD_DEPTH,
 )
+from intric.flows.flow_review_policy import FlowStepReviewMode
 
 
 def small_ref_enums(values: list[dict[str, Any]] | None) -> list[str] | None:
@@ -94,6 +95,7 @@ def build_new_step_draft_schema(
             "default": False,
             "description": "Whether the backend should enable inline citations for this text step.",
         },
+        "review_mode": build_review_mode_schema(),
         "output_fields": {
             "type": ["array", "null"],
             "description": (
@@ -240,3 +242,16 @@ def _structured_field_schema(*, depth: int) -> dict[str, Any]:
 
 def build_structured_field_schema() -> dict[str, Any]:
     return _structured_field_schema(depth=1)
+
+
+def build_review_mode_schema() -> dict[str, Any]:
+    return {
+        "type": ["string", "null"],
+        "enum": [*(mode.value for mode in FlowStepReviewMode), None],
+        "default": None,
+        "description": (
+            "Set when the run must pause after this step for human review before "
+            "later steps continue. Use 'view' when the user approves or rejects "
+            "the output, and 'edit' when the user may edit the step output."
+        ),
+    }

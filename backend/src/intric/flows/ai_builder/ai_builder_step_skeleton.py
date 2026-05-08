@@ -28,6 +28,7 @@ from intric.flows.ai_builder.pattern_registry import (
     compiled_chain_pattern_ids,
 )
 from intric.flows.ai_builder.planning_state import AggregationIntent
+from intric.flows.flow_review_policy import FlowStepReviewMode
 
 StepSkeletonRole = Literal[
     "backend_fixed",
@@ -86,6 +87,7 @@ class StepSkeletonSemanticContent:
     mcp_server_refs: tuple[str, ...] = ()
     mcp_tool_refs: tuple[str, ...] = ()
     citations_requested: bool = False
+    review_mode: FlowStepReviewMode | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -646,6 +648,7 @@ def _compose_step_skeleton_slot(
                 and content.citations_requested
                 and output_type == OutputType.TEXT
             ),
+            review_mode=content.review_mode if content is not None else None,
             output_fields=output_fields,
         ),
         output_type_drift,

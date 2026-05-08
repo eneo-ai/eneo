@@ -167,6 +167,9 @@ def test_plan_proposal_prompt_scopes_audio_transcription_to_backend():
     assert "committed audio input" in prompt
     assert "backend inserts the first transcription/upload step" in prompt
     assert "after transcription" in prompt
+    assert "include the leading transcription step with review_mode" in prompt
+    assert "set that step's review_mode" in prompt
+    assert "separate AI step" in prompt
 
 
 def test_plan_proposal_prompt_honors_selected_mcp_server():

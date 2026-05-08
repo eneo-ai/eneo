@@ -144,6 +144,11 @@ class TestBuildEditFlowToolSchema:
         assert "document_delivery_mode" in add_payload["properties"]
         assert "output_fields" in add_payload["properties"]
         assert "uses_previous_fields" not in add_payload["properties"]
+        assert add_payload["properties"]["review_mode"]["enum"] == [
+            "view",
+            "edit",
+            None,
+        ]
 
     def test_mcp_refs_are_exposed_without_schema_enums_on_add_and_patch_payloads(
         self,
@@ -215,6 +220,7 @@ class TestBuildEditFlowToolSchema:
         assert props["input_type"]["enum"] == builder_input_type_values()
         assert props["output_mode"]["enum"] == builder_output_mode_values()
         assert props["output_type"]["enum"] == builder_output_type_values()
+        assert props["review_mode"]["enum"] == ["view", "edit", None]
 
 
 class TestBuildEditModeToolSchemas:

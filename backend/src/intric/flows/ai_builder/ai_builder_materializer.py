@@ -348,6 +348,7 @@ async def execute_changeset(
                     output_contract=compiled.output_contract,
                     input_config=compiled.input_config,
                     output_config=compiled.output_config,
+                    review_policy=compiled.review_policy,
                 )
             )
 
@@ -468,6 +469,7 @@ def _compile_new_step(
         output_contract=step_spec.output_contract,
         input_config=resolve_runtime_input_config(step_spec=step_spec),
         output_config=step_spec.output_config,
+        review_policy=step_spec.review_policy,
     )
 
 
@@ -497,6 +499,7 @@ def _compile_modified_step(
             existing_input_config=existing_step.input_config,
         ),
         output_config=_resolve_output_config(step_spec, existing_step),
+        review_policy=step_spec.review_policy,
     )
 
 

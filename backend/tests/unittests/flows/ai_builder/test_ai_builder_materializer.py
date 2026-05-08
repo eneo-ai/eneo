@@ -39,6 +39,7 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     MaterializerProgressSnapshot,
 )
 from intric.flows.flow import Flow, FlowStep
+from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from intric.main.exceptions import BadRequestException
 
 # ---------------------------------------------------------------------------
@@ -77,6 +78,7 @@ def _make_step_spec(
     output_contract: dict[str, Any] | None = None,
     input_config: dict[str, Any] | None = None,
     output_config: dict[str, Any] | None = None,
+    review_policy: FlowStepReviewPolicy | None = None,
 ) -> StepSpec:
     return StepSpec(
         plan_step_ref=plan_step_ref,
@@ -97,6 +99,7 @@ def _make_step_spec(
         output_contract=output_contract,
         input_config=input_config,
         output_config=output_config,
+        review_policy=review_policy,
     )
 
 
@@ -197,6 +200,22 @@ class TestCompileCreateFlow:
         assert changeset.compiled_steps[0].step_order == 1
         assert changeset.compiled_steps[0].user_description == "Extrahera fakta"
         assert changeset.compiled_steps[0].change_kind == StepChangeKind.ADDED
+
+    def test_single_step_preserves_review_policy(self) -> None:
+        review_policy = FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW)
+        spec = _make_spec(
+            steps=[
+                _make_step_spec(
+                    plan_step_ref="step_a",
+                    name="Granska transkribering",
+                    review_policy=review_policy,
+                ),
+            ],
+        )
+
+        changeset = compile_changeset(spec, current_flow=None)
+
+        assert changeset.compiled_steps[0].review_policy == review_policy
 
     def test_three_step_creates_correct_order(self) -> None:
         spec = _make_spec(
@@ -1143,6 +1162,55 @@ class TestExecuteCreateFlow:
         assert result.flow_id == flow_id
 
     @pytest.mark.asyncio
+    async def test_create_flow_preserves_step_review_policy(self) -> None:
+        flow_id = uuid4()
+        space_id = uuid4()
+        assistant_id = uuid4()
+        review_policy = FlowStepReviewPolicy(mode=FlowStepReviewMode.EDIT)
+
+        mock_flow_service = AsyncMock()
+        mock_flow_service.create_flow.return_value = _make_flow(
+            flow_id=flow_id,
+            space_id=space_id,
+            name="Created flow",
+        )
+
+        mock_assistant = MagicMock()
+        mock_assistant.id = assistant_id
+        mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
+        mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
+
+        changeset = FlowChangeSet(
+            flow_name="Created flow",
+            flow_description="Desc",
+            assistants_to_create=[
+                AssistantToCreate(
+                    plan_step_ref="step_a",
+                    assistant_spec=AssistantSpec(instructions="Transcribe audio"),
+                ),
+            ],
+            compiled_steps=[
+                _compiled_step(
+                    plan_step_ref="step_a",
+                    step_order=1,
+                    change_kind=StepChangeKind.ADDED,
+                    user_description="Transkribera",
+                    review_policy=review_policy,
+                ),
+            ],
+        )
+
+        await execute_changeset(
+            changeset=changeset,
+            flow_service=mock_flow_service,
+            space_id=space_id,
+            flow_id=None,
+        )
+
+        update_kwargs = mock_flow_service.update_flow.call_args.kwargs
+        assert update_kwargs["steps"][0].review_policy == review_policy
+
+    @pytest.mark.asyncio
     async def test_create_flow_with_multiple_steps(self) -> None:
         flow_id = uuid4()
         space_id = uuid4()
@@ -2055,6 +2123,7 @@ def _compiled_step(
     output_type: str = "text",
     mcp_policy: str = "inherit",
     input_bindings: dict | None = None,
+    review_policy: FlowStepReviewPolicy | None = None,
 ) -> Any:
     from intric.flows.ai_builder.ai_builder_models import CompiledStep
 
@@ -2070,4 +2139,5 @@ def _compiled_step(
         output_type=output_type,
         mcp_policy=mcp_policy,
         input_bindings=input_bindings,
+        review_policy=review_policy,
     )

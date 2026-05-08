@@ -22,6 +22,7 @@ from intric.flows.ai_builder.ai_builder_mcp_resources import (
 )
 from intric.flows.ai_builder.ai_builder_new_step_schema import (
     build_new_step_draft_schema,
+    build_review_mode_schema,
     small_ref_enums,
 )
 from intric.flows.domain.flow import FlowStep
@@ -327,6 +328,7 @@ def _build_patch_schema(
                 ),
                 "additionalProperties": True,
             },
+            "review_mode": build_review_mode_schema(),
         },
     }
 

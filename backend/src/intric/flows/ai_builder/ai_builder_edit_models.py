@@ -29,6 +29,7 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     PreviousFieldRef,
 )
+from intric.flows.flow_review_policy import FlowStepReviewMode
 
 # ---------------------------------------------------------------------------
 # Step operations
@@ -59,6 +60,7 @@ class StepPatch(BaseModel):
     output_contract: dict[str, Any] | None = None
     input_config: dict[str, Any] | None = None
     output_config: dict[str, Any] | None = None
+    review_mode: FlowStepReviewMode | None = None
 
 
 class StepEditOperation(BaseModel):

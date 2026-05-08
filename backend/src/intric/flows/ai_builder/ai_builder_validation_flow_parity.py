@@ -88,6 +88,7 @@ def _spec_to_flow_steps(spec: FlowDraftSpecCore) -> list[FlowStep]:
             output_contract=rewritten_step.output_contract,
             input_config=rewritten_step.input_config,
             output_config=rewritten_step.output_config,
+            review_policy=rewritten_step.review_policy,
         )
         for index, rewritten_step in enumerate(
             [rewrite_step_spec_variables(step, ref_to_order) for step in spec.steps]

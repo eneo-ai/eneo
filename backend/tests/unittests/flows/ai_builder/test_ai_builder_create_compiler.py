@@ -64,6 +64,7 @@ from intric.flows.ai_builder.planning_state import (
     ResolvedSlot,
     StepTriple,
 )
+from intric.flows.flow_review_policy import FlowStepReviewMode
 
 
 def _field(
@@ -459,6 +460,101 @@ def test_compile_create_draft_derives_transcribe_only_for_audio_upload() -> None
     assert step.input_bindings == {"question": "{{ step_input.text }}"}
     assert step.input_config is not None
     assert step.input_config["runtime_input"]["input_format"] == "audio"
+
+
+def test_compile_create_draft_sets_review_policy_from_review_mode() -> None:
+    draft = FlowCreateDraft(
+        flow_name="Granska transkribering",
+        plan_rationale="Låt användaren granska transkriberingen innan analys.",
+        steps=[
+            CreateStepDraft(
+                name="Transkribera",
+                instructions="Transkribera ljudfilen.",
+                input_source="flow_input",
+                input_type="audio",
+                output_type="text",
+                runtime_upload=True,
+                runtime_required=True,
+                review_mode="view",
+            )
+        ],
+    )
+
+    compiled = compile_create_draft(draft)
+
+    assert compiled.steps[0].review_policy is not None
+    assert compiled.steps[0].review_policy.mode is FlowStepReviewMode.VIEW
+
+
+def test_outline_flow_schema_exposes_review_mode_on_steps() -> None:
+    schema = build_outline_flow_tool_schema()
+    parameters = cast(dict[str, object], schema["function"])["parameters"]
+    properties = cast(dict[str, object], parameters)["properties"]
+    steps = cast(dict[str, object], cast(dict[str, object], properties)["steps"])
+    items = cast(dict[str, object], steps["items"])
+    step_properties = cast(dict[str, object], items["properties"])
+    review_mode = cast(dict[str, object], step_properties["review_mode"])
+
+    assert review_mode["enum"] == ["view", "edit", None]
+
+
+def test_parse_outline_flow_arguments_accepts_review_mode() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Granska text",
+            "plan_rationale": "Användaren ska granska resultatet innan nästa steg.",
+            "steps": [
+                {
+                    "name": "Bearbeta text",
+                    "task": "Bearbeta texten.",
+                    "review_mode": "edit",
+                }
+            ],
+        }
+    )
+
+    assert outline.steps[0].review_mode is FlowStepReviewMode.EDIT
+
+
+def test_parse_outline_flow_arguments_rejects_invalid_review_mode() -> None:
+    with pytest.raises(OutlineFlowArgumentError, match="review_mode"):
+        parse_outline_flow_arguments(
+            {
+                "flow_name": "Felaktig granskning",
+                "plan_rationale": "Ogiltigt granskningsläge ska stoppas.",
+                "steps": [
+                    {
+                        "name": "Bearbeta text",
+                        "task": "Bearbeta texten.",
+                        "review_mode": "approve",
+                    }
+                ],
+            }
+        )
+
+
+def test_compile_outline_flow_sets_review_policy_from_review_mode() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Granska text",
+            "plan_rationale": "Användaren ska kunna ändra resultatet.",
+            "runtime_input": {"input_type": "text", "required": True},
+            "steps": [
+                {
+                    "name": "Bearbeta text",
+                    "task": "Bearbeta texten.",
+                    "review_mode": "edit",
+                }
+            ],
+        }
+    )
+
+    draft = compile_outline_to_create_draft(outline)
+    compiled = compile_create_draft(draft)
+
+    assert draft.steps[0].review_mode is FlowStepReviewMode.EDIT
+    assert compiled.steps[0].review_policy is not None
+    assert compiled.steps[0].review_policy.mode is FlowStepReviewMode.EDIT
 
 
 def test_compile_create_draft_derives_template_fill_for_docx_templates() -> None:
@@ -2619,6 +2715,112 @@ def test_compile_outline_flow_inserts_audio_transcription_for_single_artifact_st
     assert draft.steps[2].output_type.value == "pdf"
     assert compiled.steps[0].output_mode.value == "transcribe_only"
     assert compiled.steps[2].output_type.value == "pdf"
+    assert validation.valid
+
+
+def test_compile_outline_flow_moves_review_to_backend_audio_transcription() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Audio PDF report",
+            "plan_rationale": "Review the transcript before creating the report.",
+            "steps": [
+                {
+                    "name": "Transcribe audio",
+                    "task": "Transcribe the uploaded audio to text.",
+                    "review_mode": "edit",
+                },
+                {
+                    "name": "Create report",
+                    "task": "Summarize the reviewed transcript and create the final PDF.",
+                },
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="audio",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="pdf_document",
+            source="structured_answer",
+            confidence="high",
+        ),
+    }
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state),
+    )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert [step.name for step in draft.steps] == [
+        "Transcribe audio",
+        "Create report",
+        "Create PDF",
+    ]
+    assert draft.steps[0].review_mode is FlowStepReviewMode.EDIT
+    assert draft.steps[1].review_mode is None
+    assert compiled.steps[0].review_policy is not None
+    assert compiled.steps[0].review_policy.mode is FlowStepReviewMode.EDIT
+    assert compiled.steps[1].review_policy is None
+    assert validation.valid
+
+
+def test_compile_outline_flow_does_not_leak_review_to_backend_audio_transcription() -> (
+    None
+):
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Audio PDF report",
+            "plan_rationale": "Review the analysis before creating the report.",
+            "steps": [
+                {
+                    "name": "Analyze transcript",
+                    "task": "Analyze the transcript.",
+                    "review_mode": "edit",
+                },
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="audio",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="pdf_document",
+            source="structured_answer",
+            confidence="high",
+        ),
+    }
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state),
+    )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert [step.name for step in draft.steps] == [
+        "Transcribe audio",
+        "Analyze transcript",
+        "Create PDF",
+    ]
+    assert draft.steps[0].review_mode is None
+    assert draft.steps[1].review_mode is FlowStepReviewMode.EDIT
+    assert compiled.steps[0].review_policy is None
+    assert compiled.steps[1].review_policy is not None
+    assert compiled.steps[1].review_policy.mode is FlowStepReviewMode.EDIT
     assert validation.valid
 
 

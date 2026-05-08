@@ -14,6 +14,7 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     StructuredFieldDraft,
 )
+from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from intric.flows.flow_variable_definitions import form_field_reference_expression
 
 
@@ -59,6 +60,7 @@ def compile_new_step_draft(
         output_contract=output_contract,
         input_config=input_config,
         output_config=output_config,
+        review_policy=compile_review_policy(step_draft.review_mode),
     )
 
 
@@ -100,6 +102,14 @@ def compile_output_config(step_draft: NewStepDraft) -> dict[str, Any] | None:
     if step_draft.citations_requested:
         return {"citation_mode": "inline_inref_sidecar"}
     return None
+
+
+def compile_review_policy(
+    review_mode: FlowStepReviewMode | None,
+) -> FlowStepReviewPolicy | None:
+    if review_mode is None:
+        return None
+    return FlowStepReviewPolicy(mode=review_mode)
 
 
 def compile_input_bindings(

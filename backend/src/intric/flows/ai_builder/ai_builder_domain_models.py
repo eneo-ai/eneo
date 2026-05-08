@@ -40,6 +40,7 @@ from intric.flows.enums import (
 from intric.flows.enums import (
     FlowOutputType as OutputType,
 )
+from intric.flows.flow_review_policy import FlowStepReviewPolicy
 
 
 class SessionStatus(str, enum.Enum):
@@ -163,6 +164,7 @@ class StepSpec(BaseModel):
     output_contract: JsonObject | None = None
     input_config: JsonObject | None = None
     output_config: JsonObject | None = None
+    review_policy: FlowStepReviewPolicy | None = None
 
     @field_validator("input_bindings")
     @classmethod
@@ -304,6 +306,7 @@ class CompiledStep(BaseModel):
     output_contract: JsonObject | None = None
     input_config: JsonObject | None = None
     output_config: JsonObject | None = None
+    review_policy: FlowStepReviewPolicy | None = None
 
 
 class FlowChangeSet(BaseModel):

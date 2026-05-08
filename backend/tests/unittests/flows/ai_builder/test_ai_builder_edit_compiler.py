@@ -31,6 +31,7 @@ from intric.flows.ai_builder.ai_builder_reference_rewriter import (
 )
 from intric.flows.ai_builder.ai_builder_validator import validate_spec
 from intric.flows.flow import FlowStep
+from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 
 
 def _make_flow_step(
@@ -46,6 +47,7 @@ def _make_flow_step(
     input_contract: dict | None = None,
     output_contract: dict | None = None,
     output_config: dict | None = None,
+    review_policy: FlowStepReviewPolicy | None = None,
 ) -> FlowStep:
     return FlowStep(
         id=uuid4(),
@@ -62,6 +64,7 @@ def _make_flow_step(
         input_contract=input_contract,
         output_contract=output_contract,
         output_config=output_config,
+        review_policy=review_policy,
         mcp_policy=mcp_policy,
     )
 
@@ -130,6 +133,99 @@ def test_compile_edit_draft_clears_all_previous_input_contract() -> None:
         advisory.code == "all_previous_input_contract_cleared"
         for advisory in result.advisories
     )
+
+
+def test_compile_edit_draft_preserves_existing_review_policy() -> None:
+    review_policy = FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW)
+    existing = [
+        _make_flow_step(
+            step_order=1,
+            user_description="Transkribera",
+            review_policy=review_policy,
+        )
+    ]
+    draft = FlowEditDraft(operations=[], plan_rationale="Behåll flödet.")
+
+    result = compile_edit_draft(draft, existing, base_flow_revision=1)
+
+    assert result.compiled_spec.steps[0].review_policy == review_policy
+
+
+def test_compile_edit_draft_updates_review_policy_from_patch() -> None:
+    existing = [
+        _make_flow_step(step_order=1, user_description="Transkribera"),
+    ]
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(review_mode="edit"),
+            )
+        ],
+        plan_rationale="Låt användaren korrigera transkriberingen före nästa steg.",
+    )
+
+    result = compile_edit_draft(draft, existing, base_flow_revision=1)
+
+    review_policy = result.compiled_spec.steps[0].review_policy
+    assert review_policy is not None
+    assert review_policy.mode is FlowStepReviewMode.EDIT
+
+
+def test_compile_edit_draft_clears_review_policy_with_explicit_null_patch() -> None:
+    existing_review_policy = FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW)
+    existing = [
+        _make_flow_step(
+            step_order=1,
+            user_description="Transkribera",
+            review_policy=existing_review_policy,
+        ),
+    ]
+    patch = StepPatch.model_validate({"review_mode": None})
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=patch,
+            )
+        ],
+        plan_rationale="Ta bort manuell granskning.",
+    )
+
+    result = compile_edit_draft(draft, existing, base_flow_revision=1)
+
+    assert "review_mode" in patch.model_fields_set
+    assert result.compiled_spec.steps[0].review_policy is None
+
+
+def test_compile_edit_draft_preserves_review_policy_when_patch_omits_review_mode() -> (
+    None
+):
+    existing_review_policy = FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW)
+    existing = [
+        _make_flow_step(
+            step_order=1,
+            user_description="Transkribera",
+            review_policy=existing_review_policy,
+        ),
+    ]
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(name="Transkribera och granska"),
+            )
+        ],
+        plan_rationale="Byt namn utan att ändra granskningspunkten.",
+    )
+
+    result = compile_edit_draft(draft, existing, base_flow_revision=1)
+
+    assert result.compiled_spec.steps[0].name == "Transkribera och granska"
+    assert result.compiled_spec.steps[0].review_policy == existing_review_policy
 
 
 def test_compile_edit_draft_repairs_audio_document_flow_missing_transcript_step() -> (

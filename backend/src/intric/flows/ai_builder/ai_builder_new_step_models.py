@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from intric.flows.ai_builder.ai_builder_domain_models import AssistantSpec
 from intric.flows.ai_builder.ai_builder_models import InputSource, InputType, OutputType
+from intric.flows.flow_review_policy import FlowStepReviewMode
 
 DocumentDeliveryMode = Literal["not_applicable", "generated", "template_fill"]
 StructuredFieldType = Literal["string", "number", "boolean", "object", "array"]
@@ -128,6 +129,7 @@ class NewStepDraft(BaseModel):
     )
     document_delivery_mode: DocumentDeliveryMode = "not_applicable"
     citations_requested: bool = False
+    review_mode: FlowStepReviewMode | None = None
     output_fields: list[StructuredFieldDraft] | None = None
 
     @field_validator("name", "instructions")

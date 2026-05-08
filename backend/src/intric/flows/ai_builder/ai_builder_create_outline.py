@@ -39,6 +39,7 @@ from intric.flows.ai_builder.ai_builder_mcp_resources import (
     AIBuilderMCPResourceInput,
 )
 from intric.flows.ai_builder.ai_builder_models import (
+    InputSource,
     InputType,
     OutputMode,
     OutputType,
@@ -48,6 +49,7 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
     StructuredFieldDraft,
 )
 from intric.flows.ai_builder.ai_builder_new_step_schema import (
+    build_review_mode_schema,
     build_structured_field_schema,
     small_ref_enums,
 )
@@ -83,6 +85,7 @@ from intric.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     PlanningState,
 )
+from intric.flows.flow_review_policy import FlowStepReviewMode
 
 OUTLINE_FLOW_TOOL_NAME = "outline_flow"
 # Safety guard against runaway tool output. This should not be a practical
@@ -231,6 +234,7 @@ class OutlineStep(BaseModel):
     mcp_server_refs: list[str] = Field(default_factory=list)
     mcp_tool_refs: list[str] = Field(default_factory=list)
     citations_requested: bool = False
+    review_mode: FlowStepReviewMode | None = None
 
     @field_validator("name", "task")
     @classmethod
@@ -576,13 +580,21 @@ def compile_outline_to_create_draft(
         pattern_ids=pattern_ids,
         chain_steps=chain_steps,
     )
+    backend_audio_transcription_inserted = _backend_audio_transcription_inserted(
+        pattern_ids=pattern_resolution.pattern_ids,
+        chain_steps=pattern_resolution.chain_steps,
+    )
     outline_steps = _normalize_leading_audio_transcription_step(
         steps=list(outline.steps),
         runtime_input_type=runtime_input_type,
-        backend_audio_transcription_inserted=_backend_audio_transcription_inserted(
-            pattern_ids=pattern_resolution.pattern_ids,
-            chain_steps=pattern_resolution.chain_steps,
-        ),
+        backend_audio_transcription_inserted=backend_audio_transcription_inserted,
+    )
+    backend_audio_transcription_review_mode = (
+        _redundant_leading_audio_transcription_review_mode(
+            steps=list(outline.steps),
+            runtime_input_type=runtime_input_type,
+            backend_audio_transcription_inserted=backend_audio_transcription_inserted,
+        )
     )
     outline_steps = _fold_leading_zero_contract_text_steps(
         steps=outline_steps,
@@ -648,6 +660,11 @@ def compile_outline_to_create_draft(
         ) from error
     _log_skeleton_output_type_drifts(composition.output_type_drifts)
     steps = list(composition.steps)
+    if backend_audio_transcription_review_mode is not None:
+        steps = _apply_backend_audio_transcription_review_mode(
+            steps=steps,
+            review_mode=backend_audio_transcription_review_mode,
+        )
     steps = _attach_unreferenced_form_fields_to_final_step(
         steps=steps,
         known_field_order=known_field_order,
@@ -692,6 +709,7 @@ def _semantic_content_from_outline_step(
         mcp_server_refs=tuple(step.mcp_server_refs),
         mcp_tool_refs=tuple(step.mcp_tool_refs),
         citations_requested=step.citations_requested,
+        review_mode=step.review_mode,
     )
 
 
@@ -1102,6 +1120,7 @@ def _outline_step_schema(
                 ),
             },
             "citations_requested": {"type": "boolean", "default": False},
+            "review_mode": build_review_mode_schema(),
         },
         "additionalProperties": False,
     }
@@ -1299,6 +1318,50 @@ def _normalize_leading_audio_transcription_step(
     return steps[1:]
 
 
+def _redundant_leading_audio_transcription_review_mode(
+    *,
+    steps: list["OutlineStep"],
+    runtime_input_type: InputType,
+    backend_audio_transcription_inserted: bool,
+) -> FlowStepReviewMode | None:
+    if (
+        runtime_input_type != InputType.AUDIO
+        or not backend_audio_transcription_inserted
+        or len(steps) < 2
+    ):
+        return None
+    first_step = steps[0]
+    if first_step.review_mode is None:
+        return None
+    if not _is_redundant_audio_transcription_step(first_step):
+        return None
+    if not _has_no_external_step_refs(first_step):
+        return None
+    if not _is_plain_text_semantic_step(first_step):
+        return None
+    return first_step.review_mode
+
+
+def _apply_backend_audio_transcription_review_mode(
+    *,
+    steps: list[NewStepDraft],
+    review_mode: FlowStepReviewMode,
+) -> list[NewStepDraft]:
+    if not steps:
+        return steps
+    first_step = steps[0]
+    if (
+        first_step.input_type != InputType.AUDIO
+        or first_step.output_type != OutputType.TEXT
+        or first_step.input_source != InputSource.FLOW_INPUT
+    ):
+        return steps
+    return [
+        first_step.model_copy(update={"review_mode": review_mode}),
+        *steps[1:],
+    ]
+
+
 def _backend_audio_transcription_inserted(
     *,
     pattern_ids: tuple[str, ...],
@@ -1436,6 +1499,7 @@ def _is_zero_contract_text_step(step: "OutlineStep") -> bool:
         and not step.mcp_server_refs
         and not step.mcp_tool_refs
         and not step.citations_requested
+        and step.review_mode is None
     )
 
 
