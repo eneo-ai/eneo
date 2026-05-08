@@ -50,6 +50,11 @@ class CompletionModels(BasePublic):
 
     # Indicative USD ratecard. NULL = unknown / not applicable. Stored at high
     # precision because frontier-model prices live in the 1e-7 USD/token range.
+    # Numeric(20, 12) = 8 integer digits → cap is < 10^8 USD/token. The frontend
+    # admin form lets users enter cost per million tokens, so its input cap is
+    # the same number * 10^6 (= MAX_COST_INPUT in
+    # frontend/apps/web/src/routes/(app)/admin/models/AddWizard/models/draft.ts).
+    # Keep the two in sync if either side changes.
     input_cost_per_token: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(20, 12), nullable=True
     )
@@ -112,6 +117,9 @@ class TranscriptionModels(BasePublic):
     base_url: Mapped[str] = mapped_column()
 
     # USD per minute of audio processed. NULL = unknown / self-hosted.
+    # Numeric(20, 6) = 14 integer digits → cap is < 10^14 USD/minute, matching
+    # MAX_COST_INPUT in the frontend admin form (see
+    # frontend/apps/web/src/routes/(app)/admin/models/AddWizard/models/draft.ts).
     cost_per_minute: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(20, 6), nullable=True
     )
@@ -160,7 +168,8 @@ class EmbeddingModels(BasePublic):
     litellm_model_name: Mapped[Optional[str]] = mapped_column()
 
     # Indicative USD ratecard. Output cost is almost always zero for embeddings
-    # but kept for shape parity with completion models.
+    # but kept for shape parity with completion models. Same Numeric(20, 12)
+    # cap as completion models — see CompletionModels.input_cost_per_token.
     input_cost_per_token: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(20, 12), nullable=True
     )

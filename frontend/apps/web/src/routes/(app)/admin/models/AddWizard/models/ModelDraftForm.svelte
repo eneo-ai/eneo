@@ -25,7 +25,12 @@
   import SelectSecurityClassification from "$lib/features/security-classifications/components/SelectSecurityClassification.svelte";
 
   import HelpTooltip from "../../components/HelpTooltip.svelte";
-  import { perMillionFromTokenCost, type ModelDraftState, type ModelType } from "./draft";
+  import {
+    MAX_COST_INPUT,
+    perMillionFromTokenCost,
+    type ModelDraftState,
+    type ModelType
+  } from "./draft";
 
   let {
     draft = $bindable(),
@@ -285,6 +290,7 @@
       type="number"
       step="0.000001"
       min="0"
+      max={MAX_COST_INPUT}
       bind:value={draft.costPerMinuteStr}
       placeholder={m.cost_input_placeholder()}
     />
@@ -302,6 +308,7 @@
         type="number"
         step="0.01"
         min="0"
+        max={MAX_COST_INPUT}
         bind:value={draft.inputCostPerTokenStr}
         placeholder={m.cost_input_placeholder()}
       />
@@ -317,6 +324,7 @@
         type="number"
         step="0.01"
         min="0"
+        max={MAX_COST_INPUT}
         bind:value={draft.outputCostPerTokenStr}
         placeholder={m.cost_input_placeholder()}
       />

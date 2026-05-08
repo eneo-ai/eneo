@@ -1973,6 +1973,7 @@
   "please_select_or_create_provider": "Välj eller skapa en leverantör",
   "model_name_required": "Modellnamn krävs",
   "display_name_required": "Visningsnamn krävs",
+  "cost_value_too_large": "Pris är för stort. Max-värde är {max} USD.",
   "failed_to_create_model": "Misslyckades att skapa modell",
   "model_created_success": "Modell skapad",
   "models_created_success": "{count} modeller skapade",

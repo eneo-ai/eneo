@@ -25,8 +25,11 @@
     applyCatalogModelToDraft,
     createEmptyDraft,
     draftToWizardModel,
-    isDraftComplete
+    findDraftCostOverflow,
+    isDraftComplete,
+    MAX_COST_INPUT
   } from "./models/draft";
+  import { toast } from "$lib/components/toast";
   import {
     isSelfHostedProvider,
     loadLiveModels,
@@ -131,6 +134,10 @@
   function commitDraft(event: SubmitEvent) {
     event.preventDefault();
     if (!draftComplete) return;
+    if (findDraftCostOverflow(draft) !== null) {
+      toast.error(m.cost_value_too_large({ max: MAX_COST_INPUT.toLocaleString("en-US") }));
+      return;
+    }
     models = [...models, draftToWizardModel(draft)];
     draft = createEmptyDraft(modelType, providerType);
   }

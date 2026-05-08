@@ -36,7 +36,10 @@
   import ModelDraftForm from "./AddWizard/models/ModelDraftForm.svelte";
   import {
     createEmptyDraft,
+    findDraftCostOverflow,
+    MAX_COST_INPUT,
     modelToDraft,
+    rawCostToNumber,
     tokenCostFromPerMillion,
     type ModelDraftState,
     type ModelType
@@ -134,23 +137,18 @@
       description: draft.description.trim() || null,
       hosting: draft.hosting,
       open_source: openSource,
-      cost_per_minute: parseCost(draft.costPerMinuteStr)
+      cost_per_minute: rawCostToNumber(draft.costPerMinuteStr)
     };
-  }
-
-  // Per-minute is stored as-is — no unit conversion needed. The token-cost
-  // fields go through `tokenCostFromPerMillion` instead.
-  function parseCost(value: string): number | null {
-    const trimmed = value.trim();
-    if (!trimmed) return null;
-    const n = Number(trimmed);
-    return Number.isFinite(n) ? n : null;
   }
 
   async function handleSubmit() {
     error = null;
     if (!draft.displayName.trim()) {
       error = m.display_name_required();
+      return;
+    }
+    if (findDraftCostOverflow(draft) !== null) {
+      error = m.cost_value_too_large({ max: MAX_COST_INPUT.toLocaleString("en-US") });
       return;
     }
     isSubmitting = true;

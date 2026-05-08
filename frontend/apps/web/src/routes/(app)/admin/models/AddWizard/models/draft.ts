@@ -60,6 +60,60 @@ export function createEmptyDraft(modelType: ModelType, providerType: string): Mo
   };
 }
 
+const TOKENS_PER_MILLION = 1_000_000;
+
+/**
+ * Per-token cost columns are `Numeric(20, 12)` (Postgres) — at most 8 integer
+ * digits, i.e. strictly less than 10^8 USD per token. Translated into the
+ * per-1M-tokens admins type, that's < 10^14. Per-minute cost is `Numeric(20, 6)`
+ * which independently allows < 10^14 USD per minute. We use a single shared
+ * cap for all three fields so the form can validate before the DB rejects.
+ *
+ * Mirror change: `backend/src/intric/database/tables/ai_models_table.py` —
+ * keep the `Numeric(...)` precisions and this constant in sync.
+ */
+export const MAX_COST_INPUT = 99_999_999_999_999;
+const MAX_TOKEN_COST_PER_TOKEN = MAX_COST_INPUT / TOKENS_PER_MILLION;
+
+/** Coerce a `<Input type="number" bind:value>` field to a finite number,
+ *  returning null for empty/blank/non-numeric input. */
+export function rawCostToNumber(value: string | number | null | undefined): number | null {
+  if (value == null) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Returns the first cost field whose entered value exceeds the DB cap, or
+ *  null when all are safe. Compares against the per-1M / per-minute value
+ *  the admin typed — same units as `MAX_COST_INPUT`, no conversion. */
+export function findDraftCostOverflow(
+  draft: ModelDraftState
+): "input" | "output" | "perMinute" | null {
+  const candidates: Array<["input" | "output" | "perMinute", string | number]> = [
+    ["input", draft.inputCostPerTokenStr],
+    ["output", draft.outputCostPerTokenStr],
+    ["perMinute", draft.costPerMinuteStr]
+  ];
+  for (const [key, raw] of candidates) {
+    const n = rawCostToNumber(raw);
+    if (n != null && Math.abs(n) > MAX_COST_INPUT) return key;
+  }
+  return null;
+}
+
+/** Same overflow check as `findDraftCostOverflow`, but for already-converted
+ *  WizardModelDraft values (token cost stored per-token). The per-token DB
+ *  cap is `MAX_COST_INPUT / TOKENS_PER_MILLION`; the per-minute value
+ *  shares the same `MAX_COST_INPUT` budget directly. */
+export function isCostValueOverflow(value: number | null | undefined, perMinute = false): boolean {
+  if (value == null || !Number.isFinite(value)) return false;
+  const cap = perMinute ? MAX_COST_INPUT : MAX_TOKEN_COST_PER_TOKEN;
+  return Math.abs(value) > cap;
+}
+
 /**
  * "Complete enough to be saved." Mirrors the rules used by the original
  * StepModels.canAddModel — embeddings and transcription only need a name
@@ -76,16 +130,6 @@ export function isDraftComplete(draft: ModelDraftState, modelType: ModelType): b
   );
 }
 
-/** Parse a USD-amount string. Empty / blank / non-numeric → null. */
-function parseCost(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const n = Number(trimmed);
-  return Number.isFinite(n) ? n : null;
-}
-
-const TOKENS_PER_MILLION = 1_000_000;
-
 /**
  * Form ↔ API unit boundary for token-priced models.
  *
@@ -95,11 +139,9 @@ const TOKENS_PER_MILLION = 1_000_000;
  * helpers convert between the two representations and live here so all
  * callers (wizard, edit dialog, catalog lookup) stay in agreement.
  */
-export function tokenCostFromPerMillion(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const n = Number(trimmed);
-  return Number.isFinite(n) ? n / TOKENS_PER_MILLION : null;
+export function tokenCostFromPerMillion(value: string | number | null | undefined): number | null {
+  const n = rawCostToNumber(value);
+  return n == null ? null : n / TOKENS_PER_MILLION;
 }
 
 export function perMillionFromTokenCost(value: number | string | null | undefined): string {
@@ -126,7 +168,7 @@ export function draftToWizardModel(draft: ModelDraftState): WizardModelDraft {
     description: draft.description.trim() || null,
     inputCostPerToken: tokenCostFromPerMillion(draft.inputCostPerTokenStr),
     outputCostPerToken: tokenCostFromPerMillion(draft.outputCostPerTokenStr),
-    costPerMinute: parseCost(draft.costPerMinuteStr),
+    costPerMinute: rawCostToNumber(draft.costPerMinuteStr),
     securityClassification: draft.securityClassification
   };
 }

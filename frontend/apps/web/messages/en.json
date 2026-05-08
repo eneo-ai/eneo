@@ -1939,6 +1939,7 @@
   "please_select_or_create_provider": "Please select or create a provider",
   "model_name_required": "Model name is required",
   "display_name_required": "Display name is required",
+  "cost_value_too_large": "Cost is too large. Maximum is {max} USD.",
   "failed_to_create_model": "Failed to create model",
   "model_created_success": "Model created successfully",
   "models_created_success": "{count} models created successfully",
