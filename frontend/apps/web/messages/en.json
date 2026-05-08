@@ -1971,6 +1971,7 @@
   "migration_blocked_title": "Migration blocked by security classification requirements.",
   "migration_blocked_security": "Target model classification is too low for {count} spaces that require {classification} or higher",
   "migrating": "Migrating...",
+  "migration_impact_load_failed": "Failed to load migration impact. Please try again before migrating.",
   "migration_impact_title": "{count} resources will be affected",
   "migration_no_impact": "No resources are using this model. You can delete it directly — migration is only needed if you want to leave a history record that it was replaced by another model.",
   "migration_spaces_info": "The target model will automatically be enabled on {count} spaces where this model is currently available",

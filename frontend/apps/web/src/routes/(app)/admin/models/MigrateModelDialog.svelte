@@ -62,6 +62,8 @@
   let targetModelId = $state("");
   let isSubmitting = $state(false);
   let isLoadingImpact = $state(false);
+  let hasLoadedImpact = $state(false);
+  let impactLoadError = $state<string | null>(null);
   let submitError = $state<string | null>(null);
 
   type UsageDetail = {
@@ -114,6 +116,9 @@
   const canMigrate = $derived(
     !!targetModelId &&
       !hasSecurityBlocker &&
+      !isLoadingImpact &&
+      hasLoadedImpact &&
+      !impactLoadError &&
       !isValidating &&
       !validationError &&
       !sourceAlreadyMigrated &&
@@ -172,6 +177,8 @@
   $effect(() => {
     if (!dialogOpen) return;
     submitError = null;
+    impactLoadError = null;
+    hasLoadedImpact = false;
     acknowledged = false;
     expandedSections = {};
     impactTotal = 0;
@@ -195,8 +202,19 @@
     }
   });
 
+  // Both endpoints return 200 with empty/zero counts for models without
+  // usage rows (verified in `completion_model_usage_service.get_model_usage_statistics`
+  // which constructs an empty `ModelUsageStatistics` when no row exists).
+  // A failure here therefore signals a real backend or network problem —
+  // surface it and block migration until the admin retries, since the
+  // impact summary is what they'd otherwise be acknowledging blindly.
   async function loadImpact() {
     isLoadingImpact = true;
+    hasLoadedImpact = false;
+    impactLoadError = null;
+    impactTotal = 0;
+    impactDetails = [];
+    spacesCount = 0;
     try {
       const details = (await intric.models.getUsageDetails({
         modelId: sourceModel.id,
@@ -205,16 +223,14 @@
       impactDetails = details?.items ?? [];
       // Use backend total (handles pagination), not just items.length
       impactTotal = details?.total ?? impactDetails.length;
-      try {
-        const stats = (await intric.models.getUsageStats({ modelId: sourceModel.id })) as {
-          spaces_count?: number;
-        };
-        spacesCount = stats.spaces_count ?? 0;
-      } catch {
-        spacesCount = 0;
-      }
+      const stats = (await intric.models.getUsageStats({ modelId: sourceModel.id })) as {
+        spaces_count?: number;
+      };
+      spacesCount = stats.spaces_count ?? 0;
+      hasLoadedImpact = true;
     } catch (err: unknown) {
       console.error("[MigrateModelDialog] Failed to load impact:", err);
+      impactLoadError = err instanceof Error ? err.message : m.migration_impact_load_failed();
     } finally {
       isLoadingImpact = false;
     }
@@ -294,6 +310,16 @@
           <div class="text-muted-foreground flex items-center gap-2 py-3 text-sm">
             <Loader2 class="size-4 animate-spin" aria-hidden="true" />
             <span>{m.loading()}</span>
+          </div>
+        {:else if !sourceAlreadyMigrated && impactLoadError}
+          <div
+            class="border-negative-default bg-negative-dimmer/50 text-negative-stronger rounded-r-md border-l-2 px-4 py-3 text-sm"
+            role="alert"
+          >
+            <div class="flex items-center justify-between gap-4">
+              <span>{impactLoadError}</span>
+              <Button variant="outline" size="sm" onclick={loadImpact}>{m.retry()}</Button>
+            </div>
           </div>
         {:else if !sourceAlreadyMigrated && impactTotal > 0}
           <div class="border-border overflow-hidden rounded-lg border">

@@ -2005,6 +2005,7 @@
   "migration_blocked_title": "Migrering blockerad av säkerhetsklassificeringskrav.",
   "migration_blocked_security": "Målmodellens klassificering är för låg för {count} spaces som kräver {classification} eller högre",
   "migrating": "Migrerar...",
+  "migration_impact_load_failed": "Kunde inte ladda migreringens påverkan. Försök igen innan du migrerar.",
   "migration_impact_title": "{count} resurser kommer att påverkas",
   "migration_no_impact": "Inga resurser använder denna modell. Du kan radera den direkt — migrering behövs bara om du vill lämna en historikpost om att den ersattes av en annan modell.",
   "migration_spaces_info": "Målmodellen kommer automatiskt aktiveras på {count} spaces där denna modell är tillgänglig idag",
