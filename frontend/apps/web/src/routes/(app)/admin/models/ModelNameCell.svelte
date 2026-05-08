@@ -76,7 +76,7 @@
 
   {#if isTenantModel}
     <Button variant="ghost" size="sm" onclick={() => showDetailDialog.set(true)}>
-      <ModelNameAndVendor {model} />
+      <ModelNameAndVendor {model} descriptionMode="hidden" />
     </Button>
   {:else}
     <span class="px-3 py-2">

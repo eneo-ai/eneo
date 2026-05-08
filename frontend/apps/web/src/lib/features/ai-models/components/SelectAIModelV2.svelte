@@ -82,7 +82,7 @@
       <IconCancel />{m.unsupported_model_selected()} ({selectedModel?.name ?? m.no_model_found()})
     </div>
   {:else if $selected}
-    <ModelNameAndVendor model={$selected.value}></ModelNameAndVendor>
+    <ModelNameAndVendor model={$selected.value} descriptionMode="hidden"></ModelNameAndVendor>
   {:else}
     <div class="text-negative-default flex gap-3 truncate pl-1">
       <IconCancel />{m.no_model_selected()}
@@ -117,7 +117,8 @@
           {...$option({ value: model, label: model.nickname ?? undefined })}
           use:option
         >
-          <ModelNameAndVendor model={model as T}></ModelNameAndVendor>
+          <ModelNameAndVendor model={model as T} descriptionMode="non-tabbable"
+          ></ModelNameAndVendor>
           <div class="flex items-center gap-3">
             {#if showCost}
               <ModelCostBadge model={model as T} dense />
@@ -136,7 +137,7 @@
         {...$option({ value: model, label: model.nickname ?? undefined })}
         use:option
       >
-        <ModelNameAndVendor {model}></ModelNameAndVendor>
+        <ModelNameAndVendor {model} descriptionMode="non-tabbable"></ModelNameAndVendor>
         <div class="flex items-center gap-3">
           {#if showCost}
             <ModelCostBadge {model} dense />
