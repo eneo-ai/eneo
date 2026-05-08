@@ -24,7 +24,6 @@ from intric.security_classifications.domain.entities.security_classification imp
     SecurityClassification,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -115,12 +114,16 @@ def _build_service(
     usage_service = AsyncMock()
 
     # Patch heavy side-effect constructors that run in __init__
-    with patch(
-        "intric.completion_models.application.completion_model_migration_service.CompletionModelMigrationHistoryRepo"
-    ), patch(
-        "intric.completion_models.application.completion_model_migration_service.get_event_publisher"
-    ), patch(
-        "intric.completion_models.application.completion_model_migration_service.get_settings"
+    with (
+        patch(
+            "intric.completion_models.application.completion_model_migration_service.CompletionModelMigrationHistoryRepo"
+        ),
+        patch(
+            "intric.completion_models.application.completion_model_migration_service.get_event_publisher"
+        ),
+        patch(
+            "intric.completion_models.application.completion_model_migration_service.get_settings"
+        ),
     ):
         service = CompletionModelMigrationService(
             session=session,
@@ -146,9 +149,7 @@ class TestCompatibleModels:
 
         service = _build_service(repo_side_effect=[from_model, to_model])
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert result.compatible is True
         assert result.requires_confirmation is False
@@ -164,9 +165,7 @@ class TestTargetDeprecated:
 
         service = _build_service(repo_side_effect=[from_model, to_model])
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert result.compatible is False
         assert result.requires_confirmation is True
@@ -184,9 +183,7 @@ class TestAlreadyMigratedSource:
         service = _build_service(repo_side_effect=[from_model, from_model, to_model])
 
         with pytest.raises(Exception) as exc_info:
-            await service.validate_migration(
-                from_model.id, to_model.id, uuid4()
-            )
+            await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert "already been migrated" in str(exc_info.value)
 
@@ -199,9 +196,7 @@ class TestLowerTokenLimit:
 
         service = _build_service(repo_side_effect=[from_model, to_model])
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert result.compatible is False
         assert result.requires_confirmation is True
@@ -214,9 +209,7 @@ class TestLowerTokenLimit:
 
         service = _build_service(repo_side_effect=[from_model, to_model])
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         # No token-limit warning
         assert not any(w.startswith("lower_token_limit") for w in result.warning_codes)
@@ -228,9 +221,7 @@ class TestLowerTokenLimit:
 
         service = _build_service(repo_side_effect=[from_model, to_model])
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert not any(w.startswith("lower_token_limit") for w in result.warning_codes)
 
@@ -243,9 +234,7 @@ class TestDifferentFamily:
 
         service = _build_service(repo_side_effect=[from_model, to_model])
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert result.compatible is False
         assert result.requires_confirmation is True
@@ -258,9 +247,7 @@ class TestDifferentFamily:
 
         service = _build_service(repo_side_effect=[from_model, to_model])
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert not any(w.startswith("different_family") for w in result.warning_codes)
 
@@ -273,9 +260,7 @@ class TestVisionLoss:
 
         service = _build_service(repo_side_effect=[from_model, to_model])
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert result.compatible is False
         assert "lacks_vision" in result.warning_codes
@@ -287,9 +272,7 @@ class TestVisionLoss:
 
         service = _build_service(repo_side_effect=[from_model, to_model])
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert "lacks_vision" not in result.warning_codes
 
@@ -300,9 +283,7 @@ class TestVisionLoss:
 
         service = _build_service(repo_side_effect=[from_model, to_model])
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert "lacks_vision" not in result.warning_codes
 
@@ -315,9 +296,7 @@ class TestReasoningLoss:
 
         service = _build_service(repo_side_effect=[from_model, to_model])
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert result.compatible is False
         assert "lacks_reasoning" in result.warning_codes
@@ -329,9 +308,7 @@ class TestReasoningLoss:
 
         service = _build_service(repo_side_effect=[from_model, to_model])
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert "lacks_reasoning" not in result.warning_codes
 
@@ -344,9 +321,7 @@ class TestToolCallingLoss:
 
         service = _build_service(repo_side_effect=[from_model, to_model])
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert result.compatible is False
         assert "lacks_tool_calling" in result.warning_codes
@@ -358,9 +333,7 @@ class TestToolCallingLoss:
 
         service = _build_service(repo_side_effect=[from_model, to_model])
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert "lacks_tool_calling" not in result.warning_codes
 
@@ -375,9 +348,7 @@ class TestKwargsReset:
 
         service = _build_service(repo_side_effect=[from_model, to_model])
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert "kwargs_reset" in result.warning_codes
 
@@ -390,9 +361,7 @@ class TestKwargsReset:
 
         service = _build_service(repo_side_effect=[from_model, to_model])
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert "kwargs_reset" in result.warning_codes
 
@@ -420,9 +389,7 @@ class TestMultipleWarnings:
 
         service = _build_service(repo_side_effect=[from_model, to_model])
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert result.compatible is False
         assert result.requires_confirmation is True
@@ -443,13 +410,9 @@ class TestSecurityClassificationBlocker:
 
     @pytest.mark.asyncio
     async def test_security_blocker_makes_incompatible(self):
-        sec_class = _make_security_classification(
-            name="public", security_level=1
-        )
+        sec_class = _make_security_classification(name="public", security_level=1)
         from_model = _make_model(name="high-sec-model")
-        to_model = _make_model(
-            name="low-sec-model", security_classification=sec_class
-        )
+        to_model = _make_model(name="low-sec-model", security_classification=sec_class)
 
         # 3 spaces have higher security requirement than target
         service = _build_service(
@@ -457,16 +420,15 @@ class TestSecurityClassificationBlocker:
             security_spaces_count=3,
         )
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert result.compatible is False
         assert result.requires_confirmation is True
 
         # Should have a security_classification_insufficient warning
         security_warnings = [
-            w for w in result.warning_codes
+            w
+            for w in result.warning_codes
             if w.startswith("security_classification_insufficient")
         ]
         assert len(security_warnings) == 1
@@ -477,22 +439,19 @@ class TestSecurityClassificationBlocker:
     async def test_security_blocker_with_no_classification_on_target(self):
         """Target model without security classification gets level 0 / name 'none'."""
         from_model = _make_model(name="classified-model")
-        to_model = _make_model(
-            name="unclassified-model", security_classification=None
-        )
+        to_model = _make_model(name="unclassified-model", security_classification=None)
 
         service = _build_service(
             repo_side_effect=[from_model, to_model],
             security_spaces_count=2,
         )
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert result.compatible is False
         security_warnings = [
-            w for w in result.warning_codes
+            w
+            for w in result.warning_codes
             if w.startswith("security_classification_insufficient")
         ]
         assert len(security_warnings) == 1
@@ -510,12 +469,11 @@ class TestSecurityClassificationBlocker:
             security_spaces_count=0,
         )
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         security_warnings = [
-            w for w in result.warning_codes
+            w
+            for w in result.warning_codes
             if w.startswith("security_classification_insufficient")
         ]
         assert len(security_warnings) == 0
@@ -524,9 +482,7 @@ class TestSecurityClassificationBlocker:
     @pytest.mark.asyncio
     async def test_security_blocker_combined_with_other_issues(self):
         """Security blocker + other issues: all appear in warnings, compatible=False."""
-        sec_class = _make_security_classification(
-            name="restricted", security_level=3
-        )
+        sec_class = _make_security_classification(name="restricted", security_level=3)
         from_model = _make_model(
             name="premium",
             family="openai",
@@ -545,9 +501,7 @@ class TestSecurityClassificationBlocker:
             security_spaces_count=5,
         )
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         assert result.compatible is False
         assert result.requires_confirmation is True
@@ -566,9 +520,7 @@ class TestSecurityClassificationBlocker:
     @pytest.mark.asyncio
     async def test_blocker_warnings_come_first(self):
         """Security blockers should be placed before regular issues in the list."""
-        sec_class = _make_security_classification(
-            name="high", security_level=5
-        )
+        sec_class = _make_security_classification(name="high", security_level=5)
         from_model = _make_model(vision=True)
         to_model = _make_model(
             vision=False,
@@ -580,9 +532,7 @@ class TestSecurityClassificationBlocker:
             security_spaces_count=1,
         )
 
-        result = await service.validate_migration(
-            from_model.id, to_model.id, uuid4()
-        )
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
 
         # The first warning should be the security blocker
         assert result.warning_codes[0].startswith(
