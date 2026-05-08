@@ -96,19 +96,25 @@
       <div class="border-negative-default/30 bg-negative-dimmer/80 border-b backdrop-blur-sm">
         <Collapsible.Trigger
           class="hover:bg-negative-dimmer flex w-full items-center gap-2.5 px-4 py-2.5 text-sm transition-colors"
+          aria-expanded={isExpanded}
+          aria-controls="flow-validation-issues"
         >
           <div
             class="bg-negative-default/15 flex size-5 shrink-0 items-center justify-center rounded-full"
           >
-            <IconInfo class="text-negative-stronger size-3" />
+            <IconInfo class="text-negative-stronger size-3" aria-hidden="true" />
           </div>
           <span class="text-negative-stronger flex-1 text-left font-medium">
             {m.flow_validation_issues({ count: String(errorCount) })}
+          </span>
+          <span class="text-negative-stronger/80 hidden text-xs font-medium sm:inline">
+            {isExpanded ? m.flow_validation_hide_details() : m.flow_validation_show_details()}
           </span>
           <svg
             class="text-negative-stronger/60 size-4 shrink-0 transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] {isExpanded
               ? 'rotate-180'
               : ''}"
+            aria-hidden="true"
             viewBox="0 0 16 16"
             fill="none"
             stroke="currentColor"
@@ -121,7 +127,11 @@
         </Collapsible.Trigger>
 
         <Collapsible.Content>
-          <div class="flex flex-col gap-2 px-4 pb-3" transition:slide={{ duration: 200 }}>
+          <div
+            id="flow-validation-issues"
+            class="flex flex-col gap-2 px-4 pb-3"
+            transition:slide={{ duration: 200 }}
+          >
             {#each displayIssues as issue (issue.key)}
               <div
                 class="group border-negative-default/15 bg-primary flex items-start gap-3 rounded-xl border px-4 py-3 shadow-sm transition-shadow hover:shadow-md"

@@ -10,6 +10,7 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import FlowRunKnowledgeTrace from "./FlowRunKnowledgeTrace.svelte";
+  import FlowJsonViewer from "./FlowJsonViewer.svelte";
   import FlowRunResultFileButton from "./FlowRunResultFileButton.svelte";
   import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
   import type {
@@ -163,12 +164,7 @@
             {#if result.output_payload_json.structured}
               <div class="mt-1">
                 <Badge class="bg-accent-dimmer text-accent-stronger mb-1">JSON</Badge>
-                <pre
-                  class="bg-hover-dimmer max-h-80 overflow-auto rounded-lg p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
-                    result.output_payload_json.structured,
-                    null,
-                    2
-                  )}</pre>
+                <FlowJsonViewer value={result.output_payload_json.structured} className="mt-0" />
               </div>
             {/if}
 
@@ -188,12 +184,7 @@
                 <Markdown source={result.output_payload_json.text} class="text-sm" />
               </div>
             {:else if !result.output_payload_json.structured && !hasResultFiles}
-              <pre
-                class="bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
-                  result.output_payload_json,
-                  null,
-                  2
-                )}</pre>
+              <FlowJsonViewer value={result.output_payload_json} />
             {/if}
           </div>
         {/if}
@@ -203,15 +194,18 @@
             <div class="flex items-center justify-between">
               <Collapsible.Trigger
                 class="text-muted hover:text-secondary focus-visible:ring-accent-default -ml-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                aria-expanded={inputOpen}
+                aria-controls="step-{result.step_order}-input-panel"
               >
                 <IconChevronDown
-                  class="size-3 transition-transform duration-200 {inputOpen ? '' : '-rotate-90'}"
+                  class="size-3 transition-transform duration-200 {inputOpen ? 'rotate-180' : ''}"
+                  aria-hidden="true"
                 />
-                {m.flow_run_input()}
+                {inputOpen ? m.flow_run_hide_input() : m.flow_run_show_input()}
               </Collapsible.Trigger>
               <button
                 class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
-                aria-label={m.copy()}
+                aria-label={m.flow_run_copy_input()}
                 onclick={() =>
                   void onCopyPayload(
                     `step-${result.step_order}-input`,
@@ -227,13 +221,9 @@
               </button>
             </div>
             <Collapsible.Content>
-              <pre
-                id="step-{result.step_order}-input-panel"
-                class="bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
-                  result.input_payload_json,
-                  null,
-                  2
-                )}</pre>
+              <div id="step-{result.step_order}-input-panel">
+                <FlowJsonViewer value={result.input_payload_json} />
+              </div>
             </Collapsible.Content>
           </Collapsible.Root>
         {/if}
@@ -372,12 +362,7 @@
                 {/if}
               </button>
             </div>
-            <pre
-              class="bg-hover-dimmer mt-1 max-h-[300px] overflow-y-auto rounded-lg p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">{JSON.stringify(
-                stepAttempts,
-                null,
-                2
-              )}</pre>
+            <FlowJsonViewer value={stepAttempts} maxHeightClass="max-h-[300px]" />
           </div>
         {/if}
 

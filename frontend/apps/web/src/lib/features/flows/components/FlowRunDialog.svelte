@@ -13,6 +13,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
+  import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { IntricError } from "@intric/intric-js";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
@@ -308,7 +309,10 @@
       runContract = await intric.flows.runContract.get({ id: flowId });
     } catch (error) {
       runContract = null;
-      runContractError = error instanceof IntricError ? error.getReadableMessage() : String(error);
+      runContractError = getFlowRuntimeErrorMessage(
+        error,
+        error instanceof IntricError ? error.getReadableMessage() : String(error)
+      );
     }
   }
 
@@ -1154,13 +1158,17 @@
 
     {#if runContract === null && !runContractError}
       <div class="mt-5 flex flex-col gap-3 px-4 sm:px-6 lg:px-8" aria-busy="true">
-        <div class="bg-secondary/25 h-[6rem] animate-pulse rounded-xl"></div>
-        <div class="bg-secondary/25 h-[8rem] animate-pulse rounded-xl"></div>
+        <Skeleton class="h-[6rem] rounded-xl" />
+        <Skeleton class="h-[8rem] rounded-xl" />
       </div>
     {:else if runContractError}
       <div class="mx-4 mt-5 sm:mx-6 lg:mx-8">
         <Alert.Root variant="destructive">
-          <Alert.Description>{runContractError}</Alert.Description>
+          <Alert.Title>{m.flow_run_contract_load_failed_title()}</Alert.Title>
+          <Alert.Description>
+            <span>{m.flow_run_contract_load_failed_desc()}</span>
+            <span class="mt-1 block text-xs break-words opacity-80">{runContractError}</span>
+          </Alert.Description>
           <Alert.Action>
             <Button
               variant="outline"

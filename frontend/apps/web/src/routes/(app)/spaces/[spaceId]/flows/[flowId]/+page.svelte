@@ -25,6 +25,7 @@
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { CheckCircle2 } from "lucide-svelte";
   import { IntricError, type FlowRun, type TranscriptionModel } from "@intric/intric-js";
   import { toast } from "$lib/components/toast";
@@ -119,15 +120,21 @@
     return isFlowPageTab(urlTab) ? urlTab : "builder";
   }
 
+  let pendingPersistedTab: FlowPageTab | null = null;
+
   function persistActiveTab(tab: FlowPageTab) {
     if (!browser) return;
 
     const url = new URL(page.url);
     url.searchParams.set("tab", tab);
+    pendingPersistedTab = tab;
     // resolve() requires a typed RouteId literal; this tab URL preserves the current
     // dynamic flow route and only changes query state.
     // eslint-disable-next-line svelte/no-navigation-without-resolve
     replaceState(url, { ...page.state, tab });
+    setTimeout(() => {
+      if (pendingPersistedTab === tab) pendingPersistedTab = null;
+    }, 0);
   }
 
   function setActiveTab(tab: FlowPageTab) {
@@ -151,6 +158,8 @@
   $effect(() => {
     const urlTab = page.url.searchParams.get("tab");
     if (!isFlowPageTab(urlTab) || urlTab === activeTab) return;
+    if (pendingPersistedTab && urlTab !== pendingPersistedTab) return;
+    if (pendingPersistedTab === urlTab) pendingPersistedTab = null;
     if (urlTab === "ai-builder" && !canUseAIBuilder) {
       setActiveTab("builder");
       return;
@@ -287,6 +296,7 @@
       { value: "history", label: m.flow_history() },
       { value: "ai-builder", label: m.ai_builder_tab(), visible: canUseAIBuilder }
     ]}
+    tabIdPrefix="flow-detail-tab"
     onTabChange={(v) => {
       if (isFlowPageTab(v)) setActiveTab(v);
     }}
@@ -298,7 +308,7 @@
           <FlowSaveStatus status={$saveStatus} />
         {/if}
       </div>
-      <div class="hidden xl:contents">
+      <div class="hidden lg:contents">
         <FlowUserModeToggle />
       </div>
       {#if $isPublished}
@@ -321,16 +331,25 @@
             } catch (e) {
               const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
               console.error("Unpublish failed:", msg);
-              toast.error(msg);
+              toast.error(m.flow_unpublish_failed({ message: msg }));
             } finally {
               publishLoading = false;
             }
-          }}>{m.flow_unpublish_to_edit()}</Button
+          }}
         >
+          {#if publishLoading}
+            <IconLoadingSpinner data-icon="inline-start" class="animate-spin" />
+            {m.flow_unpublish_loading()}
+          {:else}
+            {m.flow_unpublish_to_edit()}
+          {/if}
+        </Button>
       {:else}
         <Button
           variant="default"
           disabled={!canPublish || publishLoading}
+          aria-describedby={!canPublish ? "flow-publish-disabled-reason" : undefined}
+          title={!canPublish ? m.flow_publish_not_ready_tooltip() : undefined}
           onclick={async () => {
             publishLoading = true;
             try {
@@ -340,15 +359,27 @@
             } catch (e) {
               const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
               console.error("Publish failed:", msg);
-              toast.error(msg);
+              toast.error(m.flow_publish_failed({ message: msg }));
               if ($validationErrors.size > 0) {
                 validationBannerExpanded = true;
               }
             } finally {
               publishLoading = false;
             }
-          }}>{m.flow_publish()}</Button
+          }}
         >
+          {#if publishLoading}
+            <IconLoadingSpinner data-icon="inline-start" class="animate-spin" />
+            {m.flow_publish_loading()}
+          {:else}
+            {m.flow_publish()}
+          {/if}
+        </Button>
+        {#if !canPublish}
+          <span id="flow-publish-disabled-reason" class="sr-only">
+            {m.flow_publish_disabled_reason()}
+          </span>
+        {/if}
       {/if}
     {/snippet}
   </FlowPageHeader>
@@ -357,6 +388,8 @@
     <div
       id="panel-builder"
       role="tabpanel"
+      aria-labelledby="flow-detail-tab-builder"
+      hidden={activeTab !== "builder"}
       class="flex flex-1 flex-col overflow-hidden"
       class:hidden={activeTab !== "builder"}
     >
@@ -367,6 +400,24 @@
           {m.flow_published_readonly()}
         </div>
       {/if}
+      <section
+        class="border-default bg-secondary/30 flex flex-col gap-2 border-b px-4 py-3 lg:hidden"
+        aria-label={m.flow_user_mode_aria_label()}
+      >
+        <div class="flex items-center justify-between gap-3">
+          <p class="text-primary text-sm font-medium">
+            {$userMode === "power_user"
+              ? m.flow_mode_power_user_summary()
+              : m.flow_mode_user_summary()}
+          </p>
+          <FlowUserModeToggle />
+        </div>
+        <p class="text-secondary text-xs leading-relaxed">
+          {$userMode === "power_user"
+            ? m.flow_power_user_mode_description()
+            : m.flow_user_mode_description()}
+        </p>
+      </section>
       <FlowValidationBanner
         errors={$validationErrors}
         steps={$update.steps}
@@ -1113,6 +1164,8 @@
       <div
         id="panel-ai-builder"
         role="tabpanel"
+        aria-labelledby="flow-detail-tab-ai-builder"
+        hidden={activeTab !== "ai-builder"}
         class="flex min-h-0 flex-1 flex-col overflow-hidden"
         class:hidden={activeTab !== "ai-builder"}
       >
@@ -1148,6 +1201,8 @@
     <div
       id="panel-history"
       role="tabpanel"
+      aria-labelledby="flow-detail-tab-history"
+      hidden={activeTab !== "history"}
       class="flex-1 overflow-y-auto"
       class:hidden={activeTab !== "history"}
     >

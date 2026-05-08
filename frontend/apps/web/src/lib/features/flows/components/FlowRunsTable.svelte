@@ -1,5 +1,11 @@
 <script lang="ts">
-  import type { Flow, FlowRun, FlowRunResultFile, Intric } from "@intric/intric-js";
+  import {
+    IntricError,
+    type Flow,
+    type FlowRun,
+    type FlowRunResultFile,
+    type Intric
+  } from "@intric/intric-js";
   import { untrack } from "svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
@@ -36,6 +42,7 @@
   import { getActiveFlowRunId, shouldAutoFocusFlowRun } from "./flowRunsFocus";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import type { FlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
+  import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
 
   let {
     flow,
@@ -70,6 +77,9 @@
 
   const userMode = getFlowUserMode();
   const showAdvancedControls = $derived($userMode === "power_user");
+  const historyModeDescription = $derived(
+    showAdvancedControls ? m.flow_history_power_user_mode_desc() : m.flow_history_user_mode_desc()
+  );
 
   const statusCounts = $derived.by(() => {
     const counts: Record<FlowRunStatus, number> = {
@@ -201,9 +211,14 @@
         lastAutoFocusedRunId = activeRunId;
       }
       isInitialLoad = false;
-    } catch (e) {
-      console.error("Error loading flow runs", e);
-      loadError = e instanceof Error ? e.message : "Failed to load runs";
+    } catch (error) {
+      console.error("Error loading flow runs", error);
+      loadError =
+        error instanceof IntricError
+          ? getFlowRuntimeErrorMessage(error, error.getReadableMessage())
+          : error instanceof Error
+            ? error.message
+            : m.flow_history_load_failed_desc();
     } finally {
       loading = false;
       isRunListPolling = false;
@@ -344,10 +359,15 @@
 </script>
 
 <section class="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-3 py-4 sm:px-6 sm:py-6">
-  <header class="flex items-center justify-between gap-3">
-    <h2 class="text-primary text-base font-semibold tracking-tight sm:text-lg">
-      {m.flow_history()}
-    </h2>
+  <header>
+    <div class="min-w-0">
+      <h2 class="text-primary text-base font-semibold tracking-tight sm:text-lg">
+        {m.flow_history()}
+      </h2>
+      <p class="text-secondary mt-1 max-w-2xl text-sm leading-relaxed">
+        {historyModeDescription}
+      </p>
+    </div>
   </header>
 
   {#if loading}
@@ -357,7 +377,11 @@
     </div>
   {:else if loadError}
     <Alert.Root variant="destructive">
-      <Alert.Description>{loadError}</Alert.Description>
+      <Alert.Title>{m.flow_history_load_failed_title()}</Alert.Title>
+      <Alert.Description>
+        <span>{m.flow_history_load_failed_desc()}</span>
+        <span class="mt-1 block text-xs break-words opacity-80">{loadError}</span>
+      </Alert.Description>
       <Alert.Action>
         <Button variant="outline" size="sm" onclick={loadRuns}>
           {m.flow_retry()}
@@ -603,8 +627,9 @@
                   <Table.Cell colspan={5} class="px-4 py-2">
                     <Alert.Root variant="destructive">
                       <Alert.Title class="text-xs font-semibold">{m.flow_run_error()}</Alert.Title>
-                      <Alert.Description class="text-xs break-words">
-                        {run.error_message}
+                      <Alert.Description class="text-xs">
+                        <span>{m.flow_run_error_desc()}</span>
+                        <span class="mt-1 block break-words opacity-80">{run.error_message}</span>
                       </Alert.Description>
                     </Alert.Root>
                   </Table.Cell>
@@ -685,6 +710,17 @@
                 {/if}
               </div>
             </button>
+            {#if run.status === "failed" && run.error_message}
+              <div class="border-default border-t px-3 py-3">
+                <Alert.Root variant="destructive">
+                  <Alert.Title class="text-xs font-semibold">{m.flow_run_error()}</Alert.Title>
+                  <Alert.Description class="text-xs">
+                    <span>{m.flow_run_error_desc()}</span>
+                    <span class="mt-1 block break-words opacity-80">{run.error_message}</span>
+                  </Alert.Description>
+                </Alert.Root>
+              </div>
+            {/if}
             {#if isFlowRunCancellable(run.status)}
               <div class="border-default flex items-center gap-2 border-t px-4 py-2">
                 {#if canRedispatchFlowRun(run.status)}

@@ -7,6 +7,7 @@
     backHref,
     activeTab,
     tabs,
+    tabIdPrefix = "flow-page-tab",
     onTabChange,
     actions
   }: {
@@ -14,6 +15,7 @@
     backHref: string;
     activeTab: TTab;
     tabs: Array<{ value: TTab; label: string; visible?: boolean }>;
+    tabIdPrefix?: string;
     onTabChange?: (value: TTab) => void;
     actions?: Snippet;
   } = $props();
@@ -62,7 +64,9 @@
       <Tabs.List variant="line" class="h-10">
         {#each tabs as tab (tab.value)}
           {#if tab.visible !== false}
-            <Tabs.Trigger value={tab.value} class="text-sm">{tab.label}</Tabs.Trigger>
+            <Tabs.Trigger id={`${tabIdPrefix}-${tab.value}`} value={tab.value} class="text-sm">
+              {tab.label}
+            </Tabs.Trigger>
           {/if}
         {/each}
       </Tabs.List>
