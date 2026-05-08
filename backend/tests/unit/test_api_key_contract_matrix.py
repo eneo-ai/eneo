@@ -271,6 +271,35 @@ class TestAuthPrecedence:
 
         svc._resolve_api_key.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_bearer_token_ignores_api_key_resource_guards(self):
+        """Session-token callers are unaffected by API-key resource guards."""
+        from intric.users.user_service import UserService
+
+        user = SimpleNamespace(id=uuid4())
+        svc = object.__new__(UserService)
+        svc._get_user_from_token = AsyncMock(return_value=user)
+        svc._resolve_api_key = AsyncMock()
+        svc._check_user_and_tenant_state = AsyncMock()
+        svc.info_blob_repo = AsyncMock()
+
+        request = SimpleNamespace(
+            state=SimpleNamespace(
+                _resource_perm_configs=[
+                    {"resource_type": "conversations", "read_override_endpoints": None}
+                ]
+            )
+        )
+
+        result = await svc.authenticate(
+            token="session-token",
+            api_key="pk_valid_but_must_not_be_used",
+            request=request,
+        )
+
+        assert result is user
+        svc._resolve_api_key.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Part 2D: Contract Matrix — Scope and Management Boundaries

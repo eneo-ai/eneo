@@ -7301,6 +7301,11 @@ export interface components {
       update_expiration?: boolean;
       /** Expires At */
       expires_at?: string | null;
+      /**
+       * Disable Grace Period
+       * @default false
+       */
+      disable_grace_period?: boolean;
     };
     /**
      * ApiKeyScopeType
@@ -7471,7 +7476,9 @@ export interface components {
       allowed_origins?: string[] | null;
       /** Allowed Ips */
       allowed_ips?: string[] | null;
-      resource_permissions?: components["schemas"]["ResourcePermissions"] | null;
+      resource_permissions?: {
+        [key: string]: string;
+      } | null;
       state: components["schemas"]["ApiKeyState"];
       /** Expires At */
       expires_at?: string | null;
@@ -7532,7 +7539,9 @@ export interface components {
       allowed_origins?: string[] | null;
       /** Allowed Ips */
       allowed_ips?: string[] | null;
-      resource_permissions?: components["schemas"]["ResourcePermissions"] | null;
+      resource_permissions?: {
+        [key: string]: string;
+      } | null;
       state: components["schemas"]["ApiKeyState"];
       /** Expires At */
       expires_at?: string | null;
@@ -13239,12 +13248,12 @@ export interface components {
     ResourcePermissionLevel: "none" | "read" | "write" | "admin";
     /**
      * ResourcePermissions
-     * @description Per-resource-type permission overrides for sk_ keys.
+     * @description Per-resource-type permission overrides for API keys.
      *
      *     For sk_ keys, the top-level ``permission`` field is derived automatically
-     *     as ``max(assistants, apps, spaces, knowledge)`` by
-     *     :func:`derive_permission_from_resource_permissions`.  pk_ keys do not
-     *     support fine-grained permissions.
+     *     as the maximum configured level by
+     *     :func:`derive_permission_from_resource_permissions`.  pk_ keys may use the
+     *     same shape, but policy validation caps each resource at ``read``.
      */
     ResourcePermissions: {
       /** @default none */
@@ -13255,6 +13264,14 @@ export interface components {
       spaces?: components["schemas"]["ResourcePermissionLevel"];
       /** @default none */
       knowledge?: components["schemas"]["ResourcePermissionLevel"];
+      /** @default none */
+      conversations?: components["schemas"]["ResourcePermissionLevel"];
+      /** @default none */
+      files?: components["schemas"]["ResourcePermissionLevel"];
+      /** @default none */
+      jobs?: components["schemas"]["ResourcePermissionLevel"];
+      /** @default none */
+      prompts?: components["schemas"]["ResourcePermissionLevel"];
     };
     /**
      * RetentionPolicyResponse

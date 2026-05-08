@@ -930,11 +930,17 @@ class UserService:
         # Routes with resource guards use read-overrides; others use basic check.
         # Fine-grained resource permission check inside _check_method_resource_permission
         # is self-gated by the flag via check_resource_permission().
-        perm_config = getattr(request.state, "_resource_perm_config", None)
-        if perm_config is not None:
+        perm_configs = getattr(request.state, "_resource_perm_configs", None)
+        if perm_configs is None:
+            perm_config = getattr(request.state, "_resource_perm_config", None)
+            perm_configs = [] if perm_config is None else [perm_config]
+        if perm_configs:
             # Route has resource guard — method check with read-overrides + resource check
             try:
-                _check_method_resource_permission(request, resolved.key, perm_config)
+                for perm_config in perm_configs:
+                    _check_method_resource_permission(
+                        request, resolved.key, perm_config
+                    )
             except ApiKeyValidationError as exc:
                 await self._log_api_key_auth_failed(
                     user,

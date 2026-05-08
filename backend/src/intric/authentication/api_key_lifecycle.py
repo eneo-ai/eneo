@@ -60,6 +60,16 @@ def _normalize_future_expiration(value: object) -> datetime | None:
     return normalized
 
 
+def _resource_permissions_to_json(
+    resource_permissions: ResourcePermissions | dict[str, str] | None,
+) -> dict[str, str] | None:
+    if resource_permissions is None:
+        return None
+    if isinstance(resource_permissions, ResourcePermissions):
+        return resource_permissions.model_dump(mode="json", exclude_unset=True)
+    return resource_permissions
+
+
 class ApiKeyLifecycleService:
     def __init__(
         self,
@@ -89,10 +99,8 @@ class ApiKeyLifecycleService:
         secret = self._generate_secret(request.key_type.value)
         key_hash = self._hash_hmac(secret)
 
-        resource_permissions_value = (
-            request.resource_permissions.model_dump(mode="json")
-            if request.resource_permissions
-            else None
+        resource_permissions_value = _resource_permissions_to_json(
+            request.resource_permissions
         )
 
         # For sk_ keys with fine-grained permissions, derive the effective
@@ -217,10 +225,8 @@ class ApiKeyLifecycleService:
         secret = self._generate_secret(key.key_prefix)
         key_hash = self._hash_hmac(secret)
 
-        resource_permissions_value = (
-            key.resource_permissions.model_dump(mode="json")
-            if isinstance(key.resource_permissions, ResourcePermissions)
-            else key.resource_permissions
+        resource_permissions_value = _resource_permissions_to_json(
+            key.resource_permissions
         )
 
         record = await self.api_key_repo.create(
@@ -247,14 +253,18 @@ class ApiKeyLifecycleService:
             rotated_from_key_id=key.id,
         )
 
-        tenant = getattr(user, "tenant", None)
-        policy = cast(
-            dict[str, int | None], getattr(tenant, "api_key_policy", None) or {}
-        )
-        grace_hours = policy.get("rotation_grace_hours")
-        if grace_hours is None:
-            grace_hours = self.settings.api_key_rotation_grace_hours
-        grace_until = datetime.now(timezone.utc) + timedelta(hours=grace_hours)
+        disable_grace = bool(request and request.disable_grace_period)
+        if disable_grace:
+            grace_until = datetime.now(timezone.utc)
+        else:
+            tenant = getattr(user, "tenant", None)
+            policy = cast(
+                dict[str, int | None], getattr(tenant, "api_key_policy", None) or {}
+            )
+            grace_hours = policy.get("rotation_grace_hours")
+            if grace_hours is None:
+                grace_hours = self.settings.api_key_rotation_grace_hours
+            grace_until = datetime.now(timezone.utc) + timedelta(hours=grace_hours)
         await self.api_key_repo.update(
             key_id=key.id,
             tenant_id=key.tenant_id,
@@ -275,6 +285,7 @@ class ApiKeyLifecycleService:
                     extra={
                         "old_key_id": str(key.id),
                         "rotation_grace_until": grace_until.isoformat(),
+                        "grace_period_disabled": disable_grace,
                     },
                 ),
                 ip_address=ip_address,

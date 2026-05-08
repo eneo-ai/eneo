@@ -135,22 +135,67 @@
   let scopeId = $state<string | null>(untrack(() => lockedScopeId ?? null));
   let manualScopeId = $state("");
 
-  // Narrow scopes (assistant/app) can only ever reach one resource type, so
-  // the per-resource-type matrix surfaces dead knobs. Only tenant- and
-  // space-scoped keys expose fine-grained permissions.
-  const scopeAllowsFineGrained = $derived(scopeType === "tenant" || scopeType === "space");
-
   // Fine-grained permissions (HuggingFace-style)
   type ResourcePermission = "none" | "read" | "write" | "admin";
+  type ResourcePermissionKey =
+    | "assistants"
+    | "apps"
+    | "spaces"
+    | "knowledge"
+    | "conversations"
+    | "files"
+    | "jobs"
+    | "prompts";
+
+  const ALL_RESOURCE_PERMISSION_KEYS: ReadonlyArray<ResourcePermissionKey> = [
+    "assistants",
+    "apps",
+    "spaces",
+    "knowledge",
+    "conversations",
+    "files",
+    "jobs",
+    "prompts"
+  ];
+
+  // Keep in sync with backend `_SCOPE_RESOURCE_PERMISSION_FIELDS` and
+  // `_SCOPE_REQUIRED_RESOURCE_PERMISSION_FIELD` in
+  // backend/src/intric/authentication/api_key_policy.py — drift will surface
+  // as a 400 from the policy validator when the form submits.
+  const SCOPE_RESOURCE_PERMISSION_KEYS: Record<
+    ApiKeyScopeType,
+    ReadonlyArray<ResourcePermissionKey>
+  > = {
+    tenant: ALL_RESOURCE_PERMISSION_KEYS,
+    space: ALL_RESOURCE_PERMISSION_KEYS,
+    assistant: ["assistants", "conversations", "files"],
+    app: ["apps", "files"]
+  };
+
+  const scopeAllowsFineGrained = $derived(scopeType in SCOPE_RESOURCE_PERMISSION_KEYS);
+  const scopeResourcePermissionKeys = $derived(SCOPE_RESOURCE_PERMISSION_KEYS[scopeType] ?? []);
+  const requiredResourcePermissionKey = $derived.by<ResourcePermissionKey | null>(() => {
+    switch (scopeType) {
+      case "assistant":
+        return "assistants";
+      case "app":
+        return "apps";
+      default:
+        return null;
+    }
+  });
 
   // Per-resource permission levels
-  let assistantsPermission = $state<ResourcePermission>("none");
-  let appsPermission = $state<ResourcePermission>("none");
-  let spacesPermission = $state<ResourcePermission>("none");
-  let knowledgePermission = $state<ResourcePermission>("none");
+  let assistantsPermission = $state<ResourcePermission>("read");
+  let appsPermission = $state<ResourcePermission>("read");
+  let spacesPermission = $state<ResourcePermission>("read");
+  let knowledgePermission = $state<ResourcePermission>("read");
+  let conversationsPermission = $state<ResourcePermission>("read");
+  let filesPermission = $state<ResourcePermission>("read");
+  let jobsPermission = $state<ResourcePermission>("read");
+  let promptsPermission = $state<ResourcePermission>("read");
 
-  // Permission mode
-  let permissionMode = $state<"simple" | "fine-grained">("simple");
+  const usesResourcePermissions = $derived(scopeAllowsFineGrained);
 
   // Step 3: Security settings
   let allowedOrigins = $state<string[]>([]);
@@ -198,10 +243,109 @@
   const flyX = $derived(stepDirection === "forward" ? 30 : -30);
 
   // Count active fine-grained permissions
-  const activeResourceCount = $derived(
-    [assistantsPermission, appsPermission, spacesPermission, knowledgePermission].filter(
-      (p) => p !== "none"
+  const visibleResourceCount = $derived(
+    scopeResourcePermissionKeys.filter(
+      (key) => keyType !== "pk_" || (key !== "jobs" && key !== "prompts")
     ).length
+  );
+  const activeResourceCount = $derived(
+    scopeResourcePermissionKeys.filter(
+      (key) =>
+        (keyType !== "pk_" || (key !== "jobs" && key !== "prompts")) &&
+        getResourcePermission(key) !== "none"
+    ).length
+  );
+  const effectivePermission = $derived.by<ApiKeyPermission>(() => {
+    if (keyType === "pk_") return "read";
+    if (!usesResourcePermissions) return permission;
+
+    const levels = scopeResourcePermissionKeys.map(getResourcePermission);
+    if (levels.includes("admin")) return "admin";
+    if (levels.includes("write")) return "write";
+    return "read";
+  });
+
+  type ResourcePermissionOption = {
+    key: ResourcePermissionKey;
+    label: () => string;
+    description: () => string;
+    icon: typeof MessageSquare;
+  };
+
+  // jobs/prompts are infrastructure concepts that browser-side end-users do
+  // not understand; the backend rejects them on pk_ keys, so the UI hides
+  // them too.
+  const PK_FORBIDDEN_RESOURCES: ReadonlySet<ResourcePermissionKey> = new Set(["jobs", "prompts"]);
+
+  const allResourcePermissionOptions: ReadonlyArray<ResourcePermissionOption> = [
+    {
+      key: "assistants",
+      label: () =>
+        scopeType === "assistant"
+          ? m.api_keys_resource_selected_assistant()
+          : m.api_keys_resource_assistants(),
+      description: () =>
+        scopeType === "assistant"
+          ? m.api_keys_resource_selected_assistant_desc()
+          : m.api_keys_resource_assistants_desc(),
+      icon: MessageSquare
+    },
+    {
+      key: "apps",
+      label: () =>
+        scopeType === "app"
+          ? m.api_keys_resource_selected_app()
+          : m.api_keys_resource_applications(),
+      description: () =>
+        scopeType === "app"
+          ? m.api_keys_resource_selected_app_desc()
+          : m.api_keys_resource_applications_desc(),
+      icon: AppWindow
+    },
+    {
+      key: "spaces",
+      label: () => m.api_keys_resource_spaces(),
+      description: () => m.api_keys_resource_spaces_desc(),
+      icon: Building2
+    },
+    {
+      key: "knowledge",
+      label: () => m.api_keys_resource_knowledge(),
+      description: () => m.api_keys_resource_knowledge_desc(),
+      icon: Sparkles
+    },
+    {
+      key: "conversations",
+      label: () => m.api_keys_resource_conversations(),
+      description: () => m.api_keys_resource_conversations_desc(),
+      icon: MessageSquare
+    },
+    {
+      key: "files",
+      label: () => m.api_keys_resource_files(),
+      description: () => m.api_keys_resource_files_desc(),
+      icon: Copy
+    },
+    {
+      key: "jobs",
+      label: () => m.api_keys_resource_jobs(),
+      description: () => m.api_keys_resource_jobs_desc(),
+      icon: Settings2
+    },
+    {
+      key: "prompts",
+      label: () => m.api_keys_resource_prompts(),
+      description: () => m.api_keys_resource_prompts_desc(),
+      icon: Pencil
+    }
+  ];
+
+  const resourcePermissionOptions = $derived(
+    allResourcePermissionOptions.filter(
+      (opt) =>
+        scopeResourcePermissionKeys.includes(opt.key) &&
+        (keyType !== "pk_" || !PK_FORBIDDEN_RESOURCES.has(opt.key))
+    )
   );
 
   // Scope-aware capability preview rows for the "What this key can do" box.
@@ -283,28 +427,15 @@
   $effect(() => {
     if (keyType === "pk_" && permission !== "read") {
       permission = "read";
-      permissionMode = "simple";
     }
   });
 
-  // When the simple permission level changes, sync all fine-grained
-  // permissions to match — simple mode acts as a "set all" shortcut. Only
-  // runs for scopes that expose the fine-grained matrix; narrow scopes
-  // never read the per-resource state.
+  // Effect: clear forbidden resources when switching to pk_ so a stale value
+  // (e.g. from editing an sk_ key, then toggling type) never reaches submit.
   $effect(() => {
-    if (permissionMode === "simple" && scopeAllowsFineGrained) {
-      const level =
-        permission === "read"
-          ? "read"
-          : permission === "write"
-            ? "write"
-            : permission === "admin"
-              ? "admin"
-              : "none";
-      assistantsPermission = level as ResourcePermission;
-      appsPermission = level as ResourcePermission;
-      spacesPermission = level as ResourcePermission;
-      knowledgePermission = level as ResourcePermission;
+    if (keyType === "pk_") {
+      if (jobsPermission !== "none") jobsPermission = "none";
+      if (promptsPermission !== "none") promptsPermission = "none";
     }
   });
 
@@ -313,15 +444,6 @@
     if (scopeType && !scopeLocked) {
       scopeId = null;
       manualScopeId = "";
-    }
-  });
-
-  // Narrow scopes don't support fine-grained mode — snap back to simple so
-  // a user who flipped the toggle under a wide scope and then switched to a
-  // narrow one doesn't end up with a hidden-but-active fine-grained state.
-  $effect(() => {
-    if (!scopeAllowsFineGrained && permissionMode === "fine-grained") {
-      permissionMode = "simple";
     }
   });
 
@@ -454,19 +576,32 @@
     allowedIps = key.allowed_ips ?? [];
     expiresAt = key.expires_at ?? null;
     rateLimit = key.rate_limit?.toString() ?? "";
-    const scopeSupportsFineGrained = key.scope_type === "tenant" || key.scope_type === "space";
+    const scopeSupportsFineGrained = key.scope_type in SCOPE_RESOURCE_PERMISSION_KEYS;
     if (key.resource_permissions && scopeSupportsFineGrained) {
-      permissionMode = "fine-grained";
       assistantsPermission = (key.resource_permissions.assistants ?? "none") as ResourcePermission;
       appsPermission = (key.resource_permissions.apps ?? "none") as ResourcePermission;
       spacesPermission = (key.resource_permissions.spaces ?? "none") as ResourcePermission;
       knowledgePermission = (key.resource_permissions.knowledge ?? "none") as ResourcePermission;
+      conversationsPermission = (key.resource_permissions.conversations ??
+        "none") as ResourcePermission;
+      filesPermission = (key.resource_permissions.files ?? "none") as ResourcePermission;
+      jobsPermission = (key.resource_permissions.jobs ?? "none") as ResourcePermission;
+      promptsPermission = (key.resource_permissions.prompts ?? "none") as ResourcePermission;
     } else {
-      permissionMode = "simple";
-      assistantsPermission = "none";
-      appsPermission = "none";
-      spacesPermission = "none";
-      knowledgePermission = "none";
+      if (key.key_type === "pk_") {
+        applyPublicKeyDefaults();
+      } else if (scopeSupportsFineGrained) {
+        setAllPermissions(key.permission as ResourcePermission);
+      } else {
+        assistantsPermission = "none";
+        appsPermission = "none";
+        spacesPermission = "none";
+        knowledgePermission = "none";
+        conversationsPermission = "none";
+        filesPermission = "none";
+        jobsPermission = "none";
+        promptsPermission = "none";
+      }
     }
   }
 
@@ -555,14 +690,14 @@
     errorMessage = null;
     isSubmitting = true;
 
-    // For sk_ keys, always send resource_permissions — backend derives
-    // the effective `permission` ceiling from them automatically.
-    // For pk_ keys, resource_permissions must be null.
+    // For sk_ fine-grained keys, the backend derives the effective
+    // `permission` ceiling from resource_permissions. For pk_ keys, the same
+    // shape is used as a read/no-access allowlist.
     const request: ApiKeyCreateRequest = {
       name: name.trim(),
       description: description.trim() || null,
       key_type: keyType,
-      permission,
+      permission: effectivePermission,
       scope_type: scopeType,
       scope_id: scopeType === "tenant" ? null : scopeId || manualScopeId.trim() || null,
       ownership: ownership,
@@ -570,15 +705,9 @@
       allowed_ips: keyType === "sk_" && allowedIps.length > 0 ? allowedIps : null,
       expires_at: expiresAt,
       rate_limit: rateLimit ? Number(rateLimit) : null,
-      resource_permissions:
-        keyType === "sk_" && scopeAllowsFineGrained && permissionMode === "fine-grained"
-          ? {
-              assistants: assistantsPermission as ResourcePermissionLevel,
-              apps: appsPermission as ResourcePermissionLevel,
-              spaces: spacesPermission as ResourcePermissionLevel,
-              knowledge: knowledgePermission as ResourcePermissionLevel
-            }
-          : null
+      resource_permissions: shouldSendResourcePermissions()
+        ? buildResourcePermissionsRequest()
+        : null
     };
 
     try {
@@ -600,27 +729,20 @@
 
     errorMessage = null;
 
-    // resource_permissions only persists when the user explicitly picked
-    // fine-grained. Simple mode (and narrow scopes, which have no fine-grained
-    // UI) rely on the flat `permission` field — the backend falls back to it
-    // as a uniform ceiling when resource_permissions is null.
-    const editScopeAllowsFineGrained =
-      apiKey.scope_type === "tenant" || apiKey.scope_type === "space";
-    const nextResourcePermissions =
-      apiKey.key_type === "sk_" && editScopeAllowsFineGrained && permissionMode === "fine-grained"
-        ? {
-            assistants: assistantsPermission as ResourcePermissionLevel,
-            apps: appsPermission as ResourcePermissionLevel,
-            spaces: spacesPermission as ResourcePermissionLevel,
-            knowledge: knowledgePermission as ResourcePermissionLevel
-          }
-        : null;
+    // Fine-grained permissions are scope-aware; hidden resource types are sent
+    // as "none" so the backend can reject unexpected access consistently.
+    const editScopeAllowsFineGrained = apiKey.scope_type in SCOPE_RESOURCE_PERMISSION_KEYS;
+    const nextResourcePermissions = editScopeAllowsFineGrained
+      ? buildResourcePermissionsRequest()
+      : null;
 
     const updates: ApiKeyUpdateRequest = {};
     if (name.trim() !== apiKey.name) updates.name = name.trim();
     const desc = description.trim();
     if (desc !== (apiKey.description ?? "")) updates.description = desc || null;
-    if (permission !== apiKey.permission) updates.permission = permission;
+    if (!editScopeAllowsFineGrained && permission !== apiKey.permission) {
+      updates.permission = permission;
+    }
     const parsedRate = rateLimit ? Number(rateLimit) : null;
     if (parsedRate !== (apiKey.rate_limit ?? null)) updates.rate_limit = parsedRate;
     if (
@@ -699,11 +821,7 @@
     keyType = "sk_";
     ownership = "user";
     permission = "read";
-    permissionMode = "simple";
-    assistantsPermission = "none";
-    appsPermission = "none";
-    spacesPermission = "none";
-    knowledgePermission = "none";
+    setAllPermissions("read");
     scopeType = lockedScopeType ?? "tenant";
     scopeId = lockedScopeId ?? null;
     manualScopeId = "";
@@ -726,12 +844,149 @@
     }
   }
 
-  // Quick action to set all fine-grained permissions
+  // Quick action to set all fine-grained permissions. Honors the same
+  // invariants as the per-row setter — required scope fields can't be "none"
+  // (clamped to "read") and pk_ keys can't go above "read" (clamped to "none").
   function setAllPermissions(level: ResourcePermission) {
-    assistantsPermission = level;
-    appsPermission = level;
-    spacesPermission = level;
-    knowledgePermission = level;
+    const clamp = (key: ResourcePermissionKey): ResourcePermission => {
+      if (isLevelAllowed(key, level)) return level;
+      if (key === requiredResourcePermissionKey && level === "none") return "read";
+      return "none";
+    };
+    assistantsPermission = clamp("assistants");
+    appsPermission = clamp("apps");
+    spacesPermission = clamp("spaces");
+    knowledgePermission = clamp("knowledge");
+    conversationsPermission = clamp("conversations");
+    filesPermission = clamp("files");
+    jobsPermission = clamp("jobs");
+    promptsPermission = clamp("prompts");
+  }
+
+  function applyPublicKeyDefaults() {
+    permission = "read";
+    assistantsPermission = "read";
+    appsPermission = "read";
+    spacesPermission = "none";
+    knowledgePermission = "none";
+    conversationsPermission = "none";
+    filesPermission = "none";
+    jobsPermission = "none";
+    promptsPermission = "none";
+  }
+
+  function selectKeyType(type: ApiKeyType) {
+    keyType = type;
+    if (type === "pk_") {
+      applyPublicKeyDefaults();
+    } else {
+      permission = "read";
+      setAllPermissions("read");
+    }
+  }
+
+  function getResourcePermission(key: ResourcePermissionKey): ResourcePermission {
+    const permission = (() => {
+      switch (key) {
+        case "assistants":
+          return assistantsPermission;
+        case "apps":
+          return appsPermission;
+        case "spaces":
+          return spacesPermission;
+        case "knowledge":
+          return knowledgePermission;
+        case "conversations":
+          return conversationsPermission;
+        case "files":
+          return filesPermission;
+        case "jobs":
+          return jobsPermission;
+        case "prompts":
+          return promptsPermission;
+      }
+    })();
+
+    if (key === requiredResourcePermissionKey && permission === "none") return "read";
+    return permission;
+  }
+
+  function setResourcePermission(key: ResourcePermissionKey, level: ResourcePermission) {
+    if (!isLevelAllowed(key, level)) return;
+
+    switch (key) {
+      case "assistants":
+        assistantsPermission = level;
+        break;
+      case "apps":
+        appsPermission = level;
+        break;
+      case "spaces":
+        spacesPermission = level;
+        break;
+      case "knowledge":
+        knowledgePermission = level;
+        break;
+      case "conversations":
+        conversationsPermission = level;
+        break;
+      case "files":
+        filesPermission = level;
+        break;
+      case "jobs":
+        jobsPermission = level;
+        break;
+      case "prompts":
+        promptsPermission = level;
+        break;
+    }
+  }
+
+  function buildResourcePermissionsRequest() {
+    const allowedKeys = new Set(scopeResourcePermissionKeys);
+    return {
+      assistants: (allowedKeys.has("assistants")
+        ? getResourcePermission("assistants")
+        : "none") as ResourcePermissionLevel,
+      apps: (allowedKeys.has("apps")
+        ? getResourcePermission("apps")
+        : "none") as ResourcePermissionLevel,
+      spaces: (allowedKeys.has("spaces")
+        ? getResourcePermission("spaces")
+        : "none") as ResourcePermissionLevel,
+      knowledge: (allowedKeys.has("knowledge")
+        ? getResourcePermission("knowledge")
+        : "none") as ResourcePermissionLevel,
+      conversations: (allowedKeys.has("conversations")
+        ? getResourcePermission("conversations")
+        : "none") as ResourcePermissionLevel,
+      files: (allowedKeys.has("files")
+        ? getResourcePermission("files")
+        : "none") as ResourcePermissionLevel,
+      jobs: (allowedKeys.has("jobs")
+        ? getResourcePermission("jobs")
+        : "none") as ResourcePermissionLevel,
+      prompts: (allowedKeys.has("prompts")
+        ? getResourcePermission("prompts")
+        : "none") as ResourcePermissionLevel
+    };
+  }
+
+  function shouldSendResourcePermissions() {
+    return scopeAllowsFineGrained;
+  }
+
+  function getResourceAccessScopeMessage() {
+    switch (scopeType) {
+      case "tenant":
+        return m.api_keys_scope_resource_access_link_tenant();
+      case "space":
+        return m.api_keys_scope_resource_access_link_space();
+      case "assistant":
+        return m.api_keys_scope_resource_access_link_assistant();
+      case "app":
+        return m.api_keys_scope_resource_access_link_app();
+    }
   }
 
   // Permission level display config — uses eneo's semantic state tokens
@@ -752,19 +1007,6 @@
         return "border-warning-default bg-warning-default/10 text-warning-stronger";
       case "admin":
         return "border-negative-default bg-negative-default/10 text-negative-stronger";
-    }
-  }
-
-  function getLevelBadgeClasses(level: ResourcePermission): string {
-    switch (level) {
-      case "none":
-        return "bg-subtle text-default";
-      case "read":
-        return "bg-accent-default/15 text-accent-default";
-      case "write":
-        return "bg-warning-default/15 text-warning-stronger";
-      case "admin":
-        return "bg-negative-default/15 text-negative-stronger";
     }
   }
 
@@ -813,8 +1055,9 @@
     return id ? `${label} ${id.slice(0, 8)}` : label;
   }
 
-  function isLevelAllowed(_level: ResourcePermission): boolean {
-    return true;
+  function isLevelAllowed(key: ResourcePermissionKey, level: ResourcePermission): boolean {
+    if (key === requiredResourcePermissionKey && level === "none") return false;
+    return keyType !== "pk_" || level === "none" || level === "read";
   }
 </script>
 
@@ -1054,7 +1297,7 @@
                       <!-- Secret Key -->
                       <button
                         type="button"
-                        onclick={() => (keyType = "sk_")}
+                        onclick={() => selectKeyType("sk_")}
                         aria-pressed={keyType === "sk_"}
                         disabled={!isCreateMode}
                         class="group focus-visible:ring-accent-default relative rounded-xl border-2 p-5 text-left transition-all duration-200 hover:scale-[1.02] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 active:scale-[0.98]
@@ -1105,7 +1348,7 @@
                            introducing new tokens. -->
                       <button
                         type="button"
-                        onclick={() => (keyType = "pk_")}
+                        onclick={() => selectKeyType("pk_")}
                         aria-pressed={keyType === "pk_"}
                         disabled={!isCreateMode}
                         class="label-amethyst group focus-visible:ring-accent-default relative rounded-xl border-2 p-5 text-left transition-all duration-200 hover:scale-[1.02] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 active:scale-[0.98]
@@ -1155,58 +1398,6 @@
                 <!-- Step 2: Scope & Permissions -->
                 <div class="space-y-6">
                   <h3 class="sr-only">{m.api_keys_step_scope_sr()}</h3>
-                  <!-- Permission Mode Toggle (hidden for public keys; disabled for narrow
-                       scopes since they can only ever reach one resource type and the
-                       per-resource matrix would just surface dead knobs — keeping it
-                       rendered prevents the step from reflowing when scope changes) -->
-                  {#if keyType !== "pk_"}
-                    <div class="border-default flex items-center justify-between border-b pb-4">
-                      <div>
-                        <span
-                          id="permission-type-label"
-                          class="text-default text-sm font-semibold tracking-wide"
-                          >{m.api_keys_permission_type()}</span
-                        >
-                        <p class="text-muted mt-0.5 text-xs">
-                          {scopeAllowsFineGrained
-                            ? m.api_keys_permission_choose()
-                            : m.api_keys_permission_narrow_scope_hint()}
-                        </p>
-                      </div>
-                      <div
-                        role="group"
-                        aria-labelledby="permission-type-label"
-                        class="border-default bg-subtle flex items-center gap-1 rounded-lg border p-1 {readonly ||
-                        !scopeAllowsFineGrained
-                          ? 'pointer-events-none opacity-60'
-                          : ''}"
-                      >
-                        <button
-                          type="button"
-                          onclick={() => (permissionMode = "simple")}
-                          disabled={readonly || !scopeAllowsFineGrained}
-                          class="rounded-md px-4 py-2 text-sm font-medium transition-all
-                               {permissionMode === 'simple'
-                            ? 'bg-primary text-default shadow-sm'
-                            : 'text-muted hover:text-secondary'}"
-                        >
-                          {m.api_keys_simple()}
-                        </button>
-                        <button
-                          type="button"
-                          onclick={() => (permissionMode = "fine-grained")}
-                          disabled={readonly || !scopeAllowsFineGrained}
-                          class="rounded-md px-4 py-2 text-sm font-medium transition-all
-                               {permissionMode === 'fine-grained'
-                            ? 'bg-primary text-default shadow-sm'
-                            : 'text-muted hover:text-secondary'}"
-                        >
-                          {m.api_keys_fine_grained()}
-                        </button>
-                      </div>
-                    </div>
-                  {/if}
-
                   <!-- Key Ownership Toggle (admin only) -->
                   {#if isAdmin}
                     <div class="border-default border-b pb-4">
@@ -1260,7 +1451,7 @@
                         </p>
                       {/if}
                     </div>
-                    {#if ownership === "service" && scopeType === "tenant" && (permission === "write" || permission === "admin")}
+                    {#if ownership === "service" && scopeType === "tenant" && (effectivePermission === "write" || effectivePermission === "admin")}
                       <div
                         class="border-warning-default/40 bg-warning-dimmer/40 text-warning-stronger dark:bg-warning-dimmer/20 rounded-lg border p-3 text-xs"
                       >
@@ -1272,136 +1463,224 @@
                     {/if}
                   {/if}
 
-                  {#if permissionMode === "simple" || !scopeAllowsFineGrained}
-                    <!-- Simple Mode -->
-                    <div class="space-y-6">
-                      {#if scopeLocked}
-                        <!-- Locked scope indicator — contextual creation mode -->
-                        <div
-                          class="border-accent-default/20 bg-accent-default/5 rounded-xl border p-4"
-                        >
-                          <div class="flex items-center gap-3">
-                            <div
-                              class="bg-accent-default/15 flex h-10 w-10 items-center justify-center rounded-lg"
-                            >
-                              <LockedScopeIcon class="text-accent-default h-5 w-5" />
-                            </div>
-                            <div>
-                              <p class="text-default text-sm font-semibold">
-                                {lockedDisplayScopeName}
-                              </p>
-                              <p class="text-muted text-xs">
-                                {getScopeLabel(lockedDisplayScopeType)} · {m.api_keys_scope_locked()}
-                              </p>
-                            </div>
+                  <div class="space-y-6">
+                    {#if scopeLocked}
+                      <!-- Locked scope indicator — contextual creation mode -->
+                      <div
+                        class="border-accent-default/20 bg-accent-default/5 rounded-xl border p-4"
+                      >
+                        <div class="flex items-center gap-3">
+                          <div
+                            class="bg-accent-default/15 flex h-10 w-10 items-center justify-center rounded-lg"
+                          >
+                            <LockedScopeIcon class="text-accent-default h-5 w-5" />
+                          </div>
+                          <div>
+                            <p class="text-default text-sm font-semibold">
+                              {lockedDisplayScopeName}
+                            </p>
+                            <p class="text-muted text-xs">
+                              {getScopeLabel(lockedDisplayScopeType)} · {m.api_keys_scope_locked()}
+                            </p>
                           </div>
                         </div>
-                      {:else}
-                        <!-- Scope Type Selection -->
-                        <fieldset>
-                          <legend
-                            id="scope-type-label"
-                            class="text-default mb-3 block text-sm font-semibold tracking-wide"
-                            >{m.api_keys_scope()}</legend
-                          >
-                          <div
-                            class="grid grid-cols-2 gap-3 lg:grid-cols-4"
-                            role="group"
-                            aria-labelledby="scope-type-label"
-                          >
-                            {#each [{ value: "tenant", label: m.api_keys_scope_tenant(), icon: Building2, desc: m.api_keys_scope_tenant_desc() }, { value: "space", label: m.api_keys_scope_space(), icon: Building2, desc: m.api_keys_scope_space_desc() }, { value: "assistant", label: m.api_keys_scope_assistant(), icon: MessageSquare, desc: m.api_keys_scope_assistant_desc() }, { value: "app", label: m.api_keys_scope_app(), icon: AppWindow, desc: m.api_keys_scope_app_desc() }] as opt (opt.value)}
-                              {@const isSelected = scopeType === opt.value}
-                              {@const ScopeIcon = opt.icon}
+                      </div>
+                    {:else}
+                      <!-- Scope Type Selection -->
+                      <fieldset>
+                        <legend
+                          id="scope-type-label"
+                          class="text-default mb-3 block text-sm font-semibold tracking-wide"
+                          >{m.api_keys_scope()}</legend
+                        >
+                        <div
+                          class="grid grid-cols-2 gap-3 lg:grid-cols-4"
+                          role="group"
+                          aria-labelledby="scope-type-label"
+                        >
+                          {#each [{ value: "tenant", label: m.api_keys_scope_tenant(), icon: Building2, desc: m.api_keys_scope_tenant_desc() }, { value: "space", label: m.api_keys_scope_space(), icon: Building2, desc: m.api_keys_scope_space_desc() }, { value: "assistant", label: m.api_keys_scope_assistant(), icon: MessageSquare, desc: m.api_keys_scope_assistant_desc() }, { value: "app", label: m.api_keys_scope_app(), icon: AppWindow, desc: m.api_keys_scope_app_desc() }] as opt (opt.value)}
+                            {@const isSelected = scopeType === opt.value}
+                            {@const ScopeIcon = opt.icon}
+                            <button
+                              type="button"
+                              onclick={() => (scopeType = opt.value as ApiKeyScopeType)}
+                              aria-pressed={isSelected}
+                              class="focus-visible:ring-accent-default flex flex-col items-center gap-2 rounded-xl border-2 p-4 transition-all duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
+                                   {isSelected
+                                ? 'border-accent-default bg-accent-default/10 shadow-accent-default/20 dark:shadow-accent-default/10 shadow-md'
+                                : 'border-default bg-primary hover:border-dimmer hover:bg-subtle/50'}"
+                            >
+                              <div
+                                class="flex h-10 w-10 items-center justify-center rounded-lg transition-all duration-200 ease-out
+                                     {isSelected
+                                  ? 'bg-accent-default shadow-accent-default/30 text-white shadow-sm'
+                                  : 'bg-subtle text-muted'}"
+                              >
+                                <ScopeIcon class="h-5 w-5" />
+                              </div>
+                              <div class="text-center">
+                                <p
+                                  class="text-sm font-semibold tracking-wide {isSelected
+                                    ? 'text-accent-default'
+                                    : 'text-default'}"
+                                >
+                                  {opt.label}
+                                </p>
+                                <p class="text-muted text-[11px]">{opt.desc}</p>
+                              </div>
+                            </button>
+                          {/each}
+                        </div>
+                      </fieldset>
+
+                      <!-- Resource Selector -->
+                      {#if scopeType !== "tenant"}
+                        <div class="border-default bg-subtle rounded-xl border p-5">
+                          {#if loadingResources}
+                            <!-- Skeleton loading state -->
+                            <div class="space-y-3">
+                              <div class="flex items-center gap-3">
+                                <div class="bg-default/50 h-4 w-4 animate-pulse rounded"></div>
+                                <div class="bg-default/50 h-4 w-24 animate-pulse rounded"></div>
+                              </div>
+                              {#each [1, 2, 3] as _, i (i)}
+                                <div
+                                  class="border-default bg-primary flex items-center gap-3 rounded-lg border p-3"
+                                >
+                                  <div class="bg-default/50 h-8 w-8 animate-pulse rounded-lg"></div>
+                                  <div class="flex-1 space-y-2">
+                                    <div class="bg-default/50 h-4 w-32 animate-pulse rounded"></div>
+                                    <div class="bg-default/30 h-3 w-20 animate-pulse rounded"></div>
+                                  </div>
+                                  <div
+                                    class="bg-default/50 h-4 w-4 animate-pulse rounded-full"
+                                  ></div>
+                                </div>
+                              {/each}
+                            </div>
+                          {:else}
+                            <ScopeResourceSelector
+                              {scopeType}
+                              bind:value={scopeId}
+                              {spaces}
+                              assistants={assistantOptions}
+                              apps={appOptions}
+                            />
+                            <div class="border-default mt-4 border-t pt-4">
                               <button
                                 type="button"
-                                onclick={() => (scopeType = opt.value as ApiKeyScopeType)}
-                                aria-pressed={isSelected}
-                                class="focus-visible:ring-accent-default flex flex-col items-center gap-2 rounded-xl border-2 p-4 transition-all duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
-                                   {isSelected
-                                  ? 'border-accent-default bg-accent-default/10 shadow-accent-default/20 dark:shadow-accent-default/10 shadow-md'
-                                  : 'border-default bg-primary hover:border-dimmer hover:bg-subtle/50'}"
+                                class="text-muted hover:text-secondary mb-2 flex items-center gap-2 text-xs transition-colors"
                               >
-                                <div
-                                  class="flex h-10 w-10 items-center justify-center rounded-lg transition-all duration-200 ease-out
-                                     {isSelected
-                                    ? 'bg-accent-default shadow-accent-default/30 text-white shadow-sm'
-                                    : 'bg-subtle text-muted'}"
-                                >
-                                  <ScopeIcon class="h-5 w-5" />
-                                </div>
-                                <div class="text-center">
-                                  <p
-                                    class="text-sm font-semibold tracking-wide {isSelected
-                                      ? 'text-accent-default'
-                                      : 'text-default'}"
-                                  >
-                                    {opt.label}
-                                  </p>
-                                  <p class="text-muted text-[11px]">{opt.desc}</p>
-                                </div>
+                                <Info class="h-3.5 w-3.5" />
+                                {m.api_keys_enter_id_manually({ scopeType })}
                               </button>
-                            {/each}
-                          </div>
-                        </fieldset>
+                              <Input
+                                bind:value={manualScopeId}
+                                placeholder={m.api_keys_enter_uuid()}
+                                class="font-mono text-sm"
+                              />
+                            </div>
+                          {/if}
+                        </div>
+                      {/if}
+                    {/if}
 
-                        <!-- Resource Selector -->
-                        {#if scopeType !== "tenant"}
-                          <div class="border-default bg-subtle rounded-xl border p-5">
-                            {#if loadingResources}
-                              <!-- Skeleton loading state -->
-                              <div class="space-y-3">
-                                <div class="flex items-center gap-3">
-                                  <div class="bg-default/50 h-4 w-4 animate-pulse rounded"></div>
-                                  <div class="bg-default/50 h-4 w-24 animate-pulse rounded"></div>
+                    {#if usesResourcePermissions}
+                      <div
+                        class="border-default/70 bg-subtle/50 text-muted flex items-start gap-2 rounded-lg border px-3 py-2 text-xs"
+                      >
+                        <Info class="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        <span>
+                          {getResourceAccessScopeMessage()}
+                        </span>
+                      </div>
+                      <fieldset>
+                        <legend class="sr-only">
+                          {keyType === "pk_"
+                            ? m.api_keys_public_resource_access()
+                            : m.api_keys_resource_access()}
+                        </legend>
+                        <div class="mb-3 flex items-center justify-between gap-3">
+                          <div>
+                            <p class="text-default text-sm font-semibold tracking-wide">
+                              {keyType === "pk_"
+                                ? m.api_keys_public_resource_access()
+                                : m.api_keys_resource_access()}
+                            </p>
+                            <p class="text-muted mt-0.5 text-xs">
+                              {keyType === "pk_"
+                                ? m.api_keys_public_resource_access_desc()
+                                : m.api_keys_resource_access_desc()}
+                            </p>
+                          </div>
+                          <span class="text-muted shrink-0 text-xs">
+                            {m.api_keys_of_enabled({
+                              count: activeResourceCount,
+                              total: visibleResourceCount
+                            })}
+                          </span>
+                        </div>
+                        <div class="border-default overflow-hidden rounded-lg border">
+                          {#each resourcePermissionOptions as option (option.key)}
+                            {@const selectedLevel = getResourcePermission(option.key)}
+                            {@const ResourceIcon = option.icon}
+                            <div
+                              class="border-default bg-primary flex flex-col gap-3 border-b px-4 py-3 last:border-b-0 sm:flex-row sm:items-center"
+                            >
+                              <div class="flex min-w-0 flex-1 items-center gap-3">
+                                <div
+                                  class="bg-subtle text-muted flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+                                >
+                                  <ResourceIcon class="h-4.5 w-4.5" />
                                 </div>
-                                {#each [1, 2, 3] as _, i (i)}
-                                  <div
-                                    class="border-default bg-primary flex items-center gap-3 rounded-lg border p-3"
+                                <div class="min-w-0">
+                                  <p class="text-default text-sm font-semibold">
+                                    {option.label()}
+                                  </p>
+                                  <p class="text-muted text-xs">
+                                    {option.description()}
+                                  </p>
+                                </div>
+                              </div>
+                              <div
+                                role="radiogroup"
+                                aria-label={option.label()}
+                                class="grid grid-cols-2 gap-1.5 sm:flex sm:shrink-0"
+                              >
+                                {#each ["none", "read", "write", "admin"] as level (level)}
+                                  {@const typedLevel = level as ResourcePermission}
+                                  {@const allowed = isLevelAllowed(option.key, typedLevel)}
+                                  <button
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={selectedLevel === typedLevel}
+                                    onclick={() => setResourcePermission(option.key, typedLevel)}
+                                    disabled={!canEditAccess || !allowed}
+                                    class="focus:ring-accent-default/30 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-all focus:ring-2 focus:outline-none {getLevelClasses(
+                                      typedLevel,
+                                      selectedLevel === typedLevel
+                                    )} {!canEditAccess || !allowed
+                                      ? 'cursor-not-allowed opacity-40'
+                                      : ''}"
                                   >
-                                    <div
-                                      class="bg-default/50 h-8 w-8 animate-pulse rounded-lg"
-                                    ></div>
-                                    <div class="flex-1 space-y-2">
-                                      <div
-                                        class="bg-default/50 h-4 w-32 animate-pulse rounded"
-                                      ></div>
-                                      <div
-                                        class="bg-default/30 h-3 w-20 animate-pulse rounded"
-                                      ></div>
-                                    </div>
-                                    <div
-                                      class="bg-default/50 h-4 w-4 animate-pulse rounded-full"
-                                    ></div>
-                                  </div>
+                                    {getLevelLabel(typedLevel)}
+                                  </button>
                                 {/each}
                               </div>
-                            {:else}
-                              <ScopeResourceSelector
-                                {scopeType}
-                                bind:value={scopeId}
-                                {spaces}
-                                assistants={assistantOptions}
-                                apps={appOptions}
-                              />
-                              <div class="border-default mt-4 border-t pt-4">
-                                <button
-                                  type="button"
-                                  class="text-muted hover:text-secondary mb-2 flex items-center gap-2 text-xs transition-colors"
-                                >
-                                  <Info class="h-3.5 w-3.5" />
-                                  {m.api_keys_enter_id_manually({ scopeType })}
-                                </button>
-                                <Input
-                                  bind:value={manualScopeId}
-                                  placeholder={m.api_keys_enter_uuid()}
-                                  class="font-mono text-sm"
-                                />
-                              </div>
-                            {/if}
-                          </div>
-                        {/if}
-                      {/if}
-
+                            </div>
+                          {/each}
+                        </div>
+                        <div
+                          class="border-accent-default/30 bg-accent-default/5 mt-3 flex items-start gap-3 rounded-lg border px-4 py-3"
+                        >
+                          <Info class="text-accent-default mt-0.5 h-4 w-4 flex-shrink-0" />
+                          <p class="text-accent-default text-xs leading-relaxed">
+                            <!-- eslint-disable-next-line svelte/no-at-html-tags -- localized info is trusted i18n content -->
+                            {@html m.api_keys_fine_grained_info()}
+                          </p>
+                        </div>
+                      </fieldset>
+                    {:else}
                       <!-- Simple Permission Level -->
                       <fieldset>
                         <legend
@@ -1550,271 +1829,8 @@
                           </div>
                         </div>
                       </div>
-                    </div>
-                  {:else}
-                    <!-- Fine-grained Mode (HuggingFace style) -->
-                    <div class="space-y-5">
-                      <!-- Quick actions -->
-                      <div
-                        class="border-default bg-secondary/30 flex items-center justify-between rounded-lg border px-4 py-3"
-                      >
-                        <div class="flex items-center gap-3">
-                          <span class="text-muted text-sm">{m.api_keys_quick_set_all()}</span>
-                          <div class="flex gap-1">
-                            {#each ["none", "read", "write", "admin"] as level (level)}
-                              {@const allowed = isLevelAllowed(level as ResourcePermission)}
-                              <button
-                                type="button"
-                                onclick={() => setAllPermissions(level as ResourcePermission)}
-                                disabled={!canEditAccess || !allowed}
-                                class="focus:ring-accent-default/30 rounded-md border px-3 py-1.5 text-xs font-medium transition-all hover:shadow-sm focus:ring-2 focus:outline-none {getLevelClasses(
-                                  level as ResourcePermission,
-                                  false
-                                )} {!canEditAccess || !allowed
-                                  ? 'cursor-not-allowed opacity-40'
-                                  : ''}"
-                              >
-                                {getLevelLabel(level as ResourcePermission)}
-                              </button>
-                            {/each}
-                          </div>
-                        </div>
-                        <span class="text-muted text-xs">
-                          {m.api_keys_of_enabled({ count: activeResourceCount })}
-                        </span>
-                      </div>
-
-                      <!-- Two-column permission grid - responsive at md breakpoint -->
-                      <div class="grid gap-3 md:grid-cols-2">
-                        <!-- Assistants -->
-                        <div class="border-default bg-primary overflow-hidden rounded-xl border">
-                          <div
-                            class="from-subtle to-primary/50 border-default/60 border-b bg-gradient-to-b px-5 py-4"
-                          >
-                            <div class="flex items-center justify-between">
-                              <div class="flex items-center gap-3">
-                                <div
-                                  class="bg-primary border-default/80 flex h-9 w-9 items-center justify-center rounded-lg border shadow-sm"
-                                >
-                                  <MessageSquare class="text-secondary h-5 w-5" />
-                                </div>
-                                <div>
-                                  <h4 class="text-default text-sm font-semibold">
-                                    {m.api_keys_resource_assistants()}
-                                  </h4>
-                                  <p class="text-muted text-xs">
-                                    {m.api_keys_resource_assistants_desc()}
-                                  </p>
-                                </div>
-                              </div>
-                              <span
-                                class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold transition-all duration-200 {getLevelBadgeClasses(
-                                  assistantsPermission
-                                )}"
-                              >
-                                {getLevelLabel(assistantsPermission)}
-                              </span>
-                            </div>
-                          </div>
-                          <div class="px-5 py-4">
-                            <div class="flex gap-2">
-                              {#each ["none", "read", "write", "admin"] as level (level)}
-                                {@const allowed = isLevelAllowed(level as ResourcePermission)}
-                                <button
-                                  type="button"
-                                  onclick={() =>
-                                    (assistantsPermission = level as ResourcePermission)}
-                                  disabled={!canEditAccess || !allowed}
-                                  class="focus:ring-accent-default/30 flex-1 rounded-lg border-2 px-3 py-2 text-xs font-medium transition-all focus:ring-2 focus:outline-none {getLevelClasses(
-                                    level as ResourcePermission,
-                                    assistantsPermission === level
-                                  )} {!canEditAccess || !allowed
-                                    ? 'cursor-not-allowed opacity-40'
-                                    : ''}"
-                                >
-                                  {getLevelLabel(level as ResourcePermission)}
-                                </button>
-                              {/each}
-                            </div>
-                          </div>
-                        </div>
-
-                        <!-- Apps -->
-                        <div
-                          class="border-default bg-primary permission-card-enter overflow-hidden rounded-xl border"
-                        >
-                          <div
-                            class="from-subtle to-primary/50 border-default/60 border-b bg-gradient-to-b px-5 py-4"
-                          >
-                            <div class="flex items-center justify-between">
-                              <div class="flex items-center gap-3">
-                                <div
-                                  class="bg-primary border-default/80 flex h-9 w-9 items-center justify-center rounded-lg border shadow-sm"
-                                >
-                                  <AppWindow class="text-secondary h-5 w-5" />
-                                </div>
-                                <div>
-                                  <h4 class="text-default text-sm font-semibold">
-                                    {m.api_keys_resource_applications()}
-                                  </h4>
-                                  <p class="text-muted text-xs">
-                                    {m.api_keys_resource_applications_desc()}
-                                  </p>
-                                </div>
-                              </div>
-                              <span
-                                class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold transition-all duration-200 {getLevelBadgeClasses(
-                                  appsPermission
-                                )}"
-                              >
-                                {getLevelLabel(appsPermission)}
-                              </span>
-                            </div>
-                          </div>
-                          <div class="px-5 py-4">
-                            <div class="flex gap-2">
-                              {#each ["none", "read", "write", "admin"] as level (level)}
-                                {@const allowed = isLevelAllowed(level as ResourcePermission)}
-                                <button
-                                  type="button"
-                                  onclick={() => (appsPermission = level as ResourcePermission)}
-                                  disabled={!canEditAccess || !allowed}
-                                  class="focus:ring-accent-default/30 flex-1 rounded-lg border-2 px-3 py-2 text-xs font-medium transition-all focus:ring-2 focus:outline-none {getLevelClasses(
-                                    level as ResourcePermission,
-                                    appsPermission === level
-                                  )} {!canEditAccess || !allowed
-                                    ? 'cursor-not-allowed opacity-40'
-                                    : ''}"
-                                >
-                                  {getLevelLabel(level as ResourcePermission)}
-                                </button>
-                              {/each}
-                            </div>
-                          </div>
-                        </div>
-
-                        <!-- Spaces -->
-                        <div
-                          class="border-default bg-primary permission-card-enter overflow-hidden rounded-xl border"
-                        >
-                          <div
-                            class="from-subtle to-primary/50 border-default/60 border-b bg-gradient-to-b px-5 py-4"
-                          >
-                            <div class="flex items-center justify-between">
-                              <div class="flex items-center gap-3">
-                                <div
-                                  class="bg-primary border-default/80 flex h-9 w-9 items-center justify-center rounded-lg border shadow-sm"
-                                >
-                                  <Building2 class="text-secondary h-5 w-5" />
-                                </div>
-                                <div>
-                                  <h4 class="text-default text-sm font-semibold">
-                                    {m.api_keys_resource_spaces()}
-                                  </h4>
-                                  <p class="text-muted text-xs">
-                                    {m.api_keys_resource_spaces_desc()}
-                                  </p>
-                                </div>
-                              </div>
-                              <span
-                                class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold transition-all duration-200 {getLevelBadgeClasses(
-                                  spacesPermission
-                                )}"
-                              >
-                                {getLevelLabel(spacesPermission)}
-                              </span>
-                            </div>
-                          </div>
-                          <div class="px-5 py-4">
-                            <div class="flex gap-2">
-                              {#each ["none", "read", "write", "admin"] as level (level)}
-                                {@const allowed = isLevelAllowed(level as ResourcePermission)}
-                                <button
-                                  type="button"
-                                  onclick={() => (spacesPermission = level as ResourcePermission)}
-                                  disabled={!canEditAccess || !allowed}
-                                  class="focus:ring-accent-default/30 flex-1 rounded-lg border-2 px-3 py-2 text-xs font-medium transition-all focus:ring-2 focus:outline-none {getLevelClasses(
-                                    level as ResourcePermission,
-                                    spacesPermission === level
-                                  )} {!canEditAccess || !allowed
-                                    ? 'cursor-not-allowed opacity-40'
-                                    : ''}"
-                                >
-                                  {getLevelLabel(level as ResourcePermission)}
-                                </button>
-                              {/each}
-                            </div>
-                          </div>
-                        </div>
-
-                        <!-- Knowledge -->
-                        <div
-                          class="border-default bg-primary permission-card-enter overflow-hidden rounded-xl border"
-                        >
-                          <div
-                            class="from-subtle to-primary/50 border-default/60 border-b bg-gradient-to-b px-5 py-4"
-                          >
-                            <div class="flex items-center justify-between">
-                              <div class="flex items-center gap-3">
-                                <div
-                                  class="bg-primary border-default/80 flex h-9 w-9 items-center justify-center rounded-lg border shadow-sm"
-                                >
-                                  <Sparkles class="text-secondary h-5 w-5" />
-                                </div>
-                                <div>
-                                  <h4 class="text-default text-sm font-semibold">
-                                    {m.api_keys_resource_knowledge()}
-                                  </h4>
-                                  <p class="text-muted text-xs">
-                                    {m.api_keys_resource_knowledge_desc()}
-                                  </p>
-                                </div>
-                              </div>
-                              <span
-                                class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold transition-all duration-200 {getLevelBadgeClasses(
-                                  knowledgePermission
-                                )}"
-                              >
-                                {getLevelLabel(knowledgePermission)}
-                              </span>
-                            </div>
-                          </div>
-                          <div class="px-5 py-4">
-                            <div class="flex gap-2">
-                              {#each ["none", "read", "write", "admin"] as level (level)}
-                                {@const allowed = isLevelAllowed(level as ResourcePermission)}
-                                <button
-                                  type="button"
-                                  onclick={() =>
-                                    (knowledgePermission = level as ResourcePermission)}
-                                  disabled={!canEditAccess || !allowed}
-                                  class="focus:ring-accent-default/30 flex-1 rounded-lg border-2 px-3 py-2 text-xs font-medium transition-all focus:ring-2 focus:outline-none {getLevelClasses(
-                                    level as ResourcePermission,
-                                    knowledgePermission === level
-                                  )} {!canEditAccess || !allowed
-                                    ? 'cursor-not-allowed opacity-40'
-                                    : ''}"
-                                >
-                                  {getLevelLabel(level as ResourcePermission)}
-                                </button>
-                              {/each}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- Info note -->
-                      <div
-                        class="border-accent-default/30 bg-accent-default/5 flex items-start gap-3 rounded-lg border px-4 py-3"
-                      >
-                        <Info class="text-accent-default mt-0.5 h-4 w-4 flex-shrink-0" />
-                        <p class="text-accent-default text-xs leading-relaxed">
-                          <!-- eslint-disable-next-line svelte/no-at-html-tags -- localized info is trusted i18n content -->
-                          {@html m.api_keys_fine_grained_info()}
-                        </p>
-                      </div>
-                    </div>
-                  {/if}
+                    {/if}
+                  </div>
                 </div>
               {:else if currentStep === 3}
                 <!-- Step 3: Security Settings -->

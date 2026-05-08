@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from intric.database.tables.api_keys_v2_table import ApiKeysV2 as ApiKeysV2Table
 from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
 from intric.main.config import get_settings, set_settings
 from intric.spaces.api.space_models import SpaceRoleValue
@@ -1480,6 +1481,79 @@ async def test_purge_active_key_rejected(client, default_user_token):
     )
     assert purge.status_code == 400
     assert purge.json()["code"] == "invalid_request"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_rotate_disable_grace_period_revokes_old_key_immediately(
+    client, db_container, default_user_token
+):
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Rotate Disable Grace",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    old_key_id = UUID(create_response.json()["api_key"]["id"])
+
+    rotate_response = await client.post(
+        f"/api/v1/api-keys/{old_key_id}/rotate",
+        json={"disable_grace_period": True},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert rotate_response.status_code == 200, rotate_response.text
+    new_key_id = UUID(rotate_response.json()["api_key"]["id"])
+    assert new_key_id != old_key_id
+
+    async with db_container() as container:
+        session = container.session()
+        grace_until = await session.scalar(
+            sa.select(ApiKeysV2Table.rotation_grace_until).where(
+                ApiKeysV2Table.id == old_key_id
+            )
+        )
+        assert grace_until is not None
+        assert grace_until <= datetime.now(timezone.utc)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_rotate_default_grace_period_keeps_old_key_active(
+    client, db_container, default_user_token
+):
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Rotate Default Grace",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    old_key_id = UUID(create_response.json()["api_key"]["id"])
+
+    rotate_response = await client.post(
+        f"/api/v1/api-keys/{old_key_id}/rotate",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert rotate_response.status_code == 200, rotate_response.text
+
+    async with db_container() as container:
+        session = container.session()
+        grace_until = await session.scalar(
+            sa.select(ApiKeysV2Table.rotation_grace_until).where(
+                ApiKeysV2Table.id == old_key_id
+            )
+        )
+        assert grace_until is not None
+        assert grace_until > datetime.now(timezone.utc)
 
 
 @pytest.mark.integration
