@@ -31,6 +31,8 @@ source_modules =
     intric.flows.flow_review_policy
     intric.flows.flow_retention_policy
     intric.flows.flow_retention_tombstone
+    intric.flows.flow_run_contract_models
+    intric.flows.flow_run_contract_service
     intric.flows.flow_run_evidence
     intric.flows.flow_run_evidence_bundle
     intric.flows.flow_run_evidence_export_manifest
@@ -42,6 +44,7 @@ source_modules =
     intric.flows.flow_run_rerun_request
     intric.flows.flow_run_step_inputs
     intric.flows.flow_run_step_result_file
+    intric.flows.flow_runtime_policy
     intric.flows.flow_security_classification
     intric.flows.flow_template_asset_repo
     intric.flows.flow_template_asset_service

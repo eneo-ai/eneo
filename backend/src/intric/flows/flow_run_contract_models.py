@@ -235,7 +235,16 @@ class FlowRunContractPublic(BaseModel):
             "status becomes `awaiting_review`."
         ),
     )
-    aggregate_max_files: int | None = None
+    aggregate_max_files: int | None = Field(
+        default=None,
+        description=(
+            "Total number of files a caller may attach across all runtime-input "
+            "steps for this published flow version. `0` means no published steps "
+            "currently require runtime files. `null` means at least one runtime "
+            "file-input step is intentionally unbounded, so clients should enforce "
+            "the per-step limits in `steps_requiring_input` instead."
+        ),
+    )
     template_readiness: list[FlowTemplateReadinessPublic] = Field(
         default_factory=lambda: cast(list[FlowTemplateReadinessPublic], [])
     )

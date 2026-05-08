@@ -8,13 +8,21 @@ Create Date: 2026-05-08 08:08:00.000000
 from __future__ import annotations
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision = "20260508_review_checkpoint_ui"
 down_revision = "20260506_merge_flow_session"
 branch_labels = None
 depends_on = None
+
+REVIEW_CHECKPOINT_REVIEW_MODE_VALUES = ("view", "edit")
+REVIEW_CHECKPOINT_OUTPUT_TYPE_VALUES = ("text", "json", "pdf", "docx")
+
+
+def _quoted_values(values: tuple[str, ...]) -> str:
+    return ",".join(f"'{value}'" for value in values)
 
 
 def upgrade() -> None:
@@ -37,12 +45,14 @@ def upgrade() -> None:
     op.create_check_constraint(
         "ck_flow_run_review_checkpoints_review_mode",
         "flow_run_review_checkpoints",
-        "review_mode IS NULL OR review_mode IN ('view','edit')",
+        "review_mode IS NULL "
+        f"OR review_mode IN ({_quoted_values(REVIEW_CHECKPOINT_REVIEW_MODE_VALUES)})",
     )
     op.create_check_constraint(
         "ck_flow_run_review_checkpoints_output_type",
         "flow_run_review_checkpoints",
-        "output_type IS NULL OR output_type IN ('text','json','pdf','docx')",
+        "output_type IS NULL "
+        f"OR output_type IN ({_quoted_values(REVIEW_CHECKPOINT_OUTPUT_TYPE_VALUES)})",
     )
 
 
