@@ -7471,7 +7471,9 @@ export interface components {
       allowed_origins?: string[] | null;
       /** Allowed Ips */
       allowed_ips?: string[] | null;
-      resource_permissions?: components["schemas"]["ResourcePermissions"] | null;
+      resource_permissions?: {
+        [key: string]: string;
+      } | null;
       state: components["schemas"]["ApiKeyState"];
       /** Expires At */
       expires_at?: string | null;
@@ -7532,7 +7534,9 @@ export interface components {
       allowed_origins?: string[] | null;
       /** Allowed Ips */
       allowed_ips?: string[] | null;
-      resource_permissions?: components["schemas"]["ResourcePermissions"] | null;
+      resource_permissions?: {
+        [key: string]: string;
+      } | null;
       state: components["schemas"]["ApiKeyState"];
       /** Expires At */
       expires_at?: string | null;
