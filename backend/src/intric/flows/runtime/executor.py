@@ -779,44 +779,6 @@ class FlowRunExecutor:
                 tenant_id=tenant_id,
                 flow_id=flow_id,
             )
-            if latest_run.status == FlowRunStatus.CANCELLED:
-                model_params = output.model_parameters_json or {}
-                attempt_start = _attempt_start_for_step(state=state, step=step)
-                cancel_requested_model = (
-                    model_params.get("model_name")
-                    if isinstance(model_params.get("model_name"), str)
-                    else None
-                )
-                cancel_provider = (
-                    model_params.get("provider")
-                    if isinstance(model_params.get("provider"), str)
-                    else None
-                )
-                if cancel_requested_model is None and attempt_start is not None:
-                    cancel_requested_model = attempt_start.requested_model
-                if cancel_provider is None and attempt_start is not None:
-                    cancel_provider = attempt_start.provider
-                await self.flow_run_repo.finish_attempt(
-                    run_id=run_id,
-                    step_id=step.step_id,
-                    attempt_no=attempt_no,
-                    tenant_id=tenant_id,
-                    status=FlowStepAttemptStatus.CANCELLED,
-                    error_code="run_cancelled",
-                    error_message="Run was cancelled during step execution.",
-                    requested_model=cancel_requested_model,
-                    provider=cancel_provider,
-                    num_tokens_input=output.num_tokens_input or None,
-                    num_tokens_output=output.num_tokens_output or None,
-                    provenance_json=_build_attempt_provenance(
-                        step=step,
-                        output=output,
-                        step_result=claimed_result,
-                        attempt_start=attempt_start,
-                    ),
-                )
-                await self._commit()
-                return {"status": "skipped", "reason": "run_cancelled"}
 
             success_plan = build_step_success_plan(
                 claimed=claimed_result,
@@ -834,7 +796,7 @@ class FlowRunExecutor:
                 ),
             )
             step_result = success_plan.step_result
-            await self._persist_successful_step(
+            persisted_step_result = await self._persist_successful_step(
                 run_id=run_id,
                 tenant_id=tenant_id,
                 step=step,
@@ -843,6 +805,13 @@ class FlowRunExecutor:
                 attempt_no=attempt_no,
                 attempt_start=_attempt_start_for_step(state=state, step=step),
             )
+            if persisted_step_result is None:
+                return await self._return_after_terminalized_step_write(
+                    run_id=run_id,
+                    flow_id=flow_id,
+                    tenant_id=tenant_id,
+                )
+            step_result = persisted_step_result
 
             state.append_completed(step_result)
 
@@ -873,11 +842,18 @@ class FlowRunExecutor:
                         error=exc,
                     )
 
-                step_result = await self._mark_webhook_delivery_success(
+                delivered_step_result = await self._mark_webhook_delivery_success(
                     run_id=run_id,
                     tenant_id=tenant_id,
                     step_result=step_result,
                 )
+                if delivered_step_result is None:
+                    return await self._return_after_terminalized_step_write(
+                        run_id=run_id,
+                        flow_id=flow_id,
+                        tenant_id=tenant_id,
+                    )
+                step_result = delivered_step_result
                 state.completed_by_order[step.step_order] = step_result
 
         results = await self.flow_run_repo.list_step_results(
@@ -1163,6 +1139,26 @@ class FlowRunExecutor:
         )
         return run.status == FlowRunStatus.CANCELLED
 
+    async def _return_after_terminalized_step_write(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID,
+        tenant_id: UUID,
+    ) -> dict[str, Any]:
+        run = await self.flow_run_repo.get(
+            run_id=run_id,
+            flow_id=flow_id,
+            tenant_id=tenant_id,
+        )
+        if run.status == FlowRunStatus.CANCELLED:
+            return {"status": "skipped", "reason": "run_cancelled"}
+        if run.status == FlowRunStatus.FAILED:
+            return {"status": "failed", "error": run.error_message}
+        raise RuntimeError(
+            "Step result write was skipped, but the flow run is not terminal."
+        )
+
     async def _handle_attempt_start_failure(
         self,
         *,
@@ -1364,8 +1360,8 @@ class FlowRunExecutor:
         step_result: FlowStepResult,
         attempt_no: int,
         attempt_start: AttemptStartProvenance | None,
-    ) -> None:
-        await self.flow_repo.save_step_result(
+    ) -> FlowStepResult | None:
+        saved_result = await self.flow_repo.save_step_result(
             run_id,
             step_result,
             tenant_id=tenant_id,
@@ -1375,6 +1371,9 @@ class FlowRunExecutor:
                 artifacts=output.artifacts,
             ),
         )
+        if saved_result is None:
+            await self._commit()
+            return None
         logger.info(
             "flow_executor.step_completed run_id=%s step_order=%d",
             run_id,
@@ -1401,6 +1400,7 @@ class FlowRunExecutor:
             ),
         )
         await self._commit()
+        return step_result
 
     async def _open_review_checkpoint_for_completed_step(
         self,
@@ -1515,15 +1515,17 @@ class FlowRunExecutor:
         run_id: UUID,
         tenant_id: UUID,
         step_result: FlowStepResult,
-    ) -> FlowStepResult:
+    ) -> FlowStepResult | None:
         delivered_result = with_webhook_delivery_status(
             step_result=step_result,
             delivered=True,
         )
-        await self.flow_repo.save_step_result(
+        saved_result = await self.flow_repo.save_step_result(
             run_id, delivered_result, tenant_id=tenant_id
         )
         await self._commit()
+        if saved_result is None:
+            return None
         return delivered_result
 
     async def _resolve_step_input(

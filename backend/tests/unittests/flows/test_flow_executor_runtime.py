@@ -2079,10 +2079,13 @@ async def test_execute_does_not_persist_step_after_run_cancelled_during_executio
         assistant_id=assistant_id,
     )
 
-    flow_run_repo.get = AsyncMock(side_effect=[queued_run, running_run, cancelled_run])
+    flow_run_repo.get = AsyncMock(
+        side_effect=[queued_run, running_run, cancelled_run, cancelled_run]
+    )
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
+    flow_repo.save_step_result = AsyncMock(return_value=None)
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -2132,12 +2135,8 @@ async def test_execute_does_not_persist_step_after_run_cancelled_during_executio
     )
 
     assert result == {"status": "skipped", "reason": "run_cancelled"}
-    flow_repo.save_step_result.assert_not_awaited()
-    flow_run_repo.finish_attempt.assert_awaited_once()
-    assert (
-        flow_run_repo.finish_attempt.await_args.kwargs["status"]
-        == FlowStepAttemptStatus.CANCELLED
-    )
+    flow_repo.save_step_result.assert_awaited_once()
+    flow_run_repo.finish_attempt.assert_not_awaited()
     executor.flow_run_terminalizer.terminalize_run.assert_not_awaited()
 
 

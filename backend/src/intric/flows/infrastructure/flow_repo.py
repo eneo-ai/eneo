@@ -30,7 +30,7 @@ from intric.database.tables.prompts_table import Prompts, PromptsAssistants
 from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.users_table import Users
 from intric.flows.domain.flow import Flow, FlowSparse, FlowStep, FlowStepResult
-from intric.flows.enums import FlowStepResultStatus
+from intric.flows.enums import ACTIVE_FLOW_RUN_STATUSES, FlowStepResultStatus
 from intric.flows.flow_factory import FlowFactory
 from intric.flows.flow_review_policy import FlowStepReviewPolicy
 from intric.flows.flow_run_step_result_file import FlowStepResultFileReference
@@ -50,6 +50,11 @@ def _review_policy_to_json(
     if review_policy is None:
         return None
     return review_policy.model_dump(mode="json")
+
+
+_ACTIVE_FLOW_RUN_STATUS_VALUES = tuple(
+    status.value for status in ACTIVE_FLOW_RUN_STATUSES
+)
 
 
 class FlowRepository:
@@ -533,11 +538,12 @@ class FlowRepository:
         session: AsyncSession | None = None,
         attempt_no: int = 1,
         result_file_references: Sequence[FlowStepResultFileReference] | None = None,
-    ) -> None:
+    ) -> FlowStepResult | None:
         """Persist a step result and optionally replace this attempt's file rows.
 
-        `None` leaves file rows untouched for non-success updates; an empty sequence
-        intentionally clears them.
+        Returns the persisted result, or None when the parent run is already terminal.
+        A `result_file_references` value of None leaves file rows untouched for
+        non-success updates; an empty sequence intentionally clears them.
         """
         db_session = session or self.session
 
@@ -570,17 +576,33 @@ class FlowRepository:
 
         if result.step_id is None:
             if result.id is None:
-                await db_session.execute(sa.insert(FlowStepResults).values(payload))
-                return
-            update_result = await db_session.execute(
+                saved = await db_session.scalar(
+                    sa.insert(FlowStepResults)
+                    .values(payload)
+                    .returning(FlowStepResults)
+                )
+                if saved is None:
+                    return None
+                return self.factory.from_flow_step_result_db(saved)
+            saved = await db_session.scalar(
                 sa.update(FlowStepResults)
                 .where(FlowStepResults.id == result.id)
                 .where(FlowStepResults.tenant_id == tenant_id)
                 .values(**payload)
+                .returning(FlowStepResults)
             )
-            if getattr(update_result, "rowcount", 0) == 0:
+            if saved is None:
                 raise NotFoundException("Flow step result not found for legacy update.")
-            return
+            return self.factory.from_flow_step_result_db(saved)
+
+        active_run_exists = (
+            sa.select(sa.literal(1))
+            .select_from(FlowRuns)
+            .where(FlowRuns.id == flow_run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status.in_(_ACTIVE_FLOW_RUN_STATUS_VALUES))
+            .exists()
+        )
 
         stmt = (
             pg_insert(FlowStepResults)
@@ -588,18 +610,20 @@ class FlowRepository:
             .on_conflict_do_update(
                 constraint="uq_flow_step_results_run_step",
                 set_=payload,
+                where=active_run_exists,
             )
             .returning(FlowStepResults)
         )
         saved = await db_session.scalar(stmt)
         if saved is None:
-            return
+            return None
         await self._replace_step_result_file_rows(
             db_session=db_session,
             result_row=saved,
             result_file_references=result_file_references,
             attempt_no=attempt_no,
         )
+        return self.factory.from_flow_step_result_db(saved)
 
     async def _replace_step_result_file_rows(
         self,

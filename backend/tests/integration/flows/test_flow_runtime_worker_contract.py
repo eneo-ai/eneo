@@ -312,6 +312,116 @@ async def _failure_state_from_fresh_session(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    ("target_status", "expected_worker_result", "expected_step_status"),
+    [
+        (
+            FlowRunStatus.CANCELLED,
+            {"status": "skipped", "reason": "run_cancelled"},
+            FlowStepResultStatus.CANCELLED,
+        ),
+        (
+            FlowRunStatus.FAILED,
+            {"status": "failed", "error": "Run was terminalized as failed."},
+            FlowStepResultStatus.FAILED,
+        ),
+    ],
+)
+async def test_late_output_after_terminalization_does_not_complete_attempt_or_webhook(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    target_status,
+    expected_worker_result,
+    expected_step_status,
+):
+    completion_service = SimpleNamespace(get_response=AsyncMock())
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+            output_mode="http_post",
+        )
+        await session.commit()
+
+        async def _terminalize_before_provider_success(**_kwargs):
+            async with sessionmanager.session() as terminal_session:
+                enable_autobegin_for_flow_task_session(terminal_session)
+                terminal_container = Container(
+                    session=providers.Object(terminal_session),
+                    user=providers.Object(admin_user),
+                    tenant=providers.Object(test_tenant),
+                )
+                await terminal_container.flow_run_terminalizer().terminalize_run(
+                    run_id=context.run_id,
+                    tenant_id=context.tenant_id,
+                    target_status=target_status,
+                    source=(
+                        FlowRunLifecycleSource.USER_CANCEL
+                        if target_status == FlowRunStatus.CANCELLED
+                        else FlowRunLifecycleSource.STALE_RUNNING_RECONCILER
+                    ),
+                    error_code=f"terminalized_{target_status.value}",
+                    error_message=f"Run was terminalized as {target_status.value}.",
+                )
+                await terminal_session.commit()
+            return SimpleNamespace(
+                completion="late provider success",
+                total_token_count=13,
+            )
+
+        completion_service.get_response.side_effect = (
+            _terminalize_before_provider_success
+        )
+        context.executor._deliver_webhook = AsyncMock()
+
+        worker_result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            celery_task_id=f"late-output-{target_status.value}",
+            retry_count=0,
+        )
+
+    (
+        run_row,
+        step_result_row,
+        attempt_rows,
+        outbox_rows,
+    ) = await _failure_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    assert worker_result == expected_worker_result
+    assert run_row is not None
+    assert run_row.status == target_status.value
+    assert step_result_row is not None
+    assert step_result_row.status == expected_step_status.value
+    assert step_result_row.output_payload_json is None
+    assert len(attempt_rows) == 1
+    assert attempt_rows[0].status == (
+        FlowStepAttemptStatus.CANCELLED.value
+        if target_status == FlowRunStatus.CANCELLED
+        else FlowStepAttemptStatus.FAILED.value
+    )
+    context.executor._deliver_webhook.assert_not_awaited()
+    assert FlowRunLifecycleSource.EXECUTOR_COMPLETED.value not in {
+        row.source for row in outbox_rows
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
     setup_database,
     admin_user,

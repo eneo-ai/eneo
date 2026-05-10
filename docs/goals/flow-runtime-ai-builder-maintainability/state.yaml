@@ -83,7 +83,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T015
+active_task: T017
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -623,7 +623,7 @@ tasks:
   - id: T015
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "After T014 is committed, choose the next highest-ROI safe slice: late-output terminalization race, public API golden journey, typed data boundary, or proof-only Scout if risk is unclear."
     inputs:
@@ -646,6 +646,160 @@ tasks:
       - "Claude plan-gate requirement and reason."
       - "Commit-readiness check for T014."
       - "Why this next slice is higher ROI than the alternatives."
+    receipt:
+      result: done
+      decision: "Select the remaining P0 late-output-after-terminalization race as the next Worker slice, with a blocking Claude plan gate before any source edit."
+      next_allowed_task: T016
+      completion_decision: "not_complete; remaining required runtime/API reliability work is still queued."
+      t014_commit_readiness:
+        committed: true
+        commit: "de251903 Persist flow run failed state across workers"
+        branch: "feature/refactor-flows-flowai"
+        branch_state: "ahead of origin by 4 local commits; no push observed"
+        clean_separation: true
+      why_now:
+        - "T003, T012, and T014 landed the required-input, review-edit validation, and failure-persistence P0s with local commits."
+        - "P0-late-output-after-terminalization is the remaining confirmed runtime correctness P0."
+        - "This data-integrity/runtime lifecycle risk outranks documenting the public API journey or typing JSONB boundaries."
+        - "The current success path checks cancellation after provider return, then FlowRepository.save_step_result upserts the result and replaces result-file rows without an active-run guard."
+      claude_plan_gate_required: true
+      claude_plan_gate_reason: "The slice is high ROI, but the cleanest ownership boundary is not fully settled: success persistence lives in FlowRepository.save_step_result, terminal lifecycle guards live in FlowRunRepository/FlowRunTerminalizer, and the fix must choose an atomic SQL pattern without creating parallel lifecycle ownership."
+      higher_roi_than_alternatives:
+        public_api_golden_journey: "Defer until terminal-state mutation semantics are guarded."
+        typed_data_boundary: "Defer; JSONB typing is P1 maintainability work and does not prevent late provider success from corrupting terminalized state."
+        proof_only_scout: "Not selected; enough evidence exists to define a bounded Worker and Claude plan gate covers the remaining ownership/SQL-shape uncertainty."
+        frontend: "Blocked until backend API/error contracts are stable and tested."
+
+  - id: T016
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "TDD-harden late provider success after terminalization so a run terminalized while a step is in flight cannot be overwritten by late success persistence, cannot have result-file rows replaced, and cannot reopen/complete attempts or downstream review/webhook/finalization paths."
+    allowed_files:
+      - "backend/src/intric/flows/runtime/executor.py"
+      - "backend/src/intric/flows/infrastructure/flow_repo.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+      - "backend/tests/integration/flows/test_flow_runtime_worker_contract.py"
+      - "backend/tests/integration/flows/test_flow_step_file_mapping_contract.py"
+      - "backend/tests/unittests/flows/test_flow_executor_runtime.py"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T016-late-output-terminalization-race.md"
+    verify:
+      - "Run Claude plan gate before edits using /Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py; require GREEN_LIGHT yes or return to Judge."
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py -k 'late_output or terminalized or result_file' -q"
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py -q"
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_step_file_mapping_contract.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py -k 'cancelled or terminal or step_completed or webhook' -q"
+      - "cd backend && uv run pyright src/intric/flows/runtime/executor.py src/intric/flows/infrastructure/flow_repo.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/unittests/flows/test_flow_executor_runtime.py"
+      - "cd backend && uv run ruff check src/intric/flows/runtime/executor.py src/intric/flows/infrastructure/flow_repo.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/unittests/flows/test_flow_executor_runtime.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/runtime/executor.py src/intric/flows/infrastructure/flow_repo.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/unittests/flows/test_flow_executor_runtime.py"
+      - "git diff --check"
+      - "git status --short --branch"
+    stop_if:
+      - "Claude plan gate returns GREEN_LIGHT no for correctness, ownership, transaction semantics, type contracts, test adequacy, data loss, or regression risk."
+      - "Need files outside allowed_files."
+      - "The red test cannot deterministically simulate terminalize-then-late-success with two sessions/fresh-session rereads; do not use sleep/timing guesses as proof."
+      - "The implementation is only an executor read-then-check or CANCELLED-only branch instead of an atomic repository/SQL guard."
+      - "The guard prevents result update but still allows result-file-row deletion/replacement after terminalization."
+      - "Executor success path cannot distinguish guarded no-op from success without ambiguous attempt/review/webhook/finalization semantics."
+      - "Fix requires API/schema/migration/generated-client/frontend/Celery/AI Builder changes."
+      - "Implementation creates a new lifecycle service, pass-through wrapper, interface, factory, generic helper, compatibility path, or second terminalization owner."
+      - "New Any, cast, type-ignore, or broad dict-shaped persisted/API boundary is introduced without explicit boundary reason."
+      - "Verification fails twice without a clear pre-existing unrelated cause."
+    receipt:
+      result: done
+      summary: "Hardened late provider success after terminalization with an atomic parent-run active-status guard in FlowRepository.save_step_result and executor no-op handling."
+      changed_files:
+        - "backend/src/intric/flows/infrastructure/flow_repo.py"
+        - "backend/src/intric/flows/runtime/executor.py"
+        - "backend/tests/integration/flows/test_flow_runtime_worker_contract.py"
+        - "backend/tests/integration/flows/test_flow_step_file_mapping_contract.py"
+        - "backend/tests/unittests/flows/test_flow_executor_runtime.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T016-late-output-terminalization-race.md"
+      behavior:
+        - "Late successful step-result writes after a parent run is failed/cancelled now return None and do not mutate the terminal step result."
+        - "Result-file rows are not deleted or replaced when the guarded write is rejected."
+        - "Executor success and webhook-success paths exit on guarded no-op before completing attempts, opening review checkpoints, delivering webhooks, or terminalizing as executor_completed."
+        - "Removed the old post-provider CANCELLED read-then-check branch and replaced it with repository-owned write-time protection that also covers FAILED."
+      ownership:
+        canonical_owner: "FlowRepository.save_step_result remains the canonical step-result/result-file writer; FlowRunTerminalizer remains the terminal lifecycle owner."
+        no_new_owner: true
+        no_parallel_writer: true
+      type_safety:
+        new_any: 0
+        new_cast: 0
+        new_type_ignore: 0
+        pyright: "0 errors, 0 warnings, 0 informations on touched backend files/tests."
+      tests:
+        red_proof:
+          - "Repository test initially failed because late save changed terminal step result from cancelled/failed to completed."
+        added_or_updated:
+          - "Parametrized repository test for CANCELLED and FAILED late save after terminalization, including result-file-row preservation."
+          - "Parametrized executor integration test for CANCELLED and FAILED provider-success-after-terminalization, including webhook/outbox assertions."
+          - "Updated executor unit test to assert guarded save no-op and no finish_attempt after late cancellation."
+      verification:
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py -k 'late_output or terminalized or result_file' -q -> 2 passed, 5 deselected"
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py -q -> 7 passed"
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_step_file_mapping_contract.py -q -> 4 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py -k 'cancelled or terminal or step_completed or webhook' -q -> 20 passed, 57 deselected"
+        - "cd backend && uv run pyright src/intric/flows/runtime/executor.py src/intric/flows/infrastructure/flow_repo.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/unittests/flows/test_flow_executor_runtime.py -> 0 errors, 0 warnings, 0 informations"
+        - "cd backend && uv run ruff check src/intric/flows/runtime/executor.py src/intric/flows/infrastructure/flow_repo.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/unittests/flows/test_flow_executor_runtime.py -> passed"
+        - "cd backend && uv run ruff format --check src/intric/flows/runtime/executor.py src/intric/flows/infrastructure/flow_repo.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/unittests/flows/test_flow_executor_runtime.py -> passed"
+        - "git diff --check -> passed"
+      commands:
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py -k 'late_output or terminalized or result_file' -q"
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py -q"
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_step_file_mapping_contract.py -q"
+        - "cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py -k 'cancelled or terminal or step_completed or webhook' -q"
+        - "cd backend && uv run pyright src/intric/flows/runtime/executor.py src/intric/flows/infrastructure/flow_repo.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/unittests/flows/test_flow_executor_runtime.py"
+        - "cd backend && uv run ruff check src/intric/flows/runtime/executor.py src/intric/flows/infrastructure/flow_repo.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/unittests/flows/test_flow_executor_runtime.py"
+        - "cd backend && uv run ruff format --check src/intric/flows/runtime/executor.py src/intric/flows/infrastructure/flow_repo.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/unittests/flows/test_flow_executor_runtime.py"
+        - "git diff --check"
+      claude:
+        session: "flow-runtime-maintainability-t016-late-output-terminalization"
+        plan_gate:
+          - ".codex/artifacts/claude-peer-loop-t016-late-output-terminalization-plan-gate-20260510T231150Z.md -> changes_required"
+          - ".codex/artifacts/claude-peer-loop-t016-late-output-terminalization-plan-gate-iteration-2-20260510T231656Z.md -> changes_required"
+          - ".codex/artifacts/claude-peer-loop-t016-late-output-terminalization-plan-gate-iteration-3-20260510T232134Z.md -> green, MIN_SCORE 8"
+        commit_gate:
+          - ".codex/artifacts/claude-peer-loop-t016-late-output-terminalization-implementation-review-20260510T234329Z.md -> green, MIN_SCORE 8"
+          - ".codex/artifacts/claude-peer-loop-t016-late-output-terminalization-final-verification-20260510T234529Z.md -> green, MIN_SCORE 9"
+      maintainability_delta:
+        score: 9
+        notes:
+          - "The change deepened an existing owner instead of creating a second lifecycle writer."
+          - "The new None return contract makes the write-lost-to-terminalization case explicit and typed."
+          - "Deterministic fresh-session tests reduce fear of changing runtime lifecycle code."
+      residual_risk:
+        - "Claude noted a separate review-open race after a completed step write and before opening a checkpoint; defer to a future review-lifecycle slice."
+        - "Legacy result.step_id is None save path remains unguarded and should be evaluated under the pre-production cleanup gate."
+
+  - id: T017
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "After the four confirmed P0 runtime/API correctness slices are locally committed, choose the next highest-ROI phase: public API golden journey, review-open residual race, typed JSONB/data boundary, or proof-only cleanup Scout."
+    inputs:
+      - "T003 required-input enforcement receipt"
+      - "T012 review-edit validation receipt"
+      - "T014 failure-persistence receipt"
+      - "T016 late-output terminalization receipt"
+      - "Goal charter maintainability rubric and cleanup/frontend gates"
+    constraints:
+      - "Read-only decision task."
+      - "Prefer the next phase that most reduces production-readiness and maintainability risk."
+      - "Do not activate frontend work before backend error/API contracts are stable and tested."
+      - "Do not activate cleanup unless the cleanup entry gate is satisfied."
+      - "If the best next phase is difficult to scope cleanly, require a Claude plan gate before Worker activation."
+    expected_output:
+      - "Decision and rationale."
+      - "Exactly one next Worker or Scout objective."
+      - "Allowed files if Worker."
+      - "Verification commands."
+      - "Stop conditions."
+      - "Why this outranks the alternatives."
+      - "Whether Claude plan gate is required."
     receipt: null
 
   - id: T006

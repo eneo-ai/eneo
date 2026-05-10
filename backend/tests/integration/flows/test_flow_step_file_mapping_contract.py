@@ -6,11 +6,14 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from intric.database.database import sessionmanager
 from intric.database.tables.files_table import Files
 from intric.database.tables.flow_tables import (
     FlowRuns,
     FlowRunStepInputFiles,
     FlowRunStepResultFiles,
+    FlowStepAttempts,
+    FlowStepResults,
 )
 from intric.flows import (
     Flow,
@@ -19,7 +22,13 @@ from intric.flows import (
     FlowStep,
     FlowVersionRepository,
 )
-from intric.flows.domain.flow import FlowStepResult
+from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
+from intric.flows.domain.flow import (
+    FlowRunStatus,
+    FlowStepAttemptStatus,
+    FlowStepResult,
+)
+from intric.flows.enums import FlowRunLifecycleSource
 from intric.flows.flow import FlowStepResultStatus
 from intric.flows.flow_run_step_result_file import FlowStepResultFileReference
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
@@ -119,6 +128,80 @@ async def _create_version(
             ],
         },
     )
+
+
+async def _create_running_step_file_flow(
+    *,
+    session,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    model = await completion_model_factory(session, "gpt-4o-mini")
+    space = await space_factory(session, "Flows terminal guard files", [model.id])
+    assistant = await assistant_factory(
+        session,
+        "Step result terminal guard assistant",
+        model.id,
+        space_id=space.id,
+    )
+    flow_repo = FlowRepository(session=session, factory=FlowFactory())
+    flow = await flow_repo.create(
+        flow=_flow(
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            user_id=admin_user.id,
+            assistant_id=assistant.id,
+        ),
+        tenant_id=admin_user.tenant_id,
+    )
+    flow = await flow_repo.update(
+        flow=flow.model_copy(update={"published_version": 1}),
+        tenant_id=admin_user.tenant_id,
+    )
+    await _create_version(
+        session=session,
+        flow=flow,
+        tenant_id=admin_user.tenant_id,
+    )
+    step = flow.steps[0]
+    run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+    run = await run_repo.create(
+        flow_id=flow.id,
+        flow_version=1,
+        user_id=admin_user.id,
+        principal_user_id=admin_user.id,
+        tenant_id=admin_user.tenant_id,
+        input_payload_json={"expected_flow_version": 1},
+        preseed_steps=[
+            {
+                "step_id": step.id,
+                "assistant_id": step.assistant_id,
+                "step_order": step.step_order,
+            }
+        ],
+    )
+    assert await run_repo.mark_running_if_claimable(
+        run_id=run.id,
+        tenant_id=admin_user.tenant_id,
+    )
+    claimed = await run_repo.claim_step_result(
+        run_id=run.id,
+        step_id=step.id,
+        tenant_id=admin_user.tenant_id,
+    )
+    assert claimed is not None
+    await run_repo.create_or_get_attempt_started(
+        run_id=run.id,
+        flow_id=flow.id,
+        tenant_id=admin_user.tenant_id,
+        step_id=step.id,
+        step_order=step.step_order,
+        attempt_no=1,
+        celery_task_id="terminal-guard-files",
+    )
+    return flow, step, run, run_repo
 
 
 @pytest.mark.asyncio
@@ -442,3 +525,139 @@ async def test_step_result_files_are_attempt_scoped_and_deduplicated(
     assert purged_projection is not None
     assert purged_projection.availability == "content_purged"
     assert cross_tenant_projection is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("target_status", "target_step_status", "target_attempt_status"),
+    [
+        (
+            FlowRunStatus.CANCELLED,
+            FlowStepResultStatus.CANCELLED,
+            FlowStepAttemptStatus.CANCELLED,
+        ),
+        (
+            FlowRunStatus.FAILED,
+            FlowStepResultStatus.FAILED,
+            FlowStepAttemptStatus.FAILED,
+        ),
+    ],
+)
+async def test_late_step_result_save_after_terminalization_preserves_result_files(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    target_status,
+    target_step_status,
+    target_attempt_status,
+):
+    async with sessionmanager.session() as setup_session, setup_session.begin():
+        late_file = _file(
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            name=f"late-{target_status.value}.pdf",
+        )
+        setup_session.add(late_file)
+        await setup_session.flush()
+        late_file_id = late_file.id
+        flow, step, run, run_repo = await _create_running_step_file_flow(
+            session=setup_session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+
+    async with sessionmanager.session() as terminal_session, terminal_session.begin():
+        run_repo = FlowRunRepository(session=terminal_session, factory=FlowFactory())
+        terminalizer = FlowRunTerminalizer(run_repo, run_repo.audit_outbox_repo)
+        await terminalizer.terminalize_run(
+            run_id=run.id,
+            tenant_id=admin_user.tenant_id,
+            target_status=target_status,
+            source=(
+                FlowRunLifecycleSource.USER_CANCEL
+                if target_status == FlowRunStatus.CANCELLED
+                else FlowRunLifecycleSource.STALE_RUNNING_RECONCILER
+            ),
+            error_code=f"terminalized_{target_status.value}",
+            error_message=f"Run was terminalized as {target_status.value}.",
+        )
+
+    async with sessionmanager.session() as late_session, late_session.begin():
+        late_result = FlowStepResult(
+            id=uuid4(),
+            flow_run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            step_id=step.id,
+            step_order=step.step_order,
+            assistant_id=step.assistant_id,
+            input_payload_json={"text": "late input"},
+            effective_prompt="late prompt",
+            output_payload_json={"text": "late output"},
+            model_parameters_json={},
+            num_tokens_input=1,
+            num_tokens_output=1,
+            status=FlowStepResultStatus.COMPLETED,
+            error_message=None,
+            flow_step_execution_hash="late-hash",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        late_save = await FlowRepository(
+            session=late_session, factory=FlowFactory()
+        ).save_step_result(
+            run.id,
+            late_result,
+            tenant_id=admin_user.tenant_id,
+            attempt_no=1,
+            result_file_references=[
+                FlowStepResultFileReference(
+                    file_id=late_file_id,
+                    source="generated_output",
+                )
+            ],
+        )
+
+    async with sessionmanager.session() as read_session, read_session.begin():
+        run_status = await read_session.scalar(
+            sa.select(FlowRuns.status).where(FlowRuns.id == run.id)
+        )
+        result_row = (
+            await read_session.execute(
+                sa.select(
+                    FlowStepResults.status,
+                    FlowStepResults.output_payload_json,
+                    FlowStepResults.error_message,
+                ).where(FlowStepResults.flow_run_id == run.id)
+            )
+        ).one()
+        attempt_status = await read_session.scalar(
+            sa.select(FlowStepAttempts.status).where(
+                FlowStepAttempts.flow_run_id == run.id
+            )
+        )
+        file_rows = (
+            (
+                await read_session.execute(
+                    sa.select(FlowRunStepResultFiles).where(
+                        FlowRunStepResultFiles.flow_run_id == run.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert late_save is None
+    assert run_status == target_status.value
+    assert result_row is not None
+    assert result_row.status == target_step_status.value
+    assert result_row.output_payload_json is None
+    assert result_row.error_message == f"Run was terminalized as {target_status.value}."
+    assert attempt_status == target_attempt_status.value
+    assert file_rows == []
