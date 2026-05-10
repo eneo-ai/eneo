@@ -364,17 +364,22 @@ def test_executor_accepts_grouped_config(user):
     assert executor.rag_max_reference_sources == 12
     assert executor.rag_max_chunks_per_source == 6
     assert executor.document_render_service.limits.max_source_chars == 123
-    assert executor._step_deadline_seconds(RuntimeStep(
-        step_id=uuid4(),
-        step_order=1,
-        assistant_id=uuid4(),
-        user_description=None,
-        input_source="flow_input",
-        input_bindings=None,
-        input_config=None,
-        output_mode="pass_through",
-        output_config=None,
-    )) == 70.0
+    assert (
+        executor._step_deadline_seconds(
+            RuntimeStep(
+                step_id=uuid4(),
+                step_order=1,
+                assistant_id=uuid4(),
+                user_description=None,
+                input_source="flow_input",
+                input_bindings=None,
+                input_config=None,
+                output_mode="pass_through",
+                output_config=None,
+            )
+        )
+        == 70.0
+    )
 
 
 def _assistant_for_execute_step(*, has_knowledge: bool):
@@ -1575,9 +1580,10 @@ async def test_llm_timeout_failure_retains_attempt_start_provenance(user):
     assert finish_kwargs["provider"] == "openai"
     persisted_attempt_start = finish_kwargs["provenance_json"]["attempt_start"]
     assert persisted_attempt_start["resolved_timeout_seconds"] == 1200
-    assert persisted_attempt_start["deadline_at"] == attempt_start.model_dump(
-        mode="json"
-    )["deadline_at"]
+    assert (
+        persisted_attempt_start["deadline_at"]
+        == attempt_start.model_dump(mode="json")["deadline_at"]
+    )
 
 
 @pytest.mark.asyncio

@@ -1193,6 +1193,7 @@ class FlowRunExecutor:
             error_code="step_attempt_start_failed",
             error_message=failure_plan.run_error_message,
         )
+        await self._commit()
         return failure_plan.return_result
 
     async def _handle_cancelled_step(
@@ -1297,6 +1298,7 @@ class FlowRunExecutor:
             error_code=failure_plan.error_code,
             error_message=failure_plan.run_error_message,
         )
+        await self._commit()
         return failure_plan.return_result
 
     async def _handle_generic_step_failure(
@@ -1349,6 +1351,7 @@ class FlowRunExecutor:
             error_code=failure_plan.error_code,
             error_message=failure_plan.run_error_message,
         )
+        await self._commit()
         return failure_plan.return_result
 
     async def _persist_successful_step(
@@ -1503,6 +1506,7 @@ class FlowRunExecutor:
             error_code="webhook_delivery_failed",
             error_message=f"Webhook delivery failed: {error}",
         )
+        await self._commit()
         return {"status": "failed", "error": str(error)}
 
     async def _mark_webhook_delivery_success(

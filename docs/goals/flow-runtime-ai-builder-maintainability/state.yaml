@@ -83,7 +83,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T013
+active_task: T015
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -528,7 +528,7 @@ tasks:
   - id: T013
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "After T012 is committed, choose the next highest-ROI safe slice: public API golden journey, remaining P0 runtime persistence/race risk, or a proof-only Scout if risk is unclear."
     inputs:
@@ -550,6 +550,102 @@ tasks:
       - "stop_if."
       - "Claude plan-gate requirement and reason."
       - "Follow-up disposition for review-edit validator-callback and OpenAPI examples."
+    receipt:
+      result: done
+      decision: "Select P0-runtime-failure-persistence Worker next."
+      next_allowed_task: T014
+      why_now:
+        - "T003 and T012 closed the first two API-visible P0 contract holes and are committed."
+        - "Runtime failure persistence is narrower and safer than the late-output race because it has a direct fresh-session DB proof target and does not need atomic complete-if-active race semantics."
+        - "Public API golden journey remains valuable, but remaining P0 durability risk should land first."
+      claude_plan_gate_required: false
+      claude_plan_gate_reason: "Ownership and red-test harness are concrete: FlowRunTerminalizer remains terminal lifecycle owner, FlowRunExecutor remains explicit commit/unit-of-work caller, and the existing runtime worker integration harness can provide fresh-session DB proof. Stop and return to Judge for Claude plan gate if transaction ownership must move or late-output atomic guards leak in."
+      t012_followups:
+        review_edit_validator_callback_followup: "defer until the next review-lifecycle slice that adds another edit/approve/reject/resume precondition hook."
+        review_edit_openapi_error_examples: "defer to public API golden journey or later API documentation polish."
+      summary: "Choose runtime failure persistence now. Defer public API golden journey, late-output race, frontend work, and cleanup."
+
+  - id: T014
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "TDD-harden executor failure persistence so generic step exceptions, typed I/O validation failures, and attempt-start failures persist FAILED run state, failed step-result state, failed/closed attempt state where applicable, and terminal audit outbox rows through fresh-session database re-fetches; keep FlowRunTerminalizer as terminal lifecycle owner and FlowRunExecutor as the explicit commit/unit-of-work caller."
+    allowed_files:
+      - "backend/src/intric/flows/runtime/executor.py"
+      - "backend/tests/integration/flows/test_flow_runtime_worker_contract.py"
+      - "backend/tests/unittests/flows/test_flow_executor_runtime.py"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T014-runtime-failure-persistence.md"
+    verify:
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py -k 'failure or terminal or cancelled' -q"
+      - "cd backend && uv run pyright src/intric/flows/runtime/executor.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/unittests/flows/test_flow_executor_runtime.py"
+      - "cd backend && uv run ruff check src/intric/flows/runtime/executor.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/unittests/flows/test_flow_executor_runtime.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/runtime/executor.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/unittests/flows/test_flow_executor_runtime.py"
+      - "git diff --check"
+      - "git status --short --branch"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "A fresh-session DB red test cannot be written in the existing runtime worker integration harness."
+      - "The fix requires moving transaction ownership into FlowRunTerminalizer or FlowRunRepository instead of keeping FlowRunExecutor as the explicit commit caller."
+      - "The fix changes public API schema/error contracts, migrations, generated clients, frontend code, Celery task routing, or AI Builder behavior."
+      - "Late-output-after-terminalization starts leaking into this slice: atomic complete-if-active guards, file-row replacement guards, race tests, or provider-success no-op semantics."
+      - "Implementation adds a new lifecycle service, wrapper, interface, factory, generic helper, compatibility path, or pass-through abstraction."
+      - "Only one failure sibling is fixed while generic failure, typed I/O failure, and attempt-start failure remain inconsistent."
+      - "Verification fails twice without a clear pre-existing unrelated cause."
+      - "New Any, cast, type-ignore, broad dict-shaped boundary, or source comment is introduced without explicit receipt justification."
+    receipt:
+      result: done
+      note: "notes/T014-runtime-failure-persistence.md"
+      changed_files:
+        - "backend/src/intric/flows/runtime/executor.py"
+        - "backend/tests/integration/flows/test_flow_runtime_worker_contract.py"
+        - "backend/tests/unittests/flows/test_flow_executor_runtime.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T014-runtime-failure-persistence.md"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      red_test: "Fresh-session DB tests failed before the fix because generic and attempt-start failure branches returned failed while the persisted run remained running; Claude iteration 1 identified the same missing commit in the webhook delivery failure branch."
+      commands:
+        - "PASS cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py -k 'failure_persists_failed_state' -q"
+        - "PASS cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py -q"
+        - "PASS cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py -k 'failure or terminal or cancelled' -q"
+        - "PASS cd backend && uv run pyright src/intric/flows/runtime/executor.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/unittests/flows/test_flow_executor_runtime.py"
+        - "PASS cd backend && uv run ruff check src/intric/flows/runtime/executor.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/unittests/flows/test_flow_executor_runtime.py"
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/runtime/executor.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/unittests/flows/test_flow_executor_runtime.py"
+        - "PASS git diff --check"
+      claude_iteration_1: "changes_required, GREEN_LIGHT no, MIN_SCORE 7: found missing commit in _handle_webhook_delivery_failure and unused test-context step_id. Accepted."
+      claude_iteration_2: "green, GREEN_LIGHT yes, MIN_SCORE 9."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t014-runtime-failure-persistence-commit-gate-20260510T225136Z.md"
+        - ".codex/artifacts/claude-peer-loop-t014-runtime-failure-persistence-commit-gate-iteration-2-20260510T225956Z.md"
+      maintainability_score: "9/10"
+      summary: "Executor failure terminalization now commits failed run state, result/attempt state, and audit outbox rows across generic step exceptions, typed output validation failures, attempt-start failures, and webhook delivery failures. FlowRunTerminalizer remains lifecycle owner and FlowRunExecutor remains explicit unit-of-work caller."
+
+  - id: T015
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "After T014 is committed, choose the next highest-ROI safe slice: late-output terminalization race, public API golden journey, typed data boundary, or proof-only Scout if risk is unclear."
+    inputs:
+      - "T014 receipt"
+      - "Current branch and dirty state after local commit"
+      - "Remaining confirmed P0 candidates and P1 maintainability findings"
+    constraints:
+      - "Do not implement."
+      - "Pick exactly one next Worker or Scout slice."
+      - "Prefer remaining runtime/API correctness over cleanup unless cleanup is required by the selected fix or already protected by behavior tests."
+      - "Choose long-term maintainability and reliability over quick fixes."
+      - "If transaction boundaries, API contract details, schema ownership, or implementation shape are uncertain, require a Claude plan gate before Worker activation."
+      - "Ask Claude for a second opinion when the cleanest long-term implementation path is ambiguous."
+      - "Do not select a frontend Worker until backend error contract for the touched endpoint is stable and tested."
+    expected_output:
+      - "Decision."
+      - "Exact Worker/Scout objective."
+      - "allowed_files and verify commands if Worker."
+      - "stop_if."
+      - "Claude plan-gate requirement and reason."
+      - "Commit-readiness check for T014."
+      - "Why this next slice is higher ROI than the alternatives."
     receipt: null
 
   - id: T006
