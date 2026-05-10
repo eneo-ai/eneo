@@ -1,0 +1,556 @@
+version: 2
+
+goal:
+  title: "Flow Runtime And AI Builder Maintainability / Production Readiness"
+  slug: "flow-runtime-ai-builder-maintainability"
+  kind: open_ended
+  tranche: "Backend-first maintainability and production-readiness hardening: fix P0 runtime/API risks, improve public API error contracts, type critical data boundaries, remove pre-production legacy/dead code after proof, and improve AI Builder material efficiency."
+  status: active
+
+context:
+  branch: "feature/refactor-flows-flowai"
+  repo_root: "/Users/ccimen/eneo/eneo"
+  do_not_push: true
+  stay_on_branch: "feature/refactor-flows-flowai"
+  preserve_unrelated_dirty_files: true
+  pre_production_no_live_users: true
+  compatibility_policy: "Do not preserve legacy/fallback behavior by default; keep only after grep/test/fixture/migration proof that it protects intended current product behavior."
+  codex_source_check: "docs/goals/flow-runtime-ai-builder-maintainability/notes/T000-codex-source-check.md"
+  source_packets:
+    - "docs/refactor/Chatgptanswer.md"
+    - "docs/refactor/flow-ai-builder-production-readiness-review-packet.md"
+    - "docs/refactor/flow-ai-builder-production-readiness-chatgpt-prompt.md"
+    - "docs/refactor/flow-ai-builder-material-efficiency-review-handoff.md"
+    - "docs/goals/flow-runtime-ai-builder-production-readiness/notes/T000-plan-synthesis.md"
+  claude_findings_summary: "docs/goals/flow-runtime-ai-builder-maintainability/notes/T000-maintainability-review-findings.md"
+  local_execution:
+    app_container: "docker exec eneo-41ae93-eneo-1 <command>"
+    db_container_psql: "docker exec -e PGPASSWORD=postgres eneo-41ae93-db-1 psql -U postgres -d postgres"
+    postgres_env:
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "postgres"
+      POSTGRES_PORT: "5432"
+      POSTGRES_HOST: "localhost"
+      POSTGRES_DB: "postgres"
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  tdd_red_before_p0_fix: true
+  strict_pyright_changed_files: true
+  no_push: true
+  stay_on_current_branch: true
+  local_commits_at_reviewable_intervals: true
+  commit_message_must_be_human_readable: true
+  commit_message_must_not_use_internal_planning_vocabulary: true
+  no_catch_all_commits: true
+  no_noisy_checkpoint_commits: true
+  board_setup_commit_must_be_separate: true
+  no_junk_artifacts_in_commits: true
+  no_broad_rewrites: true
+  no_shallow_pass_through_services: true
+  no_legacy_retention_without_proof: true
+  claude_plan_gate_required_for_ownership_contract_schema_or_test_uncertainty: true
+  claude_commit_gate_required_for_p0_api_runtime_data_boundary_phases: true
+  claude_self_review_allowed_for_low_risk_cleanup: true
+  claude_full_retrospective_required_at_phase_boundary: true
+  claude_review_required_before_phase_green_light: true
+  claude_iteration_required_after_major_phase_or_decision: true
+  claude_must_challenge_next_phase_before_green: true
+  claude_green_no_blocks_for_correctness_ownership_types_tests_api_regression_data_loss_security: true
+  claude_style_or_process_objections_can_be_overruled_with_evidence: true
+  maintainability_score_rubric_required: true
+  cleanup_entry_gate_required: true
+  frontend_worker_requires_stable_backend_contract: true
+  comments_explain_why_not_what: true
+  public_api_errors_are_contracts: true
+  frontend_error_states_follow_backend_contracts: true
+  worker_receipt_must_include_maintainability_self_review: true
+  worker_receipt_must_include_maintainability_rubric_score: true
+  worker_receipt_must_include_relevant_anti_patterns_avoided: true
+  no_new_any_or_cast_or_type_ignore_without_boundary_reason: true
+  worker_receipt_must_include_diff_type_debt_counts: true
+  worker_receipt_must_paste_added_or_changed_comments: true
+  board_must_be_committed_before_goal_implementation: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+active_task: T002
+
+confirmed_p0_candidates:
+  - id: P0-required-step-inputs-omitted
+    title: "Required runtime inputs are exposed by run contract but may be bypassed when step_inputs is omitted."
+    likely_first_slice: true
+    current_owner: "FlowRunService.create_run + flow_run_step_inputs + FlowRunContractService"
+    proposed_owner: "Run-request validator at the published run-contract/service boundary."
+    red_test_harness:
+      - "HTTP integration test through the real Flow run creation route, using the repo's existing API test client/fixtures."
+      - "Service-level test only as a supplement, not the sole proof."
+    red_test_required: true
+    maintainability_reason: "Aligns public contract, validation, idempotency, and API consumer behavior in one canonical path."
+    excludes:
+      - "Do not change successful create-run idempotency fingerprint canonicalization in this slice."
+  - id: P0-review-edit-contract-validation
+    title: "Review checkpoint edits may bypass output-contract validation."
+    current_owner: "FlowRunService.edit_review_checkpoint + FlowRunRepository edit persistence + runtime/output_runtime.py"
+    proposed_owner: "FlowRunService validates before persistence by directly reusing output_processing.validate_against_contract; no wrapper service."
+    red_test_harness:
+      - "Integration/service test that persists a review checkpoint, submits invalid edited payload, and proves checkpoint plus step result are unchanged."
+      - "Unit parity test proving review-edit validation and runtime output validation reject the same contract violation."
+    red_test_required: true
+    maintainability_reason: "Prevents review path from becoming a second schema-validity source of truth."
+  - id: P0-runtime-failure-persistence
+    title: "Executor failure terminalization may lose persisted failed state."
+    current_owner: "FlowExecutor + FlowRunTerminalizer + FlowRunRepository"
+    proposed_owner: "Smallest proven failure transition that delegates terminal lifecycle to FlowRunTerminalizer and commits explicitly."
+    red_test_harness:
+      - "Integration test using a real database/session and fresh-session re-fetch after the executor failure path fully exits."
+      - "Avoid AsyncMock-only proof for run, step result, attempt, or audit persistence."
+    red_test_required: true
+    maintainability_reason: "Reduces executor transaction-boundary fear and consolidates terminal lifecycle ownership."
+  - id: P0-late-output-after-terminalization
+    title: "Late provider success may overwrite or mutate terminalized run state."
+    current_owner: "FlowExecutor + FlowRepository.save_step_result + FlowRunRepository + FlowRunTerminalizer"
+    proposed_owner: "FlowRunRepository atomic complete-step-if-active guard; file-row replacement only after successful guard."
+    red_test_harness:
+      - "Integration race test with two sessions: one terminalizes the run while another attempts late success persistence."
+      - "Assert terminal status, step result status, attempt status, and file rows from a fresh session."
+    red_test_required: true
+    maintainability_reason: "Makes lifecycle correctness impossible to bypass accidentally in future executor changes."
+    implementation_shape:
+      - "Repository-owned atomic SQL guard, not read-then-check."
+      - "Guard must prevent both result update and result-file-row replacement when the run/attempt/result is no longer active."
+      - "Executor-level post-provider CANCELLED check is not the canonical lifecycle guard; remove it or document a non-duplicative reason to keep it in the Worker receipt."
+      - "If removing the executor CANCELLED branch, preserve or relocate its attempt-finalization/provenance behavior intentionally."
+
+contract_change_candidates:
+  - id: API-create-run-step-inputs-fingerprint-canonicalization
+    severity: P1
+    title: "Decide whether successful create-run requests with omitted step_inputs and empty step_inputs should share one idempotency fingerprint."
+    current_owner: "FlowRunService._build_idempotency_fingerprint and create_run effective payload shaping"
+    proposed_owner: "Run request canonicalization at the FlowRunService boundary"
+    red_test_harness:
+      - "Unit property/normalization test for create-run fingerprint input shape."
+      - "HTTP idempotency-key test if public behavior changes."
+    position: "Do not bundle into P0-required-step-inputs-omitted unless Judge proves it is required for that fix."
+
+maintainability_findings:
+  - id: API-golden-journey-missing
+    severity: P1
+    title: "No single public API golden proves a web app can run/review/fetch a flow without reading backend source."
+    proposed_owner: "Flow API integration tests + OpenAPI contract tests"
+    after: "first two P0s or immediately if touched endpoints need examples"
+    acceptance:
+      - "Client can inspect a published flow and discover runtime paths."
+      - "Client can fetch run contract and identify required form fields, required file inputs, final output type, review steps, and template readiness."
+      - "Missing required runtime input returns a typed documented HTTP error."
+      - "Valid run request can be created from the contract."
+      - "If review is present, client can fetch active checkpoint, submit invalid edit and receive typed error, submit valid edit, approve, and resume."
+      - "Client can poll status and fetch final output/artifact/evidence."
+      - "Every touched error body contains stable code, message, and useful context."
+      - "Idempotency-key replay behavior is either asserted when touched or explicitly deferred to API-create-run-step-inputs-fingerprint-canonicalization."
+  - id: JSONB-boundaries-typed
+    severity: P1
+    title: "Flow metadata and published definitions are still broad JSONB contracts with scattered readers."
+    proposed_owner: "PublishedFlowDefinitionV1 / FlowMetadataV1 typed parsers"
+    after: "P0s"
+  - id: PREPROD-legacy-cleanup
+    severity: P1
+    title: "Pre-production legacy/fallback paths and tests should be removed after local proof, not preserved for hypothetical users."
+    proposed_owner: "Per-feature owners; no generic cleanup owner"
+    after: "API golden protects intended behavior"
+    entry_gate:
+      - "Cleanup is required by the active P0 fix."
+      - "Public behavior/API golden test already protects intended replacement behavior."
+      - "Scout proves target is source-dead and no current test/fixture/migration depends on it."
+    proof_table_columns:
+      - "Candidate"
+      - "Intended replacement"
+      - "Grep proof"
+      - "Replacement behavior test path (or queued: <test name>)"
+      - "Migration/seed implication"
+      - "Decision"
+    allowed_decisions:
+      - "delete_now"
+      - "delete_after_tests"
+      - "delete_after_fixture_cleanup"
+      - "keep"
+  - id: AI-builder-material-efficiency
+    severity: P1
+    title: "Generated flows need measurable material routing and token/context efficiency, not only valid specs."
+    proposed_owner: "Existing AI Builder source-material/dataflow owners; no new parallel material planner unless red test proves need"
+    after: "runtime/API first P0s or when AI Builder touched"
+  - id: comments-ai-slop-audit
+    severity: P2
+    title: "Remove verbose what-comments, internal planning vocabulary, decorative confidence prose, vague TODOs, and obsolete compatibility comments."
+    proposed_owner: "Each touched slice; no standalone rewrite unless Scout finds widespread low-risk cleanup"
+  - id: frontend-error-handling-followthrough
+    severity: P1
+    title: "Backend error contracts must map to visible frontend states after public API behavior stabilizes."
+    proposed_owner: "Flow frontend run/review/error surfaces, selected by Scout after backend endpoint contract is stable"
+    after: "API golden journey or any backend error contract change that changes frontend-visible behavior"
+    entry_gate:
+      - "Backend error contract for touched endpoint is stable and tested."
+      - "Scout proves current UI cannot show the stable backend error code/message actionably, the path is part of API golden journey, or backend contract change would otherwise leave users with generic/misleading errors."
+      - "Frontend Worker stays narrow: render existing backend error contract clearly; no Flow UI redesign."
+  - id: lifecycle-method-naming-transaction-boundaries
+    severity: P1
+    title: "Runtime lifecycle method names and receipts should expose transaction and terminal-state invariants."
+    proposed_owner: "FlowRunTerminalizer, FlowRunRepository lifecycle methods, and FlowRunService validation boundary"
+    after: "during each P0 runtime/API fix"
+    acceptance:
+      - "Method names encode lifecycle invariant when a P0 touches runtime state."
+      - "Worker receipt states whether new/changed lifecycle method commits, requires caller commit, or only validates."
+      - "No wrapper method is added purely for naming if it does not clarify ownership."
+
+verify_first_findings:
+  - id: error-payload-drift
+    title: "Actual error payload drift from documented GeneralError."
+    position: "Do not classify as confirmed until an HTTP integration test captures real response body divergence. Bundle with public API golden slice."
+  - id: delete-candidates
+    title: "Static delete candidates may be false positives."
+    position: "Because Flows is pre-production, production DB proof is not required, but grep proof, test migration, fixture cleanup, and local migration/schema proof are required."
+  - id: metadata-vs-published-definition-priority
+    title: "FlowMetadataV1 vs PublishedFlowDefinitionV1 first after P0s."
+    position: "Decide after P0s based on actual corruption/mismatch evidence and fear-of-change reduction."
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Re-baseline current branch, dirty files, P0 evidence, maintainability hotspots, legacy/fallback candidates, comment quality, and exact verification commands."
+    inputs:
+      - "docs/goals/flow-runtime-ai-builder-maintainability/goal.md"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T000-codex-source-check.md"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T000-maintainability-review-findings.md"
+      - "docs/refactor/flow-ai-builder-production-readiness-review-packet.md"
+      - "docs/refactor/flow-ai-builder-material-efficiency-review-handoff.md"
+    constraints:
+      - "Read-only."
+      - "Do not modify source, tests, migrations, dependencies, generated clients, or dirty user files."
+      - "Verify packet claims against current branch."
+      - "Classify unrelated dirty files so Worker cannot stage them accidentally."
+      - "Identify AI-slop comments and legacy/fallback candidates, but do not delete yet."
+      - "Verify the current branch is feature/refactor-flows-flowai and flag any branch mismatch before Worker activation."
+    expected_output:
+      - "Dirty-file classification."
+      - "Confirmed/disputed P0 evidence."
+      - "Per-P0 red-test harness recommendation with exact existing fixtures/test clients to use."
+      - "Ranked first Worker slice with allowed_files, verify, and stop_if."
+      - "Maintainability hotspot list with canonical owner recommendation."
+      - "Pre-production legacy cleanup candidate list: delete now / delete after tests / keep."
+      - "Frontend error-handling follow-up needed for any touched backend API path."
+      - "Exact commands for pytest, pyright/typecheck, ruff, and OpenAPI tests, reconciled with current repo instructions and tooling."
+      - "Classification of untracked goal/refactor handoff files: commit board, preserve, ignore, or owner decision needed."
+      - "Recommended first docs-only commit subject if the board remains uncommitted."
+    receipt:
+      result: done
+      note: "notes/T001-scout-rebaseline.md"
+      summary: "Re-baselined branch, dirty files, P0 evidence, verification commands, cleanup candidates, and first Worker recommendation. Branch matches feature/refactor-flows-flowai; first recommended slice is required runtime input enforcement for omitted or empty step_inputs."
+      evidence:
+        - "backend/src/intric/flows/application/flow_run_service.py:459"
+        - "backend/src/intric/flows/flow_run_step_inputs.py:71"
+        - "backend/src/intric/flows/flow_run_step_inputs.py:196"
+        - "backend/src/intric/flows/application/flow_run_service.py:942"
+        - "backend/src/intric/flows/infrastructure/flow_repo.py:585"
+      next_recommended_task: T002
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the smallest safe first Worker slice and decide whether Claude plan gate is required under the tiered gate."
+    inputs:
+      - "T001 receipt"
+    constraints:
+      - "Do not implement."
+      - "Pick one P0 or one proof-only Scout follow-up; do not bundle cleanup with P0 unless it is required by the fix."
+      - "Run Claude plan gate only if canonical ownership, public API/error contract, schema/migration shape, red-test harness, or allowed files are uncertain."
+      - "Claude iteration must ask for areas to improve before green-lighting the Worker."
+      - "If Claude findings are rejected, cite source evidence and explain why proceeding is still cleaner."
+      - "Reject mock-call-only tests as insufficient for behavior bugs."
+      - "Reject broad rewrites, shallow services, and speculative abstractions."
+    expected_output:
+      - "Decision."
+      - "Exact Worker objective."
+      - "allowed_files."
+      - "verify commands."
+      - "stop_if."
+      - "red-test acceptance criteria."
+      - "maintainability self-review questions the Worker must answer."
+      - "red-test harness the Worker must use."
+      - "Whether create-run idempotency fingerprint canonicalization is in or out of the selected slice."
+      - "Verification that the maintainability board is committed or explicit owner approval to proceed with it uncommitted."
+      - "Confirmation that the next Worker will stay on feature/refactor-flows-flowai and will not push."
+      - "Claude plan-gate result and Codex response, or explicit reason the tiered gate did not require a plan gate."
+      - "Improvement areas Claude found before green light, plus accepted/rejected disposition."
+    receipt: null
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Execute the first safe P0 fix selected by T002 using TDD-first behavior tests."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "T002 did not set allowed_files."
+      - "T002 did not set concrete verify commands."
+      - "Need files outside allowed_files."
+      - "Cannot produce a meaningful red behavior test."
+      - "Fix requires broad architecture change."
+      - "Verification fails twice without a clear pre-existing cause."
+      - "A second P0 starts leaking into this slice."
+      - "Implementation introduces new Any/type-ignore/dict-shaped persisted payload without approved boundary reason."
+      - "Implementation adds a wrapper/service around output contract validation instead of direct reuse, unless Judge explicitly approved the abstraction."
+    receipt: null
+
+  - id: T004
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Run Claude/Codex commit gate on T003 implementation before local commit."
+    inputs:
+      - "T003 receipt"
+      - "Current diff"
+      - "Verification output"
+    constraints:
+      - "Do not implement."
+      - "No commit until green or explicit owner-approved exception."
+      - "Approve only a reviewable local commit interval; reject giant catch-all commits or noisy checkpoint commits."
+      - "Commit subject must be concise, human-readable, and describe the behavior or maintainability improvement."
+      - "Review maintainability, canonical owner, strict typing, public API behavior, rollback risk, error handling, comments, and AI Builder regression risk."
+      - "Claude gate must explicitly ask for maintainability improvements before approving the next phase."
+      - "If Claude gives green with suggestions, classify each as accept now, queue next, or reject with source evidence."
+      - "Reject green if Worker omitted diff counts for new Any/cast/type-ignore or did not paste added/changed comments."
+      - "Reject green if Worker did not name the relevant implementation anti-patterns and concrete choices that avoided them."
+    expected_output:
+      - "green | changes_required | blocked"
+      - "Whether to commit."
+      - "Recommended human-readable commit subject if green."
+      - "Residual risks."
+      - "Claude improvement areas and disposition before next phase."
+      - "Next slice recommendation."
+    receipt: null
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Execute the next P0 slice after T003 is committed and T004 permits continuation."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "T003 was not committed or was blocked."
+      - "Need a fresh Judge decision."
+      - "Need files outside allowed_files."
+      - "Cannot produce a meaningful red behavior test."
+    receipt: null
+
+  - id: T006
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Add public API golden journey and verify-first error payload assertion after early P0s stabilize run contract/review behavior."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "P0 required-input and review-edit slices are not complete or were blocked."
+      - "Journey requires frontend changes beyond backend API contract/error behavior."
+    receipt: null
+
+  - id: T011
+    type: scout
+    assignee: Scout
+    status: queued
+    reasoning_hint: medium
+    objective: "Map frontend-visible Flow error states after the public API golden journey identifies backend error contracts."
+    inputs:
+      - "T006 receipt"
+      - "Current backend API error contract"
+    constraints:
+      - "Read-only."
+      - "Do not redesign frontend broadly."
+      - "Focus on Flow run creation, missing inputs, review checkpoint edit conflicts/validation, artifact/output fetching, and retry/resume errors."
+    expected_output:
+      - "Current frontend owner components/routes."
+      - "Baseline table of backend Flow error codes rendered explicitly today vs falling through to generic handling."
+      - "Backend error codes that need user-facing rendering."
+      - "One bounded Worker candidate if frontend follow-through is needed."
+      - "Do-nothing verdict if current frontend already handles the contract clearly."
+    receipt: null
+
+  - id: T007
+    type: scout
+    assignee: Scout
+    status: queued
+    reasoning_hint: medium
+    objective: "Prepare pre-production legacy/dead-code cleanup with proof: grep, tests, fixture/migration implications, and delete/keep recommendations."
+    constraints:
+      - "Read-only unless Judge converts to Worker."
+      - "Do not delete in Scout."
+      - "Because no production users exist, do not require production DB proof; require local fixture/schema/migration proof."
+    expected_output:
+      - "Markdown cleanup table with columns: file:line, grep proof, current test coverage, replacement test path, fixture/migration implication, deletion class."
+      - "delete_now candidates."
+      - "delete_after_tests candidates."
+      - "delete_after_fixture_or_migration_cleanup candidates."
+      - "keep candidates."
+      - "tests to delete/collapse after superseding behavior tests."
+    receipt: null
+
+  - id: T008
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Execute one proof-backed pre-production legacy/dead-code cleanup slice after T007 and Judge approval."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "No proof-backed delete candidate exists."
+      - "Deletion touches unrelated P0 runtime/API behavior."
+      - "Deletion requires migration strategy not yet reviewed."
+    receipt: null
+
+  - id: T009
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Start the highest-ROI typed data-boundary slice: PublishedFlowDefinitionV1 or FlowMetadataV1, selected by fresh evidence."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "P0 slices are not stable."
+      - "No clear owner boundary is selected."
+      - "Would introduce large rewrite or shallow wrappers."
+      - "Model is added without forbid or explicit handling for unknown keys."
+      - "Introduces cast/Any to bridge old call sites instead of migrating them in the same slice."
+      - "Adds typed wrapper that does not become the canonical parser/serializer at the boundary."
+    receipt: null
+
+  - id: T010
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Improve AI Builder material efficiency with red golden/metrics if Scout proves source-material routing risk remains."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "No red/captured failing flow proves material loss."
+      - "Implementation introduces parallel material planner without Judge approval."
+      - "Introduces a parallel material-routing owner without red-test proof that one existing owner cannot be extended."
+      - "Fix uses all_previous_steps as a band-aid."
+    receipt: null
+
+  - id: T900
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Audit maintainability and production-readiness tranche."
+    inputs:
+      - "All done task receipts"
+      - "Last verification"
+      - "Current dirty diff"
+    constraints:
+      - "Do not implement."
+      - "Reject completion if safe required Worker work remains queued or active."
+      - "Run Claude loop before marking the tranche complete or before green-lighting a new major phase."
+      - "Ask Claude to identify maintainability, reliability, error-handling, test-quality, and dead-code improvements missed by prior tasks."
+    expected_output:
+      - "complete | not_complete"
+      - "maintainability score estimate"
+      - "remaining P0/P1/P2"
+      - "verification matrix"
+      - "merge-readiness"
+      - "Claude phase-gate result and improvement disposition"
+      - "next task if not complete"
+    receipt: null
+
+validation_command_candidates:
+  shared:
+    - "git status --short"
+    - "git diff --check"
+  P0-required-step-inputs-omitted:
+    expected_new_tests:
+      - "HTTP/API test: GET run-contract exposes required runtime input; POST run with omitted step_inputs returns typed 400 flow_run_required_step_input_missing."
+      - "HTTP/API test: POST run with step_inputs={} fails identically for the same required input."
+      - "Service test may supplement the HTTP proof, but cannot replace it."
+      - "Optional runtime input remains omittable."
+      - "Real HTTP response body includes a stable code, actionable message, and context step IDs."
+    excluded_from_first_slice:
+      - "Successful create-run idempotency fingerprint canonicalization for omitted vs empty step_inputs unless T002 explicitly includes the contract change."
+    typecheck_candidates:
+      - "cd backend && uv run pyright src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_contract_service.py src/intric/flows/flow_run_step_inputs.py <new_or_changed_tests>"
+    lint_candidates:
+      - "cd backend && uv run ruff check src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_contract_service.py src/intric/flows/flow_run_step_inputs.py <new_or_changed_tests>"
+      - "cd backend && uv run ruff format --check src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_contract_service.py src/intric/flows/flow_run_step_inputs.py <new_or_changed_tests>"
+  API-create-run-step-inputs-fingerprint-canonicalization:
+    expected_new_tests:
+      - "Unit/property test documents whether omitted step_inputs and empty step_inputs canonicalize identically for successful create-run fingerprint input."
+      - "HTTP idempotency-key behavior test if semantics change for public clients."
+    typecheck_candidates:
+      - "cd backend && uv run pyright src/intric/flows/application/flow_run_service.py <new_or_changed_tests>"
+    lint_candidates:
+      - "cd backend && uv run ruff check src/intric/flows/application/flow_run_service.py <new_or_changed_tests>"
+  P0-review-edit-contract-validation:
+    expected_new_tests:
+      - "Invalid review edit missing required contract property returns typed 400."
+      - "Wrong type returns typed 400."
+      - "Valid edit updates checkpoint and step result atomically."
+      - "Runtime output validator and review-edit validator parity using output_processing.validate_against_contract directly."
+  P0-runtime-failure-persistence:
+    expected_new_tests:
+      - "Generic step exception persists FAILED run/step/attempt/audit outbox from fresh session."
+      - "Typed validation exception persists FAILED run/step/attempt/audit outbox from fresh session."
+      - "Attempt-start failure persists FAILED run/step/audit outbox from fresh session."
+  P0-late-output-after-terminalization:
+    expected_new_tests:
+      - "Terminalize run while attempt is active; late success cannot mark step completed."
+      - "Late success cannot replace result file rows."
+      - "Executor reports skipped/no-op when completion guard fails."
+    implementation_guard:
+      - "Single repository-owned SQL guard, not read-then-check."
+      - "File-row replacement executes only after the guard succeeds."
+      - "Worker receipt records chosen SQL pattern: ON CONFLICT DO UPDATE WHERE vs split INSERT/UPDATE."
+      - "Race test receipt records deterministic session ordering, not naive parallel timing."
+  API-golden-journey:
+    expected_new_tests:
+      - "Fetch published flow and run contract."
+      - "Submit missing required input and assert typed error envelope."
+      - "Submit valid run payload."
+      - "Exercise active review checkpoint edit/approve/resume if flow has review."
+      - "Fetch final output/artifact/evidence."
+      - "OpenAPI contract assertions for touched operation IDs/examples."
+      - "Real HTTP error body assertions for at least flow_run_required_step_input_missing, flow_review_stale_revision, and flow_run_stale_version when those paths are touched."
+  AI-builder-material-efficiency:
+    expected_new_tests:
+      - "Compiled/golden flow asserts source text and structured fields are present in input_bindings.question."
+      - "Negative JSON-only flow does not receive unnecessary source-material normalization."
+      - "Metrics captured: binding byte size, fan-in width, structured field count, whole-output refs, source duplication, all_previous_steps count."
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: unknown
+    task: null
+    commands: []
