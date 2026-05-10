@@ -23,6 +23,10 @@ This is not a cosmetic refactor. The target is 9/10 maintainability and producti
 - behavior tests that catch real runtime/API failures,
 - less dead code, dead tests, legacy fallback, and AI-slop comments.
 
+When there is a tradeoff between a quick workaround and the cleaner long-term solution, choose the cleaner long-term solution. The right outcome is durable ownership, reliability, typed contracts, and human-readable code, not the smallest patch that happens to make one test pass.
+
+When the fine implementation details are difficult and the best path is unclear, discuss the decision with Claude before choosing. Use that second opinion for ambiguity that affects canonical ownership, public API behavior, data boundaries, runtime lifecycle semantics, error contracts, or long-term reliability. Do not use uncertainty as a reason for a quick workaround.
+
 Important context:
 Flows and Flow AI Builder are not in production and have no live users. Do not keep legacy/backwards-compatibility code merely out of fear. However, do not delete blindly. A deletion still needs grep proof, tests, fixture/migration implications, and a clear replacement behavior. Production DB proof is not required unless the owner explicitly says production-like data must be preserved.
 

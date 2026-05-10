@@ -84,6 +84,12 @@ Backend-first:
 7. **Generated flows must be smart, not just valid.**
    AI Builder output quality is part of maintainability. A flow that bloats context, drops source material, hides form fields, or relies on broad fan-in is a defect even if it runs.
 
+8. **Long-term maintainability wins over shortcuts.**
+   When a quick fix conflicts with cleaner ownership, typed contracts, durable error handling, or runtime reliability, choose the cleaner long-term solution. A slightly larger, well-scoped diff is acceptable when it reduces future fear of change and avoids a workaround that another engineer will need to undo.
+
+9. **Ask for peer pressure on difficult design choices.**
+   When the best implementation path is ambiguous and the decision affects canonical ownership, long-term reliability, public API behavior, data boundaries, or runtime lifecycle semantics, use Claude as a second opinion before committing to the direction. Do not guess through important uncertainty just to keep moving.
+
 ## Maintainability Score Rubric
 
 Every Worker receipt must estimate the maintainability delta using this rubric:

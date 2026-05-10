@@ -590,7 +590,9 @@ def test_openapi_run_contract_guides_consumer_forms_uploads_and_review(
     description = operation.get("description", "")
     schemas = openapi_spec.get("components", {}).get("schemas", {})
     run_contract = schemas.get("FlowRunContractPublic", {}).get("properties", {})
-    final_output = schemas.get("FlowFinalOutputContractPublic", {}).get("properties", {})
+    final_output = schemas.get("FlowFinalOutputContractPublic", {}).get(
+        "properties", {}
+    )
     form_field = schemas.get("FormFieldPublic", {}).get("properties", {})
     review_step = schemas.get("FlowReviewStepContractPublic", {}).get("properties", {})
 
@@ -1336,6 +1338,10 @@ def test_openapi_create_flow_run_documents_idempotency_contract(
     assert "flow_run_idempotency_conflict" in str(
         conflict_response.get("description", "")
     )
+    assert "flow_run_required_step_input_missing" in str(
+        conflict_response.get("description", "")
+    )
+    assert "context.step_ids" in str(conflict_response.get("description", ""))
 
 
 def test_openapi_flow_run_forbidden_docs_list_current_codes(

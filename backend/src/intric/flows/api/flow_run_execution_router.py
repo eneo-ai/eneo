@@ -205,9 +205,11 @@ def _result_files_by_run_id(
                 "Flow cannot be run in its current state or request payload is invalid. "
                 "Representative machine-readable codes include: flow_not_published, "
                 "flow_run_input_payload_too_large, flow_run_concurrency_limit_reached, "
-                "flow_input_required_field_missing, flow_input_invalid_number, and "
-                "flow_run_idempotency_conflict when an Idempotency-Key is replayed with "
-                "different input."
+                "flow_input_required_field_missing, flow_input_invalid_number, "
+                "flow_run_required_step_input_missing, and flow_run_idempotency_conflict "
+                "when an Idempotency-Key is replayed with different input. "
+                "Runtime step-input errors include context.step_ids so clients can "
+                "highlight the missing required upload controls."
             ),
             message="Flow must be published before creating runs.",
             intric_error_code=ErrorCodes.BAD_REQUEST,

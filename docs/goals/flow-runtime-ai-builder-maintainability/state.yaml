@@ -83,7 +83,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T002
+active_task: T005
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -269,7 +269,7 @@ tasks:
   - id: T002
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the smallest safe first Worker slice and decide whether Claude plan gate is required under the tiered gate."
     inputs:
@@ -296,32 +296,75 @@ tasks:
       - "Confirmation that the next Worker will stay on feature/refactor-flows-flowai and will not push."
       - "Claude plan-gate result and Codex response, or explicit reason the tiered gate did not require a plan gate."
       - "Improvement areas Claude found before green light, plus accepted/rejected disposition."
-    receipt: null
+    receipt:
+      result: done
+      note: "notes/T002-judge-first-worker.md"
+      decision: "Select P0-required-step-inputs-omitted as the first Worker slice. Do not run a Claude plan gate; keep Claude for the mandatory commit gate."
+      next_allowed_task: T003
+      summary: "Canonical ownership, allowed files, red-test harness, and error behavior are concrete enough to proceed to Worker. Successful create-run idempotency fingerprint canonicalization is out of scope."
 
   - id: T003
     type: worker
     assignee: Worker
-    status: queued
+    status: done
     reasoning_hint: medium
-    objective: "Execute the first safe P0 fix selected by T002 using TDD-first behavior tests."
-    allowed_files: []
-    verify: []
+    objective: "TDD-fix create-run required runtime input enforcement so required runtime step inputs reject omitted or empty step_inputs with flow_run_required_step_input_missing, without changing successful idempotency semantics."
+    allowed_files:
+      - "backend/src/intric/flows/application/flow_run_service.py"
+      - "backend/src/intric/flows/flow_run_step_inputs.py"
+      - "backend/src/intric/flows/api/flow_run_execution_router.py"
+      - "backend/tests/integration/flows/test_flow_consumer_api_contract.py"
+      - "backend/tests/unittests/flows/test_flow_run_service.py"
+      - "backend/tests/unit/test_flow_openapi_contract.py"
+    verify:
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_consumer_api_contract.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_run_service.py -k 'create_run and step_inputs' -q"
+      - "cd backend && uv run pytest tests/unit/test_flow_openapi_contract.py -q"
+      - "cd backend && uv run pyright src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_step_inputs.py src/intric/flows/api/flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unittests/flows/test_flow_run_service.py tests/unit/test_flow_openapi_contract.py"
+      - "cd backend && uv run ruff check src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_step_inputs.py src/intric/flows/api/flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unittests/flows/test_flow_run_service.py tests/unit/test_flow_openapi_contract.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_step_inputs.py src/intric/flows/api/flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unittests/flows/test_flow_run_service.py tests/unit/test_flow_openapi_contract.py"
+      - "git diff --check"
+      - "git status --short --branch"
     stop_if:
-      - "T002 did not set allowed_files."
-      - "T002 did not set concrete verify commands."
+      - "A meaningful red HTTP/API test cannot be written through the existing client and admin_token integration harness."
       - "Need files outside allowed_files."
-      - "Cannot produce a meaningful red behavior test."
-      - "Fix requires broad architecture change."
+      - "The run-contract source needs behavior changes."
+      - "The fix requires schema, migration, generated-client, frontend, worker-runtime, or persistence changes."
+      - "Implementation needs create-run idempotency fingerprint canonicalization changes for successful valid requests."
       - "Verification fails twice without a clear pre-existing cause."
       - "A second P0 starts leaking into this slice."
       - "Implementation introduces new Any/type-ignore/dict-shaped persisted payload without approved boundary reason."
-      - "Implementation adds a wrapper/service around output contract validation instead of direct reuse, unless Judge explicitly approved the abstraction."
-    receipt: null
+      - "Implementation adds a new service, wrapper, interface, factory, generic helper, or compatibility path."
+      - "Response cannot expose stable code, useful message, and context.step_ids without broader error-contract work."
+    receipt:
+      result: done
+      note: "notes/T003-required-runtime-inputs.md"
+      changed_files:
+        - "backend/src/intric/flows/application/flow_run_service.py"
+        - "backend/src/intric/flows/api/flow_run_execution_router.py"
+        - "backend/tests/integration/flows/test_flow_consumer_api_contract.py"
+        - "backend/tests/unit/test_flow_openapi_contract.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/goal.md"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/notes/codex-goal-prompt.md"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T003-required-runtime-inputs.md"
+      red_test: "tests/integration/flows/test_flow_consumer_api_contract.py::test_flow_run_create_rejects_missing_required_runtime_step_inputs failed with 201 Created for omitted step_inputs before the fix."
+      commands:
+        - "PASS cd backend && uv run pytest tests/integration/flows/test_flow_consumer_api_contract.py -q"
+        - "PASS cd backend && uv run pytest tests/unittests/flows/test_flow_run_service.py -q"
+        - "PASS cd backend && uv run pytest tests/unit/test_flow_openapi_contract.py -q"
+        - "PASS cd backend && uv run pyright src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_step_inputs.py src/intric/flows/api/flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unittests/flows/test_flow_run_service.py tests/unit/test_flow_openapi_contract.py"
+        - "PASS cd backend && uv run ruff check src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_step_inputs.py src/intric/flows/api/flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unittests/flows/test_flow_run_service.py tests/unit/test_flow_openapi_contract.py"
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_step_inputs.py src/intric/flows/api/flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unittests/flows/test_flow_run_service.py tests/unit/test_flow_openapi_contract.py"
+        - "PASS git diff --check"
+      maintainability_score: "7.5/8"
+      claude_iteration_1: "changes_required: broader create_run unit tests exposed invalid-snapshot error-ordering regression and OpenAPI context docs gap. Accepted and fixed."
+      summary: "Create-run now validates omitted required runtime step inputs from the published flow snapshot using the existing flow_run_step_inputs validator while preserving existing invalid-snapshot, idempotency, size, and concurrency error ordering. Omitted and empty required step_inputs both return flow_run_required_step_input_missing with context.step_ids. Successful idempotency fingerprint canonicalization remains out of scope."
 
   - id: T004
     type: judge
     assignee: Judge
-    status: queued
+    status: done
     reasoning_hint: high
     objective: "Run Claude/Codex commit gate on T003 implementation before local commit."
     inputs:
@@ -345,21 +388,47 @@ tasks:
       - "Residual risks."
       - "Claude improvement areas and disposition before next phase."
       - "Next slice recommendation."
-    receipt: null
+    receipt:
+      result: done
+      verdict: green
+      decision: "Commit the T003 implementation locally with subject 'Validate required flow run inputs'."
+      claude_artifact: ".codex/artifacts/claude-peer-loop-required-runtime-step-input-enforcement-commit-gate-iteration-2-20260510T215827Z.md"
+      green_light: true
+      min_score: 8
+      recommended_commit_subject: "Validate required flow run inputs"
+      summary: "Claude iteration 1 found a real verification gap and invalid-snapshot error-ordering regression. Codex fixed both, broadened verification to the full flow_run_service unit file, documented context.step_ids, pinned the required-input message, and Claude iteration 2 approved local commit."
+      residual_risks:
+        - "Next create_run touch should reduce duplicated load/preseed/validate branching."
+        - "Future typed published-definition slice should remove raw JSON casts from required runtime-input detection."
+        - "Successful omitted-vs-empty step_inputs idempotency fingerprint canonicalization remains a separate API behavior decision."
+      next_recommendation: "Proceed after commit to a fresh Judge decision for the next P0 slice."
 
   - id: T005
-    type: worker
-    assignee: Worker
-    status: queued
-    reasoning_hint: medium
-    objective: "Execute the next P0 slice after T003 is committed and T004 permits continuation."
-    allowed_files: []
-    verify: []
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe P0 or API-contract slice after the required runtime input phase is committed."
+    inputs:
+      - "T003 receipt"
+      - "T004 Claude gate receipt"
+      - "Current branch and dirty state after commit"
+      - "Remaining P0 candidates"
+    constraints:
+      - "Do not implement."
+      - "Pick exactly one next Worker slice."
+      - "Prefer the highest reliability/API-consumer risk that can be proven with a red behavior test."
+      - "Set concrete allowed_files and verify commands for the next Worker."
+      - "Run Claude plan gate only if ownership, API/error contract, schema/migration shape, or red-test harness is uncertain."
     stop_if:
-      - "T003 was not committed or was blocked."
-      - "Need a fresh Judge decision."
-      - "Need files outside allowed_files."
-      - "Cannot produce a meaningful red behavior test."
+      - "T003/T004 changes are not committed."
+      - "Current dirty state cannot be separated from unrelated files."
+      - "No remaining P0/API-contract slice has a concrete red-test harness."
+    expected_output:
+      - "Selected next Worker objective."
+      - "Allowed files."
+      - "Verification commands."
+      - "Whether Claude plan gate is required and why."
     receipt: null
 
   - id: T006

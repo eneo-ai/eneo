@@ -453,24 +453,26 @@ class FlowRunService:
             payload=input_payload_json,
         )
         self._reject_reserved_input_payload_keys(normalized_inline_payload)
-        normalized_step_inputs: dict[UUID, list[UUID]] = {}
-        runtime_version = None
+        normalized_step_inputs = normalize_step_inputs_payload(step_inputs)
+        runtime_version_definition: JsonObject | None = None
+        preseed_steps: list[PreseedStep] | None = None
         step_input_file_projections: list[StepInputFileProjection] = []
         if step_inputs is not None:
-            flow_id = cast(UUID, flow.id)
             runtime_version = await self.flow_version_repo.get(
                 flow_id=flow_id,
                 version=flow.published_version,
                 tenant_id=self.user.tenant_id,
             )
-            runtime_steps = parse_published_runtime_steps(
-                runtime_version.definition_json
+            runtime_version_definition = runtime_version.definition_json
+            preseed_steps = self._build_preseed_steps(
+                definition_json=runtime_version_definition,
+                fallback_steps=flow.steps,
             )
+            runtime_steps = parse_published_runtime_steps(runtime_version_definition)
             limits = await self._resolve_flow_input_limits()
             runtime_specs = build_runtime_step_input_specs(
                 steps=runtime_steps, limits=limits
             )
-            normalized_step_inputs = normalize_step_inputs_payload(step_inputs)
             await validate_submitted_step_inputs(
                 steps=runtime_steps,
                 specs=runtime_specs,
@@ -545,14 +547,36 @@ class FlowRunService:
                 "Flow id missing for run creation.",
                 code="flow_id_missing",
             )
-        version = runtime_version
-        if version is None:
-            version = await self.flow_version_repo.get(
+        if runtime_version_definition is None:
+            runtime_version = await self.flow_version_repo.get(
                 flow_id=flow.id,
                 version=flow.published_version,
                 tenant_id=self.user.tenant_id,
             )
-
+            runtime_version_definition = runtime_version.definition_json
+            preseed_steps = self._build_preseed_steps(
+                definition_json=runtime_version_definition,
+                fallback_steps=flow.steps,
+            )
+            if self._definition_has_required_runtime_step_inputs(
+                runtime_version_definition
+            ):
+                runtime_steps = parse_published_runtime_steps(
+                    runtime_version_definition
+                )
+                limits = await self._resolve_flow_input_limits()
+                runtime_specs = build_runtime_step_input_specs(
+                    steps=runtime_steps, limits=limits
+                )
+                await validate_submitted_step_inputs(
+                    steps=runtime_steps,
+                    specs=runtime_specs,
+                    normalized_step_inputs=normalized_step_inputs,
+                    file_repo=self.file_repo,
+                    user_id=self.user.id,
+                    principal=principal,
+                )
+        assert preseed_steps is not None
         created = await self.flow_run_repo.create(
             flow_id=flow.id,
             flow_version=flow.published_version,
@@ -562,10 +586,7 @@ class FlowRunService:
             principal_api_key_id=principal.principal_api_key_id,
             tenant_id=self.user.tenant_id,
             input_payload_json=input_payload_json,
-            preseed_steps=self._build_preseed_steps(
-                definition_json=version.definition_json,
-                fallback_steps=flow.steps,
-            ),
+            preseed_steps=preseed_steps,
             step_input_files=step_input_file_projections,
             idempotency_key=idempotency_key,
             request_fingerprint=request_fingerprint,
@@ -1410,3 +1431,30 @@ class FlowRunService:
                 }
             )
         return preseed
+
+    @staticmethod
+    def _definition_has_required_runtime_step_inputs(
+        definition_json: JsonObject,
+    ) -> bool:
+        raw_steps_obj: object = definition_json.get("steps")
+        if not isinstance(raw_steps_obj, list):
+            return False
+        raw_steps = cast(list[object], raw_steps_obj)
+        for raw_step in raw_steps:
+            if not isinstance(raw_step, dict):
+                continue
+            raw_step_dict = cast(dict[str, object], raw_step)
+            raw_input_config_obj: object = raw_step_dict.get("input_config")
+            if not isinstance(raw_input_config_obj, dict):
+                continue
+            raw_input_config = cast(dict[str, object], raw_input_config_obj)
+            raw_runtime_input_obj: object = raw_input_config.get("runtime_input")
+            if not isinstance(raw_runtime_input_obj, dict):
+                continue
+            raw_runtime_input = cast(dict[str, object], raw_runtime_input_obj)
+            if (
+                raw_runtime_input.get("enabled") is True
+                and raw_runtime_input.get("required") is True
+            ):
+                return True
+        return False

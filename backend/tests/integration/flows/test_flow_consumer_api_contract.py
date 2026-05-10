@@ -103,6 +103,72 @@ async def _create_published_flow(client, *, token: str, space_id: str) -> dict:
     return flow
 
 
+async def _create_published_required_runtime_input_flow(
+    client, *, token: str, space_id: str
+) -> dict:
+    create_response = await client.post(
+        "/api/v1/flows/",
+        json={
+            "space_id": space_id,
+            "name": f"required-runtime-input-flow-{uuid4().hex[:8]}",
+            "description": "Runtime input required API contract flow",
+            "steps": [],
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    flow_id = create_response.json()["id"]
+
+    assistant_response = await client.post(
+        f"/api/v1/flows/{flow_id}/assistants/",
+        json={"name": f"required-runtime-input-assistant-{uuid4().hex[:8]}"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert assistant_response.status_code == 201, assistant_response.text
+    assistant_id = assistant_response.json()["id"]
+
+    update_response = await client.patch(
+        f"/api/v1/flows/{flow_id}/",
+        json={
+            "name": "Required Runtime Input Flow",
+            "description": "Runtime input required API contract flow",
+            "steps": [
+                {
+                    "assistant_id": assistant_id,
+                    "step_order": 1,
+                    "user_description": "Use the uploaded document to produce a result",
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "input_config": {
+                        "runtime_input": {
+                            "enabled": True,
+                            "required": True,
+                            "max_files": 1,
+                            "input_format": "document",
+                            "label": "Source document",
+                            "description": "Upload the source document before starting the run.",
+                        }
+                    },
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "mcp_policy": "inherit",
+                }
+            ],
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert update_response.status_code == 200, update_response.text
+    flow = update_response.json()
+
+    publish_response = await client.post(
+        f"/api/v1/flows/{flow_id}/publish/",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert publish_response.status_code == 200, publish_response.text
+    flow["published_version"] = publish_response.json()["published_version"]
+    return flow
+
+
 async def _mark_first_step_completed(
     *,
     db_container,
@@ -269,3 +335,61 @@ async def test_flow_run_create_rejects_removed_top_level_file_ids_before_body_sh
         "expected_field": "step_inputs[step_id].file_ids",
         "contract_endpoint": "/api/v1/flows/{id}/run-contract/",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_create_rejects_missing_required_runtime_step_inputs(
+    client,
+    admin_token,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "intric.flows.api.flow_router_common.dispatch_flow_run_after_commit",
+        _noop_dispatch_flow_run_after_commit,
+    )
+
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_required_runtime_input_flow(
+        client,
+        token=admin_token,
+        space_id=space_id,
+    )
+    flow_id = flow["id"]
+
+    contract_response = await client.get(
+        f"/api/v1/flows/{flow_id}/run-contract/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert contract_response.status_code == 200, contract_response.text
+    contract = contract_response.json()
+    required_step = contract["steps_requiring_input"][0]
+    assert required_step["required"] is True
+
+    base_payload = {
+        "expected_flow_version": flow["published_version"],
+        "input_payload_json": {"text": "hello"},
+    }
+    expected_context = {"step_ids": [required_step["step_id"]]}
+
+    omitted_response = await client.post(
+        f"/api/v1/flows/{flow_id}/runs/",
+        json=base_payload,
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert omitted_response.status_code == 400, omitted_response.text
+    omitted_payload = omitted_response.json()
+    assert omitted_payload["code"] == "flow_run_required_step_input_missing"
+    assert omitted_payload["message"] == "Required runtime input files are missing."
+    assert omitted_payload["context"] == expected_context
+
+    empty_response = await client.post(
+        f"/api/v1/flows/{flow_id}/runs/",
+        json={**base_payload, "step_inputs": {}},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert empty_response.status_code == 400, empty_response.text
+    empty_payload = empty_response.json()
+    assert empty_payload["code"] == "flow_run_required_step_input_missing"
+    assert empty_payload["message"] == omitted_payload["message"]
+    assert empty_payload["context"] == expected_context
