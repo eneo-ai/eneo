@@ -636,9 +636,17 @@ def test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients(
     assert "step_snapshot_available" in active_description
     assert "without reading the mutable flow draft" in active_description
     assert "full corrected `current_payload_json`, not a patch" in edit_description
+    assert "typed_io_contract_violation" in edit_description
+    assert "payload_field" in edit_description
     assert "flow_review_stale_revision" in edit_description
     assert "202 Accepted" in resume_description
     assert "Idempotency-Key" in resume_description
+
+    edit_400 = edit_operation["responses"]["400"]
+    edit_400_text = str(edit_400)
+    assert "typed_io_contract_violation" in edit_400_text
+    assert "context.step_id" in edit_400_text
+    assert "context.payload_field" in edit_400_text
 
 
 def test_openapi_active_review_checkpoint_response_is_nullable(

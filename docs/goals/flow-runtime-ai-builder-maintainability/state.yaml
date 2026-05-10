@@ -83,7 +83,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T005
+active_task: T013
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -210,6 +210,23 @@ maintainability_findings:
       - "Method names encode lifecycle invariant when a P0 touches runtime state."
       - "Worker receipt states whether new/changed lifecycle method commits, requires caller commit, or only validates."
       - "No wrapper method is added purely for naming if it does not clarify ownership."
+  - id: review-edit-validator-callback-followup
+    severity: P2
+    title: "Review checkpoint edit currently performs one extra locked lifecycle read before persistence validation."
+    proposed_owner: "FlowRunRepository.edit_review_checkpoint_payload plus FlowRunService edit validator closure"
+    after: "Before the next review-lifecycle slice that adds another edit/approve/reject/resume precondition hook."
+    acceptance:
+      - "Repository keeps one locked lifecycle precondition path for edit persistence."
+      - "Service can inject schema/application validation without repository importing output contract validation."
+      - "Behavior tests still prove invalid edits do not mutate checkpoint, projection, revision, or outbox state."
+  - id: review-edit-openapi-error-examples
+    severity: P2
+    title: "Review checkpoint edit 400 response documents multiple codes but only has one worked example."
+    proposed_owner: "Flow run execution router OpenAPI response docs"
+    after: "Next API documentation polish or public API golden journey slice."
+    acceptance:
+      - "400 response examples include both typed_io_contract_violation and flow_review_stale_revision."
+      - "OpenAPI contract test asserts both examples remain present."
 
 verify_first_findings:
   - id: error-payload-drift
@@ -406,7 +423,7 @@ tasks:
   - id: T005
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe P0 or API-contract slice after the required runtime input phase is committed."
     inputs:
@@ -429,6 +446,110 @@ tasks:
       - "Allowed files."
       - "Verification commands."
       - "Whether Claude plan gate is required and why."
+    receipt:
+      result: done
+      decision: "Select P0-review-edit-contract-validation as the next single Worker slice after da6ce469."
+      note: "notes/T005-judge-next-slice.md"
+      why_this_slice:
+        - "Highest safe ROI now: API-visible review/resume behavior blocks the public API golden journey and has a concrete red test harness."
+        - "Deepens existing owners: FlowRunService owns review-edit application validation, FlowRunRepository owns persistence, and output_processing.validate_against_contract remains the shared output-contract validator."
+        - "Safer immediate next task than executor-failure persistence or late-provider terminalization because those need fresh-session/race proof before deciding transaction shape."
+      claude_plan_gate_required: false
+      claude_plan_gate_reason: "Ownership, error-code reuse, allowed files, and red-test harness are concrete. If Worker discovers a new error taxonomy or repository transaction-boundary design is needed, stop and return to Judge for a Claude plan gate."
+      next_allowed_task: T012
+
+  - id: T012
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "TDD-harden review checkpoint edits so invalid edited payloads are rejected against the checkpoint output_contract_json with typed HTTP 400 typed_io_contract_violation, while checkpoint payload, step-result projection, revision, and outbox state remain unchanged; valid edits must still update checkpoint and projection atomically."
+    canonical_owner: "FlowRunService.edit_review_checkpoint validates the edited payload before repository persistence by reusing output_processing.validate_against_contract directly. FlowRunRepository remains the persistence/state-transition owner and must not become the schema-validation owner."
+    allowed_files:
+      - "backend/src/intric/flows/application/flow_run_service.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+      - "backend/src/intric/flows/api/flow_run_execution_router.py"
+      - "backend/tests/integration/flows/test_flow_review_pause_worker_contract.py"
+      - "backend/tests/integration/flows/test_flow_consumer_api_contract.py"
+      - "backend/tests/unittests/flows/test_flow_run_service.py"
+      - "backend/tests/unit/test_flow_openapi_contract.py"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T012-review-edit-output-contract.md"
+    verify:
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_review_pause_worker_contract.py -q"
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_consumer_api_contract.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_run_service.py -k 'review_checkpoint' -q"
+      - "cd backend && uv run pytest tests/unit/test_flow_openapi_contract.py -q"
+      - "cd backend && uv run pyright src/intric/flows/application/flow_run_service.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/api/flow_run_execution_router.py tests/integration/flows/test_flow_review_pause_worker_contract.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unittests/flows/test_flow_run_service.py tests/unit/test_flow_openapi_contract.py"
+      - "cd backend && uv run ruff check src/intric/flows/application/flow_run_service.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/api/flow_run_execution_router.py tests/integration/flows/test_flow_review_pause_worker_contract.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unittests/flows/test_flow_run_service.py tests/unit/test_flow_openapi_contract.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/application/flow_run_service.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/api/flow_run_execution_router.py tests/integration/flows/test_flow_review_pause_worker_contract.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unittests/flows/test_flow_run_service.py tests/unit/test_flow_openapi_contract.py"
+      - "git diff --check"
+      - "git status --short --branch"
+    stop_if:
+      - "The current branch is not feature/refactor-flows-flowai or T003/T004 are not committed at da6ce469."
+      - "Need files outside allowed_files."
+      - "A meaningful red DB/API behavior test cannot be written without broad fixture or runtime rewrites."
+      - "The fix needs schema, migration, generated-client, frontend, executor, terminalizer, Celery, or AI Builder changes."
+      - "The implementation creates a new validator, wrapper service, interface, factory, generic helper, compatibility path, or repository-owned schema-validation path."
+      - "The repository must validate output_contract instead of merely loading/persisting review checkpoint state."
+      - "The API error contract cannot be made stable with code, message, and useful context without broader error-envelope work."
+      - "A second P0 starts leaking in: executor failure persistence, late provider success/terminalization, API golden journey, or frontend rendering."
+      - "Verification fails twice without a clear pre-existing unrelated cause."
+      - "New Any, cast, type-ignore, or dict-shaped persisted/API boundary is introduced without an explicit boundary reason in the receipt."
+    receipt:
+      result: done
+      note: "notes/T012-review-edit-output-contract.md"
+      changed_files:
+        - "backend/src/intric/flows/application/flow_run_service.py"
+        - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+        - "backend/src/intric/flows/api/flow_run_execution_router.py"
+        - "backend/tests/integration/flows/test_flow_review_pause_worker_contract.py"
+        - "backend/tests/integration/flows/test_flow_consumer_api_contract.py"
+        - "backend/tests/unit/test_flow_openapi_contract.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T012-review-edit-output-contract.md"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      red_test: "tests/integration/flows/test_flow_review_pause_worker_contract.py::test_review_checkpoint_edit_validates_output_contract_before_persisting failed before the fix because invalid review edits did not raise typed_io_contract_violation."
+      commands:
+        - "PASS cd backend && uv run pytest tests/integration/flows/test_flow_review_pause_worker_contract.py -q"
+        - "PASS cd backend && uv run pytest tests/integration/flows/test_flow_consumer_api_contract.py -q"
+        - "PASS cd backend && uv run pytest tests/unittests/flows/test_flow_run_service.py -k 'review_checkpoint' -q"
+        - "PASS cd backend && uv run pytest tests/unit/test_flow_openapi_contract.py -q"
+        - "PASS cd backend && uv run pyright src/intric/flows/application/flow_run_service.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/api/flow_run_execution_router.py tests/integration/flows/test_flow_review_pause_worker_contract.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unittests/flows/test_flow_run_service.py tests/unit/test_flow_openapi_contract.py"
+        - "PASS cd backend && uv run ruff check src/intric/flows/application/flow_run_service.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/api/flow_run_execution_router.py tests/integration/flows/test_flow_review_pause_worker_contract.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unittests/flows/test_flow_run_service.py tests/unit/test_flow_openapi_contract.py"
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/application/flow_run_service.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/api/flow_run_execution_router.py tests/integration/flows/test_flow_review_pause_worker_contract.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unittests/flows/test_flow_run_service.py tests/unit/test_flow_openapi_contract.py"
+        - "PASS git diff --check"
+      claude_iteration_1: "green with non-blocking P2/P3 suggestions. Codex accepted missing-structured and exception-preservation hardening before commit."
+      claude_iteration_2: "green, GREEN_LIGHT yes, MIN_SCORE 8 after hardening."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t012-review-edit-output-contract-commit-gate-20260510T222243Z.md"
+        - ".codex/artifacts/claude-peer-loop-t012-review-edit-output-contract-commit-gate-iteration-2-20260510T222844Z.md"
+      maintainability_score: "8/9"
+      summary: "Review checkpoint edits now validate contract-backed structured payloads before persistence, reject missing structured payloads explicitly, return typed_io_contract_violation with stable context, and prove invalid edits do not mutate checkpoint, step-result projection, revision, or audit outbox. Valid edits still update the checkpoint and step-result projection."
+
+  - id: T013
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "After T012 is committed, choose the next highest-ROI safe slice: public API golden journey, remaining P0 runtime persistence/race risk, or a proof-only Scout if risk is unclear."
+    inputs:
+      - "T012 receipt"
+      - "Current branch and dirty state after local commit"
+      - "Remaining confirmed P0 candidates"
+      - "maintainability_findings"
+    constraints:
+      - "Do not implement."
+      - "Pick exactly one next Worker or Scout slice."
+      - "Prefer runtime/API correctness over cleanup unless cleanup is required by the active fix or already protected by behavior tests."
+      - "Choose long-term maintainability and reliability over quick fixes."
+      - "If transaction boundaries, API contract details, or implementation shape are uncertain, require a Claude plan gate before Worker activation."
+      - "Do not select a frontend Worker until backend error contract for the touched endpoint is stable and tested."
+    expected_output:
+      - "Decision."
+      - "Exact Worker/Scout objective."
+      - "allowed_files and verify commands if Worker."
+      - "stop_if."
+      - "Claude plan-gate requirement and reason."
+      - "Follow-up disposition for review-edit validator-callback and OpenAPI examples."
     receipt: null
 
   - id: T006

@@ -502,6 +502,38 @@ class FlowRunRepository:
             )
         return self.factory.from_flow_run_review_checkpoint_db(checkpoint_rows[0])
 
+    async def get_review_checkpoint_for_edit(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+        expected_revision: int,
+    ) -> FlowRunReviewCheckpoint:
+        (
+            checkpoint_row,
+            run_row,
+        ) = await self._load_review_checkpoint_and_run_rows_for_update(
+            checkpoint_id=checkpoint_id,
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            flow_run_id=flow_run_id,
+        )
+        self._require_review_run_waiting(run_row)
+        self._require_review_checkpoint_revision(
+            checkpoint_row=checkpoint_row,
+            expected_revision=expected_revision,
+        )
+        self._require_review_checkpoint_state(
+            checkpoint_row=checkpoint_row,
+            allowed_states=(
+                FlowRunReviewCheckpointState.AWAITING_REVIEW,
+                FlowRunReviewCheckpointState.EDITED,
+            ),
+        )
+        return self.factory.from_flow_run_review_checkpoint_db(checkpoint_row)
+
     async def edit_review_checkpoint_payload(
         self,
         *,

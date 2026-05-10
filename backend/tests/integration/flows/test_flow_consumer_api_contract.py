@@ -5,9 +5,14 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from intric.database.tables.flow_tables import FlowStepResults
+from intric.database.tables.flow_tables import (
+    FlowRunReviewCheckpoints,
+    FlowRuns,
+    FlowStepResults,
+)
 from intric.database.tables.roles_table import Roles
 from intric.database.tables.users_table import users_roles_table
+from intric.flows.enums import FlowRunReviewCheckpointState
 from intric.roles.permissions import Permission
 
 
@@ -191,6 +196,58 @@ async def _mark_first_step_completed(
                 num_tokens_output=5,
             )
         )
+
+
+async def _open_first_step_review_checkpoint(
+    *,
+    db_container,
+    run: dict,
+    flow: dict,
+    output_contract: dict[str, object],
+    current_payload_json: dict[str, object],
+) -> str:
+    step = flow["steps"][0]
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == UUID(run["id"]))
+            .values(status="awaiting_review")
+        )
+        await session.execute(
+            sa.update(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == UUID(run["id"]))
+            .where(FlowStepResults.step_id == UUID(step["id"]))
+            .values(
+                status="completed",
+                input_payload_json={"text": "hello"},
+                output_payload_json=current_payload_json,
+                num_tokens_input=3,
+                num_tokens_output=5,
+            )
+        )
+        checkpoint = FlowRunReviewCheckpoints(
+            tenant_id=UUID(run["tenant_id"]),
+            flow_id=UUID(flow["id"]),
+            flow_run_id=UUID(run["id"]),
+            step_id=UUID(step["id"]),
+            step_order=1,
+            attempt_no=1,
+            state=FlowRunReviewCheckpointState.AWAITING_REVIEW.value,
+            revision=1,
+            schema_version=1,
+            original_payload_json=current_payload_json,
+            current_payload_json=current_payload_json,
+            step_label=step["user_description"],
+            review_mode="view",
+            output_type="json",
+            output_contract_json=output_contract,
+            requester_principal_type="user",
+            requester_user_id=UUID(run["user_id"]) if run.get("user_id") else None,
+        )
+        session.add(checkpoint)
+        await session.flush()
+        return str(checkpoint.id)
 
 
 @pytest.mark.asyncio
@@ -393,3 +450,71 @@ async def test_flow_run_create_rejects_missing_required_runtime_step_inputs(
     assert empty_payload["code"] == "flow_run_required_step_input_missing"
     assert empty_payload["message"] == omitted_payload["message"]
     assert empty_payload["context"] == expected_context
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_review_edit_returns_typed_contract_error_for_invalid_payload(
+    client,
+    db_container,
+    admin_token,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "intric.flows.api.flow_router_common.dispatch_flow_run_after_commit",
+        _noop_dispatch_flow_run_after_commit,
+    )
+
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_flow(client, token=admin_token, space_id=space_id)
+    run_response = await client.post(
+        f"/api/v1/flows/{flow['id']}/runs/",
+        json={
+            "expected_flow_version": flow["published_version"],
+            "input_payload_json": {"text": "hello"},
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert run_response.status_code == 201, run_response.text
+    run = run_response.json()
+    output_contract = {
+        "type": "object",
+        "required": ["summary"],
+        "properties": {"summary": {"type": "string"}},
+        "additionalProperties": False,
+    }
+    checkpoint_id = await _open_first_step_review_checkpoint(
+        db_container=db_container,
+        run=run,
+        flow=flow,
+        output_contract=output_contract,
+        current_payload_json={
+            "text": '{"summary":"Original."}',
+            "structured": {"summary": "Original."},
+            "webhook_delivered": False,
+        },
+    )
+
+    response = await client.patch(
+        f"/api/v1/flows/{flow['id']}/runs/{run['id']}/review-checkpoints/{checkpoint_id}/",
+        json={
+            "expected_checkpoint_revision": 1,
+            "current_payload_json": {
+                "text": '{"wrong":"shape"}',
+                "structured": {"wrong": "shape"},
+                "webhook_delivered": False,
+            },
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 400, response.text
+    payload = response.json()
+    assert payload["code"] == "typed_io_contract_violation"
+    assert "Review checkpoint step 1 output" in payload["message"]
+    assert payload["context"] == {
+        "checkpoint_id": checkpoint_id,
+        "step_id": flow["steps"][0]["id"],
+        "step_order": 1,
+        "payload_field": "structured",
+    }

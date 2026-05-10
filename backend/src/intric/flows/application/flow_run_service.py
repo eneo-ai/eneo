@@ -67,6 +67,7 @@ from intric.flows.infrastructure.flow_run_repo import (
     StepInputFileProjection,
 )
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from intric.flows.output_processing import validate_against_contract
 from intric.flows.principal import FlowPrincipal
 from intric.flows.published_definition import (
     PublishedFlowDefinition,
@@ -79,6 +80,7 @@ from intric.main.exceptions import (
     BadRequestException,
     NotFoundException,
     ResourceGoneException,
+    TypedIOValidationException,
     UnauthorizedException,
 )
 from intric.main.logging import get_logger
@@ -971,6 +973,17 @@ class FlowRunService:
     ) -> FlowRunReviewCheckpoint:
         principal = self._review_user_principal(capability="review")
         run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="content")
+        checkpoint = await self.flow_run_repo.get_review_checkpoint_for_edit(
+            checkpoint_id=checkpoint_id,
+            tenant_id=self.user.tenant_id,
+            flow_id=flow_id,
+            flow_run_id=run.id,
+            expected_revision=expected_checkpoint_revision,
+        )
+        self._validate_review_checkpoint_edit_payload(
+            checkpoint=checkpoint,
+            current_payload_json=current_payload_json,
+        )
         return await self.flow_run_repo.edit_review_checkpoint_payload(
             checkpoint_id=checkpoint_id,
             tenant_id=self.user.tenant_id,
@@ -980,6 +993,37 @@ class FlowRunService:
             current_payload_json=current_payload_json,
             principal=principal,
         )
+
+    @staticmethod
+    def _validate_review_checkpoint_edit_payload(
+        *,
+        checkpoint: FlowRunReviewCheckpoint,
+        current_payload_json: JsonObject,
+    ) -> None:
+        if checkpoint.output_contract_json is None:
+            return
+        context: dict[str, object] = {
+            "checkpoint_id": str(checkpoint.id),
+            "step_id": str(checkpoint.step_id),
+            "step_order": checkpoint.step_order,
+            "payload_field": "structured",
+        }
+        if "structured" not in current_payload_json:
+            raise TypedIOValidationException(
+                f"Review checkpoint step {checkpoint.step_order} output: "
+                "field `structured` is required for contract validation.",
+                code="typed_io_contract_violation",
+                context=context,
+            )
+        try:
+            validate_against_contract(
+                current_payload_json["structured"],
+                checkpoint.output_contract_json,
+                label=f"Review checkpoint step {checkpoint.step_order} output",
+            )
+        except TypedIOValidationException as exc:
+            exc.context = context
+            raise
 
     async def approve_review_checkpoint(
         self,

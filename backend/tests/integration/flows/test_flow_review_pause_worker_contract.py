@@ -30,6 +30,7 @@ from intric.flows.domain.flow import (
     FlowStep,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
+    JsonObject,
 )
 from intric.flows.enums import (
     FlowOutputType,
@@ -44,6 +45,7 @@ from intric.flows.published_definition import build_published_definition_json
 from intric.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
 from intric.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from intric.main.container.container import Container
+from intric.main.exceptions import TypedIOValidationException
 
 
 class _ModelKwargs:
@@ -569,6 +571,171 @@ async def test_review_checkpoint_snapshot_is_enough_to_render_consumer_review_ui
         "structured": {"summary": "This answer needs review."},
         "webhook_delivered": False,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_review_checkpoint_edit_validates_output_contract_before_persisting(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    output_contract: JsonObject = {
+        "type": "object",
+        "required": ["summary"],
+        "properties": {"summary": {"type": "string"}},
+        "additionalProperties": False,
+    }
+    original_payload: JsonObject = {
+        "text": '{"summary":"This answer needs review."}',
+        "structured": {"summary": "This answer needs review."},
+        "webhook_delivered": False,
+    }
+    invalid_payload: JsonObject = {
+        "text": '{"wrong":"shape"}',
+        "structured": {"wrong": "shape"},
+        "webhook_delivered": False,
+    }
+    missing_structured_payload: JsonObject = {
+        "text": '{"summary":"Missing structured slot."}',
+        "webhook_delivered": False,
+    }
+    valid_payload: JsonObject = {
+        "text": '{"summary":"Edited answer."}',
+        "structured": {"summary": "Edited answer."},
+        "webhook_delivered": False,
+    }
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(
+            return_value=SimpleNamespace(
+                completion='{"summary":"This answer needs review."}',
+                total_token_count=17,
+            )
+        )
+    )
+
+    async with sessionmanager.session() as session:
+        context = await _create_review_pause_runtime_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+            include_downstream_steps=False,
+            first_step_output_type="json",
+            first_step_output_contract=output_contract,
+        )
+        await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            celery_task_id=f"review-contract-pause-{uuid4()}",
+            retry_count=0,
+        )
+        run_service = context.container.flow_run_service()
+        checkpoint = await run_service.get_active_review_checkpoint(
+            flow_id=context.flow_id,
+            run_id=context.run_id,
+        )
+        assert checkpoint is not None
+        assert checkpoint.current_payload_json == original_payload
+
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await run_service.edit_review_checkpoint(
+                flow_id=context.flow_id,
+                run_id=context.run_id,
+                checkpoint_id=checkpoint.id,
+                expected_checkpoint_revision=checkpoint.revision,
+                current_payload_json=invalid_payload,
+            )
+
+        with pytest.raises(TypedIOValidationException) as missing_structured_exc:
+            await run_service.edit_review_checkpoint(
+                flow_id=context.flow_id,
+                run_id=context.run_id,
+                checkpoint_id=checkpoint.id,
+                expected_checkpoint_revision=checkpoint.revision,
+                current_payload_json=missing_structured_payload,
+            )
+
+        checkpoint_after_invalid = await session.scalar(
+            sa.select(FlowRunReviewCheckpoints).where(
+                FlowRunReviewCheckpoints.id == checkpoint.id
+            )
+        )
+        step_result_after_invalid = await session.scalar(
+            sa.select(FlowStepResults).where(
+                FlowStepResults.flow_run_id == context.run_id,
+                FlowStepResults.step_id == context.first_step_id,
+            )
+        )
+        outbox_actions_after_invalid = (
+            (
+                await session.execute(
+                    sa.select(FlowRunAuditOutbox.action)
+                    .where(FlowRunAuditOutbox.flow_run_id == context.run_id)
+                    .order_by(FlowRunAuditOutbox.created_at.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert checkpoint_after_invalid is not None
+        assert checkpoint_after_invalid.revision == checkpoint.revision
+        assert checkpoint_after_invalid.current_payload_json == original_payload
+        assert step_result_after_invalid is not None
+        assert step_result_after_invalid.output_payload_json == original_payload
+        assert outbox_actions_after_invalid == ["flow_run_review_checkpoint_opened"]
+
+        edited = await run_service.edit_review_checkpoint(
+            flow_id=context.flow_id,
+            run_id=context.run_id,
+            checkpoint_id=checkpoint.id,
+            expected_checkpoint_revision=checkpoint.revision,
+            current_payload_json=valid_payload,
+        )
+        step_result_after_valid = await session.scalar(
+            sa.select(FlowStepResults).where(
+                FlowStepResults.flow_run_id == context.run_id,
+                FlowStepResults.step_id == context.first_step_id,
+            )
+        )
+        outbox_actions_after_valid = (
+            (
+                await session.execute(
+                    sa.select(FlowRunAuditOutbox.action)
+                    .where(FlowRunAuditOutbox.flow_run_id == context.run_id)
+                    .order_by(FlowRunAuditOutbox.created_at.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert exc_info.value.code == "typed_io_contract_violation"
+    assert "Review checkpoint step 1 output" in str(exc_info.value)
+    assert exc_info.value.context == {
+        "checkpoint_id": str(checkpoint.id),
+        "step_id": str(context.first_step_id),
+        "step_order": 1,
+        "payload_field": "structured",
+    }
+    assert missing_structured_exc.value.code == "typed_io_contract_violation"
+    assert "field `structured` is required" in str(missing_structured_exc.value)
+    assert missing_structured_exc.value.context == exc_info.value.context
+    assert edited.revision == checkpoint.revision + 1
+    assert edited.current_payload_json == valid_payload
+    assert step_result_after_valid is not None
+    assert step_result_after_valid.output_payload_json == valid_payload
+    assert outbox_actions_after_valid == [
+        "flow_run_review_checkpoint_opened",
+        "flow_run_review_checkpoint_edited",
+    ]
 
 
 @pytest.mark.asyncio

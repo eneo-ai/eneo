@@ -153,6 +153,10 @@ first, the API returns `400` with code `flow_review_stale_revision` and the clie
 
 Send the full corrected `current_payload_json`, not a patch. For structured steps, keep the same
 top-level payload shape returned by the active checkpoint unless the UI deliberately changes it.
+When the checkpoint has an `output_contract`, edited structured payloads are validated before any
+checkpoint, step-result projection, or audit state is persisted. Contract failures return `400`
+with code `typed_io_contract_violation` and context fields `checkpoint_id`, `step_id`,
+`step_order`, and `payload_field`.
     """
 
 _FLOW_RUN_REVIEW_APPROVE_DESCRIPTION = """
@@ -463,12 +467,20 @@ async def get_active_flow_run_review_checkpoint(
         400: error_response(
             description=(
                 "Review edit failed. Representative machine-readable codes include "
-                "flow_review_stale_revision, flow_review_not_active, and "
-                "flow_review_step_result_not_found."
+                "typed_io_contract_violation, flow_review_stale_revision, "
+                "flow_review_not_active, and flow_review_step_result_not_found. "
+                "Contract validation errors include context.checkpoint_id, "
+                "context.step_id, context.step_order, and context.payload_field."
             ),
-            message="Review checkpoint revision is stale.",
+            message="Review checkpoint step 1 output: 'summary' is a required property",
             intric_error_code=ErrorCodes.BAD_REQUEST,
-            code="flow_review_stale_revision",
+            code="typed_io_contract_violation",
+            context={
+                "checkpoint_id": "7f4f6d62-0e2b-4682-9fa4-f046c3df1b15",
+                "step_id": "3a6610d2-8b8b-4837-b260-8e66d2155405",
+                "step_order": 1,
+                "payload_field": "structured",
+            },
         ),
         403: error_response(
             description=_FLOW_RUN_FORBIDDEN_DESCRIPTION,
