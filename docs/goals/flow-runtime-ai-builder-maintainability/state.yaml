@@ -83,7 +83,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T019
+active_task: T006
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -930,7 +930,7 @@ tasks:
   - id: T019
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe maintainability task after the completed P0 runtime/API slices, with public API golden journey expected to outrank cleanup unless fresh evidence says otherwise."
     inputs:
@@ -950,19 +950,58 @@ tasks:
       - "Why this outranks alternatives."
       - "Exact allowed_files, verify, and stop_if for any Worker."
       - "Claude second-opinion status or evidence-backed reason it was not needed."
-    receipt: null
+    receipt:
+      result: done
+      decision: "Activate T006 public API golden journey as the next Worker."
+      summary: "Public API golden journey now outranks cleanup, typed JSONB boundaries, frontend work, and AI Builder material efficiency because the runtime P0s are closed and future maintainability work needs an executable external-client contract."
+      evidence:
+        - "backend/src/intric/flows/api/flow_models.py: FlowRuntimePathsPublic has no review checkpoint path templates today."
+        - "backend/src/intric/flows/api/flow_assembler.py: FlowAssembler.to_runtime_public is the current runtime-path emission owner."
+        - "backend/src/intric/flows/api/flow_run_execution_router.py: review checkpoint endpoints exist but are not discoverable from runtime_paths."
+        - "backend/tests/integration/flows/test_flow_consumer_api_contract.py: existing tests cover journey fragments but not one full discoverable client journey."
+      claude:
+        session: "flow-runtime-maintainability-t019-next-slice"
+        iteration_1: "changes_required, GREEN_LIGHT no, MIN_SCORE 6"
+        iteration_2: "green, GREEN_LIGHT yes, MIN_SCORE 8"
+        artifact: ".codex/artifacts/claude-peer-loop-t019-next-maintainability-slice-decision-iteration-2-20260511T002456Z.md"
+      selected_task: "T006"
+      note: "docs/goals/flow-runtime-ai-builder-maintainability/notes/T019-next-slice-decision.md"
 
   - id: T006
     type: worker
     assignee: Worker
-    status: queued
-    reasoning_hint: medium
-    objective: "Add public API golden journey and verify-first error payload assertion after early P0s stabilize run contract/review behavior."
-    allowed_files: []
-    verify: []
+    status: active
+    reasoning_hint: high
+    objective: "Add a public Flow API golden journey that proves a web app or LLM-generated client can discover runtime paths, fetch run contract, identify required inputs/final output/review steps, receive typed missing-input errors, create a valid run, use review checkpoint path templates for active/edit/approve/resume, and fetch output/evidence through HTTP-driven API calls."
+    allowed_files:
+      - "backend/src/intric/flows/api/flow_models.py"
+      - "backend/src/intric/flows/api/flow_assembler.py"
+      - "backend/src/intric/flows/api/flow_run_execution_router.py"
+      - "backend/tests/integration/flows/test_flow_consumer_api_contract.py"
+      - "backend/tests/unit/test_flow_openapi_contract.py"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T006-public-api-golden-journey.md"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    verify:
+      - "Add red assertions first: runtime_paths.review_checkpoints.active_template/edit_template/approve_template/resume_template are missing today, and OpenAPI lacks the grouped review-path schema."
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_consumer_api_contract.py -q"
+      - "cd backend && uv run pytest tests/unit/test_flow_openapi_contract.py -q"
+      - "cd backend && uv run pyright src/intric/flows/api/flow_models.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py"
+      - "cd backend && uv run ruff check src/intric/flows/api/flow_models.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/api/flow_models.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py"
+      - "git diff --check"
+      - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
     stop_if:
       - "P0 required-input and review-edit slices are not complete or were blocked."
       - "Journey requires frontend changes beyond backend API contract/error behavior."
+      - "The journey requires real Celery execution or sleeps/polling instead of deterministic API calls plus controlled DB lifecycle state transitions."
+      - "The implementation changes flow_run_execution_router.py handler bodies, signatures, dependencies, dispatch behavior, or transaction behavior."
+      - "The implementation adds fields to FlowRunContractPublic or changes FlowRunContractService without returning to Judge with the exact field and red assertion."
+      - "The review path shape appears to require a versioning bump or generated-client migration concern beyond additive fields."
+      - "The implementation creates a second runtime-path owner instead of keeping FlowAssembler.to_runtime_public as the emission owner."
+      - "The implementation broadens into cleanup, typed JSONB migration, AI Builder planning, or UI redesign."
+      - "The implementation re-asserts idempotency replay/conflict instead of relying on existing consumer contract coverage."
+      - "New OpenAPI assertions restate generic JSON Schema structure instead of encoding consumer invariants."
+      - "New Any, cast, # type: ignore, or untyped dict-shaped public models are introduced."
     receipt: null
 
   - id: T011
