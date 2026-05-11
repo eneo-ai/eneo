@@ -12,31 +12,69 @@
   dayjs.extend(utc);
 
   export let website: WebsiteSparse;
-  const SKIPPED_PREFIX = "skipped duplicate crawl";
 
-  // Set dayjs locale based on paraglide locale
+  type CrawlOutcome = {
+    code: string;
+    severity: "info" | "warning" | "error";
+    message_key: string;
+    detail?: string | null;
+    affected_count?: number | null;
+  };
+  type WebsiteWithOutcome = WebsiteSparse & {
+    latest_crawl?:
+      | (NonNullable<WebsiteSparse["latest_crawl"]> & {
+          outcome?: CrawlOutcome | null;
+        })
+      | null;
+  };
+
   // eslint-disable-next-line svelte/no-immutable-reactive-statements
   $: dayjs.locale(getLocale());
-  /* TODO colours */
+
+  function latestOutcome(): CrawlOutcome | undefined {
+    return (website as WebsiteWithOutcome).latest_crawl?.outcome ?? undefined;
+  }
+
+  function outcomeLabel(outcome: CrawlOutcome): string {
+    const labels: Record<string, () => string> = {
+      crawl_outcome_duplicate_skipped: () => m.crawl_outcome_duplicate_skipped(),
+      crawl_outcome_embedding_config_missing: () => m.crawl_outcome_embedding_config_missing(),
+      crawl_outcome_no_pages_returned: () => m.crawl_outcome_no_pages_returned(),
+      crawl_outcome_timeout_no_pages: () => m.crawl_outcome_timeout_no_pages(),
+      crawl_outcome_page_failures: () => m.crawl_outcome_page_failures(),
+      crawl_outcome_unknown_error: () => m.crawl_outcome_unknown_error()
+    };
+    return labels[outcome.message_key]?.() ?? outcome.detail ?? m.sync_failed();
+  }
+
+  function outcomeTooltip(outcome: CrawlOutcome | undefined): string | undefined {
+    if (!outcome) {
+      return undefined;
+    }
+
+    const affected = outcome.affected_count
+      ? `\n${m.crawl_outcome_affected_count({ count: outcome.affected_count })}`
+      : "";
+    const detail = outcome.detail ? `\n${outcome.detail}` : "";
+    return `${outcomeLabel(outcome)}${affected}${detail}`;
+  }
+
   function statusInfo(): { label: string; color: Label.LabelColor; tooltip?: string } {
+    const outcome = latestOutcome();
+    const isDuplicateSkip = outcome?.code === "CRAWL_DUPLICATE_SKIPPED";
     const skipReason = website.latest_crawl?.result_location;
-    const skipTooltip = skipReason?.toLowerCase().startsWith(SKIPPED_PREFIX)
-      ? m.crawl_skipped_duplicate()
-      : skipReason;
+    const failureTooltip = outcomeTooltip(outcome) ?? skipReason ?? undefined;
 
     // Check if there are failures in the latest crawl
     const pagesFailed = website.latest_crawl?.pages_failed ?? 0;
     const filesFailed = website.latest_crawl?.files_failed ?? 0;
     const hasFailures = pagesFailed > 0 || filesFailed > 0;
 
-    if (
-      website.latest_crawl?.status === "failed" &&
-      skipReason?.toLowerCase().startsWith(SKIPPED_PREFIX)
-    ) {
+    if (website.latest_crawl?.status === "failed" && isDuplicateSkip) {
       return {
         color: "gray",
         label: m.sync_skipped(),
-        tooltip: skipTooltip
+        tooltip: failureTooltip ?? m.crawl_skipped_duplicate()
       };
     }
 
@@ -83,14 +121,14 @@
       case "failed":
         return {
           color: "orange",
-          label: m.sync_failed(),
-          tooltip: skipTooltip
+          label: outcome ? outcomeLabel(outcome) : m.sync_failed(),
+          tooltip: failureTooltip
         };
       case "not found":
         return {
           color: "orange",
-          label: m.sync_failed(),
-          tooltip: skipTooltip
+          label: outcome ? outcomeLabel(outcome) : m.sync_failed(),
+          tooltip: failureTooltip
         };
       case "queued":
         return {

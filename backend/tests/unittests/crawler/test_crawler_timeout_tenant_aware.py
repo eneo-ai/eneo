@@ -22,8 +22,38 @@ import pytest
 # This initializes Twisted's reactor in a way that's compatible with our test process.
 crochet.setup()
 
-from intric.crawler.crawler import Crawler
+from intric.crawler.crawler import Crawler, create_runner
 from intric.main.exceptions import CrawlTimeoutError
+
+
+class TestScrapyHttpCacheSettings:
+    def test_create_runner_leaves_http_cache_disabled_without_cache_dir(self, tmp_path):
+        runner = create_runner(filepath=tmp_path / "pages.jsonl")
+
+        assert not runner.settings.getbool("HTTPCACHE_ENABLED")
+
+    def test_create_runner_enables_rfc2616_http_cache_when_cache_dir_is_supplied(
+        self, tmp_path
+    ):
+        cache_dir = tmp_path / "http-cache"
+
+        runner = create_runner(
+            filepath=tmp_path / "pages.jsonl",
+            http_cache_dir=cache_dir,
+            http_cache_expiration_seconds=86400,
+        )
+
+        assert runner.settings.getbool("HTTPCACHE_ENABLED")
+        assert runner.settings.get("HTTPCACHE_DIR") == str(cache_dir)
+        assert (
+            runner.settings.get("HTTPCACHE_POLICY")
+            == "scrapy.extensions.httpcache.RFC2616Policy"
+        )
+        assert (
+            runner.settings.get("HTTPCACHE_STORAGE")
+            == "scrapy.extensions.httpcache.FilesystemCacheStorage"
+        )
+        assert runner.settings.getint("HTTPCACHE_EXPIRATION_SECS") == 86400
 
 
 class MockCrawlManager:

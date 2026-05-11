@@ -29,6 +29,9 @@ class FailureReason(str, Enum):
     # Embedding service issues
     EMBEDDING_TIMEOUT = "EMBEDDING_TIMEOUT"  # Embedding API call timed out
     EMBEDDING_ERROR = "EMBEDDING_ERROR"  # Embedding API returned an error
+    EMBEDDING_BATCH_LIMIT = (
+        "EMBEDDING_BATCH_LIMIT"  # Batch memory cap stopped processing
+    )
 
     # Database issues
     DB_ERROR = "DB_ERROR"  # Database error during persistence

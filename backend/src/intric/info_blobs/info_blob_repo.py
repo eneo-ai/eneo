@@ -369,10 +369,14 @@ class InfoBlobRepository:
         return InfoBlobInDB.model_validate(record) if record is not None else None
 
     async def delete_by_title_and_website(
-        self, title: str, website_id: UUID
+        self, title: str, website_id: UUID, tenant_id: UUID
     ) -> InfoBlobInDB | None:
         record = await self.delegate.delete_by(
-            conditions={InfoBlobs.title: title, InfoBlobs.website_id: website_id}
+            conditions={
+                InfoBlobs.title: title,
+                InfoBlobs.website_id: website_id,
+                InfoBlobs.tenant_id: tenant_id,
+            }
         )
         return InfoBlobInDB.model_validate(record) if record is not None else None
 
@@ -556,7 +560,7 @@ class InfoBlobRepository:
         return [title for title in result if title is not None]
 
     async def batch_delete_by_titles_and_website(
-        self, titles: list[str], website_id: UUID
+        self, titles: list[str], website_id: UUID, tenant_id: UUID
     ) -> int:
         """Delete multiple info blobs by titles in a single query.
 
@@ -565,7 +569,8 @@ class InfoBlobRepository:
 
         Args:
             titles: List of blob titles to delete
-            website_id: Website UUID for tenant isolation
+            website_id: Website UUID
+            tenant_id: Tenant UUID
 
         Returns:
             Number of blobs deleted
@@ -576,27 +581,10 @@ class InfoBlobRepository:
         # Use SQLAlchemy's .in_() method for array-based deletion
         # This is more efficient than N individual DELETE queries
         stmt = sa.delete(InfoBlobs).where(
-            InfoBlobs.website_id == website_id, InfoBlobs.title.in_(titles)
+            InfoBlobs.website_id == website_id,
+            InfoBlobs.tenant_id == tenant_id,
+            InfoBlobs.title.in_(titles),
         )
 
         result = await self.session.execute(stmt)
         return result.rowcount
-
-    async def get_content_hash(self, website_id: UUID, title: str) -> bytes | None:
-        """Get content hash for a specific page.
-
-        Why: Enables content-based change detection to skip re-processing unchanged pages.
-        Uses composite index (website_id, title) for efficient lookup.
-
-        Args:
-            website_id: Website UUID
-            title: Page title/URL
-
-        Returns:
-            32-byte SHA-256 hash or None if page doesn't exist or hash not computed
-        """
-        stmt = sa.select(InfoBlobs.content_hash).where(
-            InfoBlobs.website_id == website_id, InfoBlobs.title == title
-        )
-        result = await self.session.scalar(stmt)
-        return result

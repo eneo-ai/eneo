@@ -18,11 +18,12 @@
   // eslint-disable-next-line svelte/no-immutable-reactive-statements
   $: dayjs.locale(getLocale());
 
-  const SKIPPED_PREFIX = "skipped";
+  type CrawlOutcome = { code: string };
+  type CrawlRunWithOutcome = CrawlRun & { outcome?: CrawlOutcome | null };
 
   function isSkipped(crawl: CrawlRun): boolean {
-    const reason = (crawl.result_location ?? "").toLowerCase();
-    return crawl.status?.toLowerCase() === "failed" && reason.startsWith(SKIPPED_PREFIX);
+    const outcome = (crawl as CrawlRunWithOutcome).outcome;
+    return crawl.status?.toLowerCase() === "failed" && outcome?.code === "CRAWL_DUPLICATE_SKIPPED";
   }
 
   function hasWarnings(crawl: CrawlRun): boolean {

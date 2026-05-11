@@ -11,12 +11,13 @@ Core Invariants Tested:
 4. Embedding bytes cap triggers early Phase 1 exit
 5. Each page gets its own savepoint in Phase 2
 6. Delete and insert happen within the same savepoint (atomic)
-7. successful_urls contains ONLY URLs that committed successfully
+7. persisted_urls contains ONLY URLs that committed successfully
 
 Run with: pytest tests/unittests/worker/test_persist_batch_logic.py -v
 """
 
 import asyncio
+import hashlib
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -24,7 +25,6 @@ from uuid import uuid4
 import pytest
 
 from intric.worker.crawl_context import CrawlContext, EmbeddingModelSpec
-
 
 # =============================================================================
 # HELPER: Mock Session Manager
@@ -311,7 +311,7 @@ class TestEmbeddingSemaphoreBehavior:
         ):
             from intric.worker.crawl_tasks import persist_batch
 
-            success, failed, urls, _ = await persist_batch(
+            result = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=embedding_model_spec,
@@ -323,7 +323,7 @@ class TestEmbeddingSemaphoreBehavior:
             f"All 3 pages should be attempted, but only {call_count} were tried"
         )
         # Page 2 should have failed
-        assert failed >= 1, "At least one page should have failed"
+        assert result.failed_count >= 1, "At least one page should have failed"
 
     @pytest.mark.asyncio
     async def test_semaphore_released_on_timeout(
@@ -392,7 +392,7 @@ class TestEmbeddingSemaphoreBehavior:
         ):
             from intric.worker.crawl_tasks import persist_batch
 
-            success, failed, urls, _ = await persist_batch(
+            await persist_batch(
                 page_buffer=page_buffer,
                 ctx=short_timeout_ctx,
                 embedding_model=embedding_model_spec,
@@ -402,6 +402,200 @@ class TestEmbeddingSemaphoreBehavior:
         # Page 2 timed out, but page 3 should have been attempted
         assert call_count == 3, (
             f"All 3 pages should be attempted after timeout, got {call_count}"
+        )
+
+
+class TestHashRetention:
+    def test_existing_blob_state_requires_hash_and_current_model(self, crawl_context):
+        from intric.worker.crawl.persistence import ExistingBlobState
+
+        content_hash = b"hash"
+        existing_state = ExistingBlobState(
+            content_hash=content_hash,
+            embedding_model_id=crawl_context.embedding_model_id,
+        )
+
+        assert existing_state.is_current_for(
+            content_hash=content_hash,
+            embedding_model_id=crawl_context.embedding_model_id,
+        )
+        assert not existing_state.is_current_for(
+            content_hash=b"different-hash",
+            embedding_model_id=crawl_context.embedding_model_id,
+        )
+        assert not existing_state.is_current_for(
+            content_hash=content_hash,
+            embedding_model_id=uuid4(),
+        )
+        assert existing_state.is_current_for(
+            content_hash=content_hash,
+            embedding_model_id=None,
+        )
+        missing_stored_model_state = ExistingBlobState(
+            content_hash=content_hash,
+            embedding_model_id=None,
+        )
+        assert not missing_stored_model_state.is_current_for(
+            content_hash=content_hash,
+            embedding_model_id=crawl_context.embedding_model_id,
+        )
+        assert missing_stored_model_state.is_current_for(
+            content_hash=content_hash,
+            embedding_model_id=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_hash_match_retains_url_without_embedding_or_db_write(
+        self, crawl_context, embedding_model_spec, mock_embeddings_service
+    ):
+        from intric.worker.crawl.persistence import ExistingBlobState, persist_batch
+
+        url = "https://example.com/unchanged"
+        content = "Unchanged page content"
+        content_hash = hashlib.sha256(content.encode("utf-8")).digest()
+        mock_session = create_mock_session()
+        mock_sm = create_mock_sessionmanager(mock_session)
+
+        with patch("intric.database.database.sessionmanager", mock_sm):
+            result = await persist_batch(
+                page_buffer=[{"url": url, "content": content}],
+                ctx=crawl_context,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(mock_embeddings_service),
+                existing_blob_state_by_title={
+                    url: ExistingBlobState(
+                        content_hash=content_hash,
+                        embedding_model_id=crawl_context.embedding_model_id,
+                    )
+                },
+            )
+
+        assert result.persisted_count == 0
+        assert result.retained_count == 1
+        assert result.failed_count == 0
+        assert result.retained_urls == (url,)
+        assert result.cleanup_protected_titles == frozenset({url})
+        mock_sm.create_session.assert_not_called()
+        mock_sm.session.assert_not_called()
+        mock_embeddings_service.get_embeddings.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_hash_match_with_different_embedding_model_reembeds_and_persists(
+        self, crawl_context, embedding_model_spec, mock_embeddings_service
+    ):
+        from intric.worker.crawl.persistence import ExistingBlobState, persist_batch
+
+        url = "https://example.com/model-changed"
+        content = "Same content under a new embedding model"
+        content_hash = hashlib.sha256(content.encode("utf-8")).digest()
+        mock_session = create_mock_session()
+        mock_session.execute = AsyncMock(
+            return_value=MagicMock(scalar_one=lambda: uuid4())
+        )
+        mock_sm = create_mock_sessionmanager(mock_session)
+
+        with patch("intric.database.database.sessionmanager", mock_sm):
+            result = await persist_batch(
+                page_buffer=[{"url": url, "content": content}],
+                ctx=crawl_context,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(mock_embeddings_service),
+                existing_blob_state_by_title={
+                    url: ExistingBlobState(
+                        content_hash=content_hash,
+                        embedding_model_id=uuid4(),
+                    )
+                },
+            )
+
+        assert result.persisted_count == 1
+        assert result.retained_count == 0
+        assert result.failed_count == 0
+        assert result.persisted_urls == (url,)
+        mock_sm.create_session.assert_called_once()
+        mock_sm.session.assert_called_once()
+        mock_embeddings_service.get_embeddings.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_missing_embedding_model_retains_unchanged_and_fails_changed_only(
+        self, crawl_context, mock_embeddings_service
+    ):
+        from intric.worker.crawl.persistence import ExistingBlobState, persist_batch
+        from intric.worker.crawl_context import FailureReason
+
+        unchanged_url = "https://example.com/unchanged"
+        changed_url = "https://example.com/changed"
+        unchanged_content = "Already embedded content"
+        changed_content = "Needs a new embedding"
+        mock_session = create_mock_session()
+        mock_sm = create_mock_sessionmanager(mock_session)
+
+        with patch("intric.database.database.sessionmanager", mock_sm):
+            result = await persist_batch(
+                page_buffer=[
+                    {"url": unchanged_url, "content": unchanged_content},
+                    {"url": changed_url, "content": changed_content},
+                ],
+                ctx=crawl_context,
+                embedding_model=None,
+                container=create_mock_container(mock_embeddings_service),
+                existing_blob_state_by_title={
+                    unchanged_url: ExistingBlobState(
+                        content_hash=hashlib.sha256(
+                            unchanged_content.encode("utf-8")
+                        ).digest(),
+                        embedding_model_id=crawl_context.embedding_model_id,
+                    ),
+                    changed_url: ExistingBlobState(
+                        content_hash=b"old-hash",
+                        embedding_model_id=crawl_context.embedding_model_id,
+                    ),
+                },
+            )
+
+        assert result.persisted_count == 0
+        assert result.retained_urls == (unchanged_url,)
+        assert result.failed_count == 1
+        assert result.failures_by_reason == {
+            FailureReason.NO_EMBEDDING_MODEL: (changed_url,)
+        }
+        assert result.cleanup_protected_titles == frozenset({unchanged_url})
+        assert result.failed_urls == frozenset({changed_url})
+        mock_sm.create_session.assert_not_called()
+        mock_sm.session.assert_not_called()
+        mock_embeddings_service.get_embeddings.assert_not_called()
+
+    def test_persist_batch_result_counts_are_computed_from_collections(self):
+        from intric.worker.crawl.persistence import PersistBatchResult
+        from intric.worker.crawl_context import FailureReason
+
+        result = PersistBatchResult(
+            persisted_urls=("https://example.com/persisted",),
+            retained_urls=("https://example.com/retained",),
+            failures_by_reason={
+                FailureReason.EMPTY_CONTENT: ("https://example.com/empty",),
+                FailureReason.DB_ERROR: (
+                    "https://example.com/db1",
+                    "https://example.com/db2",
+                ),
+            },
+        )
+
+        assert result.persisted_count == 1
+        assert result.retained_count == 1
+        assert result.failed_count == 3
+        assert result.cleanup_protected_titles == frozenset(
+            {
+                "https://example.com/persisted",
+                "https://example.com/retained",
+            }
+        )
+        assert result.failed_urls == frozenset(
+            {
+                "https://example.com/empty",
+                "https://example.com/db1",
+                "https://example.com/db2",
+            }
         )
 
 
@@ -489,7 +683,7 @@ class TestMemoryCapsEnforcement:
         ):
             from intric.worker.crawl_tasks import persist_batch
 
-            await persist_batch(
+            result = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=small_cap_ctx,
                 embedding_model=embedding_model_spec,
@@ -499,6 +693,10 @@ class TestMemoryCapsEnforcement:
         # Should have stopped early due to embedding bytes cap
         assert pages_embedded < 10, (
             f"Expected early exit due to embedding cap, but processed {pages_embedded} pages"
+        )
+        assert result.failed_count == len(page_buffer) - result.persisted_count
+        assert result.failed_urls == frozenset(
+            page["url"] for page in page_buffer[pages_embedded:]
         )
 
 
@@ -632,26 +830,69 @@ class TestPhase2SavepointBehavior:
         assert first_insert_idx > delete_idx, "INSERT must be after DELETE"
         assert commit_idx > first_insert_idx, "COMMIT must be after INSERTs"
 
-
-# =============================================================================
-# TEST CLASS: successful_urls Tracking
-# =============================================================================
-
-
-class TestSuccessfulUrlsTracking:
-    """Tests for accurate tracking of successfully persisted URLs."""
-
     @pytest.mark.asyncio
-    async def test_successful_urls_only_contains_committed_pages(
+    async def test_replacement_delete_is_tenant_scoped(
         self, crawl_context, embedding_model_spec, mock_embeddings_service
     ):
         """
-        INVARIANT: successful_urls must contain ONLY URLs that were actually committed.
+        INVARIANT: Page replacement must delete by title, website, and tenant.
+        """
+        page_buffer = [{"url": "https://example.com/page1", "content": "Test content"}]
+        executed_statements = []
+
+        async def capture_execute(stmt):
+            executed_statements.append(stmt)
+            return MagicMock(scalar_one=lambda: uuid4())
+
+        mock_session = create_mock_session()
+        mock_session.execute = AsyncMock(side_effect=capture_execute)
+        mock_sm = create_mock_sessionmanager(mock_session)
+
+        with (
+            patch(
+                "intric.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=asyncio.Semaphore(10),
+            ),
+            patch("intric.database.database.sessionmanager", mock_sm),
+        ):
+            from intric.worker.crawl_tasks import persist_batch
+
+            result = await persist_batch(
+                page_buffer=page_buffer,
+                ctx=crawl_context,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(mock_embeddings_service),
+            )
+
+        assert result.persisted_count == 1
+        delete_statement = next(
+            stmt for stmt in executed_statements if "DELETE" in str(stmt)
+        )
+        delete_sql = str(delete_statement)
+        assert "info_blobs.title" in delete_sql
+        assert "info_blobs.website_id" in delete_sql
+        assert "info_blobs.tenant_id" in delete_sql
+
+
+# =============================================================================
+# TEST CLASS: Persisted URL Tracking
+# =============================================================================
+
+
+class TestPersistedUrlsTracking:
+    """Tests for accurate tracking of successfully persisted URLs."""
+
+    @pytest.mark.asyncio
+    async def test_persisted_urls_only_contains_committed_pages(
+        self, crawl_context, embedding_model_spec, mock_embeddings_service
+    ):
+        """
+        INVARIANT: persisted_urls must contain ONLY URLs that were actually committed.
 
         This is the core data integrity fix for the slot leak issue.
 
         Scenario: 3 pages, page 2 fails during insert
-        Expected: successful_urls = [page1, page3], not [page1, page2, page3]
+        Expected: persisted_urls = [page1, page3], not [page1, page2, page3]
         """
         page_buffer = [
             {"url": "https://example.com/success1", "content": "Content 1"},
@@ -696,7 +937,7 @@ class TestSuccessfulUrlsTracking:
         ):
             from intric.worker.crawl_tasks import persist_batch
 
-            success_count, failed_count, successful_urls, _ = await persist_batch(
+            result = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=embedding_model_spec,
@@ -704,13 +945,13 @@ class TestSuccessfulUrlsTracking:
             )
 
         # Verify correct tracking
-        assert success_count == 2, f"Expected 2 successes, got {success_count}"
-        assert failed_count == 1, f"Expected 1 failure, got {failed_count}"
-        assert len(successful_urls) == 2, f"Expected 2 URLs, got {len(successful_urls)}"
-        assert "https://example.com/success1" in successful_urls
-        assert "https://example.com/success2" in successful_urls
-        assert "https://example.com/fails" not in successful_urls, (
-            "Failed URL must NOT be in successful_urls"
+        assert result.persisted_count == 2
+        assert result.failed_count == 1
+        assert len(result.persisted_urls) == 2
+        assert "https://example.com/success1" in result.persisted_urls
+        assert "https://example.com/success2" in result.persisted_urls
+        assert "https://example.com/fails" not in result.persisted_urls, (
+            "Failed URL must NOT be in persisted_urls"
         )
 
     @pytest.mark.asyncio
@@ -718,7 +959,7 @@ class TestSuccessfulUrlsTracking:
         self, crawl_context, embedding_model_spec
     ):
         """
-        INVARIANT: Empty page_buffer should return (0, 0, [], {}).
+        INVARIANT: Empty page_buffer should return an empty PersistBatchResult.
         """
         from intric.worker.crawl_tasks import persist_batch
 
@@ -729,44 +970,45 @@ class TestSuccessfulUrlsTracking:
             container=create_mock_container(MagicMock()),
         )
 
-        assert result == (0, 0, [], {}), (
-            f"Empty buffer should return (0, 0, [], {{}}), got {result}"
-        )
+        assert result.persisted_count == 0
+        assert result.retained_count == 0
+        assert result.failed_count == 0
+        assert result.persisted_urls == ()
+        assert result.retained_urls == ()
+        assert result.failures_by_reason == {}
 
     @pytest.mark.asyncio
     async def test_no_embedding_model_fails_all_pages(self, crawl_context):
         """
         INVARIANT: When embedding_model is None, all pages fail with NO_EMBEDDING_MODEL reason.
         """
-        from intric.worker.crawl_tasks import persist_batch
         from intric.worker.crawl_context import FailureReason
+        from intric.worker.crawl_tasks import persist_batch
 
         page_buffer = [
             {"url": "https://example.com/page1", "content": "Content 1"},
             {"url": "https://example.com/page2", "content": "Content 2"},
         ]
 
-        success, failed, urls, failures_by_reason = await persist_batch(
+        result = await persist_batch(
             page_buffer=page_buffer,
             ctx=crawl_context,
             embedding_model=None,  # No model
             container=create_mock_container(MagicMock()),
         )
 
-        assert success == 0, (
-            f"Expected 0 successes with no embedding model, got {success}"
-        )
-        assert failed == 2, f"Expected 2 failures with no embedding model, got {failed}"
-        assert urls == [], f"Expected empty URLs with no embedding model, got {urls}"
-        assert FailureReason.NO_EMBEDDING_MODEL.value in failures_by_reason
-        assert len(failures_by_reason[FailureReason.NO_EMBEDDING_MODEL.value]) == 2
+        assert result.persisted_count == 0
+        assert result.failed_count == 2
+        assert result.persisted_urls == ()
+        assert FailureReason.NO_EMBEDDING_MODEL in result.failures_by_reason
+        assert len(result.failures_by_reason[FailureReason.NO_EMBEDDING_MODEL]) == 2
 
     @pytest.mark.asyncio
     async def test_savepoint_rollback_excludes_url_from_successful(
         self, crawl_context, embedding_model_spec, mock_embeddings_service
     ):
         """
-        INVARIANT: When savepoint.rollback() is called, the URL must NOT appear in successful_urls.
+        INVARIANT: When savepoint.rollback() is called, the URL must NOT appear in persisted_urls.
 
         This is critical: rollback means the data was NOT persisted.
         """
@@ -802,7 +1044,7 @@ class TestSuccessfulUrlsTracking:
         ):
             from intric.worker.crawl_tasks import persist_batch
 
-            success, failed, urls, failures_by_reason = await persist_batch(
+            result = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=crawl_context,
                 embedding_model=embedding_model_spec,
@@ -812,12 +1054,14 @@ class TestSuccessfulUrlsTracking:
         # Verify rollback was called
         savepoint.rollback.assert_called_once()
 
-        # Verify URL is NOT in successful_urls
-        assert success == 0
-        assert failed == 1
-        assert urls == [], "Rolled-back URL must NOT appear in successful_urls"
+        # Verify URL is NOT in persisted_urls
+        assert result.persisted_count == 0
+        assert result.failed_count == 1
+        assert result.persisted_urls == (), (
+            "Rolled-back URL must NOT appear in persisted_urls"
+        )
         # DB error should be tracked
-        assert FailureReason.DB_ERROR.value in failures_by_reason
+        assert FailureReason.DB_ERROR in result.failures_by_reason
 
 
 # =============================================================================
@@ -986,7 +1230,7 @@ class TestTransactionWallTimeGuard:
         ):
             from intric.worker.crawl_tasks import persist_batch
 
-            success, failed, urls, _ = await persist_batch(
+            result = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=short_timeout_ctx,
                 embedding_model=embedding_model_spec,
@@ -994,6 +1238,6 @@ class TestTransactionWallTimeGuard:
             )
 
         # Due to timeout, not all pages could be persisted
-        total = success + failed
+        total = result.persisted_count + result.failed_count
         assert total == 5, f"Total should be 5, got {total}"
-        assert failed > 0, "Some pages should have failed due to timeout"
+        assert result.failed_count > 0, "Some pages should have failed due to timeout"

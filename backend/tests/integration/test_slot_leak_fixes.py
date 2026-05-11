@@ -3,8 +3,8 @@ Integration tests for slot leak fixes.
 
 Tests cover:
 1. Session lifecycle - main session closes before crawl loop
-2. Partial batch failure tracking - successful_urls only includes actually persisted URLs
-3. Embedding API failures - errors don't corrupt successful_urls tracking
+2. Partial batch failure tracking - persisted_urls only includes actually persisted URLs
+3. Embedding API failures - errors don't corrupt persisted_urls tracking
 4. Cancellation safety - cleanup on task cancellation
 5. Zombie job prevention - stale crawlers don't corrupt state
 6. Redis TTL management - heartbeat refreshes both counter and flag TTL
@@ -31,17 +31,17 @@ def create_mock_container(embeddings_service):
 
 
 # =============================================================================
-# UNIT TESTS: persist_batch return type and crawled_titles tracking
+# UNIT TESTS: persist_batch result type and cleanup protection tracking
 # =============================================================================
 
 
 class TestPersistBatchReturnType:
-    """Tests for persist_batch returning tuple[int, int, list[str], list[str]]."""
+    """Tests for persist_batch returning PersistBatchResult."""
 
     @pytest.mark.asyncio
     async def test_empty_buffer_returns_empty_urls(self):
         """
-        Empty page_buffer should return (0, 0, [], []).
+        Empty page_buffer should return an empty PersistBatchResult.
 
         This is the base case - no pages, no URLs.
         """
@@ -73,15 +73,17 @@ class TestPersistBatchReturnType:
             container=create_mock_container(MagicMock()),
         )
 
-        # Should return (0, 0, [], {})
-        assert result == (0, 0, [], {}), (
-            f"Empty buffer should return (0, 0, [], {{}}), got {result}"
-        )
+        assert result.persisted_count == 0
+        assert result.retained_count == 0
+        assert result.failed_count == 0
+        assert result.persisted_urls == ()
+        assert result.retained_urls == ()
+        assert result.failures_by_reason == {}
 
     @pytest.mark.asyncio
     async def test_no_embedding_model_returns_all_failed(self):
         """
-        When embedding_model is None, all pages should fail with empty successful_urls.
+        When embedding_model is None, all pages should fail with empty persisted_urls.
         """
         from intric.worker.crawl_context import CrawlContext
 
@@ -113,27 +115,25 @@ class TestPersistBatchReturnType:
             container=create_mock_container(MagicMock()),
         )
 
-        success_count, failed_count, successful_urls, _ = result
-
         # All pages should fail when no embedding model
-        assert success_count == 0, f"Expected 0 successes, got {success_count}"
-        assert failed_count == 2, f"Expected 2 failures, got {failed_count}"
-        assert successful_urls == [], f"Expected empty URLs, got {successful_urls}"
+        assert result.persisted_count == 0
+        assert result.failed_count == 2
+        assert result.persisted_urls == ()
 
 
-class TestCrawledTitlesTracking:
-    """Tests for crawled_titles only containing actually persisted URLs."""
+class TestCleanupProtectionTracking:
+    """Tests for cleanup protection only containing persisted or retained URLs."""
 
-    def test_successful_urls_only_includes_persisted(self):
+    def test_persisted_urls_only_includes_persisted(self):
         """
-        INVARIANT: successful_urls must ONLY contain URLs that were actually
+        INVARIANT: persisted_urls must ONLY contain URLs that were actually
         persisted to the database. URLs from failed pages must NOT be included.
 
         This test validates the fix for the data loss bug at lines 1668-1669.
         """
         # Simulate the BEFORE and AFTER patterns
 
-        # BEFORE (BUG): crawled_titles.update(p["url"] for p in page_buffer if success_count > 0)
+        # BEFORE (BUG): cleanup set updated from the whole page_buffer if success_count > 0
         # This marks ALL URLs as crawled if ANY page succeeds
 
         page_buffer = [
@@ -144,29 +144,31 @@ class TestCrawledTitlesTracking:
         success_count = 2  # 2 pages succeeded
 
         # OLD BUGGY LOGIC - would mark all 3 URLs
-        buggy_crawled_titles = set()
-        buggy_crawled_titles.update(p["url"] for p in page_buffer if success_count > 0)
-        assert len(buggy_crawled_titles) == 3, "Bug: marks ALL URLs when ANY succeeds"
+        buggy_must_keep_titles = set()
+        buggy_must_keep_titles.update(
+            p["url"] for p in page_buffer if success_count > 0
+        )
+        assert len(buggy_must_keep_titles) == 3, "Bug: marks ALL URLs when ANY succeeds"
 
-        # AFTER (FIX): crawled_titles.update(successful_urls)
+        # AFTER (FIX): must_keep_titles.update(result.cleanup_protected_titles)
         # Only URLs from successful persists are included
 
-        successful_urls = [
+        persisted_urls = [
             "https://example.com/success1",
             "https://example.com/success2",
         ]  # Only the 2 that actually persisted
 
-        fixed_crawled_titles = set()
-        fixed_crawled_titles.update(successful_urls)
-        assert len(fixed_crawled_titles) == 2, "Fix: marks only ACTUALLY persisted URLs"
-        assert "https://example.com/failed" not in fixed_crawled_titles
+        must_keep_titles = set()
+        must_keep_titles.update(persisted_urls)
+        assert len(must_keep_titles) == 2, "Fix: marks only ACTUALLY persisted URLs"
+        assert "https://example.com/failed" not in must_keep_titles
 
     def test_partial_batch_failure_tracking(self):
         """
         When a batch has partial failures, only successful URLs are tracked.
 
         Scenario: 5 pages in batch, 2 fail due to constraint violations
-        Expected: crawled_titles only has 3 URLs
+        Expected: must_keep_titles only has 3 URLs
         """
         _page_buffer = [  # noqa: F841 - documents test scenario
             {"url": "https://example.com/page1", "content": "OK"},
@@ -179,20 +181,20 @@ class TestCrawledTitlesTracking:
         # Simulated persist_batch result
         _success_count = 3  # noqa: F841 - documents expected outcome
         _failed_count = 2  # noqa: F841 - documents expected outcome
-        successful_urls = [
+        persisted_urls = [
             "https://example.com/page1",
             "https://example.com/page3",
             "https://example.com/page5",
         ]
 
-        crawled_titles = set()
-        crawled_titles.update(successful_urls)
+        must_keep_titles = set()
+        must_keep_titles.update(persisted_urls)
 
         # Verify only successful URLs are tracked
-        assert len(crawled_titles) == 3
-        assert "https://example.com/page2" not in crawled_titles
-        assert "https://example.com/page4" not in crawled_titles
-        assert all(url in crawled_titles for url in successful_urls)
+        assert len(must_keep_titles) == 3
+        assert "https://example.com/page2" not in must_keep_titles
+        assert "https://example.com/page4" not in must_keep_titles
+        assert all(url in must_keep_titles for url in persisted_urls)
 
 
 class TestSessionLifecycle:
@@ -207,6 +209,7 @@ class TestSessionLifecycle:
         to return the connection to the pool before the long-running crawl begins.
         """
         import inspect
+
         from intric.worker import crawl_tasks
 
         source = inspect.getsource(crawl_tasks.crawl_task)
@@ -236,10 +239,10 @@ class TestEmbeddingAPIFailures:
     async def test_embedding_timeout_doesnt_corrupt_tracking(self):
         """
         When embedding API times out, the page should fail but not corrupt
-        successful_urls tracking for other pages.
+        persisted_urls tracking for other pages.
 
         Scenario: Page 2 embedding times out, pages 1 and 3 succeed
-        Expected: successful_urls = [page1, page3], failed_count = 1
+        Expected: persisted_urls = [page1, page3], failed_count = 1
         """
         # This is tested implicitly through the persist_batch implementation
         # but we document the expected behavior here
@@ -251,12 +254,10 @@ class TestEmbeddingAPIFailures:
             {"url": "page3", "status": "success", "reason": "embedded and persisted"},
         ]
 
-        successful_urls = [
-            p["url"] for p in pages_processed if p["status"] == "success"
-        ]
+        persisted_urls = [p["url"] for p in pages_processed if p["status"] == "success"]
         failed_count = sum(1 for p in pages_processed if p["status"] == "failed")
 
-        assert successful_urls == ["page1", "page3"]
+        assert persisted_urls == ["page1", "page3"]
         assert failed_count == 1
 
 
@@ -273,14 +274,14 @@ class TestCancellationSafety:
         """
         # Per-page savepoints ensure atomic rollback
         # If cancelled mid-batch, uncommitted pages are rolled back
-        # Only committed pages (successful savepoints) are in successful_urls
+        # Only committed pages (successful savepoints) are in persisted_urls
 
         # Document the pattern:
         # 1. savepoint = await session.begin_nested()
         # 2. try:
         # 3.     ... persist page ...
         # 4.     await savepoint.commit()
-        # 5.     successful_urls.append(url)  # Only after commit!
+        # 5.     persisted_urls.append(url)  # Only after commit!
         # 6. except Exception:
         # 7.     await savepoint.rollback()
         # 8.     failed_count += 1
@@ -309,6 +310,7 @@ class TestRedisTTLManagement:
         Note: Heartbeat logic was extracted to HeartbeatMonitor during refactoring.
         """
         import inspect
+
         from intric.worker.crawl.heartbeat import HeartbeatMonitor
 
         source = inspect.getsource(HeartbeatMonitor._refresh_redis_ttl)
@@ -330,6 +332,7 @@ class TestZombieJobPrevention:
         Note: Preemption logic was extracted to HeartbeatMonitor during refactoring.
         """
         import inspect
+
         from intric.worker.crawl.heartbeat import HeartbeatMonitor
 
         source = inspect.getsource(HeartbeatMonitor._check_preemption)
@@ -344,6 +347,7 @@ class TestZombieJobPrevention:
         and return preempted_during_crawl status.
         """
         import inspect
+
         from intric.worker import crawl_tasks
 
         source = inspect.getsource(crawl_tasks.crawl_task)

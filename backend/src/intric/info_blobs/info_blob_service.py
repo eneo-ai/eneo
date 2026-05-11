@@ -132,7 +132,7 @@ class InfoBlobService:
 
             elif info_blob.website_id:
                 info_blob_deleted = await self.repo.delete_by_title_and_website(
-                    info_blob.title, info_blob.website_id
+                    info_blob.title, info_blob.website_id, info_blob.tenant_id
                 )
 
                 if info_blob_deleted is not None:

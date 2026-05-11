@@ -24,7 +24,6 @@ import redis.asyncio as aioredis
 from intric.worker.feeder.capacity import CapacityManager
 from intric.worker.redis.lua_scripts import LuaScripts
 
-
 # =============================================================================
 # HELPER: Slot Counter Assertion
 # =============================================================================
@@ -406,7 +405,7 @@ class TestCancellationDuringPersist:
 
     When a task is cancelled mid-persist:
     1. In-progress savepoints should rollback
-    2. successful_urls should only contain committed pages
+    2. persisted_urls should only contain committed pages
     3. Slot should still be released in finally block
     """
 
@@ -419,7 +418,7 @@ class TestCancellationDuringPersist:
         #     try:
         #         ... persist page ...
         #         await savepoint.commit()
-        #         successful_urls.append(url)  # Only after commit!
+        #         persisted_urls.append(url)  # Only after commit!
         #     except Exception:
         #         await savepoint.rollback()
         #         failed_count += 1

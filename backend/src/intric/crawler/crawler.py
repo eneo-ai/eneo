@@ -19,6 +19,7 @@ from intric.crawler.parse_html import CrawledPage
 from intric.crawler.pipelines import FileNamePipeline
 from intric.crawler.spiders.crawl_spider import CrawlSpider
 from intric.crawler.spiders.sitemap_spider import SitemapSpider
+from intric.main.config import get_settings
 from intric.main.exceptions import CrawlerException, CrawlTimeoutError
 from intric.tenants.crawler_settings_helper import get_crawler_setting
 from intric.websites.domain.crawl_run import CrawlType
@@ -83,6 +84,7 @@ class CrawlManager:
         *,
         filepath: str | Path,
         files_dir: str | Path | None = None,
+        http_cache_dir: str | Path | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
         **spider_kwargs: Any,
     ) -> Any:
@@ -97,6 +99,7 @@ class CrawlManager:
         self._runner = create_runner(
             filepath=filepath,
             files_dir=files_dir,
+            http_cache_dir=http_cache_dir,
             tenant_crawler_settings=tenant_crawler_settings,
         )
 
@@ -193,6 +196,8 @@ class Crawl:
 def create_runner(
     filepath: str | Path,
     files_dir: Optional[str | Path] = None,
+    http_cache_dir: Optional[str | Path] = None,
+    http_cache_expiration_seconds: int | None = None,
     tenant_crawler_settings: dict[str, Any] | None = None,
 ) -> CrawlerRunner:
     """Create a Scrapy CrawlerRunner with tenant-aware settings.
@@ -208,6 +213,7 @@ def create_runner(
         tenant_crawler_settings: Optional tenant-specific settings from DB
     """
     filepath_str = str(filepath)
+    settings_obj = get_settings()
     # Scrapy settings values have heterogeneous types; dict[str, Any] is correct here.
     settings: dict[str, Any] = {
         "FEEDS": {filepath_str: {"format": "jsonl", "item_classes": [CrawledPage]}},
@@ -232,6 +238,21 @@ def create_runner(
         "RETRY_TIMES": get_crawler_setting("retry_times", tenant_crawler_settings),
         "RETRY_ENABLED": True,
     }
+
+    if http_cache_dir is not None:
+        settings.update(
+            {
+                "HTTPCACHE_ENABLED": True,
+                "HTTPCACHE_DIR": str(http_cache_dir),
+                "HTTPCACHE_POLICY": "scrapy.extensions.httpcache.RFC2616Policy",
+                "HTTPCACHE_STORAGE": "scrapy.extensions.httpcache.FilesystemCacheStorage",
+                "HTTPCACHE_EXPIRATION_SECS": (
+                    http_cache_expiration_seconds
+                    if http_cache_expiration_seconds is not None
+                    else settings_obj.crawl_http_cache_expiration_seconds
+                ),
+            }
+        )
 
     if files_dir is not None:
         settings["ITEM_PIPELINES"] = {FileNamePipeline: 300}
@@ -260,6 +281,7 @@ class Crawler:
         *,
         filepath: str | Path,
         files_dir: Optional[str | Path],
+        http_cache_dir: Optional[str | Path] = None,
         http_user: str | None = None,
         http_pass: str | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
@@ -277,6 +299,7 @@ class Crawler:
         runner = create_runner(
             filepath=filepath,
             files_dir=files_dir,
+            http_cache_dir=http_cache_dir,
             tenant_crawler_settings=tenant_crawler_settings,
         )
         return runner.crawl(  # pyright: ignore[reportUnknownMemberType]  # Scrapy has no py.typed stubs
@@ -290,6 +313,7 @@ class Crawler:
         *,
         filepath: str | Path,
         files_dir: Optional[str | Path],
+        http_cache_dir: Optional[str | Path] = None,
         http_user: str | None = None,
         http_pass: str | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
@@ -305,6 +329,7 @@ class Crawler:
         """
         runner = create_runner(
             filepath=filepath,
+            http_cache_dir=http_cache_dir,
             tenant_crawler_settings=tenant_crawler_settings,
         )
         return runner.crawl(  # pyright: ignore[reportUnknownMemberType]
@@ -321,6 +346,7 @@ class Crawler:
         *,
         filepath: str | Path,
         files_dir: Optional[str | Path],
+        http_cache_dir: Optional[str | Path] = None,
         http_user: str | None = None,
         http_pass: str | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
@@ -358,6 +384,7 @@ class Crawler:
                 CrawlSpider,
                 filepath=str(filepath),
                 files_dir=files_dir_str,
+                http_cache_dir=http_cache_dir,
                 tenant_crawler_settings=tenant_crawler_settings,
                 url=url,
                 http_user=http_user,
@@ -432,6 +459,7 @@ class Crawler:
         *,
         filepath: str | Path,
         files_dir: Optional[str | Path],
+        http_cache_dir: Optional[str | Path] = None,
         http_user: str | None = None,
         http_pass: str | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
@@ -464,6 +492,7 @@ class Crawler:
                 SitemapSpider,
                 filepath=str(filepath),
                 files_dir=None,  # Sitemap crawls don't download files
+                http_cache_dir=http_cache_dir,
                 tenant_crawler_settings=tenant_crawler_settings,
                 sitemap_url=sitemap_url,
                 http_user=http_user,
@@ -659,6 +688,7 @@ class Crawler:
         http_user: str | None = None,
         http_pass: str | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
+        http_cache_dir: Optional[str | Path] = None,
         heartbeat_callback: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
         heartbeat_interval: float = 60.0,
     ):
@@ -695,6 +725,7 @@ class Crawler:
                 http_user=http_user,
                 http_pass=http_pass,
                 tenant_crawler_settings=tenant_crawler_settings,
+                http_cache_dir=http_cache_dir,
             ) as crawl_result:
                 yield crawl_result
 
@@ -708,6 +739,7 @@ class Crawler:
                 http_user=http_user,
                 http_pass=http_pass,
                 tenant_crawler_settings=tenant_crawler_settings,
+                http_cache_dir=http_cache_dir,
             ) as crawl_result:
                 yield crawl_result
 

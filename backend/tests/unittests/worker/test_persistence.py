@@ -9,11 +9,13 @@ Tests the crawl/persistence.py module directly to ensure:
 Run with: pytest tests/unittests/worker/test_persistence.py -v
 """
 
-import pytest
+import os
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-from intric.worker.crawl_context import CrawlContext, PreparedPage, EmbeddingModelSpec
+import pytest
+
+from intric.worker.crawl_context import CrawlContext, EmbeddingModelSpec, PreparedPage
 
 
 def create_mock_container(embeddings_service):
@@ -60,8 +62,8 @@ class TestPersistenceModuleSemantics:
     """Tests for persist_batch behavior after extraction."""
 
     @pytest.mark.asyncio
-    async def test_empty_buffer_returns_zeros(self):
-        """Empty page buffer should return (0, 0, [], {})."""
+    async def test_empty_buffer_returns_empty_result(self):
+        """Empty page buffer should return an empty PersistBatchResult."""
         from intric.worker.crawl.persistence import persist_batch
 
         ctx = CrawlContext(
@@ -91,17 +93,17 @@ class TestPersistenceModuleSemantics:
             provider_config={},
         )
 
-        success, failed, success_urls, failures_by_reason = await persist_batch(
+        result = await persist_batch(
             page_buffer=[],
             ctx=ctx,
             embedding_model=embedding_model,
             container=create_mock_container(MagicMock()),
         )
 
-        assert success == 0
-        assert failed == 0
-        assert success_urls == []
-        assert failures_by_reason == {}
+        assert result.persisted_count == 0
+        assert result.failed_count == 0
+        assert result.persisted_urls == ()
+        assert result.failures_by_reason == {}
 
     @pytest.mark.asyncio
     async def test_none_embedding_model_fails_all_pages(self):
@@ -126,18 +128,153 @@ class TestPersistenceModuleSemantics:
             {"url": "https://example.com/page2", "content": "Test content 2"},
         ]
 
-        success, failed, success_urls, failures_by_reason = await persist_batch(
+        result = await persist_batch(
             page_buffer=page_buffer,
             ctx=ctx,
             embedding_model=None,  # No embedding model
             container=create_mock_container(MagicMock()),
         )
 
-        assert success == 0
-        assert failed == 2
-        assert success_urls == []
-        assert FailureReason.NO_EMBEDDING_MODEL.value in failures_by_reason
-        assert len(failures_by_reason[FailureReason.NO_EMBEDDING_MODEL.value]) == 2
+        assert result.persisted_count == 0
+        assert result.failed_count == 2
+        assert result.persisted_urls == ()
+        assert FailureReason.NO_EMBEDDING_MODEL in result.failures_by_reason
+        assert len(result.failures_by_reason[FailureReason.NO_EMBEDDING_MODEL]) == 2
+
+
+class TestCrawlTaskRetentionHelpers:
+    def test_existing_blob_lookup_keeps_page_and_file_blob_state(self):
+        from intric.worker.crawl_tasks import _build_existing_blob_lookup
+
+        page_model_id = uuid4()
+        file_model_id = uuid4()
+        rows = [
+            ("https://example.com/page", b"page-hash", page_model_id),
+            ("manual.pdf", b"file-hash", file_model_id),
+            ("missing-hash", None, uuid4()),
+            (None, b"ignored", uuid4()),
+        ]
+
+        titles, state_by_title = _build_existing_blob_lookup(rows)
+
+        assert titles == [
+            "https://example.com/page",
+            "manual.pdf",
+            "missing-hash",
+        ]
+        assert state_by_title["https://example.com/page"].content_hash == b"page-hash"
+        assert state_by_title["https://example.com/page"].embedding_model_id == (
+            page_model_id
+        )
+        assert state_by_title["manual.pdf"].content_hash == b"file-hash"
+        assert state_by_title["manual.pdf"].embedding_model_id == file_model_id
+        assert "missing-hash" not in state_by_title
+
+    def test_compute_stale_titles_separates_kept_failed_and_deleted_titles(self):
+        from intric.worker.crawl_tasks import _compute_stale_titles
+
+        stale_titles = _compute_stale_titles(
+            existing_titles=[
+                "https://example.com/deleted",
+                "https://example.com/retained",
+                "https://example.com/persisted",
+                "https://example.com/failed",
+            ],
+            must_keep_titles={
+                "https://example.com/retained",
+                "https://example.com/persisted",
+            },
+            failed_titles={"https://example.com/failed"},
+        )
+
+        assert stale_titles == ["https://example.com/deleted"]
+
+    def test_build_http_cache_dir_scopes_by_tenant_and_website(self, tmp_path):
+        from intric.worker.crawl_tasks import _build_http_cache_dir
+
+        tenant_id = uuid4()
+        website_id = uuid4()
+
+        cache_dir = _build_http_cache_dir(
+            root_dir=tmp_path,
+            tenant_id=tenant_id,
+            website_id=website_id,
+        )
+
+        assert cache_dir == tmp_path / str(tenant_id) / str(website_id)
+
+    def test_prune_http_cache_dir_removes_oldest_files_over_size_cap(self, tmp_path):
+        from intric.worker.crawl_tasks import _prune_http_cache_dir
+
+        old_file = tmp_path / "old"
+        new_file = tmp_path / "new"
+        old_file.write_bytes(b"a" * 10)
+        new_file.write_bytes(b"b" * 10)
+        old_time = 1_700_000_000
+        new_time = old_time + 60
+        old_file.touch()
+        new_file.touch()
+
+        os.utime(old_file, (old_time, old_time))
+        os.utime(new_file, (new_time, new_time))
+
+        _prune_http_cache_dir(tmp_path, max_bytes=10)
+
+        assert not old_file.exists()
+        assert new_file.exists()
+
+    def test_retained_items_without_embedding_config_logs_once_per_crawl(
+        self, monkeypatch
+    ):
+        import intric.worker.crawl_tasks as crawl_tasks
+
+        mock_logger = MagicMock()
+        monkeypatch.setattr(crawl_tasks, "logger", mock_logger)
+
+        crawl_tasks._warn_if_retained_items_without_embedding_config(
+            embedding_model=None,
+            retained_pages=3,
+            retained_files=1,
+            website_id=uuid4(),
+            tenant_id=uuid4(),
+        )
+
+        mock_logger.warning.assert_called_once()
+        _, kwargs = mock_logger.warning.call_args
+        assert kwargs["extra"]["reason"] == "embedding_misconfigured_but_no_changes"
+        assert kwargs["extra"]["retained_pages"] == 3
+        assert kwargs["extra"]["retained_files"] == 1
+        assert kwargs["extra"]["retained_count"] == 4
+
+    def test_retained_items_with_valid_embedding_config_do_not_warn(self, monkeypatch):
+        import intric.worker.crawl_tasks as crawl_tasks
+
+        mock_logger = MagicMock()
+        monkeypatch.setattr(crawl_tasks, "logger", mock_logger)
+        embedding_model = EmbeddingModelSpec(
+            id=uuid4(),
+            name="test-model",
+            litellm_model_name="openai/text-embedding-ada-002",
+            family=None,
+            max_input=8191,
+            max_batch_size=32,
+            dimensions=1536,
+            open_source=False,
+            provider_id=uuid4(),
+            provider_type="openai",
+            provider_credentials={"api_key": "test"},
+            provider_config={},
+        )
+
+        crawl_tasks._warn_if_retained_items_without_embedding_config(
+            embedding_model=embedding_model,
+            retained_pages=3,
+            retained_files=1,
+            website_id=uuid4(),
+            tenant_id=uuid4(),
+        )
+
+        mock_logger.warning.assert_not_called()
 
 
 class TestEmbeddingSemaphore:
@@ -152,6 +289,7 @@ class TestEmbeddingSemaphore:
     def test_semaphore_returns_asyncio_semaphore(self):
         """_get_embedding_semaphore should return an asyncio.Semaphore."""
         import asyncio
+
         from intric.worker.crawl.persistence import _get_embedding_semaphore
 
         sem = _get_embedding_semaphore()

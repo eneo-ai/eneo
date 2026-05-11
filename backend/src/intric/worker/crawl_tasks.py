@@ -3,7 +3,9 @@ import random
 import socket
 import time
 from collections import defaultdict
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, cast
 from uuid import UUID
 
@@ -20,6 +22,7 @@ from intric.main.logging import get_logger
 from intric.tenants.crawler_settings_helper import get_crawler_setting
 from intric.websites.crawl_dependencies.crawl_models import CrawlTask
 from intric.worker.crawl import (
+    ExistingBlobState,
     HeartbeatFailedError,
     HeartbeatMonitor,
     JobPreemptedError,
@@ -67,6 +70,101 @@ async def _get_primary_active_job_id(
         .limit(1)
     )
     return await session.scalar(stmt)
+
+
+def _build_existing_blob_lookup(
+    rows: Iterable[tuple[str | None, bytes | None, UUID | None]],
+) -> tuple[list[str], dict[str, ExistingBlobState]]:
+    existing_titles: list[str] = []
+    existing_blob_state_by_title: dict[str, ExistingBlobState] = {}
+
+    for title, content_hash, embedding_model_id in rows:
+        if title is None:
+            continue
+
+        existing_titles.append(title)
+        if content_hash is None:
+            continue
+
+        existing_blob_state_by_title[title] = ExistingBlobState(
+            content_hash=content_hash,
+            embedding_model_id=embedding_model_id,
+        )
+
+    return existing_titles, existing_blob_state_by_title
+
+
+def _compute_stale_titles(
+    *,
+    existing_titles: Iterable[str],
+    must_keep_titles: set[str],
+    failed_titles: set[str],
+) -> list[str]:
+    return [
+        title
+        for title in existing_titles
+        if title not in must_keep_titles and title not in failed_titles
+    ]
+
+
+def _build_http_cache_dir(*, root_dir: Path, tenant_id: UUID, website_id: UUID) -> Path:
+    return root_dir / str(tenant_id) / str(website_id)
+
+
+def _prune_http_cache_dir(cache_dir: Path, *, max_bytes: int) -> None:
+    if max_bytes <= 0 or not cache_dir.exists():
+        return
+
+    files: list[tuple[float, int, Path]] = []
+    total_bytes = 0
+    for path in cache_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        stat = path.stat()
+        files.append((stat.st_mtime, stat.st_size, path))
+        total_bytes += stat.st_size
+
+    if total_bytes <= max_bytes:
+        return
+
+    for _, size, path in sorted(files):
+        if total_bytes <= max_bytes:
+            break
+        try:
+            path.unlink()
+            total_bytes -= size
+        except OSError:
+            logger.warning(
+                "Failed to prune crawler HTTP cache file",
+                extra={"path": str(path), "cache_dir": str(cache_dir)},
+            )
+
+
+def _warn_if_retained_items_without_embedding_config(
+    *,
+    embedding_model: EmbeddingModelSpec | None,
+    retained_pages: int,
+    retained_files: int,
+    website_id: UUID,
+    tenant_id: UUID,
+) -> None:
+    retained_count = retained_pages + retained_files
+    if retained_count == 0:
+        return
+    if embedding_model is not None and embedding_model.provider_id is not None:
+        return
+
+    logger.warning(
+        "Embedding configuration is missing but unchanged crawl items were retained",
+        extra={
+            "reason": "embedding_misconfigured_but_no_changes",
+            "website_id": str(website_id),
+            "tenant_id": str(tenant_id),
+            "retained_pages": retained_pages,
+            "retained_files": retained_files,
+            "retained_count": retained_count,
+        },
+    )
 
 
 async def queue_website_crawls(container: Container):
@@ -723,7 +821,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # These will be populated by bootstrap
             crawl_context: CrawlContext
             existing_titles: list[str] = []
-            existing_file_hashes: dict[str, bytes] = {}
+            existing_blob_state_by_title: dict[str, ExistingBlobState] = {}
             website_url: str = ""  # For logging after session closes
 
             start = time.time()
@@ -909,18 +1007,19 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     ),
                 )
 
-                # Fetch existing titles for stale detection and file hashes for skip optimization
-                stmt = sa.select(InfoBlobs.title, InfoBlobs.content_hash).where(
-                    InfoBlobs.website_id == params.website_id
+                # Fetch existing blob state for stale detection and hash retention.
+                stmt = sa.select(
+                    InfoBlobs.title,
+                    InfoBlobs.content_hash,
+                    InfoBlobs.embedding_model_id,
+                ).where(
+                    InfoBlobs.website_id == params.website_id,
+                    InfoBlobs.tenant_id == crawl_context.tenant_id,
                 )
                 blob_result = await bootstrap_session.execute(stmt)
-
-                # Build lookups for O(1) operations
-                for title, hash_bytes in blob_result:
-                    existing_titles.append(title)
-                    # Only store hashes for files (not URLs)
-                    if hash_bytes is not None and not title.startswith("http"):
-                        existing_file_hashes[title] = hash_bytes
+                existing_titles, existing_blob_state_by_title = (
+                    _build_existing_blob_lookup(blob_result.tuples())
+                )
 
             finally:
                 # Always close the bootstrap session to return connection to pool
@@ -951,6 +1050,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             num_failed_pages = 0
             num_failed_files = 0
             num_deleted_blobs = 0
+            num_skipped_pages = 0  # URL pages retained because content/model match
             num_skipped_files = 0  # Files with unchanged content (hash match)
 
             # Aggregate failure reasons across all batches
@@ -958,7 +1058,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             failure_counts: dict[str, int] = defaultdict(int)
 
             # Use set for O(1) membership tests
-            crawled_titles: set[str] = set()
+            must_keep_titles: set[str] = set()
             failed_titles: set[str] = set()  # Failed URLs excluded from stale deletion
 
             # Get per-tenant settings for heartbeat BEFORE starting crawl
@@ -988,6 +1088,40 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 semaphore_ttl_seconds=semaphore_ttl_seconds,
             )
 
+            http_cache_dir: Path | None = None
+            if settings.crawl_http_cache_enabled:
+                candidate_cache_dir = _build_http_cache_dir(
+                    root_dir=settings.crawl_http_cache_dir,
+                    tenant_id=crawl_context.tenant_id,
+                    website_id=params.website_id,
+                )
+                try:
+                    candidate_cache_dir.mkdir(parents=True, exist_ok=True)
+                    _prune_http_cache_dir(
+                        candidate_cache_dir,
+                        max_bytes=settings.crawl_http_cache_max_bytes_per_website,
+                    )
+                    http_cache_dir = candidate_cache_dir
+                    logger.info(
+                        "Scrapy HTTP cache enabled for crawl",
+                        extra={
+                            "website_id": str(params.website_id),
+                            "tenant_id": str(crawl_context.tenant_id),
+                            "cache_dir": str(http_cache_dir),
+                            "policy": "RFC2616Policy",
+                        },
+                    )
+                except OSError as cache_error:
+                    logger.warning(
+                        "Scrapy HTTP cache disabled because cache directory is unavailable",
+                        extra={
+                            "website_id": str(params.website_id),
+                            "tenant_id": str(crawl_context.tenant_id),
+                            "cache_dir": str(candidate_cache_dir),
+                            "error": str(cache_error),
+                        },
+                    )
+
             # Use Scrapy crawler to process website content
             # Measure crawl and parse phase
             start = time.time()
@@ -999,6 +1133,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 http_pass=crawl_context.http_auth_pass or "",  # From bootstrap DTO
                 # Pass tenant settings for tenant-aware Scrapy configuration
                 tenant_crawler_settings=tenant.crawler_settings if tenant else None,
+                http_cache_dir=http_cache_dir,
                 # Pass heartbeat callback for liveness during Scrapy crawl phase
                 heartbeat_callback=heartbeat_monitor.tick,
                 heartbeat_interval=float(heartbeat_interval_seconds),
@@ -1068,61 +1203,57 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                     # Flush when buffer is full
                     if len(page_buffer) >= crawl_context.batch_size:
-                        (
-                            success_count,
-                            failed_count,
-                            successful_urls,
-                            batch_failures_by_reason,
-                        ) = await persist_batch(
+                        batch_result = await persist_batch(
                             page_buffer=page_buffer,
                             ctx=crawl_context,
                             embedding_model=embedding_model_spec,
                             container=container,
+                            existing_blob_state_by_title=existing_blob_state_by_title,
                         )
-                        crawled_titles.update(successful_urls)
+                        must_keep_titles.update(batch_result.cleanup_protected_titles)
                         # Aggregate failure reasons and track failed URLs
-                        for reason, urls in batch_failures_by_reason.items():
-                            failure_counts[reason] += len(urls)
+                        for reason, urls in batch_result.failures_by_reason.items():
+                            failure_counts[reason.value] += len(urls)
                             failed_titles.update(urls)
-                        num_failed_pages += failed_count
+                        num_failed_pages += batch_result.failed_count
+                        num_skipped_pages += batch_result.retained_count
                         page_buffer.clear()
 
                         logger.debug(
                             f"Flushed batch of {crawl_context.batch_size} pages",
                             extra={
                                 "job_id": str(job_id),
-                                "success": success_count,
-                                "failed": failed_count,
+                                "persisted": batch_result.persisted_count,
+                                "retained": batch_result.retained_count,
+                                "failed": batch_result.failed_count,
                                 "total_pages": num_pages,
                             },
                         )
 
                 # Final flush for remaining pages
                 if page_buffer:
-                    (
-                        success_count,
-                        failed_count,
-                        successful_urls,
-                        batch_failures_by_reason,
-                    ) = await persist_batch(
+                    batch_result = await persist_batch(
                         page_buffer=page_buffer,
                         ctx=crawl_context,
                         embedding_model=embedding_model_spec,
                         container=container,
+                        existing_blob_state_by_title=existing_blob_state_by_title,
                     )
-                    crawled_titles.update(successful_urls)
+                    must_keep_titles.update(batch_result.cleanup_protected_titles)
                     # Aggregate failure reasons and track failed URLs
-                    for reason, urls in batch_failures_by_reason.items():
-                        failure_counts[reason] += len(urls)
+                    for reason, urls in batch_result.failures_by_reason.items():
+                        failure_counts[reason.value] += len(urls)
                         failed_titles.update(urls)
-                    num_failed_pages += failed_count
+                    num_failed_pages += batch_result.failed_count
+                    num_skipped_pages += batch_result.retained_count
 
                     logger.debug(
                         f"Final flush of {len(page_buffer)} pages",
                         extra={
                             "job_id": str(job_id),
-                            "success": success_count,
-                            "failed": failed_count,
+                            "persisted": batch_result.persisted_count,
+                            "retained": batch_result.retained_count,
+                            "failed": batch_result.failed_count,
                             "total_pages": num_pages,
                         },
                     )
@@ -1137,20 +1268,22 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     num_files += 1
                     filename = file.stem
                     try:
-                        # ✅ PERFORMANCE OPTIMIZATION: Hash checking for files
                         # Hash raw bytes directly (no HTML normalization for files)
                         file_bytes = file.read_bytes()
                         new_file_hash = hashlib.sha256(file_bytes).digest()
 
-                        existing_file_hash = existing_file_hashes.get(filename)
+                        existing_file_state = existing_blob_state_by_title.get(filename)
 
                         if (
-                            existing_file_hash is not None
-                            and new_file_hash == existing_file_hash
+                            existing_file_state is not None
+                            and existing_file_state.is_current_for(
+                                content_hash=new_file_hash,
+                                embedding_model_id=crawl_context.embedding_model_id,
+                            )
                         ):
                             # File unchanged - skip processing
                             num_skipped_files += 1
-                            crawled_titles.add(filename)
+                            must_keep_titles.add(filename)
                             logger.debug(
                                 f"Skipping unchanged file: {filename}",
                                 extra={
@@ -1188,7 +1321,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             operation_name=f"process_file_{filename}",
                             operation=_process_single_file,
                         )
-                        crawled_titles.add(filename)
+                        must_keep_titles.add(filename)
 
                     except Exception:
                         logger.exception(
@@ -1201,16 +1334,17 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             },
                         )
                         num_failed_files += 1
+                        failed_titles.add(filename)
                 timings["process_files"] = time.time() - file_start
 
             # Cleanup phase: delete stale blobs (batch for performance)
             cleanup_start = time.time()
             # Exclude failed_titles - their original data was preserved by transaction rollback
-            stale_titles = [
-                title
-                for title in existing_titles
-                if title not in crawled_titles and title not in failed_titles
-            ]
+            stale_titles = _compute_stale_titles(
+                existing_titles=existing_titles,
+                must_keep_titles=must_keep_titles,
+                failed_titles=failed_titles,
+            )
 
             # Batch delete using session-per-operation pattern
             if stale_titles:
@@ -1221,7 +1355,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     session_provider.override(providers.Object(sess))
                     cleanup_repo = container.info_blob_repo()
                     return await cleanup_repo.batch_delete_by_titles_and_website(
-                        titles=stale_titles, website_id=params.website_id
+                        titles=stale_titles,
+                        website_id=params.website_id,
+                        tenant_id=crawl_context.tenant_id,
                     )
 
                 num_deleted_blobs = await execute_with_recovery(
@@ -1302,7 +1438,18 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 operation=_do_timestamp_update,
             )
 
-            # Calculate file skip rate for performance analysis
+            _warn_if_retained_items_without_embedding_config(
+                embedding_model=embedding_model_spec,
+                retained_pages=num_skipped_pages,
+                retained_files=num_skipped_files,
+                website_id=params.website_id,
+                tenant_id=crawl_context.tenant_id,
+            )
+
+            # Calculate skip rates for performance analysis
+            page_skip_rate = (
+                (num_skipped_pages / num_pages * 100) if num_pages > 0 else 0
+            )
             file_skip_rate = (
                 (num_skipped_files / num_files * 100) if num_files > 0 else 0
             )
@@ -1317,14 +1464,12 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 "=" * 60,
                 f"{status_label}: {params.url}",
                 "-" * 60,
-                f"Pages:   {num_pages} crawled, {num_failed_pages} failed",
+                f"Pages:   {num_pages} crawled, {num_failed_pages} failed, {num_skipped_pages} unchanged ({page_skip_rate:.1f}%)",
                 f"Files:   {num_files} downloaded, {num_failed_files} failed, {num_skipped_files} skipped ({file_skip_rate:.1f}%)",
                 f"Cleanup: {num_deleted_blobs} stale entries removed",
             ]
             if crawl_is_partial:
-                summary.append(
-                    f"⚠️  Partial completion due to: {crawl_termination_reason}"
-                )
+                summary.append(f"Partial completion due to: {crawl_termination_reason}")
             summary.append("=" * 60)
             logger.info("\n".join(summary))
 
@@ -1343,6 +1488,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     "timings": timings,
                     "pages_crawled": num_pages,
                     "pages_failed": num_failed_pages,
+                    "pages_skipped": num_skipped_pages,
+                    "page_skip_rate_percent": page_skip_rate,
                     "files_crawled": num_files,
                     "files_failed": num_failed_files,
                     "files_skipped": num_skipped_files,
@@ -1549,6 +1696,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     "crawl_stats": {
                         "pages_crawled": num_pages,
                         "pages_failed": num_failed_pages,
+                        "pages_skipped": num_skipped_pages,
                         "files_downloaded": num_files,
                         "files_failed": num_failed_files,
                         "files_skipped": num_skipped_files,

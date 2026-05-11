@@ -471,7 +471,8 @@ class TestJobRepoTouchJob:
 
     async def test_touch_job_updates_timestamp(self, db_container, admin_user):
         """touch_job() should update the job's updated_at timestamp."""
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, timezone
+
         from intric.database.tables.job_table import Jobs
         from intric.jobs.job_repo import JobRepository
         from intric.main.models import Status
@@ -517,6 +518,7 @@ class TestJobRepoTouchJob:
     ):
         """Regular touch_job() calls should keep job under stale threshold."""
         from datetime import datetime, timezone
+
         from intric.database.tables.job_table import Jobs
         from intric.jobs.job_repo import JobRepository
         from intric.main.models import Status
@@ -556,6 +558,7 @@ class TestJobRepoTouchJob:
     async def test_touch_job_nonexistent_job_no_error(self, db_container):
         """touch_job() on non-existent job should not raise error."""
         from uuid import uuid4
+
         from intric.jobs.job_repo import JobRepository
 
         async with db_container() as container:
@@ -607,6 +610,7 @@ class TestJobRepoMarkJobFailedIfRunning:
 
             assert rows_affected == 1, "Should affect 1 row"
             assert job.status == Status.FAILED, "Job should be FAILED"
+            assert job.result_location == "Preempted: stale job"
 
     async def test_marks_in_progress_job_as_failed(self, db_container, admin_user):
         """mark_job_failed_if_running() should fail IN_PROGRESS jobs."""
@@ -638,6 +642,7 @@ class TestJobRepoMarkJobFailedIfRunning:
 
             assert rows_affected == 1, "Should affect 1 row"
             assert job.status == Status.FAILED, "Job should be FAILED"
+            assert job.result_location == "Worker crashed"
 
     async def test_does_not_affect_completed_job(self, db_container, admin_user):
         """mark_job_failed_if_running() should not touch COMPLETE jobs."""
@@ -750,6 +755,7 @@ class TestJobRepoMarkJobFailedIfRunning:
     async def test_nonexistent_job_returns_zero(self, db_container):
         """mark_job_failed_if_running() on non-existent job returns 0."""
         from uuid import uuid4
+
         from intric.jobs.job_repo import JobRepository
 
         async with db_container() as container:

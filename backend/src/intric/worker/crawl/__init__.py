@@ -14,7 +14,11 @@ from intric.worker.crawl.heartbeat import (
     HeartbeatMonitor,
     JobPreemptedError,
 )
-from intric.worker.crawl.persistence import persist_batch
+from intric.worker.crawl.persistence import (
+    ExistingBlobState,
+    PersistBatchResult,
+    persist_batch,
+)
 from intric.worker.crawl.recovery import (
     SessionHolder,
     calculate_exponential_backoff,
@@ -32,6 +36,8 @@ __all__ = [
     "HeartbeatMonitor",
     "JobPreemptedError",
     # Persistence
+    "ExistingBlobState",
+    "PersistBatchResult",
     "persist_batch",
     # Recovery - Main API
     "SessionHolder",

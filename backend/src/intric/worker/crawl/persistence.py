@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
+from uuid import UUID
 
 import sqlalchemy as sa
 from dependency_injector import providers
@@ -58,6 +61,87 @@ class CrawlPageData(TypedDict):
     content: str
 
 
+@dataclass(frozen=True, slots=True)
+class ExistingBlobState:
+    content_hash: bytes
+    embedding_model_id: UUID | None
+
+    def is_current_for(
+        self,
+        *,
+        content_hash: bytes,
+        embedding_model_id: UUID | None,
+    ) -> bool:
+        if self.content_hash != content_hash:
+            return False
+        if embedding_model_id is None:
+            return True
+        return self.embedding_model_id == embedding_model_id
+
+
+@dataclass(frozen=True, slots=True)
+class _PageToEmbed:
+    url: str
+    content: str
+    content_hash: bytes
+
+
+def _empty_failures() -> dict[FailureReason, tuple[str, ...]]:
+    return {}
+
+
+@dataclass(frozen=True)
+class PersistBatchResult:
+    """Result of one page persistence batch."""
+
+    persisted_urls: tuple[str, ...] = ()
+    retained_urls: tuple[str, ...] = ()
+    failures_by_reason: dict[FailureReason, tuple[str, ...]] = field(
+        default_factory=_empty_failures
+    )
+
+    @property
+    def persisted_count(self) -> int:
+        return len(self.persisted_urls)
+
+    @property
+    def retained_count(self) -> int:
+        return len(self.retained_urls)
+
+    @property
+    def failed_count(self) -> int:
+        return sum(len(urls) for urls in self.failures_by_reason.values())
+
+    @property
+    def failed_urls(self) -> frozenset[str]:
+        return frozenset(
+            url for urls in self.failures_by_reason.values() for url in urls
+        )
+
+    @property
+    def cleanup_protected_titles(self) -> frozenset[str]:
+        return frozenset(self.persisted_urls) | frozenset(self.retained_urls)
+
+
+def _build_result(
+    *,
+    persisted_urls: list[str] | None = None,
+    retained_urls: list[str] | None = None,
+    failures_by_reason: dict[FailureReason, list[str]] | None = None,
+) -> PersistBatchResult:
+    frozen_failures: dict[FailureReason, tuple[str, ...]] = {}
+    if failures_by_reason is not None:
+        frozen_failures = {
+            reason: tuple(urls) for reason, urls in failures_by_reason.items()
+        }
+
+    return PersistBatchResult(
+        persisted_urls=tuple(persisted_urls or ()),
+        retained_urls=tuple(retained_urls or ()),
+        failures_by_reason=frozen_failures,
+    )
+
+
 def _get_embedding_semaphore() -> asyncio.Semaphore:
     """Get or create the module-level embedding semaphore.
 
@@ -84,15 +168,22 @@ async def persist_batch(
     ctx: CrawlContext,
     embedding_model: EmbeddingModelSpec | None,
     container: "Container",
-) -> tuple[int, int, list[str], dict[str, list[str]]]:
+    existing_blob_state_by_title: Mapping[str, ExistingBlobState] | None = None,
+) -> PersistBatchResult:
     """
     Persist a batch of pages using the TWO-PHASE pattern.
 
     This function minimizes database connection hold time by separating
-    compute from persistence using a two-phase pattern.
+    compute from persistence using a two-phase pattern. Pages whose stored
+    content hash and embedding model already match the current crawl are
+    retained without chunking, embedding, or database writes.
+
+    Hash prepass:
+        - Compute content_hash via SHA-256
+        - Retain unchanged pages that are compatible with the current model
+        - Reject empty content as a page-level failure
 
     PHASE 1 (Pure Compute - ZERO DB operations):
-        - Compute content_hash via SHA-256
         - Chunk text using RecursiveCharacterTextSplitter
         - Call embedding API with concurrency limit (semaphore)
         - Create PreparedPage objects with pre-computed data
@@ -113,43 +204,103 @@ async def persist_batch(
         ctx: CrawlContext DTO with all primitives (no ORM objects!)
         embedding_model: EmbeddingModelSpec frozen dataclass (session-independent)
         container: DI container for creating embedding service with proper session
+        existing_blob_state_by_title: Existing blob state keyed by title/URL
 
     Returns:
-        Tuple of (success_count, failed_count, successful_urls, failures_by_reason)
-        - success_count: Number of pages successfully persisted
-        - failed_count: Number of pages that failed to persist
-        - successful_urls: List of URLs that were ACTUALLY persisted (for accurate tracking)
-        - failures_by_reason: Dict mapping FailureReason codes to lists of failed URLs
+        PersistBatchResult with persisted, retained, and failed URLs.
 
     Note:
         - Deduplication uses delete-then-insert pattern (not idempotent across workers)
         - For true idempotency, add UNIQUE constraint on (tenant_id, website_id, title)
-        - CRITICAL: Only URLs in successful_urls should be marked as crawled
-        - CRITICAL: URLs in failures_by_reason should NOT be deleted as stale
+        - CRITICAL: Only cleanup_protected_titles should be protected as successful work
+        - CRITICAL: failed_urls should be excluded from stale deletion separately
     """
     from intric.database.database import sessionmanager
 
     if not page_buffer:
-        return 0, 0, [], {}
+        return _build_result()
 
-    # Track failures by reason code for detailed reporting
-    failures_by_reason: dict[str, list[str]] = {}
+    existing_blob_states: Mapping[str, ExistingBlobState] = (
+        existing_blob_state_by_title if existing_blob_state_by_title is not None else {}
+    )
+
+    failures_by_reason: dict[FailureReason, list[str]] = {}
+    retained_urls: list[str] = []
+    pages_to_embed: list[_PageToEmbed] = []
+    prepared_pages: list[PreparedPage] = []
+    persisted_urls: list[str] = []
+    buffer_embedding_bytes = 0
 
     def add_failure(reason: FailureReason, url: str) -> None:
-        """Track a failure by reason code."""
-        reason_key = reason.value
-        if reason_key not in failures_by_reason:
-            failures_by_reason[reason_key] = []
-        failures_by_reason[reason_key].append(url)
+        failures_by_reason.setdefault(reason, []).append(url)
+
+    for page_data in page_buffer:
+        url = page_data["url"]
+        content = page_data["content"]
+
+        if not content.strip():
+            logger.warning(
+                f"Skipping empty page {url}",
+                extra={
+                    "website_id": str(ctx.website_id),
+                    "url": url,
+                    "reason": "empty_content",
+                    "content_length": len(content) if content else 0,
+                },
+            )
+            add_failure(FailureReason.EMPTY_CONTENT, url)
+            continue
+
+        content_hash = hashlib.sha256(content.encode("utf-8")).digest()
+        existing_blob_state = existing_blob_states.get(url)
+        if existing_blob_state is not None and existing_blob_state.is_current_for(
+            content_hash=content_hash,
+            embedding_model_id=ctx.embedding_model_id,
+        ):
+            retained_urls.append(url)
+            continue
+
+        pages_to_embed.append(
+            _PageToEmbed(url=url, content=content, content_hash=content_hash)
+        )
+
+    if not pages_to_embed:
+        return _build_result(
+            retained_urls=retained_urls,
+            failures_by_reason=failures_by_reason,
+        )
 
     if embedding_model is None:
         logger.warning(
             "No embedding model configured for website",
-            extra={"website_id": str(ctx.website_id), "batch_size": len(page_buffer)},
+            extra={
+                "website_id": str(ctx.website_id),
+                "batch_size": len(pages_to_embed),
+                "retained_count": len(retained_urls),
+            },
         )
-        for page in page_buffer:
-            add_failure(FailureReason.NO_EMBEDDING_MODEL, page["url"])
-        return 0, len(page_buffer), [], failures_by_reason
+        for page in pages_to_embed:
+            add_failure(FailureReason.NO_EMBEDDING_MODEL, page.url)
+        return _build_result(
+            retained_urls=retained_urls,
+            failures_by_reason=failures_by_reason,
+        )
+
+    if ctx.embedding_model_id is None:
+        logger.warning(
+            "Embedding model context missing model id",
+            extra={
+                "website_id": str(ctx.website_id),
+                "embedding_model_name": getattr(embedding_model, "name", None),
+                "retained_count": len(retained_urls),
+            },
+        )
+        for page in pages_to_embed:
+            add_failure(FailureReason.NO_EMBEDDING_MODEL, page.url)
+        return _build_result(
+            retained_urls=retained_urls,
+            failures_by_reason=failures_by_reason,
+        )
 
     # Validate embedding model has required provider_id for credential lookup
     if not getattr(embedding_model, "provider_id", None):
@@ -159,17 +310,15 @@ async def persist_batch(
                 "website_id": str(ctx.website_id),
                 "embedding_model_name": getattr(embedding_model, "name", None),
                 "embedding_model_id": str(getattr(embedding_model, "id", None)),
+                "retained_count": len(retained_urls),
             },
         )
-        for page in page_buffer:
-            add_failure(FailureReason.MISSING_PROVIDER, page["url"])
-        return 0, len(page_buffer), [], failures_by_reason
-
-    success_count = 0
-    failed_count = 0
-    successful_urls: list[str] = []
-    prepared_pages: list[PreparedPage] = []
-    buffer_embedding_bytes = 0
+        for page in pages_to_embed:
+            add_failure(FailureReason.MISSING_PROVIDER, page.url)
+        return _build_result(
+            retained_urls=retained_urls,
+            failures_by_reason=failures_by_reason,
+        )
 
     # Create a short-lived session for embedding service to load provider credentials
     embedding_session = sessionmanager.create_session()
@@ -188,9 +337,12 @@ async def persist_batch(
             },
         )
         await embedding_session.close()
-        for page in page_buffer:
-            add_failure(FailureReason.EMBEDDING_ERROR, page["url"])
-        return 0, len(page_buffer), [], failures_by_reason
+        for page in pages_to_embed:
+            add_failure(FailureReason.EMBEDDING_ERROR, page.url)
+        return _build_result(
+            retained_urls=retained_urls,
+            failures_by_reason=failures_by_reason,
+        )
 
     # Create text splitter (matching datastore.py pattern)
     splitter = RecursiveCharacterTextSplitter(
@@ -206,54 +358,34 @@ async def persist_batch(
         "Phase 1: Computing embeddings for batch",
         extra={
             "website_id": str(ctx.website_id),
-            "batch_size": len(page_buffer),
+            "batch_size": len(pages_to_embed),
+            "retained_count": len(retained_urls),
             "embedding_model": ctx.embedding_model_name,
         },
     )
 
     try:
-        for page_data in page_buffer:
-            url = page_data["url"]
-            content = page_data["content"]
-
-            if not content.strip():
-                logger.warning(
-                    f"Skipping empty page {url}",
-                    extra={
-                        "website_id": str(ctx.website_id),
-                        "url": url,
-                        "reason": "empty_content",
-                        "content_length": len(content) if content else 0,
-                    },
-                )
-                failed_count += 1
-                add_failure(FailureReason.EMPTY_CONTENT, url)
-                continue
-
+        for page_index, page in enumerate(pages_to_embed):
             try:
-                # 1. Compute content hash (local operation)
-                content_hash = hashlib.sha256(content.encode("utf-8")).digest()
-
-                # 2. Chunk the text (local operation)
-                raw_chunks = splitter.split_text(content)
+                # 1. Chunk the text (local operation)
+                raw_chunks = splitter.split_text(page.content)
                 chunks = [chunk.strip() for chunk in raw_chunks if chunk.strip()]
 
                 if not chunks:
                     logger.warning(
-                        f"No chunks after splitting for {url}",
+                        f"No chunks after splitting for {page.url}",
                         extra={
                             "website_id": str(ctx.website_id),
-                            "url": url,
+                            "url": page.url,
                             "reason": "no_chunks",
-                            "content_length": len(content),
+                            "content_length": len(page.content),
                             "raw_chunks_count": len(raw_chunks),
                         },
                     )
-                    failed_count += 1
-                    add_failure(FailureReason.NO_CHUNKS, url)
+                    add_failure(FailureReason.NO_CHUNKS, page.url)
                     continue
 
-                # 3. Create InfoBlobChunk objects for embedding service
+                # 2. Create InfoBlobChunk objects for embedding service
                 # Note: info_blob_id is a placeholder - will be set in Phase 2
                 chunk_objects = [
                     InfoBlobChunk(
@@ -265,7 +397,7 @@ async def persist_batch(
                     for i, chunk_text in enumerate(chunks)
                 ]
 
-                # 4. Call embedding API with semaphore limit and timeout
+                # 3. Call embedding API with semaphore limit and timeout
                 # This is the expensive network I/O - happens OUTSIDE any DB transaction
                 async with _get_embedding_semaphore():
                     try:
@@ -278,19 +410,18 @@ async def persist_batch(
                             )
                     except asyncio.TimeoutError:
                         logger.warning(
-                            f"Embedding timeout for {url} after {ctx.embedding_timeout_seconds}s",
+                            f"Embedding timeout for {page.url} after {ctx.embedding_timeout_seconds}s",
                             extra={
                                 "website_id": str(ctx.website_id),
                                 "tenant_id": str(ctx.tenant_id),
-                                "url": url,
+                                "url": page.url,
                                 "num_chunks": len(chunks),
                             },
                         )
-                        failed_count += 1
-                        add_failure(FailureReason.EMBEDDING_TIMEOUT, url)
+                        add_failure(FailureReason.EMBEDDING_TIMEOUT, page.url)
                         continue
 
-                # 5. Extract embeddings from ChunkEmbeddingList
+                # 4. Extract embeddings from ChunkEmbeddingList
                 embeddings: list[list[float]] = []
                 for _, embedding in chunk_embedding_list:
                     # ChunkEmbeddingList returns numpy arrays, convert to list
@@ -300,20 +431,19 @@ async def persist_batch(
                         else list(embedding)
                     )
 
-                # 6. Track embedding memory for early flush
+                # 5. Track embedding memory for early flush
                 embedding_bytes = sum(
                     len(e) * 4 for e in embeddings
                 )  # float32 = 4 bytes
                 buffer_embedding_bytes += embedding_bytes
 
-                # 7. Create PreparedPage with all data needed for Phase 2
+                # 6. Create PreparedPage with all data needed for Phase 2
                 embedding_model_id = ctx.embedding_model_id
-                assert embedding_model_id is not None
                 prepared = PreparedPage(
-                    url=url,
-                    title=url,  # URL as title, matching existing crawler pattern
-                    content=content,
-                    content_hash=content_hash,
+                    url=page.url,
+                    title=page.url,  # URL as title, matching existing crawler pattern
+                    content=page.content,
+                    content_hash=page.content_hash,
                     chunks=chunks,
                     embeddings=embeddings,
                     tenant_id=ctx.tenant_id,
@@ -325,27 +455,32 @@ async def persist_batch(
 
                 # Check memory cap for early flush
                 if buffer_embedding_bytes >= ctx.max_batch_embedding_bytes:
+                    for unprocessed_page in pages_to_embed[page_index + 1 :]:
+                        add_failure(
+                            FailureReason.EMBEDDING_BATCH_LIMIT,
+                            unprocessed_page.url,
+                        )
                     logger.info(
                         f"Embedding memory cap reached ({buffer_embedding_bytes} bytes), stopping Phase 1 early",
                         extra={
                             "website_id": str(ctx.website_id),
                             "pages_prepared": len(prepared_pages),
+                            "pages_unprocessed": len(pages_to_embed) - page_index - 1,
                         },
                     )
                     break
 
             except Exception as e:
                 logger.error(
-                    f"Phase 1: Failed to prepare page {url}: {e}",
+                    f"Phase 1: Failed to prepare page {page.url}: {e}",
                     extra={
                         "website_id": str(ctx.website_id),
                         "tenant_id": str(ctx.tenant_id),
-                        "url": url,
+                        "url": page.url,
                         "error": str(e),
                     },
                 )
-                failed_count += 1
-                add_failure(FailureReason.EMBEDDING_ERROR, url)
+                add_failure(FailureReason.EMBEDDING_ERROR, page.url)
                 continue
     finally:
         # Close embedding session after Phase 1 completes
@@ -355,9 +490,16 @@ async def persist_batch(
     if not prepared_pages:
         logger.warning(
             "No pages prepared after Phase 1",
-            extra={"website_id": str(ctx.website_id), "failed_count": failed_count},
+            extra={
+                "website_id": str(ctx.website_id),
+                "failed_count": sum(len(urls) for urls in failures_by_reason.values()),
+                "retained_count": len(retained_urls),
+            },
         )
-        return success_count, failed_count, [], failures_by_reason
+        return _build_result(
+            retained_urls=retained_urls,
+            failures_by_reason=failures_by_reason,
+        )
 
     # PHASE 2: Persist to DB (SHORT-LIVED SESSION)
     # This is the only part that holds a database connection.
@@ -384,6 +526,7 @@ async def persist_batch(
                             sa.and_(
                                 InfoBlobs.title == prepared.title,
                                 InfoBlobs.website_id == prepared.website_id,
+                                InfoBlobs.tenant_id == prepared.tenant_id,
                             )
                         )
                         await session.execute(delete_stmt)
@@ -433,14 +576,12 @@ async def persist_batch(
                             await session.execute(insert_chunks_stmt)
 
                         await savepoint.commit()
-                        success_count += 1
-                        successful_urls.append(
+                        persisted_urls.append(
                             prepared.url
                         )  # Track this URL as actually persisted
 
                     except Exception as e:
                         await savepoint.rollback()
-                        failed_count += 1
                         add_failure(FailureReason.DB_ERROR, prepared.url)
                         logger.error(
                             f"Phase 2: Failed to persist page {prepared.url}: {e}",
@@ -457,8 +598,9 @@ async def persist_batch(
             "Phase 2: Batch persist complete",
             extra={
                 "website_id": str(ctx.website_id),
-                "success_count": success_count,
-                "failed_count": failed_count,
+                "persisted_count": len(persisted_urls),
+                "retained_count": len(retained_urls),
+                "failed_count": sum(len(urls) for urls in failures_by_reason.values()),
             },
         )
 
@@ -472,9 +614,8 @@ async def persist_batch(
         )
         # Mark all unpersisted pages as failed with DB_ERROR
         for p in prepared_pages:
-            if p.url not in successful_urls:
+            if p.url not in persisted_urls:
                 add_failure(FailureReason.DB_ERROR, p.url)
-        failed_count += len(prepared_pages) - success_count
 
     except Exception as e:
         logger.error(
@@ -486,8 +627,11 @@ async def persist_batch(
         )
         # Mark all unpersisted pages as failed with DB_ERROR
         for p in prepared_pages:
-            if p.url not in successful_urls:
+            if p.url not in persisted_urls:
                 add_failure(FailureReason.DB_ERROR, p.url)
-        failed_count += len(prepared_pages) - success_count
 
-    return success_count, failed_count, successful_urls, failures_by_reason
+    return _build_result(
+        persisted_urls=persisted_urls,
+        retained_urls=retained_urls,
+        failures_by_reason=failures_by_reason,
+    )

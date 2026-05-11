@@ -19,7 +19,11 @@ from intric.main.models import (
     Status,
     is_provided,
 )
-from intric.websites.crawl_dependencies.crawl_models import CrawlRunSparse
+from intric.websites.crawl_dependencies.crawl_models import (
+    CrawlOutcomePublic,
+    CrawlRunSparse,
+    derive_crawl_outcome,
+)
 from intric.websites.domain.crawl_run import CrawlRun, CrawlType
 from intric.websites.domain.website import UpdateInterval, Website
 
@@ -76,6 +80,7 @@ class CrawlRunPublic(BaseResponse):
     status: Status
     result_location: Optional[str]
     finished_at: Optional[datetime]
+    outcome: Optional[CrawlOutcomePublic] = None
 
     @classmethod
     def from_domain(cls, crawl_run: CrawlRun):
@@ -91,6 +96,13 @@ class CrawlRunPublic(BaseResponse):
             status=crawl_run.status,
             result_location=crawl_run.result_location,
             finished_at=crawl_run.finished_at,
+            outcome=derive_crawl_outcome(
+                status=crawl_run.status,
+                result_location=crawl_run.result_location,
+                failure_summary=crawl_run.failure_summary,
+                pages_failed=crawl_run.pages_failed,
+                files_failed=crawl_run.files_failed,
+            ),
         )
 
 
