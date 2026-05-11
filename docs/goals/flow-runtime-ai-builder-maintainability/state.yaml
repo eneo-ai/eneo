@@ -3830,7 +3830,19 @@ tasks:
     expected_output:
       - "Rerun T060 smoke command when credentials are available."
       - "Record smoke result or updated blocker."
-    receipt: null
+    receipt:
+      result: blocked
+      note: "notes/T061-live-smoke-still-blocked.md"
+      summary: "Live AI Builder smoke remains blocked because ENEO_LOCAL_API_KEY is missing from host and app-container environments; the checked env files expose only a super key variable, not the Flow API key expected by the runner."
+      required_credentials_available: false
+      runner_exit: "Missing ENEO_LOCAL_API_KEY or --api-key."
+      evidence:
+        - "Host environment has ENEO_LOCAL_API_KEY and ENEO_LOCAL_API_BASE missing."
+        - "App container environment has ENEO_LOCAL_API_KEY, ENEO_LOCAL_API_BASE, ENEO_SUPER_API_KEY, API_KEY, and INTRIC_API_KEY missing."
+        - "backend/.env is present and contains ENEO_SUPER_API_KEY, but no ENEO_LOCAL_API_KEY assignment was found in checked env files; secret values were not printed."
+        - "docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py reads ENEO_LOCAL_API_KEY or --api-key and sends it as X-API-Key."
+        - "POST /api/v1/api-keys requires session authentication plus Permission.API_KEYS, and backend/scripts/test_api_key_regression.py requires an admin bearer token to create test keys."
+      decision: "Wait for the owner to export ENEO_LOCAL_API_BASE and ENEO_LOCAL_API_KEY in the shell; do not alias the super key, paste secrets into receipts, or mutate the DB to invent a key."
 
 validation_command_candidates:
   shared:
