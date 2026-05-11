@@ -111,6 +111,8 @@ A phase is not 9/10 maintainable if it fixes the bug by adding another ad hoc br
 
 Use the Claude peer loop as a maintainability challenge before green-lighting the next big phase or any important architecture/runtime/API decision.
 
+Run Claude reviews with a long enough timeout for meaningful analysis. Use at least 15 minutes and prefer 20 minutes for phase gates, commit gates, and difficult architecture decisions. Iterate in the same Claude session until `GREEN_LIGHT: yes`, or document an evidence-backed disagreement before proceeding.
+
 Gate tiering:
 
 - P0/API/runtime/data-boundary/lifecycle implementation: run a blocking Claude commit gate before the local phase commit. A separate plan gate is required only when Judge changes canonical ownership, public API/error contract, schema/migration shape, or cannot define the red-test harness/allowed files confidently.

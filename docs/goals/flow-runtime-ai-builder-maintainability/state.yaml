@@ -60,6 +60,8 @@ rules:
   claude_self_review_allowed_for_low_risk_cleanup: true
   claude_full_retrospective_required_at_phase_boundary: true
   claude_review_required_before_phase_green_light: true
+  claude_review_timeout_minutes_min: 15
+  claude_review_timeout_minutes_preferred: 20
   claude_iteration_required_after_major_phase_or_decision: true
   claude_must_challenge_next_phase_before_green: true
   claude_green_no_blocks_for_correctness_ownership_types_tests_api_regression_data_loss_security: true
@@ -83,7 +85,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T007
+active_task: T025
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -1260,7 +1262,7 @@ tasks:
   - id: T007
     type: scout
     assignee: Scout
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Prepare pre-production legacy/dead-code cleanup with proof: grep, tests, fixture/migration implications, and delete/keep recommendations."
     constraints:
@@ -1274,6 +1276,112 @@ tasks:
       - "delete_after_fixture_or_migration_cleanup candidates."
       - "keep candidates."
       - "tests to delete/collapse after superseding behavior tests."
+    receipt:
+      result: done
+      note: "notes/T007-preproduction-cleanup-scout.md"
+      summary: "Mapped Flow and Flow AI Builder pre-production cleanup candidates with grep/test/migration proof. Found no safe source-code delete_now candidate. Most real cleanup targets are delete_after_tests or delete_after_fixture_cleanup because current tests, public schemas, migrations, or runtime evidence still encode the compatibility behavior."
+      decisions:
+        delete_now:
+          - "Only comment-only cleanup inside files already touched by a future approved Worker; no source-wide comment cleanup."
+        delete_after_tests:
+          - "Legacy form schema type normalization after FlowMetadataV1/FlowFormSchemaV1 ownership is selected."
+          - "FlowRepository.save_step_result step_id-is-None legacy update branch after DB/schema proof."
+        delete_after_fixture_cleanup:
+          - "Review checkpoint missing step snapshot public fallback after migration/fixture decision."
+          - "Template file selection legacy flow-asset fallback after template asset boundary cleanup."
+        keep:
+          - "FlowPrincipal legacy_user_id until identity-schema/API payload cleanup is selected."
+          - "legacy_prompt_binding_used runtime evidence flag until public evidence contract rename/removal is selected."
+          - "Question catalog legacy question-id bridge until persisted conversation compatibility is resolved."
+          - "Flow capability manifest legacy parity until FCM becomes canonical rule owner."
+          - "AI Builder required_slot_names/has_new_evidence compatibility surfaces until a dedicated AI Builder Scout/Judge decision."
+      next_recommended_task: T024
+
+  - id: T024
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next maintainability slice after T007 cleanup Scout: narrow cleanup Worker, typed metadata/form-schema boundary, typed published-definition/template-asset Scout, or AI Builder material-efficiency Scout."
+    inputs:
+      - "T007 receipt"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T007-preproduction-cleanup-scout.md"
+      - "Queued T008/T009/T010 tasks"
+      - "Goal cleanup entry gate and maintainability score rubric"
+    constraints:
+      - "Do not implement."
+      - "Prefer long-term maintainability and reliability over quick fixes."
+      - "Do not activate broad cleanup; choose exactly one narrow next task."
+      - "Do not activate a cleanup Worker unless the T007 proof table gives a delete_now or delete_after_tests candidate with clear allowed files, replacement tests, and fixture/migration implications."
+      - "If choosing a typed boundary, name the canonical parser/serializer owner and the cleanup it unlocks."
+      - "If the cleanest long-term choice is ambiguous, run the Claude peer loop with a timeout of at least 15 minutes, preferably 20 minutes, and iterate until GREEN_LIGHT yes or document evidence-backed disagreement."
+      - "Stay on feature/refactor-flows-flowai; commit locally at good intervals but do not push."
+    expected_output:
+      - "Decision."
+      - "Why the selected task outranks the alternatives."
+      - "Exact Worker/Scout objective."
+      - "Allowed files and verification commands if Worker."
+      - "Stop conditions."
+      - "Claude plan-gate requirement and timeout choice."
+      - "Human maintainability impact: what file/function becomes easier to understand and why."
+      - "Whether a docs-only commit is appropriate before implementation."
+    receipt:
+      result: done
+      verdict: changes_required_then_green_after_revision
+      decision: "Activate T025 typed-data-boundary Scout instead of a cleanup Worker or direct typed metadata Worker."
+      note: "notes/T024-next-maintainability-slice.md"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t024-next-maintainability-slice-decision-20260511T020846Z.md"
+        - ".codex/artifacts/claude-peer-loop-t024-next-maintainability-slice-decision-iteration-2-20260511T021228Z.md"
+      green_light: true
+      min_score: 8
+      accepted_claude_feedback:
+        - "Do not start a direct FlowMetadataV1/FlowFormSchemaV1 Worker before inventorying raw metadata_json and form_schema readers."
+        - "Treat published-definition inner metadata_json typing as the same ownership problem, not a separate PublishedFlowDefinitionV1 shell problem."
+        - "Defer source cleanup until a typed owner or replacement behavior tests exist."
+        - "Keep AI Builder required_slot_names/has_new_evidence cleanup out of this lane until an AI Builder-specific Scout/Judge decision."
+        - "Add T025 stop conditions for material-routing scope bleed and unexpectedly broad read-write writer count."
+        - "Require proposed typed-boundary Worker slices to stay reviewable and name the closer slice that retires remaining dict readers."
+      evidence:
+        - "metadata_json: 151 hits across 26 files under backend/src/intric/flows"
+        - "form_schema: 81 hits across 10 files under backend/src/intric/flows"
+        - "backend/src/intric/flows/published_definition.py:30"
+        - "backend/src/intric/flows/published_definition.py:36"
+        - "backend/src/intric/flows/ai_builder/ai_builder_edit_models.py:117"
+      docs_only_commit_recommended: true
+      next_allowed_task: T025
+
+  - id: T025
+    type: scout
+    assignee: Scout
+    status: active
+    reasoning_hint: high
+    objective: "Map the Flow typed metadata/data-boundary migration before any Worker adds FlowMetadataV1 or FlowFormSchemaV1, so the typed model becomes the canonical owner rather than a parallel JSONB reader."
+    constraints:
+      - "Read-only."
+      - "Do not modify source, tests, migrations, generated clients, or frontend files."
+      - "Inventory all backend/src/intric/flows metadata_json and form_schema readers/writers."
+      - "Treat published_definition.metadata_json inner typing, FlowMetadataPatch, form_schema validation, run-contract metadata reading, and AI Builder metadata handling as one ownership problem."
+      - "Prefer long-term maintainability and reliability over quick fixes."
+      - "If uncertain about canonical owner or migration order, run Claude with at least a 15 minute timeout, preferably 20 minutes."
+      - "Current board and notes should be committed as a docs-only local commit before any source Worker starts."
+    stop_if:
+      - "Reader inventory shows material-routing AI Builder readers whose canonical ownership belongs in the AI Builder material-efficiency lane; surface them but do not classify them as metadata canonical-owner candidates here."
+      - "Inventory finds more than five read-write metadata/form_schema writers, which would imply this is not one bounded boundary and should return to Judge before proposing Worker slices."
+      - "The Scout cannot identify a single candidate canonical parser/serializer owner without creating a parallel typed shape."
+      - "The Scout cannot keep proposed Worker slices reviewable under the file-budget guidance."
+    expected_output:
+      - "Reader inventory table for all files returned by rg -l 'metadata_json|form_schema' backend/src/intric/flows -g '*.py'."
+      - "Per-reader classification: read_only, read_write, validator, serializer, published_snapshot, ai_builder_patch, runtime_contract, runtime_execution, test_only."
+      - "Canonical owner recommendation for FlowMetadataV1 and FlowFormSchemaV1, including exact proposed module path."
+      - "Decision on whether FlowFormSchemaV1 is standalone or nested inside FlowMetadataV1."
+      - "Relationship to existing FlowMetadataPatch and whether it should compose with, be subsumed by, or remain separate from the canonical metadata model."
+      - "Two or three Worker slices with allowed_files, red tests, validation commands, and stop_if conditions; each proposed Worker should normally target at most six source/test files unless the Scout explicitly justifies a larger reviewable slice."
+      - "A named closer slice that retires every remaining raw dict-reader for the selected metadata/form-schema boundary, so the typed model cannot remain a parallel owner."
+      - "Replacement behavior tests needed before deleting normalize_legacy_form_schema."
+      - "Decision on whether existing legacy-form-normalization tests are replaced or augmented by typed-boundary tests."
+      - "Explicit decision on whether FlowStepResult.step_id type-tightening is part of this typed-boundary lane or a separate cleanup lane."
+      - "Claude plan-gate requirement before activating the first typed-boundary Worker."
     receipt: null
 
   - id: T008
