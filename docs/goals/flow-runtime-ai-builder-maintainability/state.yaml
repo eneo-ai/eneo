@@ -83,7 +83,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T011
+active_task: T007
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -1074,7 +1074,7 @@ tasks:
   - id: T011
     type: scout
     assignee: Scout
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Map frontend-visible Flow error states after the public API golden journey identifies backend error contracts."
     inputs:
@@ -1090,12 +1090,177 @@ tasks:
       - "Backend error codes that need user-facing rendering."
       - "One bounded Worker candidate if frontend follow-through is needed."
       - "Do-nothing verdict if current frontend already handles the contract clearly."
-    receipt: null
+    receipt:
+      result: done
+      note: "notes/T011-frontend-flow-error-states.md"
+      summary: "Mapped frontend Flow error surfaces after the public API golden journey. Run creation already uses one Flow runtime error mapper, but the mapper lacks the new run-create public codes and is hardcoded Swedish. Review checkpoint actions explicitly handle stale revision but not typed contract violations or most review lifecycle codes. Evidence/artifact/cancel/redispatch errors remain generic and should be deferred until backend codes are stable."
+      evidence:
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:1040"
+        - "frontend/apps/web/src/lib/features/flows/flowRuntimeErrorMapping.ts:3"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunReviewCheckpointPanel.svelte:82"
+        - "backend/tests/integration/flows/test_flow_consumer_api_contract.py:489"
+        - "backend/tests/integration/flows/test_flow_consumer_api_contract.py:555"
+      next_recommended_task: T021
+
+  - id: T021
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Decide whether to activate a narrow frontend Flow error-contract Worker based on T011, and resolve the message ownership/i18n shape before implementation."
+    inputs:
+      - "T011 receipt"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T011-frontend-flow-error-states.md"
+      - "Current frontend Flow error mapping and review checkpoint component"
+      - "Backend public API golden journey error contracts"
+    constraints:
+      - "Do not implement."
+      - "Prefer long-term maintainability and reliability over quick fixes."
+      - "Do not start frontend work unless backend error contracts for the touched endpoints are stable and tested."
+      - "Keep any proposed Worker narrow: render existing backend error contracts clearly; do not redesign Flow UI."
+      - "Resolve whether message ownership should stay in flowRuntimeErrorMapping.ts, move to component-level message selection, or use a narrow message resolver before Worker activation."
+      - "If the i18n/message access pattern or ownership boundary is uncertain, discuss with Claude using a timeout longer than 10 minutes before green-lighting the Worker."
+    expected_output:
+      - "Decision: activate frontend Worker, defer frontend work, or request more Scout evidence."
+      - "Exact Worker objective if activated."
+      - "Allowed files."
+      - "Red test expectations."
+      - "Verification commands."
+      - "Stop conditions."
+      - "Claude plan-gate result or explicit evidence-backed reason it was not required."
+      - "How the selected shape improves maintainability and avoids a second error-mapping owner."
+    receipt:
+      result: done
+      verdict: green
+      decision: "Activate T022 as a narrow frontend Flow API error-contract Worker."
+      note: "notes/T021-frontend-error-contract-judge.md"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t021-frontend-flow-error-contract-plan-20260511T010149Z.md"
+        - ".codex/artifacts/claude-peer-loop-t021-frontend-flow-error-contract-plan-iteration-2-20260511T010549Z.md"
+      green_light: true
+      min_score: 8
+      summary: "Claude iteration 1 rejected the first plan because the i18n/resolver shape was ambiguous and the review panel local mapper was not a hard deletion. Codex revised the plan to use a descriptor-based typed Flow API error parser, stable string-returning wrappers, catalog-backed messages, explicit deferrals, red tests, and stop conditions. Claude iteration 2 approved Worker activation."
+      next_allowed_task: T022
+
+  - id: T022
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "TDD-consolidate Flow API error-code rendering so stable backend Flow run/review codes resolve to localized, actionable frontend messages through one Flow-domain parser/descriptor owner, while preserving existing string-returning helper call sites and removing the review panel's local code switch."
+    canonical_owner: "frontend/apps/web/src/lib/features/flows/flowRuntimeErrorMapping.ts owns Flow API error-code extraction, descriptors, and string wrapper resolution. FlowRunReviewCheckpointPanel.svelte must render errors through this owner instead of keeping a local code switch."
+    allowed_files:
+      - "frontend/apps/web/src/lib/features/flows/flowRuntimeErrorMapping.ts"
+      - "frontend/apps/web/src/lib/features/flows/flowRuntimeErrorMapping.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowRunReviewCheckpointPanel.svelte"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowRunReviewCheckpointPanel.test.ts"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T022-frontend-flow-error-contracts.md"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    verify:
+      - "cd frontend/apps/web && bunx vitest run src/lib/features/flows/flowRuntimeErrorMapping.test.ts src/lib/features/flows/components/FlowRunReviewCheckpointPanel.test.ts"
+      - "cd frontend/apps/web && bunx vitest run src/lib/features/flows"
+      - "cd frontend/apps/web && bun run i18n:compile"
+      - "cd frontend/apps/web && bun run check"
+      - "cd frontend/apps/web && bun run lint"
+      - "git diff --check"
+      - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    stop_if:
+      - "A clean implementation requires changing backend contracts or generated API client types."
+      - "The resolver cannot import and use Paraglide messages from plain TS without broad build/config changes."
+      - "The existing string-returning helper signatures cannot remain stable without changing more frontend call sites."
+      - "Need files outside allowed_files."
+      - "The slice expands into UI redesign, artifact/evidence/cancel/redispatch behavior, or broad frontend error-boundary refactoring."
+      - "Implementation introduces any, as any, @ts-ignore, or a second Flow error-code owner."
+      - "Hardcoded Swedish messages remain alongside catalog-backed Flow API messages in the mapper."
+      - "Tests assert raw translated strings instead of descriptors/message keys, except where asserting the review panel renders the localized user-visible message."
+      - "rg 'getReviewActionErrorMessage' frontend/apps/web/src returns a remaining source reference after implementation."
+    receipt:
+      result: done
+      note: "notes/T022-frontend-flow-error-contracts.md"
+      changed_files:
+        - "frontend/apps/web/src/lib/features/flows/flowRuntimeErrorMapping.ts"
+        - "frontend/apps/web/src/lib/features/flows/flowRuntimeErrorMapping.test.ts"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunReviewCheckpointPanel.svelte"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunReviewCheckpointPanel.test.ts"
+        - "frontend/apps/web/messages/en.json"
+        - "frontend/apps/web/messages/sv.json"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T022-frontend-flow-error-contracts.md"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      red_test: "Targeted tests failed before implementation because describeFlowApiError, FLOW_API_ERROR_CODES, and flow_error_typed_io_contract_violation did not exist."
+      commands:
+        - "PASS cd frontend/apps/web && bunx vitest run src/lib/features/flows/flowRuntimeErrorMapping.test.ts src/lib/features/flows/components/FlowRunReviewCheckpointPanel.test.ts -> 2 files / 23 tests passed after Claude iteration 1 fixes"
+        - "PASS cd frontend/apps/web && bun run i18n:compile"
+        - "PASS cd frontend/apps/web && bun run check -> 0 errors; 7 existing warnings remain"
+        - "PASS cd frontend/apps/web && bunx prettier --check src/lib/features/flows/flowRuntimeErrorMapping.ts src/lib/features/flows/flowRuntimeErrorMapping.test.ts src/lib/features/flows/components/FlowRunReviewCheckpointPanel.svelte src/lib/features/flows/components/FlowRunReviewCheckpointPanel.test.ts messages/en.json messages/sv.json"
+        - "PASS cd frontend/apps/web && bunx eslint src/lib/features/flows/flowRuntimeErrorMapping.ts src/lib/features/flows/flowRuntimeErrorMapping.test.ts src/lib/features/flows/components/FlowRunReviewCheckpointPanel.svelte src/lib/features/flows/components/FlowRunReviewCheckpointPanel.test.ts"
+        - "PASS rg -n 'flow_run_review_stale_error|FLOW_API_ERROR_MESSAGE|getReviewActionErrorMessage' frontend/apps/web/src frontend/apps/web/messages/en.json frontend/apps/web/messages/sv.json -> no matches"
+        - "PASS git diff --check"
+        - "FAIL cd frontend/apps/web && bunx vitest run src/lib/features/flows -> 5 files / 8 tests failed with unrelated locale-sensitive and existing expectation failures; 459 tests passed; failing test names are listed in notes/T022-frontend-flow-error-contracts.md"
+        - "FAIL cd frontend/apps/web && bun run lint -> pre-existing Prettier drift across 30 files; touched files pass targeted Prettier and ESLint"
+      claude_iteration_1: "changes_required, GREEN_LIGHT no, MIN_SCORE 6: found stale legacy i18n key/coincidence test, unpinned response-code precedence, and duplicate resolver tables. Accepted and fixed."
+      maintainability_score: "8/10"
+      type_debt_counts:
+        new_any: 0
+        new_as_any: 0
+        new_type_ignore: 0
+        new_unsafe_cast: 0
+      comments_added_or_changed: "None."
+      anti_patterns_avoided:
+        - "No backend contract or generated-client change."
+        - "No second Flow error-code owner."
+        - "No UI redesign or broad frontend error-boundary refactor."
+        - "No hardcoded Swedish Flow API messages inside the mapper."
+        - "No broad formatter cleanup committed."
+      summary: "Flow run/review API errors now resolve through one typed frontend Flow-domain parser/descriptor owner with localized catalog messages. The review checkpoint panel no longer keeps its own backend-code switch and now renders typed contract violations through the shared mapper."
+
+  - id: T023
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Run Claude/Codex commit gate on T022 frontend Flow API error contracts before local commit."
+    inputs:
+      - "T011 frontend error-state Scout receipt"
+      - "T021 Judge plan-gate receipt"
+      - "T022 Worker receipt"
+      - "Current diff"
+      - "Verification output"
+    constraints:
+      - "Do not implement unless Claude finds a concrete blocker that can be fixed within T022 allowed files."
+      - "Use Claude peer loop with a timeout longer than 10 minutes."
+      - "Iterate until Claude gives GREEN_LIGHT yes or document evidence-backed disagreement."
+      - "Review maintainability, canonical frontend Flow error ownership, i18n/message quality, TypeScript type safety, frontend error handling, tests, comments, AI slop, and regression risk."
+      - "Prefer long-term maintainability and reliability over quick fixes."
+      - "If a difficult implementation or API-shape choice appears, ask Claude for a second opinion before deciding."
+      - "Commit locally only after green; do not push."
+      - "Commit subject must be concise, human-readable, and avoid internal planning vocabulary."
+      - "Stage only T022 files and goal receipts; preserve unrelated dirty files."
+    expected_output:
+      - "green | changes_required | blocked"
+      - "Whether to commit."
+      - "Recommended human-readable commit subject if green."
+      - "Residual risks and next slice recommendation."
+    receipt:
+      result: done
+      verdict: green
+      decision: "Commit the T022 implementation locally with subject 'Localize Flow API errors'."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t022-frontend-flow-error-contracts-commit-gate-20260511T013311Z.md"
+        - ".codex/artifacts/claude-peer-loop-t022-frontend-flow-error-contracts-commit-gate-iteration-2-20260511T015212Z.md"
+      green_light: true
+      min_score: 8
+      recommended_commit_subject: "Localize Flow API errors"
+      accepted_followups:
+        - "Documented the exact eight broader Flow frontend test failures that remain outside T022."
+        - "Queue later migration of remaining Swedish-only upload hints once broader frontend i18n cleanup is selected."
+      summary: "Claude iteration 1 found real blockers: stale duplicate review i18n key, a coincidence stale-revision test, unpinned response-code precedence, and duplicate resolver tables. Codex fixed all four, revalidated targeted tests/i18n/check/Prettier/ESLint/rg/diff-check, documented broader failing Flow frontend tests, and Claude iteration 2 approved local commit."
 
   - id: T007
     type: scout
     assignee: Scout
-    status: queued
+    status: active
     reasoning_hint: medium
     objective: "Prepare pre-production legacy/dead-code cleanup with proof: grep, tests, fixture/migration implications, and delete/keep recommendations."
     constraints:

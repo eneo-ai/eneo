@@ -1,23 +1,51 @@
 import { IntricError } from "@intric/intric-js";
+import { m } from "$lib/paraglide/messages";
 
-const FLOW_SWEDISH_ERROR_BY_CODE: Record<string, string> = {
-  flow_template_invalid_archive:
-    "Den uppladdade filen är inte en giltig Word-mall (.docx). Välj en .docx-fil och försök igen.",
-  flow_template_corrupted_archive:
-    "Word-mallen verkar vara skadad. Prova att öppna och spara om filen i Word.",
-  flow_template_macro_not_allowed:
-    "Makroaktiverade Word-filer (.docm/.dotm) stöds inte som mallar. Spara filen som .docx och försök igen.",
-  flow_template_missing_required_parts:
-    "Filen ser inte ut att vara en giltig Word-mall. Kontrollera filen och försök igen.",
-  flow_template_not_accessible: "Mallen är inte tillgänglig för dig i detta flow eller space.",
-  flow_template_read_only: "Du kan använda flödet men inte byta mall för detta flow.",
-  flow_template_unsupported_extension:
-    "Endast .docx-filer kan användas som mall. Välj en .docx-fil och försök igen.",
-  flow_template_missing_content:
-    "Den valda DOCX-mallen kunde inte läsas eftersom filinnehållet saknas.",
-  flow_run_rerun_step_inputs_unsupported:
-    "Denna körning kan inte köras om med stegindata. Starta en ny körning i stället."
+export const FLOW_API_ERROR_CODES = [
+  "flow_run_required_step_input_missing",
+  "flow_run_top_level_file_ids_not_supported",
+  "flow_run_idempotency_conflict",
+  "typed_io_contract_violation",
+  "flow_review_stale_revision",
+  "flow_review_not_active",
+  "flow_review_step_result_not_found",
+  "flow_review_checkpoint_not_found",
+  "flow_review_reject_reason_required",
+  "flow_review_reject_reason_too_long",
+  "flow_review_idempotency_key_required",
+  "flow_review_not_approved",
+  "flow_review_already_resumed",
+  "flow_review_rejected",
+  "flow_review_cancelled",
+  "flow_template_invalid_archive",
+  "flow_template_corrupted_archive",
+  "flow_template_macro_not_allowed",
+  "flow_template_missing_required_parts",
+  "flow_template_not_accessible",
+  "flow_template_read_only",
+  "flow_template_unsupported_extension",
+  "flow_template_missing_content",
+  "flow_run_rerun_step_inputs_unsupported"
+] as const;
+
+export type FlowApiErrorCode = (typeof FLOW_API_ERROR_CODES)[number];
+export type FlowApiErrorMessageKey = `flow_error_${FlowApiErrorCode}`;
+
+export type FlowApiErrorContext = {
+  step_ids?: string[];
+  checkpoint_id?: string;
+  step_id?: string;
+  step_order?: number;
+  payload_field?: string;
 };
+
+export type FlowApiErrorDescriptor = {
+  code: FlowApiErrorCode;
+  messageKey: FlowApiErrorMessageKey;
+  context: FlowApiErrorContext;
+};
+
+const FLOW_API_ERROR_CODE_SET = new Set<string>(FLOW_API_ERROR_CODES);
 
 const UPLOAD_ERROR_HINTS: Record<string, string> = {
   timeout: " Försök igen med en mindre fil eller kontrollera din internetanslutning.",
@@ -47,34 +75,129 @@ const MISSING_TEMPLATE_CONTENT_PATTERNS = [
   "file content is missing"
 ];
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function readOptionalStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const strings = value.filter((item): item is string => typeof item === "string");
+  return strings.length > 0 ? strings : undefined;
+}
+
+function readOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function readOptionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function extractFlowApiErrorContext(value: unknown): FlowApiErrorContext {
+  if (!isObject(value)) return {};
+
+  const context: FlowApiErrorContext = {};
+  const stepIds = readOptionalStringArray(value.step_ids);
+  if (stepIds) context.step_ids = stepIds;
+
+  const checkpointId = readOptionalString(value.checkpoint_id);
+  if (checkpointId) context.checkpoint_id = checkpointId;
+
+  const stepId = readOptionalString(value.step_id);
+  if (stepId) context.step_id = stepId;
+
+  const stepOrder = readOptionalNumber(value.step_order);
+  if (stepOrder !== undefined) context.step_order = stepOrder;
+
+  const payloadField = readOptionalString(value.payload_field);
+  if (payloadField) context.payload_field = payloadField;
+
+  return context;
+}
+
+function isFlowApiErrorCode(code: string): code is FlowApiErrorCode {
+  return FLOW_API_ERROR_CODE_SET.has(code);
+}
+
+function getResponseCode(error: IntricError): string | null {
+  if (isObject(error.response) && typeof error.response.code === "string") {
+    return error.response.code;
+  }
+  return typeof error.code === "string" ? error.code : null;
+}
+
+function responseContext(error: IntricError): FlowApiErrorContext {
+  if (!isObject(error.response)) return {};
+  return extractFlowApiErrorContext(error.response.context);
+}
+
+function messageKeyForCode(code: FlowApiErrorCode): FlowApiErrorMessageKey {
+  return `flow_error_${code}`;
+}
+
+export function extractFlowApiError(error: unknown): {
+  code: FlowApiErrorCode;
+  context: FlowApiErrorContext;
+} | null {
+  if (!(error instanceof IntricError)) return null;
+
+  const code = getResponseCode(error);
+  if (!code || !isFlowApiErrorCode(code)) return null;
+
+  return {
+    code,
+    context: responseContext(error)
+  };
+}
+
+export function describeFlowApiError(error: unknown): FlowApiErrorDescriptor | null {
+  const parsed = extractFlowApiError(error);
+  if (!parsed) return null;
+
+  return {
+    code: parsed.code,
+    messageKey: messageKeyForCode(parsed.code),
+    context: parsed.context
+  };
+}
+
+function descriptorForCode(code: string | null | undefined): FlowApiErrorDescriptor | null {
+  if (!code || !isFlowApiErrorCode(code)) return null;
+  return {
+    code,
+    messageKey: messageKeyForCode(code),
+    context: {}
+  };
+}
+
+function resolveFlowApiErrorMessage(descriptor: FlowApiErrorDescriptor): string {
+  return m[descriptor.messageKey]();
+}
+
+function matchesMissingTemplateContentError(readableMessage: string): boolean {
+  const normalized = readableMessage.toLowerCase();
+  return MISSING_TEMPLATE_CONTENT_PATTERNS.some((pattern) => normalized.includes(pattern));
+}
+
 export function getFlowRuntimeErrorMessage(error: unknown, fallbackMessage: string): string {
   if (!(error instanceof IntricError)) {
     return fallbackMessage;
   }
 
-  const responseCode =
-    error.response &&
-    typeof error.response === "object" &&
-    !Array.isArray(error.response) &&
-    typeof (error.response as { code?: unknown }).code === "string"
-      ? (error.response as { code: string }).code
-      : "";
-  const code = typeof error.code === "string" ? error.code : responseCode;
-  const mapped = getFlowRuntimeErrorMessageByCode(code);
-  if (mapped) return mapped;
+  const descriptor = describeFlowApiError(error);
+  if (descriptor) return resolveFlowApiErrorMessage(descriptor);
 
   const readable = error.getReadableMessage();
-  const normalized = readable.toLowerCase();
-  if (MISSING_TEMPLATE_CONTENT_PATTERNS.some((pattern) => normalized.includes(pattern))) {
-    return FLOW_SWEDISH_ERROR_BY_CODE.flow_template_missing_content;
+  if (matchesMissingTemplateContentError(readable)) {
+    return getFlowRuntimeErrorMessageByCode("flow_template_missing_content") ?? readable;
   }
 
   return readable;
 }
 
 export function getFlowRuntimeErrorMessageByCode(code: string | null | undefined): string | null {
-  if (!code) return null;
-  return FLOW_SWEDISH_ERROR_BY_CODE[code] ?? null;
+  const descriptor = descriptorForCode(code);
+  return descriptor ? resolveFlowApiErrorMessage(descriptor) : null;
 }
 
 const MIME_FRIENDLY_NAMES: Record<string, string> = {

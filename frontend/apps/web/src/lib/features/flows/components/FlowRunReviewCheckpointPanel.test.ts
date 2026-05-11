@@ -1,4 +1,4 @@
-// @vitest-environment happy-dom
+// @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -160,7 +160,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     });
     await fireEvent.click(screen.getByRole("button", { name: m.flow_run_review_save_edit() }));
 
-    await screen.findByText(m.flow_run_review_stale_error());
+    await screen.findByText(m.flow_error_flow_review_stale_revision());
     expect(edit).toHaveBeenCalledWith({
       flowId: "flow-1",
       runId: "run-1",
@@ -168,6 +168,42 @@ describe("FlowRunReviewCheckpointPanel", () => {
       expectedCheckpointRevision: 1,
       currentPayloadJson: { text: "Edited answer." }
     });
+  });
+
+  it("shows typed contract edit errors from the shared Flow API error contract", async () => {
+    const contractError = new IntricError(
+      "backend readable fallback",
+      "RESPONSE",
+      400,
+      9007,
+      {
+        code: "typed_io_contract_violation",
+        context: {
+          checkpoint_id: "checkpoint-1",
+          step_id: "step-1",
+          step_order: 1,
+          payload_field: "structured"
+        }
+      },
+      { endpoint: "PATCH@/review-checkpoints/checkpoint-1" }
+    );
+    const edit = vi.fn(async () => {
+      throw contractError;
+    });
+    const eneo = buildEneo({ activeCheckpoint: buildCheckpoint("awaiting_review", 1), edit });
+
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric }
+    });
+
+    const payloadEditor = await screen.findByLabelText(m.flow_run_review_current_payload());
+    await fireEvent.input(payloadEditor, {
+      target: { value: JSON.stringify({ text: "Edited answer." }, null, 2) }
+    });
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_run_review_save_edit() }));
+
+    await screen.findByText(m.flow_error_typed_io_contract_violation());
+    expect(screen.queryByText("backend readable fallback")).toBeNull();
   });
 
   it("keeps invalid and non-object payloads out of edit requests", async () => {

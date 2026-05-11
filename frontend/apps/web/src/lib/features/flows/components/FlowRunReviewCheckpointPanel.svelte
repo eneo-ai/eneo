@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { IntricError, type FlowRunReviewCheckpoint, type Intric } from "@intric/intric-js";
+  import type { FlowRunReviewCheckpoint, Intric } from "@intric/intric-js";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { onMount } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
@@ -7,6 +7,7 @@
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
+  import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
 
   let {
     runId,
@@ -59,7 +60,7 @@
       applyCheckpoint(await eneo.flows.runs.reviewCheckpoints.active({ flowId, runId }));
     } catch (error) {
       console.error("Failed to load review checkpoint", error);
-      loadError = getReviewActionErrorMessage(error, m.flow_run_review_load_failed());
+      loadError = getFlowRuntimeErrorMessage(error, m.flow_run_review_load_failed());
     } finally {
       loading = false;
     }
@@ -77,30 +78,6 @@
       actionError = m.flow_run_review_payload_invalid();
       return null;
     }
-  }
-
-  function getReviewActionErrorMessage(error: unknown, fallback: string): string {
-    const code = getReviewErrorCode(error);
-    if (code === "flow_review_stale_revision") {
-      return m.flow_run_review_stale_error();
-    }
-    if (error instanceof IntricError) {
-      return error.getReadableMessage() || fallback;
-    }
-    return fallback;
-  }
-
-  function getReviewErrorCode(error: unknown): string | null {
-    if (
-      !(error instanceof IntricError) ||
-      !error.response ||
-      typeof error.response !== "object" ||
-      Array.isArray(error.response)
-    ) {
-      return null;
-    }
-    const code = (error.response as { code?: unknown }).code;
-    return typeof code === "string" ? code : null;
   }
 
   function getCheckpointStateLabel(state: FlowRunReviewCheckpoint["state"]): string {
@@ -140,7 +117,7 @@
       onChanged?.();
     } catch (error) {
       console.error("Failed to save review checkpoint", error);
-      actionError = getReviewActionErrorMessage(error, m.flow_run_review_save_failed());
+      actionError = getFlowRuntimeErrorMessage(error, m.flow_run_review_save_failed());
     } finally {
       activeAction = null;
     }
@@ -163,7 +140,7 @@
       onChanged?.();
     } catch (error) {
       console.error("Failed to approve review checkpoint", error);
-      actionError = getReviewActionErrorMessage(error, m.flow_run_review_approve_failed());
+      actionError = getFlowRuntimeErrorMessage(error, m.flow_run_review_approve_failed());
     } finally {
       activeAction = null;
     }
@@ -187,7 +164,7 @@
       onChanged?.();
     } catch (error) {
       console.error("Failed to reject review checkpoint", error);
-      actionError = getReviewActionErrorMessage(error, m.flow_run_review_reject_failed());
+      actionError = getFlowRuntimeErrorMessage(error, m.flow_run_review_reject_failed());
     } finally {
       activeAction = null;
     }
@@ -210,7 +187,7 @@
       onChanged?.();
     } catch (error) {
       console.error("Failed to resume review checkpoint", error);
-      actionError = getReviewActionErrorMessage(error, m.flow_run_review_resume_failed());
+      actionError = getFlowRuntimeErrorMessage(error, m.flow_run_review_resume_failed());
     } finally {
       activeAction = null;
     }
