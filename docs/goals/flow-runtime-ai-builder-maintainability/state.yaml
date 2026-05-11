@@ -85,7 +85,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T032
+active_task: T033
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -2012,7 +2012,7 @@ tasks:
   - id: T032
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Decide the next cleanup/typed-boundary step after FlowService metadata normalization: delete orphan care-data write adapter first, or proceed to typed published-definition metadata accessor."
     inputs:
@@ -2032,6 +2032,45 @@ tasks:
       - "verification commands"
       - "stop_if"
       - "whether Claude plan gate is required before activation"
+    receipt:
+      result: done
+      decision: "Activate T033 to delete the orphan care-data write adapter before starting the typed published-definition accessor."
+      summary: "Grep proof shows validate_flow_care_data_policy has no production callers after T031; only its definition and its dedicated unit test remain. The next Worker should delete that adapter and move write-error coverage to the canonical FlowMetadataV1 parser tests."
+      note: "docs/goals/flow-runtime-ai-builder-maintainability/notes/T032-next-metadata-cleanup-decision.md"
+      grep_proof:
+        - "git grep -n 'validate_flow_care_data_policy' -- backend -> only backend/src/intric/flows/flow_care_data_policy.py and backend/tests/unittests/flows/test_flow_care_data_policy.py."
+      deferred:
+        - "Typed published-definition metadata accessor remains required after this cleanup."
+      claude_plan_gate_required: false
+      next_task: T033
+
+  - id: T033
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: medium
+    objective: "Delete the orphan validate_flow_care_data_policy adapter and move its write-error coverage to the canonical FlowMetadataV1 parser tests without changing runtime care-data read behavior."
+    allowed_files:
+      - "backend/src/intric/flows/flow_care_data_policy.py"
+      - "backend/tests/unittests/flows/test_flow_care_data_policy.py"
+      - "backend/tests/unittests/flows/test_flow_metadata.py"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py -q"
+      - "cd backend && uv run pyright src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py"
+      - "cd backend && uv run ruff check src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py"
+    stop_if:
+      - "Any production caller remains for validate_flow_care_data_policy."
+      - "Write-error message coverage cannot move cleanly to test_flow_metadata.py."
+      - "Runtime care-data persisted-read behavior changes."
+      - "New Any, casts, # type: ignore, or Pyright ignores are added."
+      - "Deletion requires touching FlowService, published_definition.py, AI Builder, routers, migrations, frontend, generated clients, or unrelated dirty files."
+    expected_output:
+      - "Grep proof before and after deletion."
+      - "Write-error coverage moved to FlowMetadataV1 parser tests."
+      - "Persisted-read resolve_flow_care_data_policy tests still pass."
+      - "All verify commands passed."
+      - "Receipt says whether Claude self-review was needed."
     receipt: null
 
 validation_command_candidates:
