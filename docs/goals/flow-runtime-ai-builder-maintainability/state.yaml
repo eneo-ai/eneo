@@ -85,7 +85,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T030
+active_task: T031
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -1841,7 +1841,7 @@ tasks:
   - id: T030
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Scope the FlowMetadataV1 Worker 2b write-path closer so FlowService create/update/publish normalization and serialization can consume the typed metadata envelope without broadening into published-definition or AI Builder cleanup."
     inputs:
@@ -1864,6 +1864,67 @@ tasks:
       - "stop_if"
       - "sensitive default serialization policy"
       - "whether Claude plan gate is required before activation"
+    receipt:
+      result: done
+      decision: "Activate T031 after host Claude plan gate iteration 2 returned green."
+      summary: "Scoped FlowService metadata write-path Worker 2b to use FlowMetadataV1 normalization with WRITE mode for user-provided metadata and PERSISTED_READ mode for already-stored draft metadata, delete the old form-schema normalization wrapper, preserve published snapshot stability, and avoid double care-data WRITE parsing."
+      note: "docs/goals/flow-runtime-ai-builder-maintainability/notes/T030-flowservice-metadata-write-path-scope.md"
+      claude_plan_gate:
+        session: "flow-runtime-maintainability-t030-flowservice-metadata-write-path-plan"
+        artifact_iteration_1: ".codex/artifacts/claude-peer-loop-t030-flowservice-metadata-write-path-plan-gate-20260511T070725Z.md"
+        artifact_iteration_2: ".codex/artifacts/claude-peer-loop-t030-flowservice-metadata-write-path-plan-gate-iteration-2-20260511T071103Z.md"
+        model: "claude-opus-4-7"
+        effort: "xhigh"
+        verdict: "green"
+        green_light: true
+        min_score: 8
+        accepted_changes:
+          - "Explicit mode policy: WRITE for user-provided create/update metadata; PERSISTED_READ for existing draft metadata on update-without-metadata and publish."
+          - "Publish snapshot metadata shape and checksum determinism tests required."
+          - "normalize_legacy_form_schema compatibility wrapper must be deleted or renamed, not preserved."
+          - "FlowService must not silently double-parse care-data WRITE validation at the same boundary."
+          - "Serializer sensitive default behavior should be verified before editing serializer semantics."
+      next_task: T031
+
+  - id: T031
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Move FlowService create/update/publish metadata normalization through FlowMetadataV1 and serialize_flow_metadata, using WRITE mode for user-provided metadata and PERSISTED_READ mode for already-stored draft metadata, without touching published-definition parsing or AI Builder behavior."
+    allowed_files:
+      - "backend/src/intric/flows/flow_metadata.py"
+      - "backend/src/intric/flows/flow_validators_form.py"
+      - "backend/src/intric/flows/flow_validators.py"
+      - "backend/src/intric/flows/application/flow_service.py"
+      - "backend/tests/unittests/flows/test_flow_metadata.py"
+      - "backend/tests/unittests/flows/test_flow_validators.py"
+      - "backend/tests/unittests/flows/test_flow_service.py"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_service.py -q"
+      - "cd backend && uv run pyright src/intric/flows/flow_metadata.py src/intric/flows/flow_validators_form.py src/intric/flows/flow_validators.py src/intric/flows/application/flow_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_service.py"
+      - "cd backend && uv run ruff check src/intric/flows/flow_metadata.py src/intric/flows/flow_validators_form.py src/intric/flows/flow_validators.py src/intric/flows/application/flow_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_service.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/flow_metadata.py src/intric/flows/flow_validators_form.py src/intric/flows/flow_validators.py src/intric/flows/application/flow_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_service.py"
+    stop_if:
+      - "The implementation needs published_definition.py, ai_builder/*, routers, generated clients, migrations, frontend files, or unrelated dirty files."
+      - "The implementation changes public API request/response shape."
+      - "Current BadRequestException messages/codes/context change without explicit test updates and review."
+      - "Serializer changes drop unrelated top-level metadata keys."
+      - "normalize_legacy_form_schema remains as a compatibility wrapper after FlowService moves to metadata-level normalization."
+      - "FlowService silently double-parses care-data WRITE validation at the same boundary with no receipt rationale."
+      - "update_flow(..., metadata_json=NOT_PROVIDED) changes tolerant existing-metadata behavior without an explicit test and receipt decision."
+      - "publish_flow snapshot metadata shape/checksum changes without a dedicated test."
+      - "New Any, # type: ignore, or Pyright ignore comments are added to get green checks."
+    expected_output:
+      - "Red tests first, then implementation."
+      - "Sensitive default serialization policy verified before serializer edits."
+      - "Mode policy implemented and tested for create/update/publish."
+      - "publish_flow PERSISTED_READ choice justified in receipt."
+      - "normalize_legacy_form_schema deleted or renamed with grep proof."
+      - "No silent double care-data WRITE parse at FlowService boundary."
+      - "Before/after Any, cast, and type-ignore counts for changed source files."
+      - "All verify commands passed."
+      - "Claude commit gate before source commit."
     receipt: null
 
 validation_command_candidates:
