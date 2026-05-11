@@ -1712,6 +1712,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         files_downloaded=num_files,
                         pages_failed=num_failed_pages,
                         files_failed=num_failed_files,
+                        pages_source_retained=num_source_retained_pages,
                         failure_summary=failure_summary,
                         outcome_code=crawl_run_outcome_code.value
                         if crawl_run_outcome_code is not None

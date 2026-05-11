@@ -26,6 +26,7 @@ export type CrawlOutcome = {
 
 type CrawlRunWithOutcome = CrawlRun & {
   outcome?: CrawlOutcome | null;
+  pages_source_retained?: number | null;
 };
 
 type WebsiteWithOutcome = WebsiteSparse & {
@@ -63,6 +64,11 @@ export function getCrawlOutcome(crawl: CrawlRun): CrawlOutcome | undefined {
   return (crawl as CrawlRunWithOutcome).outcome ?? undefined;
 }
 
+export function getPagesSourceRetained(crawl: CrawlRun): number | undefined {
+  const count = (crawl as CrawlRunWithOutcome).pages_source_retained;
+  return typeof count === "number" && count > 0 ? count : undefined;
+}
+
 export function getLatestCrawlOutcome(website: WebsiteSparse): CrawlOutcome | undefined {
   return (website as WebsiteWithOutcome).latest_crawl?.outcome ?? undefined;
 }
@@ -79,6 +85,10 @@ export function isSourceRetentionOnly(
 
 export function getCrawlOutcomeLabel(outcome: CrawlOutcome, fallback: string): string {
   return outcomeLabels[outcome.message_key]?.() ?? outcome.detail ?? fallback;
+}
+
+export function getSourceRetainedLabel(count: number): string {
+  return m.source_retained_pages({ count });
 }
 
 export function getCrawlOutcomeTooltip(

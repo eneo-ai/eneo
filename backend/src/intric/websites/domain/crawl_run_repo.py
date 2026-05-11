@@ -55,6 +55,7 @@ class CrawlRunRepository:
                 files_downloaded=crawl_run.files_downloaded,
                 pages_failed=crawl_run.pages_failed,
                 files_failed=crawl_run.files_failed,
+                pages_source_retained=crawl_run.pages_source_retained,
                 outcome_code=_serialize_crawl_outcome_code(crawl_run.outcome_code),
                 job_id=crawl_run.job_id,
             )
@@ -74,6 +75,7 @@ class CrawlRunRepository:
                 files_downloaded=crawl_run.files_downloaded,
                 pages_failed=crawl_run.pages_failed,
                 files_failed=crawl_run.files_failed,
+                pages_source_retained=crawl_run.pages_source_retained,
                 outcome_code=_serialize_crawl_outcome_code(crawl_run.outcome_code),
                 job_id=crawl_run.job_id,
             )

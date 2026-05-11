@@ -28,6 +28,7 @@ class CrawlRunBase(BaseModel):
     files_downloaded: Optional[int] = None
     pages_failed: Optional[int] = None
     files_failed: Optional[int] = None
+    pages_source_retained: Optional[int] = None
     failure_summary: Optional[dict[str, int]] = None
     outcome_code: Optional["CrawlOutcomeCode"] = None
 
@@ -54,6 +55,7 @@ def derive_crawl_outcome(
     failure_summary: dict[str, int] | None,
     pages_failed: int | None,
     files_failed: int | None,
+    pages_source_retained: int | None,
     outcome_code: CrawlOutcomeCode | str | None = None,
 ) -> CrawlOutcomePublic | None:
     resolved_code = (
@@ -76,6 +78,7 @@ def derive_crawl_outcome(
         failure_summary=failure_summary,
         pages_failed=pages_failed,
         files_failed=files_failed,
+        pages_source_retained=pages_source_retained,
     )
 
 
@@ -130,6 +133,7 @@ def _crawl_outcome_from_code(
     failure_summary: dict[str, int] | None,
     pages_failed: int | None,
     files_failed: int | None,
+    pages_source_retained: int | None,
 ) -> CrawlOutcomePublic:
     detail = result_location.strip() if result_location else None
     affected_count = (pages_failed or 0) + (files_failed or 0)
@@ -196,7 +200,7 @@ def _crawl_outcome_from_code(
             code=code,
             severity=CrawlOutcomeSeverity.INFO,
             message_key="crawl_outcome_source_retention_only",
-            affected_count=affected_count or None,
+            affected_count=pages_source_retained or None,
         )
 
     return CrawlOutcomePublic(
@@ -244,6 +248,7 @@ class CrawlRunSparse(CrawlRunBase, InDB):
                 failure_summary=self.failure_summary,
                 pages_failed=self.pages_failed,
                 files_failed=self.files_failed,
+                pages_source_retained=self.pages_source_retained,
                 outcome_code=self.outcome_code,
             )
         return self

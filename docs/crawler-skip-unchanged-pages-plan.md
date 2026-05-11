@@ -25,6 +25,7 @@ Purpose: reduce embedding-token spend and database churn for scheduled website c
 - [x] Frontend crawl outcome labels/tooltips are centralized in a narrow knowledge Module instead of duplicated across website status and crawl history components.
 - [x] Source-retained timeout salvage: timeouts with retained sitemap output now yield partial crawl output instead of failing as empty crawls.
 - [x] Partial crawls skip stale-blob cleanup, because a timeout means the source frontier may be incomplete.
+- [x] Mixed source-retention visibility: crawl runs now expose `pages_source_retained`, and crawl history shows retained unchanged pages alongside fetched pages.
 - [x] Targeted tests, strict pyright, ruff, and regression validation.
 - [x] Claude peer-loop implementation review.
 - [x] Local commit only; do not push from this branch.
@@ -67,6 +68,8 @@ Claude artifact:
 - `.codex/artifacts/claude-peer-loop-crawler-skip-next-roi-review-20260511T143100Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-skip-timeout-salvage-and-retained-count-plan-20260511T180506Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-skip-timeout-salvage-implementation-review-20260511T181125Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-skip-retained-count-contract-plan-20260511T181636Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-skip-retained-count-implementation-review-20260511T182727Z.md`
 
 Claude loop summary:
 
@@ -84,6 +87,8 @@ Claude loop summary:
 - Next-ROI review: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`; blocker found source-retention-only runs were still rendered as empty complete crawls in the frontend. This drove the shared crawl outcome presentation Module and complete-state source-retention rendering fix.
 - Timeout salvage and retained-count plan review: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 5`; blocker found that salvage of partial source-retained feeds would be unsafe unless partial crawls also skip stale cleanup.
 - Timeout salvage implementation review: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; confirmed `_crawl()` now reads both Scrapy feeds symmetrically and partial crawls skip stale cleanup.
+- Retained-count contract plan review: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; confirmed `pages_source_retained` should be the typed public counter, while `outcome.affected_count` derives from it only for source-retention-only runs.
+- Retained-count implementation review: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; confirmed both public crawl-run models, the required outcome derivation parameter, migration shape, worker write, and frontend mixed-run chip are safe to commit.
 
 Claude agreed with the core architecture:
 
@@ -1292,7 +1297,7 @@ Goal:
 7. Completed source-retained timeout salvage: if Scrapy emits retained sitemap URLs before timing out with zero fetched pages, `_crawl()` treats the retained feed as partial crawl output instead of raising `CrawlTimeoutError`. Partial crawls skip stale cleanup to avoid deleting blobs that the timed-out crawl never reached.
 8. Add a stored processing fingerprint that includes embedding model, chunking version, text-normalization version, and embedding dimensions.
 9. Review broader info-blob tenant-scoping outside the website crawl paths, such as group and integration deletes, as a separate hardening slice.
-10. Add mixed source-retention outcome visibility: crawls that retain some sitemap URLs and fetch some changed pages should expose retained count through a typed public field or outcome summary, not only logs.
+10. Completed mixed source-retention visibility: crawls that retain some sitemap URLs and fetch some changed pages now expose `pages_source_retained` through the typed crawl-run contract, and the crawl history result cell renders the retained unchanged-page count.
 11. Revisit the custom `SitemapSpider._parse_sitemap()` implementation after the current branch ships. Prefer Scrapy-owned lifecycle hooks where possible, and keep the current smoke/behavior tests as the guard while this branch needs cleanup-visible retained URL feed items.
 
 ## Questions For ChatGPT Extended Pro

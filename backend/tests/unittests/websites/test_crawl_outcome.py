@@ -16,6 +16,7 @@ def test_stored_duplicate_crawl_skip_is_info_outcome_without_string_parsing():
         failure_summary=None,
         pages_failed=None,
         files_failed=None,
+        pages_source_retained=None,
         outcome_code=CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED,
     )
 
@@ -44,6 +45,7 @@ def test_embedding_failure_summary_becomes_config_outcome():
         failure_summary={FailureReason.NO_EMBEDDING_MODEL.value: 2},
         pages_failed=2,
         files_failed=0,
+        pages_source_retained=None,
     )
 
     assert outcome is not None
@@ -59,6 +61,7 @@ def test_failed_no_pages_result_location_becomes_typed_error():
         failure_summary=None,
         pages_failed=None,
         files_failed=None,
+        pages_source_retained=None,
     )
 
     assert outcome is not None
@@ -74,6 +77,7 @@ def test_stored_sitemap_no_pages_outcome_has_specific_message():
         failure_summary=None,
         pages_failed=None,
         files_failed=None,
+        pages_source_retained=None,
         outcome_code=CrawlOutcomeCode.CRAWL_SITEMAP_NO_PAGES,
     )
 
@@ -90,6 +94,7 @@ def test_stored_max_age_outcome_has_specific_error_message():
         failure_summary=None,
         pages_failed=None,
         files_failed=None,
+        pages_source_retained=None,
         outcome_code=CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED,
     )
 
@@ -106,6 +111,7 @@ def test_stored_source_retention_outcome_is_informational():
         failure_summary=None,
         pages_failed=0,
         files_failed=0,
+        pages_source_retained=None,
         outcome_code=CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY,
     )
 
@@ -113,6 +119,36 @@ def test_stored_source_retention_outcome_is_informational():
     assert outcome.code == CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY
     assert outcome.severity == CrawlOutcomeSeverity.INFO
     assert outcome.message_key == "crawl_outcome_source_retention_only"
+
+
+def test_source_retention_outcome_uses_source_retained_count():
+    outcome = derive_crawl_outcome(
+        status=Status.COMPLETE,
+        result_location=None,
+        failure_summary=None,
+        pages_failed=0,
+        files_failed=0,
+        pages_source_retained=42,
+        outcome_code=CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY,
+    )
+
+    assert outcome is not None
+    assert outcome.affected_count == 42
+
+
+def test_page_failure_outcome_does_not_use_source_retained_count_as_affected_count():
+    outcome = derive_crawl_outcome(
+        status=Status.COMPLETE,
+        result_location=None,
+        failure_summary={FailureReason.DB_ERROR.value: 2},
+        pages_failed=2,
+        files_failed=0,
+        pages_source_retained=100,
+    )
+
+    assert outcome is not None
+    assert outcome.code == CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
+    assert outcome.affected_count == 2
 
 
 def test_crawl_run_sparse_uses_stored_outcome_code():
@@ -129,3 +165,22 @@ def test_crawl_run_sparse_uses_stored_outcome_code():
 
     assert crawl_run.outcome is not None
     assert crawl_run.outcome.code == CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED
+
+
+def test_crawl_run_sparse_source_retention_outcome_uses_retained_count():
+    crawl_run = CrawlRunSparse.model_validate(
+        {
+            "id": "00000000-0000-0000-0000-000000000001",
+            "created_at": None,
+            "updated_at": None,
+            "status": Status.COMPLETE,
+            "result_location": None,
+            "pages_failed": 0,
+            "files_failed": 0,
+            "pages_source_retained": 12,
+            "outcome_code": CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY,
+        }
+    )
+
+    assert crawl_run.outcome is not None
+    assert crawl_run.outcome.affected_count == 12

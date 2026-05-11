@@ -845,6 +845,7 @@
   "started_time_ago": "Started {timeAgo}",
   "crawled_pages": "Crawled {count} pages",
   "crawled_pages_and_files": "Crawled {pages} pages and {files} files",
+  "source_retained_pages": "Retained {count} unchanged pages",
   "pages_failed": "{count} pages failed",
   "files_failed": "{count} files failed",
   "pages_and_files_failed": "{pages} pages and {files} files failed",

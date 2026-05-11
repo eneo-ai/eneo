@@ -77,6 +77,7 @@ class CrawlRunPublic(BaseResponse):
     files_downloaded: Optional[int]
     pages_failed: Optional[int]
     files_failed: Optional[int]
+    pages_source_retained: Optional[int] = None
     failure_summary: Optional[dict[str, int]] = None
     outcome_code: Optional[CrawlOutcomeCode] = None
     status: Status
@@ -94,6 +95,7 @@ class CrawlRunPublic(BaseResponse):
             files_downloaded=crawl_run.files_downloaded,
             pages_failed=crawl_run.pages_failed,
             files_failed=crawl_run.files_failed,
+            pages_source_retained=crawl_run.pages_source_retained,
             failure_summary=crawl_run.failure_summary,
             outcome_code=crawl_run.outcome_code,
             status=crawl_run.status,
@@ -105,6 +107,7 @@ class CrawlRunPublic(BaseResponse):
                 failure_summary=crawl_run.failure_summary,
                 pages_failed=crawl_run.pages_failed,
                 files_failed=crawl_run.files_failed,
+                pages_source_retained=crawl_run.pages_source_retained,
                 outcome_code=crawl_run.outcome_code,
             ),
         )

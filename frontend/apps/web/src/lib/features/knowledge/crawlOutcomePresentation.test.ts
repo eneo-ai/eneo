@@ -7,6 +7,8 @@ import {
   getCrawlOutcomeTooltip,
   getFailureSummaryTooltip,
   getLatestCrawlOutcome,
+  getPagesSourceRetained,
+  getSourceRetainedLabel,
   isDuplicateCrawlSkip,
   isSourceRetentionOnly,
   type CrawlOutcome
@@ -91,4 +93,17 @@ test("failure summary tooltip renders known failure reasons", () => {
   expect(getFailureSummaryTooltip({ NO_EMBEDDING_MODEL: 2 })).toBe(
     "Failure breakdown:\nNo embedding model: 2"
   );
+});
+
+test("source-retained count is absent for historical rows", () => {
+  const crawl = { pages_source_retained: null } as unknown as CrawlRun;
+
+  expect(getPagesSourceRetained(crawl)).toBeUndefined();
+});
+
+test("source-retained count is exposed for mixed source-skip crawls", () => {
+  const crawl = { pages_source_retained: 100 } as unknown as CrawlRun;
+
+  expect(getPagesSourceRetained(crawl)).toBe(100);
+  expect(getSourceRetainedLabel(100)).toBe("Retained 100 unchanged pages");
 });

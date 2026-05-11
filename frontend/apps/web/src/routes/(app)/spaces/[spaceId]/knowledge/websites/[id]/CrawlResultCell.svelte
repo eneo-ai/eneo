@@ -7,6 +7,8 @@
     getCrawlOutcomeLabel,
     getCrawlOutcomeTooltip,
     getFailureSummaryTooltip,
+    getPagesSourceRetained,
+    getSourceRetainedLabel,
     isDuplicateCrawlSkip,
     isSourceRetentionOnly
   } from "$lib/features/knowledge/crawlOutcomePresentation";
@@ -19,6 +21,7 @@
 
   const successPages = (crawl.pages_crawled ?? 0) - (crawl.pages_failed ?? 0);
   const successFiles = (crawl.files_downloaded ?? 0) - (crawl.files_failed ?? 0);
+  const sourceRetainedPages = getPagesSourceRetained(crawl);
 
   function getFailureTooltip(): string | undefined {
     return getFailureSummaryTooltip(crawl.failure_summary);
@@ -84,6 +87,13 @@
     }
   }
 
+  function sourceRetainedCountLabel(count: number): { label: string; color: Label.LabelColor } {
+    return {
+      color: "green",
+      label: getSourceRetainedLabel(count)
+    };
+  }
+
   function sourceRetentionLabel(): { label: string; color: Label.LabelColor; tooltip?: string } {
     const outcome = getCrawlOutcome(crawl);
     return {
@@ -142,6 +152,12 @@
       <Label.Single capitalize={false} item={sourceRetentionLabel()}></Label.Single>
     {:else}
       <Label.Single capitalize={false} item={totalLabel()}></Label.Single>
+      {#if sourceRetainedPages}
+        <Label.Single
+          capitalize={false}
+          item={sourceRetainedCountLabel(sourceRetainedPages)}
+        ></Label.Single>
+      {/if}
       {#if successPages || successFiles}
         <Label.Single capitalize={false} item={successLabel()}></Label.Single>
       {/if}

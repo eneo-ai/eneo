@@ -844,6 +844,7 @@
   "started_time_ago": "Startad {timeAgo}",
   "crawled_pages": "Indexerade {count} sidor",
   "crawled_pages_and_files": "Indexerade {pages} sidor och {files} filer",
+  "source_retained_pages": "Behöll {count} oförändrade sidor",
   "pages_failed": "{count} sidor misslyckades",
   "files_failed": "{count} filer misslyckades",
   "pages_and_files_failed": "{pages} sidor och {files} filer misslyckades",

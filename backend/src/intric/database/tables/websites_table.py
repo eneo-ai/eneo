@@ -21,6 +21,10 @@ class CrawlRuns(BasePublic):
     files_downloaded: Mapped[Optional[int]] = mapped_column()
     pages_failed: Mapped[Optional[int]] = mapped_column()
     files_failed: Mapped[Optional[int]] = mapped_column()
+    pages_source_retained: Mapped[Optional[int]] = mapped_column(
+        nullable=True,
+        comment="Sitemap page URLs retained without downloading during source skip",
+    )
     outcome_code: Mapped[Optional[str]] = mapped_column(
         String,
         nullable=True,
