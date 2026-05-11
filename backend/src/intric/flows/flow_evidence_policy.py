@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, cast
+from typing import Any, Mapping, cast
 
 from intric.authentication.auth_models import (
     ResourcePermissionLevel,
     ResourcePermissions,
 )
+from intric.flows.domain.flow import JsonObject
 from intric.flows.flow_care_data_policy import resolve_flow_care_data_policy
 
 
@@ -90,7 +91,9 @@ def apply_flow_evidence_policy_patch(
     return next_settings
 
 
-def flow_metadata_marks_sensitive(metadata_json: dict[str, Any] | None) -> bool:
+def flow_metadata_marks_sensitive(
+    metadata_json: JsonObject | Mapping[str, object] | None,
+) -> bool:
     return resolve_flow_care_data_policy(metadata_json).sensitive
 
 

@@ -5,10 +5,14 @@ import re
 import pytest
 
 from intric.flows.flow_metadata import (
+    FlowCareDataPolicyV1,
     FlowFormFieldType,
     FlowFormSchemaParseMode,
+    FlowMetadataParseMode,
     parse_flow_form_schema,
+    parse_flow_metadata,
     serialize_flow_form_schema,
+    serialize_flow_metadata,
 )
 from intric.main.exceptions import BadRequestException
 
@@ -244,3 +248,55 @@ def test_parse_flow_form_schema_persisted_read_rejects_duplicate_options() -> No
             ),
             mode=FlowFormSchemaParseMode.PERSISTED_READ,
         )
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [FlowMetadataParseMode.WRITE, FlowMetadataParseMode.PERSISTED_READ],
+)
+def test_parse_flow_metadata_preserves_unrelated_top_level_keys(
+    mode: FlowMetadataParseMode,
+) -> None:
+    parsed = parse_flow_metadata(
+        {
+            "form_schema": {
+                "fields": [{"name": "case_id", "type": "string"}],
+            },
+            "care_data_policy": {"sensitive": True},
+            "ai_builder": {"description": "Generated draft"},
+            "transcription": {"language": "sv"},
+        },
+        mode=mode,
+    )
+
+    assert serialize_flow_metadata(parsed) == {
+        "form_schema": {
+            "fields": [{"name": "case_id", "type": "text"}],
+        },
+        "care_data_policy": {"sensitive": True},
+        "ai_builder": {"description": "Generated draft"},
+        "transcription": {"language": "sv"},
+    }
+
+
+def test_flow_care_data_policy_v1_defaults_to_non_sensitive() -> None:
+    policy = FlowCareDataPolicyV1()
+
+    assert policy.sensitive is False
+    assert policy.approval_mode is None
+    assert policy.pre_approval_visibility is None
+
+
+def test_parse_flow_metadata_composes_existing_form_schema_model() -> None:
+    parsed = parse_flow_metadata(
+        {
+            "form_schema": {
+                "fields": [{"name": "customer", "type": "textarea"}],
+            }
+        },
+        mode=FlowMetadataParseMode.WRITE,
+    )
+
+    assert parsed.form_schema is not None
+    assert parsed.form_schema.fields[0].type is FlowFormFieldType.TEXT
+    assert parsed.care_data_policy.sensitive is False

@@ -85,7 +85,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T029
+active_task: T030
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -1731,7 +1731,7 @@ tasks:
   - id: T029
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Introduce FlowMetadataV1 and FlowCareDataPolicyV1 in the canonical flow metadata module, then route care-data policy validation and sensitive-export reads through that typed parser while preserving current write errors and persisted-read fail-closed behavior."
     allowed_files:
@@ -1764,6 +1764,106 @@ tasks:
       - "Persisted-read tolerance and top-level key preservation proven."
       - "All verify commands passed."
       - "Claude commit gate before source commit."
+    receipt:
+      result: done
+      summary: "Introduced FlowMetadataV1 and FlowCareDataPolicyV1 in flow_metadata.py, deleted the local FlowCareDataPolicy dataclass, and routed care-data policy validation/read adapters through the typed metadata parser. FlowService write paths, published_definition.py, and AI Builder behavior were not touched."
+      canonical_owner: "backend/src/intric/flows/flow_metadata.py now owns the typed metadata envelope, form_schema submodel, and care_data_policy submodel."
+      files_changed:
+        source:
+          - "backend/src/intric/flows/flow_metadata.py"
+          - "backend/src/intric/flows/flow_care_data_policy.py"
+          - "backend/src/intric/flows/flow_evidence_policy.py"
+        tests:
+          - "backend/tests/unittests/flows/test_flow_metadata.py"
+          - "backend/tests/unittests/flows/test_flow_care_data_policy.py"
+      changed_files:
+        - "backend/src/intric/flows/flow_metadata.py"
+        - "backend/src/intric/flows/flow_care_data_policy.py"
+        - "backend/src/intric/flows/flow_evidence_policy.py"
+        - "backend/tests/unittests/flows/test_flow_metadata.py"
+        - "backend/tests/unittests/flows/test_flow_care_data_policy.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      behavior:
+        - "FlowCareDataPolicy dataclass deleted; rg -n -P 'FlowCareDataPolicy(?!V1)' backend -g '*.py' returns no hits."
+        - "resolve_flow_care_data_policy now returns FlowCareDataPolicyV1 and preserves absent metadata defaults, fail-closed legacy truthy sensitive values, and unsupported enum dropping."
+        - "validate_flow_care_data_policy now validates through parse_flow_metadata(..., mode=WRITE) and preserves current BadRequestException message strings."
+        - "parse_flow_metadata preserves unrelated top-level metadata keys through serialization in both WRITE and PERSISTED_READ modes."
+        - "PERSISTED_READ no longer masks invalid select/multiselect option shapes before FlowService write validation; test_flow_service.py now protects those cases."
+        - "serialize_flow_metadata is not wired into production code yet; rg shows only flow_metadata.py and test_flow_metadata.py."
+      type_debt_counts:
+        - "flow_metadata.py: HEAD Any/cast/type-ignore 5; worktree 6. The one added cast is parser-boundary narrowing after runtime Mapping checks; zero Any and zero type-ignore added."
+        - "flow_care_data_policy.py: HEAD Any/cast/type-ignore 5; worktree 0."
+        - "flow_evidence_policy.py: HEAD Any/cast/type-ignore 9; worktree 8."
+      tests_added:
+        - "test_flow_metadata.py covers FlowMetadataV1 top-level key preservation for WRITE and PERSISTED_READ, FlowCareDataPolicyV1 defaults, and composition with existing FlowFormSchemaV1."
+        - "test_flow_care_data_policy.py covers the canonical FlowCareDataPolicyV1 return type and write-mode BadRequestException message preservation."
+      verification:
+        - "PASS cd backend && uv run pytest tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py -q -> 94 passed, 1 warning."
+        - "PASS cd backend && uv run pyright src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py src/intric/flows/flow_evidence_policy.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py -> 0 errors."
+        - "PASS cd backend && uv run ruff check src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py src/intric/flows/flow_evidence_policy.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py."
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py src/intric/flows/flow_evidence_policy.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py."
+        - "PASS git diff --check for T029 files."
+        - "PASS git grep -nE '(T029|Worker 2a|tranche|\\bA\\.[0-9]|P0\\.|Phase [0A-G])' -- backend/src/intric/flows backend/tests/unittests/flows returned no hits."
+      commands:
+        - "cd backend && uv run pytest tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py -q"
+        - "cd backend && uv run pyright src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py src/intric/flows/flow_evidence_policy.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py"
+        - "cd backend && uv run ruff check src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py src/intric/flows/flow_evidence_policy.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py"
+        - "cd backend && uv run ruff format --check src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py src/intric/flows/flow_evidence_policy.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py"
+        - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flow-runtime-maintainability-t029-typed-metadata-care-data-commit-gate --new-session --title 'T029 typed metadata care-data commit gate' --phase commit-gate --iteration 1 --require-green --required-min-score 8 --model claude-opus-4-7 --effort xhigh --timeout-seconds 1200 ..."
+      claude_commit_gate:
+        artifact: ".codex/artifacts/claude-peer-loop-t029-typed-metadata-care-data-commit-gate-20260511T070014Z.md"
+        model: "claude-opus-4-7"
+        effort: "xhigh"
+        verdict: "green"
+        green_light: true
+        min_score: 8
+        non_blocking_followups:
+          - "Resolve serialize_flow_metadata sensitive default asymmetry before wiring serializer into write paths."
+          - "Add a positive-path validate_flow_care_data_policy does-not-raise test when care-data policy tests are next touched."
+      comments_added_or_changed:
+        - "backend/src/intric/flows/flow_metadata.py: Fail closed for legacy truthy values that predate strict authoring / validation; writes must still pass validate_flow_care_data_policy."
+      maintainability_rubric:
+        canonical_ownership: 1
+        fear_of_change_reduction: 1
+        type_safety: 0.8
+        error_contract_quality: 1
+        test_quality: 0.8
+        comment_quality: 1
+        complexity: 1
+        deletion_quality: 1
+        score: "7.6/8"
+      anti_patterns_avoided:
+        - "No new shallow service, manager, generic helper, fake interface, or parallel care-data policy type."
+        - "No Pyright ignore comments and no broad Any added."
+        - "No source comments with internal planning vocabulary."
+        - "No FlowService, published_definition.py, AI Builder, frontend, or unrelated dirty-file changes."
+
+  - id: T030
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Scope the FlowMetadataV1 Worker 2b write-path closer so FlowService create/update/publish normalization and serialization can consume the typed metadata envelope without broadening into published-definition or AI Builder cleanup."
+    inputs:
+      - "T028 receipt"
+      - "T029 receipt"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T028-typed-metadata-worker-2a-scope.md"
+      - ".codex/artifacts/claude-peer-loop-t029-typed-metadata-care-data-commit-gate-20260511T070014Z.md"
+    constraints:
+      - "Read-only. Do not implement source changes."
+      - "Decide whether the serialize_flow_metadata sensitive default asymmetry must be fixed before or inside Worker 2b."
+      - "Keep published_definition.py and AI Builder out of Worker 2b unless this Judge task rejects that split with file:line evidence."
+      - "Name allowed files, red tests, verification commands, and stop_if conditions."
+      - "Require host Claude plan gate if ownership/schema/test uncertainty remains."
+    expected_output:
+      - "decision"
+      - "exact Worker 2b objective"
+      - "allowed_files"
+      - "red tests"
+      - "verification commands"
+      - "stop_if"
+      - "sensitive default serialization policy"
+      - "whether Claude plan gate is required before activation"
     receipt: null
 
 validation_command_candidates:

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Mapping, cast
+from typing import Literal, Mapping, cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from intric.flows.domain.flow import JsonObject
 from intric.flows.flow_variable_definitions import (
@@ -19,6 +19,11 @@ class FlowFormSchemaParseMode(str, Enum):
     PERSISTED_READ = "persisted_read"
 
 
+class FlowMetadataParseMode(str, Enum):
+    WRITE = "write"
+    PERSISTED_READ = "persisted_read"
+
+
 class FlowFormFieldType(str, Enum):
     TEXT = "text"
     MULTISELECT = "multiselect"
@@ -26,6 +31,11 @@ class FlowFormFieldType(str, Enum):
     DATE = "date"
     SELECT = "select"
 
+
+CareDataApprovalMode = Literal["single_reviewer_outside_flow"]
+CareDataPreApprovalVisibility = Literal["uploader_and_reviewers"]
+SUPPORTED_CARE_DATA_APPROVAL_MODES = frozenset({"single_reviewer_outside_flow"})
+SUPPORTED_CARE_DATA_PRE_APPROVAL_VISIBILITY = frozenset({"uploader_and_reviewers"})
 
 _LEGACY_FORM_FIELD_TYPE_NORMALIZATION = {
     "string": FlowFormFieldType.TEXT,
@@ -52,6 +62,21 @@ class FlowFormSchemaV1(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     fields: list[FlowFormFieldV1]
+
+
+class FlowCareDataPolicyV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    sensitive: bool = False
+    approval_mode: CareDataApprovalMode | None = None
+    pre_approval_visibility: CareDataPreApprovalVisibility | None = None
+
+
+class FlowMetadataV1(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    form_schema: FlowFormSchemaV1 | None = None
+    care_data_policy: FlowCareDataPolicyV1 = Field(default_factory=FlowCareDataPolicyV1)
 
 
 def form_field_name_error(
@@ -144,6 +169,140 @@ def parse_flow_form_schema(
 
 def serialize_flow_form_schema(schema: FlowFormSchemaV1) -> JsonObject:
     return schema.model_dump(mode="json", exclude_unset=True)
+
+
+def parse_flow_metadata(
+    metadata_json: JsonObject | Mapping[str, object] | None,
+    *,
+    mode: FlowMetadataParseMode,
+) -> FlowMetadataV1:
+    if metadata_json is None:
+        return FlowMetadataV1()
+
+    payload = dict(metadata_json)
+    form_schema = parse_flow_form_schema(
+        payload,
+        mode=_form_schema_mode_for_metadata_mode(mode),
+    )
+    if form_schema is None:
+        payload.pop("form_schema", None)
+    else:
+        payload["form_schema"] = form_schema
+
+    care_data_policy = _parse_care_data_policy(payload, mode=mode)
+    if "care_data_policy" in payload:
+        payload["care_data_policy"] = care_data_policy
+
+    return FlowMetadataV1.model_validate(payload)
+
+
+def serialize_flow_metadata(metadata: FlowMetadataV1) -> JsonObject:
+    return metadata.model_dump(mode="json", exclude_unset=True)
+
+
+def _form_schema_mode_for_metadata_mode(
+    mode: FlowMetadataParseMode,
+) -> FlowFormSchemaParseMode:
+    if mode is FlowMetadataParseMode.WRITE:
+        return FlowFormSchemaParseMode.WRITE
+    return FlowFormSchemaParseMode.PERSISTED_READ
+
+
+def _parse_care_data_policy(
+    metadata_json: Mapping[str, object],
+    *,
+    mode: FlowMetadataParseMode,
+) -> FlowCareDataPolicyV1:
+    care_data_policy = metadata_json.get("care_data_policy")
+    if care_data_policy is None:
+        return FlowCareDataPolicyV1()
+    if not isinstance(care_data_policy, Mapping):
+        if mode is FlowMetadataParseMode.PERSISTED_READ:
+            return FlowCareDataPolicyV1()
+        raise BadRequestException("metadata_json.care_data_policy must be an object.")
+
+    policy = cast(Mapping[str, object], care_data_policy)
+    if mode is FlowMetadataParseMode.WRITE:
+        return _parse_care_data_policy_for_write(policy)
+    return _parse_care_data_policy_for_persisted_read(policy)
+
+
+def _parse_care_data_policy_for_write(
+    policy: Mapping[str, object],
+) -> FlowCareDataPolicyV1:
+    allowed_fields = {"sensitive", "approval_mode", "pre_approval_visibility"}
+    unknown_fields = set(policy) - allowed_fields
+    if unknown_fields:
+        unknown = ", ".join(sorted(unknown_fields))
+        raise BadRequestException(
+            f"metadata_json.care_data_policy contains unknown fields: {unknown}"
+        )
+
+    sensitive = policy.get("sensitive")
+    if sensitive is not None and not isinstance(sensitive, bool):
+        raise BadRequestException(
+            "metadata_json.care_data_policy.sensitive must be a boolean."
+        )
+
+    approval_mode = _parse_care_data_approval_mode(policy.get("approval_mode"))
+    if policy.get("approval_mode") is not None and approval_mode is None:
+        raise BadRequestException(
+            "metadata_json.care_data_policy.approval_mode must be 'single_reviewer_outside_flow' when provided."
+        )
+
+    pre_approval_visibility = _parse_care_data_pre_approval_visibility(
+        policy.get("pre_approval_visibility")
+    )
+    if (
+        policy.get("pre_approval_visibility") is not None
+        and pre_approval_visibility is None
+    ):
+        raise BadRequestException(
+            "metadata_json.care_data_policy.pre_approval_visibility must be 'uploader_and_reviewers' when provided."
+        )
+
+    policy_payload: dict[str, object] = {}
+    if isinstance(sensitive, bool):
+        policy_payload["sensitive"] = sensitive
+    if approval_mode is not None:
+        policy_payload["approval_mode"] = approval_mode
+    if pre_approval_visibility is not None:
+        policy_payload["pre_approval_visibility"] = pre_approval_visibility
+    return FlowCareDataPolicyV1.model_validate(policy_payload)
+
+
+def _parse_care_data_policy_for_persisted_read(
+    policy: Mapping[str, object],
+) -> FlowCareDataPolicyV1:
+    sensitive_value = policy.get("sensitive", False)
+    policy_payload: dict[str, object] = {
+        # Fail closed for legacy truthy values that predate strict authoring
+        # validation; writes must still pass validate_flow_care_data_policy.
+        "sensitive": bool(sensitive_value),
+    }
+    approval_mode = _parse_care_data_approval_mode(policy.get("approval_mode"))
+    if approval_mode is not None:
+        policy_payload["approval_mode"] = approval_mode
+    pre_approval_visibility = _parse_care_data_pre_approval_visibility(
+        policy.get("pre_approval_visibility")
+    )
+    if pre_approval_visibility is not None:
+        policy_payload["pre_approval_visibility"] = pre_approval_visibility
+    return FlowCareDataPolicyV1.model_validate(policy_payload)
+
+
+def _parse_care_data_approval_mode(value: object) -> CareDataApprovalMode | None:
+    if value in SUPPORTED_CARE_DATA_APPROVAL_MODES:
+        return "single_reviewer_outside_flow"
+    return None
+
+
+def _parse_care_data_pre_approval_visibility(
+    value: object,
+) -> CareDataPreApprovalVisibility | None:
+    if value in SUPPORTED_CARE_DATA_PRE_APPROVAL_VISIBILITY:
+        return "uploader_and_reviewers"
+    return None
 
 
 def _parse_form_field(
@@ -314,23 +473,19 @@ def _parse_options(
     options = field.get("options")
     if field_type is FlowFormFieldType.MULTISELECT:
         if options is None or not isinstance(options, list):
-            if mode is FlowFormSchemaParseMode.PERSISTED_READ:
-                return []
             raise BadRequestException(
                 f"metadata_json.form_schema.fields[{index}].options must be a list for multiselect."
             )
         return _parse_option_list(cast(list[object], options), index=index)
     if field_type is FlowFormFieldType.SELECT:
         if options is not None and not isinstance(options, list):
-            if mode is FlowFormSchemaParseMode.PERSISTED_READ:
-                return []
             raise BadRequestException(
                 f"metadata_json.form_schema.fields[{index}].options must be a list for select."
             )
         if isinstance(options, list):
             return _parse_option_list(cast(list[object], options), index=index)
         return None
-    if options is not None and mode is FlowFormSchemaParseMode.WRITE:
+    if options is not None:
         raise BadRequestException(
             f"metadata_json.form_schema.fields[{index}].options is only valid for select or multiselect."
         )
