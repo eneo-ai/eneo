@@ -193,10 +193,16 @@ def _warn_if_retained_items_without_embedding_config(
     )
 
 
-def _crawl_outcome_code_for_exception(exc: Exception) -> CrawlOutcomeCode:
+def _crawl_outcome_code_for_exception(
+    exc: Exception,
+    *,
+    crawl_type: CrawlType,
+) -> CrawlOutcomeCode:
     if isinstance(exc, CrawlTimeoutError):
         return CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES
     if isinstance(exc, CrawlerException) and "no pages returned" in str(exc).lower():
+        if crawl_type == CrawlType.SITEMAP:
+            return CrawlOutcomeCode.CRAWL_SITEMAP_NO_PAGES
         return CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED
     return CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
 
@@ -1883,7 +1889,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
     except Retry:
         raise
     except Exception as exc:
-        outcome_code = _crawl_outcome_code_for_exception(exc)
+        outcome_code = _crawl_outcome_code_for_exception(
+            exc,
+            crawl_type=params.crawl_type,
+        )
         try:
             await _record_crawl_run_outcome_code(
                 run_id=params.run_id,

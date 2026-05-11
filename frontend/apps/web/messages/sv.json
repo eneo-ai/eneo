@@ -858,6 +858,7 @@
   "crawl_outcome_duplicate_skipped": "Hoppades över eftersom en annan indexering redan pågår",
   "crawl_outcome_embedding_config_missing": "Problem med embedding-konfiguration",
   "crawl_outcome_no_pages_returned": "Inga sidor returnerades",
+  "crawl_outcome_sitemap_no_pages": "Sitemap returnerade inga indexerbara sidor",
   "crawl_outcome_timeout_no_pages": "Indexeringen fick timeout innan några sidor returnerades",
   "crawl_outcome_max_age_exceeded": "Indexeringen väntade för länge och stoppades",
   "crawl_outcome_source_retention_only": "Inga sidnedladdningar behövdes",

@@ -67,6 +67,22 @@ def test_failed_no_pages_result_location_becomes_typed_error():
     assert outcome.message_key == "crawl_outcome_no_pages_returned"
 
 
+def test_stored_sitemap_no_pages_outcome_has_specific_message():
+    outcome = derive_crawl_outcome(
+        status=Status.FAILED,
+        result_location="Crawl failed for https://example.com: no pages returned",
+        failure_summary=None,
+        pages_failed=None,
+        files_failed=None,
+        outcome_code=CrawlOutcomeCode.CRAWL_SITEMAP_NO_PAGES,
+    )
+
+    assert outcome is not None
+    assert outcome.code == CrawlOutcomeCode.CRAWL_SITEMAP_NO_PAGES
+    assert outcome.severity == CrawlOutcomeSeverity.ERROR
+    assert outcome.message_key == "crawl_outcome_sitemap_no_pages"
+
+
 def test_stored_max_age_outcome_has_specific_error_message():
     outcome = derive_crawl_outcome(
         status=Status.FAILED,

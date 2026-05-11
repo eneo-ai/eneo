@@ -330,15 +330,26 @@ class TestCrawlTaskRetentionHelpers:
     def test_crawl_exception_maps_to_specific_outcome_code(self):
         from intric.main.exceptions import CrawlerException, CrawlTimeoutError
         from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
+        from intric.websites.domain.crawl_run import CrawlType
         from intric.worker.crawl_tasks import _crawl_outcome_code_for_exception
 
         assert (
             _crawl_outcome_code_for_exception(
                 CrawlerException(
                     "Crawl failed for https://example.com: no pages returned"
-                )
+                ),
+                crawl_type=CrawlType.CRAWL,
             )
             == CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED
+        )
+        assert (
+            _crawl_outcome_code_for_exception(
+                CrawlerException(
+                    "Crawl failed for https://example.com: no pages returned"
+                ),
+                crawl_type=CrawlType.SITEMAP,
+            )
+            == CrawlOutcomeCode.CRAWL_SITEMAP_NO_PAGES
         )
         assert (
             _crawl_outcome_code_for_exception(
@@ -346,12 +357,16 @@ class TestCrawlTaskRetentionHelpers:
                     url="https://example.com",
                     timeout_seconds=10,
                     pages_collected=0,
-                )
+                ),
+                crawl_type=CrawlType.SITEMAP,
             )
             == CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES
         )
         assert (
-            _crawl_outcome_code_for_exception(RuntimeError("unexpected"))
+            _crawl_outcome_code_for_exception(
+                RuntimeError("unexpected"),
+                crawl_type=CrawlType.SITEMAP,
+            )
             == CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
         )
 

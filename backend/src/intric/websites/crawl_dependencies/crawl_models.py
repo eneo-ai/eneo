@@ -167,6 +167,14 @@ def _crawl_outcome_from_code(
             detail=detail,
         )
 
+    if code == CrawlOutcomeCode.CRAWL_SITEMAP_NO_PAGES:
+        return CrawlOutcomePublic(
+            code=code,
+            severity=CrawlOutcomeSeverity.ERROR,
+            message_key="crawl_outcome_sitemap_no_pages",
+            detail=detail,
+        )
+
     if code == CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES:
         return CrawlOutcomePublic(
             code=code,
