@@ -17,6 +17,153 @@ from intric.websites.domain.website_sparse_repo import WebsiteSparseRepository
 from intric.worker.crawl_tasks import _get_primary_active_job_id
 
 
+async def _create_scheduled_website(
+    session,
+    *,
+    admin_user,
+    space_factory,
+    name: str,
+    url: str,
+    update_interval: UpdateInterval,
+    last_crawled_at: datetime | None,
+    next_retry_at: datetime | None = None,
+) -> WebsitesTable:
+    embedding_model_id = await session.scalar(sa.select(EmbeddingModels.id).limit(1))
+    assert embedding_model_id is not None
+
+    space = await space_factory(session, f"{name} space")
+
+    website = WebsitesTable(
+        name=name,
+        url=url,
+        download_files=False,
+        crawl_type=CrawlType.CRAWL,
+        update_interval=update_interval,
+        size=0,
+        tenant_id=admin_user.tenant_id,
+        user_id=admin_user.id,
+        embedding_model_id=embedding_model_id,
+        space_id=space.id,
+        last_crawled_at=last_crawled_at,
+        next_retry_at=next_retry_at,
+    )
+    session.add(website)
+    await session.flush()
+    return website
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("update_interval", "last_crawled_delta", "expected_due"),
+    [
+        (UpdateInterval.DAILY, timedelta(hours=23, minutes=59), False),
+        (UpdateInterval.DAILY, timedelta(hours=24, minutes=1), True),
+        (UpdateInterval.EVERY_OTHER_DAY, timedelta(hours=47, minutes=59), False),
+        (UpdateInterval.EVERY_OTHER_DAY, timedelta(hours=48, minutes=1), True),
+        (UpdateInterval.WEEKLY, timedelta(days=6, hours=23, minutes=59), False),
+        (UpdateInterval.WEEKLY, timedelta(days=7, minutes=1), True),
+    ],
+)
+async def test_scheduler_uses_one_as_of_timestamp_for_interval_thresholds(
+    db_session,
+    admin_user,
+    space_factory,
+    update_interval: UpdateInterval,
+    last_crawled_delta: timedelta,
+    expected_due: bool,
+):
+    as_of = datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc)  # Friday
+
+    async with db_session() as session:
+        website = await _create_scheduled_website(
+            session,
+            admin_user=admin_user,
+            space_factory=space_factory,
+            name=f"Scheduler interval {update_interval.value}",
+            url=f"https://example.com/scheduler/{update_interval.value}/{expected_due}",
+            update_interval=update_interval,
+            last_crawled_at=as_of - last_crawled_delta,
+        )
+        website_id = website.id
+
+    async with db_session() as session:
+        repo = WebsiteSparseRepository(session)
+        due = await repo.get_due_websites(as_of)
+
+    due_ids = {site.id for site in due}
+    assert (website_id in due_ids) is expected_due
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_weekly_scheduler_only_runs_on_fridays(
+    db_session,
+    admin_user,
+    space_factory,
+):
+    thursday = datetime(2026, 5, 7, 12, 0, tzinfo=timezone.utc)
+
+    async with db_session() as session:
+        website = await _create_scheduled_website(
+            session,
+            admin_user=admin_user,
+            space_factory=space_factory,
+            name="Scheduler weekly Thursday",
+            url="https://example.com/scheduler/weekly-thursday",
+            update_interval=UpdateInterval.WEEKLY,
+            last_crawled_at=thursday - timedelta(days=14),
+        )
+        website_id = website.id
+
+    async with db_session() as session:
+        repo = WebsiteSparseRepository(session)
+        due = await repo.get_due_websites(thursday)
+
+    due_ids = {site.id for site in due}
+    assert website_id not in due_ids
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("next_retry_delta", "expected_due"),
+    [
+        (timedelta(minutes=1), False),
+        (timedelta(seconds=0), True),
+        (timedelta(minutes=-1), True),
+    ],
+)
+async def test_scheduler_respects_circuit_breaker_retry_timestamp(
+    db_session,
+    admin_user,
+    space_factory,
+    next_retry_delta: timedelta,
+    expected_due: bool,
+):
+    as_of = datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc)
+
+    async with db_session() as session:
+        website = await _create_scheduled_website(
+            session,
+            admin_user=admin_user,
+            space_factory=space_factory,
+            name="Scheduler circuit breaker",
+            url=f"https://example.com/scheduler/backoff/{expected_due}",
+            update_interval=UpdateInterval.DAILY,
+            last_crawled_at=as_of - timedelta(days=2),
+            next_retry_at=as_of + next_retry_delta,
+        )
+        website_id = website.id
+
+    async with db_session() as session:
+        repo = WebsiteSparseRepository(session)
+        due = await repo.get_due_websites(as_of)
+
+    due_ids = {site.id for site in due}
+    assert (website_id in due_ids) is expected_due
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_scheduler_skips_websites_with_active_jobs(
@@ -24,6 +171,8 @@ async def test_scheduler_skips_websites_with_active_jobs(
     admin_user,
     space_factory,
 ):
+    as_of = datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc)
+
     async with db_session() as session:
         embedding_model_id = await session.scalar(
             sa.select(EmbeddingModels.id).limit(1)
@@ -43,7 +192,7 @@ async def test_scheduler_skips_websites_with_active_jobs(
             user_id=admin_user.id,
             embedding_model_id=embedding_model_id,
             space_id=space.id,
-            last_crawled_at=datetime.now(timezone.utc) - timedelta(days=2),
+            last_crawled_at=as_of - timedelta(days=2),
         )
         session.add(website)
         await session.flush()
@@ -71,7 +220,7 @@ async def test_scheduler_skips_websites_with_active_jobs(
 
     async with db_session() as session:
         repo = WebsiteSparseRepository(session)
-        due = await repo.get_due_websites(datetime.now(timezone.utc).date())
+        due = await repo.get_due_websites(as_of)
 
     due_ids = {site.id for site in due}
     assert website_id not in due_ids

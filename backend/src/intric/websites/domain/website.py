@@ -29,11 +29,9 @@ class UpdateInterval(str, Enum):
     """
 
     NEVER = "never"
-    DAILY = "daily"  # Crawl every day at 1:00 UTC (2 AM Swedish winter / 3 AM summer)
-    EVERY_OTHER_DAY = "every_other_day"  # Crawl every 2 days at 1:00 UTC (2 AM Swedish winter / 3 AM summer)
-    WEEKLY = (
-        "weekly"  # Crawl every Friday at 1:00 UTC (2 AM Swedish winter / 3 AM summer)
-    )
+    DAILY = "daily"
+    EVERY_OTHER_DAY = "every_other_day"
+    WEEKLY = "weekly"
 
 
 class Website(Entity):

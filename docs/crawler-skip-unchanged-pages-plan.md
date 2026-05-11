@@ -44,6 +44,7 @@ Purpose: reduce embedding-token spend and database churn for scheduled website c
 - [x] Custom Scrapy sitemap parser override reviewed against installed Scrapy 2.11.2 and official Scrapy docs; keep it narrow because public `sitemap_filter()` can filter request entries but cannot emit cleanup-visible retained feed items.
 - [x] Sitemap `<lastmod>` source-skip now uses `websites.last_source_verified_at` instead of `last_crawled_at`, so partial crawls and page-failure crawls do not advance the trusted source-skip cutoff.
 - [x] `last_source_verified_at` updates only after complete sitemap crawls with no page persistence failures; the migration intentionally does not backfill it from legacy `last_crawled_at` because old crawls do not prove the source frontier was complete.
+- [x] Scheduled crawler due-window hardening: daily, every-other-day, weekly, and circuit-breaker backoff checks now use one explicit UTC scheduler timestamp, with DB-backed boundary tests.
 - [x] Worker, ARQ feeder/watchdog, website stale-job checks, and Scrapy crawler paths now receive a typed `TenantCrawlerSettings` snapshot instead of repeatedly passing raw tenant JSON through runtime settings resolution.
 - [x] Invalid stored crawler setting overrides no longer fail the crawl before useful diagnostics; runtime paths ignore invalid overrides, fall back to defaults, and emit a structured warning metric.
 - [x] Invalid crawler-setting warnings are owned by `TenantCrawlerSettings`, reused by worker/ARQ/watchdog/user-triggered preemption paths, and deduped per tenant in watchdog rescue loops.
@@ -108,6 +109,8 @@ Claude artifact:
 - `.codex/artifacts/claude-peer-loop-crawler-source-verified-hardening-implementation-20260511T221008Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-source-verified-hardening-implementation-re-review-20260511T223215Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-source-verified-hardening-final-polish-review-20260511T224130Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-next-roi-hardening-20260511T225731Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-next-roi-scheduler-implementation-20260511T230532Z.md`
 
 Claude loop summary:
 
@@ -133,6 +136,7 @@ Claude loop summary:
 - Typed outcome hardening implementation review: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; follow-up notes led to parameterizing terminal zero-output worker coverage across crawl, sitemap, and timeout outcomes, removing the unused `"error"` termination literal, and renaming/logging the legacy outcome metric as a general fallback metric.
 - Typed outcome hardening post-fix verification: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; confirmed no blockers after the post-review test hardening, metric rename, narrowed termination literal, and classifier call-site comment.
 - Admin crawler settings hardening review: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 5`; blockers drove the typed tenant-owned crawler settings model, current-tenant endpoint, narrow self-service UI, HTTP-cache exclusion from admin UI, exception-string duplicate fallback removal, precise-outcome preservation, and typed shutdown outcome.
+- Scheduler hardening review: initial pass rejected timestamp renames, source-skip default-on, and HTTP-cache default-on; implementation pass was `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8` after DB-backed interval/backoff tests and one explicit scheduler timestamp.
 
 Claude agreed with the core architecture:
 

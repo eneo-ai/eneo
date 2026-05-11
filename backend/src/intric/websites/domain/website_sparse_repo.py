@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
@@ -18,45 +18,14 @@ class WebsiteSparseRepository:
         super().__init__()
         self.session = session
 
-    async def get_weekly_websites(self) -> list[WebsiteSparse]:
-        """Get websites with weekly update intervals.
-
-        Why: Preserves existing API for backwards compatibility.
-        Deprecated: Use get_websites_with_intervals() with scheduler service instead.
-        """
-        stmt = sa.select(WebsitesTable).where(
-            WebsitesTable.update_interval == UpdateInterval.WEEKLY
-        )
-
-        websites_db = await self.session.scalars(stmt)
-
-        return [WebsiteSparse.to_domain(website_db) for website_db in websites_db]
-
-    async def get_websites_with_intervals(self) -> list[WebsiteSparse]:
-        """Get all websites that have active update intervals (not NEVER).
-
-        Why: Enables scheduler service to apply interval logic consistently.
-        Excludes NEVER websites to avoid unnecessary processing.
-
-        Returns:
-            List of websites with DAILY, EVERY_OTHER_DAY, or WEEKLY intervals
-        """
-        stmt = sa.select(WebsitesTable).where(
-            WebsitesTable.update_interval != UpdateInterval.NEVER
-        )
-
-        websites_db = await self.session.scalars(stmt)
-
-        return [WebsiteSparse.to_domain(website_db) for website_db in websites_db]
-
-    async def get_due_websites(self, today: date) -> list[WebsiteSparse]:
+    async def get_due_websites(self, as_of: datetime) -> list[WebsiteSparse]:
         """Get websites that are due for crawling based on their update_interval.
 
         Why: Push filtering to database for better performance with 1000+ websites.
         Uses composite index on (update_interval, last_crawled_at) for efficiency.
 
         Args:
-            today: Current date for schedule calculation
+            as_of: Current scheduler timestamp for interval calculation
 
         Returns:
             List of websites due for crawling
@@ -64,10 +33,9 @@ class WebsiteSparseRepository:
         # Calculate threshold timestamps using rolling window from current time
         # Why: Use actual elapsed time, not midnight-to-midnight boundaries
         # This ensures websites are scheduled ~24h after last crawl, not at next midnight
-        now_utc = datetime.now(timezone.utc)
-        one_day_ago = now_utc - timedelta(days=1)
-        two_days_ago = now_utc - timedelta(days=2)
-        seven_days_ago = now_utc - timedelta(days=7)
+        one_day_ago = as_of - timedelta(days=1)
+        two_days_ago = as_of - timedelta(days=2)
+        seven_days_ago = as_of - timedelta(days=7)
 
         # DAILY: crawl if last_crawled_at is NULL or >= 1 day ago
         cond_daily = sa.and_(
@@ -88,7 +56,7 @@ class WebsiteSparseRepository:
         )
 
         # WEEKLY: only on Fridays AND >= 7 days ago (or never crawled)
-        is_friday = today.weekday() == 4  # 0=Monday, 4=Friday
+        is_friday = as_of.date().weekday() == 4  # 0=Monday, 4=Friday
         if is_friday:
             cond_weekly = sa.and_(
                 WebsitesTable.update_interval == UpdateInterval.WEEKLY,
@@ -106,7 +74,7 @@ class WebsiteSparseRepository:
         # NULL = no failures, non-NULL = backoff until this time
         cond_circuit_breaker = sa.or_(
             WebsitesTable.next_retry_at.is_(None),
-            WebsitesTable.next_retry_at <= now_utc,
+            WebsitesTable.next_retry_at <= as_of,
         )
 
         # Active job condition: Skip websites that already have queued/in-progress crawls
