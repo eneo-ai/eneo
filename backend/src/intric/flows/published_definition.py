@@ -7,8 +7,8 @@ from uuid import UUID
 from intric.flows.assistant_execution_snapshot import stable_hash
 from intric.flows.domain.flow import JsonObject
 from intric.flows.flow_metadata import (
+    FlowMetadata,
     FlowMetadataParseMode,
-    FlowMetadataV1,
     parse_flow_metadata,
 )
 from intric.flows.runtime.models import RuntimeStep
@@ -46,7 +46,7 @@ class PublishedFlowDefinition:
     steps: list[JsonObject]
     definition_json: JsonObject
 
-    def metadata(self) -> FlowMetadataV1:
+    def metadata(self) -> FlowMetadata:
         raw_metadata: object = self.definition_json.get("metadata_json")
         metadata_json: Mapping[str, object] | None = (
             raw_metadata if _is_json_object(raw_metadata) else None

@@ -47,7 +47,7 @@ _FORM_FIELD_TYPES_BY_VALUE = {
 }
 
 
-class FlowFormFieldV1(BaseModel):
+class FlowFormField(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     name: str
@@ -58,13 +58,13 @@ class FlowFormFieldV1(BaseModel):
     order: int | None = None
 
 
-class FlowFormSchemaV1(BaseModel):
+class FlowFormSchema(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    fields: list[FlowFormFieldV1]
+    fields: list[FlowFormField]
 
 
-class FlowCareDataPolicyV1(BaseModel):
+class FlowCareDataPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     sensitive: bool = False
@@ -72,11 +72,11 @@ class FlowCareDataPolicyV1(BaseModel):
     pre_approval_visibility: CareDataPreApprovalVisibility | None = None
 
 
-class FlowMetadataV1(BaseModel):
+class FlowMetadata(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    form_schema: FlowFormSchemaV1 | None = None
-    care_data_policy: FlowCareDataPolicyV1 = Field(default_factory=FlowCareDataPolicyV1)
+    form_schema: FlowFormSchema | None = None
+    care_data_policy: FlowCareDataPolicy = Field(default_factory=FlowCareDataPolicy)
 
 
 def form_field_name_error(
@@ -121,7 +121,7 @@ def parse_flow_form_schema(
     metadata_json: JsonObject | Mapping[str, object] | None,
     *,
     mode: FlowFormSchemaParseMode,
-) -> FlowFormSchemaV1 | None:
+) -> FlowFormSchema | None:
     if metadata_json is None:
         return None
 
@@ -141,7 +141,7 @@ def parse_flow_form_schema(
         raise BadRequestException("metadata_json.form_schema.fields must be a list.")
     field_values = cast(list[object], fields)
 
-    parsed_fields: list[FlowFormFieldV1] = []
+    parsed_fields: list[FlowFormField] = []
     seen_names: set[str] = set()
     seen_orders: set[int] = set()
     for index, field in enumerate(field_values):
@@ -164,10 +164,10 @@ def parse_flow_form_schema(
 
     schema_payload: dict[str, object] = dict(form_schema_mapping)
     schema_payload["fields"] = parsed_fields
-    return FlowFormSchemaV1.model_validate(schema_payload)
+    return FlowFormSchema.model_validate(schema_payload)
 
 
-def serialize_flow_form_schema(schema: FlowFormSchemaV1) -> JsonObject:
+def serialize_flow_form_schema(schema: FlowFormSchema) -> JsonObject:
     return schema.model_dump(mode="json", exclude_unset=True)
 
 
@@ -175,9 +175,9 @@ def parse_flow_metadata(
     metadata_json: JsonObject | Mapping[str, object] | None,
     *,
     mode: FlowMetadataParseMode,
-) -> FlowMetadataV1:
+) -> FlowMetadata:
     if metadata_json is None:
-        return FlowMetadataV1()
+        return FlowMetadata()
 
     payload = dict(metadata_json)
     form_schema = parse_flow_form_schema(
@@ -193,10 +193,10 @@ def parse_flow_metadata(
     if "care_data_policy" in payload:
         payload["care_data_policy"] = care_data_policy
 
-    return FlowMetadataV1.model_validate(payload)
+    return FlowMetadata.model_validate(payload)
 
 
-def serialize_flow_metadata(metadata: FlowMetadataV1) -> JsonObject:
+def serialize_flow_metadata(metadata: FlowMetadata) -> JsonObject:
     return metadata.model_dump(mode="json", exclude_unset=True)
 
 
@@ -232,13 +232,13 @@ def _parse_care_data_policy(
     metadata_json: Mapping[str, object],
     *,
     mode: FlowMetadataParseMode,
-) -> FlowCareDataPolicyV1:
+) -> FlowCareDataPolicy:
     care_data_policy = metadata_json.get("care_data_policy")
     if care_data_policy is None:
-        return FlowCareDataPolicyV1()
+        return FlowCareDataPolicy()
     if not isinstance(care_data_policy, Mapping):
         if mode is FlowMetadataParseMode.PERSISTED_READ:
-            return FlowCareDataPolicyV1()
+            return FlowCareDataPolicy()
         raise BadRequestException("metadata_json.care_data_policy must be an object.")
 
     policy = cast(Mapping[str, object], care_data_policy)
@@ -249,7 +249,7 @@ def _parse_care_data_policy(
 
 def _parse_care_data_policy_for_write(
     policy: Mapping[str, object],
-) -> FlowCareDataPolicyV1:
+) -> FlowCareDataPolicy:
     allowed_fields = {"sensitive", "approval_mode", "pre_approval_visibility"}
     unknown_fields = set(policy) - allowed_fields
     if unknown_fields:
@@ -288,12 +288,12 @@ def _parse_care_data_policy_for_write(
         policy_payload["approval_mode"] = approval_mode
     if pre_approval_visibility is not None:
         policy_payload["pre_approval_visibility"] = pre_approval_visibility
-    return FlowCareDataPolicyV1.model_validate(policy_payload)
+    return FlowCareDataPolicy.model_validate(policy_payload)
 
 
 def _parse_care_data_policy_for_persisted_read(
     policy: Mapping[str, object],
-) -> FlowCareDataPolicyV1:
+) -> FlowCareDataPolicy:
     sensitive_value = policy.get("sensitive", False)
     policy_payload: dict[str, object] = {
         # Fail closed for legacy truthy values that predate strict authoring
@@ -308,7 +308,7 @@ def _parse_care_data_policy_for_persisted_read(
     )
     if pre_approval_visibility is not None:
         policy_payload["pre_approval_visibility"] = pre_approval_visibility
-    return FlowCareDataPolicyV1.model_validate(policy_payload)
+    return FlowCareDataPolicy.model_validate(policy_payload)
 
 
 def _parse_care_data_approval_mode(value: object) -> CareDataApprovalMode | None:
@@ -332,7 +332,7 @@ def _parse_form_field(
     mode: FlowFormSchemaParseMode,
     seen_names: set[str],
     seen_orders: set[int],
-) -> FlowFormFieldV1:
+) -> FlowFormField:
     field_name = _parse_field_name(field, index=index, mode=mode, seen_names=seen_names)
     field_type = _parse_field_type(field, index=index)
     required = _parse_required(field, index=index, mode=mode)
@@ -348,7 +348,7 @@ def _parse_form_field(
         payload["order"] = order
     if "options" in field or options is not None:
         payload["options"] = options
-    return FlowFormFieldV1.model_validate(payload)
+    return FlowFormField.model_validate(payload)
 
 
 def _parse_field_name(

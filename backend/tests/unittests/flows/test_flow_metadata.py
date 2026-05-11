@@ -5,7 +5,7 @@ import re
 import pytest
 
 from intric.flows.flow_metadata import (
-    FlowCareDataPolicyV1,
+    FlowCareDataPolicy,
     FlowFormFieldType,
     FlowFormSchemaParseMode,
     FlowMetadataParseMode,
@@ -279,8 +279,8 @@ def test_parse_flow_metadata_preserves_unrelated_top_level_keys(
     }
 
 
-def test_flow_care_data_policy_v1_defaults_to_non_sensitive() -> None:
-    policy = FlowCareDataPolicyV1()
+def test_flow_care_data_policy_defaults_to_non_sensitive() -> None:
+    policy = FlowCareDataPolicy()
 
     assert policy.sensitive is False
     assert policy.approval_mode is None

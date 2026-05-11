@@ -86,7 +86,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T038
+active_task: T040
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -2454,7 +2454,7 @@ tasks:
   - id: T038
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe maintainability slice after T037 typed run-payload metadata, explicitly judging whether the FlowMetadataV1/FlowFormSchemaV1 names should be renamed before more code depends on them."
     inputs:
@@ -2474,6 +2474,162 @@ tasks:
     expected_output:
       - "decision"
       - "naming verdict for FlowMetadataV1, FlowFormSchemaV1, FlowFormFieldV1, and FlowCareDataPolicyV1"
+      - "next Worker objective or reason to pick Scout/PM/audit instead"
+      - "allowed_files"
+      - "red tests"
+      - "verification commands"
+      - "stop_if"
+      - "whether Claude plan gate is required before activation"
+    receipt:
+      result: done
+      decision: "Activate T039 to rename the unversioned Flow metadata model classes before more code depends on the misleading V1 suffix."
+      summary: "Repo evidence shows FlowMetadataV1, FlowFormSchemaV1, FlowFormFieldV1, and FlowCareDataPolicyV1 have no metadata schema_version, metadata_version, V2 peer, or migration plan. The only real versioned envelope is PublishedFlowDefinition.schema_version, so the nested metadata class suffixes are misleading."
+      evidence:
+        - "rg -n '\\bFlow(Metadata|FormSchema|FormField|CareDataPolicy)V1\\b' backend/src/intric/flows backend/tests/unittests/flows -g '*.py' -> eight source/test files."
+        - "rg -n 'schema_version|metadata_version|FlowMetadataV2|FlowFormSchemaV2|FlowFormFieldV2|FlowCareDataPolicyV2' backend/src/intric/flows/flow_metadata.py backend/tests/unittests/flows/test_flow_metadata.py -> no hits."
+        - "PublishedFlowDefinition has a real FLOW_DEFINITION_SCHEMA_VERSION; the metadata submodels do not."
+      claude_plan_gate:
+        session: "flow-runtime-maintainability-t038-metadata-naming-plan"
+        artifact: ".codex/artifacts/claude-peer-loop-t038-flow-metadata-naming-plan-20260511T082434Z.md"
+        model: "claude-opus-4-7"
+        effort: "xhigh"
+        verdict: "green"
+        green_light: true
+        min_score: 8
+        accepted_constraints:
+          - "Do not retroactively rewrite historical state.yaml receipts that mention the old V1 names; only record the new task outcome."
+          - "Broaden final grep to catch frontend, docs, backend, fixtures, and AI Builder references, while treating historical goal receipts as audit trail rather than source to rewrite."
+          - "Do not add compatibility aliases for the old V1 class names unless a real current caller is proven."
+          - "Do not bundle extra='allow' semantic tightening into the rename."
+      next_task: T039
+
+  - id: T039
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Rename the Flow metadata model classes from speculative V1 names to unversioned human-readable names without changing metadata parsing behavior."
+    allowed_files:
+      - "backend/src/intric/flows/flow_metadata.py"
+      - "backend/src/intric/flows/flow_care_data_policy.py"
+      - "backend/src/intric/flows/published_definition.py"
+      - "backend/src/intric/flows/application/flow_run_service.py"
+      - "backend/src/intric/flows/flow_run_input_payload.py"
+      - "backend/tests/unittests/flows/test_flow_metadata.py"
+      - "backend/tests/unittests/flows/test_flow_care_data_policy.py"
+      - "backend/tests/unittests/flows/test_flow_run_input_payload.py"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/goal.md"
+      - "docs/refactor/phase7/data-model-scalability-stress-test.md"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py -q"
+      - "cd backend && uv run pyright src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_input_payload.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py"
+      - "cd backend && uv run ruff check src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_input_payload.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_input_payload.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py"
+      - "rg -n '\\bFlow(Metadata|FormSchema|FormField|CareDataPolicy)V1\\b' backend/src backend/tests frontend docs -g '!docs/goals/flow-runtime-ai-builder-maintainability/state.yaml' -g '!docs/goals/flow-runtime-ai-builder-maintainability/notes/**' || true"
+      - "git diff --check"
+    stop_if:
+      - "The rename requires files outside allowed_files, except for read-only grep evidence."
+      - "A behavior change appears in parsing, serialization, extra-field handling, or error messages."
+      - "Compatibility aliases for the old V1 class names seem necessary."
+      - "Historical goal receipts or notes would need retroactive rewriting."
+      - "FlowMetadataPatch or unrelated AI Builder models are pulled into the rename."
+      - "Any new Any, cast, type-ignore, Pyright ignore, or explanatory migration comment is added."
+      - "extra='allow' or other Pydantic behavior is changed in the same slice."
+    expected_output:
+      - "FlowFormFieldV1 renamed to FlowFormField."
+      - "FlowFormSchemaV1 renamed to FlowFormSchema."
+      - "FlowCareDataPolicyV1 renamed to FlowCareDataPolicy."
+      - "FlowMetadataV1 renamed to FlowMetadata."
+      - "No old V1 compatibility aliases remain."
+      - "No behavior changes beyond symbol names."
+      - "Broad grep proof for old V1 names outside historical goal receipts."
+      - "All verify commands passed."
+      - "Receipt records that extra='allow' tightening is a separate semantic follow-up, not bundled."
+    receipt:
+      result: done
+      summary: "Renamed speculative V1 Flow metadata model classes to unversioned names: FlowMetadata, FlowFormSchema, FlowFormField, and FlowCareDataPolicy. Parser behavior, serializer behavior, extra-field handling, and error messages were not changed."
+      changed_files:
+        - "backend/src/intric/flows/flow_metadata.py"
+        - "backend/src/intric/flows/flow_care_data_policy.py"
+        - "backend/src/intric/flows/published_definition.py"
+        - "backend/src/intric/flows/application/flow_run_service.py"
+        - "backend/src/intric/flows/flow_run_input_payload.py"
+        - "backend/tests/unittests/flows/test_flow_metadata.py"
+        - "backend/tests/unittests/flows/test_flow_care_data_policy.py"
+        - "backend/tests/unittests/flows/test_flow_run_input_payload.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/goal.md"
+        - "docs/refactor/phase7/data-model-scalability-stress-test.md"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      implementation_notes:
+        - "FlowFormFieldV1 -> FlowFormField."
+        - "FlowFormSchemaV1 -> FlowFormSchema."
+        - "FlowCareDataPolicyV1 -> FlowCareDataPolicy."
+        - "FlowMetadataV1 -> FlowMetadata."
+        - "No old-name compatibility aliases were added."
+        - "FlowMetadataPatch was not renamed or touched."
+        - "Historical goal receipts and notes were not retroactively rewritten."
+        - "extra='allow' remains unchanged; tightening it would be a semantic contract change and is deferred."
+      verification:
+        - "PASS cd backend && uv run pytest tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py -q -> 209 passed, 10 warnings."
+        - "PASS cd backend && uv run pyright src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_input_payload.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py -> 0 errors, 0 warnings, 0 informations."
+        - "PASS cd backend && uv run ruff check src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_input_payload.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py."
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_input_payload.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py."
+        - "PASS git grep -n \"\\bFlow\\(Metadata\\|FormSchema\\|FormField\\|CareDataPolicy\\)V1\\b\" -- backend/src backend/tests frontend docs ':!docs/goals/flow-runtime-ai-builder-maintainability/state.yaml' ':!docs/goals/flow-runtime-ai-builder-maintainability/notes' || true -> no tracked hits."
+        - "PASS git diff --check."
+        - "PASS node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml."
+      untracked_artifact_note: "Plain rg still finds old V1 names in untracked planning artifacts under docs/refactor/flow-ai-builder-production-readiness-review-packet.md and docs/goals/flow-runtime-ai-builder-production-readiness/state.yaml; those files were already untracked and were left untouched."
+      commands:
+        - "cd backend && uv run pytest tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py -q"
+        - "cd backend && uv run pyright src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_input_payload.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py"
+        - "cd backend && uv run ruff check src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_input_payload.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py"
+        - "cd backend && uv run ruff format --check src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py src/intric/flows/flow_run_input_payload.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py"
+        - "git grep -n \"\\bFlow\\(Metadata\\|FormSchema\\|FormField\\|CareDataPolicy\\)V1\\b\" -- backend/src backend/tests frontend docs ':!docs/goals/flow-runtime-ai-builder-maintainability/state.yaml' ':!docs/goals/flow-runtime-ai-builder-maintainability/notes' || true"
+        - "git diff --check"
+        - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      type_debt:
+        new_any: 0
+        new_cast: 0
+        new_type_ignore: 0
+        new_pyright_ignore: 0
+      maintainability_self_review:
+        naming_verdict: "V1 suffix was removed because there is no actual metadata version contract. PublishedFlowDefinition keeps its separate schema_version because that envelope is genuinely versioned."
+        anti_patterns_avoided:
+          - "No speculative version suffix."
+          - "No compatibility alias for pre-production internal names."
+          - "No behavior change hidden inside a rename."
+          - "No broad historical receipt rewrite."
+      maintainability_rubric:
+        maintainability: 9
+        code_quality: 9
+        clean_architecture: 8
+        separation_of_concerns: 9
+        single_source_of_truth: 9
+        human_readability: 9
+        human_reviewability: 9
+        overall_min: 8
+      next_task: T040
+
+  - id: T040
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe slice after the typed metadata naming cleanup, balancing small T037/T039 follow-ups against higher-value runtime/API/data-boundary work."
+    inputs:
+      - "T037 receipt"
+      - "T039 receipt"
+      - "confirmed_p0_candidates"
+      - "maintainability_findings"
+      - ".codex/artifacts/claude-peer-loop-t038-flow-metadata-naming-plan-20260511T082434Z.md"
+    constraints:
+      - "Read-only. Do not implement source changes."
+      - "Prefer a small follow-up only if it removes near-term review risk from the just-touched metadata boundary."
+      - "Do not broaden into frontend, AI Builder, migrations, generated clients, or unrelated dirty files unless evidence shows they are the next highest-risk owner."
+      - "If selecting a Worker that changes public API/error contracts, runtime lifecycle, schema ownership, or shared typed boundaries, require the host Claude plan gate before activation."
+      - "Keep naming discipline explicit: no version suffixes without real version contracts, no compatibility aliases for pre-production internal names, and no slop comments."
+    expected_output:
+      - "decision"
       - "next Worker objective or reason to pick Scout/PM/audit instead"
       - "allowed_files"
       - "red tests"

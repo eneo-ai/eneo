@@ -5,22 +5,22 @@ from copy import deepcopy
 import pytest
 
 from intric.flows.flow_metadata import (
+    FlowMetadata,
     FlowMetadataParseMode,
-    FlowMetadataV1,
     parse_flow_metadata,
 )
 from intric.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
 from intric.main.exceptions import BadRequestException
 
 
-def _metadata(fields: list[dict[str, object]]) -> FlowMetadataV1:
+def _metadata(fields: list[dict[str, object]]) -> FlowMetadata:
     return parse_flow_metadata(
         {"form_schema": {"fields": fields}},
         mode=FlowMetadataParseMode.PERSISTED_READ,
     )
 
 
-def _empty_metadata() -> FlowMetadataV1:
+def _empty_metadata() -> FlowMetadata:
     return parse_flow_metadata(None, mode=FlowMetadataParseMode.PERSISTED_READ)
 
 
@@ -33,7 +33,7 @@ def _empty_metadata() -> FlowMetadataV1:
     ],
 )
 def test_payload_passthrough_when_form_schema_missing_or_empty(
-    metadata: FlowMetadataV1 | None,
+    metadata: FlowMetadata | None,
 ) -> None:
     payload = {"note": "raw payload value", "file_ids": ["abc"]}
 

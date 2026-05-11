@@ -183,7 +183,7 @@ It must assert:
 
 2. Typed JSONB boundaries:
    - choose `PublishedFlowDefinitionV1` first if runtime/contract corruption is the dominant risk,
-   - choose `FlowMetadataV1` / `FlowFormSchemaV1` first if form/run-contract mismatch is dominant.
+   - choose `FlowMetadata` / `FlowFormSchema` first if form/run-contract mismatch is dominant.
 
 3. Pre-production legacy cleanup:
    - remove unused fallback paths after grep + tests + fixture/migration proof,

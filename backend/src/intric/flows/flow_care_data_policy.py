@@ -4,7 +4,7 @@ from typing import Mapping
 
 from intric.flows.domain.flow import JsonObject
 from intric.flows.flow_metadata import (
-    FlowCareDataPolicyV1,
+    FlowCareDataPolicy,
     FlowMetadataParseMode,
     parse_flow_metadata,
 )
@@ -12,7 +12,7 @@ from intric.flows.flow_metadata import (
 
 def resolve_flow_care_data_policy(
     metadata_json: JsonObject | Mapping[str, object] | None,
-) -> FlowCareDataPolicyV1:
+) -> FlowCareDataPolicy:
     return parse_flow_metadata(
         metadata_json, mode=FlowMetadataParseMode.PERSISTED_READ
     ).care_data_policy

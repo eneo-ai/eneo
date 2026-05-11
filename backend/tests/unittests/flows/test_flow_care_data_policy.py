@@ -1,5 +1,5 @@
 from intric.flows.flow_care_data_policy import resolve_flow_care_data_policy
-from intric.flows.flow_metadata import FlowCareDataPolicyV1
+from intric.flows.flow_metadata import FlowCareDataPolicy
 
 
 def test_resolve_flow_care_data_policy_reads_supported_fields() -> None:
@@ -39,7 +39,7 @@ def test_resolve_flow_care_data_policy_fails_closed_for_legacy_truthy_sensitive(
 def test_resolve_flow_care_data_policy_returns_canonical_metadata_policy() -> None:
     policy = resolve_flow_care_data_policy(None)
 
-    assert isinstance(policy, FlowCareDataPolicyV1)
+    assert isinstance(policy, FlowCareDataPolicy)
 
 
 def test_resolve_flow_care_data_policy_drops_unknown_enums() -> None:

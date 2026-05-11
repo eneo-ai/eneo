@@ -32,8 +32,8 @@ from intric.flows.flow_evidence_policy import (
 )
 from intric.flows.flow_input_limits import FlowInputLimits, resolve_flow_input_limits
 from intric.flows.flow_metadata import (
+    FlowMetadata,
     FlowMetadataParseMode,
-    FlowMetadataV1,
     parse_flow_metadata,
 )
 from intric.flows.flow_permissions import user_can_view_flow_trace
@@ -745,7 +745,7 @@ class FlowRunService:
     @staticmethod
     def _parse_draft_metadata_lenient(
         metadata_json: JsonObject | None,
-    ) -> FlowMetadataV1 | None:
+    ) -> FlowMetadata | None:
         try:
             return parse_flow_metadata(
                 metadata_json, mode=FlowMetadataParseMode.PERSISTED_READ

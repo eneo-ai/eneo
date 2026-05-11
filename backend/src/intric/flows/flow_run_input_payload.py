@@ -4,7 +4,7 @@ import math
 from datetime import date
 from typing import Any, cast
 
-from intric.flows.flow_metadata import FlowMetadataV1
+from intric.flows.flow_metadata import FlowMetadata
 from intric.main.exceptions import BadRequestException
 
 
@@ -25,7 +25,7 @@ def _flow_payload_error(
 
 def normalize_and_validate_flow_run_payload(
     *,
-    metadata: FlowMetadataV1 | None,
+    metadata: FlowMetadata | None,
     payload: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     form_schema = metadata.form_schema if metadata is not None else None
