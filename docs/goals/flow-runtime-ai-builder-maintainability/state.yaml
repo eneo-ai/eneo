@@ -85,7 +85,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T009
+active_task: T900
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -1505,7 +1505,7 @@ tasks:
   - id: T009
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Introduce the Worker 1 typed form-schema boundary with FlowFormSchemaV1 and FlowFormFieldV1 only, replacing duplicate raw form-schema walks in validation, run input payload, and run contract without introducing the full FlowMetadataV1 envelope."
     allowed_files:
@@ -1532,7 +1532,89 @@ tasks:
       - "FlowFormFieldV1.options uses a mutable default instead of list[str] | None."
       - "The Worker cannot remove the duplicate run-payload legacy normalization map."
       - "serialize_flow_form_schema has neither a real Worker 1 caller nor an explicit deferral to Worker 2."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Introduced backend/src/intric/flows/flow_metadata.py as the canonical typed form-schema boundary for FlowFormSchemaV1 and FlowFormFieldV1. Migrated write validation, run input payload normalization, and run-contract form-field projection to the shared parser without introducing FlowMetadataV1 or touching care-data, FlowService write paths, published-definition metadata access, or AI Builder behavior."
+      canonical_owner: "backend/src/intric/flows/flow_metadata.py owns form_schema parsing, legacy type normalization, and serialization for Worker 1."
+      files_changed:
+        source:
+          - "backend/src/intric/flows/flow_metadata.py"
+          - "backend/src/intric/flows/flow_validators_form.py"
+          - "backend/src/intric/flows/flow_run_input_payload.py"
+          - "backend/src/intric/flows/flow_run_contract_service.py"
+        tests:
+          - "backend/tests/unittests/flows/test_flow_metadata.py"
+          - "backend/tests/unittests/flows/test_flow_run_input_payload.py"
+          - "backend/tests/unittests/flows/test_flow_run_contract_service.py"
+      changed_files:
+        - "backend/src/intric/flows/flow_metadata.py"
+        - "backend/src/intric/flows/flow_validators_form.py"
+        - "backend/src/intric/flows/flow_run_input_payload.py"
+        - "backend/src/intric/flows/flow_run_contract_service.py"
+        - "backend/tests/unittests/flows/test_flow_metadata.py"
+        - "backend/tests/unittests/flows/test_flow_run_input_payload.py"
+        - "backend/tests/unittests/flows/test_flow_run_contract_service.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      behavior:
+        - "Deleted duplicate run-payload legacy type map; grep for _RUN_FIELD_TYPE_LEGACY_NORMALIZATION under backend/src/intric returns no hits."
+        - "Legacy string/email/textarea field types normalize to text through one parser for write validation, run payloads, and run-contract form fields."
+        - "run-contract invalid published form fields still translate to flow_published_form_schema_invalid."
+        - "PERSISTED_READ mode is intentionally tolerant for runtime payload reads; run-contract remains the loud public reader for corrupt published form_schema."
+        - "serialize_flow_form_schema is wired through normalize_legacy_form_schema in Worker 1, so it has a real caller."
+      type_debt_counts:
+        - "flow_metadata.py: HEAD Any/cast/type-ignore 0; worktree 5, all casts are parser-boundary narrowing after runtime isinstance checks; zero type ignores."
+        - "flow_validators_form.py: HEAD 12; worktree 0."
+        - "flow_run_input_payload.py: HEAD 15; worktree 10, no new type ignores; remaining Any/cast are pre-existing runtime payload coercion boundary shapes."
+        - "flow_run_contract_service.py: HEAD 3; worktree 0."
+      remaining_raw_metadata_readers:
+        - "backend/src/intric/flows/flow_care_data_policy.py: care_data_policy raw metadata reader, deferred to Worker 2 with FlowMetadataV1."
+        - "backend/src/intric/flows/application/flow_service.py: FlowService metadata serialization/write boundary, deferred to Worker 2."
+        - "backend/src/intric/flows/published_definition.py: published definition metadata_json cast/accessor, deferred to Worker 2."
+        - "backend/src/intric/flows/ai_builder/ai_builder_form_fields.py: AI Builder raw form_schema reader, deferred to Worker 3."
+        - "backend/src/intric/flows/ai_builder/ai_builder_edit_models.py: FlowMetadataPatch delete-or-wire decision, deferred to Worker 3."
+        - "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py: AI Builder metadata/provenance reader, deferred to Worker 3."
+      tests_added:
+        - "test_flow_metadata.py covers write-mode error message preservation, write-mode error codes/context, legacy alias normalization, serialize round-trip with extra keys, persisted-read tolerance, and duplicate-option rejection."
+        - "test_flow_run_input_payload.py now parametrizes string/email/textarea legacy type runtime payload behavior."
+        - "test_flow_run_contract_service.py covers published form-field legacy normalization/sorting and flow_published_form_schema_invalid preservation."
+      verification:
+        - "PASS cd backend && uv run pytest tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_run_contract_service.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_consumer_api_contract.py -q -> 162 passed, 16 warnings."
+        - "PASS cd backend && uv run pyright src/intric/flows/flow_metadata.py src/intric/flows/flow_validators_form.py src/intric/flows/flow_run_input_payload.py src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_run_contract_service.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_consumer_api_contract.py -> 0 errors."
+        - "PASS cd backend && uv run ruff check src/intric/flows/flow_metadata.py src/intric/flows/flow_validators_form.py src/intric/flows/flow_run_input_payload.py src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_run_contract_service.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_consumer_api_contract.py."
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/flow_metadata.py src/intric/flows/flow_validators_form.py src/intric/flows/flow_run_input_payload.py src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_run_contract_service.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_consumer_api_contract.py."
+        - "PASS git diff --check for T009 files."
+      commands:
+        - "cd backend && uv run pytest tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_run_contract_service.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_consumer_api_contract.py -q"
+        - "cd backend && uv run pyright src/intric/flows/flow_metadata.py src/intric/flows/flow_validators_form.py src/intric/flows/flow_run_input_payload.py src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_run_contract_service.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_consumer_api_contract.py"
+        - "cd backend && uv run ruff check src/intric/flows/flow_metadata.py src/intric/flows/flow_validators_form.py src/intric/flows/flow_run_input_payload.py src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_run_contract_service.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_consumer_api_contract.py"
+        - "cd backend && uv run ruff format --check src/intric/flows/flow_metadata.py src/intric/flows/flow_validators_form.py src/intric/flows/flow_run_input_payload.py src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_run_contract_service.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_consumer_api_contract.py"
+        - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flow-runtime-maintainability-t009-typed-form-schema-commit-gate --new-session --title 'T009 typed form schema commit gate' --phase commit-gate --iteration 1 --require-green --required-min-score 8 --model claude-opus-4-7 --effort xhigh --timeout-seconds 1200 ..."
+      claude_commit_gate:
+        artifact: ".codex/artifacts/claude-peer-loop-t009-typed-form-schema-commit-gate-20260511T063028Z.md"
+        model: "claude-opus-4-7"
+        effort: "xhigh"
+        verdict: "green"
+        green_light: true
+        min_score: 8
+        accepted_followups:
+          - "Added persisted-read tolerance and duplicate-option guardrail tests after Claude's green review."
+          - "Receipt explicitly documents tolerant run-payload reader versus loud run-contract reader."
+      comments_added_or_changed: []
+      maintainability_rubric:
+        canonical_ownership: 1
+        fear_of_change_reduction: 1
+        type_safety: 0.8
+        error_contract_quality: 1
+        test_quality: 1
+        comment_quality: 1
+        complexity: 1
+        deletion_quality: 1
+        score: "7.8/8"
+      anti_patterns_avoided:
+        - "No new shallow service, helper module, manager, fake interface, or one-implementation port."
+        - "No source comments, tutorial prose, or internal planning vocabulary in source."
+        - "No Any/cast/type-ignore added outside the parser/runtime coercion boundaries."
+        - "No frontend, care-data, FlowService, published-definition, or AI Builder changes."
 
   - id: T010
     type: worker
@@ -1552,7 +1634,7 @@ tasks:
   - id: T900
     type: judge
     assignee: Judge
-    status: queued
+    status: active
     reasoning_hint: high
     objective: "Audit maintainability and production-readiness tranche."
     inputs:

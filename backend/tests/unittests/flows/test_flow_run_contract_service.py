@@ -12,7 +12,7 @@ from intric.flows.flow import Flow, FlowStep
 from intric.flows.flow_input_limits import FlowInputLimits
 from intric.flows.flow_run_contract_service import FlowRunContractService
 from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
-from intric.main.exceptions import NotFoundException
+from intric.main.exceptions import BadRequestException, NotFoundException
 
 
 def _flow(*, step: FlowStep) -> Flow:
@@ -185,6 +185,7 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
     assert contract.final_output.delivery == FlowOutputDelivery.ARTIFACT
     assert contract.aggregate_max_files == 2
     assert contract.form_fields[0].name == "published_field"
+    assert contract.form_fields[0].type == "text"
     assert contract.form_fields[0].label == "Published field"
     assert contract.steps_requiring_input[0].step_id == runtime_step.id
     assert contract.steps_requiring_input[0].label == "Upload"
@@ -197,6 +198,95 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
     )
     assert contract.template_readiness[0].status == "ready"
     assert contract.template_readiness[0].template_asset_id == asset_id
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_normalizes_and_sorts_published_form_fields() -> None:
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+
+    step = _step(step_order=1, input_type="text")
+    flow = _flow(step=step).model_copy(update={"published_version": 1, "steps": [step]})
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    flow_version_repo.get.return_value = SimpleNamespace(
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "metadata_json": {
+                "form_schema": {
+                    "fields": [
+                        {"name": "second", "type": "email", "order": 2},
+                        {"name": "first", "type": "textarea", "order": 1},
+                    ]
+                }
+            },
+            "steps": [
+                {
+                    "step_id": str(step.id),
+                    "step_order": 1,
+                    "assistant_id": str(step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "mcp_policy": "inherit",
+                }
+            ],
+        }
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+    ).get_run_contract(flow_id=flow.id)
+
+    assert [(field.name, field.type) for field in contract.form_fields] == [
+        ("first", "text"),
+        ("second", "text"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_preserves_invalid_form_schema_error_code() -> None:
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+
+    step = _step(step_order=1, input_type="text")
+    flow = _flow(step=step).model_copy(update={"published_version": 1, "steps": [step]})
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    flow_version_repo.get.return_value = SimpleNamespace(
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "metadata_json": {"form_schema": {"fields": [{"type": "text"}]}},
+            "steps": [
+                {
+                    "step_id": str(step.id),
+                    "step_order": 1,
+                    "assistant_id": str(step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "mcp_policy": "inherit",
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await _service(
+            flow_service=flow_service,
+            settings_service=settings_service,
+            flow_version_repo=flow_version_repo,
+        ).get_run_contract(flow_id=flow.id)
+
+    assert exc_info.value.code == "flow_published_form_schema_invalid"
 
 
 @pytest.mark.asyncio

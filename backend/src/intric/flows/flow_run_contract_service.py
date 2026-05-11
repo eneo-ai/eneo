@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import Protocol
 from uuid import UUID
-
-from pydantic import ValidationError
 
 from intric.flows.domain.flow import Flow, FlowTemplateAsset, FlowVersion, JsonObject
 from intric.flows.enums import FlowOutputMode, FlowOutputType, FlowTemplateAssetStatus
@@ -14,6 +12,7 @@ from intric.flows.flow_input_limits import (
     effective_flow_input_limit,
     effective_runtime_max_files,
 )
+from intric.flows.flow_metadata import FlowFormSchemaParseMode, parse_flow_form_schema
 from intric.flows.flow_run_contract_models import (
     FlowFinalOutputContractPublic,
     FlowOutputDelivery,
@@ -243,24 +242,28 @@ def _output_delivery(
 
 
 def _published_form_fields(metadata_json: JsonObject | None) -> list[FormFieldPublic]:
-    form_schema = metadata_json.get("form_schema") if metadata_json is not None else None
-    if not isinstance(form_schema, dict):
-        return []
-    form_schema_dict = cast(dict[str, Any], form_schema)
-    fields_value = form_schema_dict.get("fields")
-    if not isinstance(fields_value, list):
-        return []
     try:
-        fields = [
-            FormFieldPublic.model_validate(field)
-            for field in cast(list[object], fields_value)
-            if isinstance(field, dict)
-        ]
-    except ValidationError as exc:
+        form_schema = parse_flow_form_schema(
+            metadata_json, mode=FlowFormSchemaParseMode.PERSISTED_READ
+        )
+    except BadRequestException as exc:
         raise BadRequestException(
             "Published flow form schema is invalid.",
             code="flow_published_form_schema_invalid",
         ) from exc
+    if form_schema is None:
+        return []
+    fields = [
+        FormFieldPublic(
+            name=field.name,
+            type=field.type.value,
+            label=field.label,
+            required=field.required,
+            options=field.options,
+            order=field.order,
+        )
+        for field in form_schema.fields
+    ]
     return sorted(fields, key=lambda field: field.order or 0)
 
 

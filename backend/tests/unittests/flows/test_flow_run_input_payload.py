@@ -41,7 +41,9 @@ def test_missing_required_field_emits_machine_readable_error_contract() -> None:
         [{"name": "case_id", "type": "text", "required": True, "order": 1}]
     )
 
-    with pytest.raises(BadRequestException, match=r"Missing required input field 'case_id'\.") as exc_info:
+    with pytest.raises(
+        BadRequestException, match=r"Missing required input field 'case_id'\."
+    ) as exc_info:
         normalize_and_validate_flow_run_payload(metadata_json=metadata, payload={})
 
     assert exc_info.value.code == "flow_input_required_field_missing"
@@ -54,24 +56,54 @@ def test_missing_required_field_emits_machine_readable_error_contract() -> None:
 @pytest.mark.parametrize(
     ("field_type", "value", "message", "code"),
     [
-        ("text", None, r"Missing required input field 'field'\.", "flow_input_required_field_missing"),
-        ("text", "   ", r"Field 'field' cannot be empty\.", "flow_input_required_field_empty"),
+        (
+            "text",
+            None,
+            r"Missing required input field 'field'\.",
+            "flow_input_required_field_missing",
+        ),
+        (
+            "text",
+            "   ",
+            r"Field 'field' cannot be empty\.",
+            "flow_input_required_field_empty",
+        ),
         (
             "number",
             None,
             r"Missing required input field 'field'\.",
             "flow_input_required_field_missing",
         ),
-        ("number", "   ", r"Field 'field' cannot be empty\.", "flow_input_required_field_empty"),
-        ("date", None, r"Missing required input field 'field'\.", "flow_input_required_field_missing"),
-        ("date", "   ", r"Field 'field' cannot be empty\.", "flow_input_required_field_empty"),
+        (
+            "number",
+            "   ",
+            r"Field 'field' cannot be empty\.",
+            "flow_input_required_field_empty",
+        ),
+        (
+            "date",
+            None,
+            r"Missing required input field 'field'\.",
+            "flow_input_required_field_missing",
+        ),
+        (
+            "date",
+            "   ",
+            r"Field 'field' cannot be empty\.",
+            "flow_input_required_field_empty",
+        ),
         (
             "select",
             None,
             r"Missing required input field 'field'\.",
             "flow_input_required_field_missing",
         ),
-        ("select", "   ", r"Field 'field' cannot be empty\.", "flow_input_required_field_empty"),
+        (
+            "select",
+            "   ",
+            r"Field 'field' cannot be empty\.",
+            "flow_input_required_field_empty",
+        ),
         (
             "multiselect",
             None,
@@ -121,9 +153,10 @@ def test_required_field_rejects_none_and_blank(
     }
 
 
-def test_legacy_string_type_is_normalized_to_text() -> None:
+@pytest.mark.parametrize("legacy_type", ["string", "email", "textarea"])
+def test_legacy_text_types_are_normalized_to_text(legacy_type: str) -> None:
     metadata = _metadata(
-        [{"name": "note", "type": "string", "required": True, "order": 1}]
+        [{"name": "note", "type": legacy_type, "required": True, "order": 1}]
     )
 
     normalized = normalize_and_validate_flow_run_payload(
@@ -157,7 +190,9 @@ def test_unknown_fields_are_preserved_and_payload_is_not_mutated() -> None:
         ("2E-2", 0.02),
     ],
 )
-def test_number_field_accepts_scientific_notation(raw_value: str, expected: float) -> None:
+def test_number_field_accepts_scientific_notation(
+    raw_value: str, expected: float
+) -> None:
     metadata = _metadata(
         [{"name": "attempts", "type": "number", "required": True, "order": 1}]
     )
@@ -184,7 +219,9 @@ def test_number_field_rejects_non_finite_values(raw_value: object) -> None:
         [{"name": "attempts", "type": "number", "required": True, "order": 1}]
     )
 
-    with pytest.raises(BadRequestException, match=r"Field 'attempts' must be a finite number\.") as exc_info:
+    with pytest.raises(
+        BadRequestException, match=r"Field 'attempts' must be a finite number\."
+    ) as exc_info:
         normalize_and_validate_flow_run_payload(
             metadata_json=metadata,
             payload={"attempts": raw_value},
