@@ -85,7 +85,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T900
+active_task: T029
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -1634,7 +1634,7 @@ tasks:
   - id: T900
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Audit maintainability and production-readiness tranche."
     inputs:
@@ -1654,6 +1654,116 @@ tasks:
       - "merge-readiness"
       - "Claude phase-gate result and improvement disposition"
       - "next task if not complete"
+    receipt:
+      result: done
+      decision: not_complete
+      summary: "T900 audit rejects tranche completion. T009 is committed and verified, but required typed metadata/data-boundary follow-up remains. Host Claude returned VERDICT green and GREEN_LIGHT yes for the audit recommendation, with MIN_SCORE 7 below the phase-green threshold of 8 because single-source/type-contract gaps remain."
+      artifact: ".codex/artifacts/claude-peer-loop-t900-tranche-audit-after-typed-form-schema-20260511T064116Z.md"
+      claude_phase_gate:
+        model: "claude-opus-4-7"
+        effort: "xhigh"
+        verdict: "green"
+        green_light: true
+        min_score: 7
+        required_min_score: 8
+        disposition: "Use as evidence for not_complete and next-task selection; do not mark tranche complete or phase-green."
+      maintainability_score_estimate: "7/10"
+      remaining_p1_p2:
+        - "backend/src/intric/flows/ai_builder/ai_builder_form_fields.py remains a parallel raw form_schema parser."
+        - "backend/src/intric/flows/published_definition.py still casts metadata_json without a typed inner accessor."
+        - "backend/src/intric/flows/flow_care_data_policy.py remains a raw care_data_policy metadata reader."
+        - "backend/src/intric/flows/application/flow_service.py still owns raw metadata write/normalization paths."
+      next_task: T028
+      commands:
+        - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flow-runtime-maintainability-t900-tranche-audit --new-session --title 'T900 tranche audit after typed form schema' --phase verification --iteration 1 --require-green --required-min-score 8 --model claude-opus-4-7 --effort xhigh --timeout-seconds 1200 ..."
+
+  - id: T028
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Scope the next typed metadata Worker 2a so it introduces a narrow FlowMetadataV1 envelope and FlowCareDataPolicyV1 adapter without touching FlowService write paths, published-definition access, or AI Builder behavior."
+    inputs:
+      - "T009 receipt"
+      - "T900 receipt"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T025-typed-metadata-boundary-scout.md"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T026-typed-form-schema-worker-decision.md"
+      - ".codex/artifacts/claude-peer-loop-t900-tranche-audit-after-typed-form-schema-20260511T064116Z.md"
+    constraints:
+      - "Read-only. Do not implement source changes."
+      - "Keep the next Worker narrower than the previously rejected broad metadata-envelope plan."
+      - "Decide per-mode extra-field policy explicitly."
+      - "Name allowed files, red tests, verification commands, and stop_if conditions."
+      - "Do not include FlowService write paths, published_definition.py, or AI Builder behavior in Worker 2a unless this Judge task rejects the split with file:line evidence."
+      - "Require the host Claude peer-loop before activating the Worker if ownership, schema, or test uncertainty remains."
+    expected_output:
+      - "decision"
+      - "exact Worker 2a objective"
+      - "allowed_files"
+      - "red tests"
+      - "verification commands"
+      - "stop_if"
+      - "per-mode extra policy"
+      - "whether Claude plan gate is required before activation"
+    receipt:
+      result: done
+      decision: "Activate T029 after host Claude plan gate iteration 2 returned green."
+      summary: "Scoped Worker 2a to introduce FlowMetadataV1 and FlowCareDataPolicyV1 in the existing flow_metadata.py owner, delete the local FlowCareDataPolicy dataclass, route care-data validation/read adapters through the typed metadata parser, and keep FlowService write paths, published_definition.py, and AI Builder out of scope."
+      note: "docs/goals/flow-runtime-ai-builder-maintainability/notes/T028-typed-metadata-worker-2a-scope.md"
+      claude_plan_gate:
+        session: "flow-runtime-maintainability-t028-typed-metadata-worker-2a-plan"
+        artifact_iteration_1: ".codex/artifacts/claude-peer-loop-t028-typed-metadata-worker-2a-plan-gate-20260511T064747Z.md"
+        artifact_iteration_2: ".codex/artifacts/claude-peer-loop-t028-typed-metadata-worker-2a-plan-gate-iteration-2-20260511T065021Z.md"
+        model: "claude-opus-4-7"
+        effort: "xhigh"
+        verdict: "green"
+        green_light: true
+        min_score: 8
+        accepted_changes:
+          - "Delete FlowCareDataPolicy dataclass instead of keeping two care-data policy types."
+          - "Preserve write errors through manual BadRequestException validation, not Pydantic ValidationError translation."
+          - "Require top-level metadata key preservation tests for write and persisted-read modes."
+          - "Keep test_flow_service.py as verification-only, not an allowed edit file."
+          - "Add flow_run_service.py to Pyright verification for unchanged caller variance."
+          - "Trigger Worker 2b immediately after T029 commit gate unless a fresh P0 runtime/API regression appears."
+      next_task: T029
+
+  - id: T029
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Introduce FlowMetadataV1 and FlowCareDataPolicyV1 in the canonical flow metadata module, then route care-data policy validation and sensitive-export reads through that typed parser while preserving current write errors and persisted-read fail-closed behavior."
+    allowed_files:
+      - "backend/src/intric/flows/flow_metadata.py"
+      - "backend/src/intric/flows/flow_care_data_policy.py"
+      - "backend/src/intric/flows/flow_evidence_policy.py"
+      - "backend/tests/unittests/flows/test_flow_metadata.py"
+      - "backend/tests/unittests/flows/test_flow_care_data_policy.py"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py -q"
+      - "cd backend && uv run pyright src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py src/intric/flows/flow_evidence_policy.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py"
+      - "cd backend && uv run ruff check src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py src/intric/flows/flow_evidence_policy.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py src/intric/flows/flow_evidence_policy.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py"
+    stop_if:
+      - "The implementation needs to touch application/flow_service.py, published_definition.py, or ai_builder/*."
+      - "FlowMetadataV1 becomes a shallow envelope used by only one read path without the named Worker 2b closer."
+      - "The implementation keeps FlowCareDataPolicy as a second runtime type instead of making FlowCareDataPolicyV1 the single care-data policy value."
+      - "The implementation adds # type: ignore or broad Any to bypass Pyright instead of fixing the parser boundary."
+      - "Write-mode care-data validation uses Pydantic ValidationError translation instead of raising BadRequestException with current messages."
+      - "FlowCareDataPolicyV1 omits frozen=True without documenting why in the Worker receipt."
+      - "Source comments or docstrings mention T028, Worker 2a, tranche, or other internal planning vocabulary."
+      - "Persisted-read mode stops failing closed for legacy truthy sensitive."
+      - "Top-level metadata unknown keys are dropped."
+    expected_output:
+      - "Red tests first, then implementation."
+      - "Before/after Any, cast, and type-ignore counts for changed source files."
+      - "Confirmation that FlowCareDataPolicy dataclass was deleted or a stop receipt if not."
+      - "Confirmation that FlowCareDataPolicyV1 is frozen or an evidence-backed reason if not."
+      - "Current write-error messages preserved."
+      - "Persisted-read tolerance and top-level key preservation proven."
+      - "All verify commands passed."
+      - "Claude commit gate before source commit."
     receipt: null
 
 validation_command_candidates:
