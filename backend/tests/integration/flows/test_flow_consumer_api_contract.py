@@ -30,7 +30,11 @@ async def admin_token(db_container, patch_auth_service_jwt, admin_user) -> str:
 
         role = Roles(
             name=f"Flow Consumer Test {uuid4().hex[:8]}",
-            permissions=[Permission.FLOWS_MANAGE.value, Permission.FLOWS_RUN.value],
+            permissions=[
+                Permission.FLOWS_MANAGE.value,
+                Permission.FLOWS_RUN.value,
+                Permission.FLOWS_TRACE.value,
+            ],
             tenant_id=admin_user.tenant_id,
         )
         session.add(role)
@@ -54,7 +58,13 @@ async def _create_space(client, *, token: str) -> str:
     return response.json()["id"]
 
 
-async def _create_published_flow(client, *, token: str, space_id: str) -> dict:
+async def _create_published_flow(
+    client,
+    *,
+    token: str,
+    space_id: str,
+    review_output_contract: dict[str, object] | None = None,
+) -> dict:
     create_response = await client.post(
         "/api/v1/flows/",
         json={
@@ -76,23 +86,26 @@ async def _create_published_flow(client, *, token: str, space_id: str) -> dict:
     assert assistant_response.status_code == 201, assistant_response.text
     assistant_id = assistant_response.json()["id"]
 
+    step_payload = {
+        "assistant_id": assistant_id,
+        "step_order": 1,
+        "user_description": "Produce the consumer-visible result",
+        "input_source": "flow_input",
+        "input_type": "text",
+        "output_mode": "pass_through",
+        "output_type": "json",
+        "mcp_policy": "inherit",
+    }
+    if review_output_contract is not None:
+        step_payload["review_policy"] = {"mode": "view"}
+        step_payload["output_contract"] = review_output_contract
+
     update_response = await client.patch(
         f"/api/v1/flows/{flow_id}/",
         json={
             "name": "Consumer API Flow",
             "description": "Runtime API consumer contract flow",
-            "steps": [
-                {
-                    "assistant_id": assistant_id,
-                    "step_order": 1,
-                    "user_description": "Produce the consumer-visible result",
-                    "input_source": "flow_input",
-                    "input_type": "text",
-                    "output_mode": "pass_through",
-                    "output_type": "json",
-                    "mcp_policy": "inherit",
-                }
-            ],
+            "steps": [step_payload],
         },
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -250,6 +263,19 @@ async def _open_first_step_review_checkpoint(
         return str(checkpoint.id)
 
 
+def _runtime_path(
+    template: str,
+    *,
+    run_id: str,
+    checkpoint_id: str | None = None,
+) -> str:
+    path = template.replace("{run_id}", run_id)
+    if checkpoint_id is not None:
+        path = path.replace("{checkpoint_id}", checkpoint_id)
+    assert "{" not in path
+    return path
+
+
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
@@ -276,6 +302,23 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert published_payload["id"] == flow_id
     assert published_payload["runtime_paths"]["create_run"].endswith(
         f"/flows/{flow_id}/runs/"
+    )
+    review_paths = published_payload["runtime_paths"]["review_checkpoints"]
+    assert review_paths["active_template"].endswith(
+        f"/flows/{flow_id}/runs/{{run_id}}/review-checkpoints/active/"
+    )
+    assert review_paths["edit_template"].endswith(
+        f"/flows/{flow_id}/runs/{{run_id}}/review-checkpoints/{{checkpoint_id}}/"
+    )
+    assert review_paths["approve_template"].endswith(
+        f"/flows/{flow_id}/runs/{{run_id}}/review-checkpoints/"
+        "{checkpoint_id}/approve/"
+    )
+    assert review_paths["reject_template"].endswith(
+        f"/flows/{flow_id}/runs/{{run_id}}/review-checkpoints/{{checkpoint_id}}/reject/"
+    )
+    assert review_paths["resume_template"].endswith(
+        f"/flows/{flow_id}/runs/{{run_id}}/review-checkpoints/{{checkpoint_id}}/resume/"
     )
 
     run_payload = {
@@ -363,6 +406,20 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert len(steps) == 1
     assert steps[0]["status"] == "completed"
     assert steps[0]["output_payload_json"] == {"answer": "consumer-visible"}
+
+    evidence_response = await client.get(
+        published_payload["runtime_paths"]["evidence_template"].replace(
+            "{run_id}",
+            first_run["id"],
+        ),
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert evidence_response.status_code == 200, evidence_response.text
+    evidence = evidence_response.json()
+    assert evidence["run"]["id"] == first_run["id"]
+    assert evidence["step_results"][0]["output_payload_json"] == {
+        "answer": "consumer-visible"
+    }
 
 
 @pytest.mark.asyncio
@@ -518,3 +575,152 @@ async def test_flow_review_edit_returns_typed_contract_error_for_invalid_payload
         "step_order": 1,
         "payload_field": "structured",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_consumer_golden_journey_uses_review_runtime_paths(
+    client,
+    db_container,
+    admin_token,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "intric.flows.api.flow_router_common.dispatch_flow_run_after_commit",
+        _noop_dispatch_flow_run_after_commit,
+    )
+
+    output_contract = {
+        "type": "object",
+        "required": ["summary"],
+        "properties": {"summary": {"type": "string"}},
+        "additionalProperties": False,
+    }
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_flow(
+        client,
+        token=admin_token,
+        space_id=space_id,
+        review_output_contract=output_contract,
+    )
+
+    published_response = await client.get(
+        f"/api/v1/flows/{flow['id']}/published/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert published_response.status_code == 200, published_response.text
+    runtime_paths = published_response.json()["runtime_paths"]
+    review_paths = runtime_paths["review_checkpoints"]
+
+    contract_response = await client.get(
+        runtime_paths["run_contract"],
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert contract_response.status_code == 200, contract_response.text
+    contract = contract_response.json()
+    assert contract["final_output"]["output_type"] == "json"
+    assert contract["steps_requiring_review"][0]["step_id"] == flow["steps"][0]["id"]
+    assert contract["steps_requiring_review"][0]["output_contract"] == output_contract
+
+    run_response = await client.post(
+        runtime_paths["create_run"],
+        json={
+            "expected_flow_version": flow["published_version"],
+            "input_payload_json": {"text": "hello"},
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert run_response.status_code == 201, run_response.text
+    run = run_response.json()
+
+    active_before_checkpoint_response = await client.get(
+        _runtime_path(review_paths["active_template"], run_id=run["id"]),
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert active_before_checkpoint_response.status_code == 200
+    assert active_before_checkpoint_response.json() is None
+
+    checkpoint_id = await _open_first_step_review_checkpoint(
+        db_container=db_container,
+        run=run,
+        flow=flow,
+        output_contract=output_contract,
+        current_payload_json={
+            "text": '{"summary":"Original."}',
+            "structured": {"summary": "Original."},
+            "webhook_delivered": False,
+        },
+    )
+    active_path = _runtime_path(review_paths["active_template"], run_id=run["id"])
+    active_response = await client.get(
+        active_path,
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert active_response.status_code == 200, active_response.text
+    active_checkpoint = active_response.json()
+    assert active_checkpoint["id"] == checkpoint_id
+    assert active_checkpoint["output_contract"] == output_contract
+
+    edit_path = _runtime_path(
+        review_paths["edit_template"],
+        run_id=run["id"],
+        checkpoint_id=checkpoint_id,
+    )
+    invalid_edit_response = await client.patch(
+        edit_path,
+        json={
+            "expected_checkpoint_revision": active_checkpoint["revision"],
+            "current_payload_json": {
+                "text": '{"wrong":"shape"}',
+                "structured": {"wrong": "shape"},
+                "webhook_delivered": False,
+            },
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert invalid_edit_response.status_code == 400, invalid_edit_response.text
+    assert invalid_edit_response.json()["code"] == "typed_io_contract_violation"
+
+    valid_edit_response = await client.patch(
+        edit_path,
+        json={
+            "expected_checkpoint_revision": active_checkpoint["revision"],
+            "current_payload_json": {
+                "text": '{"summary":"Approved."}',
+                "structured": {"summary": "Approved."},
+                "webhook_delivered": False,
+            },
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert valid_edit_response.status_code == 200, valid_edit_response.text
+    edited_checkpoint = valid_edit_response.json()
+
+    approve_response = await client.post(
+        _runtime_path(
+            review_paths["approve_template"],
+            run_id=run["id"],
+            checkpoint_id=checkpoint_id,
+        ),
+        json={"expected_checkpoint_revision": edited_checkpoint["revision"]},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert approve_response.status_code == 200, approve_response.text
+    approved_checkpoint = approve_response.json()
+
+    resume_response = await client.post(
+        _runtime_path(
+            review_paths["resume_template"],
+            run_id=run["id"],
+            checkpoint_id=checkpoint_id,
+        ),
+        json={"expected_checkpoint_revision": approved_checkpoint["revision"]},
+        headers={
+            "Authorization": f"Bearer {admin_token}",
+            "Idempotency-Key": f"resume:{uuid4().hex}",
+        },
+    )
+    assert resume_response.status_code == 202, resume_response.text
+    resumed_payload = resume_response.json()
+    assert resumed_payload["checkpoint"]["id"] == checkpoint_id
+    assert resumed_payload["run"]["id"] == run["id"]

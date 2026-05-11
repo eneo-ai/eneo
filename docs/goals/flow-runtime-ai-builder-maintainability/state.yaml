@@ -83,7 +83,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T006
+active_task: T011
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -970,7 +970,7 @@ tasks:
   - id: T006
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Add a public Flow API golden journey that proves a web app or LLM-generated client can discover runtime paths, fetch run contract, identify required inputs/final output/review steps, receive typed missing-input errors, create a valid run, use review checkpoint path templates for active/edit/approve/resume, and fetch output/evidence through HTTP-driven API calls."
     allowed_files:
@@ -1002,12 +1002,79 @@ tasks:
       - "The implementation re-asserts idempotency replay/conflict instead of relying on existing consumer contract coverage."
       - "New OpenAPI assertions restate generic JSON Schema structure instead of encoding consumer invariants."
       - "New Any, cast, # type: ignore, or untyped dict-shaped public models are introduced."
-    receipt: null
+    receipt:
+      result: done
+      note: "notes/T006-public-api-golden-journey.md"
+      changed_files:
+        - "backend/src/intric/flows/api/flow_models.py"
+        - "backend/src/intric/flows/api/flow_assembler.py"
+        - "backend/tests/integration/flows/test_flow_consumer_api_contract.py"
+        - "backend/tests/unit/test_flow_openapi_contract.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T006-public-api-golden-journey.md"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      red_test: "Published runtime and OpenAPI tests failed with missing runtime_paths.review_checkpoints before implementation."
+      commands:
+        - "PASS cd backend && uv run pytest tests/integration/flows/test_flow_consumer_api_contract.py -q"
+        - "PASS cd backend && uv run pytest tests/unit/test_flow_openapi_contract.py -q"
+        - "PASS cd backend && uv run pyright src/intric/flows/api/flow_models.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py"
+        - "PASS cd backend && uv run ruff check src/intric/flows/api/flow_models.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py"
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/api/flow_models.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_run_execution_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py"
+        - "PASS git diff --check"
+        - "PASS node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      maintainability_score: "8.5/10"
+      type_debt_counts:
+        new_any: 0
+        new_cast: 0
+        new_type_ignore: 0
+      comments_added_or_changed: "None."
+      anti_patterns_avoided:
+        - "No second runtime-path owner."
+        - "No router handler or transaction changes."
+        - "No run-contract model duplication."
+        - "No frontend, cleanup, typed JSONB, AI Builder, or idempotency broadening."
+      summary: "Published runtime now exposes grouped review checkpoint path templates. The consumer contract tests prove external clients can discover runtime paths, fetch run contract, create/poll runs, fetch step output/evidence, and drive review active/edit/approve/resume through HTTP-discovered templates."
+
+  - id: T020
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Run Claude/Codex commit gate on T006 public API golden journey before local commit."
+    inputs:
+      - "T006 receipt"
+      - "Current diff"
+      - "Verification output"
+    constraints:
+      - "Do not implement unless Claude finds a concrete blocker that can be fixed within T006 allowed files."
+      - "Use Claude peer loop with a timeout longer than 10 minutes."
+      - "Iterate until Claude gives GREEN_LIGHT yes or document evidence-backed disagreement."
+      - "Review maintainability, canonical runtime-path ownership, API consumer DX, OpenAPI quality, strict typing, error handling, test quality, and regression risk."
+      - "Prefer long-term maintainability and reliability over quick fixes."
+      - "If a difficult implementation or API-shape choice appears, ask Claude for a second opinion before deciding."
+      - "Commit locally only after green; do not push."
+      - "Commit subject must be concise, human-readable, and avoid internal planning vocabulary."
+    expected_output:
+      - "green | changes_required | blocked"
+      - "Whether to commit."
+      - "Recommended human-readable commit subject if green."
+      - "Residual risks and next slice recommendation."
+    receipt:
+      result: done
+      verdict: green
+      decision: "Commit the T006 implementation locally with subject 'Publish review checkpoint runtime paths'."
+      claude_artifact: ".codex/artifacts/claude-peer-loop-t006-public-api-golden-journey-commit-gate-20260511T004802Z.md"
+      green_light: true
+      min_score: 8
+      recommended_commit_subject: "Publish review checkpoint runtime paths"
+      accepted_followups:
+        - "Queue, but do not block this commit on, a structural route-template parity test for runtime_paths if future runtime path fields are added."
+        - "Queue a later API-shape decision on whether cancel, rerun, and redispatch should also be advertised in the published runtime projection."
+      summary: "Claude approved the additive runtime-path contract as a clean API-consumer improvement with clear ownership in FlowRuntimePathsPublic and FlowAssembler.to_runtime_public. No blockers. Stage only T006 files and keep unrelated dirty files unstaged."
 
   - id: T011
     type: scout
     assignee: Scout
-    status: queued
+    status: active
     reasoning_hint: medium
     objective: "Map frontend-visible Flow error states after the public API golden journey identifies backend error contracts."
     inputs:

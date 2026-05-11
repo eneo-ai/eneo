@@ -118,6 +118,7 @@ REQUIRED_PATHS: dict[str, set[str]] = {
 REQUIRED_SCHEMAS = {
     "FlowInputPolicyPublic",
     "FlowRuntimePublic",
+    "FlowReviewCheckpointRuntimePathsPublic",
     "FlowRunContractPublic",
     "FlowRunStepRerunRequest",
     "FlowRunStepRerunResponse",
@@ -607,6 +608,31 @@ def test_openapi_run_contract_guides_consumer_forms_uploads_and_review(
     assert "review screens" in run_contract["steps_requiring_review"]["description"]
     assert "Review behavior" in review_step["review_mode"]["description"]
     assert "output contract" in review_step["output_contract"]["description"]
+
+
+def test_openapi_runtime_paths_expose_review_checkpoint_templates(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    runtime_paths = schemas.get("FlowRuntimePathsPublic", {}).get("properties", {})
+
+    review_paths_ref = runtime_paths["review_checkpoints"]
+    review_paths = _resolve_component_ref(openapi_spec, review_paths_ref)
+    review_properties = review_paths.get("properties", {})
+
+    assert review_paths.get("title") == "FlowReviewCheckpointRuntimePathsPublic"
+    assert {
+        "active_template",
+        "edit_template",
+        "approve_template",
+        "reject_template",
+        "resume_template",
+    } <= set(review_properties)
+    assert "{run_id}" in review_properties["active_template"]["description"]
+    assert "{checkpoint_id}" in review_properties["edit_template"]["description"]
+    assert "{checkpoint_id}" in review_properties["approve_template"]["description"]
+    assert "{checkpoint_id}" in review_properties["reject_template"]["description"]
+    assert "{checkpoint_id}" in review_properties["resume_template"]["description"]
 
 
 def test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients(

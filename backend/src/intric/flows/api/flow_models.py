@@ -118,6 +118,13 @@ FLOW_RUNTIME_PUBLIC_EXAMPLE: dict[str, Any] = {
         "upload_step_runtime_file_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/steps/{step_id}/runtime-files/",
         "create_run": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
         "list_runs": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
+        "review_checkpoints": {
+            "active_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/active/",
+            "edit_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/",
+            "approve_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
+            "reject_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
+            "resume_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
+        },
         "get_graph_for_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/?run_id={run_id}",
         "get_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/",
         "list_steps_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/",
@@ -491,6 +498,45 @@ class FlowPublic(FlowSparsePublic):
     steps: list[FlowStepPublic]
 
 
+class FlowReviewCheckpointRuntimePathsPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    active_template: str = Field(
+        description=(
+            "GET template for the active review checkpoint on a run. Replace "
+            "`{run_id}` with the run id returned by create_run."
+        )
+    )
+    edit_template: str = Field(
+        description=(
+            "PATCH template for submitting a full corrected checkpoint payload. "
+            "Replace `{run_id}` and `{checkpoint_id}` with values returned by "
+            "create_run and active checkpoint polling."
+        )
+    )
+    approve_template: str = Field(
+        description=(
+            "POST template for approving a checkpoint. Replace `{run_id}` and "
+            "`{checkpoint_id}` with values returned by create_run and active "
+            "checkpoint polling."
+        )
+    )
+    reject_template: str = Field(
+        description=(
+            "POST template for rejecting a checkpoint. Replace `{run_id}` and "
+            "`{checkpoint_id}` with values returned by create_run and active "
+            "checkpoint polling."
+        )
+    )
+    resume_template: str = Field(
+        description=(
+            "POST template for resuming a run after checkpoint approval. Replace "
+            "`{run_id}` and `{checkpoint_id}` with values returned by create_run "
+            "and active checkpoint polling."
+        )
+    )
+
+
 class FlowRuntimePathsPublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -501,6 +547,13 @@ class FlowRuntimePathsPublic(BaseModel):
     upload_step_runtime_file_template: str
     create_run: str
     list_runs: str
+    review_checkpoints: FlowReviewCheckpointRuntimePathsPublic = Field(
+        description=(
+            "Review checkpoint path templates for human-in-loop clients. These "
+            "templates let web apps discover active checkpoint, edit, approve, "
+            "reject, and resume URLs before a run reaches awaiting_review."
+        )
+    )
     get_graph_for_run_template: str
     get_run_template: str
     list_steps_template: str

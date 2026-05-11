@@ -4,6 +4,7 @@ from typing import Any, Sequence
 
 from intric.flows.api.flow_models import (
     FlowPublic,
+    FlowReviewCheckpointRuntimePathsPublic,
     FlowRunPublic,
     FlowRunReviewCheckpointPublic,
     FlowRunReviewCheckpointResumeResponse,
@@ -79,6 +80,28 @@ class FlowAssembler:
             ),
             create_run=f"/api/v1/flows/{flow_id}/runs/",
             list_runs=f"/api/v1/flows/{flow_id}/runs/",
+            review_checkpoints=FlowReviewCheckpointRuntimePathsPublic(
+                active_template=(
+                    f"/api/v1/flows/{flow_id}/runs/{{run_id}}/"
+                    "review-checkpoints/active/"
+                ),
+                edit_template=(
+                    f"/api/v1/flows/{flow_id}/runs/{{run_id}}/"
+                    "review-checkpoints/{checkpoint_id}/"
+                ),
+                approve_template=(
+                    f"/api/v1/flows/{flow_id}/runs/{{run_id}}/"
+                    "review-checkpoints/{checkpoint_id}/approve/"
+                ),
+                reject_template=(
+                    f"/api/v1/flows/{flow_id}/runs/{{run_id}}/"
+                    "review-checkpoints/{checkpoint_id}/reject/"
+                ),
+                resume_template=(
+                    f"/api/v1/flows/{flow_id}/runs/{{run_id}}/"
+                    "review-checkpoints/{checkpoint_id}/resume/"
+                ),
+            ),
             get_graph_for_run_template=f"/api/v1/flows/{flow_id}/graph/?run_id={{run_id}}",
             get_run_template=f"/api/v1/flows/{flow_id}/runs/{{run_id}}/",
             list_steps_template=f"/api/v1/flows/{flow_id}/runs/{{run_id}}/steps/",
