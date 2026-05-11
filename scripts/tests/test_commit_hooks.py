@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 import unittest
@@ -13,12 +14,18 @@ PRE_PUSH_CHECK = REPO_ROOT / "scripts" / "pre_push_check.py"
 ROUTE_METADATA_CHECK = REPO_ROOT / "scripts" / "check_route_metadata.py"
 
 
-def run_script(script: Path, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+def run_script(
+    script: Path,
+    *args: str,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["python3", str(script), *args],
         text=True,
         capture_output=True,
         cwd=str(cwd) if cwd else None,
+        env=env,
         check=False,
     )
 
@@ -92,6 +99,7 @@ class CommitHookTests(unittest.TestCase):
         root = self.make_repo()
         (root / ".gitignore").write_text("", encoding="utf-8")
         target = root / "backend" / "src" / "intric" / "pattern_demo.py"
+        # Keep the scanner test fixture out of CodeQL/secret-scanning literals.
         candidate = "".join(["gh", "p_", "a" * 30])
         target.write_text(f'value = "{candidate}"\n', encoding="utf-8")
         subprocess.run(["git", "add", str(target.relative_to(root))], cwd=root, check=True, capture_output=True, text=True)
@@ -104,6 +112,7 @@ class CommitHookTests(unittest.TestCase):
         root = self.make_repo()
         (root / ".gitignore").write_text("", encoding="utf-8")
         target = root / "backend" / "src" / "intric" / "anthropic_pattern_demo.py"
+        # Keep the scanner test fixture out of CodeQL/secret-scanning literals.
         candidate = "".join(["sk", "-ant-api03-", "a" * 40])
         target.write_text(f'value = "{candidate}"\n', encoding="utf-8")
         subprocess.run(["git", "add", str(target.relative_to(root))], cwd=root, check=True, capture_output=True, text=True)
@@ -122,6 +131,85 @@ class CommitHookTests(unittest.TestCase):
         result = run_script(PRE_PUSH_CHECK, cwd=root)
         self.assertEqual(result.returncode, 2)
         self.assertIn("refusing direct push from protected branch", result.stderr)
+
+    def test_pre_push_check_does_not_run_heavy_backend_or_frontend_checks(self) -> None:
+        root = self.make_repo()
+        bin_dir = root / "bin"
+        marker = root / "heavy-check-ran"
+        bin_dir.mkdir()
+        # Extend this shadow list if pre-push grows another full-stack local check.
+        for executable in ("bash", "bun"):
+            candidate = bin_dir / executable
+            candidate.write_text(
+                f"#!/usr/bin/env sh\nprintf '%s\\n' {executable} > {marker}\nexit 99\n",
+                encoding="utf-8",
+            )
+            candidate.chmod(0o755)
+
+        readme = root / "README.md"
+        readme.write_text("hello\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=root, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "commit", "-m", "docs: seed"], cwd=root, check=True, capture_output=True, text=True)
+
+        backend_source = root / "backend" / "src" / "intric" / "service.py"
+        frontend_source = root / "frontend" / "apps" / "web" / "src" / "page.ts"
+        backend_source.write_text("VALUE = 1\n", encoding="utf-8")
+        frontend_source.write_text("export const value = 1;\n", encoding="utf-8")
+        subprocess.run(
+            [
+                "git",
+                "add",
+                str(backend_source.relative_to(root)),
+                str(frontend_source.relative_to(root)),
+            ],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(["git", "commit", "-m", "feat: add source files"], cwd=root, check=True, capture_output=True, text=True)
+
+        env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+        result = run_script(PRE_PUSH_CHECK, cwd=root, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(marker.exists(), result.stderr)
+
+    def test_pre_push_check_runs_route_metadata_for_router_changes(self) -> None:
+        root = self.make_repo()
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "check_route_metadata.py").write_text(
+            ROUTE_METADATA_CHECK.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+
+        readme = root / "README.md"
+        readme.write_text("hello\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=root, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "commit", "-m", "docs: seed"], cwd=root, check=True, capture_output=True, text=True)
+
+        router = root / "backend" / "src" / "intric" / "demo_router.py"
+        router.write_text(
+            "@router.post(\n"
+            '    "/demo",\n'
+            "    response_model=DemoResponse,\n"
+            ")\n"
+            "async def create_demo():\n"
+            "    return {}\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            ["git", "add", "scripts/check_route_metadata.py", str(router.relative_to(root))],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(["git", "commit", "-m", "feat: add demo route"], cwd=root, check=True, capture_output=True, text=True)
+
+        result = run_script(PRE_PUSH_CHECK, cwd=root)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("route decorator missing description, responses", result.stderr)
 
     def test_route_metadata_check_flags_missing_fields_on_mutation_routes(self) -> None:
         root = self.make_repo()

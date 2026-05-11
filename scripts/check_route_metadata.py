@@ -10,7 +10,9 @@ from pathlib import Path
 ROUTE_START_RE = re.compile(
     r"^(\s*)@[A-Za-z_][A-Za-z0-9_]*\.(get|post|put|patch|delete)\("
 )
-ROUTER_FILE_RE = re.compile(r"(?:^|/)(?:routes|routes/.*|[^/]*router)\.py$")
+ROUTER_FILE_RE = re.compile(
+    r"(?:^|/)backend/src/(?:.*/)?(?:routes|routes/.*|[^/]*router)\.py$"
+)
 HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
 

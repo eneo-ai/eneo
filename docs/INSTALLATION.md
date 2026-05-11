@@ -218,12 +218,14 @@ This enables:
 
 - staged-file preflight checks before commit
 - commit-message validation
-- push-time branch safety and final local checks
+- push-time branch safety and route metadata checks when route files changed
 
-The pre-push checks only run the heavier backend or frontend checks when files in
-those areas changed. For a WIP push or a CI rerun where you intentionally want to
-skip local hooks, use `git push --no-verify`; do not use it to bypass a real
-failure before opening or merging a PR.
+Full backend, frontend, test, and Docker validation runs in CI. The local
+pre-push hook stays intentionally light so WIP pushes do not wait on the same
+checks twice. For a WIP push or a CI rerun on a feature branch where you
+intentionally want to skip local hooks, use `git push --no-verify`; do not use it
+to bypass a real failure before opening or merging a PR, and do not use it for
+protected branches such as `develop` or `main`.
 
 ### Testing Your Changes
 

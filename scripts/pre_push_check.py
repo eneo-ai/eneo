@@ -40,6 +40,8 @@ def repo_root() -> Path:
 
 
 def diff_base(repo: Path) -> str:
+    # A configured upstream is the normal feature-branch case; the fallbacks keep
+    # the hook useful in freshly-created local repos and test fixtures.
     upstream = subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
         text=True,
@@ -116,22 +118,12 @@ def main() -> int:
         print("[pre-push] no branch-local file changes detected.", file=sys.stderr)
         return 0
 
-    backend_changed = any(path.startswith("backend/src/intric/") for path in paths)
-    frontend_changed = any(path.startswith("frontend/apps/web/src/") for path in paths)
     router_paths = [
         path for path in paths if path.startswith("backend/src/") and is_router_file_path(path)
     ]
     router_changed = bool(router_paths)
 
     try:
-        if backend_changed:
-            run_check(
-                "backend pyright",
-                ["bash", "backend/scripts/run_pyright_in_devcontainer.sh"],
-                root,
-            )
-        if frontend_changed:
-            run_check("frontend check", ["bun", "run", "check"], root / "frontend")
         if router_changed:
             run_check(
                 "route metadata",

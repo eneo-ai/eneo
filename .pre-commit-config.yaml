@@ -15,13 +15,11 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.12.3
     hooks:
-      # Lint using project configuration (pyproject.toml)
       - id: ruff-check
         name: ruff
         args: [--fix]
         stages: [pre-commit]
         files: ^backend/
-      # Auto-format Python with ruff format (Python equivalent of prettier).
       # Alembic migrations are excluded — they are historical artifacts that
       # should not change after being deployed (whitespace churn breaks
       # git blame / bisect on schema history).
@@ -31,22 +29,12 @@ repos:
         files: ^backend/.*\.py$
         exclude: ^backend/alembic/
 
-  # Pyright type checking via devcontainer
   - repo: local
     hooks:
       - id: commit-preflight
         name: commit-preflight
         entry: python3 scripts/commit_preflight.py
         language: system
-        pass_filenames: false
-        stages: [pre-commit]
-
-      - id: pyright
-        name: pyright
-        entry: bash backend/scripts/run_pyright_in_devcontainer.sh
-        language: system
-        types: [python]
-        files: ^backend/src/intric/
         pass_filenames: false
         stages: [pre-commit]
 
