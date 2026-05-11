@@ -86,7 +86,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T059
+active_task: T060
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -3732,7 +3732,7 @@ tasks:
   - id: T059
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Perform the final local tranche audit and decide whether to mark the current tranche complete, activate a next major lane, or stop for owner direction."
     inputs:
@@ -3751,6 +3751,50 @@ tasks:
       - "Maintainability improvement summary."
       - "Remaining required work vs non-blocking follow-ups."
       - "Next active task if not completing the goal."
+    receipt:
+      result: done
+      note: "notes/T059-final-local-tranche-audit.md"
+      decision: "Mark the current tranche complete, keep the broader goal open, and activate T060 for live AI Builder smoke readiness."
+      tranche_complete: true
+      goal_complete: false
+      summary: "The current backend-first maintainability tranche is complete after the T058 host Claude green-light, but the broader goal remains open because live AI Builder material-efficiency smoke evidence is still environment-dependent."
+      maintainability_improvement:
+        - "Runtime lifecycle/API P0 fixes are committed and backed by behavior tests."
+        - "Public API golden journey and frontend-visible stable error mapping are committed."
+        - "Typed metadata/published-definition boundaries use unversioned human-readable names in source."
+        - "Pre-production cleanup removed stale nullable result/file-row behavior without compatibility branches."
+        - "Remaining P2/API-doc/comment/smoke follow-ups are explicit and non-blocking for this tranche."
+      required_next_work:
+        - "Scout whether live AI Builder material-efficiency smoke can run in the current local environment."
+      non_blocking_followups:
+        - "review-edit-openapi-error-examples."
+        - "review-edit-validator-callback-followup."
+        - "comments-ai-slop-audit."
+        - "Per-field frontend context for flow_published_form_schema_invalid, if product asks for field-level guidance."
+        - "Exact-message frontend mapper assertions."
+      next_task: T060
+
+  - id: T060
+    type: scout
+    assignee: Scout
+    status: active
+    reasoning_hint: medium
+    objective: "Check whether live AI Builder material-efficiency smoke can run in the current local environment, and either run it or record the exact blocker."
+    inputs:
+      - "T049 AI Builder material-efficiency Scout receipt."
+      - "T057 phase-boundary deferrals."
+      - "Current local API/server/container state."
+    constraints:
+      - "Do not modify source or tests."
+      - "Do not invent fake smoke proof if API/server credentials are unavailable."
+      - "Use existing repo scripts or documented commands if present; do not create a new smoke harness in Scout."
+      - "Preserve unrelated dirty files."
+    expected_output:
+      - "Local API/server available yes/no."
+      - "Required credentials available yes/no."
+      - "Existing smoke/eval command candidates."
+      - "Smoke run results or exact blocker."
+      - "Decision: activate Worker, record blocked, or ask owner for credentials."
     receipt: null
 
 validation_command_candidates:
