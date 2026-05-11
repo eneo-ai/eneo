@@ -133,22 +133,6 @@ class SitemapSpider(scrapy.spiders.SitemapSpider):  # type: ignore[attr-defined]
 
         super().__init__(*args, **kwargs)  # pyright: ignore[reportUnknownMemberType]  # Scrapy spider __init__ is untyped
 
-    def sitemap_filter(
-        self,
-        entries: Iterable[dict[str, object]],
-    ) -> Iterator[dict[str, object]]:
-        if getattr(entries, "type", None) != "urlset":
-            yield from entries
-            return
-
-        for entry in entries:
-            retained_url = self._source_retained_url_for_entry(entry)
-            if retained_url is None:
-                yield entry
-                continue
-
-            self._mark_source_retained_url(retained_url)
-
     @override
     def parse(self, response: Response):
         return parse_response(response)
@@ -175,7 +159,7 @@ class SitemapSpider(scrapy.spiders.SitemapSpider):  # type: ignore[attr-defined]
         sitemap = _Sitemap(cast(str, body))
         if sitemap.type == "sitemapindex":
             for loc in _iter_sitemap_locs(
-                self.sitemap_filter(sitemap),
+                sitemap,
                 include_alternate=self.sitemap_alternate_links,
             ):
                 if any(pattern.search(loc) for pattern in self._follow):

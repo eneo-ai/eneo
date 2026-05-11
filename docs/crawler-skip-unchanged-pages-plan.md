@@ -26,6 +26,9 @@ Purpose: reduce embedding-token spend and database churn for scheduled website c
 - [x] Source-retained timeout salvage: timeouts with retained sitemap output now yield partial crawl output instead of failing as empty crawls.
 - [x] Partial crawls skip stale-blob cleanup, because a timeout means the source frontier may be incomplete.
 - [x] Mixed source-retention visibility: crawl runs now expose `pages_source_retained`, and crawl history shows retained unchanged pages alongside fetched pages.
+- [x] DB-backed `CrawlRunRepository` round-trip coverage for `pages_source_retained`.
+- [x] Mixed crawl-history labels now render fetched/succeeded/retained/failed states in a clearer scan order.
+- [x] Custom Scrapy sitemap parser override reviewed against installed Scrapy 2.11.2 and official Scrapy docs; keep it narrow because public `sitemap_filter()` can filter request entries but cannot emit cleanup-visible retained feed items.
 - [x] Targeted tests, strict pyright, ruff, and regression validation.
 - [x] Claude peer-loop implementation review.
 - [x] Local commit only; do not push from this branch.
@@ -50,7 +53,8 @@ Sources used in this plan:
 - `improve-codebase-architecture` skill: Module, Interface, Implementation, Depth, Seam, Adapter, Leverage, and Locality vocabulary. No repo `CONTEXT.md` or ADR folder was found in this checkout, so this review is code-evidence based.
 - Host Claude peer-loop wrapper, `claude-opus-4-7`, `xhigh`, blocking skepticism.
 - ChatGPT Extended Pro review supplied by the user.
-- Scrapy official documentation for `HttpCacheMiddleware`, `RFC2616Policy`, `SitemapSpider.sitemap_filter()`, and `JOBDIR`/dupefilter persistence.
+- Scrapy official documentation for `HttpCacheMiddleware`, `RFC2616Policy`, `SitemapSpider.sitemap_filter()`, `FEEDS.item_classes`, and `JOBDIR`/dupefilter persistence.
+- Installed Scrapy 2.11.2 source for `SitemapSpider.sitemap_filter()` and `_parse_sitemap()`.
 
 Claude artifact:
 
@@ -70,6 +74,8 @@ Claude artifact:
 - `.codex/artifacts/claude-peer-loop-crawler-skip-timeout-salvage-implementation-review-20260511T181125Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-skip-retained-count-contract-plan-20260511T181636Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-skip-retained-count-implementation-review-20260511T182727Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-skip-high-roi-continuation-plan-20260511T183836Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-skip-high-roi-continuation-implementation-review-20260511T184817Z.md`
 
 Claude loop summary:
 
@@ -89,6 +95,8 @@ Claude loop summary:
 - Timeout salvage implementation review: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; confirmed `_crawl()` now reads both Scrapy feeds symmetrically and partial crawls skip stale cleanup.
 - Retained-count contract plan review: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; confirmed `pages_source_retained` should be the typed public counter, while `outcome.affected_count` derives from it only for source-retention-only runs.
 - Retained-count implementation review: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; confirmed both public crawl-run models, the required outcome derivation parameter, migration shape, worker write, and frontend mixed-run chip are safe to commit.
+- High-ROI continuation plan review: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 5`; blocker found URLSET retention duplicated between the public `sitemap_filter()` test path and the live `_parse_sitemap()` production path.
+- High-ROI continuation implementation review: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; confirmed the redundant URLSET `sitemap_filter()` branch is removed, tests now exercise `_parse_sitemap()`, repository round-trip coverage includes `pages_source_retained` and `outcome_code`, and mixed crawl-history labels are safe to commit.
 
 Claude agreed with the core architecture:
 
@@ -1218,10 +1226,27 @@ bun eslint 'src/routes/(app)/spaces/[spaceId]/knowledge/websites/WebsiteStatus.s
 bun run check
 ```
 
+Completed continuation validation:
+
+```bash
+uv run ruff check src/intric/crawler/spiders/sitemap_spider.py src/intric/crawler/crawler.py tests/unittests/crawler/test_sitemap_lastmod_skip.py tests/integration/test_crawl_run_repository.py
+uv run pyright --project pyrightconfig.json src/intric/crawler/spiders/sitemap_spider.py src/intric/crawler/crawler.py tests/unittests/crawler/test_sitemap_lastmod_skip.py tests/integration/test_crawl_run_repository.py
+set -a; source .env.template; set +a; uv run pytest tests/unittests/crawler/test_sitemap_lastmod_skip.py tests/unittests/crawler/test_crawler_timeout_tenant_aware.py::TestScrapyHttpCacheSettings tests/integration/test_crawl_run_repository.py -q
+```
+
+Completed continuation frontend validation:
+
+```bash
+bunx prettier --check 'apps/web/src/routes/(app)/spaces/[spaceId]/knowledge/websites/[id]/CrawlResultCell.svelte'
+bun eslint 'src/routes/(app)/spaces/[spaceId]/knowledge/websites/[id]/CrawlResultCell.svelte'
+bun run --filter @intric/web check
+```
+
 Notes:
 
 - Backend targeted tests: 70 passed for the hash/model retention slice.
 - Backend crawler/source-skip hardening tests: 138 passed across crawler, crawler retry, persistence, crawl outcome, and tenant crawler settings tests.
+- Backend continuation tests: 11 passed across sitemap source-retention, Scrapy HTTP cache settings, and crawl-run repository persistence.
 - Backend strict pyright: 0 errors, 0 warnings, 0 informations.
 - Alembic head check: `202605111230 (head)`.
 - `bun run check`: 0 errors, 1 pre-existing warning in `src/lib/features/api-keys/ExtendExpirationDialog.svelte`.
@@ -1297,8 +1322,10 @@ Goal:
 7. Completed source-retained timeout salvage: if Scrapy emits retained sitemap URLs before timing out with zero fetched pages, `_crawl()` treats the retained feed as partial crawl output instead of raising `CrawlTimeoutError`. Partial crawls skip stale cleanup to avoid deleting blobs that the timed-out crawl never reached.
 8. Add a stored processing fingerprint that includes embedding model, chunking version, text-normalization version, and embedding dimensions.
 9. Review broader info-blob tenant-scoping outside the website crawl paths, such as group and integration deletes, as a separate hardening slice.
-10. Completed mixed source-retention visibility: crawls that retain some sitemap URLs and fetch some changed pages now expose `pages_source_retained` through the typed crawl-run contract, and the crawl history result cell renders the retained unchanged-page count.
-11. Revisit the custom `SitemapSpider._parse_sitemap()` implementation after the current branch ships. Prefer Scrapy-owned lifecycle hooks where possible, and keep the current smoke/behavior tests as the guard while this branch needs cleanup-visible retained URL feed items.
+10. Completed mixed source-retention visibility: crawls that retain some sitemap URLs and fetch some changed pages now expose `pages_source_retained` through the typed crawl-run contract, and the crawl history result cell renders the retained unchanged-page count in a clearer total, succeeded, retained, failed order.
+11. Completed DB-backed repository coverage for `pages_source_retained`: `CrawlRunRepository.add()`, `one()`, and `update()` now have integration coverage proving the new counter survives the database boundary.
+12. Completed Scrapy override review: the branch uses Scrapy's sitemap parser utilities for source enumeration and Scrapy `FEEDS.item_classes` for separate retained-output export. The narrow `_parse_sitemap()` mirror remains because Scrapy's public `sitemap_filter()` returns entries for request creation and cannot yield `SourceRetainedUrl` feed items for entries it filters out. The redundant URLSET `sitemap_filter()` override was removed so tests exercise the live parser path instead of a dead branch. Keep the smoke/behavior tests as the guard, and revisit only on Scrapy upgrades or if Scrapy adds a public hook for filtered-entry item emission.
+13. Refresh/generated `@intric/intric-js` OpenAPI types from the backend schema when the normal generation flow is available. Until then, keep frontend casts narrow and local to the same pattern already used for typed outcome fields.
 
 ## Questions For ChatGPT Extended Pro
 

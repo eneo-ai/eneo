@@ -89,7 +89,7 @@
 
   function sourceRetainedCountLabel(count: number): { label: string; color: Label.LabelColor } {
     return {
-      color: "green",
+      color: "blue",
       label: getSourceRetainedLabel(count)
     };
   }
@@ -152,14 +152,12 @@
       <Label.Single capitalize={false} item={sourceRetentionLabel()}></Label.Single>
     {:else}
       <Label.Single capitalize={false} item={totalLabel()}></Label.Single>
-      {#if sourceRetainedPages}
-        <Label.Single
-          capitalize={false}
-          item={sourceRetainedCountLabel(sourceRetainedPages)}
-        ></Label.Single>
-      {/if}
       {#if successPages || successFiles}
         <Label.Single capitalize={false} item={successLabel()}></Label.Single>
+      {/if}
+      {#if sourceRetainedPages}
+        {@const retainedCountLabel = sourceRetainedCountLabel(sourceRetainedPages)}
+        <Label.Single capitalize={false} item={retainedCountLabel}></Label.Single>
       {/if}
       {#if crawl.pages_failed || crawl.files_failed}
         <Label.Single capitalize={false} item={failedLabel()}></Label.Single>

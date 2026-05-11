@@ -45,27 +45,12 @@ class CrawlShutdownError(Exception):
 
 
 class CrawlManager:
-    """Manages a single crawl operation with proper lifecycle control.
+    """Owns one Scrapy crawl lifecycle.
 
-    This class solves the resource leak problem where Scrapy crawlers continue
-    running in Twisted's reactor after timeout. By holding a reference to the
-    crawler instance, we can explicitly stop it when needed.
-
-    The key insight (from GPT-5.2 and Gemini-3-pro-preview consultation):
-    - crochet's EventualResult.wait(timeout) only stops WAITING, not the crawler
-    - Without explicit stop, the crawler keeps running in Twisted's reactor
-    - We must call crawler.stop() INSIDE the reactor thread
-    - We must wait for the crawl deferred to complete before reading results
-
-    Usage:
-        manager = CrawlManager()
-        eventual_result = manager.start_crawl(...)
-        try:
-            eventual_result.wait(timeout=max_length)
-        except TimeoutError:
-            manager.stop_crawl()  # Gracefully stop the crawler
-            if not manager.wait_for_completion():
-                raise CrawlShutdownError(...)  # Don't read incomplete file!
+    A timeout from crochet's `EventualResult.wait()` stops waiting, not the
+    underlying Scrapy crawl. Keep the crawler and Deferred references here so
+    timeout handling can stop the crawler inside Twisted's reactor and wait for
+    feed writes to flush before reading output files.
     """
 
     def __init__(self) -> None:
@@ -75,7 +60,6 @@ class CrawlManager:
         # the Deferred type parameter is Unknown at the boundary.
         self._crawl_deferred: Any = None  # Deferred from Scrapy/Twisted
         self._runner: CrawlerRunner | None = None
-        # Note: _stop_event removed - was unused (set but never waited on)
         self._completion_event = threading.Event()
 
     @crochet.run_in_reactor
