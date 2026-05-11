@@ -86,7 +86,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T058
+active_task: T059
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -3678,7 +3678,7 @@ tasks:
   - id: T058
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Verify and locally commit the T054-T057 cleanup/error-mapping/deferral slice, then run the host Claude phase green-light for tranche completion."
     inputs:
@@ -3698,6 +3698,59 @@ tasks:
       - "Local commit hash."
       - "Claude phase green-light result."
       - "Next task or completion decision."
+    receipt:
+      result: done
+      commit: "59c688d5f0ba5ed37d8bf4d9d7cd0858833c616b"
+      summary: "Verified and locally committed the T054-T057 slice, then ran the host Claude phase green-light with claude-opus-4-7 and xhigh effort."
+      verification:
+        - "PASS cd backend && uv run pytest tests/integration/flows/test_flow_step_file_mapping_contract.py -q -> 4 passed, 16 warnings."
+        - "PASS cd backend && uv run pyright src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_step_file_mapping_contract.py -> 0 errors."
+        - "PASS cd backend && uv run ruff check src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_step_file_mapping_contract.py."
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_step_file_mapping_contract.py."
+        - "PASS cd frontend/apps/web && bunx vitest run src/lib/features/flows/flowRuntimeErrorMapping.test.ts -> 16 tests passed."
+        - "PASS cd frontend/apps/web && bunx eslint src/lib/features/flows/flowRuntimeErrorMapping.ts src/lib/features/flows/flowRuntimeErrorMapping.test.ts."
+        - "PASS cd frontend/apps/web && bunx prettier --check src/lib/features/flows/flowRuntimeErrorMapping.ts src/lib/features/flows/flowRuntimeErrorMapping.test.ts messages/en.json messages/sv.json."
+        - "PASS cd frontend/apps/web && bun run i18n:compile."
+        - "PASS git diff --check."
+        - "PASS node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml."
+        - "PASS rg -n 'class FlowMetadataV1|class FlowFormSchemaV1|class PublishedFlowDefinitionV1|FlowMetadataV1|PublishedFlowDefinitionV1' backend/src/intric/flows -g '*.py' -> no source hits."
+      claude_phase_gate:
+        session: "flow-runtime-maintainability-t058-phase-green-light"
+        artifact: ".codex/artifacts/claude-peer-loop-t058-phase-green-light-20260511T101928Z.md"
+        model: "claude-opus-4-7"
+        effort: "xhigh"
+        verdict: "green"
+        green_light: true
+        min_score: 8
+      claude_non_blocking_followups:
+        - "If product wants per-field guidance for flow_published_form_schema_invalid, extend FlowApiErrorContext with field_index and field_name."
+        - "Later frontend polish can replace not.toBe('fallback') assertions with exact message assertions."
+        - "Keep comments-ai-slop-audit from aging by converting it to a Scout if broad comment issues become concrete."
+      decision: "Proceed to a final local tranche audit/next-lane decision; do not mark the broader goal complete until that audit states no required work remains."
+      next_task: T059
+
+  - id: T059
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Perform the final local tranche audit and decide whether to mark the current tranche complete, activate a next major lane, or stop for owner direction."
+    inputs:
+      - "Goal acceptance criteria."
+      - "Done receipts through T058."
+      - "Claude T058 phase green-light."
+      - "Current dirty worktree."
+    constraints:
+      - "Do not modify source or tests."
+      - "Do not mark the broader goal complete if required live smoke, next-lane selection, or owner direction remains."
+      - "Preserve unrelated dirty files."
+      - "Keep naming guidance unversioned unless a real version contract exists."
+    expected_output:
+      - "Tranche complete yes/no."
+      - "Goal complete yes/no."
+      - "Maintainability improvement summary."
+      - "Remaining required work vs non-blocking follow-ups."
+      - "Next active task if not completing the goal."
     receipt: null
 
 validation_command_candidates:
