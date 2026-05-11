@@ -673,6 +673,23 @@ def test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients(
     assert "typed_io_contract_violation" in edit_400_text
     assert "context.step_id" in edit_400_text
     assert "context.payload_field" in edit_400_text
+    edit_400_examples = edit_400["content"]["application/json"]["examples"]
+    assert {
+        "typed_io_contract_violation",
+        "flow_review_stale_revision",
+    } <= set(edit_400_examples)
+    assert (
+        edit_400_examples["typed_io_contract_violation"]["value"]["code"]
+        == "typed_io_contract_violation"
+    )
+    assert (
+        edit_400_examples["flow_review_stale_revision"]["value"]["code"]
+        == "flow_review_stale_revision"
+    )
+    assert (
+        "actual_revision"
+        in edit_400_examples["flow_review_stale_revision"]["value"]["context"]
+    )
 
 
 def test_openapi_active_review_checkpoint_response_is_nullable(

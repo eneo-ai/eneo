@@ -37,7 +37,7 @@ from intric.flows.application.flow_run_service import FlowRunService
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
-from intric.main.models import OffsetPaginatedResponse
+from intric.main.models import GeneralError, OffsetPaginatedResponse
 from intric.server.dependencies.container import get_container
 
 router = APIRouter()
@@ -158,6 +158,29 @@ checkpoint, step-result projection, or audit state is persisted. Contract failur
 with code `typed_io_contract_violation` and context fields `checkpoint_id`, `step_id`,
 `step_order`, and `payload_field`.
     """
+
+_FLOW_RUN_REVIEW_EDIT_CONTRACT_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Review checkpoint step 1 output: 'summary' is a required property",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": "typed_io_contract_violation",
+    "context": {
+        "checkpoint_id": "7f4f6d62-0e2b-4682-9fa4-f046c3df1b15",
+        "step_id": "3a6610d2-8b8b-4837-b260-8e66d2155405",
+        "step_order": 1,
+        "payload_field": "structured",
+    },
+}
+
+_FLOW_RUN_REVIEW_EDIT_STALE_REVISION_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Review checkpoint was edited by another client. Refetch before editing.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": "flow_review_stale_revision",
+    "context": {
+        "checkpoint_id": "7f4f6d62-0e2b-4682-9fa4-f046c3df1b15",
+        "expected_revision": 2,
+        "actual_revision": 3,
+    },
+}
 
 _FLOW_RUN_REVIEW_APPROVE_DESCRIPTION = """
 Approve the current payload for a human review checkpoint.
@@ -464,24 +487,31 @@ async def get_active_flow_run_review_checkpoint(
     summary="Edit flow run review checkpoint",
     description=_FLOW_RUN_REVIEW_EDIT_DESCRIPTION,
     responses={
-        400: error_response(
-            description=(
+        400: {
+            "model": GeneralError,
+            "description": (
                 "Review edit failed. Representative machine-readable codes include "
                 "typed_io_contract_violation, flow_review_stale_revision, "
                 "flow_review_not_active, and flow_review_step_result_not_found. "
                 "Contract validation errors include context.checkpoint_id, "
                 "context.step_id, context.step_order, and context.payload_field."
             ),
-            message="Review checkpoint step 1 output: 'summary' is a required property",
-            intric_error_code=ErrorCodes.BAD_REQUEST,
-            code="typed_io_contract_violation",
-            context={
-                "checkpoint_id": "7f4f6d62-0e2b-4682-9fa4-f046c3df1b15",
-                "step_id": "3a6610d2-8b8b-4837-b260-8e66d2155405",
-                "step_order": 1,
-                "payload_field": "structured",
+            "content": {
+                "application/json": {
+                    "example": _FLOW_RUN_REVIEW_EDIT_CONTRACT_ERROR_EXAMPLE,
+                    "examples": {
+                        "typed_io_contract_violation": {
+                            "summary": "Edited payload violates the step output contract.",
+                            "value": _FLOW_RUN_REVIEW_EDIT_CONTRACT_ERROR_EXAMPLE,
+                        },
+                        "flow_review_stale_revision": {
+                            "summary": "Checkpoint revision changed before edit.",
+                            "value": _FLOW_RUN_REVIEW_EDIT_STALE_REVISION_ERROR_EXAMPLE,
+                        },
+                    },
+                }
             },
-        ),
+        },
         403: error_response(
             description=_FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="You do not have permission to review flows.",

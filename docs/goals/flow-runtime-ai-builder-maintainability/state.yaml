@@ -86,7 +86,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T061
+active_task: T063
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -3817,7 +3817,7 @@ tasks:
   - id: T061
     type: scout
     assignee: PM
-    status: active
+    status: blocked
     reasoning_hint: low
     objective: "Resume live AI Builder smoke once the owner exports ENEO_LOCAL_API_BASE and ENEO_LOCAL_API_KEY in the shell."
     inputs:
@@ -3843,6 +3843,92 @@ tasks:
         - "docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py reads ENEO_LOCAL_API_KEY or --api-key and sends it as X-API-Key."
         - "POST /api/v1/api-keys requires session authentication plus Permission.API_KEYS, and backend/scripts/test_api_key_regression.py requires an admin bearer token to create test keys."
       decision: "Wait for the owner to export ENEO_LOCAL_API_BASE and ENEO_LOCAL_API_KEY in the shell; do not alias the super key, paste secrets into receipts, or mutate the DB to invent a key."
+      next_task: T062
+
+  - id: T062
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Add worked OpenAPI 400 examples for both review checkpoint edit contract violations and stale revisions."
+    canonical_owner: "backend/src/intric/flows/api/flow_run_execution_router.py owns Flow run review checkpoint route documentation."
+    allowed_files:
+      - "backend/src/intric/flows/api/flow_run_execution_router.py"
+      - "backend/tests/unit/test_flow_openapi_contract.py"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unit/test_flow_openapi_contract.py -q"
+      - "cd backend && uv run pyright src/intric/flows/api/flow_run_execution_router.py tests/unit/test_flow_openapi_contract.py"
+      - "cd backend && uv run ruff check src/intric/flows/api/flow_run_execution_router.py tests/unit/test_flow_openapi_contract.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/api/flow_run_execution_router.py tests/unit/test_flow_openapi_contract.py"
+      - "git diff --check"
+      - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    stop_if:
+      - "The update requires changing runtime review behavior or error codes."
+      - "The update requires a second Flow API error documentation owner."
+      - "The implementation adds compatibility branches, broad Any, casts, type ignores, or restating comments."
+    expected_output:
+      - "Review-edit 400 response documents worked examples for typed_io_contract_violation and flow_review_stale_revision."
+      - "OpenAPI contract test asserts both examples remain present."
+      - "Verification results and local commit."
+    receipt:
+      result: done
+      summary: "Added named OpenAPI 400 examples for review checkpoint edit contract violations and stale revision conflicts while preserving the existing single GeneralError example contract."
+      changed_files:
+        - "backend/src/intric/flows/api/flow_run_execution_router.py"
+        - "backend/tests/unit/test_flow_openapi_contract.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      behavior:
+        - "PATCH /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/ now documents worked examples for typed_io_contract_violation and flow_review_stale_revision."
+        - "The route still exposes the existing single application/json example expected by the broader OpenAPI error-response contract test."
+      verification:
+        - "PASS cd backend && uv run pytest tests/unit/test_flow_openapi_contract.py -q -> 42 passed, 15 warnings."
+        - "PASS cd backend && uv run pyright src/intric/flows/api/flow_run_execution_router.py tests/unit/test_flow_openapi_contract.py -> 0 errors."
+        - "PASS cd backend && uv run ruff check src/intric/flows/api/flow_run_execution_router.py tests/unit/test_flow_openapi_contract.py."
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/api/flow_run_execution_router.py tests/unit/test_flow_openapi_contract.py."
+        - "PASS git diff --check."
+        - "PASS node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml."
+      commands:
+        - "cd backend && uv run pytest tests/unit/test_flow_openapi_contract.py -q"
+        - "cd backend && uv run pyright src/intric/flows/api/flow_run_execution_router.py tests/unit/test_flow_openapi_contract.py"
+        - "cd backend && uv run ruff check src/intric/flows/api/flow_run_execution_router.py tests/unit/test_flow_openapi_contract.py"
+        - "cd backend && uv run ruff format --check src/intric/flows/api/flow_run_execution_router.py tests/unit/test_flow_openapi_contract.py"
+        - "git diff --check"
+        - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      type_debt:
+        new_any: 0
+        new_cast: 0
+        new_type_ignore: 0
+        new_pyright_ignore: 0
+      comments_added_or_changed: 0
+      anti_patterns_avoided:
+        - "No runtime review behavior or error-code change."
+        - "No second Flow API documentation owner."
+        - "No compatibility branch for unshipped Flow behavior."
+        - "No broad Any, casts, type ignores, or restating comments."
+      next_task: T063
+
+  - id: T063
+    type: scout
+    assignee: Scout
+    status: active
+    reasoning_hint: medium
+    objective: "Find whether comments-ai-slop-audit has a low-risk Flow cleanup cluster worth activating next."
+    inputs:
+      - "T057 comments-ai-slop-audit deferral."
+      - "Current Flow runtime/API/AI Builder source comments."
+      - "Current dirty worktree."
+    constraints:
+      - "Read-only except board receipt and optional note under docs/goals/flow-runtime-ai-builder-maintainability/notes/."
+      - "Do not modify source or tests."
+      - "Do not propose a source-wide churn cleanup."
+      - "Only recommend a Worker when the cluster is narrow, reviewable, and behavior-neutral."
+      - "Preserve unrelated dirty files."
+    expected_output:
+      - "Low-risk comment cleanup cluster yes/no."
+      - "File:line evidence for restating, stale, or planning-vocabulary comments."
+      - "Decision: activate narrow Worker, defer, or stop for owner input."
+    receipt: null
 
 validation_command_candidates:
   shared:
