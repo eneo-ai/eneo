@@ -49,17 +49,17 @@ class TestGetTenantSettings:
     """Tests for get_tenant_settings method."""
 
     @pytest.mark.asyncio
-    async def test_returns_settings_from_database(self):
-        """Should fetch and return tenant settings from DB."""
+    async def test_returns_settings_snapshot_from_database(self):
+        """Should fetch tenant overrides and return a settings snapshot."""
         from intric.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
         tenant_id = uuid4()
-        expected_settings = {"crawl_feeder_batch_size": 10}
+        stored_overrides = {"crawl_feeder_batch_size": 10}
 
         # Mock the session and context managers properly
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = expected_settings
+        mock_result.scalar_one_or_none.return_value = stored_overrides
 
         mock_session = MagicMock()
         mock_session.execute = AsyncMock(return_value=mock_result)
@@ -82,11 +82,12 @@ class TestGetTenantSettings:
             manager = CapacityManager(redis_mock)
             result = await manager.get_tenant_settings(tenant_id)
 
-        assert result == expected_settings
+        assert result.get("crawl_feeder_batch_size") == 10
+        assert result.invalid_overrides == ()
 
     @pytest.mark.asyncio
-    async def test_returns_empty_dict_when_no_settings(self):
-        """Should return empty dict when tenant has no settings."""
+    async def test_returns_default_snapshot_when_no_settings(self):
+        """Should return default settings snapshot when tenant has no overrides."""
         from intric.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
@@ -116,11 +117,12 @@ class TestGetTenantSettings:
             manager = CapacityManager(redis_mock)
             result = await manager.get_tenant_settings(tenant_id)
 
-        assert result == {}
+        assert result.get("crawl_feeder_batch_size") is not None
+        assert result.invalid_overrides == ()
 
     @pytest.mark.asyncio
-    async def test_returns_none_on_database_error(self):
-        """Should return None and log warning on DB error."""
+    async def test_returns_default_snapshot_on_database_error(self):
+        """Should return defaults and log warning on DB error."""
         from intric.worker.feeder.capacity import CapacityManager
 
         redis_mock = MagicMock()
@@ -140,7 +142,7 @@ class TestGetTenantSettings:
             manager = CapacityManager(redis_mock)
             result = await manager.get_tenant_settings(tenant_id)
 
-        assert result is None
+        assert result.get("crawl_feeder_batch_size") is not None
 
 
 class TestGetMaxConcurrent:

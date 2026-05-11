@@ -55,3 +55,19 @@ def test_self_service_crawler_settings_update_allows_only_user_safe_settings():
         "obey_robots": True,
         "autothrottle_enabled": False,
     }
+
+
+def test_crawler_setting_literals_match_spec_keys():
+    from typing import get_args
+
+    from intric.tenants.crawler_settings_helper import (
+        CRAWLER_SETTING_SPECS,
+        BoolCrawlerSetting,
+        IntCrawlerSetting,
+    )
+
+    typed_setting_names = set(get_args(IntCrawlerSetting)) | set(
+        get_args(BoolCrawlerSetting)
+    )
+
+    assert typed_setting_names == set(CRAWLER_SETTING_SPECS)

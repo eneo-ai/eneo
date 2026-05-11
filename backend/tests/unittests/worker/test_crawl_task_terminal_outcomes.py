@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -168,6 +169,8 @@ class _FakeContainer:
         "termination_reason",
         "expected_outcome_code",
         "expected_message",
+        "crawler_settings",
+        "expect_invalid_settings_warning",
     ),
     [
         (
@@ -176,6 +179,8 @@ class _FakeContainer:
             "completed",
             CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED,
             "Crawl produced no pages",
+            {"download_timeout": True},
+            True,
         ),
         (
             CrawlType.SITEMAP,
@@ -183,6 +188,8 @@ class _FakeContainer:
             "completed",
             CrawlOutcomeCode.CRAWL_SITEMAP_NO_PAGES,
             "Sitemap crawl produced no pages",
+            {"crawl_heartbeat_interval_seconds": 60},
+            False,
         ),
         (
             CrawlType.SITEMAP,
@@ -190,6 +197,8 @@ class _FakeContainer:
             "timeout",
             CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES,
             "Crawl timed out before collecting pages",
+            {"crawl_heartbeat_interval_seconds": 60},
+            False,
         ),
         (
             CrawlType.CRAWL,
@@ -197,6 +206,8 @@ class _FakeContainer:
             "timeout",
             CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES,
             "Crawl timed out before collecting pages",
+            {"crawl_heartbeat_interval_seconds": 60},
+            False,
         ),
     ],
 )
@@ -207,8 +218,14 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
     termination_reason: CrawlTerminationReason,
     expected_outcome_code: CrawlOutcomeCode,
     expected_message: str,
+    crawler_settings: dict[str, object],
+    expect_invalid_settings_warning: bool,
 ):
-    tenant = SimpleNamespace(id=uuid4(), slug="test", crawler_settings={})
+    tenant = SimpleNamespace(
+        id=uuid4(),
+        slug="test",
+        crawler_settings=crawler_settings,
+    )
     user = SimpleNamespace(id=uuid4())
     website = SimpleNamespace(
         id=uuid4(),
@@ -220,6 +237,7 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
         encrypted_auth_password=None,
         user_id=user.id,
         name="Example",
+        last_source_verified_at=None,
     )
     audit_service = _FakeAuditService()
     container = _FakeContainer(
@@ -269,6 +287,8 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
     monkeypatch.setattr(
         crawl_tasks, "reset_tenant_retry_delay", reset_tenant_retry_delay
     )
+    mock_logger = MagicMock()
+    monkeypatch.setattr(crawl_tasks, "logger", mock_logger)
 
     result = await crawl_tasks.crawl_task(
         job_id=uuid4(),
@@ -307,6 +327,13 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
         "successful": False,
         "outcome_code": expected_outcome_code.value,
     }
+    if expect_invalid_settings_warning:
+        warning_messages = [
+            str(call.args[0]) for call in mock_logger.warning.call_args_list
+        ]
+        assert "Invalid tenant crawler settings ignored; defaults used" in (
+            warning_messages
+        )
 
 
 @pytest.mark.asyncio

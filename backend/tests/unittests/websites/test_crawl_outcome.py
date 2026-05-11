@@ -281,6 +281,22 @@ def test_classify_partial_timeout_with_output_takes_run_level_precedence():
     )
 
 
+def test_classify_partial_timeout_with_embedding_failure_keeps_timeout_precedence():
+    assert (
+        classify_crawl_outcome(
+            crawl_type="sitemap",
+            is_partial=True,
+            termination_reason="timeout",
+            pages_count=3,
+            source_retained_count=0,
+            failure_summary={FailureReason.MISSING_PROVIDER.value: 2},
+            pages_failed=2,
+            files_failed=0,
+        )
+        == CrawlOutcomeCode.CRAWL_PARTIAL_TIMEOUT
+    )
+
+
 def test_classify_source_retention_only():
     assert (
         classify_crawl_outcome(

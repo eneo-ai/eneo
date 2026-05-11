@@ -54,6 +54,7 @@ class Website(Entity):
         size: int,
         latest_crawl: Optional["CrawlRun"],
         last_crawled_at: Optional["datetime"] = None,
+        last_source_verified_at: Optional["datetime"] = None,
         http_auth: Optional[HttpAuthCredentials] = None,
         consecutive_failures: int = 0,
         next_retry_at: Optional["datetime"] = None,
@@ -71,6 +72,7 @@ class Website(Entity):
         self.size = size
         self.latest_crawl = latest_crawl
         self.last_crawled_at = last_crawled_at
+        self.last_source_verified_at = last_source_verified_at
         self.http_auth = http_auth
         self.consecutive_failures = consecutive_failures
         self.next_retry_at = next_retry_at
@@ -216,6 +218,7 @@ class Website(Entity):
             size=0,
             latest_crawl=None,
             last_crawled_at=None,
+            last_source_verified_at=None,
             http_auth=None,
         )
 
@@ -284,6 +287,7 @@ class Website(Entity):
             if latest_crawl
             else None,
             last_crawled_at=record.last_crawled_at,
+            last_source_verified_at=record.last_source_verified_at,
             http_auth=http_auth,
             consecutive_failures=record.consecutive_failures,
             next_retry_at=record.next_retry_at,

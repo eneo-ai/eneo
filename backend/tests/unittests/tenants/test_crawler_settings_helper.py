@@ -10,6 +10,7 @@ import pytest
 
 from intric.tenants.crawler_settings_helper import (
     CRAWLER_SETTING_SPECS,
+    TenantCrawlerSettings,
     get_all_crawler_settings,
     get_crawler_setting,
     validate_crawler_setting,
@@ -136,6 +137,40 @@ class TestGetCrawlerSetting:
             result = get_crawler_setting("crawl_max_length", tenant_settings)
             assert result == 7200
 
+    def test_invalid_tenant_override_falls_back_to_default_in_snapshot(self):
+        tenant_settings = TenantCrawlerSettings.from_overrides(
+            {"download_timeout": True, "retry_times": 4}
+        )
+
+        assert get_crawler_setting("download_timeout", tenant_settings) == 90
+        assert get_crawler_setting("retry_times", tenant_settings) == 4
+        assert [override.name for override in tenant_settings.invalid_overrides] == [
+            "download_timeout"
+        ]
+        assert "must be int" in tenant_settings.invalid_overrides[0].reason
+
+    def test_invalid_tenant_override_logs_structured_warning(self):
+        tenant_settings = TenantCrawlerSettings.from_overrides(
+            {"download_timeout": True}
+        )
+        logger = MagicMock()
+
+        tenant_settings.warn_invalid_overrides(
+            logger,
+            tenant_id="tenant-id",
+            website_id="website-id",
+        )
+
+        logger.warning.assert_called_once()
+        _, kwargs = logger.warning.call_args
+        assert kwargs["extra"]["tenant_id"] == "tenant-id"
+        assert kwargs["extra"]["website_id"] == "website-id"
+        assert kwargs["extra"]["invalid_setting_names"] == ["download_timeout"]
+        assert (
+            kwargs["extra"]["metric_name"]
+            == "crawler.settings.invalid_overrides_ignored"
+        )
+
     def test_sitemap_lastmod_skip_setting_defaults_to_environment(self):
         with patch("intric.tenants.crawler_settings_helper.get_settings") as mock:
             mock_settings = MagicMock()
@@ -151,6 +186,19 @@ class TestGetCrawlerSetting:
             get_crawler_setting(
                 "crawl_sitemap_lastmod_skip_enabled",
                 {"crawl_sitemap_lastmod_skip_enabled": True},
+            )
+            is True
+        )
+
+    def test_tenant_settings_snapshot_is_supported(self):
+        tenant_settings = TenantCrawlerSettings.from_overrides(
+            {"crawl_sitemap_lastmod_skip_enabled": True}
+        )
+
+        assert (
+            get_crawler_setting(
+                "crawl_sitemap_lastmod_skip_enabled",
+                tenant_settings,
             )
             is True
         )
@@ -201,6 +249,8 @@ class TestGetAllCrawlerSettings:
             mock_settings.crawl_feeder_interval_seconds = 10
             mock_settings.crawl_feeder_batch_size = 10
             mock_settings.crawl_job_max_age_seconds = 1800
+            mock_settings.tenant_worker_semaphore_ttl_seconds = 18000
+            mock_settings.crawl_page_batch_size = 100
             mock_settings.crawl_sitemap_lastmod_skip_enabled = False
             mock.return_value = mock_settings
 
@@ -253,6 +303,12 @@ class TestValidateCrawlerSetting:
     def test_wrong_type_returns_error(self):
         """Wrong type returns type error."""
         errors = validate_crawler_setting("download_timeout", "not_an_int")
+        assert len(errors) == 1
+        assert "must be int" in errors[0]
+
+    def test_boolean_is_not_valid_integer_setting(self):
+        errors = validate_crawler_setting("download_timeout", True)
+
         assert len(errors) == 1
         assert "must be int" in errors[0]
 

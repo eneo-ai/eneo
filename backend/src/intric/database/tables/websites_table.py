@@ -59,6 +59,11 @@ class Websites(BasePublic):
     last_crawled_at: Mapped[Optional[datetime]] = mapped_column(
         TIMESTAMP(timezone=True), nullable=True
     )
+    last_source_verified_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="Last complete sitemap crawl with no page persistence failures",
+    )
 
     # HTTP Basic Auth fields (all nullable - feature is optional)
     http_auth_username: Mapped[Optional[str]] = mapped_column(

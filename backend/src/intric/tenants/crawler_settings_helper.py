@@ -9,15 +9,19 @@ It defines types, validation ranges, defaults, and descriptions.
 All consumers (tenant.py validator, router Pydantic model) should import from here.
 """
 
-from typing import Any, Literal, TypeVar, overload
+from collections.abc import Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Any, Literal, TypeVar, cast, get_args, overload
+from uuid import UUID
 
 from intric.main.config import get_settings
 
 T = TypeVar("T")
+CrawlerSettingValue = int | bool
 
 # Setting names grouped by their declared spec type. Keep in sync with
-# CRAWLER_SETTING_SPECS below — there is a unit-style assertion at module
-# import time that catches drift.
+# CRAWLER_SETTING_SPECS below.
 IntCrawlerSetting = Literal[
     "crawl_max_length",
     "download_timeout",
@@ -178,6 +182,91 @@ CRAWLER_SETTING_SPECS: dict[str, dict[str, Any]] = {
 }
 
 
+def _typed_setting_names() -> set[str]:
+    return set(get_args(IntCrawlerSetting)) | set(get_args(BoolCrawlerSetting))
+
+
+if _typed_setting_names() != set(CRAWLER_SETTING_SPECS):
+    raise RuntimeError("Crawler setting Literal names must match CRAWLER_SETTING_SPECS")
+
+
+@dataclass(frozen=True, slots=True)
+class InvalidCrawlerSettingOverride:
+    name: str
+    value: object
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class TenantCrawlerSettings:
+    values: Mapping[str, CrawlerSettingValue]
+    invalid_overrides: tuple[InvalidCrawlerSettingOverride, ...] = ()
+
+    def get(self, setting_name: str) -> CrawlerSettingValue | None:
+        return self.values.get(setting_name)
+
+    def as_dict(self) -> dict[str, CrawlerSettingValue]:
+        return dict(self.values)
+
+    def warn_invalid_overrides(
+        self,
+        logger: Any,
+        *,
+        tenant_id: UUID | str,
+        website_id: UUID | str | None = None,
+    ) -> None:
+        if not self.invalid_overrides:
+            return
+
+        extra: dict[str, object] = {
+            "tenant_id": str(tenant_id),
+            "invalid_setting_names": [
+                override.name for override in self.invalid_overrides
+            ],
+            "invalid_setting_count": len(self.invalid_overrides),
+            "metric_name": "crawler.settings.invalid_overrides_ignored",
+            "metric_value": len(self.invalid_overrides),
+        }
+        if website_id is not None:
+            extra["website_id"] = str(website_id)
+
+        logger.warning(
+            "Invalid tenant crawler settings ignored; defaults used",
+            extra=extra,
+        )
+
+    @classmethod
+    def from_overrides(
+        cls,
+        overrides: Mapping[str, object] | None,
+    ) -> "TenantCrawlerSettings":
+        values = _default_crawler_setting_values()
+        invalid_overrides: list[InvalidCrawlerSettingOverride] = []
+
+        if overrides:
+            for setting_name, value in overrides.items():
+                errors = validate_crawler_setting(setting_name, value)
+                if errors:
+                    invalid_overrides.append(
+                        InvalidCrawlerSettingOverride(
+                            name=setting_name,
+                            value=value,
+                            reason="; ".join(errors),
+                        )
+                    )
+                    continue
+
+                if setting_name in CRAWLER_SETTING_SPECS and isinstance(
+                    value, (int, bool)
+                ):
+                    values[setting_name] = value
+
+        return cls(
+            values=MappingProxyType(values),
+            invalid_overrides=tuple(invalid_overrides),
+        )
+
+
 def _get_setting_default(setting_name: str, spec: dict[str, Any]) -> Any:
     """Get the default value for a setting from env or hardcoded default."""
     # If spec has hardcoded default, use it
@@ -192,31 +281,50 @@ def _get_setting_default(setting_name: str, spec: dict[str, Any]) -> Any:
     raise KeyError(f"Setting {setting_name} has no default or env_attr defined")
 
 
+def _is_valid_setting_type(*, expected_type: type, value: object) -> bool:
+    if expected_type is int:
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected_type is bool:
+        return isinstance(value, bool)
+    return isinstance(value, expected_type)
+
+
+def _default_crawler_setting_values() -> dict[str, CrawlerSettingValue]:
+    values: dict[str, CrawlerSettingValue] = {}
+    for setting_name, spec in CRAWLER_SETTING_SPECS.items():
+        default_value = _get_setting_default(setting_name, spec)
+        if not _is_valid_setting_type(expected_type=spec["type"], value=default_value):
+            raise TypeError(f"Default for {setting_name} must be int or bool")
+        values[setting_name] = cast(CrawlerSettingValue, default_value)
+
+    return values
+
+
 @overload
 def get_crawler_setting(
     setting_name: IntCrawlerSetting,
-    tenant_crawler_settings: dict[str, Any] | None,
+    tenant_crawler_settings: TenantCrawlerSettings | Mapping[str, object] | None,
 ) -> int: ...
 
 
 @overload
 def get_crawler_setting(
     setting_name: BoolCrawlerSetting,
-    tenant_crawler_settings: dict[str, Any] | None,
+    tenant_crawler_settings: TenantCrawlerSettings | Mapping[str, object] | None,
 ) -> bool: ...
 
 
 @overload
 def get_crawler_setting(
     setting_name: str,
-    tenant_crawler_settings: dict[str, Any] | None,
+    tenant_crawler_settings: TenantCrawlerSettings | Mapping[str, object] | None,
     default: T,
 ) -> T: ...
 
 
 def get_crawler_setting(
     setting_name: str,
-    tenant_crawler_settings: dict[str, Any] | None,
+    tenant_crawler_settings: TenantCrawlerSettings | Mapping[str, object] | None,
     default: T | None = None,
 ) -> T | int | bool:
     """
@@ -229,7 +337,7 @@ def get_crawler_setting(
 
     Args:
         setting_name: Name of the setting (e.g., "download_timeout", "crawl_max_length")
-        tenant_crawler_settings: Tenant's crawler_settings dict (from TenantInDB.crawler_settings)
+        tenant_crawler_settings: Tenant settings snapshot or raw stored overrides
         default: Optional fallback if setting not found in either source
 
     Returns:
@@ -240,13 +348,30 @@ def get_crawler_setting(
         tenant = await get_tenant(tenant_id)
         timeout = get_crawler_setting(
             "download_timeout",
-            tenant.crawler_settings,
+            tenant_crawler_settings,
             default=90
         )
     """
-    # Check tenant override first
-    if tenant_crawler_settings and setting_name in tenant_crawler_settings:
-        return tenant_crawler_settings[setting_name]
+    if isinstance(tenant_crawler_settings, TenantCrawlerSettings):
+        value = tenant_crawler_settings.get(setting_name)
+        if value is not None:
+            return value
+
+    # Compatibility path for older non-runtime callers; crawler execution should pass
+    # a TenantCrawlerSettings snapshot so invalid stored overrides fall back once.
+    if (
+        tenant_crawler_settings is not None
+        and not isinstance(tenant_crawler_settings, TenantCrawlerSettings)
+        and setting_name in tenant_crawler_settings
+    ):
+        value = tenant_crawler_settings[setting_name]
+        if setting_name in CRAWLER_SETTING_SPECS:
+            errors = validate_crawler_setting(setting_name, value)
+            if errors:
+                raise ValueError("; ".join(errors))
+            if not isinstance(value, (int, bool)):
+                raise TypeError(f"Setting {setting_name} must be int or bool")
+            return value
 
     # Check if it's a known setting
     if setting_name in CRAWLER_SETTING_SPECS:
@@ -260,27 +385,22 @@ def get_crawler_setting(
 
 
 def get_all_crawler_settings(
-    tenant_crawler_settings: dict[str, Any] | None,
-) -> dict[str, Any]:
+    tenant_crawler_settings: TenantCrawlerSettings | Mapping[str, object] | None,
+) -> dict[str, CrawlerSettingValue]:
     """
     Get all crawler settings merged with defaults.
 
     Args:
-        tenant_crawler_settings: Tenant's crawler_settings dict
+        tenant_crawler_settings: Tenant settings snapshot or raw stored overrides
 
     Returns:
         Complete settings dict with tenant overrides merged with defaults
     """
     # Build defaults from specs
-    result: dict[str, Any] = {}
-    for setting_name, spec in CRAWLER_SETTING_SPECS.items():
-        result[setting_name] = _get_setting_default(setting_name, spec)
+    if isinstance(tenant_crawler_settings, TenantCrawlerSettings):
+        return tenant_crawler_settings.as_dict()
 
-    # Merge tenant overrides
-    if tenant_crawler_settings:
-        result.update(tenant_crawler_settings)
-
-    return result
+    return TenantCrawlerSettings.from_overrides(tenant_crawler_settings).as_dict()
 
 
 def validate_crawler_setting(key: str, value: Any) -> list[str]:
@@ -306,7 +426,7 @@ def validate_crawler_setting(key: str, value: Any) -> list[str]:
     spec = CRAWLER_SETTING_SPECS[key]
     expected_type = spec["type"]
 
-    if not isinstance(value, expected_type):
+    if not _is_valid_setting_type(expected_type=expected_type, value=value):
         errors.append(
             f"Setting {key} must be {expected_type.__name__}, "
             f"got {type(value).__name__}"

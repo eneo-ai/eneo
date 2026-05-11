@@ -523,7 +523,10 @@ class OrphanWatchdog:
         from intric.database.tables.tenant_table import Tenants
         from intric.database.tables.websites_table import CrawlRuns, Websites
         from intric.main.models import Status
-        from intric.tenants.crawler_settings_helper import get_crawler_setting
+        from intric.tenants.crawler_settings_helper import (
+            TenantCrawlerSettings,
+            get_crawler_setting,
+        )
 
         # Safety bounds for threshold (per plan: floor=5, ceiling=60)
         THRESHOLD_FLOOR_MINUTES = 5
@@ -571,11 +574,21 @@ class OrphanWatchdog:
         # Re-queue stuck jobs that meet their tenant's threshold
         rescued_job_ids: list[UUID] = []
         skipped_count = 0
+        invalid_settings_warned_tenant_ids: set[UUID] = set()
         for row in potential_stuck_jobs:
             # Get tenant-specific threshold with bounds
+            tenant_crawler_settings = TenantCrawlerSettings.from_overrides(
+                row.crawler_settings
+            )
+            if row.tenant_id not in invalid_settings_warned_tenant_ids:
+                tenant_crawler_settings.warn_invalid_overrides(
+                    logger,
+                    tenant_id=row.tenant_id,
+                )
+                invalid_settings_warned_tenant_ids.add(row.tenant_id)
             raw_threshold = get_crawler_setting(
                 "queued_stale_threshold_minutes",
-                row.crawler_settings,
+                tenant_crawler_settings,
                 default=stale_threshold_minutes,
             )
             # Apply safety bounds

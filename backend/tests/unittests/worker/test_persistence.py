@@ -344,6 +344,36 @@ class TestCrawlTaskRetentionHelpers:
 
         mock_logger.warning.assert_not_called()
 
+    def test_retained_items_with_unresolved_provider_warn(self, monkeypatch):
+        import intric.worker.crawl_tasks as crawl_tasks
+
+        mock_logger = MagicMock()
+        monkeypatch.setattr(crawl_tasks, "logger", mock_logger)
+        embedding_model = EmbeddingModelSpec(
+            id=uuid4(),
+            name="test-model",
+            litellm_model_name="openai/text-embedding-ada-002",
+            family=None,
+            max_input=8191,
+            max_batch_size=32,
+            dimensions=1536,
+            open_source=False,
+            provider_id=uuid4(),
+            provider_type=None,
+            provider_credentials=None,
+            provider_config=None,
+        )
+
+        crawl_tasks._warn_if_retained_items_without_embedding_config(
+            embedding_model=embedding_model,
+            retained_pages=3,
+            retained_files=1,
+            website_id=uuid4(),
+            tenant_id=uuid4(),
+        )
+
+        mock_logger.warning.assert_called_once()
+
     def test_exception_string_outcome_classifier_is_not_exported(self):
         import pytest
 
@@ -352,33 +382,77 @@ class TestCrawlTaskRetentionHelpers:
                 _crawl_outcome_code_for_exception,  # noqa: F401
             )
 
-    def test_sitemap_lastmod_source_skip_requires_sitemap_previous_crawl_and_setting(
+    def test_sitemap_lastmod_source_skip_requires_sitemap_source_verified_timestamp_and_setting(
         self,
     ):
+        from intric.tenants.crawler_settings_helper import TenantCrawlerSettings
         from intric.websites.domain.crawl_run import CrawlType
         from intric.worker.crawl_tasks import _should_enable_sitemap_lastmod_skip
 
-        last_crawled_at = datetime.now(timezone.utc)
+        last_source_verified_at = datetime.now(timezone.utc)
+        enabled_settings = TenantCrawlerSettings.from_overrides(
+            {"crawl_sitemap_lastmod_skip_enabled": True}
+        )
+        disabled_settings = TenantCrawlerSettings.from_overrides(
+            {"crawl_sitemap_lastmod_skip_enabled": False}
+        )
 
         assert _should_enable_sitemap_lastmod_skip(
             crawl_type=CrawlType.SITEMAP,
-            website_last_crawled_at=last_crawled_at,
-            tenant_crawler_settings={"crawl_sitemap_lastmod_skip_enabled": True},
+            website_last_source_verified_at=last_source_verified_at,
+            tenant_crawler_settings=enabled_settings,
         )
         assert not _should_enable_sitemap_lastmod_skip(
             crawl_type=CrawlType.CRAWL,
-            website_last_crawled_at=last_crawled_at,
-            tenant_crawler_settings={"crawl_sitemap_lastmod_skip_enabled": True},
+            website_last_source_verified_at=last_source_verified_at,
+            tenant_crawler_settings=enabled_settings,
         )
         assert not _should_enable_sitemap_lastmod_skip(
             crawl_type=CrawlType.SITEMAP,
-            website_last_crawled_at=None,
-            tenant_crawler_settings={"crawl_sitemap_lastmod_skip_enabled": True},
+            website_last_source_verified_at=None,
+            tenant_crawler_settings=enabled_settings,
         )
         assert not _should_enable_sitemap_lastmod_skip(
             crawl_type=CrawlType.SITEMAP,
-            website_last_crawled_at=last_crawled_at,
-            tenant_crawler_settings={"crawl_sitemap_lastmod_skip_enabled": False},
+            website_last_source_verified_at=last_source_verified_at,
+            tenant_crawler_settings=disabled_settings,
+        )
+
+    def test_sitemap_source_verified_at_updates_only_after_complete_page_clean_sitemaps(
+        self,
+    ):
+        from intric.websites.domain.crawl_run import CrawlType
+        from intric.worker.crawl_tasks import _should_update_sitemap_source_verified_at
+
+        assert _should_update_sitemap_source_verified_at(
+            crawl_type=CrawlType.SITEMAP,
+            crawl_is_partial=False,
+            pages_failed=0,
+            files_failed=0,
+        )
+        assert not _should_update_sitemap_source_verified_at(
+            crawl_type=CrawlType.SITEMAP,
+            crawl_is_partial=True,
+            pages_failed=0,
+            files_failed=0,
+        )
+        assert not _should_update_sitemap_source_verified_at(
+            crawl_type=CrawlType.SITEMAP,
+            crawl_is_partial=False,
+            pages_failed=1,
+            files_failed=0,
+        )
+        assert not _should_update_sitemap_source_verified_at(
+            crawl_type=CrawlType.SITEMAP,
+            crawl_is_partial=False,
+            pages_failed=0,
+            files_failed=1,
+        )
+        assert not _should_update_sitemap_source_verified_at(
+            crawl_type=CrawlType.CRAWL,
+            crawl_is_partial=False,
+            pages_failed=0,
+            files_failed=0,
         )
 
 

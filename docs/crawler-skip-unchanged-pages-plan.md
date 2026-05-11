@@ -42,6 +42,14 @@ Purpose: reduce embedding-token spend and database churn for scheduled website c
 - [x] Crawler settings response models are typed at the backend boundary; HTTP cache storage controls remain operator-only and are not exposed through tenant admin settings.
 - [x] Normal `intric-js` OpenAPI generation path verified against an OpenAPI-only backend; broad unrelated generated schema drift kept out of this commit, with a narrow crawler endpoint type shim added for the new admin page.
 - [x] Custom Scrapy sitemap parser override reviewed against installed Scrapy 2.11.2 and official Scrapy docs; keep it narrow because public `sitemap_filter()` can filter request entries but cannot emit cleanup-visible retained feed items.
+- [x] Sitemap `<lastmod>` source-skip now uses `websites.last_source_verified_at` instead of `last_crawled_at`, so partial crawls and page-failure crawls do not advance the trusted source-skip cutoff.
+- [x] `last_source_verified_at` updates only after complete sitemap crawls with no page persistence failures; the migration intentionally does not backfill it from legacy `last_crawled_at` because old crawls do not prove the source frontier was complete.
+- [x] Worker, ARQ feeder/watchdog, website stale-job checks, and Scrapy crawler paths now receive a typed `TenantCrawlerSettings` snapshot instead of repeatedly passing raw tenant JSON through runtime settings resolution.
+- [x] Invalid stored crawler setting overrides no longer fail the crawl before useful diagnostics; runtime paths ignore invalid overrides, fall back to defaults, and emit a structured warning metric.
+- [x] Invalid crawler-setting warnings are owned by `TenantCrawlerSettings`, reused by worker/ARQ/watchdog/user-triggered preemption paths, and deduped per tenant in watchdog rescue loops.
+- [x] Crawler setting Literal names are checked against `CRAWLER_SETTING_SPECS` with a runtime error instead of an optimizable assert, and invalid integer settings no longer accept booleans through Python's `bool`-is-`int` subclass behavior.
+- [x] Retained unchanged-page/file warning now treats unresolved embedding providers as misconfigured, even when a provider id exists but no provider type was resolved.
+- [x] Partial timeout outcome precedence is pinned by tests when page-level embedding failures are also present.
 - [x] Targeted tests, strict pyright, ruff, and regression validation.
 - [x] Claude peer-loop implementation review.
 - [x] Local commit only; do not push from this branch.
@@ -96,6 +104,10 @@ Claude artifact:
 - `.codex/artifacts/claude-peer-loop-crawler-typed-outcome-hardening-implementation-review-20260511T200635Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-typed-outcome-hardening-post-fix-verification-20260511T201518Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-admin-settings-hardening-20260511T210925Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-next-roi-post-commit-review-20260511T214944Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-source-verified-hardening-implementation-20260511T221008Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-source-verified-hardening-implementation-re-review-20260511T223215Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-source-verified-hardening-final-polish-review-20260511T224130Z.md`
 
 Claude loop summary:
 
@@ -157,7 +169,7 @@ Implement the hash gate inside `backend/src/intric/worker/crawl/persistence.py`,
 
 This is a deep Module: callers should not need to know the ordering details of hash comparison, embedding setup, and DB writes. Moving the hash gate into `crawl_tasks.py` would make the orchestration layer remember too much about the persistence Implementation and would make the stale-cleanup bug easier to reintroduce.
 
-Sitemap `<lastmod>` source-skip is implemented only as an explicit, disabled-by-default fetch hint. The earlier data-loss blocker is addressed by making source-retained URLs a first-class crawler output: the spider emits `SourceRetainedUrl` items to a separate Scrapy feed, `_crawl()` exposes them as `Crawl.source_retained_urls`, and `crawl_tasks.py` merges them into `must_keep_titles` before stale cleanup. This still trusts upstream sitemap `<lastmod>` values, so it remains default-off and logs a warning whenever it short-circuits page downloads.
+Sitemap `<lastmod>` source-skip is implemented only as an explicit, disabled-by-default fetch hint. The earlier data-loss blocker is addressed by making source-retained URLs a first-class crawler output: the spider emits `SourceRetainedUrl` items to a separate Scrapy feed, `_crawl()` exposes them as `Crawl.source_retained_urls`, and `crawl_tasks.py` merges those URLs into `must_keep_titles` before stale cleanup. The skip cutoff is `websites.last_source_verified_at`, which advances only after complete sitemap crawls with no page persistence failures; `last_crawled_at` remains the scheduler timestamp and is no longer trusted for source-skip correctness. This still trusts upstream sitemap `<lastmod>` values, so it remains default-off and logs a warning whenever it short-circuits page downloads.
 
 The current implementation shape is:
 
@@ -168,7 +180,7 @@ The current implementation shape is:
 5. Return a typed `PersistBatchResult` with `persisted_urls`, `retained_urls`, and `failures_by_reason`; counts are computed properties.
 6. In `crawl_tasks.py`, protect `batch_result.cleanup_protected_titles` from stale cleanup.
 7. Wire Scrapy HTTP cache support through the existing crawler settings as an optional disabled-by-default fetch optimization.
-8. Wire optional sitemap `<lastmod>` source-skip through Scrapy sitemap parsing and a second feed for source-retained URLs.
+8. Wire optional sitemap `<lastmod>` source-skip through Scrapy sitemap parsing and a second feed for source-retained URLs, gated by the last complete page-clean sitemap source verification timestamp.
 9. Track unchanged page/file/source-retained skip counts in structured logs, the human summary log, performance extras, and audit metadata.
 10. Store typed crawl outcome codes for durable frontend/backend failure and diagnostic reporting.
 11. Do not write unchanged-content skips or source-retained skips to `failure_summary`.

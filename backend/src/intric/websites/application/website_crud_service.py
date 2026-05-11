@@ -13,7 +13,10 @@ from intric.main.models import (  # Status used for job status check
     NotProvided,
     Status,
 )
-from intric.tenants.crawler_settings_helper import get_crawler_setting
+from intric.tenants.crawler_settings_helper import (
+    TenantCrawlerSettings,
+    get_crawler_setting,
+)
 from intric.websites.domain.website import UpdateInterval, Website
 
 logger = get_logger(__name__)
@@ -202,7 +205,14 @@ class WebsiteCRUDService:
             # If stuck in QUEUED for 5+ min, it's likely orphaned (Redis cleared, worker restarted)
             # IN_PROGRESS jobs use longer tenant-configurable threshold (heartbeat timeout)
             tenant = await self.tenant_repo.get(self.user.tenant_id)
-            tenant_settings = tenant.crawler_settings if tenant else None
+            tenant_settings = TenantCrawlerSettings.from_overrides(
+                tenant.crawler_settings if tenant else None
+            )
+            tenant_settings.warn_invalid_overrides(
+                logger,
+                tenant_id=self.user.tenant_id,
+                website_id=website.id,
+            )
 
             if job.status == Status.QUEUED:
                 # Configurable threshold for QUEUED - if stuck, it's orphaned

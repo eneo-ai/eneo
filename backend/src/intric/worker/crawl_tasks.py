@@ -20,7 +20,10 @@ from intric.database.tables.model_providers_table import ModelProviders
 from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
-from intric.tenants.crawler_settings_helper import get_crawler_setting
+from intric.tenants.crawler_settings_helper import (
+    TenantCrawlerSettings,
+    get_crawler_setting,
+)
 from intric.websites.crawl_dependencies.crawl_models import CrawlTask
 from intric.websites.domain.crawl_outcome import (
     CrawlOutcomeCode,
@@ -155,16 +158,31 @@ def _build_sitemap_lastmod_skip_urls(
 def _should_enable_sitemap_lastmod_skip(
     *,
     crawl_type: CrawlType,
-    website_last_crawled_at: datetime | None,
-    tenant_crawler_settings: dict[str, Any] | None,
+    website_last_source_verified_at: datetime | None,
+    tenant_crawler_settings: TenantCrawlerSettings | None,
 ) -> bool:
     return (
         crawl_type == CrawlType.SITEMAP
-        and website_last_crawled_at is not None
+        and website_last_source_verified_at is not None
         and get_crawler_setting(
             "crawl_sitemap_lastmod_skip_enabled",
             tenant_crawler_settings,
         )
+    )
+
+
+def _should_update_sitemap_source_verified_at(
+    *,
+    crawl_type: CrawlType,
+    crawl_is_partial: bool,
+    pages_failed: int,
+    files_failed: int,
+) -> bool:
+    return (
+        crawl_type == CrawlType.SITEMAP
+        and not crawl_is_partial
+        and pages_failed == 0
+        and files_failed == 0
     )
 
 
@@ -208,7 +226,11 @@ def _warn_if_retained_items_without_embedding_config(
     retained_count = retained_pages + retained_files
     if retained_count == 0:
         return
-    if embedding_model is not None and embedding_model.provider_id is not None:
+    if (
+        embedding_model is not None
+        and embedding_model.provider_id is not None
+        and embedding_model.provider_type is not None
+    ):
         return
 
     logger.warning(
@@ -654,6 +676,18 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
     except Exception:  # pragma: no cover - defensive guard when tenant not injected
         tenant = None
 
+    tenant_crawler_settings = TenantCrawlerSettings.from_overrides(
+        tenant.crawler_settings
+        if tenant is not None and hasattr(tenant, "crawler_settings")
+        else None
+    )
+    if tenant is not None:
+        tenant_crawler_settings.warn_invalid_overrides(
+            logger,
+            tenant_id=tenant.id,
+            website_id=params.website_id,
+        )
+
     if tenant:
         limiter = container.tenant_concurrency_limiter()
         try:
@@ -699,9 +733,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     try:
                         semaphore_ttl = get_crawler_setting(
                             "tenant_worker_semaphore_ttl_seconds",
-                            tenant.crawler_settings
-                            if hasattr(tenant, "crawler_settings")
-                            else None,
+                            tenant_crawler_settings,
                             default=settings.tenant_worker_semaphore_ttl_seconds,
                         )
                         concurrency_key = f"tenant:{tenant.id}:active_jobs"
@@ -726,9 +758,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         # Use per-tenant TTL if available
                         semaphore_ttl = get_crawler_setting(
                             "tenant_worker_semaphore_ttl_seconds",
-                            tenant.crawler_settings
-                            if hasattr(tenant, "crawler_settings")
-                            else None,
+                            tenant_crawler_settings,
                             default=settings.tenant_worker_semaphore_ttl_seconds,
                         )
                         release_key = f"tenant:{preacquired_tenant_id}:active_jobs"
@@ -756,8 +786,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # Concurrency limit (busy signal) is NOT counted as a failure - only age is checked.
             # This prevents jobs from being abandoned just because they're waiting for a slot.
 
-            # Get per-tenant max age setting (falls back to env default)
-            tenant_crawler_settings = tenant.crawler_settings if tenant else None
             max_age_seconds = get_crawler_setting(
                 "crawl_job_max_age_seconds",
                 tenant_crawler_settings,
@@ -1002,7 +1030,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             existing_titles: list[str] = []
             existing_blob_state_by_title: dict[str, ExistingBlobState] = {}
             website_url: str = ""  # For logging after session closes
-            website_last_crawled_at: datetime | None = None
+            website_last_source_verified_at: datetime | None = None
 
             start = time.time()
             # Bootstrap phase: Short-lived session for extracting ORM → DTO
@@ -1029,7 +1057,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                 website: Any = website_row
                 website_url = website_row.url  # Save for logging after session closes
-                website_last_crawled_at = website_row.last_crawled_at
+                website_last_source_verified_at = website_row.last_source_verified_at
 
                 # CRITICAL: Verify tenant isolation
                 current_tenant = container.tenant()
@@ -1183,7 +1211,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     # Batch settings from tenant config with defaults
                     batch_size=get_crawler_setting(
                         "crawl_page_batch_size",
-                        tenant.crawler_settings if tenant else None,
+                        tenant_crawler_settings,
                         default=settings.crawl_page_batch_size,
                     ),
                 )
@@ -1245,17 +1273,14 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             # Get per-tenant settings for heartbeat BEFORE starting crawl
             # This ensures heartbeat runs during the entire crawl phase
-            current_tenant = container.tenant()
             heartbeat_interval_seconds = get_crawler_setting(
                 "crawl_heartbeat_interval_seconds",
-                current_tenant.crawler_settings if current_tenant else None,
+                tenant_crawler_settings,
                 default=settings.crawl_heartbeat_interval_seconds,
             )
             semaphore_ttl_seconds = get_crawler_setting(
                 "tenant_worker_semaphore_ttl_seconds",
-                tenant.crawler_settings
-                if tenant is not None and hasattr(tenant, "crawler_settings")
-                else None,
+                tenant_crawler_settings,
                 default=settings.tenant_worker_semaphore_ttl_seconds,
             )
 
@@ -1306,19 +1331,18 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             sitemap_lastmod_skip_cutoff: datetime | None = None
             sitemap_lastmod_skip_allowed_urls: frozenset[str] = frozenset()
-            tenant_crawler_settings = tenant.crawler_settings if tenant else None
             if _should_enable_sitemap_lastmod_skip(
                 crawl_type=params.crawl_type,
-                website_last_crawled_at=website_last_crawled_at,
+                website_last_source_verified_at=website_last_source_verified_at,
                 tenant_crawler_settings=tenant_crawler_settings,
             ):
-                assert website_last_crawled_at is not None
+                assert website_last_source_verified_at is not None
                 sitemap_lastmod_skip_allowed_urls = _build_sitemap_lastmod_skip_urls(
                     existing_blob_state_by_title=existing_blob_state_by_title,
                     embedding_model_id=crawl_context.embedding_model_id,
                 )
                 if sitemap_lastmod_skip_allowed_urls:
-                    sitemap_lastmod_skip_cutoff = website_last_crawled_at
+                    sitemap_lastmod_skip_cutoff = website_last_source_verified_at
                     logger.info(
                         "Sitemap lastmod source skip enabled for crawl",
                         extra={
@@ -1327,7 +1351,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             "skip_candidate_count": len(
                                 sitemap_lastmod_skip_allowed_urls
                             ),
-                            "last_crawled_at": website_last_crawled_at.isoformat(),
+                            "last_source_verified_at": (
+                                website_last_source_verified_at.isoformat()
+                            ),
                         },
                     )
 
@@ -1341,7 +1367,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 http_user=crawl_context.http_auth_user or "",  # From bootstrap DTO
                 http_pass=crawl_context.http_auth_pass or "",  # From bootstrap DTO
                 # Pass tenant settings for tenant-aware Scrapy configuration
-                tenant_crawler_settings=tenant.crawler_settings if tenant else None,
+                tenant_crawler_settings=tenant_crawler_settings,
                 http_cache_dir=http_cache_dir,
                 sitemap_lastmod_skip_cutoff=sitemap_lastmod_skip_cutoff,
                 sitemap_lastmod_skip_allowed_urls=sitemap_lastmod_skip_allowed_urls,
@@ -1797,13 +1823,22 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # Use database server time for timezone correctness
             # NOTE: WebsitesTable already imported above for bootstrap phase
 
+            last_crawled_values = {"last_crawled_at": sa.func.now()}
+            if _should_update_sitemap_source_verified_at(
+                crawl_type=params.crawl_type,
+                crawl_is_partial=crawl_is_partial,
+                pages_failed=num_failed_pages,
+                files_failed=num_failed_files,
+            ):
+                last_crawled_values["last_source_verified_at"] = sa.func.now()
+
             last_crawled_stmt = (
                 sa.update(WebsitesTable)
                 .where(WebsitesTable.id == params.website_id)
                 .where(
                     WebsitesTable.tenant_id == crawl_context.tenant_id
                 )  # Tenant isolation
-                .values(last_crawled_at=sa.func.now())
+                .values(**last_crawled_values)
             )
 
             async def _do_timestamp_update(sess: AsyncSession) -> None:

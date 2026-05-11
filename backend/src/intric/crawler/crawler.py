@@ -22,7 +22,10 @@ from intric.crawler.spiders.crawl_spider import CrawlSpider
 from intric.crawler.spiders.sitemap_spider import SitemapSpider, SourceRetainedUrl
 from intric.main.config import get_settings
 from intric.main.exceptions import CrawlTimeoutError
-from intric.tenants.crawler_settings_helper import get_crawler_setting
+from intric.tenants.crawler_settings_helper import (
+    TenantCrawlerSettings,
+    get_crawler_setting,
+)
 from intric.websites.domain.crawl_outcome import CrawlTerminationReason
 from intric.websites.domain.crawl_run import CrawlType
 
@@ -72,7 +75,7 @@ class CrawlManager:
         files_dir: str | Path | None = None,
         http_cache_dir: str | Path | None = None,
         source_retained_filepath: str | Path | None = None,
-        tenant_crawler_settings: dict[str, Any] | None = None,
+        tenant_crawler_settings: TenantCrawlerSettings | None = None,
         **spider_kwargs: Any,
     ) -> Any:
         """Start a crawl and return the EventualResult.
@@ -203,19 +206,14 @@ def create_runner(
     http_cache_dir: Optional[str | Path] = None,
     source_retained_filepath: Optional[str | Path] = None,
     http_cache_expiration_seconds: int | None = None,
-    tenant_crawler_settings: dict[str, Any] | None = None,
+    tenant_crawler_settings: TenantCrawlerSettings | None = None,
 ) -> CrawlerRunner:
     """Create a Scrapy CrawlerRunner with tenant-aware settings.
-
-    Settings are resolved in priority order:
-    1. Tenant-specific override (from DB via API)
-    2. Environment variable default
-    3. Hardcoded default
 
     Args:
         filepath: Path to output JSONL file for crawled pages
         files_dir: Optional directory for downloaded files
-        tenant_crawler_settings: Optional tenant-specific settings from DB
+        tenant_crawler_settings: Tenant-specific crawler settings snapshot
     """
     filepath_str = str(filepath)
     feeds: dict[str, dict[str, object]] = {
@@ -347,7 +345,7 @@ class Crawler:
         http_cache_dir: Optional[str | Path] = None,
         http_user: str | None = None,
         http_pass: str | None = None,
-        tenant_crawler_settings: dict[str, Any] | None = None,
+        tenant_crawler_settings: TenantCrawlerSettings | None = None,
     ) -> Any:
         """Run crawl in Twisted reactor, returns EventualResult.
 
@@ -382,7 +380,7 @@ class Crawler:
         source_retained_filepath: str | Path | None = None,
         lastmod_skip_cutoff: datetime | None = None,
         lastmod_skip_allowed_urls: Iterable[str] | None = None,
-        tenant_crawler_settings: dict[str, Any] | None = None,
+        tenant_crawler_settings: TenantCrawlerSettings | None = None,
     ) -> Any:
         """Run sitemap crawl in Twisted reactor, returns EventualResult.
 
@@ -418,7 +416,7 @@ class Crawler:
         http_cache_dir: Optional[str | Path] = None,
         http_user: str | None = None,
         http_pass: str | None = None,
-        tenant_crawler_settings: dict[str, Any] | None = None,
+        tenant_crawler_settings: TenantCrawlerSettings | None = None,
         max_length: int,
         heartbeat_callback: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
         heartbeat_interval: float = 60.0,
@@ -534,7 +532,7 @@ class Crawler:
         source_retained_filepath: str | Path | None = None,
         lastmod_skip_cutoff: datetime | None = None,
         lastmod_skip_allowed_urls: Iterable[str] | None = None,
-        tenant_crawler_settings: dict[str, Any] | None = None,
+        tenant_crawler_settings: TenantCrawlerSettings | None = None,
         max_length: int,
         heartbeat_callback: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
         heartbeat_interval: float = 60.0,
@@ -749,7 +747,7 @@ class Crawler:
         crawl_type: CrawlType = CrawlType.CRAWL,
         http_user: str | None = None,
         http_pass: str | None = None,
-        tenant_crawler_settings: dict[str, Any] | None = None,
+        tenant_crawler_settings: TenantCrawlerSettings | None = None,
         http_cache_dir: Optional[str | Path] = None,
         sitemap_lastmod_skip_cutoff: datetime | None = None,
         sitemap_lastmod_skip_allowed_urls: Iterable[str] | None = None,
@@ -764,8 +762,7 @@ class Crawler:
             crawl_type: Type of crawl (CRAWL or SITEMAP)
             http_user: HTTP basic auth username (optional)
             http_pass: HTTP basic auth password (optional)
-            tenant_crawler_settings: Tenant-specific settings from DB (optional)
-                If provided, these override environment variable defaults.
+            tenant_crawler_settings: Tenant-specific crawler settings snapshot.
             heartbeat_callback: Optional async callable for heartbeat during crawl.
                 Called at heartbeat_interval during crawl to maintain liveness.
                 Used to refresh Redis TTLs and DB timestamps during long crawls.
