@@ -25,7 +25,6 @@ from intric.flows.flow_capability_manifest import (
 )
 from intric.flows.flow_review_policy import parse_flow_step_review_policy
 from intric.flows.flow_validators_form import (
-    normalize_legacy_form_schema,
     validate_form_schema,
     validate_variable_alias_collisions,
 )
@@ -62,7 +61,6 @@ _ALLOWED_FLOW_OUTPUT_MODES = set(FLOW_STEP_OUTPUT_MODE_VALUES)
 _ALLOWED_FLOW_OUTPUT_TYPES = set(FLOW_STEP_OUTPUT_TYPE_VALUES)
 _ALLOWED_FLOW_MCP_POLICIES = set(FLOW_STEP_MCP_POLICY_VALUES)
 __all__ = [
-    "normalize_legacy_form_schema",
     "validate_form_schema",
     "validate_steps",
     "validate_variable_alias_collisions",
@@ -336,10 +334,7 @@ def _validate_audio_document_transcript_chain(*, steps: list[FlowStep]) -> None:
         return
     if terminal_step.output_type not in {"pdf", "docx"}:
         return
-    if (
-        first_step.output_type == "text"
-        and first_step.output_mode == "transcribe_only"
-    ):
+    if first_step.output_type == "text" and first_step.output_mode == "transcribe_only":
         return
     raise BadRequestException(
         "Audio document flows must start with a dedicated transcribe_only "

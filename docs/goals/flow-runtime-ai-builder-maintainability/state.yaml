@@ -85,7 +85,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T031
+active_task: T032
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -1889,7 +1889,7 @@ tasks:
   - id: T031
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Move FlowService create/update/publish metadata normalization through FlowMetadataV1 and serialize_flow_metadata, using WRITE mode for user-provided metadata and PERSISTED_READ mode for already-stored draft metadata, without touching published-definition parsing or AI Builder behavior."
     allowed_files:
@@ -1925,6 +1925,113 @@ tasks:
       - "Before/after Any, cast, and type-ignore counts for changed source files."
       - "All verify commands passed."
       - "Claude commit gate before source commit."
+    receipt:
+      result: done
+      summary: "Moved FlowService create/update/publish metadata normalization through FlowMetadataV1 and serialize_flow_metadata. User-provided create/update metadata now uses WRITE normalization; existing draft metadata on update-without-metadata and publish uses PERSISTED_READ normalization. Deleted normalize_legacy_form_schema and removed the FlowService double care-data WRITE parse."
+      canonical_owner: "backend/src/intric/flows/flow_metadata.py owns metadata parse, serialize, WRITE normalization, and persisted-read normalization."
+      files_changed:
+        source:
+          - "backend/src/intric/flows/flow_metadata.py"
+          - "backend/src/intric/flows/flow_validators_form.py"
+          - "backend/src/intric/flows/flow_validators.py"
+          - "backend/src/intric/flows/application/flow_service.py"
+        tests:
+          - "backend/tests/unittests/flows/test_flow_metadata.py"
+          - "backend/tests/unittests/flows/test_flow_validators.py"
+          - "backend/tests/unittests/flows/test_flow_service.py"
+      changed_files:
+        - "backend/src/intric/flows/flow_metadata.py"
+        - "backend/src/intric/flows/flow_validators_form.py"
+        - "backend/src/intric/flows/flow_validators.py"
+        - "backend/src/intric/flows/application/flow_service.py"
+        - "backend/tests/unittests/flows/test_flow_metadata.py"
+        - "backend/tests/unittests/flows/test_flow_validators.py"
+        - "backend/tests/unittests/flows/test_flow_service.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      behavior:
+        - "create_flow and update_flow with user-provided metadata normalize through normalize_flow_metadata_for_write."
+        - "update_flow with metadata_json=NOT_PROVIDED normalizes existing draft metadata through normalize_persisted_flow_metadata and preserves tolerant cleanup for persisted required='yes' field flags."
+        - "publish_flow normalizes stored draft metadata before both version snapshot creation and flow row update; receipt accepts PERSISTED_READ here to preserve pre-existing draft cleanup behavior while making snapshot and row shapes match."
+        - "normalize_legacy_form_schema deleted; git grep -n 'normalize_legacy_form_schema' -- backend returns no hits."
+        - "validate_flow_care_data_policy has no production callers after this slice; only its adapter definition and its unit test remain."
+        - "publish snapshot metadata now contains normalized form field aliases, preserved unrelated top-level metadata keys, and deterministic checksum input."
+      type_debt_counts:
+        - "flow_metadata.py: HEAD Any/cast/type-ignore 6; worktree 6."
+        - "flow_validators_form.py: HEAD Any/cast/type-ignore 0; worktree 0."
+        - "flow_validators.py: HEAD Any/cast/type-ignore 3; worktree 3."
+        - "flow_service.py: HEAD Any/cast/type-ignore 32; worktree 32."
+      tests_added:
+        - "test_flow_metadata.py covers WRITE empty care_data_policy preservation, explicit false sensitive preservation, and PERSISTED_READ legacy truthy sensitive fail-closed serialization."
+        - "test_flow_service.py covers create_flow unrelated top-level key preservation, update_flow without metadata tolerant persisted normalization, and publish_flow normalized snapshot metadata/checksum behavior."
+        - "test_flow_validators.py imports the metadata-level normalizer instead of the deleted form-schema wrapper."
+      verification:
+        - "PASS cd backend && uv run pytest tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_service.py -q -> 128 passed, 1 warning."
+        - "PASS cd backend && uv run pyright src/intric/flows/flow_metadata.py src/intric/flows/flow_validators_form.py src/intric/flows/flow_validators.py src/intric/flows/application/flow_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_service.py -> 0 errors."
+        - "PASS cd backend && uv run ruff check src/intric/flows/flow_metadata.py src/intric/flows/flow_validators_form.py src/intric/flows/flow_validators.py src/intric/flows/application/flow_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_service.py."
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/flow_metadata.py src/intric/flows/flow_validators_form.py src/intric/flows/flow_validators.py src/intric/flows/application/flow_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_service.py."
+        - "BLOCKED extra check cd backend && uv run pytest tests/integration/flows -q -> collection fails before this slice on missing intric.ai_models.model_enums in AI Builder regression tests."
+        - "PASS git diff --check for T031 files."
+        - "PASS git grep -nE '(T031|Worker 2b|tranche|\\bA\\.[0-9]|P0\\.|Phase [0A-G])' -- backend/src/intric/flows backend/tests/unittests/flows returned no hits."
+      commands:
+        - "cd backend && uv run pytest tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_service.py -q"
+        - "cd backend && uv run pyright src/intric/flows/flow_metadata.py src/intric/flows/flow_validators_form.py src/intric/flows/flow_validators.py src/intric/flows/application/flow_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_service.py"
+        - "cd backend && uv run ruff check src/intric/flows/flow_metadata.py src/intric/flows/flow_validators_form.py src/intric/flows/flow_validators.py src/intric/flows/application/flow_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_service.py"
+        - "cd backend && uv run ruff format --check src/intric/flows/flow_metadata.py src/intric/flows/flow_validators_form.py src/intric/flows/flow_validators.py src/intric/flows/application/flow_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_service.py"
+        - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flow-runtime-maintainability-t031-flowservice-metadata-normalization-commit-gate --new-session --title 'T031 FlowService metadata normalization commit gate' --phase commit-gate --iteration 1 --require-green --required-min-score 8 --model claude-opus-4-7 --effort xhigh --timeout-seconds 1200 ..."
+      claude_commit_gate:
+        artifact: ".codex/artifacts/claude-peer-loop-t031-flowservice-metadata-normalization-commit-gate-20260511T072216Z.md"
+        model: "claude-opus-4-7"
+        effort: "xhigh"
+        verdict: "green"
+        green_light: true
+        min_score: 8
+        accepted_followup:
+          - "Updated the touched fail-closed comment to reference parse_flow_metadata(WRITE) after Claude flagged validate_flow_care_data_policy as stale."
+        non_blocking_followups:
+          - "Delete orphan validate_flow_care_data_policy and its dedicated test after proof; current grep shows only adapter definition and test calls remain."
+          - "Strengthen publish checksum determinism with a repeated publish assertion if this path is touched again."
+          - "Fix integration collection blocker for tests/integration/flows/test_ai_builder_*regressions.py missing intric.ai_models.model_enums so future metadata slices can use the broader integration harness."
+      comments_added_or_changed:
+        - "backend/src/intric/flows/flow_metadata.py: Fail closed for legacy truthy values that predate strict authoring / validation; writes must still pass parse_flow_metadata(WRITE)."
+      maintainability_rubric:
+        canonical_ownership: 1
+        fear_of_change_reduction: 1
+        type_safety: 1
+        error_contract_quality: 0.8
+        test_quality: 0.8
+        comment_quality: 1
+        complexity: 1
+        deletion_quality: 1
+        score: "7.6/8"
+      anti_patterns_avoided:
+        - "No compatibility wrapper for the old form-schema normalization name."
+        - "No new broad Any, type ignore, Pyright ignore, generic helper, service, manager, or fake interface."
+        - "No FlowService double care-data WRITE parse at the same boundary."
+        - "No published_definition.py, AI Builder, router, generated client, frontend, migration, or unrelated dirty-file changes."
+
+  - id: T032
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Decide the next cleanup/typed-boundary step after FlowService metadata normalization: delete orphan care-data write adapter first, or proceed to typed published-definition metadata accessor."
+    inputs:
+      - "T029 receipt"
+      - "T031 receipt"
+      - ".codex/artifacts/claude-peer-loop-t031-flowservice-metadata-normalization-commit-gate-20260511T072216Z.md"
+    constraints:
+      - "Read-only. Do not implement source changes."
+      - "Use grep proof before selecting deletion."
+      - "If selecting published_definition.py, keep AI Builder out unless evidence proves a shared change is required."
+      - "Name allowed files, red tests, verification commands, and stop_if conditions."
+    expected_output:
+      - "decision"
+      - "next Worker objective"
+      - "allowed_files"
+      - "red tests"
+      - "verification commands"
+      - "stop_if"
+      - "whether Claude plan gate is required before activation"
     receipt: null
 
 validation_command_candidates:

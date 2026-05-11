@@ -200,6 +200,26 @@ def serialize_flow_metadata(metadata: FlowMetadataV1) -> JsonObject:
     return metadata.model_dump(mode="json", exclude_unset=True)
 
 
+def normalize_flow_metadata_for_write(
+    metadata_json: JsonObject | None,
+) -> JsonObject | None:
+    if metadata_json is None:
+        return None
+    return serialize_flow_metadata(
+        parse_flow_metadata(metadata_json, mode=FlowMetadataParseMode.WRITE)
+    )
+
+
+def normalize_persisted_flow_metadata(
+    metadata_json: JsonObject | None,
+) -> JsonObject | None:
+    if metadata_json is None:
+        return None
+    return serialize_flow_metadata(
+        parse_flow_metadata(metadata_json, mode=FlowMetadataParseMode.PERSISTED_READ)
+    )
+
+
 def _form_schema_mode_for_metadata_mode(
     mode: FlowMetadataParseMode,
 ) -> FlowFormSchemaParseMode:
@@ -277,7 +297,7 @@ def _parse_care_data_policy_for_persisted_read(
     sensitive_value = policy.get("sensitive", False)
     policy_payload: dict[str, object] = {
         # Fail closed for legacy truthy values that predate strict authoring
-        # validation; writes must still pass validate_flow_care_data_policy.
+        # validation; writes must still pass parse_flow_metadata(WRITE).
         "sensitive": bool(sensitive_value),
     }
     approval_mode = _parse_care_data_approval_mode(policy.get("approval_mode"))

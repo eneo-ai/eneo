@@ -315,6 +315,51 @@ async def test_publish_flow_creates_version_and_updates_published_version(user):
 
 
 @pytest.mark.asyncio
+async def test_publish_flow_uses_normalized_metadata_in_snapshot(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    flow_id = uuid4()
+    flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Publishable Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json={
+            "form_schema": {
+                "fields": [{"name": "case_id", "type": "string"}],
+            },
+            "care_data_policy": {},
+            "ai_builder": {"description": "Generated draft"},
+        },
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[_step(step_order=1)],
+    )
+    flow_repo.get.return_value = flow
+    version_repo.get_latest.return_value = None
+    flow_repo.update.return_value = flow.model_copy(update={"published_version": 1})
+
+    await service.publish_flow(flow_id=flow_id)
+
+    definition = version_repo.create.await_args.kwargs["definition_json"]
+    assert definition["metadata_json"] == {
+        "form_schema": {"fields": [{"name": "case_id", "type": "text"}]},
+        "care_data_policy": {"sensitive": False},
+        "ai_builder": {"description": "Generated draft"},
+    }
+    assert version_repo.create.await_args.kwargs["definition_checksum"] == stable_hash(
+        definition
+    )
+
+
+@pytest.mark.asyncio
 async def test_publish_flow_includes_mcp_snapshot_fields(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
@@ -2131,7 +2176,9 @@ async def test_create_flow_normalizes_legacy_form_field_types(user):
                     {"name": "Email", "type": "email", "required": True},
                     {"name": "Anteckning", "type": "textarea", "required": False},
                 ]
-            }
+            },
+            "ai_builder": {"description": "Generated draft"},
+            "transcription": {"language": "sv"},
         },
     )
 
@@ -2139,6 +2186,49 @@ async def test_create_flow_normalizes_legacy_form_field_types(user):
         field["type"] for field in created.metadata_json["form_schema"]["fields"]
     ]
     assert field_types == ["text", "text"]
+    assert created.metadata_json["ai_builder"] == {"description": "Generated draft"}
+    assert created.metadata_json["transcription"] == {"language": "sv"}
+
+
+@pytest.mark.asyncio
+async def test_update_flow_without_metadata_normalizes_existing_metadata_tolerantly(
+    user,
+):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    flow_id = uuid4()
+    source_flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json={
+            "form_schema": {
+                "fields": [{"name": "case_id", "type": "string", "required": "yes"}]
+            },
+            "ai_builder": {"description": "Generated draft"},
+        },
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[_step(step_order=1)],
+    )
+    flow_repo.get.return_value = source_flow
+    flow_repo.update.side_effect = lambda flow, tenant_id, **_: flow
+
+    updated = await service.update_flow(flow_id=flow_id, name="Updated")
+
+    assert updated.metadata_json == {
+        "form_schema": {
+            "fields": [{"name": "case_id", "type": "text", "required": False}]
+        },
+        "ai_builder": {"description": "Generated draft"},
+    }
 
 
 @pytest.mark.asyncio

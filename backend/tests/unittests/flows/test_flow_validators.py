@@ -6,16 +6,14 @@ import pytest
 
 from intric.flows.enums import FlowOutputMode, FlowOutputType
 from intric.flows.flow import FlowStep
+from intric.flows.flow_metadata import normalize_flow_metadata_for_write
 from intric.flows.flow_review_policy import (
     FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED,
     FlowStepReviewMode,
     FlowStepReviewPolicy,
 )
 from intric.flows.flow_validators import validate_form_schema, validate_steps
-from intric.flows.flow_validators_form import (
-    normalize_legacy_form_schema,
-    validate_variable_alias_collisions,
-)
+from intric.flows.flow_validators_form import validate_variable_alias_collisions
 from intric.main.exceptions import BadRequestException
 
 
@@ -471,7 +469,7 @@ def test_validate_steps_rejects_review_policy_for_http_post_output() -> None:
     assert exc_info.value.code == FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED
 
 
-def test_normalize_legacy_form_schema_maps_legacy_string_type_to_text():
+def test_normalize_flow_metadata_for_write_maps_legacy_string_type_to_text():
     metadata_json = {
         "form_schema": {
             "fields": [
@@ -481,7 +479,7 @@ def test_normalize_legacy_form_schema_maps_legacy_string_type_to_text():
         }
     }
 
-    normalized = normalize_legacy_form_schema(metadata_json)
+    normalized = normalize_flow_metadata_for_write(metadata_json)
 
     assert normalized == {
         "form_schema": {

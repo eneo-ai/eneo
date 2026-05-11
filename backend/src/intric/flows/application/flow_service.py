@@ -12,14 +12,15 @@ from intric.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
 )
 from intric.flows.domain.flow import Flow, FlowSparse, FlowStep, JsonObject
-from intric.flows.flow_care_data_policy import validate_flow_care_data_policy
+from intric.flows.flow_metadata import (
+    normalize_flow_metadata_for_write,
+    normalize_persisted_flow_metadata,
+)
 from intric.flows.flow_security_classification import (
     evaluate_step_security_classification,
 )
 from intric.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from intric.flows.flow_validators import (
-    normalize_legacy_form_schema,
-    validate_form_schema,
     validate_steps,
     validate_variable_alias_collisions,
 )
@@ -89,8 +90,7 @@ class FlowService:
         data_retention_days: int | None = None,
         owner_user_id: UUID | None = None,
     ) -> Flow:
-        normalized_metadata = self._normalize_legacy_form_schema(metadata_json)
-        self._validate_form_schema(normalized_metadata)
+        normalized_metadata = normalize_flow_metadata_for_write(metadata_json)
         self._validate_steps(steps, metadata_json=normalized_metadata)
         self._validate_variable_alias_collisions(
             steps=steps,
@@ -180,12 +180,11 @@ class FlowService:
             steps=next_steps,
         )
 
-        next_metadata = self._normalize_legacy_form_schema(existing.metadata_json)
+        next_metadata = normalize_persisted_flow_metadata(existing.metadata_json)
         if metadata_json is not NOT_PROVIDED:
-            next_metadata = self._normalize_legacy_form_schema(
+            next_metadata = normalize_flow_metadata_for_write(
                 cast(JsonObject | None, metadata_json)
             )
-        self._validate_form_schema(next_metadata)
         self._validate_steps(next_steps, metadata_json=next_metadata)
         self._validate_variable_alias_collisions(
             steps=next_steps,
@@ -329,8 +328,7 @@ class FlowService:
 
     async def publish_flow(self, *, flow_id: UUID) -> Flow:
         flow = await self.get_flow(flow_id)
-        normalized_metadata = self._normalize_legacy_form_schema(flow.metadata_json)
-        self._validate_form_schema(normalized_metadata)
+        normalized_metadata = normalize_persisted_flow_metadata(flow.metadata_json)
         self._validate_publishable(flow, metadata_json=normalized_metadata)
         self._validate_variable_alias_collisions(
             steps=flow.steps,
@@ -352,7 +350,11 @@ class FlowService:
         )
         next_version = 1 if latest is None else latest.version + 1
 
-        definition = await self._build_definition(flow)
+        flow_with_normalized_metadata = flow.model_copy(
+            update={"metadata_json": normalized_metadata},
+            deep=True,
+        )
+        definition = await self._build_definition(flow_with_normalized_metadata)
         checksum = self._definition_checksum(definition)
         await self.flow_version_repo.create(
             flow_id=flow_id,
@@ -362,10 +364,9 @@ class FlowService:
             tenant_id=self.user.tenant_id,
         )
 
-        updated = flow.model_copy(
+        updated = flow_with_normalized_metadata.model_copy(
             update={
                 "published_version": next_version,
-                "metadata_json": normalized_metadata,
             },
             deep=True,
         )
@@ -396,15 +397,6 @@ class FlowService:
             metadata_json=metadata_json,
             require_complete_template_fill_config=require_complete_template_fill_config,
         )
-
-    def _validate_form_schema(self, metadata_json: JsonObject | None) -> None:
-        validate_form_schema(metadata_json)
-        validate_flow_care_data_policy(metadata_json)
-
-    def _normalize_legacy_form_schema(
-        self, metadata_json: JsonObject | None
-    ) -> JsonObject | None:
-        return normalize_legacy_form_schema(metadata_json)
 
     def _validate_variable_alias_collisions(
         self,

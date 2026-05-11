@@ -5,7 +5,6 @@ from intric.flows.flow_metadata import (
     FlowFormSchemaParseMode,
     form_field_name_error,
     parse_flow_form_schema,
-    serialize_flow_form_schema,
     validate_form_field_runtime_name,
 )
 from intric.flows.flow_variable_definitions import (
@@ -18,23 +17,6 @@ from intric.main.exceptions import BadRequestException
 
 def validate_form_schema(metadata_json: JsonObject | None) -> None:
     parse_flow_form_schema(metadata_json, mode=FlowFormSchemaParseMode.WRITE)
-
-
-def normalize_legacy_form_schema(metadata_json: JsonObject | None) -> JsonObject | None:
-    if metadata_json is None:
-        return None
-    parsed_schema = parse_flow_form_schema(
-        metadata_json, mode=FlowFormSchemaParseMode.PERSISTED_READ
-    )
-    if parsed_schema is None:
-        return metadata_json
-    normalized_form_schema = serialize_flow_form_schema(parsed_schema)
-    if normalized_form_schema == metadata_json.get("form_schema"):
-        return metadata_json
-
-    normalized_metadata = dict(metadata_json)
-    normalized_metadata["form_schema"] = normalized_form_schema
-    return normalized_metadata
 
 
 def validate_variable_alias_collisions(

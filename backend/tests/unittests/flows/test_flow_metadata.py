@@ -300,3 +300,30 @@ def test_parse_flow_metadata_composes_existing_form_schema_model() -> None:
     assert parsed.form_schema is not None
     assert parsed.form_schema.fields[0].type is FlowFormFieldType.TEXT
     assert parsed.care_data_policy.sensitive is False
+
+
+def test_flow_metadata_write_normalization_preserves_empty_care_data_policy() -> None:
+    parsed = parse_flow_metadata(
+        {"care_data_policy": {}},
+        mode=FlowMetadataParseMode.WRITE,
+    )
+
+    assert serialize_flow_metadata(parsed) == {"care_data_policy": {}}
+
+
+def test_flow_metadata_write_normalization_preserves_explicit_false_sensitive() -> None:
+    parsed = parse_flow_metadata(
+        {"care_data_policy": {"sensitive": False}},
+        mode=FlowMetadataParseMode.WRITE,
+    )
+
+    assert serialize_flow_metadata(parsed) == {"care_data_policy": {"sensitive": False}}
+
+
+def test_flow_metadata_persisted_read_fails_closed_for_legacy_sensitive() -> None:
+    parsed = parse_flow_metadata(
+        {"care_data_policy": {"sensitive": "yes"}},
+        mode=FlowMetadataParseMode.PERSISTED_READ,
+    )
+
+    assert serialize_flow_metadata(parsed) == {"care_data_policy": {"sensitive": True}}
