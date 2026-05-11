@@ -108,6 +108,20 @@ class FlowRunReviewCheckpointResumeResult:
     accepted: bool
 
 
+class FlowReviewCheckpointRunNotRunningError(BadRequestException):
+    def __init__(
+        self,
+        message: str,
+        *,
+        context: dict[str, object] | None = None,
+    ):
+        super().__init__(
+            message,
+            code="flow_review_checkpoint_run_not_running",
+            context=context,
+        )
+
+
 _RERUN_ELIGIBLE_RUN_STATUSES = (
     FlowRunStatus.COMPLETED.value,
     FlowRunStatus.FAILED.value,
@@ -382,9 +396,8 @@ class FlowRunRepository:
             )
 
         if run_row.status != FlowRunStatus.RUNNING.value:
-            raise BadRequestException(
+            raise FlowReviewCheckpointRunNotRunningError(
                 "Flow run must be running before opening a review checkpoint.",
-                code="flow_review_checkpoint_run_not_running",
                 context={"status": run_row.status},
             )
 
@@ -446,9 +459,8 @@ class FlowRunRepository:
             .returning(FlowRuns)
         )
         if updated_run_row is None:
-            raise BadRequestException(
+            raise FlowReviewCheckpointRunNotRunningError(
                 "Flow run changed state before review checkpoint opened.",
-                code="flow_review_checkpoint_run_not_running",
             )
 
         actor_fields = requester_principal.audit_actor_fields()

@@ -62,6 +62,7 @@ from intric.flows.flow_security_classification import (
 from intric.flows.flow_template_asset_service import FlowTemplateAssetService
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import (
+    FlowReviewCheckpointRunNotRunningError,
     FlowRunActiveRerunOperation,
     FlowRunRepository,
 )
@@ -1412,23 +1413,38 @@ class FlowRunExecutor:
         step: RuntimeStep,
         attempt_no: int,
     ) -> dict[str, Any]:
-        opened = await self.flow_run_repo.open_review_checkpoint_for_completed_step(
-            tenant_id=tenant_id,
-            flow_id=flow_id,
-            flow_run_id=run_id,
-            step_id=step.step_id,
-            step_order=step.step_order,
-            attempt_no=attempt_no,
-            requester_principal=self.principal,
-            next_step_ids=self._next_step_ids_after_reviewed_step(
-                steps=steps,
-                reviewed_step=step,
-            ),
-            step_label=step.user_description,
-            review_mode=step.review_policy.mode if step.review_policy else None,
-            output_type=FlowOutputType(step.output_type),
-            output_contract_json=step.output_contract,
-        )
+        try:
+            opened = await self.flow_run_repo.open_review_checkpoint_for_completed_step(
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+                flow_run_id=run_id,
+                step_id=step.step_id,
+                step_order=step.step_order,
+                attempt_no=attempt_no,
+                requester_principal=self.principal,
+                next_step_ids=self._next_step_ids_after_reviewed_step(
+                    steps=steps,
+                    reviewed_step=step,
+                ),
+                step_label=step.user_description,
+                review_mode=step.review_policy.mode if step.review_policy else None,
+                output_type=FlowOutputType(step.output_type),
+                output_contract_json=step.output_contract,
+            )
+        except FlowReviewCheckpointRunNotRunningError:
+            await self._rollback()
+            logger.info(
+                "flow_executor.review_open_skipped_run_terminal "
+                "run_id=%s step_order=%d step_id=%s",
+                run_id,
+                step.step_order,
+                step.step_id,
+            )
+            return await self._return_after_terminalized_step_write(
+                run_id=run_id,
+                flow_id=flow_id,
+                tenant_id=tenant_id,
+            )
         await self._commit()
         logger.info(
             "flow_executor.awaiting_review run_id=%s step_order=%d checkpoint_id=%s",

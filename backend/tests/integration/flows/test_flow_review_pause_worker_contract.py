@@ -40,6 +40,7 @@ from intric.flows.enums import (
 from intric.flows.flow_factory import FlowFactory
 from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from intric.flows.infrastructure.flow_repo import FlowRepository
+from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.published_definition import build_published_definition_json
 from intric.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
@@ -342,6 +343,197 @@ async def _create_review_pause_runtime_context(
         third_step_id=third_step.id if third_step is not None else None,
         initial_run_revision=run.revision,
     )
+
+
+async def _review_pause_state_from_fresh_session(
+    *,
+    run_id: UUID,
+    tenant_id: UUID,
+) -> tuple[
+    FlowRuns | None,
+    list[FlowRunReviewCheckpoints],
+    list[FlowStepResults],
+    list[FlowStepAttempts],
+    list[FlowRunAuditOutbox],
+]:
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        run_row = await session.scalar(sa.select(FlowRuns).where(FlowRuns.id == run_id))
+        checkpoint_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowRunReviewCheckpoints)
+                    .where(FlowRunReviewCheckpoints.flow_run_id == run_id)
+                    .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+                    .order_by(FlowRunReviewCheckpoints.created_at.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        step_result_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowStepResults)
+                    .where(FlowStepResults.flow_run_id == run_id)
+                    .where(FlowStepResults.tenant_id == tenant_id)
+                    .order_by(FlowStepResults.step_order.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        attempt_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowStepAttempts)
+                    .where(FlowStepAttempts.flow_run_id == run_id)
+                    .where(FlowStepAttempts.tenant_id == tenant_id)
+                    .order_by(FlowStepAttempts.attempt_no.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        outbox_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowRunAuditOutbox)
+                    .where(FlowRunAuditOutbox.flow_run_id == run_id)
+                    .where(FlowRunAuditOutbox.tenant_id == tenant_id)
+                    .order_by(FlowRunAuditOutbox.run_revision.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return run_row, checkpoint_rows, step_result_rows, attempt_rows, outbox_rows
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("target_status", "expected_worker_result"),
+    [
+        (
+            FlowRunStatus.CANCELLED,
+            {"status": "skipped", "reason": "run_cancelled"},
+        ),
+        (
+            FlowRunStatus.FAILED,
+            {"status": "failed", "error": "Run was terminalized as failed."},
+        ),
+    ],
+)
+async def test_review_checkpoint_open_after_terminalization_returns_terminal_outcome(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+    target_status,
+    expected_worker_result,
+):
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(
+            return_value=SimpleNamespace(
+                completion="This answer needs review.",
+                total_token_count=17,
+            )
+        )
+    )
+    async with sessionmanager.session() as session:
+        context = await _create_review_pause_runtime_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+        )
+        await session.commit()
+
+        original_open = FlowRunRepository.open_review_checkpoint_for_completed_step
+
+        async def _terminalize_then_open(self, **kwargs):
+            async with sessionmanager.session() as terminal_session:
+                enable_autobegin_for_flow_task_session(terminal_session)
+                terminal_container = Container(
+                    session=providers.Object(terminal_session),
+                    user=providers.Object(admin_user),
+                    tenant=providers.Object(test_tenant),
+                )
+                await terminal_container.flow_run_terminalizer().terminalize_run(
+                    run_id=context.run_id,
+                    tenant_id=context.tenant_id,
+                    target_status=target_status,
+                    source=(
+                        FlowRunLifecycleSource.USER_CANCEL
+                        if target_status == FlowRunStatus.CANCELLED
+                        else FlowRunLifecycleSource.STALE_RUNNING_RECONCILER
+                    ),
+                    error_code=f"terminalized_{target_status.value}",
+                    error_message=f"Run was terminalized as {target_status.value}.",
+                )
+                await terminal_session.commit()
+            return await original_open(self, **kwargs)
+
+        monkeypatch.setattr(
+            FlowRunRepository,
+            "open_review_checkpoint_for_completed_step",
+            _terminalize_then_open,
+        )
+
+        worker_result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            celery_task_id=f"review-open-terminalized-{target_status.value}",
+            retry_count=0,
+        )
+
+    (
+        run_row,
+        checkpoint_rows,
+        step_result_rows,
+        attempt_rows,
+        outbox_rows,
+    ) = await _review_pause_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    assert worker_result == expected_worker_result
+    completion_service.get_response.assert_awaited_once()
+    assert run_row is not None
+    assert run_row.status == target_status.value
+    assert checkpoint_rows == []
+    downstream_step_status = (
+        FlowStepResultStatus.CANCELLED
+        if target_status == FlowRunStatus.CANCELLED
+        else FlowStepResultStatus.FAILED
+    )
+    assert [row.status for row in step_result_rows] == [
+        FlowStepResultStatus.COMPLETED.value,
+        downstream_step_status.value,
+        downstream_step_status.value,
+    ]
+    assert step_result_rows[0].output_payload_json == {
+        "text": "This answer needs review.",
+        "webhook_delivered": False,
+    }
+    assert len(attempt_rows) == 1
+    assert attempt_rows[0].status == FlowStepAttemptStatus.COMPLETED.value
+    assert attempt_rows[0].finished_at is not None
+    assert "flow_run_review_checkpoint_opened" not in {
+        row.action for row in outbox_rows
+    }
+    assert FlowRunLifecycleSource.REVIEW_CHECKPOINT_OPENED.value not in {
+        row.source for row in outbox_rows
+    }
 
 
 @pytest.mark.asyncio

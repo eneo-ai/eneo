@@ -83,7 +83,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T017
+active_task: T019
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -777,7 +777,7 @@ tasks:
   - id: T017
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "After the four confirmed P0 runtime/API correctness slices are locally committed, choose the next highest-ROI phase: public API golden journey, review-open residual race, typed JSONB/data boundary, or proof-only cleanup Scout."
     inputs:
@@ -800,6 +800,156 @@ tasks:
       - "Stop conditions."
       - "Why this outranks the alternatives."
       - "Whether Claude plan gate is required."
+    receipt:
+      result: done
+      decision: "Choose a Worker next: review-open residual race after completed reviewed-step write."
+      next_allowed_task: T018
+      completion_decision: "not_complete; the tranche still has a known review-lifecycle reliability risk before public API golden journey and data-boundary work."
+      evidence:
+        - "The four confirmed runtime/API P0s are locally committed: da6e368d, 47de65d3, de251903, e818fe8b."
+        - "T016 left a residual review-open race after a completed step write and before opening a checkpoint."
+        - "FlowRunExecutor persists and commits successful step output before opening the review checkpoint."
+        - "FlowRunRepository.open_review_checkpoint_for_completed_step rejects checkpoint opening when the run is no longer RUNNING, but executor does not currently translate that terminal race outcome."
+      chosen_next_task_type: Worker
+      exact_objective: "TDD-harden the review checkpoint open race after a successful reviewed-step write: when a run is terminalized after _persist_successful_step commits but before _open_review_checkpoint_for_completed_step opens the review checkpoint, the executor must return the terminal run outcome without bubbling a generic worker error, must not create/open a review checkpoint or checkpoint-open audit outbox, and must leave the terminal run, completed/terminal step result, and attempt state consistent from a fresh database session."
+      allowed_files:
+        - "backend/src/intric/flows/runtime/executor.py"
+        - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+        - "backend/tests/integration/flows/test_flow_review_pause_worker_contract.py"
+        - "backend/tests/integration/flows/test_flow_runtime_worker_contract.py"
+        - "backend/tests/unittests/flows/test_flow_executor_runtime.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T018-review-open-terminalization-race.md"
+      verification_commands:
+        - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py plan gate before edits; require GREEN_LIGHT yes or return to Judge."
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_review_pause_worker_contract.py -k 'review and terminal' -q"
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_review_pause_worker_contract.py -q"
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py -k 'late_output or terminalized or review' -q"
+        - "cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py -k 'review or terminal or cancelled' -q"
+        - "cd backend && uv run pyright src/intric/flows/runtime/executor.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_review_pause_worker_contract.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/unittests/flows/test_flow_executor_runtime.py"
+        - "cd backend && uv run ruff check src/intric/flows/runtime/executor.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_review_pause_worker_contract.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/unittests/flows/test_flow_executor_runtime.py"
+        - "cd backend && uv run ruff format --check src/intric/flows/runtime/executor.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_review_pause_worker_contract.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/unittests/flows/test_flow_executor_runtime.py"
+        - "git diff --check"
+        - "git status --short --branch"
+      stop_conditions:
+        - "Claude plan gate returns GREEN_LIGHT no for correctness, ownership, transaction semantics, test adequacy, data loss, or regression risk."
+        - "Need files outside allowed_files."
+        - "A deterministic red test cannot simulate successful step persistence followed by terminalization before checkpoint open using explicit sessions/fresh-session rereads; do not use sleeps or timing guesses."
+        - "The fix requires schema, migration, generated-client, frontend, Celery routing, AI Builder, or public API contract changes."
+        - "The implementation creates a second review-checkpoint owner, new lifecycle service, pass-through wrapper, interface, factory, generic helper, or compatibility path."
+        - "The implementation performs an executor-side pre-check/fresh-run status check instead of translating the repository's locked review-open signal."
+        - "The implementation swallows all BadRequestException from review checkpoint opening instead of handling only the terminal-run race case with a stable code/status check."
+        - "The implementation matches a string error code in executor code when a typed repository exception can be used inside the allowed files."
+        - "The implementation can leave a committed checkpoint row or flow_run_review_checkpoint_opened audit outbox when the run is already terminal."
+        - "The executor cannot return a clear terminal outcome for both CANCELLED and FAILED."
+        - "New Any, cast, # type: ignore, or broad dict-shaped boundary is introduced without explicit receipt justification."
+        - "Verification fails twice without a clear pre-existing unrelated cause."
+      claude_plan_gate_required: true
+      claude_plan_gate_reason: "This is a subtle lifecycle/transaction boundary: the completed-step write commits before checkpoint opening, FlowRunRepository.open_review_checkpoint_for_completed_step owns checkpoint persistence and run-state transition, and the executor must distinguish a terminalization race from genuine review-open invariant failures."
+      why_this_outranks_alternatives:
+        public_api_golden_journey: "Defer one more step; do not canonize a review journey while a known review-lifecycle race can still make the worker fail between completed output persistence and checkpoint opening."
+        typed_data_boundary: "Defer; typed published definition/metadata contracts reduce future fear but do not close a current runtime lifecycle race."
+        proof_only_cleanup_scout: "Defer; cleanup remains important, but a known runtime correctness risk has higher ROI."
+        frontend: "Blocked until backend API/error contracts are stable and tested."
+      blocked_tasks:
+        - "T006 public API golden journey is blocked until T018 is resolved or Judge explicitly downgrades the review-open race after failed red-test proof."
+        - "T009 typed JSONB/data-boundary Worker is blocked until review lifecycle correctness and public API golden path are no longer higher-risk."
+        - "T007/T008 cleanup remains blocked as implementation work."
+        - "T011 frontend error-state Scout remains blocked until backend API/error contracts are stabilized by the golden journey."
+
+  - id: T018
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "TDD-harden the review checkpoint open race after a successful reviewed-step write: when a run is terminalized after _persist_successful_step commits but before _open_review_checkpoint_for_completed_step opens the review checkpoint, the executor must return the terminal run outcome without bubbling a generic worker error, must not create/open a review checkpoint or checkpoint-open audit outbox, and must leave the terminal run, completed/terminal step result, and attempt state consistent from a fresh database session."
+    allowed_files:
+      - "backend/src/intric/flows/runtime/executor.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+      - "backend/tests/integration/flows/test_flow_review_pause_worker_contract.py"
+      - "backend/tests/integration/flows/test_flow_runtime_worker_contract.py"
+      - "backend/tests/unittests/flows/test_flow_executor_runtime.py"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T018-review-open-terminalization-race.md"
+    verify:
+      - "Run Claude plan gate before edits using /Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py; require GREEN_LIGHT yes or return to Judge."
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_review_pause_worker_contract.py -k 'review and terminal' -q"
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_review_pause_worker_contract.py -q"
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py -k 'late_output or terminalized or review' -q"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py -k 'review or terminal or cancelled' -q"
+      - "cd backend && uv run pyright src/intric/flows/runtime/executor.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_review_pause_worker_contract.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/unittests/flows/test_flow_executor_runtime.py"
+      - "cd backend && uv run ruff check src/intric/flows/runtime/executor.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_review_pause_worker_contract.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/unittests/flows/test_flow_executor_runtime.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/runtime/executor.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_review_pause_worker_contract.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/unittests/flows/test_flow_executor_runtime.py"
+      - "git diff --check"
+      - "git status --short --branch"
+    stop_if:
+      - "Claude plan gate returns GREEN_LIGHT no for correctness, ownership, transaction semantics, test adequacy, data loss, or regression risk."
+      - "Need files outside allowed_files."
+      - "A deterministic red test cannot simulate successful step persistence followed by terminalization before checkpoint open using explicit sessions/fresh-session rereads; do not use sleeps or timing guesses."
+      - "The fix requires schema, migration, generated-client, frontend, Celery routing, AI Builder, or public API contract changes."
+      - "The implementation creates a second review-checkpoint owner, new lifecycle service, pass-through wrapper, interface, factory, generic helper, or compatibility path."
+      - "The implementation performs an executor-side pre-check/fresh-run status check instead of translating the repository's locked review-open signal."
+      - "The implementation swallows all BadRequestException from review checkpoint opening instead of handling only the terminal-run race case with a stable code/status check."
+      - "The implementation matches a string error code in executor code when a typed repository exception can be used inside the allowed files."
+      - "The implementation can leave a committed checkpoint row or flow_run_review_checkpoint_opened audit outbox when the run is already terminal."
+      - "The executor cannot return a clear terminal outcome for both CANCELLED and FAILED."
+      - "New Any, cast, # type: ignore, or broad dict-shaped boundary is introduced without explicit receipt justification."
+      - "Verification fails twice without a clear pre-existing unrelated cause."
+    receipt:
+      result: done
+      summary: "Hardened the reviewed-step success race where a run becomes terminal after the reviewed step commits but before the review checkpoint opens. The repository now raises a typed terminal-run checkpoint-open signal, and the executor catches only that signal to roll back the checkpoint transaction and return the existing terminal outcome path."
+      changed_files:
+        - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+        - "backend/src/intric/flows/runtime/executor.py"
+        - "backend/tests/integration/flows/test_flow_review_pause_worker_contract.py"
+        - "backend/tests/unittests/flows/test_flow_executor_runtime.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T018-review-open-terminalization-race.md"
+      commands:
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_review_pause_worker_contract.py -k 'review and terminal' -q -> 3 passed"
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_review_pause_worker_contract.py -q -> 7 passed"
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py -k 'late_output or terminalized or review' -q -> 2 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py -k 'review or terminal or cancelled' -q -> 9 passed"
+        - "cd backend && uv run pyright src/intric/flows/runtime/executor.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_review_pause_worker_contract.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/unittests/flows/test_flow_executor_runtime.py -> 0 errors"
+        - "cd backend && uv run ruff check src/intric/flows/runtime/executor.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_review_pause_worker_contract.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/unittests/flows/test_flow_executor_runtime.py -> passed"
+        - "cd backend && uv run ruff format --check src/intric/flows/runtime/executor.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/flows/test_flow_review_pause_worker_contract.py tests/integration/flows/test_flow_runtime_worker_contract.py tests/unittests/flows/test_flow_executor_runtime.py -> passed"
+        - "git diff --check -> passed"
+      claude:
+        session: "flow-runtime-maintainability-t018-review-open-terminalization"
+        plan_gate: "iteration 2 GREEN_LIGHT yes, MIN_SCORE 8"
+        commit_gate: "iteration 3 GREEN_LIGHT yes, MIN_SCORE 9"
+        artifact: ".codex/artifacts/claude-peer-loop-t018-review-open-terminalization-implementation-review-20260511T001425Z.md"
+      maintainability_delta:
+        canonical_owner: "FlowRunRepository remains the sole owner of the locked checkpoint-open validity check; FlowRunExecutor owns worker return-shape translation."
+        fear_of_change: "Future changes can distinguish the terminalization race by exception type instead of matching public error-code strings or adding an executor-side status pre-check."
+        type_safety: "No new Any, cast, or type-ignore."
+        error_contract_quality: "The typed subclass preserves code=flow_review_checkpoint_run_not_running for existing API translation while giving runtime code a typed signal."
+        test_quality: "Fresh-session integration coverage proves no checkpoint row or checkpoint-open audit outbox is created after terminalization; unit coverage proves sibling BadRequestException paths still propagate."
+        comment_quality: "No new explanatory comments were needed; names and tests carry the invariant."
+      followups:
+        - "_run_is_cancelled(...) in executor.py may be cleanup-eligible after terminal outcome translation was consolidated through _return_after_terminalized_step_write(...)."
+        - "Future executor unit refactors should reduce brittle flow_run_repo.get side-effect lists where practical."
+
+  - id: T019
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe maintainability task after the completed P0 runtime/API slices, with public API golden journey expected to outrank cleanup unless fresh evidence says otherwise."
+    inputs:
+      - "T014, T016, and T018 runtime receipts"
+      - "T006 public API golden journey candidate"
+      - "T007/T008 cleanup candidates"
+      - "T009 typed data-boundary candidate"
+      - "T010 AI Builder material-efficiency candidate"
+    constraints:
+      - "Do not implement."
+      - "Prefer long-term maintainability and reliability over quick fixes."
+      - "If choosing public API golden journey, produce exact Worker objective, allowed_files, verify commands, stop_if, and expected OpenAPI/API consumer proof."
+      - "Do not activate frontend work until backend error contracts for the touched endpoints are stable and tested."
+      - "Run Claude peer loop for the major phase decision if the next slice is ambiguous or materially changes priority."
+    expected_output:
+      - "Decision with one next active Worker or Scout."
+      - "Why this outranks alternatives."
+      - "Exact allowed_files, verify, and stop_if for any Worker."
+      - "Claude second-opinion status or evidence-backed reason it was not needed."
     receipt: null
 
   - id: T006

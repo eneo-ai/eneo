@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -33,6 +34,9 @@ from intric.flows.flow_run_provenance import (
     ModelParameterSnapshot,
 )
 from intric.flows.flow_runtime_policy import FlowRuntimePolicy
+from intric.flows.infrastructure.flow_run_repo import (
+    FlowReviewCheckpointRunNotRunningError,
+)
 from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 from intric.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from intric.flows.runtime.executor import (
@@ -2138,6 +2142,193 @@ async def test_execute_does_not_persist_step_after_run_cancelled_during_executio
     flow_repo.save_step_result.assert_awaited_once()
     flow_run_repo.finish_attempt.assert_not_awaited()
     executor.flow_run_terminalizer.terminalize_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_returns_terminal_outcome_when_review_open_loses_run_race(
+    user,
+    caplog,
+):
+    executor, flow_repo, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    failed_run = queued_run.model_copy(
+        update={
+            "status": FlowRunStatus.FAILED,
+            "error_message": "Run was terminalized as failed.",
+        }
+    )
+    step_id = uuid4()
+    assistant_id = uuid4()
+    claimed = _claimed_step_result(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        step_id=step_id,
+        assistant_id=assistant_id,
+    )
+    completed = claimed.model_copy(
+        update={
+            "status": FlowStepResultStatus.COMPLETED,
+            "output_payload_json": {"text": "done"},
+        },
+        deep=True,
+    )
+
+    flow_run_repo.get = AsyncMock(
+        side_effect=[queued_run, running_run, running_run, failed_run]
+    )
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_run_repo.open_review_checkpoint_for_completed_step = AsyncMock(
+        side_effect=FlowReviewCheckpointRunNotRunningError(
+            "Flow run changed state before review checkpoint opened."
+        )
+    )
+    flow_repo.save_step_result = AsyncMock(return_value=completed)
+    flow_version_repo.get = AsyncMock(
+        return_value=FlowVersion(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum="checksum",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(step_id),
+                        "step_order": 1,
+                        "assistant_id": str(assistant_id),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                        "review_policy": {"mode": "view"},
+                    }
+                ]
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+    executor._execute_step = AsyncMock(
+        return_value=StepExecutionOutput(
+            input_text="hello",
+            source_text="hello",
+            input_source="flow_input",
+            used_question_binding=False,
+            legacy_prompt_binding_used=False,
+            full_text="done",
+            persisted_text="done",
+            generated_file_ids=[],
+            tool_calls_metadata=None,
+            num_tokens_input=10,
+            num_tokens_output=10,
+            effective_prompt="prompt",
+            model_parameters_json={},
+        )
+    )
+
+    with caplog.at_level(logging.INFO, logger="intric.flows.runtime.executor"):
+        result = await executor.execute(
+            run_id=queued_run.id,
+            flow_id=queued_run.flow_id,
+            tenant_id=user.tenant_id,
+            celery_task_id="task-1",
+            retry_count=0,
+        )
+
+    assert result == {"status": "failed", "error": "Run was terminalized as failed."}
+    flow_run_repo.open_review_checkpoint_for_completed_step.assert_awaited_once()
+    executor.session.rollback.assert_awaited_once()
+    assert "flow_executor.review_open_skipped_run_terminal" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_execute_propagates_non_terminal_review_open_errors(user):
+    executor, flow_repo, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    step_id = uuid4()
+    assistant_id = uuid4()
+    claimed = _claimed_step_result(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        step_id=step_id,
+        assistant_id=assistant_id,
+    )
+    completed = claimed.model_copy(
+        update={
+            "status": FlowStepResultStatus.COMPLETED,
+            "output_payload_json": {"text": "done"},
+        },
+        deep=True,
+    )
+    review_conflict = BadRequestException(
+        "Flow run already has an active review checkpoint.",
+        code="flow_review_checkpoint_active_conflict",
+    )
+
+    flow_run_repo.get = AsyncMock(side_effect=[queued_run, running_run, running_run])
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_run_repo.open_review_checkpoint_for_completed_step = AsyncMock(
+        side_effect=review_conflict
+    )
+    flow_repo.save_step_result = AsyncMock(return_value=completed)
+    flow_version_repo.get = AsyncMock(
+        return_value=FlowVersion(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum="checksum",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(step_id),
+                        "step_order": 1,
+                        "assistant_id": str(assistant_id),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                        "review_policy": {"mode": "view"},
+                    }
+                ]
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+    executor._execute_step = AsyncMock(
+        return_value=StepExecutionOutput(
+            input_text="hello",
+            source_text="hello",
+            input_source="flow_input",
+            used_question_binding=False,
+            legacy_prompt_binding_used=False,
+            full_text="done",
+            persisted_text="done",
+            generated_file_ids=[],
+            tool_calls_metadata=None,
+            num_tokens_input=10,
+            num_tokens_output=10,
+            effective_prompt="prompt",
+            model_parameters_json={},
+        )
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await executor.execute(
+            run_id=queued_run.id,
+            flow_id=queued_run.flow_id,
+            tenant_id=user.tenant_id,
+            celery_task_id="task-1",
+            retry_count=0,
+        )
+
+    assert exc_info.value is review_conflict
+    executor.session.rollback.assert_not_awaited()
 
 
 @pytest.mark.asyncio
