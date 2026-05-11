@@ -327,3 +327,36 @@ def test_flow_metadata_persisted_read_fails_closed_for_legacy_sensitive() -> Non
     )
 
     assert serialize_flow_metadata(parsed) == {"care_data_policy": {"sensitive": True}}
+
+
+@pytest.mark.parametrize(
+    ("metadata_json", "message"),
+    [
+        (
+            {"care_data_policy": []},
+            "metadata_json.care_data_policy must be an object.",
+        ),
+        (
+            {"care_data_policy": {"unknown": True}},
+            "metadata_json.care_data_policy contains unknown fields: unknown",
+        ),
+        (
+            {"care_data_policy": {"sensitive": "yes"}},
+            "metadata_json.care_data_policy.sensitive must be a boolean.",
+        ),
+        (
+            {"care_data_policy": {"approval_mode": "two_reviewers"}},
+            "metadata_json.care_data_policy.approval_mode must be 'single_reviewer_outside_flow' when provided.",
+        ),
+        (
+            {"care_data_policy": {"pre_approval_visibility": "everyone"}},
+            "metadata_json.care_data_policy.pre_approval_visibility must be 'uploader_and_reviewers' when provided.",
+        ),
+    ],
+)
+def test_parse_flow_metadata_preserves_care_data_write_errors(
+    metadata_json: dict[str, object],
+    message: str,
+) -> None:
+    with pytest.raises(BadRequestException, match=re.escape(message)):
+        parse_flow_metadata(metadata_json, mode=FlowMetadataParseMode.WRITE)

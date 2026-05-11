@@ -16,9 +16,3 @@ def resolve_flow_care_data_policy(
     return parse_flow_metadata(
         metadata_json, mode=FlowMetadataParseMode.PERSISTED_READ
     ).care_data_policy
-
-
-def validate_flow_care_data_policy(
-    metadata_json: JsonObject | Mapping[str, object] | None,
-) -> None:
-    parse_flow_metadata(metadata_json, mode=FlowMetadataParseMode.WRITE)

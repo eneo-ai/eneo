@@ -85,7 +85,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T033
+active_task: T034
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -2047,7 +2047,7 @@ tasks:
   - id: T033
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Delete the orphan validate_flow_care_data_policy adapter and move its write-error coverage to the canonical FlowMetadataV1 parser tests without changing runtime care-data read behavior."
     allowed_files:
@@ -2071,6 +2071,86 @@ tasks:
       - "Persisted-read resolve_flow_care_data_policy tests still pass."
       - "All verify commands passed."
       - "Receipt says whether Claude self-review was needed."
+    receipt:
+      result: done
+      summary: "Deleted the orphan validate_flow_care_data_policy adapter and moved its write-error coverage to parse_flow_metadata(..., mode=WRITE) tests in the canonical metadata owner."
+      canonical_owner: "backend/src/intric/flows/flow_metadata.py owns care-data write validation."
+      files_changed:
+        source:
+          - "backend/src/intric/flows/flow_care_data_policy.py"
+        tests:
+          - "backend/tests/unittests/flows/test_flow_care_data_policy.py"
+          - "backend/tests/unittests/flows/test_flow_metadata.py"
+      changed_files:
+        - "backend/src/intric/flows/flow_care_data_policy.py"
+        - "backend/tests/unittests/flows/test_flow_care_data_policy.py"
+        - "backend/tests/unittests/flows/test_flow_metadata.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      behavior:
+        - "git grep -n 'validate_flow_care_data_policy' -- backend returns no hits after deletion."
+        - "resolve_flow_care_data_policy persisted-read behavior remains covered in test_flow_care_data_policy.py."
+        - "Care-data write error messages are now tested directly through parse_flow_metadata(..., mode=WRITE) in test_flow_metadata.py."
+      type_debt_counts:
+        - "flow_care_data_policy.py: HEAD Any/cast/type-ignore 0; worktree 0."
+        - "test_flow_care_data_policy.py: HEAD Any/cast/type-ignore 0; worktree 0."
+        - "test_flow_metadata.py: HEAD Any/cast/type-ignore 0; worktree 0."
+      verification:
+        - "PASS git grep -n 'validate_flow_care_data_policy' -- backend -> no hits."
+        - "PASS cd backend && uv run pytest tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py -q -> 99 passed, 1 warning."
+        - "PASS cd backend && uv run pyright src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py -> 0 errors."
+        - "PASS cd backend && uv run ruff check src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py."
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py."
+        - "PASS git diff --check for T033 files."
+      commands:
+        - "git grep -n 'validate_flow_care_data_policy' -- backend"
+        - "cd backend && uv run pytest tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py -q"
+        - "cd backend && uv run pyright src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py"
+        - "cd backend && uv run ruff check src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py"
+        - "cd backend && uv run ruff format --check src/intric/flows/flow_metadata.py src/intric/flows/flow_care_data_policy.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_care_data_policy.py tests/unittests/flows/test_flow_service.py"
+      claude:
+        plan_gate_required: false
+        self_review_needed: false
+        reason: "Proof-backed deletion stayed inside allowed files, had exact grep proof, and verification passed without hidden behavior."
+      comments_added_or_changed: []
+      maintainability_rubric:
+        canonical_ownership: 1
+        fear_of_change_reduction: 1
+        type_safety: 1
+        error_contract_quality: 1
+        test_quality: 1
+        comment_quality: 1
+        complexity: 1
+        deletion_quality: 1
+        score: "8/8"
+      anti_patterns_avoided:
+        - "No compatibility shim retained."
+        - "No new Any, casts, type ignores, helper module, service, manager, or fake interface."
+        - "No FlowService, published_definition.py, AI Builder, router, migration, frontend, generated client, or unrelated dirty-file changes."
+
+  - id: T034
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Scope the typed published-definition metadata accessor so runtime/contract readers can stop consuming raw published_definition.metadata_json without broadening into AI Builder cleanup."
+    inputs:
+      - "T031 receipt"
+      - "T033 receipt"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T032-next-metadata-cleanup-decision.md"
+    constraints:
+      - "Read-only. Do not implement source changes."
+      - "Inspect published_definition.py, flow_run_contract_service.py, and flow_run_service.py call sites before choosing a Worker scope."
+      - "Keep AI Builder out unless evidence proves a shared change is required."
+      - "Name allowed files, red tests, verification commands, and stop_if conditions."
+      - "Require host Claude plan gate if ownership/schema/test uncertainty remains."
+    expected_output:
+      - "decision"
+      - "next Worker objective"
+      - "allowed_files"
+      - "red tests"
+      - "verification commands"
+      - "stop_if"
+      - "whether Claude plan gate is required before activation"
     receipt: null
 
 validation_command_candidates:
