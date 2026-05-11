@@ -85,7 +85,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T025
+active_task: T026
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -1354,7 +1354,7 @@ tasks:
   - id: T025
     type: scout
     assignee: Scout
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Map the Flow typed metadata/data-boundary migration before any Worker adds FlowMetadataV1 or FlowFormSchemaV1, so the typed model becomes the canonical owner rather than a parallel JSONB reader."
     constraints:
@@ -1382,6 +1382,45 @@ tasks:
       - "Decision on whether existing legacy-form-normalization tests are replaced or augmented by typed-boundary tests."
       - "Explicit decision on whether FlowStepResult.step_id type-tightening is part of this typed-boundary lane or a separate cleanup lane."
       - "Claude plan-gate requirement before activating the first typed-boundary Worker."
+    receipt:
+      result: done
+      note: "notes/T025-typed-metadata-boundary-scout.md"
+      summary: "Mapped the Flow metadata/form_schema boundary across 151 metadata_json hits in 26 files and 81 form_schema hits in 10 files. Recommended a new Flow-domain flow_metadata.py owner with FlowFormSchemaV1 as a standalone nested model under FlowMetadataV1, staged through core validation/run-contract/run-input first, FlowService/published snapshots second, and AI Builder reader cleanup as the closer. FlowStepResult.step_id type-tightening remains a separate cleanup lane."
+      canonical_owner_recommendation: "backend/src/intric/flows/flow_metadata.py"
+      model_shape: "FlowFormSchemaV1 is a standalone model in the same module and is referenced by FlowMetadataV1.form_schema."
+      worker_sequence:
+        - "Worker 1: introduce core typed metadata/form schema boundary for validation, run input payload, and run contract."
+        - "Worker 2: move FlowService, published_definition, and care-data/evidence policy readers through canonical metadata."
+        - "Worker 3: AI Builder metadata/form-field closer that retires remaining raw form-schema dict readers."
+      claude_plan_gate_required_before_worker: true
+      next_recommended_task: T026
+
+  - id: T026
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Review T025 typed metadata-boundary Scout and decide whether to activate the first typed-boundary Worker, revise the Worker sequence, or request more evidence."
+    inputs:
+      - "T025 receipt"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T025-typed-metadata-boundary-scout.md"
+      - "Claude T024 green-light artifacts"
+    constraints:
+      - "Do not implement."
+      - "Run a Claude plan gate with at least a 15 minute timeout, preferably 20 minutes, before activating any source Worker."
+      - "Prefer long-term maintainability and reliability over a quick typed wrapper."
+      - "Reject any Worker plan that leaves FlowMetadataV1 as a parallel owner beside raw dict readers without a named closer."
+      - "Keep FlowStepResult.step_id type-tightening separate unless Judge proves it shares the same owner and rollback path."
+      - "Stay on feature/refactor-flows-flowai and do not push."
+    expected_output:
+      - "Decision: activate Worker 1, revise plan, or request more Scout evidence."
+      - "Claude plan-gate result and accepted/rejected findings."
+      - "Exact allowed files for Worker 1 if activated."
+      - "Red-test expectations."
+      - "Validation commands."
+      - "Stop conditions."
+      - "Maintainability self-review questions for the Worker."
+      - "Whether to commit the T025 Scout docs before implementation."
     receipt: null
 
   - id: T008
