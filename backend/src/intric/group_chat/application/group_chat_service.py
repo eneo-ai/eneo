@@ -259,16 +259,20 @@ class GroupChatService:
     def _is_match(
         self, response_text: str, assistants: list[GroupChatAssistant]
     ) -> int | None:
-        """Parse the model's response to determine which assistant to use"""
-        response_text = response_text.strip().upper()
+        """Parse the model's response to a 1-indexed assistant number, or None.
 
-        # Look for a number in the response
-        match = re.search(r"(\d+)", response_text)
-
-        if match:
-            return int(match.group(1))
-        else:
+        Bounds-checks the parsed digit so an out-of-range pick (e.g. a stray
+        year like "2024" or a hallucinated index) collapses to None and the
+        caller falls through to the clarification branch instead of crashing
+        on `selection_result.response_str`.
+        """
+        match = re.search(r"(\d+)", response_text.strip().upper())
+        if match is None:
             return None
+        n = int(match.group(1))
+        if 1 <= n <= len(assistants):
+            return n
+        return None
 
     async def _select_assistant_with_completion_model(
         self,
@@ -306,24 +310,21 @@ class GroupChatService:
             session=session,
             text_input=question,
         )
-        # parse the response to determine which assistant to use
         assistant_match = self._is_match(
             response.completion.text,  # type: ignore[union-attr]
             assistants,
         )
-        if assistant_match:
-            if 1 <= assistant_match <= len(assistants):
-                return GroupChatAssistantSelectionResult(
-                    assistant=assistants[assistant_match - 1],
-                    response_str=response.completion.text,  # type: ignore[union-attr]
-                    assistant_selector_tokens=assistant_selector_tokens,
-                )
-        else:
+        if assistant_match is not None:
             return GroupChatAssistantSelectionResult(
-                assistant=None,
+                assistant=assistants[assistant_match - 1],
                 response_str=response.completion.text,  # type: ignore[union-attr]
                 assistant_selector_tokens=assistant_selector_tokens,
             )
+        return GroupChatAssistantSelectionResult(
+            assistant=None,
+            response_str=response.completion.text,  # type: ignore[union-attr]
+            assistant_selector_tokens=assistant_selector_tokens,
+        )
 
     async def _handle_response(
         self,
