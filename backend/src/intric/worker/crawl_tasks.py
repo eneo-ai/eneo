@@ -18,14 +18,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.main.config import get_settings
 from intric.main.container.container import Container
-from intric.main.exceptions import CrawlerException, CrawlTimeoutError
 from intric.main.logging import get_logger
 from intric.tenants.crawler_settings_helper import get_crawler_setting
-from intric.websites.crawl_dependencies.crawl_models import (
-    CrawlTask,
-    derive_crawl_outcome_code,
+from intric.websites.crawl_dependencies.crawl_models import CrawlTask
+from intric.websites.domain.crawl_outcome import (
+    CrawlOutcomeCode,
+    CrawlOutcomeCrawlType,
+    CrawlTerminationReason,
+    classify_crawl_outcome,
 )
-from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.websites.domain.crawl_run import CrawlType
 from intric.worker.crawl import (
     ExistingBlobState,
@@ -50,6 +51,13 @@ logger = get_logger(__name__)
 
 SCHEDULER_LOCK_KEY = "crawl_scheduler:leader"
 SCHEDULER_LOCK_TTL_SECONDS = 1800
+_TERMINAL_ZERO_OUTPUT_MESSAGES: dict[CrawlOutcomeCode, str] = {
+    CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED: "Crawl produced no pages",
+    CrawlOutcomeCode.CRAWL_SITEMAP_NO_PAGES: "Sitemap crawl produced no pages",
+    CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES: (
+        "Crawl timed out before collecting pages"
+    ),
+}
 
 
 async def _get_primary_active_job_id(
@@ -215,18 +223,96 @@ def _warn_if_retained_items_without_embedding_config(
     )
 
 
-def _crawl_outcome_code_for_exception(
-    exc: Exception,
+def _crawl_type_for_outcome(crawl_type: CrawlType) -> CrawlOutcomeCrawlType:
+    if crawl_type == CrawlType.SITEMAP:
+        return "sitemap"
+    return "crawl"
+
+
+def _terminal_zero_output_message(outcome_code: CrawlOutcomeCode | None) -> str | None:
+    if outcome_code is None:
+        return None
+    return _TERMINAL_ZERO_OUTPUT_MESSAGES.get(outcome_code)
+
+
+async def _update_website_circuit_breaker(
+    sess: AsyncSession,
     *,
-    crawl_type: CrawlType,
-) -> CrawlOutcomeCode:
-    if isinstance(exc, CrawlTimeoutError):
-        return CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES
-    if isinstance(exc, CrawlerException) and "no pages returned" in str(exc).lower():
-        if crawl_type == CrawlType.SITEMAP:
-            return CrawlOutcomeCode.CRAWL_SITEMAP_NO_PAGES
-        return CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED
-    return CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
+    website_id: UUID,
+    tenant_id: UUID,
+    website_url: str,
+    crawl_successful: bool,
+) -> None:
+    from intric.database.tables.websites_table import Websites as WebsitesTable
+
+    if crawl_successful:
+        logger.info(f"Crawl successful, resetting circuit breaker for website {website_id}")
+        reset_stmt = (
+            sa.update(WebsitesTable)
+            .where(WebsitesTable.id == website_id)
+            .where(WebsitesTable.tenant_id == tenant_id)
+            .values(consecutive_failures=0, next_retry_at=None)
+        )
+        await sess.execute(reset_stmt)
+        return
+
+    current_failures_stmt = (
+        sa.select(WebsitesTable.consecutive_failures)
+        .where(WebsitesTable.id == website_id)
+        .where(WebsitesTable.tenant_id == tenant_id)
+    )
+    current_failures: int = (await sess.scalar(current_failures_stmt)) or 0
+    new_failures = current_failures + 1
+
+    max_failures_before_disable = 10
+    if new_failures >= max_failures_before_disable:
+        from intric.websites.domain.website import UpdateInterval
+
+        logger.error(
+            f"Website {website_id} auto-disabled after {new_failures} consecutive failures. "
+            "User action required to re-enable.",
+            extra={
+                "website_id": str(website_id),
+                "url": website_url,
+                "consecutive_failures": new_failures,
+            },
+        )
+        disable_stmt = (
+            sa.update(WebsitesTable)
+            .where(WebsitesTable.id == website_id)
+            .where(WebsitesTable.tenant_id == tenant_id)
+            .values(
+                consecutive_failures=new_failures,
+                update_interval=UpdateInterval.NEVER,
+                next_retry_at=None,
+            )
+        )
+        await sess.execute(disable_stmt)
+        return
+
+    backoff_hours = min(2 ** (new_failures - 1), 24)
+    next_retry = datetime.now(timezone.utc) + timedelta(hours=backoff_hours)
+    logger.warning(
+        f"Crawl failed for website {website_id}. "
+        f"Failure {new_failures}/{max_failures_before_disable}, "
+        f"backoff {backoff_hours}h until {next_retry.isoformat()}",
+        extra={
+            "website_id": str(website_id),
+            "consecutive_failures": new_failures,
+            "backoff_hours": backoff_hours,
+            "next_retry_at": next_retry.isoformat(),
+        },
+    )
+    backoff_stmt = (
+        sa.update(WebsitesTable)
+        .where(WebsitesTable.id == website_id)
+        .where(WebsitesTable.tenant_id == tenant_id)
+        .values(
+            consecutive_failures=new_failures,
+            next_retry_at=next_retry,
+        )
+    )
+    await sess.execute(backoff_stmt)
 
 
 async def _record_crawl_run_outcome_code(
@@ -1263,7 +1349,157 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                 # Track partial completion status for logging
                 crawl_is_partial = crawl.is_partial
-                crawl_termination_reason = crawl.termination_reason
+                crawl_termination_reason: CrawlTerminationReason = (
+                    crawl.termination_reason
+                )
+                # Page/file failures cannot exist before processing; this call only
+                # classifies crawler-level terminal conditions that must skip cleanup.
+                crawl_output_outcome_code = classify_crawl_outcome(
+                    crawl_type=_crawl_type_for_outcome(params.crawl_type),
+                    is_partial=crawl_is_partial,
+                    termination_reason=crawl_termination_reason,
+                    pages_count=crawl.pages_count,
+                    source_retained_count=crawl.source_retained_count,
+                    failure_summary=None,
+                    pages_failed=0,
+                    files_failed=0,
+                )
+                terminal_failure_message = _terminal_zero_output_message(
+                    crawl_output_outcome_code
+                )
+                if terminal_failure_message is not None:
+                    assert crawl_output_outcome_code is not None
+                    terminal_outcome_code = crawl_output_outcome_code
+                    from intric.audit.domain.action_types import ActionType
+                    from intric.audit.domain.entity_types import EntityType
+                    from intric.database.tables.job_table import Jobs
+                    from intric.database.tables.websites_table import CrawlRuns
+                    from intric.main.models import Status as JobStatus
+
+                    logger.warning(
+                        "Crawl produced no usable output",
+                        extra={
+                            "job_id": str(job_id),
+                            "website_id": str(params.website_id),
+                            "tenant_id": str(crawl_context.tenant_id),
+                            "crawl_type": params.crawl_type.value,
+                            "outcome_code": terminal_outcome_code.value,
+                            "termination_reason": crawl_termination_reason,
+                        },
+                    )
+
+                    async def _do_terminal_crawl_run_update(
+                        sess: AsyncSession,
+                    ) -> None:
+                        stmt = (
+                            sa.update(CrawlRuns)
+                            .where(CrawlRuns.id == params.run_id)
+                            .values(
+                                pages_crawled=0,
+                                files_downloaded=0,
+                                pages_failed=0,
+                                files_failed=0,
+                                pages_source_retained=0,
+                                failure_summary=None,
+                                outcome_code=terminal_outcome_code.value,
+                            )
+                        )
+                        await sess.execute(stmt)
+
+                    await execute_with_recovery(
+                        container=container,
+                        session_holder=session_holder,
+                        created_sessions=created_sessions,
+                        operation_name="terminal_crawl_run_update",
+                        operation=_do_terminal_crawl_run_update,
+                    )
+
+                    async def _do_terminal_circuit_breaker_update(
+                        sess: AsyncSession,
+                    ) -> None:
+                        await _update_website_circuit_breaker(
+                            sess,
+                            website_id=params.website_id,
+                            tenant_id=crawl_context.tenant_id,
+                            website_url=website_url,
+                            crawl_successful=False,
+                        )
+
+                    await execute_with_recovery(
+                        container=container,
+                        session_holder=session_holder,
+                        created_sessions=created_sessions,
+                        operation_name="terminal_circuit_breaker_update",
+                        operation=_do_terminal_circuit_breaker_update,
+                    )
+
+                    audit_service = container.audit_service()
+                    actor_id = (
+                        website.user_id
+                        if hasattr(website, "user_id") and website.user_id
+                        else current_tenant.id
+                    )
+                    await audit_service.log_async(
+                        tenant_id=current_tenant.id,
+                        actor_id=actor_id,
+                        action=ActionType.WEBSITE_CRAWLED,
+                        entity_type=EntityType.WEBSITE,
+                        entity_id=params.website_id,
+                        description=f"Website crawled: {website.url} - Failed",
+                        metadata={
+                            "target": {
+                                "website_id": str(params.website_id),
+                                "url": website.url,
+                                "name": getattr(website, "name", website.url),
+                            },
+                            "crawl_stats": {
+                                "pages_crawled": 0,
+                                "pages_failed": 0,
+                                "pages_skipped": 0,
+                                "pages_source_retained": 0,
+                                "files_downloaded": 0,
+                                "files_failed": 0,
+                                "files_skipped": 0,
+                                "blobs_deleted": 0,
+                                "successful": False,
+                                "outcome_code": terminal_outcome_code.value,
+                            },
+                        },
+                    )
+
+                    async def _do_fail_terminal_job(sess: AsyncSession) -> None:
+                        stmt = (
+                            sa.update(Jobs)
+                            .where(Jobs.id == job_id)
+                            .where(
+                                Jobs.status.in_(
+                                    [
+                                        JobStatus.QUEUED.value,
+                                        JobStatus.IN_PROGRESS.value,
+                                    ]
+                                )
+                            )
+                            .values(
+                                status=JobStatus.FAILED.value,
+                                finished_at=datetime.now(timezone.utc),
+                                result_location=terminal_failure_message,
+                            )
+                        )
+                        await sess.execute(stmt)
+
+                    await execute_with_recovery(
+                        container=container,
+                        session_holder=session_holder,
+                        created_sessions=created_sessions,
+                        operation_name="terminal_fail_job",
+                        operation=_do_fail_terminal_job,
+                    )
+                    setattr(task_manager, "_job_already_handled", True)
+                    task_manager.success = False
+                    return {
+                        "status": "failed",
+                        "outcome_code": terminal_outcome_code.value,
+                    }
 
                 if crawl_is_partial:
                     logger.warning(
@@ -1685,22 +1921,16 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # Convert failure_counts defaultdict to regular dict for JSONB storage
             # Only store if there are any failures
             failure_summary = dict(failure_counts) if failure_counts else None
-            if (
-                num_source_retained_pages > 0
-                and num_pages == 0
-                and num_files == 0
-                and num_failed_pages == 0
-                and num_failed_files == 0
-            ):
-                crawl_run_outcome_code = CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY
-            else:
-                crawl_run_outcome_code = derive_crawl_outcome_code(
-                    status=JobStatus.COMPLETE,
-                    result_location=None,
-                    failure_summary=failure_summary,
-                    pages_failed=num_failed_pages,
-                    files_failed=num_failed_files,
-                )
+            crawl_run_outcome_code = classify_crawl_outcome(
+                crawl_type=_crawl_type_for_outcome(params.crawl_type),
+                is_partial=crawl_is_partial,
+                termination_reason=crawl_termination_reason,
+                pages_count=num_pages,
+                source_retained_count=num_source_retained_pages,
+                failure_summary=failure_summary,
+                pages_failed=num_failed_pages,
+                files_failed=num_failed_files,
+            )
 
             async def _do_crawl_run_update(sess: AsyncSession) -> None:
                 # Session provided by execute_with_recovery (session-per-operation pattern)
@@ -1738,91 +1968,13 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             crawl_successful = total_items > 0 and total_failed < total_items
 
             async def _do_circuit_breaker_update(sess: AsyncSession) -> None:
-                """Update circuit breaker state with appropriate backoff/reset."""
-                # Session provided by execute_with_recovery (session-per-operation pattern)
-                # NOTE: Use crawl_context primitives, NOT detached ORM website object
-                if crawl_successful:
-                    # Success: Reset circuit breaker
-                    logger.info(
-                        f"Crawl successful, resetting circuit breaker for website {params.website_id}"
-                    )
-                    reset_stmt = (
-                        sa.update(WebsitesTable)
-                        .where(WebsitesTable.id == params.website_id)
-                        .where(WebsitesTable.tenant_id == crawl_context.tenant_id)
-                        .values(consecutive_failures=0, next_retry_at=None)
-                    )
-                    await sess.execute(reset_stmt)
-                else:
-                    # Failure: Increment counter and apply exponential backoff
-                    # Get current failure count (with tenant filter for security)
-                    current_failures_stmt = (
-                        sa.select(WebsitesTable.consecutive_failures)
-                        .where(WebsitesTable.id == params.website_id)
-                        .where(WebsitesTable.tenant_id == crawl_context.tenant_id)
-                    )
-                    current_failures: int = (
-                        await sess.scalar(current_failures_stmt)
-                    ) or 0
-                    new_failures = current_failures + 1
-
-                    # Auto-disable threshold: Stop trying after too many failures
-                    MAX_FAILURES_BEFORE_DISABLE = 10
-
-                    if new_failures >= MAX_FAILURES_BEFORE_DISABLE:
-                        # Auto-disable: Set update_interval to NEVER
-                        from intric.websites.domain.website import UpdateInterval
-
-                        logger.error(
-                            f"Website {params.website_id} auto-disabled after {new_failures} consecutive failures. "
-                            f"User action required to re-enable.",
-                            extra={
-                                "website_id": str(params.website_id),
-                                "url": website_url,  # Use primitive captured during bootstrap
-                                "consecutive_failures": new_failures,
-                            },
-                        )
-
-                        disable_stmt = (
-                            sa.update(WebsitesTable)
-                            .where(WebsitesTable.id == params.website_id)
-                            .where(WebsitesTable.tenant_id == crawl_context.tenant_id)
-                            .values(
-                                consecutive_failures=new_failures,
-                                update_interval=UpdateInterval.NEVER,  # Auto-disable
-                                next_retry_at=None,  # Clear retry time
-                            )
-                        )
-                        await sess.execute(disable_stmt)
-                    else:
-                        # Normal exponential backoff: 1h, 2h, 4h, 8h, 16h, 24h max
-                        backoff_hours = min(2 ** (new_failures - 1), 24)
-                        next_retry = datetime.now(timezone.utc) + timedelta(
-                            hours=backoff_hours
-                        )
-
-                        logger.warning(
-                            f"Crawl failed for website {params.website_id}. "
-                            f"Failure {new_failures}/{MAX_FAILURES_BEFORE_DISABLE}, "
-                            f"backoff {backoff_hours}h until {next_retry.isoformat()}",
-                            extra={
-                                "website_id": str(params.website_id),
-                                "consecutive_failures": new_failures,
-                                "backoff_hours": backoff_hours,
-                                "next_retry_at": next_retry.isoformat(),
-                            },
-                        )
-
-                        backoff_stmt = (
-                            sa.update(WebsitesTable)
-                            .where(WebsitesTable.id == params.website_id)
-                            .where(WebsitesTable.tenant_id == crawl_context.tenant_id)
-                            .values(
-                                consecutive_failures=new_failures,
-                                next_retry_at=next_retry,
-                            )
-                        )
-                        await sess.execute(backoff_stmt)
+                await _update_website_circuit_breaker(
+                    sess,
+                    website_id=params.website_id,
+                    tenant_id=crawl_context.tenant_id,
+                    website_url=website_url,
+                    crawl_successful=crawl_successful,
+                )
 
             await execute_with_recovery(
                 container=container,
@@ -1916,15 +2068,11 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
         return task_manager.successful()
     except Retry:
         raise
-    except Exception as exc:
-        outcome_code = _crawl_outcome_code_for_exception(
-            exc,
-            crawl_type=params.crawl_type,
-        )
+    except Exception:
         try:
             await _record_crawl_run_outcome_code(
                 run_id=params.run_id,
-                outcome_code=outcome_code,
+                outcome_code=CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR,
             )
         except Exception as outcome_exc:
             logger.warning(
@@ -1932,7 +2080,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 extra={
                     "job_id": str(job_id),
                     "run_id": str(params.run_id),
-                    "outcome_code": outcome_code.value,
+                    "outcome_code": CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR.value,
                     "error": str(outcome_exc),
                 },
             )

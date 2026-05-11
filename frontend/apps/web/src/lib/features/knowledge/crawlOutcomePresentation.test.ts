@@ -44,6 +44,19 @@ test("outcome tooltip includes affected count and detail", () => {
   ).toBe("Completed with page or file failures\n3 affected\nThree pages failed during embedding");
 });
 
+test("partial timeout outcome has a localized label", () => {
+  expect(
+    getCrawlOutcomeLabel(
+      {
+        code: "CRAWL_PARTIAL_TIMEOUT",
+        severity: "warning",
+        message_key: "crawl_outcome_partial_timeout"
+      },
+      "fallback"
+    )
+  ).toBe("Partially completed");
+});
+
 test("unknown outcome message key falls back to detail", () => {
   expect(
     getCrawlOutcomeLabel(

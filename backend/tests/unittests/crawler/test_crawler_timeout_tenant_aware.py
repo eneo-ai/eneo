@@ -91,15 +91,34 @@ class TestCrawlerSourceRetainedUrls:
         async def timeout_without_output(*, max_length, sitemap_url, **kwargs):
             raise CrawlTimeoutError(url=sitemap_url, timeout_seconds=max_length)
 
-        with pytest.raises(CrawlTimeoutError) as exc_info:
-            async with crawler._crawl(
-                timeout_without_output,
-                max_length=60,
-                sitemap_url="https://example.com/sitemap.xml",
-            ):
-                pass
+        async with crawler._crawl(
+            timeout_without_output,
+            max_length=60,
+            sitemap_url="https://example.com/sitemap.xml",
+        ) as crawl:
+            assert crawl.is_partial is True
+            assert crawl.termination_reason == "timeout"
+            assert crawl.pages_count == 0
+            assert crawl.source_retained_count == 0
+            assert list(crawl.pages) == []
 
-        assert exc_info.value.pages_collected == 0
+    @pytest.mark.asyncio
+    async def test_completed_crawl_with_no_output_yields_typed_empty_result(self):
+        crawler = Crawler()
+
+        async def complete_without_output(**kwargs):
+            return None
+
+        async with crawler._crawl(
+            complete_without_output,
+            max_length=60,
+            url="https://example.com",
+        ) as crawl:
+            assert crawl.is_partial is False
+            assert crawl.termination_reason == "completed"
+            assert crawl.pages_count == 0
+            assert crawl.source_retained_count == 0
+            assert list(crawl.pages) == []
 
 
 class TestCrawlerLastmodRouting:

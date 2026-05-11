@@ -520,8 +520,8 @@ class TestHashRetention:
     async def test_missing_embedding_model_retains_unchanged_and_fails_changed_only(
         self, crawl_context, mock_embeddings_service
     ):
+        from intric.websites.domain.crawl_outcome import FailureReason
         from intric.worker.crawl.persistence import ExistingBlobState, persist_batch
-        from intric.worker.crawl_context import FailureReason
 
         unchanged_url = "https://example.com/unchanged"
         changed_url = "https://example.com/changed"
@@ -566,8 +566,8 @@ class TestHashRetention:
         mock_embeddings_service.get_embeddings.assert_not_called()
 
     def test_persist_batch_result_counts_are_computed_from_collections(self):
+        from intric.websites.domain.crawl_outcome import FailureReason
         from intric.worker.crawl.persistence import PersistBatchResult
-        from intric.worker.crawl_context import FailureReason
 
         result = PersistBatchResult(
             persisted_urls=("https://example.com/persisted",),
@@ -982,7 +982,7 @@ class TestPersistedUrlsTracking:
         """
         INVARIANT: When embedding_model is None, all pages fail with NO_EMBEDDING_MODEL reason.
         """
-        from intric.worker.crawl_context import FailureReason
+        from intric.websites.domain.crawl_outcome import FailureReason
         from intric.worker.crawl_tasks import persist_batch
 
         page_buffer = [
@@ -1012,7 +1012,7 @@ class TestPersistedUrlsTracking:
 
         This is critical: rollback means the data was NOT persisted.
         """
-        from intric.worker.crawl_context import FailureReason
+        from intric.websites.domain.crawl_outcome import FailureReason
 
         page_buffer = [
             {"url": "https://example.com/will-rollback", "content": "Content"}

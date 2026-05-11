@@ -1,12 +1,16 @@
 from intric.main.models import Status
+from intric.websites.crawl_dependencies import crawl_models
 from intric.websites.crawl_dependencies.crawl_models import (
     CrawlOutcomeSeverity,
     CrawlRunSparse,
     derive_crawl_outcome,
     derive_crawl_outcome_code,
 )
-from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
-from intric.worker.crawl_context import FailureReason
+from intric.websites.domain.crawl_outcome import (
+    CrawlOutcomeCode,
+    FailureReason,
+    classify_crawl_outcome,
+)
 
 
 def test_stored_duplicate_crawl_skip_is_info_outcome_without_string_parsing():
@@ -36,6 +40,33 @@ def test_legacy_duplicate_crawl_skip_string_still_derives_outcome():
     )
 
     assert outcome_code == CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED
+
+
+def test_legacy_outcome_fallback_emits_observability(monkeypatch):
+    class CapturingLogger:
+        def __init__(self):
+            self.extra: dict[str, object] | None = None
+
+        def info(self, _message: str, *, extra: dict[str, object]) -> None:
+            self.extra = extra
+
+    logger = CapturingLogger()
+    monkeypatch.setattr(crawl_models, "logger", logger)
+
+    outcome_code = derive_crawl_outcome_code(
+        status=Status.FAILED,
+        result_location="Crawl timed out before collecting pages",
+        failure_summary=None,
+        pages_failed=None,
+        files_failed=None,
+    )
+
+    assert outcome_code == CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES
+    assert logger.extra == {
+        "metric_name": "crawler.outcome.legacy_fallback_used",
+        "metric_value": 1,
+        "outcome_code": CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES.value,
+    }
 
 
 def test_embedding_failure_summary_becomes_config_outcome():
@@ -121,6 +152,23 @@ def test_stored_source_retention_outcome_is_informational():
     assert outcome.message_key == "crawl_outcome_source_retention_only"
 
 
+def test_stored_partial_timeout_outcome_is_warning():
+    outcome = derive_crawl_outcome(
+        status=Status.COMPLETE,
+        result_location=None,
+        failure_summary=None,
+        pages_failed=0,
+        files_failed=0,
+        pages_source_retained=12,
+        outcome_code=CrawlOutcomeCode.CRAWL_PARTIAL_TIMEOUT,
+    )
+
+    assert outcome is not None
+    assert outcome.code == CrawlOutcomeCode.CRAWL_PARTIAL_TIMEOUT
+    assert outcome.severity == CrawlOutcomeSeverity.WARNING
+    assert outcome.message_key == "crawl_outcome_partial_timeout"
+
+
 def test_source_retention_outcome_uses_source_retained_count():
     outcome = derive_crawl_outcome(
         status=Status.COMPLETE,
@@ -149,6 +197,102 @@ def test_page_failure_outcome_does_not_use_source_retained_count_as_affected_cou
     assert outcome is not None
     assert outcome.code == CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
     assert outcome.affected_count == 2
+
+
+def test_classify_completed_crawl_with_no_pages_returned():
+    assert (
+        classify_crawl_outcome(
+            crawl_type="crawl",
+            is_partial=False,
+            termination_reason="completed",
+            pages_count=0,
+            source_retained_count=0,
+            failure_summary=None,
+            pages_failed=0,
+            files_failed=0,
+        )
+        == CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED
+    )
+
+
+def test_classify_completed_sitemap_with_no_pages_returned():
+    assert (
+        classify_crawl_outcome(
+            crawl_type="sitemap",
+            is_partial=False,
+            termination_reason="completed",
+            pages_count=0,
+            source_retained_count=0,
+            failure_summary=None,
+            pages_failed=0,
+            files_failed=0,
+        )
+        == CrawlOutcomeCode.CRAWL_SITEMAP_NO_PAGES
+    )
+
+
+def test_classify_timeout_without_output():
+    assert (
+        classify_crawl_outcome(
+            crawl_type="sitemap",
+            is_partial=True,
+            termination_reason="timeout",
+            pages_count=0,
+            source_retained_count=0,
+            failure_summary=None,
+            pages_failed=0,
+            files_failed=0,
+        )
+        == CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES
+    )
+
+
+def test_classify_partial_timeout_with_output_takes_run_level_precedence():
+    assert (
+        classify_crawl_outcome(
+            crawl_type="sitemap",
+            is_partial=True,
+            termination_reason="timeout",
+            pages_count=3,
+            source_retained_count=100,
+            failure_summary={FailureReason.DB_ERROR.value: 2},
+            pages_failed=2,
+            files_failed=0,
+        )
+        == CrawlOutcomeCode.CRAWL_PARTIAL_TIMEOUT
+    )
+
+
+def test_classify_source_retention_only():
+    assert (
+        classify_crawl_outcome(
+            crawl_type="sitemap",
+            is_partial=False,
+            termination_reason="completed",
+            pages_count=0,
+            source_retained_count=42,
+            failure_summary=None,
+            pages_failed=0,
+            files_failed=0,
+        )
+        == CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY
+    )
+
+
+def test_classify_embedding_failure_summary():
+    assert (
+        classify_crawl_outcome(
+            crawl_type="crawl",
+            is_partial=False,
+            termination_reason="completed",
+            pages_count=5,
+            source_retained_count=0,
+            failure_summary={FailureReason.MISSING_PROVIDER.value: 2},
+            pages_failed=2,
+            files_failed=0,
+        )
+        == CrawlOutcomeCode.EMBEDDING_CONFIG_MISSING
+    )
 
 
 def test_crawl_run_sparse_uses_stored_outcome_code():

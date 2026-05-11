@@ -109,8 +109,8 @@ class TestPersistenceModuleSemantics:
     @pytest.mark.asyncio
     async def test_none_embedding_model_fails_all_pages(self):
         """None embedding model should fail all pages with NO_EMBEDDING_MODEL reason."""
+        from intric.websites.domain.crawl_outcome import FailureReason
         from intric.worker.crawl.persistence import persist_batch
-        from intric.worker.crawl_context import FailureReason
 
         ctx = CrawlContext(
             website_id=uuid4(),
@@ -344,48 +344,13 @@ class TestCrawlTaskRetentionHelpers:
 
         mock_logger.warning.assert_not_called()
 
-    def test_crawl_exception_maps_to_specific_outcome_code(self):
-        from intric.main.exceptions import CrawlerException, CrawlTimeoutError
-        from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
-        from intric.websites.domain.crawl_run import CrawlType
-        from intric.worker.crawl_tasks import _crawl_outcome_code_for_exception
+    def test_exception_string_outcome_classifier_is_not_exported(self):
+        import pytest
 
-        assert (
-            _crawl_outcome_code_for_exception(
-                CrawlerException(
-                    "Crawl failed for https://example.com: no pages returned"
-                ),
-                crawl_type=CrawlType.CRAWL,
+        with pytest.raises(ImportError):
+            from intric.worker.crawl_tasks import (
+                _crawl_outcome_code_for_exception,  # noqa: F401
             )
-            == CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED
-        )
-        assert (
-            _crawl_outcome_code_for_exception(
-                CrawlerException(
-                    "Crawl failed for https://example.com: no pages returned"
-                ),
-                crawl_type=CrawlType.SITEMAP,
-            )
-            == CrawlOutcomeCode.CRAWL_SITEMAP_NO_PAGES
-        )
-        assert (
-            _crawl_outcome_code_for_exception(
-                CrawlTimeoutError(
-                    url="https://example.com",
-                    timeout_seconds=10,
-                    pages_collected=0,
-                ),
-                crawl_type=CrawlType.SITEMAP,
-            )
-            == CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES
-        )
-        assert (
-            _crawl_outcome_code_for_exception(
-                RuntimeError("unexpected"),
-                crawl_type=CrawlType.SITEMAP,
-            )
-            == CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
-        )
 
     def test_sitemap_lastmod_source_skip_requires_sitemap_previous_crawl_and_setting(
         self,

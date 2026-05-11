@@ -862,6 +862,7 @@
   "crawl_outcome_no_pages_returned": "No pages were returned",
   "crawl_outcome_sitemap_no_pages": "The sitemap returned no crawlable pages",
   "crawl_outcome_timeout_no_pages": "The crawl timed out before returning pages",
+  "crawl_outcome_partial_timeout": "Partially completed",
   "crawl_outcome_max_age_exceeded": "The crawl waited too long and was stopped",
   "crawl_outcome_source_retention_only": "No page downloads were needed",
   "crawl_outcome_page_failures": "Completed with page or file failures",

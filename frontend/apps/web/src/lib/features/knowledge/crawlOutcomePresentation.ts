@@ -8,6 +8,7 @@ export type CrawlOutcomeCode =
   | "CRAWL_TIMEOUT_NO_PAGES"
   | "CRAWL_MAX_AGE_EXCEEDED"
   | "CRAWL_SOURCE_RETENTION_ONLY"
+  | "CRAWL_PARTIAL_TIMEOUT"
   | "CRAWL_COMPLETED_WITH_PAGE_FAILURES"
   | "EMBEDDING_CONFIG_MISSING"
   | "UNKNOWN_CRAWL_ERROR";
@@ -43,6 +44,7 @@ const outcomeLabels: Record<string, () => string> = {
   crawl_outcome_no_pages_returned: () => m.crawl_outcome_no_pages_returned(),
   crawl_outcome_sitemap_no_pages: () => m.crawl_outcome_sitemap_no_pages(),
   crawl_outcome_timeout_no_pages: () => m.crawl_outcome_timeout_no_pages(),
+  crawl_outcome_partial_timeout: () => m.crawl_outcome_partial_timeout(),
   crawl_outcome_max_age_exceeded: () => m.crawl_outcome_max_age_exceeded(),
   crawl_outcome_source_retention_only: () => m.crawl_outcome_source_retention_only(),
   crawl_outcome_page_failures: () => m.crawl_outcome_page_failures(),

@@ -23,6 +23,11 @@ Purpose: reduce embedding-token spend and database churn for scheduled website c
 - [x] Frontend-visible crawl/job failure states.
 - [x] Frontend source-retention-only success state is visible instead of showing a misleading `0 pages crawled` result.
 - [x] Frontend crawl outcome labels/tooltips are centralized in a narrow knowledge Module instead of duplicated across website status and crawl history components.
+- [x] Crawler no-output and timeout/no-output results now cross the crawler-worker seam as typed crawl facts instead of exception-string protocols.
+- [x] A single domain classifier owns write-time crawl outcome selection, including source-retention-only, partial-timeout, no-page, and embedding-config outcomes.
+- [x] Terminal zero-output crawls mark the job failed with a fixed sanitized result message, record a stored outcome code, write failed audit metadata, increment the website circuit breaker, and skip stale cleanup.
+- [x] Partial timeout crawls with any output keep their output, skip stale cleanup, and surface `CRAWL_PARTIAL_TIMEOUT` as a warning outcome.
+- [x] Page-level `FailureReason` now has a domain home in `websites/domain/crawl_outcome.py`; worker persistence imports it from the domain instead of making presentation code depend on worker context.
 - [x] Source-retained timeout salvage: timeouts with retained sitemap output now yield partial crawl output instead of failing as empty crawls.
 - [x] Partial crawls skip stale-blob cleanup, because a timeout means the source frontier may be incomplete.
 - [x] Mixed source-retention visibility: crawl runs now expose `pages_source_retained`, and crawl history shows retained unchanged pages alongside fetched pages.
@@ -76,6 +81,12 @@ Claude artifact:
 - `.codex/artifacts/claude-peer-loop-crawler-skip-retained-count-implementation-review-20260511T182727Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-skip-high-roi-continuation-plan-20260511T183836Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-skip-high-roi-continuation-implementation-review-20260511T184817Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-typed-failure-outcome-architecture-20260511T185907Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-typed-failure-outcome-architecture-revised-20260511T190414Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-typed-failure-outcome-final-contract-20260511T190735Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-typed-failure-outcome-green-contract-20260511T190958Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-typed-outcome-hardening-implementation-review-20260511T200635Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-typed-outcome-hardening-post-fix-verification-20260511T201518Z.md`
 
 Claude loop summary:
 
@@ -97,6 +108,9 @@ Claude loop summary:
 - Retained-count implementation review: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; confirmed both public crawl-run models, the required outcome derivation parameter, migration shape, worker write, and frontend mixed-run chip are safe to commit.
 - High-ROI continuation plan review: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 5`; blocker found URLSET retention duplicated between the public `sitemap_filter()` test path and the live `_parse_sitemap()` production path.
 - High-ROI continuation implementation review: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; confirmed the redundant URLSET `sitemap_filter()` branch is removed, tests now exercise `_parse_sitemap()`, repository round-trip coverage includes `pages_source_retained` and `outcome_code`, and mixed crawl-history labels are safe to commit.
+- Typed failure-outcome architecture review: two `changes_required` passes and a final `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; blockers removed the stringly typed no-output exception classifier, required one write-time domain classifier, required terminal zero-output stale-cleanup bypass, and kept broad DNS/TLS/robots taxonomy out of this slice.
+- Typed outcome hardening implementation review: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; follow-up notes led to parameterizing terminal zero-output worker coverage across crawl, sitemap, and timeout outcomes, removing the unused `"error"` termination literal, and renaming/logging the legacy outcome metric as a general fallback metric.
+- Typed outcome hardening post-fix verification: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; confirmed no blockers after the post-review test hardening, metric rename, narrowed termination literal, and classifier call-site comment.
 
 Claude agreed with the core architecture:
 
@@ -1023,10 +1037,14 @@ Reason:
 19. Scrapy HTTP cache support is available through disabled-by-default settings and uses tenant/website-scoped filesystem directories when enabled.
 20. Duplicate crawl skips and crawl failures are exposed to the frontend through typed crawl outcomes rather than frontend-only string-prefix detection.
 21. Frontend crawl status views render translated outcome labels/details for known failure and skip states.
-22. Sitemap source-skip is controlled through `crawler_settings`, not only a process-wide environment flag.
-23. ARQ duplicate enqueue races are detected from `enqueue_job()` returning `None`, and the feeder treats them as idempotent duplicates.
-24. Watchdog rescue only counts a queued job as rescued when it actually re-enqueues it.
-25. DB pool settings defined in `Settings` are passed to SQLAlchemy engine initialization.
+22. Crawler no-output and timeout/no-output states are returned as typed crawl facts and classified by the worker, not parsed from exception text.
+23. Terminal no-output crawls do not run stale cleanup, because no returned source frontier is not proof that existing blobs were deleted at the source.
+24. Terminal no-output crawls store a typed `outcome_code`, mark the job failed, write fixed sanitized failure text, increment the website circuit breaker, and emit failed audit metadata.
+25. Partial timeout crawls with output store `CRAWL_PARTIAL_TIMEOUT`, preserve page-level `failure_summary`, and skip stale cleanup.
+26. Sitemap source-skip is controlled through `crawler_settings`, not only a process-wide environment flag.
+27. ARQ duplicate enqueue races are detected from `enqueue_job()` returning `None`, and the feeder treats them as idempotent duplicates.
+28. Watchdog rescue only counts a queued job as rescued when it actually re-enqueues it.
+29. DB pool settings defined in `Settings` are passed to SQLAlchemy engine initialization.
 
 ## Required Tests
 
@@ -1242,13 +1260,32 @@ bun eslint 'src/routes/(app)/spaces/[spaceId]/knowledge/websites/[id]/CrawlResul
 bun run --filter @intric/web check
 ```
 
+Completed typed-outcome hardening validation:
+
+```bash
+uv run ruff check src tests/unittests/websites/test_crawl_outcome.py tests/unittests/crawler/test_crawler_timeout_tenant_aware.py tests/unittests/worker/test_persistence.py tests/unittests/worker/test_persist_batch_logic.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py
+uv run pyright --project pyrightconfig.json
+set -a; source .env.template; set +a; uv run pytest tests/unittests/crawler/test_crawler_timeout_tenant_aware.py tests/unittests/crawler/test_sitemap_lastmod_skip.py tests/unittests/worker/test_persistence.py tests/unittests/worker/test_persist_batch_logic.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py tests/unittests/websites/test_crawl_outcome.py -q
+```
+
+Completed typed-outcome frontend validation:
+
+```bash
+bun run --filter @intric/web i18n:compile
+bun run --filter @intric/web test:unit -- src/lib/features/knowledge/crawlOutcomePresentation.test.ts
+bun run --filter @intric/web check
+bun run --filter @intric/web lint
+```
+
 Notes:
 
 - Backend targeted tests: 70 passed for the hash/model retention slice.
 - Backend crawler/source-skip hardening tests: 138 passed across crawler, crawler retry, persistence, crawl outcome, and tenant crawler settings tests.
 - Backend continuation tests: 11 passed across sitemap source-retention, Scrapy HTTP cache settings, and crawl-run repository persistence.
+- Backend typed-outcome hardening tests: 90 passed across crawler, sitemap source-retention, persistence, terminal worker outcome, and crawl outcome tests.
+- Backend full unit suite: 1422 passed with `.env.template` loaded; warnings were pre-existing Pydantic deprecations, AsyncMock warnings, and Crochet deprecations outside this crawler slice.
 - Backend strict pyright: 0 errors, 0 warnings, 0 informations.
-- Alembic head check: `202605111230 (head)`.
+- Alembic head check: `202605111815 (head)`.
 - `bun run check`: 0 errors, 1 pre-existing warning in `src/lib/features/api-keys/ExtendExpirationDialog.svelte`.
 
 Reference command set from the original plan:
@@ -1326,6 +1363,8 @@ Goal:
 11. Completed DB-backed repository coverage for `pages_source_retained`: `CrawlRunRepository.add()`, `one()`, and `update()` now have integration coverage proving the new counter survives the database boundary.
 12. Completed Scrapy override review: the branch uses Scrapy's sitemap parser utilities for source enumeration and Scrapy `FEEDS.item_classes` for separate retained-output export. The narrow `_parse_sitemap()` mirror remains because Scrapy's public `sitemap_filter()` returns entries for request creation and cannot yield `SourceRetainedUrl` feed items for entries it filters out. The redundant URLSET `sitemap_filter()` override was removed so tests exercise the live parser path instead of a dead branch. Keep the smoke/behavior tests as the guard, and revisit only on Scrapy upgrades or if Scrapy adds a public hook for filtered-entry item emission.
 13. Refresh/generated `@intric/intric-js` OpenAPI types from the backend schema when the normal generation flow is available. Until then, keep frontend casts narrow and local to the same pattern already used for typed outcome fields.
+14. Completed typed no-output failure contract: no-output and timeout/no-output crawls now write durable outcome codes without exception-string parsing, and terminal no-output handling is covered by a worker-level regression that proves stale cleanup is bypassed.
+15. Keep broader failure taxonomy deferred until Scrapy stats capture is proven. Do not add DNS/TLS/robots/auth/sitemap-fetch codes from guessed exception text.
 
 ## Questions For ChatGPT Extended Pro
 

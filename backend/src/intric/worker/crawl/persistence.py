@@ -28,10 +28,10 @@ from intric.database.tables.info_blobs_table import InfoBlobs
 from intric.info_blobs.info_blob import InfoBlobChunk
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
+from intric.websites.domain.crawl_outcome import FailureReason
 from intric.worker.crawl_context import (
     CrawlContext,
     EmbeddingModelSpec,
-    FailureReason,
     PreparedPage,
 )
 

@@ -6,13 +6,16 @@ from uuid import UUID
 from pydantic import AliasChoices, AliasPath, BaseModel, Field, model_validator
 
 from intric.jobs.task_models import TaskParams
+from intric.main.logging import get_logger
 from intric.main.models import InDB, Status
 from intric.websites.domain.crawl_outcome import (
     CrawlOutcomeCode,
+    FailureReason,
     parse_crawl_outcome_code,
 )
 from intric.websites.domain.crawl_run import CrawlType
-from intric.worker.crawl_context import FailureReason
+
+logger = get_logger(__name__)
 
 
 class CrawlTask(TaskParams):
@@ -100,6 +103,7 @@ def derive_crawl_outcome_code(
     if status_value == Status.FAILED.value and detail_lower.startswith(
         "skipped duplicate crawl"
     ):
+        _log_legacy_outcome_fallback_used(CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED)
         return CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED
 
     if failure_summary:
@@ -107,23 +111,44 @@ def derive_crawl_outcome_code(
             FailureReason.NO_EMBEDDING_MODEL.value in failure_summary
             or FailureReason.MISSING_PROVIDER.value in failure_summary
         ):
+            _log_legacy_outcome_fallback_used(CrawlOutcomeCode.EMBEDDING_CONFIG_MISSING)
             return CrawlOutcomeCode.EMBEDDING_CONFIG_MISSING
 
+        _log_legacy_outcome_fallback_used(
+            CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
+        )
         return CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
 
     if status_value == Status.FAILED.value or status_value == Status.NOT_FOUND.value:
         if "no pages returned" in detail_lower:
+            _log_legacy_outcome_fallback_used(CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED)
             return CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED
 
-        if "timeout" in detail_lower:
+        if "timeout" in detail_lower or "timed out" in detail_lower:
+            _log_legacy_outcome_fallback_used(CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES)
             return CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES
 
+        _log_legacy_outcome_fallback_used(CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR)
         return CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
 
     if affected_count > 0:
+        _log_legacy_outcome_fallback_used(
+            CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
+        )
         return CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
 
     return None
+
+
+def _log_legacy_outcome_fallback_used(code: CrawlOutcomeCode) -> None:
+    logger.info(
+        "Derived crawl outcome for legacy crawl run without stored outcome_code",
+        extra={
+            "metric_name": "crawler.outcome.legacy_fallback_used",
+            "metric_value": 1,
+            "outcome_code": code.value,
+        },
+    )
 
 
 def _crawl_outcome_from_code(
@@ -184,6 +209,14 @@ def _crawl_outcome_from_code(
             code=code,
             severity=CrawlOutcomeSeverity.ERROR,
             message_key="crawl_outcome_timeout_no_pages",
+            detail=detail,
+        )
+
+    if code == CrawlOutcomeCode.CRAWL_PARTIAL_TIMEOUT:
+        return CrawlOutcomePublic(
+            code=code,
+            severity=CrawlOutcomeSeverity.WARNING,
+            message_key="crawl_outcome_partial_timeout",
             detail=detail,
         )
 

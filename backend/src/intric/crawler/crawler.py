@@ -21,8 +21,9 @@ from intric.crawler.pipelines import FileNamePipeline
 from intric.crawler.spiders.crawl_spider import CrawlSpider
 from intric.crawler.spiders.sitemap_spider import SitemapSpider, SourceRetainedUrl
 from intric.main.config import get_settings
-from intric.main.exceptions import CrawlerException, CrawlTimeoutError
+from intric.main.exceptions import CrawlTimeoutError
 from intric.tenants.crawler_settings_helper import get_crawler_setting
+from intric.websites.domain.crawl_outcome import CrawlTerminationReason
 from intric.websites.domain.crawl_run import CrawlType
 
 logger = logging.getLogger(__name__)
@@ -169,7 +170,7 @@ class Crawl:
         pages: Iterator of crawled pages
         files: Optional iterator of downloaded files
         is_partial: True if crawl was terminated early (timeout, etc.)
-        termination_reason: Why crawl ended ("completed", "timeout", "error")
+        termination_reason: Why crawl ended ("completed", "timeout")
         pages_count: Number of pages collected (for partial results reporting)
         source_retained_urls: Sitemap URLs present in source but not fetched
     """
@@ -177,7 +178,7 @@ class Crawl:
     pages: Iterable[CrawledPage]
     files: Optional[Iterable[Path]]
     is_partial: bool = False
-    termination_reason: str = "completed"
+    termination_reason: CrawlTerminationReason = "completed"
     pages_count: int = 0
     source_retained_urls: frozenset[str] = frozenset()
 
@@ -649,8 +650,8 @@ class Crawler:
         Handles timeouts gracefully by salvaging partial results:
         - On successful completion: yields all pages with is_partial=False
         - On timeout WITH output collected: yields partial output with is_partial=True
-        - On timeout with NO output: raises CrawlTimeoutError
-        - On other failures: raises CrawlerException
+        - On timeout with no output: yields an empty typed timeout result
+        - On successful completion with no output: yields an empty typed result
 
         Args:
             func: The async crawl function to execute
@@ -667,8 +668,7 @@ class Crawler:
         tmp_dir = tmp_dir_obj.name
 
         is_partial = False
-        termination_reason = "completed"
-        url: str = kwargs.get("url") or kwargs.get("sitemap_url") or "unknown"
+        termination_reason: CrawlTerminationReason = "completed"
         crawl_outputs: _CrawlOutputSummary | None = None
 
         try:
@@ -698,21 +698,6 @@ class Crawler:
                 source_retained_filepath=source_retained_file_path,
             )
 
-            if not crawl_outputs.has_output:
-                try:
-                    os.unlink(tmp_file_path)
-                    os.unlink(source_retained_file_path)
-                    tmp_dir_obj.cleanup()
-                except OSError:
-                    pass
-                raise CrawlTimeoutError(
-                    url=url,
-                    timeout_seconds=timeout_err.timeout_seconds,
-                    pages_collected=0,
-                    message=f"Crawl timeout: exceeded {timeout_err.timeout_seconds}s for {url} with no output collected",
-                )
-
-            # Update the timeout error with page count for diagnostics
             timeout_err.pages_collected = crawl_outputs.pages_count
 
         try:
@@ -721,8 +706,6 @@ class Crawler:
                     pages_filepath=tmp_file_path,
                     source_retained_filepath=source_retained_file_path,
                 )
-            if not crawl_outputs.has_output:
-                raise CrawlerException(f"Crawl failed for {url}: no pages returned")
 
             def _iter_pages() -> Iterable[CrawledPage]:
                 with open(tmp_file_path) as f:
