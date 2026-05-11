@@ -27,7 +27,15 @@ async def backfill_slugs():
     # Initialize database session manager
     settings = get_settings()
     db_url = f"postgresql+asyncpg://{settings.postgres_user}:{settings.postgres_password}@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_db}"
-    sessionmanager.init(db_url)
+    sessionmanager.init(
+        db_url,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_pool_max_overflow,
+        pool_timeout=settings.db_pool_timeout,
+        pool_pre_ping=settings.db_pool_pre_ping,
+        pool_recycle=settings.db_pool_recycle,
+        pool_debug=settings.db_pool_debug,
+    )
 
     try:
         # Create session and repository

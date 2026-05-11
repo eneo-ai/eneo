@@ -260,7 +260,8 @@ class Settings(BaseSettings):
     # Database connection pool configuration
     # Why: Controls PostgreSQL connection pooling behavior for SQLAlchemy async engine
     # See pool exhaustion analysis in plans/fuzzy-skipping-cray.md
-    # NOTE: Defaults preserve current behavior (20/10/30). Change via env vars:
+    # NOTE: Defaults preserve the existing size/overflow and SQLAlchemy
+    # timeout/recycle defaults; pre_ping follows the existing Settings default.
     #   DB_POOL_SIZE=25 DB_POOL_TIMEOUT=60 DB_POOL_PRE_PING=true DB_POOL_RECYCLE=3600
     db_pool_size: int = (
         20  # Base pool size (permanent connections) - default: current behavior

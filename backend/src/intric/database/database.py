@@ -40,13 +40,31 @@ class DatabaseSessionManager:
         self._engine: AsyncEngine | None = None
         self._sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
-    def init(self, host: str):
+    def init(
+        self,
+        host: str,
+        *,
+        pool_size: int = 20,
+        max_overflow: int = 10,
+        pool_timeout: int = 30,
+        pool_pre_ping: bool = True,
+        pool_recycle: int = -1,
+        pool_debug: bool = False,
+    ):
         # If already initialized, don't reinitialize (important for tests)
         if self._engine is not None:
             logger.debug("Database already initialized, skipping reinitialization")
             return
 
-        self._engine = create_async_engine(host, pool_size=20, max_overflow=10)
+        self._engine = create_async_engine(
+            host,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            pool_timeout=pool_timeout,
+            pool_pre_ping=pool_pre_ping,
+            pool_recycle=pool_recycle,
+            echo_pool="debug" if pool_debug else False,
+        )
         self._sessionmaker = async_sessionmaker(
             autocommit=False,
             bind=self._engine,
