@@ -31,11 +31,6 @@ from intric.flows.flow_evidence_policy import (
     resolve_service_key_evidence_capability,
 )
 from intric.flows.flow_input_limits import FlowInputLimits, resolve_flow_input_limits
-from intric.flows.flow_metadata import (
-    FlowMetadata,
-    FlowMetadataParseMode,
-    parse_flow_metadata,
-)
 from intric.flows.flow_permissions import user_can_view_flow_trace
 from intric.flows.flow_run_evidence_bundle import (
     EvidenceBundle,
@@ -77,7 +72,6 @@ from intric.flows.principal import FlowPrincipal
 from intric.flows.published_definition import (
     PublishedFlowDefinition,
     parse_published_definition,
-    parse_published_runtime_steps,
 )
 from intric.flows.runtime.models import RuntimeStep
 from intric.main.config import get_settings
@@ -453,27 +447,30 @@ class FlowRunService:
                 },
             )
 
+        runtime_version = await self.flow_version_repo.get(
+            flow_id=flow_id,
+            version=flow.published_version,
+            tenant_id=self.user.tenant_id,
+        )
+        published_definition = parse_published_definition(
+            runtime_version.definition_json
+        )
+        definition_json = published_definition.definition_json
         normalized_inline_payload = normalize_and_validate_flow_run_payload(
-            metadata=self._parse_draft_metadata_lenient(flow.metadata_json),
+            metadata=published_definition.metadata(),
             payload=input_payload_json,
         )
         self._reject_reserved_input_payload_keys(normalized_inline_payload)
         normalized_step_inputs = normalize_step_inputs_payload(step_inputs)
-        runtime_version_definition: JsonObject | None = None
-        preseed_steps: list[PreseedStep] | None = None
+        preseed_steps = self._build_preseed_steps(
+            definition_json=definition_json,
+            fallback_steps=flow.steps,
+        )
         step_input_file_projections: list[StepInputFileProjection] = []
-        if step_inputs is not None:
-            runtime_version = await self.flow_version_repo.get(
-                flow_id=flow_id,
-                version=flow.published_version,
-                tenant_id=self.user.tenant_id,
-            )
-            runtime_version_definition = runtime_version.definition_json
-            preseed_steps = self._build_preseed_steps(
-                definition_json=runtime_version_definition,
-                fallback_steps=flow.steps,
-            )
-            runtime_steps = parse_published_runtime_steps(runtime_version_definition)
+        if step_inputs is not None or self._definition_has_required_runtime_step_inputs(
+            definition_json
+        ):
+            runtime_steps = published_definition.runtime_steps()
             limits = await self._resolve_flow_input_limits()
             runtime_specs = build_runtime_step_input_specs(
                 steps=runtime_steps, limits=limits
@@ -552,36 +549,6 @@ class FlowRunService:
                 "Flow id missing for run creation.",
                 code="flow_id_missing",
             )
-        if runtime_version_definition is None:
-            runtime_version = await self.flow_version_repo.get(
-                flow_id=flow.id,
-                version=flow.published_version,
-                tenant_id=self.user.tenant_id,
-            )
-            runtime_version_definition = runtime_version.definition_json
-            preseed_steps = self._build_preseed_steps(
-                definition_json=runtime_version_definition,
-                fallback_steps=flow.steps,
-            )
-            if self._definition_has_required_runtime_step_inputs(
-                runtime_version_definition
-            ):
-                runtime_steps = parse_published_runtime_steps(
-                    runtime_version_definition
-                )
-                limits = await self._resolve_flow_input_limits()
-                runtime_specs = build_runtime_step_input_specs(
-                    steps=runtime_steps, limits=limits
-                )
-                await validate_submitted_step_inputs(
-                    steps=runtime_steps,
-                    specs=runtime_specs,
-                    normalized_step_inputs=normalized_step_inputs,
-                    file_repo=self.file_repo,
-                    user_id=self.user.id,
-                    principal=principal,
-                )
-        assert preseed_steps is not None
         created = await self.flow_run_repo.create(
             flow_id=flow.id,
             flow_version=flow.published_version,
@@ -741,18 +708,6 @@ class FlowRunService:
             input_payload_json=normalized_inline_payload,
         )
         return normalized_inline_payload
-
-    @staticmethod
-    def _parse_draft_metadata_lenient(
-        metadata_json: JsonObject | None,
-    ) -> FlowMetadata | None:
-        try:
-            return parse_flow_metadata(
-                metadata_json, mode=FlowMetadataParseMode.PERSISTED_READ
-            )
-        except BadRequestException:
-            # Draft metadata can be mid-edit; preserve create-run passthrough behavior.
-            return None
 
     async def _normalize_and_validate_rerun_step_inputs(
         self,

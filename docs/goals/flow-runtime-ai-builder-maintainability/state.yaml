@@ -86,7 +86,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T042
+active_task: T044
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -2726,7 +2726,7 @@ tasks:
   - id: T042
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe implementation slice after the typed metadata boundary, naming cleanup, and published metadata error cleanup are committed."
     inputs:
@@ -2738,6 +2738,177 @@ tasks:
     constraints:
       - "Read-only. Do not implement source changes."
       - "Prefer higher-value runtime/API/data-boundary work unless a tiny cleanup removes immediate review risk from the latest commits."
+      - "Apply the naming rule: no version suffixes without a real version contract."
+      - "Apply the type-safety rule: no broad Any, casts, type-ignore, or Pyright ignores to make checks pass."
+      - "Apply the pre-production rule: no legacy/backwards-compatible behavior without proof it protects intended current product behavior."
+      - "If selecting a Worker that changes public API/error contracts, runtime lifecycle, schema ownership, or shared typed boundaries, require the host Claude plan gate before activation."
+    expected_output:
+      - "decision"
+      - "next Worker objective or reason to pick Scout/PM/audit instead"
+      - "allowed_files"
+      - "red tests"
+      - "verification commands"
+      - "stop_if"
+      - "whether Claude plan gate is required before activation"
+    receipt:
+      result: done
+      decision: "Activate T043 to make create-run inline payload validation use published snapshot metadata instead of mutable draft metadata."
+      summary: "Create-run still validated inline payloads against mutable draft flow.metadata_json while run-contract and rerun use the published snapshot. The next safe slice is to fetch and parse the published FlowVersion once in create_run, validate inline payload with PublishedFlowDefinition.metadata(), remove draft metadata leniency, and keep the behavior scoped to flow_run_service tests and implementation."
+      evidence:
+        - "backend/src/intric/flows/application/flow_run_service.py:456-459 normalizes create-run input_payload_json with _parse_draft_metadata_lenient(flow.metadata_json)."
+        - "backend/src/intric/flows/application/flow_run_service.py:555-583 fetches the published FlowVersion only after inline payload normalization and idempotency fingerprint construction when step_inputs is omitted."
+        - "backend/src/intric/flows/application/flow_run_service.py:623-636 already validates rerun inline payloads through PublishedFlowDefinition.metadata()."
+        - "backend/src/intric/flows/published_definition.py:49-74 owns published metadata parsing and FLOW_PUBLISHED_FORM_SCHEMA_INVALID translation."
+        - "backend/tests/unittests/flows/test_flow_run_service.py:863-900 still asserts draft metadata passthrough for malformed draft metadata, which must be deleted or reframed."
+      claude_plan_gate:
+        session: "flow-runtime-maintainability-t042-create-run-published-metadata-plan"
+        iteration_1_artifact: ".codex/artifacts/claude-peer-loop-t042-create-run-published-metadata-plan-20260511T084109Z.md"
+        iteration_1_verdict: "changes_required"
+        iteration_2_artifact: ".codex/artifacts/claude-peer-loop-t042-create-run-published-metadata-plan-iteration-2-20260511T084328Z.md"
+        model: "claude-opus-4-7"
+        effort: "xhigh"
+        verdict: "green"
+        green_light: true
+        min_score: 8
+        accepted_changes:
+          - "Name the fate of the old draft metadata passthrough test."
+          - "Parse the published snapshot once and thread one PublishedFlowDefinition object through create_run."
+          - "Add a fail-fast malformed published metadata test that proves no tenant lock and no persistence."
+          - "Record the accepted error-ordering shift before implementation."
+          - "Add an idempotency fingerprint test grep before commit."
+      next_task: T043
+
+  - id: T043
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Validate create-run inline payloads against published snapshot metadata instead of mutable draft metadata, using one parsed PublishedFlowDefinition object inside create_run."
+    allowed_files:
+      - "backend/src/intric/flows/application/flow_run_service.py"
+      - "backend/tests/unittests/flows/test_flow_run_service.py"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_published_definition_contract.py -q"
+      - "cd backend && uv run pyright src/intric/flows/application/flow_run_service.py src/intric/flows/published_definition.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_published_definition_contract.py"
+      - "cd backend && uv run ruff check src/intric/flows/application/flow_run_service.py src/intric/flows/published_definition.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_published_definition_contract.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/application/flow_run_service.py src/intric/flows/published_definition.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_published_definition_contract.py"
+      - "rg -n \"_parse_draft_metadata_lenient|FlowMetadataParseMode|parse_flow_metadata\" backend/src/intric/flows/application/flow_run_service.py || true"
+      - "rg -n \"FlowMetadataParseMode|parse_flow_metadata\" backend/src/intric/flows/"
+      - "rg -n \"request_fingerprint|flow_run_idempotency_conflict\" backend/tests/unittests/flows/"
+      - "git diff --check"
+      - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    stop_if:
+      - "The fix needs files outside allowed_files, except read-only grep evidence."
+      - "Idempotency behavior requires a public semantic decision beyond using published metadata as the normalization source."
+      - "Runtime step-input semantics need to change."
+      - "Any broad Any, cast, type-ignore, Pyright ignore, speculative compatibility path, or migration comment seems necessary."
+      - "Names need version suffixes or generic helper/service abstractions."
+      - "A comment is added to narrate the obvious published-snapshot behavior instead of making the code read clearly."
+    expected_output:
+      - "create_run fetches and parses the published FlowVersion once after published-version checks."
+      - "create_run normalizes input_payload_json with PublishedFlowDefinition.metadata()."
+      - "runtime_version_definition: JsonObject | None and the duplicate late FlowVersion fetch branch are removed if no longer needed."
+      - "_parse_draft_metadata_lenient(...) and now-unused FlowMetadata/FlowMetadataParseMode/parse_flow_metadata imports are removed from flow_run_service.py."
+      - "test_create_run_preserves_passthrough_when_draft_metadata_is_malformed is deleted or reframed so draft passthrough is no longer an accepted invariant."
+      - "Create-run tests make published snapshot metadata explicit by adjusting test sites to feed the FlowVersion fixture metadata_json; do not mutate _form_schema_flow unless every callsite agrees."
+      - "Malformed published metadata raises FLOW_PUBLISHED_FORM_SCHEMA_INVALID before tenant lock acquisition and before run persistence."
+      - "Existing expected_flow_version payload insertion and reserved-key rejection behavior remain covered."
+      - "Test names and any docstrings describe invariants, not implementation mechanics."
+      - "Receipt records the accepted fail-fast error-ordering shift and defers moving _definition_has_required_runtime_step_inputs onto PublishedFlowDefinition."
+      - "All verify commands passed."
+    receipt:
+      result: done
+      summary: "Create-run now validates inline input_payload_json against the published FlowVersion snapshot metadata through PublishedFlowDefinition.metadata(), not mutable draft flow.metadata_json."
+      changed_files:
+        - "backend/src/intric/flows/application/flow_run_service.py"
+        - "backend/tests/unittests/flows/test_flow_run_service.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      red_tests:
+        - "test_create_run_validates_against_published_metadata initially failed because create_run still ignored published metadata and continued until an unconfigured count_active_runs AsyncMock comparison."
+        - "test_create_run_ignores_draft_only_form_fields initially failed because create_run rejected the draft-only required field."
+        - "test_create_run_rejects_malformed_published_form_schema_before_side_effects initially failed because create_run did not inspect published metadata before tenant-lock/concurrency behavior."
+      implementation_notes:
+        - "create_run fetches the published FlowVersion once after published-version and expected-version checks."
+        - "create_run parses one PublishedFlowDefinition and uses it for inline payload metadata, preseed definition JSON, and runtime step parsing."
+        - "Deleted _parse_draft_metadata_lenient(...) and removed FlowMetadata/FlowMetadataParseMode/parse_flow_metadata imports from flow_run_service.py."
+        - "Removed parse_published_runtime_steps import from flow_run_service.py; create_run uses published_definition.runtime_steps()."
+        - "Removed runtime_version_definition: JsonObject | None and the duplicate late FlowVersion fetch branch."
+        - "Reframed draft malformed metadata coverage as test_create_run_ignores_malformed_draft_metadata; draft passthrough is no longer an accepted invariant."
+        - "Existing create-run form-schema tests now use _runtime_version(...) so metadata is explicit in the published snapshot fixture."
+      accepted_error_ordering_shift:
+        - "Malformed published metadata and published snapshot parse failures now fail before tenant lock acquisition, idempotency lookup, concurrency-limit checks, and run persistence."
+        - "This is intentional because create-run must fail fast on the published contract it is about to execute."
+      verification:
+        - "RED cd backend && uv run pytest tests/unittests/flows/test_flow_run_service.py -q -k \"create_run_validates_against_published_metadata or create_run_ignores_draft_only_form_fields or create_run_ignores_malformed_draft_metadata or create_run_rejects_malformed_published_form_schema_before_side_effects or create_run_rejects_missing_required_form_field or create_run_rejects_invalid_select_option or create_run_rejects_invalid_multiselect_shape or create_run_normalizes_multiselect_number_and_date_fields or create_run_preserves_unknown_payload_fields_for_forward_compat\" -> 3 failed, 8 passed."
+        - "PASS cd backend && uv run pytest tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_published_definition_contract.py -q -> 129 passed, 10 warnings."
+        - "PASS cd backend && uv run pyright src/intric/flows/application/flow_run_service.py src/intric/flows/published_definition.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_published_definition_contract.py -> 0 errors, 0 warnings, 0 informations."
+        - "PASS cd backend && uv run ruff check src/intric/flows/application/flow_run_service.py src/intric/flows/published_definition.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_published_definition_contract.py."
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/application/flow_run_service.py src/intric/flows/published_definition.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_published_definition_contract.py."
+        - "PASS rg -n \"_parse_draft_metadata_lenient|FlowMetadataParseMode|parse_flow_metadata\" backend/src/intric/flows/application/flow_run_service.py || true -> no hits."
+        - "PASS rg -n \"FlowMetadataParseMode|parse_flow_metadata\" backend/src/intric/flows/ -> legitimate remaining owners/callers in flow_metadata.py, published_definition.py, and flow_care_data_policy.py."
+        - "PASS rg -n \"request_fingerprint|flow_run_idempotency_conflict\" backend/tests/unittests/flows/ -> no create-run fingerprint value depended on draft metadata leniency."
+        - "PASS git diff --check."
+        - "PASS node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml."
+      commands:
+        - "cd backend && uv run pytest tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_published_definition_contract.py -q"
+        - "cd backend && uv run pyright src/intric/flows/application/flow_run_service.py src/intric/flows/published_definition.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_published_definition_contract.py"
+        - "cd backend && uv run ruff check src/intric/flows/application/flow_run_service.py src/intric/flows/published_definition.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_published_definition_contract.py"
+        - "cd backend && uv run ruff format --check src/intric/flows/application/flow_run_service.py src/intric/flows/published_definition.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_published_definition_contract.py"
+        - "rg -n \"_parse_draft_metadata_lenient|FlowMetadataParseMode|parse_flow_metadata\" backend/src/intric/flows/application/flow_run_service.py || true"
+        - "rg -n \"FlowMetadataParseMode|parse_flow_metadata\" backend/src/intric/flows/"
+        - "rg -n \"request_fingerprint|flow_run_idempotency_conflict\" backend/tests/unittests/flows/"
+        - "git diff --check"
+        - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      claude_commit_gate:
+        session: "flow-runtime-maintainability-t042-create-run-published-metadata-plan"
+        artifact: ".codex/artifacts/claude-peer-loop-t043-create-run-published-metadata-implementation-review-20260511T085224Z.md"
+        model: "claude-opus-4-7"
+        effort: "xhigh"
+        verdict: "green"
+        green_light: true
+        min_score: 8
+      type_debt:
+        new_any: 0
+        new_cast: 0
+        new_type_ignore: 0
+        new_pyright_ignore: 0
+      comments_added_or_changed: []
+      maintainability_self_review:
+        canonical_owner: "PublishedFlowDefinition is the published snapshot contract owner for create-run metadata validation, matching rerun and run-contract behavior."
+        single_source_of_truth: "Mutable draft flow.metadata_json is no longer a create-run input contract source."
+        anti_patterns_avoided:
+          - "No compatibility alias or draft fallback path retained."
+          - "No speculative version suffixes or generic helper/service abstraction added."
+          - "No comments narrating the obvious published-snapshot behavior."
+          - "No broad Any, cast, type-ignore, or Pyright ignore added."
+        deferred_followups:
+          - "_definition_has_required_runtime_step_inputs(...) still inspects published raw JSON inside FlowRunService; consider moving this snapshot-shape query onto PublishedFlowDefinition in a later slice."
+      maintainability_rubric:
+        maintainability: 9
+        code_quality: 9
+        clean_architecture: 9
+        separation_of_concerns: 9
+        single_source_of_truth: 10
+        human_readability: 9
+        human_reviewability: 9
+        overall_min: 9
+      next_task: T044
+
+  - id: T044
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe implementation slice after create-run inline payload validation now uses the published snapshot metadata."
+    inputs:
+      - "T043 receipt"
+      - ".codex/artifacts/claude-peer-loop-t043-create-run-published-metadata-implementation-review-20260511T085224Z.md"
+      - "confirmed_p0_candidates"
+      - "maintainability_findings"
+    constraints:
+      - "Read-only. Do not implement source changes."
+      - "Prefer higher-value runtime/API/data-boundary work unless the deferred _definition_has_required_runtime_step_inputs ownership cleanup is the smallest high-confidence next step."
       - "Apply the naming rule: no version suffixes without a real version contract."
       - "Apply the type-safety rule: no broad Any, casts, type-ignore, or Pyright ignores to make checks pass."
       - "Apply the pre-production rule: no legacy/backwards-compatible behavior without proof it protects intended current product behavior."

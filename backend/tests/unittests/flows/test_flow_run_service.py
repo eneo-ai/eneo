@@ -495,6 +495,7 @@ async def test_create_run_enforces_tenant_concurrency_limit(user):
     )
     flow = _flow(user=user, published_version=1)
     flow_repo.get.return_value = flow
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
     flow_run_repo.count_active_runs.return_value = 1
 
     with pytest.raises(BadRequestException) as exc_info:
@@ -718,6 +719,7 @@ async def test_create_run_replays_idempotent_run_before_concurrency_limit(user):
         max_concurrent_runs=0,
     )
     flow_repo.get.return_value = flow
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
     expected_fingerprint = service._build_idempotency_fingerprint(
         tenant_id=user.tenant_id,
         principal=service._principal(),
@@ -841,7 +843,7 @@ async def test_create_run_rejects_missing_required_form_field(user):
     )
     flow_repo.get.return_value = flow
     flow_run_repo.count_active_runs.return_value = 0
-    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
 
     with pytest.raises(
         BadRequestException, match="Missing required input field 'Personnummer'"
@@ -860,6 +862,91 @@ async def test_create_run_rejects_missing_required_form_field(user):
     }
 
 
+@pytest.mark.asyncio
+async def test_create_run_validates_against_published_metadata(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    draft_flow = _flow(user=user, published_version=1, metadata_json=None)
+    published_metadata = {
+        "form_schema": {
+            "fields": [
+                {"name": "case_id", "type": "text", "required": True, "order": 1}
+            ]
+        }
+    }
+    published_flow = draft_flow.model_copy(update={"metadata_json": published_metadata})
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+    flow_repo.get.return_value = draft_flow
+    flow_version_repo.get.return_value = _runtime_version(
+        user=user, flow=published_flow
+    )
+
+    with pytest.raises(
+        BadRequestException, match="Missing required input field 'case_id'"
+    ) as exc_info:
+        await service.create_run(flow_id=draft_flow.id, input_payload_json={})
+
+    assert exc_info.value.code == "flow_input_required_field_missing"
+    assert exc_info.value.context == {
+        "field_name": "case_id",
+        "field_type": "text",
+    }
+    flow_run_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_run_ignores_draft_only_form_fields(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    draft_flow = _flow(
+        user=user,
+        published_version=1,
+        metadata_json={
+            "form_schema": {
+                "fields": [
+                    {
+                        "name": "draft_only",
+                        "type": "text",
+                        "required": True,
+                        "order": 1,
+                    }
+                ]
+            }
+        },
+    )
+    published_flow = draft_flow.model_copy(update={"metadata_json": None})
+    created_run = _run(user=user, flow_id=draft_flow.id)
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+    flow_repo.get.return_value = draft_flow
+    flow_run_repo.get_idempotent_run.return_value = None
+    flow_run_repo.count_active_runs.return_value = 0
+    flow_version_repo.get.return_value = _runtime_version(
+        user=user, flow=published_flow
+    )
+    flow_run_repo.create.return_value = created_run
+
+    result = await service.create_run(flow_id=draft_flow.id, input_payload_json={})
+
+    assert result == created_run
+    assert flow_run_repo.create.await_args.kwargs["input_payload_json"] == {
+        "expected_flow_version": 1,
+    }
+
+
 @pytest.mark.parametrize(
     "metadata_json",
     [
@@ -869,7 +956,7 @@ async def test_create_run_rejects_missing_required_form_field(user):
     ],
 )
 @pytest.mark.asyncio
-async def test_create_run_preserves_passthrough_when_draft_metadata_is_malformed(
+async def test_create_run_ignores_malformed_draft_metadata(
     user,
     metadata_json: dict[str, object],
 ):
@@ -888,7 +975,10 @@ async def test_create_run_preserves_passthrough_when_draft_metadata_is_malformed
     flow_repo.get.return_value = flow
     flow_run_repo.get_idempotent_run.return_value = None
     flow_run_repo.count_active_runs.return_value = 0
-    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    published_flow = flow.model_copy(update={"metadata_json": None})
+    flow_version_repo.get.return_value = _runtime_version(
+        user=user, flow=published_flow
+    )
     flow_run_repo.create.return_value = created_run
 
     result = await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
@@ -898,6 +988,46 @@ async def test_create_run_preserves_passthrough_when_draft_metadata_is_malformed
         "x": "y",
         "expected_flow_version": 1,
     }
+
+
+@pytest.mark.asyncio
+async def test_create_run_rejects_malformed_published_form_schema_before_side_effects(
+    user,
+):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    draft_flow = _flow(user=user, published_version=1, metadata_json=None)
+    published_flow = draft_flow.model_copy(
+        update={
+            "metadata_json": {
+                "form_schema": {"fields": [{"name": "case_id", "type": "unsupported"}]}
+            }
+        }
+    )
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+    flow_repo.get.return_value = draft_flow
+    flow_version_repo.get.return_value = _runtime_version(
+        user=user, flow=published_flow
+    )
+
+    with pytest.raises(
+        BadRequestException, match="Published flow form schema is invalid"
+    ) as exc_info:
+        await service.create_run(
+            flow_id=draft_flow.id,
+            input_payload_json={"case_id": "A-123"},
+        )
+
+    assert exc_info.value.code == FLOW_PUBLISHED_FORM_SCHEMA_INVALID
+    flow_run_repo.acquire_tenant_run_creation_lock.assert_not_awaited()
+    flow_run_repo.create.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -915,7 +1045,7 @@ async def test_create_run_rejects_invalid_select_option(user):
     )
     flow_repo.get.return_value = flow
     flow_run_repo.count_active_runs.return_value = 0
-    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
 
     with pytest.raises(
         BadRequestException, match="must be one of the configured options"
@@ -951,7 +1081,7 @@ async def test_create_run_rejects_invalid_multiselect_shape(user):
     )
     flow_repo.get.return_value = flow
     flow_run_repo.count_active_runs.return_value = 0
-    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
 
     with pytest.raises(
         BadRequestException, match="contains invalid option values"
@@ -988,7 +1118,7 @@ async def test_create_run_normalizes_multiselect_number_and_date_fields(user):
     )
     flow_repo.get.return_value = flow
     flow_run_repo.count_active_runs.return_value = 0
-    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
 
     await service.create_run(
         flow_id=flow.id,
@@ -1025,7 +1155,7 @@ async def test_create_run_preserves_unknown_payload_fields_for_forward_compat(us
     )
     flow_repo.get.return_value = flow
     flow_run_repo.count_active_runs.return_value = 0
-    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
 
     await service.create_run(
         flow_id=flow.id,
@@ -3182,6 +3312,7 @@ async def test_create_run_rejects_oversized_input_payload(user):
     )
     flow = _flow(user=user, published_version=1)
     flow_repo.get.return_value = flow
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
     flow_run_repo.count_active_runs.return_value = 0
 
     with pytest.raises(
