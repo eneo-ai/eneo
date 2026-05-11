@@ -208,10 +208,8 @@ class JobEnqueuer:
 
         try:
             from intric.jobs.job_models import Task
-            from intric.websites.crawl_dependencies.crawl_models import (
-                CrawlTask,
-                CrawlType,
-            )
+            from intric.websites.crawl_dependencies.crawl_models import CrawlTask
+            from intric.websites.domain.crawl_run import CrawlType
 
             params = CrawlTask(
                 user_id=UUID(job_data["user_id"]),
@@ -222,11 +220,13 @@ class JobEnqueuer:
                 crawl_type=CrawlType(job_data["crawl_type"]),
             )
 
-            await job_manager.enqueue(
+            enqueued = await job_manager.enqueue(
                 task=Task.CRAWL,
                 job_id=job_id,
                 params=params,
             )
+            if not enqueued:
+                return True, True, job_id
 
             logger.debug(
                 "Enqueued crawl job from feeder",
@@ -251,10 +251,10 @@ class JobEnqueuer:
     ) -> tuple[bool, bool, UUID]:
         """Handle enqueue errors with duplicate detection.
 
-        Duplicate jobs are treated as success for idempotency.
-        If the feeder crashes after enqueue but before LREM, the job stays
-        in pending. On retry, ARQ returns "already exists" - we treat this
-        as SUCCESS so LREM proceeds and clears the job.
+        Duplicate jobs are treated as success for idempotency. The canonical
+        duplicate signal is JobManager.enqueue() returning False when ARQ
+        returns None for an existing job id. This exception path is a defensive
+        fallback for wrapped queue errors so LREM can still clear pending work.
 
         IMPORTANT: Caller must release slot when is_duplicate=True, since
         the original enqueue already acquired a slot.

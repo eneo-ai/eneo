@@ -190,7 +190,7 @@ class TestWatchdogPhase2RescueStuck:
         stuck_job.website_id = uuid4()
         stuck_job.url = "https://example.com"
         stuck_job.download_files = False
-        stuck_job.crawl_type = "full"
+        stuck_job.crawl_type = "crawl"
         stuck_job.created_at = now - timedelta(minutes=30)
         stuck_job.updated_at = now - timedelta(minutes=10)
 
@@ -207,6 +207,46 @@ class TestWatchdogPhase2RescueStuck:
         )
 
         assert len(result.jobs_to_requeue) == 1
+        watchdog._requeue_job.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_rescue_does_not_count_job_already_present_in_arq(self):
+        """Should not bump rescued count when ARQ already has the queued job."""
+        from intric.worker.feeder.watchdog import OrphanWatchdog
+
+        redis_mock = MagicMock()
+        settings_mock = MagicMock()
+        settings_mock.crawl_job_max_age_seconds = 7200
+
+        watchdog = OrphanWatchdog(redis_mock, settings_mock)
+
+        now = datetime.now(timezone.utc)
+        stuck_job = MagicMock()
+        stuck_job.job_id = uuid4()
+        stuck_job.tenant_id = uuid4()
+        stuck_job.user_id = uuid4()
+        stuck_job.run_id = uuid4()
+        stuck_job.website_id = uuid4()
+        stuck_job.url = "https://example.com"
+        stuck_job.download_files = False
+        stuck_job.crawl_type = "crawl"
+        stuck_job.created_at = now - timedelta(minutes=30)
+        stuck_job.updated_at = now - timedelta(minutes=10)
+        stuck_job.crawler_settings = {}
+
+        session_mock = MagicMock()
+        session_mock.execute = AsyncMock(
+            return_value=MagicMock(fetchall=lambda: [stuck_job])
+        )
+
+        watchdog._requeue_job = AsyncMock(return_value=False)
+
+        result = await watchdog._rescue_stuck_jobs(
+            session_mock, now=now, stale_threshold_minutes=5
+        )
+
+        assert result.jobs_to_requeue == []
+        assert result.rescued_count == 0
         watchdog._requeue_job.assert_called_once()
 
     @pytest.mark.asyncio

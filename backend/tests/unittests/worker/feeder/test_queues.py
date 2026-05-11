@@ -151,7 +151,7 @@ class TestJobEnqueuerEnqueue:
             "run_id": str(uuid4()),
             "url": "https://example.com",
             "download_files": False,
-            "crawl_type": "full",
+            "crawl_type": "crawl",
         }
 
         with (
@@ -160,7 +160,7 @@ class TestJobEnqueuerEnqueue:
             patch("intric.websites.crawl_dependencies.crawl_models.CrawlTask"),
             patch("intric.websites.crawl_dependencies.crawl_models.CrawlType"),
         ):
-            mock_manager.enqueue = AsyncMock()
+            mock_manager.enqueue = AsyncMock(return_value=True)
 
             enqueuer = JobEnqueuer()
             success, is_duplicate, returned_id = await enqueuer.enqueue(
@@ -171,6 +171,39 @@ class TestJobEnqueuerEnqueue:
             assert is_duplicate is False
             assert returned_id == job_id
             mock_manager.enqueue.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_treats_native_arq_duplicate_return_as_duplicate(self):
+        """Should mark duplicate when ARQ returns None for an existing job id."""
+        from intric.worker.feeder.queues import JobEnqueuer
+
+        job_id = uuid4()
+        job_data = {
+            "job_id": str(job_id),
+            "user_id": str(uuid4()),
+            "website_id": str(uuid4()),
+            "run_id": str(uuid4()),
+            "url": "https://example.com",
+            "download_files": False,
+            "crawl_type": "crawl",
+        }
+
+        with (
+            patch("intric.worker.feeder.queues.job_manager") as mock_manager,
+            patch("intric.jobs.job_models.Task"),
+            patch("intric.websites.crawl_dependencies.crawl_models.CrawlTask"),
+            patch("intric.websites.crawl_dependencies.crawl_models.CrawlType"),
+        ):
+            mock_manager.enqueue = AsyncMock(return_value=False)
+
+            enqueuer = JobEnqueuer()
+            success, is_duplicate, returned_id = await enqueuer.enqueue(
+                job_data, uuid4()
+            )
+
+            assert success is True
+            assert is_duplicate is True
+            assert returned_id == job_id
 
     @pytest.mark.asyncio
     async def test_returns_failure_on_invalid_job_id(self):
@@ -213,7 +246,7 @@ class TestJobEnqueuerEnqueue:
             "run_id": str(uuid4()),
             "url": "https://example.com",
             "download_files": False,
-            "crawl_type": "full",
+            "crawl_type": "crawl",
         }
 
         with (
@@ -248,7 +281,7 @@ class TestJobEnqueuerEnqueue:
             "run_id": str(uuid4()),
             "url": "https://example.com",
             "download_files": False,
-            "crawl_type": "full",
+            "crawl_type": "crawl",
         }
 
         with (
@@ -297,7 +330,7 @@ class TestJobEnqueuerDuplicateDetection:
             "run_id": str(uuid4()),
             "url": "https://example.com",
             "download_files": False,
-            "crawl_type": "full",
+            "crawl_type": "crawl",
         }
 
         with (

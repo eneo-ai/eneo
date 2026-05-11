@@ -592,7 +592,7 @@ class OrphanWatchdog:
                 continue
 
             try:
-                await self._requeue_job(
+                requeued = await self._requeue_job(
                     job_id=row.job_id,
                     user_id=row.user_id,
                     run_id=row.run_id,
@@ -602,9 +602,10 @@ class OrphanWatchdog:
                     download_files=row.download_files,
                     crawl_type=row.crawl_type,
                 )
-                result.jobs_to_requeue.append({"job_id": row.job_id})
-                rescued_job_ids.append(row.job_id)
-                result.rescued_count += 1
+                if requeued:
+                    result.jobs_to_requeue.append({"job_id": row.job_id})
+                    rescued_job_ids.append(row.job_id)
+                    result.rescued_count += 1
             except Exception as requeue_exc:
                 logger.warning(
                     "Failed to re-queue stuck job",
@@ -657,7 +658,8 @@ class OrphanWatchdog:
 
         from intric.jobs.job_manager import job_manager
         from intric.jobs.job_models import Task
-        from intric.websites.crawl_dependencies.crawl_models import CrawlTask, CrawlType
+        from intric.websites.crawl_dependencies.crawl_models import CrawlTask
+        from intric.websites.domain.crawl_run import CrawlType
 
         # Check ARQ status first
         arq_job = Job(job_id=str(job_id), redis=self._redis)
@@ -683,7 +685,18 @@ class OrphanWatchdog:
         )
 
         try:
-            await job_manager.enqueue(task=Task.CRAWL, job_id=job_id, params=params)
+            enqueued = await job_manager.enqueue(
+                task=Task.CRAWL,
+                job_id=job_id,
+                params=params,
+            )
+            if not enqueued:
+                logger.info(
+                    "Job appeared in ARQ during re-queue attempt",
+                    extra={"job_id": str(job_id), "tenant_id": str(tenant_id)},
+                )
+                return False
+
             logger.info(
                 "Re-queued stuck job to ARQ",
                 extra={"job_id": str(job_id), "tenant_id": str(tenant_id)},
@@ -692,7 +705,13 @@ class OrphanWatchdog:
         except Exception as exc:
             error_msg = str(exc).lower()
             if "already exists" in error_msg or "duplicate" in error_msg:
-                return True
+                # Canonical duplicate detection is enqueue() returning False;
+                # this keeps wrapped queue errors idempotent too.
+                logger.info(
+                    "Job already in ARQ during re-queue attempt",
+                    extra={"job_id": str(job_id), "tenant_id": str(tenant_id)},
+                )
+                return False
             raise
 
     async def _fail_stalled_startup_jobs(
