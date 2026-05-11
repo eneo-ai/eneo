@@ -137,6 +137,22 @@ def _build_sitemap_lastmod_skip_urls(
     )
 
 
+def _should_enable_sitemap_lastmod_skip(
+    *,
+    crawl_type: CrawlType,
+    website_last_crawled_at: datetime | None,
+    tenant_crawler_settings: dict[str, Any] | None,
+) -> bool:
+    return (
+        crawl_type == CrawlType.SITEMAP
+        and website_last_crawled_at is not None
+        and get_crawler_setting(
+            "crawl_sitemap_lastmod_skip_enabled",
+            tenant_crawler_settings,
+        )
+    )
+
+
 def _prune_http_cache_dir(cache_dir: Path, *, max_bytes: int) -> None:
     if max_bytes <= 0 or not cache_dir.exists():
         return
@@ -1194,11 +1210,13 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             sitemap_lastmod_skip_cutoff: datetime | None = None
             sitemap_lastmod_skip_allowed_urls: frozenset[str] = frozenset()
-            if (
-                settings.crawl_sitemap_lastmod_skip_enabled
-                and params.crawl_type == CrawlType.SITEMAP
-                and website_last_crawled_at is not None
+            tenant_crawler_settings = tenant.crawler_settings if tenant else None
+            if _should_enable_sitemap_lastmod_skip(
+                crawl_type=params.crawl_type,
+                website_last_crawled_at=website_last_crawled_at,
+                tenant_crawler_settings=tenant_crawler_settings,
             ):
+                assert website_last_crawled_at is not None
                 sitemap_lastmod_skip_allowed_urls = _build_sitemap_lastmod_skip_urls(
                     existing_blob_state_by_title=existing_blob_state_by_title,
                     embedding_model_id=crawl_context.embedding_model_id,

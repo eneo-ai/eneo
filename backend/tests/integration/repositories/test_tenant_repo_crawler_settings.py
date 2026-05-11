@@ -6,8 +6,9 @@ Tests PostgreSQL JSONB atomic merge operations for crawler settings:
 - Race condition prevention via atomic operations
 """
 
-import pytest
 import asyncio
+
+import pytest
 
 
 @pytest.mark.asyncio
@@ -244,6 +245,25 @@ class TestCrawlerSettingsIntegrationWithHelper:
             )
             assert batch_size == 5
 
+    async def test_sitemap_lastmod_source_skip_from_db(self, db_container, test_tenant):
+        """Sitemap source-skip rollout flag is retrievable from tenant settings."""
+        from intric.tenants.crawler_settings_helper import get_crawler_setting
+
+        async with db_container() as container:
+            tenant_repo = container.tenant_repo()
+
+            await tenant_repo.update_crawler_settings(
+                tenant_id=test_tenant.id,
+                crawler_settings={"crawl_sitemap_lastmod_skip_enabled": True},
+            )
+
+            tenant = await tenant_repo.get(test_tenant.id)
+            source_skip_enabled = get_crawler_setting(
+                "crawl_sitemap_lastmod_skip_enabled",
+                tenant.crawler_settings,
+            )
+            assert source_skip_enabled is True
+
     async def test_get_all_settings_merges_correctly(self, db_container, test_tenant):
         """get_all_crawler_settings() merges tenant overrides with defaults."""
         from intric.tenants.crawler_settings_helper import get_all_crawler_settings
@@ -266,6 +286,4 @@ class TestCrawlerSettingsIntegrationWithHelper:
             # Verify defaults still present
             assert "dns_timeout" in all_settings
             assert "crawl_max_length" in all_settings
-            assert (
-                len(all_settings) == 18
-            )  # Updated: now includes queued_stale_threshold_minutes
+            assert len(all_settings) == 19

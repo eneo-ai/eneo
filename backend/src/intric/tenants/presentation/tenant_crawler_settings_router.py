@@ -51,6 +51,7 @@ class CrawlerSettingsUpdate(BaseModel):
             "closespider_itemcount": 20000,
             "obey_robots": true,
             "autothrottle_enabled": true,
+            "crawl_sitemap_lastmod_skip_enabled": false,
             "tenant_worker_concurrency_limit": 4,
             "crawl_stale_threshold_minutes": 30,
             "crawl_heartbeat_interval_seconds": 300,
@@ -125,6 +126,11 @@ class CrawlerSettingsUpdate(BaseModel):
         None,
         description=_SPECS["autothrottle_enabled"]["description"],
         examples=[True],
+    )
+    crawl_sitemap_lastmod_skip_enabled: bool | None = Field(
+        None,
+        description=_SPECS["crawl_sitemap_lastmod_skip_enabled"]["description"],
+        examples=[False],
     )
 
     # Concurrency settings
@@ -229,6 +235,7 @@ class CrawlerSettingsResponse(BaseModel):
                 "closespider_itemcount": 20000,
                 "obey_robots": True,
                 "autothrottle_enabled": True,
+                "crawl_sitemap_lastmod_skip_enabled": False,
                 "tenant_worker_concurrency_limit": 4,
                 "crawl_stale_threshold_minutes": 30,
                 "crawl_heartbeat_interval_seconds": 300,

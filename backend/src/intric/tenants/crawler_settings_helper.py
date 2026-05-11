@@ -40,6 +40,7 @@ BoolCrawlerSetting = Literal[
     "obey_robots",
     "autothrottle_enabled",
     "crawl_feeder_enabled",
+    "crawl_sitemap_lastmod_skip_enabled",
 ]
 
 # Buffer time (5 minutes) between semaphore TTL and job max age
@@ -168,6 +169,11 @@ CRAWLER_SETTING_SPECS: dict[str, dict[str, Any]] = {
         "max": 1000,
         "env_attr": "crawl_page_batch_size",
         "description": "Commit after every N pages during crawl (10 to 1000)",
+    },
+    "crawl_sitemap_lastmod_skip_enabled": {
+        "type": bool,
+        "env_attr": "crawl_sitemap_lastmod_skip_enabled",
+        "description": "Enable trusted sitemap lastmod values to retain unchanged URL pages without downloading them",
     },
 }
 

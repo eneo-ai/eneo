@@ -4,13 +4,14 @@ Tests the single source of truth (CRAWLER_SETTING_SPECS) and helper functions
 for tenant-specific crawler settings with hierarchical override support.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from intric.tenants.crawler_settings_helper import (
     CRAWLER_SETTING_SPECS,
-    get_crawler_setting,
     get_all_crawler_settings,
+    get_crawler_setting,
     validate_crawler_setting,
 )
 
@@ -40,8 +41,8 @@ class TestCrawlerSettingSpecs:
             assert has_default or has_env_attr, f"{name} needs 'default' or 'env_attr'"
 
     def test_expected_settings_count(self):
-        """Verify we have all 18 crawler settings."""
-        assert len(CRAWLER_SETTING_SPECS) == 18
+        """Verify we have all 19 crawler settings."""
+        assert len(CRAWLER_SETTING_SPECS) == 19
 
     def test_known_settings_present(self):
         """Verify all known settings are present."""
@@ -56,6 +57,7 @@ class TestCrawlerSettingSpecs:
             "autothrottle_enabled",
             "tenant_worker_concurrency_limit",
             "crawl_stale_threshold_minutes",
+            "queued_stale_threshold_minutes",
             "crawl_heartbeat_interval_seconds",
             "crawl_feeder_enabled",
             "crawl_feeder_interval_seconds",
@@ -63,6 +65,7 @@ class TestCrawlerSettingSpecs:
             "crawl_job_max_age_seconds",
             "tenant_worker_semaphore_ttl_seconds",
             "crawl_page_batch_size",
+            "crawl_sitemap_lastmod_skip_enabled",
         ]
         for name in expected:
             assert name in CRAWLER_SETTING_SPECS, f"Missing setting: {name}"
@@ -133,6 +136,25 @@ class TestGetCrawlerSetting:
             result = get_crawler_setting("crawl_max_length", tenant_settings)
             assert result == 7200
 
+    def test_sitemap_lastmod_skip_setting_defaults_to_environment(self):
+        with patch("intric.tenants.crawler_settings_helper.get_settings") as mock:
+            mock_settings = MagicMock()
+            mock_settings.crawl_sitemap_lastmod_skip_enabled = False
+            mock.return_value = mock_settings
+
+            assert (
+                get_crawler_setting("crawl_sitemap_lastmod_skip_enabled", {}) is False
+            )
+
+    def test_sitemap_lastmod_skip_setting_allows_tenant_override(self):
+        assert (
+            get_crawler_setting(
+                "crawl_sitemap_lastmod_skip_enabled",
+                {"crawl_sitemap_lastmod_skip_enabled": True},
+            )
+            is True
+        )
+
 
 class TestGetAllCrawlerSettings:
     """Tests for get_all_crawler_settings() function."""
@@ -155,12 +177,13 @@ class TestGetAllCrawlerSettings:
             mock_settings.crawl_job_max_age_seconds = 1800
             mock_settings.tenant_worker_semaphore_ttl_seconds = 18000
             mock_settings.crawl_page_batch_size = 100
+            mock_settings.crawl_sitemap_lastmod_skip_enabled = False
             mock.return_value = mock_settings
 
             result = get_all_crawler_settings({})
             assert "download_timeout" in result
             assert "crawl_max_length" in result
-            assert len(result) == 18
+            assert len(result) == 19
 
     def test_tenant_overrides_merged_correctly(self):
         """Tenant-specific values override defaults."""
@@ -178,6 +201,7 @@ class TestGetAllCrawlerSettings:
             mock_settings.crawl_feeder_interval_seconds = 10
             mock_settings.crawl_feeder_batch_size = 10
             mock_settings.crawl_job_max_age_seconds = 1800
+            mock_settings.crawl_sitemap_lastmod_skip_enabled = False
             mock.return_value = mock_settings
 
             tenant_settings = {"download_timeout": 200, "dns_timeout": 60}
@@ -205,10 +229,11 @@ class TestGetAllCrawlerSettings:
             mock_settings.crawl_job_max_age_seconds = 1800
             mock_settings.tenant_worker_semaphore_ttl_seconds = 18000
             mock_settings.crawl_page_batch_size = 100
+            mock_settings.crawl_sitemap_lastmod_skip_enabled = False
             mock.return_value = mock_settings
 
             result = get_all_crawler_settings(None)
-            assert len(result) == 18
+            assert len(result) == 19
 
 
 class TestValidateCrawlerSetting:
@@ -251,10 +276,15 @@ class TestValidateCrawlerSetting:
         assert errors == []
         errors = validate_crawler_setting("obey_robots", False)
         assert errors == []
+        errors = validate_crawler_setting("crawl_sitemap_lastmod_skip_enabled", True)
+        assert errors == []
 
     def test_boolean_wrong_type(self):
         """Non-boolean for boolean setting returns error."""
         errors = validate_crawler_setting("obey_robots", "true")
+        assert len(errors) == 1
+        assert "must be bool" in errors[0]
+        errors = validate_crawler_setting("crawl_sitemap_lastmod_skip_enabled", "true")
         assert len(errors) == 1
         assert "must be bool" in errors[0]
 

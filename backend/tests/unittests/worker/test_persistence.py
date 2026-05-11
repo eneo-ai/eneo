@@ -10,6 +10,7 @@ Run with: pytest tests/unittests/worker/test_persistence.py -v
 """
 
 import os
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -368,6 +369,35 @@ class TestCrawlTaskRetentionHelpers:
                 crawl_type=CrawlType.SITEMAP,
             )
             == CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
+        )
+
+    def test_sitemap_lastmod_source_skip_requires_sitemap_previous_crawl_and_setting(
+        self,
+    ):
+        from intric.websites.domain.crawl_run import CrawlType
+        from intric.worker.crawl_tasks import _should_enable_sitemap_lastmod_skip
+
+        last_crawled_at = datetime.now(timezone.utc)
+
+        assert _should_enable_sitemap_lastmod_skip(
+            crawl_type=CrawlType.SITEMAP,
+            website_last_crawled_at=last_crawled_at,
+            tenant_crawler_settings={"crawl_sitemap_lastmod_skip_enabled": True},
+        )
+        assert not _should_enable_sitemap_lastmod_skip(
+            crawl_type=CrawlType.CRAWL,
+            website_last_crawled_at=last_crawled_at,
+            tenant_crawler_settings={"crawl_sitemap_lastmod_skip_enabled": True},
+        )
+        assert not _should_enable_sitemap_lastmod_skip(
+            crawl_type=CrawlType.SITEMAP,
+            website_last_crawled_at=None,
+            tenant_crawler_settings={"crawl_sitemap_lastmod_skip_enabled": True},
+        )
+        assert not _should_enable_sitemap_lastmod_skip(
+            crawl_type=CrawlType.SITEMAP,
+            website_last_crawled_at=last_crawled_at,
+            tenant_crawler_settings={"crawl_sitemap_lastmod_skip_enabled": False},
         )
 
 

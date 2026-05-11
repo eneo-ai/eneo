@@ -4,8 +4,10 @@ Tests the PUT/GET/DELETE endpoints for managing tenant-specific crawler settings
 Requires super_admin_token for authentication (system admin only).
 """
 
-import pytest
 from uuid import uuid4
+
+import pytest
+
 from intric.tenants.crawler_settings_helper import CRAWLER_SETTING_SPECS
 
 
@@ -134,13 +136,18 @@ class TestUpdateCrawlerSettings:
         """Boolean settings can be updated."""
         response = await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
-            json={"obey_robots": False, "autothrottle_enabled": False},
+            json={
+                "obey_robots": False,
+                "autothrottle_enabled": False,
+                "crawl_sitemap_lastmod_skip_enabled": True,
+            },
             headers={"X-API-Key": super_admin_token},
         )
         assert response.status_code == 200
         data = response.json()
         assert data["settings"]["obey_robots"] is False
         assert data["settings"]["autothrottle_enabled"] is False
+        assert data["settings"]["crawl_sitemap_lastmod_skip_enabled"] is True
 
     async def test_update_download_max_size(
         self, client, test_tenant, super_admin_token
