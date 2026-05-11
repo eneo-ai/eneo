@@ -860,6 +860,8 @@
   "crawl_outcome_embedding_config_missing": "Embedding configuration issue",
   "crawl_outcome_no_pages_returned": "No pages were returned",
   "crawl_outcome_timeout_no_pages": "The crawl timed out before returning pages",
+  "crawl_outcome_max_age_exceeded": "The crawl waited too long and was stopped",
+  "crawl_outcome_source_retention_only": "No page downloads were needed",
   "crawl_outcome_page_failures": "Completed with page or file failures",
   "crawl_outcome_unknown_error": "Crawl failed for an unknown reason",
   "crawl_outcome_affected_count": "{count} affected",

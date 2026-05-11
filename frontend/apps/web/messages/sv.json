@@ -859,6 +859,8 @@
   "crawl_outcome_embedding_config_missing": "Problem med embedding-konfiguration",
   "crawl_outcome_no_pages_returned": "Inga sidor returnerades",
   "crawl_outcome_timeout_no_pages": "Indexeringen fick timeout innan några sidor returnerades",
+  "crawl_outcome_max_age_exceeded": "Indexeringen väntade för länge och stoppades",
+  "crawl_outcome_source_retention_only": "Inga sidnedladdningar behövdes",
   "crawl_outcome_page_failures": "Slutförd med sid- eller filfel",
   "crawl_outcome_unknown_error": "Indexeringen misslyckades av okänd anledning",
   "crawl_outcome_affected_count": "{count} påverkade",

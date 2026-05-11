@@ -21,6 +21,11 @@ class CrawlRuns(BasePublic):
     files_downloaded: Mapped[Optional[int]] = mapped_column()
     pages_failed: Mapped[Optional[int]] = mapped_column()
     files_failed: Mapped[Optional[int]] = mapped_column()
+    outcome_code: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+        comment="Typed crawl/job outcome code for frontend display and diagnostics",
+    )
     failure_summary: Mapped[Optional[dict[str, int]]] = mapped_column(
         JSONB,
         nullable=True,

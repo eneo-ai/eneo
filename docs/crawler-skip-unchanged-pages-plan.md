@@ -2,7 +2,7 @@
 
 Branch: `feature/crawler-skip-unchanged-pages`
 
-Status: implementation validation, Claude implementation re-review, and local commit are complete on this branch. Do not push from this branch unless explicitly requested.
+Status: implementation validation, Claude implementation re-review, local commit, and follow-up hardening are complete locally on this branch. Do not push from this branch unless explicitly requested.
 
 Purpose: reduce embedding-token spend and database churn for scheduled website crawls by retaining URL blobs whose normalized page content hash has not changed, without weakening stale-cleanup correctness or crawl reliability.
 
@@ -12,7 +12,10 @@ Purpose: reduce embedding-token spend and database churn for scheduled website c
 - [x] Persistence value types, hash/model retention gate, and `PersistBatchResult`.
 - [x] Crawl orchestration cleanup protection, file-skip alignment, and tenant-scoped deletes.
 - [x] Safe fetch-skip plumbing using Scrapy `HttpCacheMiddleware` and `RFC2616Policy`, disabled by default until durable worker storage is configured.
+- [x] Optional sitemap `<lastmod>` source-skip using Scrapy's sitemap parsing/feed lifecycle, disabled by default and cleanup-safe through source-retained URL bookkeeping.
+- [x] Scrapy sitemap API smoke test guarding the upstream internals used by the source-retention parser.
 - [x] Typed backend crawl/job failure details suitable for frontend display.
+- [x] Stored crawl outcome codes for durable frontend/backend failure details instead of relying only on raw `result_location` text.
 - [x] Frontend-visible crawl/job failure states.
 - [x] Targeted tests, strict pyright, ruff, and regression validation.
 - [x] Claude peer-loop implementation review.
@@ -20,12 +23,13 @@ Purpose: reduce embedding-token spend and database churn for scheduled website c
 
 ## User Impact
 
-The first implemented slice still fetches pages, but it improves the parts users are most likely to feel in cost, runtime, and reliability:
+The default path still fetches pages unless the new source-skip setting is enabled, but the branch improves the parts users are most likely to feel in cost, runtime, and reliability:
 
 - Much lower embedding cost: scheduled crawls embed only changed or new pages instead of every page.
 - Less crawl failure from embedding/model/provider issues: unchanged pages can be retained without entering the embedding path.
 - Less database churn: unchanged pages skip blob/chunk delete-and-insert work.
-- Better correctness foundation: the implementation makes persisted, retained, failed, and stale page states explicit before source-level fetch skipping is added.
+- Better correctness foundation: the implementation makes persisted, retained, failed, source-retained, and stale page states explicit.
+- Optional source-level sitemap skip: when explicitly enabled for trusted sitemaps, URLs with `<lastmod>` at or before the previous successful crawl can be retained without page downloads. The spider emits source-retained records through a separate Scrapy feed, and `crawl_tasks.py` merges those records into `must_keep_titles` before stale cleanup.
 - No user-visible behavior regression: changed pages still update, deleted pages still delete, failed pages remain protected, tenant scoping is tightened, and existing file-skip behavior becomes safer through embedding-model compatibility.
 
 ## Review Inputs
@@ -49,6 +53,9 @@ Claude artifact:
 - `.codex/artifacts/claude-peer-loop-crawler-hash-skip-chatgpt-pro-refinements-verification-20260511T102437Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-skip-unchanged-pages-implementation-review-20260511T114454Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-skip-unchanged-pages-implementation-re-review-20260511T120343Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-source-skip-hardening-plan-20260511T123556Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-source-skip-hardening-implementation-review-20260511T125758Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-source-skip-hardening-implementation-re-review-20260511T132343Z.md`
 
 Claude loop summary:
 
@@ -60,6 +67,9 @@ Claude loop summary:
 - ChatGPT Pro refinements verification: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`.
 - Initial implementation review: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`.
 - Implementation re-review after closing blockers: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`.
+- Source-skip hardening plan review: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`; blockers drove the switch from manual sidecar writes to Scrapy feed output, default-off warning logs, source-retention tests, and dropping the unused outcome-code index.
+- Source-skip implementation review: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 4`; blockers found sitemap lastmod kwargs routed to the wrong crawl path and a tautological skip helper.
+- Source-skip implementation re-review after routing tests and helper cleanup: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`.
 
 Claude agreed with the core architecture:
 
@@ -96,7 +106,7 @@ Implement the hash gate inside `backend/src/intric/worker/crawl/persistence.py`,
 
 This is a deep Module: callers should not need to know the ordering details of hash comparison, embedding setup, and DB writes. Moving the hash gate into `crawl_tasks.py` would make the orchestration layer remember too much about the persistence Implementation and would make the stale-cleanup bug easier to reintroduce.
 
-Do not implement sitemap `<lastmod>` filtering in this implementation slice. The current cleanup logic treats "not returned by the processing loop" as stale. Filtering URLs out before persistence would make unchanged pages look deleted and risks silent data loss.
+Sitemap `<lastmod>` source-skip is implemented only as an explicit, disabled-by-default fetch hint. The earlier data-loss blocker is addressed by making source-retained URLs a first-class crawler output: the spider emits `SourceRetainedUrl` items to a separate Scrapy feed, `_crawl()` exposes them as `Crawl.source_retained_urls`, and `crawl_tasks.py` merges them into `must_keep_titles` before stale cleanup. This still trusts upstream sitemap `<lastmod>` values, so it remains default-off and logs a warning whenever it short-circuits page downloads.
 
 The current implementation shape is:
 
@@ -107,8 +117,10 @@ The current implementation shape is:
 5. Return a typed `PersistBatchResult` with `persisted_urls`, `retained_urls`, and `failures_by_reason`; counts are computed properties.
 6. In `crawl_tasks.py`, protect `batch_result.cleanup_protected_titles` from stale cleanup.
 7. Wire Scrapy HTTP cache support through the existing crawler settings as an optional disabled-by-default fetch optimization.
-8. Track unchanged page/file skip counts in structured logs, the human summary log, performance extras, and audit metadata.
-9. Do not write hash skips to `failure_summary` in this implementation slice.
+8. Wire optional sitemap `<lastmod>` source-skip through Scrapy sitemap parsing and a second feed for source-retained URLs.
+9. Track unchanged page/file/source-retained skip counts in structured logs, the human summary log, performance extras, and audit metadata.
+10. Store typed crawl outcome codes for durable frontend/backend failure and diagnostic reporting.
+11. Do not write unchanged-content skips or source-retained skips to `failure_summary`.
 
 Related reliability/UX requirement:
 
@@ -518,21 +530,21 @@ Decision:
 - Wire Scrapy `HttpCacheMiddleware` + `RFC2616Policy` as optional crawler settings in the current branch, but keep it disabled by default.
 - Treat this as fetch-skip plumbing, not the correctness mechanism. Persistence hash/model retention remains the gate that prevents re-embedding and stale cleanup loss.
 - Do not use Scrapy `JOBDIR` or the duplicate filter as the scheduled-crawl skip mechanism. They are for duplicate request filtering and pause/resume state, not for "source still contains this URL, retain its blob" semantics.
-- Do not use `SitemapSpider.sitemap_filter()` for `<lastmod>` skipping until crawl bookkeeping distinguishes `seen_in_source`, `fetched`, and `persisted_or_retained`.
+- `SitemapSpider` can now use `<lastmod>` as an explicit source-skip hint because source-retained URLs are emitted as a separate Scrapy feed and protected by `must_keep_titles`. Keep the setting disabled by default because upstream `<lastmod>` is not a content hash.
 
 Reason:
 
 - Scrapy HTTP cache can reduce network transfer when origins return cacheable responses or `304 Not Modified`, but production use still needs a durable tenant-scoped cache location. The branch scopes cache directories by tenant and website and adds TTL/size settings; deployment should only enable it when the configured directory survives worker restarts as intended and has an operational purge path.
 - Even with HTTP cache, the spider can still emit a cached response body. Without the persistence hash gate, unchanged cached pages would still be re-embedded and rewritten.
-- `sitemap_filter()` can skip request creation, which is exactly why it collides with current stale cleanup: skipped URLs would not naturally reach `must_keep_titles`.
+- `sitemap_filter()` can skip request creation, which is exactly why the implementation must emit source-retained URLs as a separate crawler output and merge them into `must_keep_titles`.
 
 Fetch-skip follow-up shape:
 
 1. Keep hash/model retention as the correctness gate.
-2. Split crawl bookkeeping into `seen_in_source`, `fetched`, and `persisted_or_retained`.
+2. Preserve the current source-retained URL feed if enabling sitemap `<lastmod>` skip; do not filter URLs without cleanup-visible retention records.
 3. Enable the already-wired tenant/website-scoped Scrapy HTTP cache only where the cache directory is durable enough for scheduled crawls.
 4. Prefer origin-provided `ETag` / `Last-Modified` revalidation over trusting sitemap `<lastmod>`.
-5. Add sitemap `<lastmod>` only as a conservative fetch hint after source bookkeeping can retain present-but-not-fetched URLs safely.
+5. Keep sitemap `<lastmod>` as an opt-in conservative fetch hint, not a correctness mechanism.
 
 ### 10. Backend-To-Frontend Failure Visibility Is Partial
 
@@ -1150,7 +1162,10 @@ bun run check
 
 Notes:
 
-- Backend targeted tests: 70 passed.
+- Backend targeted tests: 70 passed for the hash/model retention slice.
+- Backend crawler/source-skip hardening tests: 138 passed across crawler, crawler retry, persistence, crawl outcome, and tenant crawler settings tests.
+- Backend strict pyright: 0 errors, 0 warnings, 0 informations.
+- Alembic head check: `202605111230 (head)`.
 - `bun run check`: 0 errors, 1 pre-existing warning in `src/lib/features/api-keys/ExtendExpirationDialog.svelte`.
 
 Reference command set from the original plan:
@@ -1190,6 +1205,7 @@ Goal:
 | Mutable hash map in frozen crawl context | Frozen dataclass would still hold mutable state | Pass `Mapping[str, ExistingBlobState]` as an argument to `persist_batch()` |
 | Redundant counts drift from URL/failure collections | Metrics and cleanup decisions become inconsistent | `PersistBatchResult` computes counts from immutable collections |
 | Tenant omission in mutating deletes | Defense-in-depth gap for shared-title/same-URL rows | Add tenant predicates to touched delete paths |
+| Upstream sitemap `<lastmod>` lies | Source-skip could retain stale content without fetching | Keep disabled by default, require existing/current blob state, and emit a warning whenever source-skip applies |
 | Concurrent crawl non-idempotency | Existing delete/insert pattern can race | Do not solve in this slice; track unique constraint/update-in-place separately |
 | Tuple-to-result migration misses tests | Breaks test suite and hides contract change | Enumerate call sites with `rg` and update tests explicitly |
 | Old blobs with NULL hash | Cannot be skipped safely | Treat as changed and rewrite once; later runs can skip |
@@ -1198,7 +1214,8 @@ Goal:
 
 ## What Not To Do In Current Slice
 
-- Do not add sitemap `<lastmod>` filtering.
+- Do not enable sitemap `<lastmod>` source-skip by default.
+- Do not use sitemap `<lastmod>` source-skip without the source-retained URL feed and cleanup protection.
 - Do not enable Scrapy HTTP cache by default or rely on it as the correctness mechanism.
 - Do not use a shared Scrapy cache directory without tenant/website scoping, TTL, size policy, and an operational purge path.
 - Do not add a standalone `content_hash` index.
@@ -1208,21 +1225,17 @@ Goal:
 - Do not add a generic helper module.
 - Do not add new interfaces, protocols, factories, adapters, or one-method seams.
 - Do not add tuple backward compatibility.
-- Do not add new `Any`, `cast`, or `type: ignore`.
+- Do not add untyped application boundaries or new `type: ignore`; casts are limited to untyped Scrapy/JSON boundaries.
 - Do not retain a blob on `content_hash` alone.
 
 ## Follow-Up Improvements After This Branch
 
-1. Split crawler bookkeeping into:
-   - `seen_in_source`,
-   - `fetched`,
-   - `persisted_or_retained`.
+1. Split the broader crawler orchestration into smaller application services after this behavior is stable.
 2. Keep Scrapy HTTP cache disabled by default until the configured cache directory is backed by durable worker storage in production.
-3. Add a stored crawl outcome column if product wants querying/alerting on outcome codes instead of deriving them at the API boundary.
-4. Add idempotency protection for `(tenant_id, website_id, title)` if concurrent crawls remain possible.
-5. Consider update-in-place for changed pages to reduce chunk-table churn further.
-6. Add more specific user-facing warning states for sitemap-not-found and malformed-sitemap failures.
-7. Revisit sitemap `<lastmod>` filtering after source/fetch/retention bookkeeping is split; keep it as a fetch hint, not the correctness mechanism.
+3. Add idempotency protection for `(tenant_id, website_id, title)` if concurrent crawls remain possible.
+4. Consider update-in-place for changed pages to reduce chunk-table churn further.
+5. Add more specific user-facing warning states for sitemap-not-found and malformed-sitemap failures.
+6. Add a query/reporting view for stored crawl outcome codes if product wants operational dashboards.
 8. Add a stored processing fingerprint that includes embedding model, chunking version, text-normalization version, and embedding dimensions.
 9. Review broader info-blob tenant-scoping outside the website crawl paths, such as group and integration deletes, as a separate hardening slice.
 
@@ -1272,4 +1285,4 @@ Specific questions:
 
 Overall score: 8.
 
-Claude implementation re-review agreed with this score: `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`.
+Claude implementation re-review agreed with this score for both the hash/model retention slice and the source-skip hardening slice: `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`.

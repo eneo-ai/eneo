@@ -426,6 +426,7 @@ class Settings(BaseSettings):
     crawl_http_cache_dir: Path = Path("/tmp/eneo-crawler-http-cache")
     crawl_http_cache_expiration_seconds: int = 60 * 60 * 24 * 7
     crawl_http_cache_max_bytes_per_website: int = 1024 * 1024 * 512
+    crawl_sitemap_lastmod_skip_enabled: bool = False
 
     # Crawl retry configuration
     crawl_page_max_retries: int = 3  # Maximum retries for failed pages during crawl

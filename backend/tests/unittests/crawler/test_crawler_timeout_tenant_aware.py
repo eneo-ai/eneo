@@ -13,6 +13,8 @@ Test categories:
 import threading
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import crochet
@@ -24,6 +26,130 @@ crochet.setup()
 
 from intric.crawler.crawler import Crawler, create_runner
 from intric.main.exceptions import CrawlTimeoutError
+
+
+class TestCrawlerSourceRetainedUrls:
+    @pytest.mark.asyncio
+    async def test_empty_page_spool_is_success_when_sitemap_retained_source_urls(self):
+        crawler = Crawler()
+
+        async def write_retained_url(
+            *,
+            filepath,
+            source_retained_filepath,
+            **kwargs,
+        ):
+            Path(source_retained_filepath).write_text(
+                '{"url": "https://example.com/stable"}\n'
+            )
+
+        async with crawler._crawl(
+            write_retained_url,
+            max_length=60,
+            sitemap_url="https://example.com/sitemap.xml",
+        ) as crawl:
+            assert list(crawl.pages) == []
+            assert crawl.pages_count == 0
+            assert crawl.source_retained_urls == frozenset(
+                {"https://example.com/stable"}
+            )
+            assert crawl.source_retained_count == 1
+
+
+class TestCrawlerLastmodRouting:
+    @pytest.mark.asyncio
+    async def test_crawl_type_does_not_forward_sitemap_lastmod_kwargs_to_crawl_runner(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        from intric.websites.domain.crawl_run import CrawlType
+
+        captured: dict[str, object] = {}
+
+        async def record_crawl(
+            *,
+            filepath,
+            files_dir,
+            max_length,
+            heartbeat_callback,
+            heartbeat_interval,
+            url,
+            download_files,
+            http_user,
+            http_pass,
+            tenant_crawler_settings,
+            http_cache_dir,
+        ):
+            captured["url"] = url
+            captured["download_files"] = download_files
+            captured["http_cache_dir"] = http_cache_dir
+            Path(filepath).write_text(
+                '{"url":"https://example.com","title":"https://example.com","content":"ok"}\n'
+            )
+
+        crawler = Crawler()
+        monkeypatch.setattr(crawler, "_run_crawl_with_timeout", record_crawl)
+
+        cutoff = datetime(2026, 5, 10, tzinfo=timezone.utc)
+        async with crawler.crawl(
+            url="https://example.com",
+            crawl_type=CrawlType.CRAWL,
+            sitemap_lastmod_skip_cutoff=cutoff,
+            sitemap_lastmod_skip_allowed_urls=frozenset({"https://example.com/stable"}),
+        ) as crawl:
+            assert list(crawl.pages)
+
+        assert captured["url"] == "https://example.com"
+        assert captured["download_files"] is False
+
+    @pytest.mark.asyncio
+    async def test_sitemap_crawl_forwards_lastmod_skip_kwargs_to_sitemap_runner(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        from intric.websites.domain.crawl_run import CrawlType
+
+        captured: dict[str, object] = {}
+
+        async def record_sitemap(
+            *,
+            filepath,
+            files_dir,
+            max_length,
+            heartbeat_callback,
+            heartbeat_interval,
+            sitemap_url,
+            http_user,
+            http_pass,
+            source_retained_filepath,
+            lastmod_skip_cutoff,
+            lastmod_skip_allowed_urls,
+            tenant_crawler_settings,
+            http_cache_dir,
+        ):
+            captured["sitemap_url"] = sitemap_url
+            captured["source_retained_filepath"] = source_retained_filepath
+            captured["lastmod_skip_cutoff"] = lastmod_skip_cutoff
+            captured["lastmod_skip_allowed_urls"] = lastmod_skip_allowed_urls
+            Path(filepath).write_text(
+                '{"url":"https://example.com/fresh","title":"https://example.com/fresh","content":"ok"}\n'
+            )
+
+        crawler = Crawler()
+        monkeypatch.setattr(crawler, "_run_sitemap_crawl_with_timeout", record_sitemap)
+
+        cutoff = datetime(2026, 5, 10, tzinfo=timezone.utc)
+        allowed_urls = frozenset({"https://example.com/stable"})
+        async with crawler.crawl(
+            url="https://example.com/sitemap.xml",
+            crawl_type=CrawlType.SITEMAP,
+            sitemap_lastmod_skip_cutoff=cutoff,
+            sitemap_lastmod_skip_allowed_urls=allowed_urls,
+        ) as crawl:
+            assert list(crawl.pages)
+
+        assert captured["sitemap_url"] == "https://example.com/sitemap.xml"
+        assert captured["source_retained_filepath"]
+        assert captured["lastmod_skip_cutoff"] == cutoff
+        assert captured["lastmod_skip_allowed_urls"] == allowed_urls
 
 
 class TestScrapyHttpCacheSettings:
@@ -54,6 +180,19 @@ class TestScrapyHttpCacheSettings:
             == "scrapy.extensions.httpcache.FilesystemCacheStorage"
         )
         assert runner.settings.getint("HTTPCACHE_EXPIRATION_SECS") == 86400
+
+    def test_create_runner_writes_source_retained_urls_to_separate_feed(self, tmp_path):
+        pages_path = tmp_path / "pages.jsonl"
+        source_retained_path = tmp_path / "source-retained.jsonl"
+
+        runner = create_runner(
+            filepath=pages_path,
+            source_retained_filepath=source_retained_path,
+        )
+
+        feeds = runner.settings.getdict("FEEDS")
+        assert str(pages_path) in feeds
+        assert str(source_retained_path) in feeds
 
 
 class MockCrawlManager:

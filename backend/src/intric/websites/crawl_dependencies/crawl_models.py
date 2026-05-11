@@ -25,6 +25,7 @@ class CrawlRunBase(BaseModel):
     pages_failed: Optional[int] = None
     files_failed: Optional[int] = None
     failure_summary: Optional[dict[str, int]] = None
+    outcome_code: Optional["CrawlOutcomeCode"] = None
 
 
 class CrawlOutcomeSeverity(str, Enum):
@@ -37,6 +38,8 @@ class CrawlOutcomeCode(str, Enum):
     CRAWL_DUPLICATE_SKIPPED = "CRAWL_DUPLICATE_SKIPPED"
     CRAWL_NO_PAGES_RETURNED = "CRAWL_NO_PAGES_RETURNED"
     CRAWL_TIMEOUT_NO_PAGES = "CRAWL_TIMEOUT_NO_PAGES"
+    CRAWL_MAX_AGE_EXCEEDED = "CRAWL_MAX_AGE_EXCEEDED"
+    CRAWL_SOURCE_RETENTION_ONLY = "CRAWL_SOURCE_RETENTION_ONLY"
     CRAWL_COMPLETED_WITH_PAGE_FAILURES = "CRAWL_COMPLETED_WITH_PAGE_FAILURES"
     EMBEDDING_CONFIG_MISSING = "EMBEDDING_CONFIG_MISSING"
     UNKNOWN_CRAWL_ERROR = "UNKNOWN_CRAWL_ERROR"
@@ -58,76 +61,150 @@ def derive_crawl_outcome(
     failure_summary: dict[str, int] | None,
     pages_failed: int | None,
     files_failed: int | None,
+    outcome_code: CrawlOutcomeCode | str | None = None,
 ) -> CrawlOutcomePublic | None:
+    resolved_code = (
+        CrawlOutcomeCode(outcome_code)
+        if outcome_code is not None
+        else derive_crawl_outcome_code(
+            status=status,
+            result_location=result_location,
+            failure_summary=failure_summary,
+            pages_failed=pages_failed,
+            files_failed=files_failed,
+        )
+    )
+    if resolved_code is None:
+        return None
+
+    return _crawl_outcome_from_code(
+        code=resolved_code,
+        result_location=result_location,
+        failure_summary=failure_summary,
+        pages_failed=pages_failed,
+        files_failed=files_failed,
+    )
+
+
+def derive_crawl_outcome_code(
+    *,
+    status: Status | str | None,
+    result_location: str | None,
+    failure_summary: dict[str, int] | None,
+    pages_failed: int | None,
+    files_failed: int | None,
+) -> CrawlOutcomeCode | None:
     status_value = status.value if isinstance(status, Status) else status
     detail = result_location.strip() if result_location else None
     detail_lower = detail.lower() if detail else ""
     affected_count = (pages_failed or 0) + (files_failed or 0)
 
+    # Legacy rows only stored crawl outcomes in result_location text. New writes
+    # should set outcome_code and use these branches only as a read fallback.
     if status_value == Status.FAILED.value and detail_lower.startswith(
         "skipped duplicate crawl"
     ):
+        return CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED
+
+    if failure_summary:
+        if (
+            FailureReason.NO_EMBEDDING_MODEL.value in failure_summary
+            or FailureReason.MISSING_PROVIDER.value in failure_summary
+        ):
+            return CrawlOutcomeCode.EMBEDDING_CONFIG_MISSING
+
+        return CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
+
+    if status_value == Status.FAILED.value or status_value == Status.NOT_FOUND.value:
+        if "no pages returned" in detail_lower:
+            return CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED
+
+        if "timeout" in detail_lower:
+            return CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES
+
+        return CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
+
+    if affected_count > 0:
+        return CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
+
+    return None
+
+
+def _crawl_outcome_from_code(
+    *,
+    code: CrawlOutcomeCode,
+    result_location: str | None,
+    failure_summary: dict[str, int] | None,
+    pages_failed: int | None,
+    files_failed: int | None,
+) -> CrawlOutcomePublic:
+    detail = result_location.strip() if result_location else None
+    affected_count = (pages_failed or 0) + (files_failed or 0)
+    failure_count = sum(failure_summary.values()) if failure_summary else None
+
+    if code == CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED:
         return CrawlOutcomePublic(
-            code=CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED,
+            code=code,
             severity=CrawlOutcomeSeverity.INFO,
             message_key="crawl_outcome_duplicate_skipped",
             detail=detail,
         )
 
-    if failure_summary:
-        failure_count = sum(failure_summary.values())
-        if (
-            FailureReason.NO_EMBEDDING_MODEL.value in failure_summary
-            or FailureReason.MISSING_PROVIDER.value in failure_summary
-        ):
-            return CrawlOutcomePublic(
-                code=CrawlOutcomeCode.EMBEDDING_CONFIG_MISSING,
-                severity=CrawlOutcomeSeverity.WARNING,
-                message_key="crawl_outcome_embedding_config_missing",
-                affected_count=failure_count,
-            )
-
+    if code == CrawlOutcomeCode.EMBEDDING_CONFIG_MISSING:
         return CrawlOutcomePublic(
-            code=CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES,
+            code=code,
             severity=CrawlOutcomeSeverity.WARNING,
-            message_key="crawl_outcome_page_failures",
-            affected_count=failure_count,
+            message_key="crawl_outcome_embedding_config_missing",
+            affected_count=failure_count or affected_count or None,
         )
 
-    if status_value == Status.FAILED.value or status_value == Status.NOT_FOUND.value:
-        if "no pages returned" in detail_lower:
-            return CrawlOutcomePublic(
-                code=CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED,
-                severity=CrawlOutcomeSeverity.ERROR,
-                message_key="crawl_outcome_no_pages_returned",
-                detail=detail,
-            )
-
-        if "timeout" in detail_lower:
-            return CrawlOutcomePublic(
-                code=CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES,
-                severity=CrawlOutcomeSeverity.ERROR,
-                message_key="crawl_outcome_timeout_no_pages",
-                detail=detail,
-            )
-
+    if code == CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES:
         return CrawlOutcomePublic(
-            code=CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR,
+            code=code,
+            severity=CrawlOutcomeSeverity.WARNING,
+            message_key="crawl_outcome_page_failures",
+            affected_count=failure_count or affected_count or None,
+        )
+
+    if code == CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED:
+        return CrawlOutcomePublic(
+            code=code,
             severity=CrawlOutcomeSeverity.ERROR,
-            message_key="crawl_outcome_unknown_error",
+            message_key="crawl_outcome_no_pages_returned",
             detail=detail,
+        )
+
+    if code == CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES:
+        return CrawlOutcomePublic(
+            code=code,
+            severity=CrawlOutcomeSeverity.ERROR,
+            message_key="crawl_outcome_timeout_no_pages",
+            detail=detail,
+        )
+
+    if code == CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED:
+        return CrawlOutcomePublic(
+            code=code,
+            severity=CrawlOutcomeSeverity.ERROR,
+            message_key="crawl_outcome_max_age_exceeded",
+            detail=detail,
+        )
+
+    if code == CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY:
+        return CrawlOutcomePublic(
+            code=code,
+            severity=CrawlOutcomeSeverity.INFO,
+            message_key="crawl_outcome_source_retention_only",
             affected_count=affected_count or None,
         )
 
-    if affected_count > 0:
-        return CrawlOutcomePublic(
-            code=CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES,
-            severity=CrawlOutcomeSeverity.WARNING,
-            message_key="crawl_outcome_page_failures",
-            affected_count=affected_count,
-        )
-
-    return None
+    return CrawlOutcomePublic(
+        code=CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR,
+        severity=CrawlOutcomeSeverity.ERROR,
+        message_key="crawl_outcome_unknown_error",
+        detail=detail,
+        affected_count=affected_count or None,
+    )
 
 
 class CrawlRunCreate(BaseModel):
@@ -166,6 +243,7 @@ class CrawlRunSparse(CrawlRunBase, InDB):
                 failure_summary=self.failure_summary,
                 pages_failed=self.pages_failed,
                 files_failed=self.files_failed,
+                outcome_code=self.outcome_code,
             )
         return self
 

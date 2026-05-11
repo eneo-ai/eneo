@@ -41,6 +41,8 @@
       crawl_outcome_embedding_config_missing: () => m.crawl_outcome_embedding_config_missing(),
       crawl_outcome_no_pages_returned: () => m.crawl_outcome_no_pages_returned(),
       crawl_outcome_timeout_no_pages: () => m.crawl_outcome_timeout_no_pages(),
+      crawl_outcome_max_age_exceeded: () => m.crawl_outcome_max_age_exceeded(),
+      crawl_outcome_source_retention_only: () => m.crawl_outcome_source_retention_only(),
       crawl_outcome_page_failures: () => m.crawl_outcome_page_failures(),
       crawl_outcome_unknown_error: () => m.crawl_outcome_unknown_error()
     };

@@ -5,9 +5,10 @@ import os
 import threading
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
-from typing import Any, Callable, Coroutine, Iterable, Optional
+from typing import Any, Callable, Coroutine, Iterable, Optional, cast
 
 import crochet
 from scrapy.crawler import Crawler as ScrapyCrawler
@@ -18,7 +19,7 @@ from twisted.python.failure import Failure
 from intric.crawler.parse_html import CrawledPage
 from intric.crawler.pipelines import FileNamePipeline
 from intric.crawler.spiders.crawl_spider import CrawlSpider
-from intric.crawler.spiders.sitemap_spider import SitemapSpider
+from intric.crawler.spiders.sitemap_spider import SitemapSpider, SourceRetainedUrl
 from intric.main.config import get_settings
 from intric.main.exceptions import CrawlerException, CrawlTimeoutError
 from intric.tenants.crawler_settings_helper import get_crawler_setting
@@ -85,6 +86,7 @@ class CrawlManager:
         filepath: str | Path,
         files_dir: str | Path | None = None,
         http_cache_dir: str | Path | None = None,
+        source_retained_filepath: str | Path | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
         **spider_kwargs: Any,
     ) -> Any:
@@ -100,6 +102,7 @@ class CrawlManager:
             filepath=filepath,
             files_dir=files_dir,
             http_cache_dir=http_cache_dir,
+            source_retained_filepath=source_retained_filepath,
             tenant_crawler_settings=tenant_crawler_settings,
         )
 
@@ -174,7 +177,7 @@ class CrawlManager:
         return completed
 
 
-@dataclass
+@dataclass(frozen=True)
 class Crawl:
     """Result of a web crawl operation.
 
@@ -184,6 +187,7 @@ class Crawl:
         is_partial: True if crawl was terminated early (timeout, etc.)
         termination_reason: Why crawl ended ("completed", "timeout", "error")
         pages_count: Number of pages collected (for partial results reporting)
+        source_retained_urls: Sitemap URLs present in source but not fetched
     """
 
     pages: Iterable[CrawledPage]
@@ -191,12 +195,18 @@ class Crawl:
     is_partial: bool = False
     termination_reason: str = "completed"
     pages_count: int = 0
+    source_retained_urls: frozenset[str] = frozenset()
+
+    @property
+    def source_retained_count(self) -> int:
+        return len(self.source_retained_urls)
 
 
 def create_runner(
     filepath: str | Path,
     files_dir: Optional[str | Path] = None,
     http_cache_dir: Optional[str | Path] = None,
+    source_retained_filepath: Optional[str | Path] = None,
     http_cache_expiration_seconds: int | None = None,
     tenant_crawler_settings: dict[str, Any] | None = None,
 ) -> CrawlerRunner:
@@ -213,10 +223,19 @@ def create_runner(
         tenant_crawler_settings: Optional tenant-specific settings from DB
     """
     filepath_str = str(filepath)
+    feeds: dict[str, dict[str, object]] = {
+        filepath_str: {"format": "jsonl", "item_classes": [CrawledPage]}
+    }
+    if source_retained_filepath is not None:
+        feeds[str(source_retained_filepath)] = {
+            "format": "jsonl",
+            "item_classes": [SourceRetainedUrl],
+        }
+
     settings_obj = get_settings()
     # Scrapy settings values have heterogeneous types; dict[str, Any] is correct here.
     settings: dict[str, Any] = {
-        "FEEDS": {filepath_str: {"format": "jsonl", "item_classes": [CrawledPage]}},
+        "FEEDS": feeds,
         # All settings use get_crawler_setting() for tenant-aware resolution
         "CLOSESPIDER_ITEMCOUNT": get_crawler_setting(
             "closespider_itemcount", tenant_crawler_settings
@@ -259,6 +278,34 @@ def create_runner(
         settings["FILES_STORE"] = str(files_dir)
 
     return CrawlerRunner(settings=settings)
+
+
+def _read_source_retained_urls(filepath: str | Path) -> frozenset[str]:
+    path = Path(filepath)
+    if not path.exists() or path.stat().st_size == 0:
+        return frozenset()
+
+    retained_urls: list[str] = []
+    with path.open(encoding="utf-8") as file:
+        for line in file:
+            try:
+                payload: object = json.loads(line)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Ignoring malformed source-retained crawler line",
+                    extra={"path": str(path)},
+                )
+                continue
+
+            url = (
+                cast(dict[str, object], payload).get("url")
+                if isinstance(payload, dict)
+                else None
+            )
+            if isinstance(url, str) and url:
+                retained_urls.append(url)
+
+    return frozenset(retained_urls)
 
 
 # Type alias for the async crawl functions used by _crawl()
@@ -316,6 +363,9 @@ class Crawler:
         http_cache_dir: Optional[str | Path] = None,
         http_user: str | None = None,
         http_pass: str | None = None,
+        source_retained_filepath: str | Path | None = None,
+        lastmod_skip_cutoff: datetime | None = None,
+        lastmod_skip_allowed_urls: Iterable[str] | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
     ) -> Any:
         """Run sitemap crawl in Twisted reactor, returns EventualResult.
@@ -330,6 +380,7 @@ class Crawler:
         runner = create_runner(
             filepath=filepath,
             http_cache_dir=http_cache_dir,
+            source_retained_filepath=source_retained_filepath,
             tenant_crawler_settings=tenant_crawler_settings,
         )
         return runner.crawl(  # pyright: ignore[reportUnknownMemberType]
@@ -337,6 +388,8 @@ class Crawler:
             sitemap_url=sitemap_url,
             http_user=http_user,
             http_pass=http_pass,
+            lastmod_skip_cutoff=lastmod_skip_cutoff,
+            lastmod_skip_allowed_urls=lastmod_skip_allowed_urls,
         )
 
     @staticmethod
@@ -462,6 +515,9 @@ class Crawler:
         http_cache_dir: Optional[str | Path] = None,
         http_user: str | None = None,
         http_pass: str | None = None,
+        source_retained_filepath: str | Path | None = None,
+        lastmod_skip_cutoff: datetime | None = None,
+        lastmod_skip_allowed_urls: Iterable[str] | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
         max_length: int,
         heartbeat_callback: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
@@ -493,10 +549,13 @@ class Crawler:
                 filepath=str(filepath),
                 files_dir=None,  # Sitemap crawls don't download files
                 http_cache_dir=http_cache_dir,
+                source_retained_filepath=source_retained_filepath,
                 tenant_crawler_settings=tenant_crawler_settings,
                 sitemap_url=sitemap_url,
                 http_user=http_user,
                 http_pass=http_pass,
+                lastmod_skip_cutoff=lastmod_skip_cutoff,
+                lastmod_skip_allowed_urls=lastmod_skip_allowed_urls,
             )
 
             try:
@@ -587,6 +646,8 @@ class Crawler:
         """
         with NamedTemporaryFile(delete=False) as tmp_file:
             tmp_file_path = tmp_file.name
+        with NamedTemporaryFile(delete=False) as source_retained_file:
+            source_retained_file_path = source_retained_file.name
         tmp_dir_obj = TemporaryDirectory()
         tmp_dir = tmp_dir_obj.name
 
@@ -595,13 +656,17 @@ class Crawler:
         url: str = kwargs.get("url") or kwargs.get("sitemap_url") or "unknown"
 
         try:
+            crawl_kwargs = dict(kwargs)
+            if "sitemap_url" in crawl_kwargs:
+                crawl_kwargs["source_retained_filepath"] = source_retained_file_path
+
             await func(
                 filepath=tmp_file_path,
                 files_dir=tmp_dir,
                 max_length=max_length,
                 heartbeat_callback=heartbeat_callback,
                 heartbeat_interval=heartbeat_interval,
-                **kwargs,
+                **crawl_kwargs,
             )
         except CrawlTimeoutError as timeout_err:
             # Timeout occurred - check if we have partial results to salvage
@@ -641,9 +706,10 @@ class Crawler:
             timeout_err.pages_collected = pages_count
 
         try:
+            source_retained_urls = _read_source_retained_urls(source_retained_file_path)
             # Check if file exists and has content
             file_size = os.stat(tmp_file_path).st_size
-            if file_size == 0:
+            if file_size == 0 and not source_retained_urls:
                 raise CrawlerException(f"Crawl failed for {url}: no pages returned")
 
             # Count pages for the result
@@ -666,12 +732,17 @@ class Crawler:
                 is_partial=is_partial,
                 termination_reason=termination_reason,
                 pages_count=pages_count,
+                source_retained_urls=source_retained_urls,
             )
 
         finally:
             # Clean up temp files
             try:
                 os.unlink(tmp_file_path)
+            except OSError:
+                pass
+            try:
+                os.unlink(source_retained_file_path)
             except OSError:
                 pass
             try:
@@ -689,6 +760,8 @@ class Crawler:
         http_pass: str | None = None,
         tenant_crawler_settings: dict[str, Any] | None = None,
         http_cache_dir: Optional[str | Path] = None,
+        sitemap_lastmod_skip_cutoff: datetime | None = None,
+        sitemap_lastmod_skip_allowed_urls: Iterable[str] | None = None,
         heartbeat_callback: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
         heartbeat_interval: float = 60.0,
     ):
@@ -740,6 +813,8 @@ class Crawler:
                 http_pass=http_pass,
                 tenant_crawler_settings=tenant_crawler_settings,
                 http_cache_dir=http_cache_dir,
+                lastmod_skip_cutoff=sitemap_lastmod_skip_cutoff,
+                lastmod_skip_allowed_urls=sitemap_lastmod_skip_allowed_urls,
             ) as crawl_result:
                 yield crawl_result
 

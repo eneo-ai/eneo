@@ -3,7 +3,7 @@ import random
 import socket
 import time
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast
@@ -18,9 +18,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.main.config import get_settings
 from intric.main.container.container import Container
+from intric.main.exceptions import CrawlerException, CrawlTimeoutError
 from intric.main.logging import get_logger
 from intric.tenants.crawler_settings_helper import get_crawler_setting
-from intric.websites.crawl_dependencies.crawl_models import CrawlTask
+from intric.websites.crawl_dependencies.crawl_models import (
+    CrawlOutcomeCode,
+    CrawlTask,
+    derive_crawl_outcome_code,
+)
+from intric.websites.domain.crawl_run import CrawlType
 from intric.worker.crawl import (
     ExistingBlobState,
     HeartbeatFailedError,
@@ -111,6 +117,26 @@ def _build_http_cache_dir(*, root_dir: Path, tenant_id: UUID, website_id: UUID) 
     return root_dir / str(tenant_id) / str(website_id)
 
 
+def _is_url_title(title: str) -> bool:
+    return title.startswith(("http://", "https://"))
+
+
+def _build_sitemap_lastmod_skip_urls(
+    *,
+    existing_blob_state_by_title: Mapping[str, ExistingBlobState],
+    embedding_model_id: UUID | None,
+) -> frozenset[str]:
+    return frozenset(
+        title
+        for title, blob_state in existing_blob_state_by_title.items()
+        if _is_url_title(title)
+        and (
+            embedding_model_id is None
+            or blob_state.embedding_model_id == embedding_model_id
+        )
+    )
+
+
 def _prune_http_cache_dir(cache_dir: Path, *, max_bytes: int) -> None:
     if max_bytes <= 0 or not cache_dir.exists():
         return
@@ -165,6 +191,30 @@ def _warn_if_retained_items_without_embedding_config(
             "retained_count": retained_count,
         },
     )
+
+
+def _crawl_outcome_code_for_exception(exc: Exception) -> CrawlOutcomeCode:
+    if isinstance(exc, CrawlTimeoutError):
+        return CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES
+    if isinstance(exc, CrawlerException) and "no pages returned" in str(exc).lower():
+        return CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED
+    return CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
+
+
+async def _record_crawl_run_outcome_code(
+    *,
+    run_id: UUID,
+    outcome_code: CrawlOutcomeCode,
+) -> None:
+    from intric.database.tables.websites_table import CrawlRuns
+
+    async with Container.session_scope() as session:
+        stmt = (
+            sa.update(CrawlRuns)
+            .where(CrawlRuns.id == run_id)
+            .values(outcome_code=outcome_code.value)
+        )
+        await session.execute(stmt)
 
 
 async def queue_website_crawls(container: Container):
@@ -615,6 +665,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         from intric.main.models import Status
 
                         crawl_run.status = Status.FAILED
+                        crawl_run.update(
+                            outcome_code=CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED.value
+                        )
                         await crawl_run_repo.update(crawl_run)
                 except Exception as update_exc:
                     logger.warning(
@@ -693,6 +746,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                 if primary_job_id and primary_job_id != job_id:
                     from intric.database.tables.job_table import Jobs
+                    from intric.database.tables.websites_table import CrawlRuns
                     from intric.main.models import Status
 
                     skip_message = (
@@ -713,6 +767,13 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         )
                     )
                     result = await session.execute(stmt)
+                    await session.execute(
+                        sa.update(CrawlRuns)
+                        .where(CrawlRuns.id == params.run_id)
+                        .values(
+                            outcome_code=CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED.value
+                        )
+                    )
                     if result.rowcount == 0:
                         logger.debug(
                             "Duplicate crawl skip ignored; job status already changed",
@@ -823,6 +884,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             existing_titles: list[str] = []
             existing_blob_state_by_title: dict[str, ExistingBlobState] = {}
             website_url: str = ""  # For logging after session closes
+            website_last_crawled_at: datetime | None = None
 
             start = time.time()
             # Bootstrap phase: Short-lived session for extracting ORM → DTO
@@ -849,6 +911,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                 website: Any = website_row
                 website_url = website_row.url  # Save for logging after session closes
+                website_last_crawled_at = website_row.last_crawled_at
 
                 # CRITICAL: Verify tenant isolation
                 current_tenant = container.tenant()
@@ -1052,6 +1115,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             num_deleted_blobs = 0
             num_skipped_pages = 0  # URL pages retained because content/model match
             num_skipped_files = 0  # Files with unchanged content (hash match)
+            num_source_retained_pages = 0
 
             # Aggregate failure reasons across all batches
             # Maps FailureReason codes to counts for final storage in failure_summary
@@ -1122,6 +1186,31 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         },
                     )
 
+            sitemap_lastmod_skip_cutoff: datetime | None = None
+            sitemap_lastmod_skip_allowed_urls: frozenset[str] = frozenset()
+            if (
+                settings.crawl_sitemap_lastmod_skip_enabled
+                and params.crawl_type == CrawlType.SITEMAP
+                and website_last_crawled_at is not None
+            ):
+                sitemap_lastmod_skip_allowed_urls = _build_sitemap_lastmod_skip_urls(
+                    existing_blob_state_by_title=existing_blob_state_by_title,
+                    embedding_model_id=crawl_context.embedding_model_id,
+                )
+                if sitemap_lastmod_skip_allowed_urls:
+                    sitemap_lastmod_skip_cutoff = website_last_crawled_at
+                    logger.info(
+                        "Sitemap lastmod source skip enabled for crawl",
+                        extra={
+                            "website_id": str(params.website_id),
+                            "tenant_id": str(crawl_context.tenant_id),
+                            "skip_candidate_count": len(
+                                sitemap_lastmod_skip_allowed_urls
+                            ),
+                            "last_crawled_at": website_last_crawled_at.isoformat(),
+                        },
+                    )
+
             # Use Scrapy crawler to process website content
             # Measure crawl and parse phase
             start = time.time()
@@ -1134,6 +1223,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 # Pass tenant settings for tenant-aware Scrapy configuration
                 tenant_crawler_settings=tenant.crawler_settings if tenant else None,
                 http_cache_dir=http_cache_dir,
+                sitemap_lastmod_skip_cutoff=sitemap_lastmod_skip_cutoff,
+                sitemap_lastmod_skip_allowed_urls=sitemap_lastmod_skip_allowed_urls,
                 # Pass heartbeat callback for liveness during Scrapy crawl phase
                 heartbeat_callback=heartbeat_monitor.tick,
                 heartbeat_interval=float(heartbeat_interval_seconds),
@@ -1158,6 +1249,24 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                 # Measure page processing time
                 process_start = time.time()
+                if crawl.source_retained_urls:
+                    must_keep_titles.update(crawl.source_retained_urls)
+                    num_source_retained_pages = crawl.source_retained_count
+                    num_skipped_pages += crawl.source_retained_count
+                    logger.warning(
+                        "Retained sitemap URLs without fetching due to lastmod",
+                        extra={
+                            "reason": "sitemap_lastmod_source_skip_applied",
+                            "job_id": str(job_id),
+                            "website_id": str(params.website_id),
+                            "tenant_id": str(crawl_context.tenant_id),
+                            "lastmod_cutoff": sitemap_lastmod_skip_cutoff.isoformat()
+                            if sitemap_lastmod_skip_cutoff is not None
+                            else None,
+                            "retained_count": crawl.source_retained_count,
+                            "caveat": "Trusts upstream sitemap lastmod values",
+                        },
+                    )
 
                 # Session-per-batch page processing (NO main session held)
                 # Bootstrap already returned session to pool. All DB operations
@@ -1447,8 +1556,11 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             )
 
             # Calculate skip rates for performance analysis
+            total_page_source_count = num_pages + num_source_retained_pages
             page_skip_rate = (
-                (num_skipped_pages / num_pages * 100) if num_pages > 0 else 0
+                (num_skipped_pages / total_page_source_count * 100)
+                if total_page_source_count > 0
+                else 0
             )
             file_skip_rate = (
                 (num_skipped_files / num_files * 100) if num_files > 0 else 0
@@ -1487,6 +1599,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 extra={
                     "timings": timings,
                     "pages_crawled": num_pages,
+                    "pages_source_retained": num_source_retained_pages,
                     "pages_failed": num_failed_pages,
                     "pages_skipped": num_skipped_pages,
                     "page_skip_rate_percent": page_skip_rate,
@@ -1539,6 +1652,22 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # Convert failure_counts defaultdict to regular dict for JSONB storage
             # Only store if there are any failures
             failure_summary = dict(failure_counts) if failure_counts else None
+            if (
+                num_source_retained_pages > 0
+                and num_pages == 0
+                and num_files == 0
+                and num_failed_pages == 0
+                and num_failed_files == 0
+            ):
+                crawl_run_outcome_code = CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY
+            else:
+                crawl_run_outcome_code = derive_crawl_outcome_code(
+                    status=JobStatus.COMPLETE,
+                    result_location=None,
+                    failure_summary=failure_summary,
+                    pages_failed=num_failed_pages,
+                    files_failed=num_failed_files,
+                )
 
             async def _do_crawl_run_update(sess: AsyncSession) -> None:
                 # Session provided by execute_with_recovery (session-per-operation pattern)
@@ -1551,6 +1680,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         pages_failed=num_failed_pages,
                         files_failed=num_failed_files,
                         failure_summary=failure_summary,
+                        outcome_code=crawl_run_outcome_code.value
+                        if crawl_run_outcome_code is not None
+                        else None,
                     )
                 )
                 await sess.execute(stmt)
@@ -1567,7 +1699,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             # Determine if crawl was successful
             # Success = at least one item (page or file) AND not everything failed
-            total_items = num_pages + num_files
+            total_items = num_pages + num_files + num_source_retained_pages
             total_failed = num_failed_pages + num_failed_files
             crawl_successful = total_items > 0 and total_failed < total_items
 
@@ -1697,6 +1829,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         "pages_crawled": num_pages,
                         "pages_failed": num_failed_pages,
                         "pages_skipped": num_skipped_pages,
+                        "pages_source_retained": num_source_retained_pages,
                         "files_downloaded": num_files,
                         "files_failed": num_failed_files,
                         "files_skipped": num_skipped_files,
@@ -1747,6 +1880,26 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             setattr(task_manager, "_job_already_handled", True)
 
         return task_manager.successful()
+    except Retry:
+        raise
+    except Exception as exc:
+        outcome_code = _crawl_outcome_code_for_exception(exc)
+        try:
+            await _record_crawl_run_outcome_code(
+                run_id=params.run_id,
+                outcome_code=outcome_code,
+            )
+        except Exception as outcome_exc:
+            logger.warning(
+                "Failed to record crawl outcome code after crawl exception",
+                extra={
+                    "job_id": str(job_id),
+                    "run_id": str(params.run_id),
+                    "outcome_code": outcome_code.value,
+                    "error": str(outcome_exc),
+                },
+            )
+        raise
     finally:
         # Primary path: normal release when everything worked
         if limiter is not None and tenant is not None and acquired:

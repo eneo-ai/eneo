@@ -177,17 +177,68 @@ class TestCrawlTaskRetentionHelpers:
             existing_titles=[
                 "https://example.com/deleted",
                 "https://example.com/retained",
+                "https://example.com/source-retained",
                 "https://example.com/persisted",
                 "https://example.com/failed",
             ],
             must_keep_titles={
                 "https://example.com/retained",
+                "https://example.com/source-retained",
                 "https://example.com/persisted",
             },
             failed_titles={"https://example.com/failed"},
         )
 
         assert stale_titles == ["https://example.com/deleted"]
+
+    def test_build_sitemap_lastmod_skip_urls_only_includes_current_url_blobs(self):
+        from intric.worker.crawl.persistence import ExistingBlobState
+        from intric.worker.crawl_tasks import _build_sitemap_lastmod_skip_urls
+
+        current_model_id = uuid4()
+        other_model_id = uuid4()
+
+        skip_urls = _build_sitemap_lastmod_skip_urls(
+            existing_blob_state_by_title={
+                "https://example.com/current": ExistingBlobState(
+                    content_hash=b"current",
+                    embedding_model_id=current_model_id,
+                ),
+                "https://example.com/old-model": ExistingBlobState(
+                    content_hash=b"old-model",
+                    embedding_model_id=other_model_id,
+                ),
+                "manual.pdf": ExistingBlobState(
+                    content_hash=b"file",
+                    embedding_model_id=current_model_id,
+                ),
+            },
+            embedding_model_id=current_model_id,
+        )
+
+        assert skip_urls == frozenset({"https://example.com/current"})
+
+    def test_build_sitemap_lastmod_skip_urls_allows_existing_urls_when_model_missing(
+        self,
+    ):
+        from intric.worker.crawl.persistence import ExistingBlobState
+        from intric.worker.crawl_tasks import _build_sitemap_lastmod_skip_urls
+
+        skip_urls = _build_sitemap_lastmod_skip_urls(
+            existing_blob_state_by_title={
+                "https://example.com/known": ExistingBlobState(
+                    content_hash=b"known",
+                    embedding_model_id=uuid4(),
+                ),
+                "manual.pdf": ExistingBlobState(
+                    content_hash=b"file",
+                    embedding_model_id=uuid4(),
+                ),
+            },
+            embedding_model_id=None,
+        )
+
+        assert skip_urls == frozenset({"https://example.com/known"})
 
     def test_build_http_cache_dir_scopes_by_tenant_and_website(self, tmp_path):
         from intric.worker.crawl_tasks import _build_http_cache_dir
@@ -275,6 +326,34 @@ class TestCrawlTaskRetentionHelpers:
         )
 
         mock_logger.warning.assert_not_called()
+
+    def test_crawl_exception_maps_to_specific_outcome_code(self):
+        from intric.main.exceptions import CrawlerException, CrawlTimeoutError
+        from intric.websites.crawl_dependencies.crawl_models import CrawlOutcomeCode
+        from intric.worker.crawl_tasks import _crawl_outcome_code_for_exception
+
+        assert (
+            _crawl_outcome_code_for_exception(
+                CrawlerException(
+                    "Crawl failed for https://example.com: no pages returned"
+                )
+            )
+            == CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED
+        )
+        assert (
+            _crawl_outcome_code_for_exception(
+                CrawlTimeoutError(
+                    url="https://example.com",
+                    timeout_seconds=10,
+                    pages_collected=0,
+                )
+            )
+            == CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES
+        )
+        assert (
+            _crawl_outcome_code_for_exception(RuntimeError("unexpected"))
+            == CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
+        )
 
 
 class TestEmbeddingSemaphore:

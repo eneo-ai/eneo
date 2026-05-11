@@ -37,6 +37,7 @@ class CrawlRun(Entity):
         finished_at: Optional["datetime"],
         job_id: Optional["UUID"],
         failure_summary: Optional[dict[str, int]] = None,
+        outcome_code: Optional[str] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.status = status
@@ -50,6 +51,7 @@ class CrawlRun(Entity):
         self.tenant_id = tenant_id
         self.job_id = job_id
         self.failure_summary = failure_summary
+        self.outcome_code = outcome_code
 
     @overload
     @classmethod
@@ -82,6 +84,7 @@ class CrawlRun(Entity):
             finished_at=None,
             job_id=None,
             failure_summary=None,
+            outcome_code=None,
         )
 
     @classmethod
@@ -126,6 +129,7 @@ class CrawlRun(Entity):
             result_location=job.result_location if job else None,
             finished_at=job.finished_at if job else None,
             failure_summary=record.failure_summary,
+            outcome_code=record.outcome_code,
         )
 
     def update(
@@ -135,6 +139,7 @@ class CrawlRun(Entity):
         files_downloaded: Optional[int] = None,
         pages_failed: Optional[int] = None,
         files_failed: Optional[int] = None,
+        outcome_code: Optional[str] = None,
     ) -> "CrawlRun":
         if job_id is not None:
             self.job_id = job_id
@@ -150,5 +155,8 @@ class CrawlRun(Entity):
 
         if files_failed is not None:
             self.files_failed = files_failed
+
+        if outcome_code is not None:
+            self.outcome_code = outcome_code
 
         return self

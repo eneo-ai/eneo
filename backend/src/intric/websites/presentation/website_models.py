@@ -20,6 +20,7 @@ from intric.main.models import (
     is_provided,
 )
 from intric.websites.crawl_dependencies.crawl_models import (
+    CrawlOutcomeCode,
     CrawlOutcomePublic,
     CrawlRunSparse,
     derive_crawl_outcome,
@@ -77,6 +78,7 @@ class CrawlRunPublic(BaseResponse):
     pages_failed: Optional[int]
     files_failed: Optional[int]
     failure_summary: Optional[dict[str, int]] = None
+    outcome_code: Optional[CrawlOutcomeCode] = None
     status: Status
     result_location: Optional[str]
     finished_at: Optional[datetime]
@@ -93,6 +95,9 @@ class CrawlRunPublic(BaseResponse):
             pages_failed=crawl_run.pages_failed,
             files_failed=crawl_run.files_failed,
             failure_summary=crawl_run.failure_summary,
+            outcome_code=CrawlOutcomeCode(crawl_run.outcome_code)
+            if crawl_run.outcome_code is not None
+            else None,
             status=crawl_run.status,
             result_location=crawl_run.result_location,
             finished_at=crawl_run.finished_at,
@@ -102,6 +107,7 @@ class CrawlRunPublic(BaseResponse):
                 failure_summary=crawl_run.failure_summary,
                 pages_failed=crawl_run.pages_failed,
                 files_failed=crawl_run.files_failed,
+                outcome_code=crawl_run.outcome_code,
             ),
         )
 
