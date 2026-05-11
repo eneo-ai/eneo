@@ -105,7 +105,13 @@ def _compute_stale_titles(
     existing_titles: Iterable[str],
     must_keep_titles: set[str],
     failed_titles: set[str],
+    crawl_is_partial: bool,
 ) -> list[str]:
+    if crawl_is_partial:
+        # Partial crawls have an incomplete source frontier; absence from
+        # must_keep_titles is not proof that a blob was removed at the source.
+        return []
+
     return [
         title
         for title in existing_titles
@@ -1261,13 +1267,15 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                 if crawl_is_partial:
                     logger.warning(
-                        f"Crawl timed out but has partial results - salvaging {crawl.pages_count} pages",
+                        "Crawl timed out but has partial results",
                         extra={
                             "job_id": str(job_id),
                             "website_id": str(params.website_id),
                             "url": params.url,
                             "pages_collected": crawl.pages_count,
+                            "source_retained_count": crawl.source_retained_count,
                             "termination_reason": crawl_termination_reason,
+                            "stale_cleanup": "skipped_for_partial_crawl",
                         },
                     )
 
@@ -1477,6 +1485,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 existing_titles=existing_titles,
                 must_keep_titles=must_keep_titles,
                 failed_titles=failed_titles,
+                crawl_is_partial=crawl_is_partial,
             )
 
             # Batch delete using session-per-operation pattern

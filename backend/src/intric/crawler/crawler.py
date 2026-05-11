@@ -202,6 +202,16 @@ class Crawl:
         return len(self.source_retained_urls)
 
 
+@dataclass(frozen=True, slots=True)
+class _CrawlOutputSummary:
+    pages_count: int
+    source_retained_urls: frozenset[str]
+
+    @property
+    def has_output(self) -> bool:
+        return self.pages_count > 0 or bool(self.source_retained_urls)
+
+
 def create_runner(
     filepath: str | Path,
     files_dir: Optional[str | Path] = None,
@@ -306,6 +316,27 @@ def _read_source_retained_urls(filepath: str | Path) -> frozenset[str]:
                 retained_urls.append(url)
 
     return frozenset(retained_urls)
+
+
+def _count_jsonl_lines(filepath: str | Path) -> int:
+    try:
+        if os.stat(filepath).st_size == 0:
+            return 0
+        with open(filepath) as f:
+            return sum(1 for _ in f)
+    except OSError:
+        return 0
+
+
+def _read_crawl_outputs(
+    *,
+    pages_filepath: str | Path,
+    source_retained_filepath: str | Path,
+) -> _CrawlOutputSummary:
+    return _CrawlOutputSummary(
+        pages_count=_count_jsonl_lines(pages_filepath),
+        source_retained_urls=_read_source_retained_urls(source_retained_filepath),
+    )
 
 
 # Type alias for the async crawl functions used by _crawl()
@@ -633,8 +664,8 @@ class Crawler:
 
         Handles timeouts gracefully by salvaging partial results:
         - On successful completion: yields all pages with is_partial=False
-        - On timeout WITH pages collected: yields partial pages with is_partial=True
-        - On timeout with NO pages: raises CrawlTimeoutError
+        - On timeout WITH output collected: yields partial output with is_partial=True
+        - On timeout with NO output: raises CrawlTimeoutError
         - On other failures: raises CrawlerException
 
         Args:
@@ -654,6 +685,7 @@ class Crawler:
         is_partial = False
         termination_reason = "completed"
         url: str = kwargs.get("url") or kwargs.get("sitemap_url") or "unknown"
+        crawl_outputs: _CrawlOutputSummary | None = None
 
         try:
             crawl_kwargs = dict(kwargs)
@@ -675,23 +707,17 @@ class Crawler:
 
             # Note: CrawlManager.stop_crawl() + wait_for_completion() already
             # ensured the crawler finished and flushed writes before we get here.
-            # The JSONL file is safe to read immediately.
+            # The JSONL files are safe to read immediately.
 
-            # Count pages in the spool file
-            pages_count = 0
-            try:
-                file_size = os.stat(tmp_file_path).st_size
-                if file_size > 0:
-                    with open(tmp_file_path) as f:
-                        pages_count = sum(1 for _ in f)
-            except OSError:
-                pages_count = 0
+            crawl_outputs = _read_crawl_outputs(
+                pages_filepath=tmp_file_path,
+                source_retained_filepath=source_retained_file_path,
+            )
 
-            if pages_count == 0:
-                # No pages collected before timeout - this is a true failure
-                # Clean up temp files before raising
+            if not crawl_outputs.has_output:
                 try:
                     os.unlink(tmp_file_path)
+                    os.unlink(source_retained_file_path)
                     tmp_dir_obj.cleanup()
                 except OSError:
                     pass
@@ -699,22 +725,20 @@ class Crawler:
                     url=url,
                     timeout_seconds=timeout_err.timeout_seconds,
                     pages_collected=0,
-                    message=f"Crawl timeout: exceeded {timeout_err.timeout_seconds}s for {url} with no pages collected",
+                    message=f"Crawl timeout: exceeded {timeout_err.timeout_seconds}s for {url} with no output collected",
                 )
 
-            # Update the timeout error with page count for logging
-            timeout_err.pages_collected = pages_count
+            # Update the timeout error with page count for diagnostics
+            timeout_err.pages_collected = crawl_outputs.pages_count
 
         try:
-            source_retained_urls = _read_source_retained_urls(source_retained_file_path)
-            # Check if file exists and has content
-            file_size = os.stat(tmp_file_path).st_size
-            if file_size == 0 and not source_retained_urls:
+            if crawl_outputs is None:
+                crawl_outputs = _read_crawl_outputs(
+                    pages_filepath=tmp_file_path,
+                    source_retained_filepath=source_retained_file_path,
+                )
+            if not crawl_outputs.has_output:
                 raise CrawlerException(f"Crawl failed for {url}: no pages returned")
-
-            # Count pages for the result
-            with open(tmp_file_path) as f:
-                pages_count = sum(1 for _ in f)
 
             def _iter_pages() -> Iterable[CrawledPage]:
                 with open(tmp_file_path) as f:
@@ -731,8 +755,8 @@ class Crawler:
                 files=_iter_files(),
                 is_partial=is_partial,
                 termination_reason=termination_reason,
-                pages_count=pages_count,
-                source_retained_urls=source_retained_urls,
+                pages_count=crawl_outputs.pages_count,
+                source_retained_urls=crawl_outputs.source_retained_urls,
             )
 
         finally:

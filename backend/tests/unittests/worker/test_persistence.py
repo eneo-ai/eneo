@@ -188,9 +188,25 @@ class TestCrawlTaskRetentionHelpers:
                 "https://example.com/persisted",
             },
             failed_titles={"https://example.com/failed"},
+            crawl_is_partial=False,
         )
 
         assert stale_titles == ["https://example.com/deleted"]
+
+    def test_compute_stale_titles_skips_cleanup_for_partial_crawl(self):
+        from intric.worker.crawl_tasks import _compute_stale_titles
+
+        stale_titles = _compute_stale_titles(
+            existing_titles=[
+                "https://example.com/source-retained-before-timeout",
+                "https://example.com/not-yet-seen-before-timeout",
+            ],
+            must_keep_titles={"https://example.com/source-retained-before-timeout"},
+            failed_titles=set(),
+            crawl_is_partial=True,
+        )
+
+        assert stale_titles == []
 
     def test_build_sitemap_lastmod_skip_urls_only_includes_current_url_blobs(self):
         from intric.worker.crawl.persistence import ExistingBlobState

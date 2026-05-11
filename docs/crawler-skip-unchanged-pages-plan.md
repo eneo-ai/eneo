@@ -23,6 +23,8 @@ Purpose: reduce embedding-token spend and database churn for scheduled website c
 - [x] Frontend-visible crawl/job failure states.
 - [x] Frontend source-retention-only success state is visible instead of showing a misleading `0 pages crawled` result.
 - [x] Frontend crawl outcome labels/tooltips are centralized in a narrow knowledge Module instead of duplicated across website status and crawl history components.
+- [x] Source-retained timeout salvage: timeouts with retained sitemap output now yield partial crawl output instead of failing as empty crawls.
+- [x] Partial crawls skip stale-blob cleanup, because a timeout means the source frontier may be incomplete.
 - [x] Targeted tests, strict pyright, ruff, and regression validation.
 - [x] Claude peer-loop implementation review.
 - [x] Local commit only; do not push from this branch.
@@ -63,6 +65,8 @@ Claude artifact:
 - `.codex/artifacts/claude-peer-loop-crawler-source-skip-hardening-implementation-review-20260511T125758Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-source-skip-hardening-implementation-re-review-20260511T132343Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-skip-next-roi-review-20260511T143100Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-skip-timeout-salvage-and-retained-count-plan-20260511T180506Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-skip-timeout-salvage-implementation-review-20260511T181125Z.md`
 
 Claude loop summary:
 
@@ -78,6 +82,8 @@ Claude loop summary:
 - Source-skip implementation review: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 4`; blockers found sitemap lastmod kwargs routed to the wrong crawl path and a tautological skip helper.
 - Source-skip implementation re-review after routing tests and helper cleanup: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`.
 - Next-ROI review: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`; blocker found source-retention-only runs were still rendered as empty complete crawls in the frontend. This drove the shared crawl outcome presentation Module and complete-state source-retention rendering fix.
+- Timeout salvage and retained-count plan review: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 5`; blocker found that salvage of partial source-retained feeds would be unsafe unless partial crawls also skip stale cleanup.
+- Timeout salvage implementation review: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; confirmed `_crawl()` now reads both Scrapy feeds symmetrically and partial crawls skip stale cleanup.
 
 Claude agreed with the core architecture:
 
@@ -1283,7 +1289,7 @@ Goal:
 4. Consider update-in-place for changed pages to reduce chunk-table churn further.
 5. Add more specific user-facing warning states for sitemap-not-found and malformed-sitemap failures.
 6. Add a query/reporting view for stored crawl outcome codes if product wants operational dashboards.
-7. Add source-retained timeout salvage as its own crawler lifecycle slice: if Scrapy emits retained sitemap URLs before timing out with zero fetched pages, `_crawl()` should treat the retained feed as partial crawl output instead of raising `CrawlTimeoutError`. Write the red timeout test first.
+7. Completed source-retained timeout salvage: if Scrapy emits retained sitemap URLs before timing out with zero fetched pages, `_crawl()` treats the retained feed as partial crawl output instead of raising `CrawlTimeoutError`. Partial crawls skip stale cleanup to avoid deleting blobs that the timed-out crawl never reached.
 8. Add a stored processing fingerprint that includes embedding model, chunking version, text-normalization version, and embedding dimensions.
 9. Review broader info-blob tenant-scoping outside the website crawl paths, such as group and integration deletes, as a separate hardening slice.
 10. Add mixed source-retention outcome visibility: crawls that retain some sitemap URLs and fetch some changed pages should expose retained count through a typed public field or outcome summary, not only logs.
