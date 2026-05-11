@@ -52,6 +52,7 @@ from intric.flows.infrastructure.flow_run_repo import (
 )
 from intric.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
+    FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
     build_published_definition_json,
 )
 from intric.main.exceptions import (
@@ -1935,7 +1936,7 @@ async def test_rerun_step_rejects_malformed_published_form_schema(user):
             input_payload_json={"case_id": "A-123"},
         )
 
-    assert exc_info.value.code == "flow_published_form_schema_invalid"
+    assert exc_info.value.code == FLOW_PUBLISHED_FORM_SCHEMA_INVALID
     flow_run_repo.get_latest_completed_attempt_id_for_step.assert_not_awaited()
     flow_run_repo.accept_or_replay_rerun_operation.assert_not_awaited()
 

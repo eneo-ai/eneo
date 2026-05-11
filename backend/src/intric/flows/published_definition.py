@@ -60,6 +60,7 @@ class PublishedFlowDefinition:
             raise BadRequestException(
                 "Published flow form schema is invalid.",
                 code=FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
+                context=exc.context,
             ) from exc
         if (
             metadata_json is not None

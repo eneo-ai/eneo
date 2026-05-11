@@ -86,7 +86,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T040
+active_task: T042
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -2613,7 +2613,7 @@ tasks:
   - id: T040
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe slice after the typed metadata naming cleanup, balancing small T037/T039 follow-ups against higher-value runtime/API/data-boundary work."
     inputs:
@@ -2628,6 +2628,120 @@ tasks:
       - "Do not broaden into frontend, AI Builder, migrations, generated clients, or unrelated dirty files unless evidence shows they are the next highest-risk owner."
       - "If selecting a Worker that changes public API/error contracts, runtime lifecycle, schema ownership, or shared typed boundaries, require the host Claude plan gate before activation."
       - "Keep naming discipline explicit: no version suffixes without real version contracts, no compatibility aliases for pre-production internal names, and no slop comments."
+    expected_output:
+      - "decision"
+      - "next Worker objective or reason to pick Scout/PM/audit instead"
+      - "allowed_files"
+      - "red tests"
+      - "verification commands"
+      - "stop_if"
+      - "whether Claude plan gate is required before activation"
+    receipt:
+      result: done
+      decision: "Activate T041 for the small T037 public-error cleanup before moving to a larger runtime/API/data-boundary slice."
+      summary: "T037 is committed and verified, but Claude identified two cheap non-blocking follow-ups in the just-touched published metadata error path: preserve parser context on the stable published form-schema error and replace remaining test string literals with the exported constant. This is narrower and lower risk than starting another P0/runtime slice immediately."
+      evidence:
+        - "backend/src/intric/flows/published_definition.py raises FLOW_PUBLISHED_FORM_SCHEMA_INVALID without forwarding the caught parser context."
+        - "backend/tests/unittests/flows/test_flow_run_contract_service.py and backend/tests/unittests/flows/test_flow_run_service.py still assert the string literal flow_published_form_schema_invalid."
+        - ".codex/artifacts/claude-peer-loop-t037-typed-run-payload-metadata-implementation-review-20260511T081723Z.md lists both as P3 follow-ups."
+      claude_plan_gate_required: false
+      claude_plan_gate_reason: "This is a direct accepted follow-up from the T037 Claude commit gate, keeps the same error code/owner, and does not choose a new ownership or schema direction. Stop and run a host Claude gate if the cleanup expands beyond the named files or changes error-code semantics."
+      next_task: T041
+
+  - id: T041
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Preserve parser context on the published form-schema error and replace remaining test string literals with the exported error-code constant."
+    allowed_files:
+      - "backend/src/intric/flows/published_definition.py"
+      - "backend/tests/unittests/flows/test_published_definition_contract.py"
+      - "backend/tests/unittests/flows/test_flow_run_contract_service.py"
+      - "backend/tests/unittests/flows/test_flow_run_service.py"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py -q"
+      - "cd backend && uv run pyright src/intric/flows/published_definition.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py"
+      - "cd backend && uv run ruff check src/intric/flows/published_definition.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/published_definition.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py"
+      - "git diff --check"
+    stop_if:
+      - "The cleanup needs files outside allowed_files."
+      - "The public error code or message changes."
+      - "PublishedDefinition stops owning the corrupt published metadata translation."
+      - "A compatibility alias, broad Any/cast/type-ignore/Pyright ignore, or explanatory migration comment is added."
+      - "The change broadens into parser mode semantics or extra-field handling."
+    expected_output:
+      - "PublishedFlowDefinition.metadata() forwards underlying parser context when it maps parser errors to FLOW_PUBLISHED_FORM_SCHEMA_INVALID."
+      - "Tests assert the exported FLOW_PUBLISHED_FORM_SCHEMA_INVALID constant rather than duplicating the string literal."
+      - "At least one test proves parser context survives the mapped published error."
+      - "All verify commands passed."
+    receipt:
+      result: done
+      summary: "PublishedFlowDefinition.metadata() now preserves parser context when mapping parser failures to FLOW_PUBLISHED_FORM_SCHEMA_INVALID, and tests use the exported constant instead of duplicating the error-code string."
+      changed_files:
+        - "backend/src/intric/flows/published_definition.py"
+        - "backend/tests/unittests/flows/test_published_definition_contract.py"
+        - "backend/tests/unittests/flows/test_flow_run_contract_service.py"
+        - "backend/tests/unittests/flows/test_flow_run_service.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      implementation_notes:
+        - "The public error code and message were unchanged."
+        - "Underlying parser context is forwarded only when the lower-level parser supplies context."
+        - "The present-but-unusable form_schema branch still raises the same public code with no fabricated context."
+        - "No compatibility alias, type ignore, cast, Any, or migration comment was added."
+      verification:
+        - "PASS cd backend && uv run pytest tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py -q -> 133 passed, 11 warnings."
+        - "PASS cd backend && uv run pyright src/intric/flows/published_definition.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py -> 0 errors, 0 warnings, 0 informations."
+        - "PASS cd backend && uv run ruff check src/intric/flows/published_definition.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py."
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/published_definition.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py."
+      commands:
+        - "cd backend && uv run pytest tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py -q"
+        - "cd backend && uv run pyright src/intric/flows/published_definition.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py"
+        - "cd backend && uv run ruff check src/intric/flows/published_definition.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py"
+        - "cd backend && uv run ruff format --check src/intric/flows/published_definition.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_run_contract_service.py"
+      type_debt:
+        new_any: 0
+        new_cast: 0
+        new_type_ignore: 0
+        new_pyright_ignore: 0
+      maintainability_self_review:
+        canonical_owner: "PublishedFlowDefinition.metadata() remains the single owner translating corrupt published metadata to FLOW_PUBLISHED_FORM_SCHEMA_INVALID."
+        anti_patterns_avoided:
+          - "No duplicated stringly error code in touched tests."
+          - "No invented context for parser cases that do not supply one."
+          - "No broader parser-mode or compatibility change."
+      maintainability_rubric:
+        maintainability: 9
+        code_quality: 9
+        clean_architecture: 9
+        separation_of_concerns: 9
+        single_source_of_truth: 9
+        human_readability: 9
+        human_reviewability: 9
+        overall_min: 9
+      next_task: T042
+
+  - id: T042
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe implementation slice after the typed metadata boundary, naming cleanup, and published metadata error cleanup are committed."
+    inputs:
+      - "T037 receipt"
+      - "T039 receipt"
+      - "T041 receipt"
+      - "confirmed_p0_candidates"
+      - "maintainability_findings"
+    constraints:
+      - "Read-only. Do not implement source changes."
+      - "Prefer higher-value runtime/API/data-boundary work unless a tiny cleanup removes immediate review risk from the latest commits."
+      - "Apply the naming rule: no version suffixes without a real version contract."
+      - "Apply the type-safety rule: no broad Any, casts, type-ignore, or Pyright ignores to make checks pass."
+      - "Apply the pre-production rule: no legacy/backwards-compatible behavior without proof it protects intended current product behavior."
+      - "If selecting a Worker that changes public API/error contracts, runtime lifecycle, schema ownership, or shared typed boundaries, require the host Claude plan gate before activation."
     expected_output:
       - "decision"
       - "next Worker objective or reason to pick Scout/PM/audit instead"

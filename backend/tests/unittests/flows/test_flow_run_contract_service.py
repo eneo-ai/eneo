@@ -11,7 +11,10 @@ from intric.flows.api.flow_models import FlowOutputDelivery
 from intric.flows.flow import Flow, FlowStep
 from intric.flows.flow_input_limits import FlowInputLimits
 from intric.flows.flow_run_contract_service import FlowRunContractService
-from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
+from intric.flows.published_definition import (
+    FLOW_DEFINITION_SCHEMA_VERSION,
+    FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
+)
 from intric.main.exceptions import BadRequestException, NotFoundException
 
 
@@ -286,7 +289,7 @@ async def test_get_run_contract_preserves_invalid_form_schema_error_code() -> No
             flow_version_repo=flow_version_repo,
         ).get_run_contract(flow_id=flow.id)
 
-    assert exc_info.value.code == "flow_published_form_schema_invalid"
+    assert exc_info.value.code == FLOW_PUBLISHED_FORM_SCHEMA_INVALID
 
 
 @pytest.mark.asyncio

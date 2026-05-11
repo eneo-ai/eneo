@@ -115,15 +115,19 @@ def test_parser_exposes_typed_metadata_without_raw_metadata_field() -> None:
 
 
 @pytest.mark.parametrize(
-    "metadata_json",
+    ("metadata_json", "expected_context"),
     [
-        {"form_schema": {"fields": "not-a-list"}},
-        {"form_schema": {"fields": [{"name": "case_id", "type": "unsupported"}]}},
-        {"form_schema": {"fields": [{"type": "text"}]}},
+        ({"form_schema": {"fields": "not-a-list"}}, None),
+        (
+            {"form_schema": {"fields": [{"name": "case_id", "type": "unsupported"}]}},
+            None,
+        ),
+        ({"form_schema": {"fields": [{"type": "text"}]}}, {"field_index": 0}),
     ],
 )
 def test_metadata_maps_corrupt_published_form_schema_to_named_error(
     metadata_json: dict[str, object],
+    expected_context: dict[str, object] | None,
 ) -> None:
     definition = build_published_definition_json(
         flow_id=uuid4(),
@@ -137,6 +141,7 @@ def test_metadata_maps_corrupt_published_form_schema_to_named_error(
         parse_published_definition(definition).metadata()
 
     assert exc_info.value.code == FLOW_PUBLISHED_FORM_SCHEMA_INVALID
+    assert exc_info.value.context == expected_context
 
 
 def test_parser_round_trips_step_review_policy() -> None:
