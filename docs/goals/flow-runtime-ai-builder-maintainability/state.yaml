@@ -86,7 +86,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T063
+active_task: T065
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -3911,7 +3911,7 @@ tasks:
   - id: T063
     type: scout
     assignee: Scout
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Find whether comments-ai-slop-audit has a low-risk Flow cleanup cluster worth activating next."
     inputs:
@@ -3928,6 +3928,103 @@ tasks:
       - "Low-risk comment cleanup cluster yes/no."
       - "File:line evidence for restating, stale, or planning-vocabulary comments."
       - "Decision: activate narrow Worker, defer, or stop for owner input."
+    receipt:
+      result: done
+      summary: "Found a narrow behavior-neutral comment cleanup cluster in AI Builder question catalog docstrings; broader legacy/phase hits are active domain language, tests, or compatibility contracts and should not be swept."
+      low_risk_cluster_found: true
+      evidence:
+        - "backend/src/intric/flows/ai_builder/question_catalog.py:98 uses internal 'future slice' wording in the QuestionTemplate docstring."
+        - "backend/src/intric/flows/ai_builder/question_catalog.py:664 uses internal 'future slice' wording in question_ids_for_slot."
+        - "backend/src/intric/flows/ai_builder/ai_builder_orchestrator.py:282 and :290 mention older callers but describe live guardrail compatibility; not a comment-only cleanup."
+        - "backend/src/intric/flows/flow_capability_manifest.py:364-369 and :472-480 describe typed parity with existing validators; not a safe sweep."
+      decision: "Activate T064 as a narrow Worker limited to replacing internal planning vocabulary in question_catalog.py docstrings with product-readable wording."
+      next_task: T064
+
+  - id: T064
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "Replace internal planning vocabulary in AI Builder question catalog docstrings with product-readable wording."
+    canonical_owner: "backend/src/intric/flows/ai_builder/question_catalog.py owns AI Builder question catalog copy and catalog API docstrings."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/question_catalog.py"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_question_catalog.py -q"
+      - "cd backend && uv run pyright src/intric/flows/ai_builder/question_catalog.py tests/unittests/flows/ai_builder/test_question_catalog.py"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/question_catalog.py tests/unittests/flows/ai_builder/test_question_catalog.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/question_catalog.py tests/unittests/flows/ai_builder/test_question_catalog.py"
+      - "git diff --check"
+      - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    stop_if:
+      - "The cleanup requires changing question catalog behavior or generated user-facing copy."
+      - "The cleanup expands beyond question_catalog.py."
+      - "The implementation adds comments, compatibility branches, Any, casts, or type ignores."
+    expected_output:
+      - "No source docstring uses 'future slice' in question_catalog.py."
+      - "Question catalog tests and focused type/lint checks pass."
+    receipt:
+      result: done
+      summary: "Replaced internal 'future slice' wording in AI Builder question catalog docstrings with product-readable catalog ownership wording."
+      changed_files:
+        - "backend/src/intric/flows/ai_builder/question_catalog.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      behavior:
+        - "Question catalog behavior and user-facing catalog copy are unchanged."
+        - "Docstrings now describe the explicit key-shape requirement without internal planning vocabulary."
+      verification:
+        - "PASS cd backend && uv run pytest tests/unittests/flows/ai_builder/test_question_catalog.py -q -> 49 passed."
+        - "PASS cd backend && uv run pyright src/intric/flows/ai_builder/question_catalog.py tests/unittests/flows/ai_builder/test_question_catalog.py -> 0 errors."
+        - "PASS cd backend && uv run ruff check src/intric/flows/ai_builder/question_catalog.py tests/unittests/flows/ai_builder/test_question_catalog.py."
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/ai_builder/question_catalog.py tests/unittests/flows/ai_builder/test_question_catalog.py."
+        - "PASS git diff --check."
+        - "PASS node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml."
+      commands:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_question_catalog.py -q"
+        - "cd backend && uv run pyright src/intric/flows/ai_builder/question_catalog.py tests/unittests/flows/ai_builder/test_question_catalog.py"
+        - "cd backend && uv run ruff check src/intric/flows/ai_builder/question_catalog.py tests/unittests/flows/ai_builder/test_question_catalog.py"
+        - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/question_catalog.py tests/unittests/flows/ai_builder/test_question_catalog.py"
+        - "git diff --check"
+        - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      type_debt:
+        new_any: 0
+        new_cast: 0
+        new_type_ignore: 0
+        new_pyright_ignore: 0
+      comments_added_or_changed: 2
+      changed_comments:
+        - "Today's `_build_catalog` only accepts exact slot-name keys; supporting multiple questions per slot would require an explicit key shape and a matching catalog build rule."
+        - "Today's catalog is one-template-per-slot, so the returned tuple has zero or one element. The plural return shape keeps the read API stable if catalog ownership later allows multiple questions per slot. Unknown slot -> `()` (the `\"has this slot any copy?\"` read is valid and must not raise)."
+      anti_patterns_avoided:
+        - "No behavior change."
+        - "No broad comment sweep."
+        - "No compatibility branch."
+        - "No Any, casts, type ignores, or Pyright ignores."
+      next_task: T065
+
+  - id: T065
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: medium
+    objective: "Audit the board after local follow-ups and decide whether any safe unblocked next task remains."
+    inputs:
+      - "T059 final local tranche audit."
+      - "T061 live-smoke blocker receipt."
+      - "T062 review-edit OpenAPI examples receipt."
+      - "T063 comment cleanup Scout receipt."
+      - "T064 question catalog comment cleanup receipt."
+      - "Current dirty worktree."
+    constraints:
+      - "Do not modify source or tests."
+      - "Do not mark the goal complete while live AI Builder smoke remains credential-gated."
+      - "Do not start review-edit-validator-callback-followup unless its trigger is met."
+      - "Preserve unrelated dirty files."
+    expected_output:
+      - "complete | blocked | next task."
+      - "Which remaining follow-ups are blocked, future-triggered, or safe now."
+      - "Decision on goal.status and active_task."
     receipt: null
 
 validation_command_candidates:

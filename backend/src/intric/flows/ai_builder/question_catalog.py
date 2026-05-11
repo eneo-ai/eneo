@@ -94,9 +94,9 @@ class QuestionTemplate:
     """Canonical question attached to a single architectural slot.
 
     One template per slot name in `KNOWN_REQUIREMENT_SLOT_NAMES`.
-    Today's `_build_catalog` only accepts exact slot-name keys; a
-    future slice that wants multiple questions per slot needs to relax
-    that build rule alongside introducing its own key shape.
+    Today's `_build_catalog` only accepts exact slot-name keys; supporting
+    multiple questions per slot would require an explicit key shape and a
+    matching catalog build rule.
     """
 
     id: str
@@ -660,10 +660,10 @@ def question_ids_for_slot(slot: str) -> tuple[str, ...]:
     """Return every question-template id registered against `slot`.
 
     Today's catalog is one-template-per-slot, so the returned tuple has
-    zero or one element. The plural return shape leaves room for a
-    future slice that wants multiple questions per slot without a
-    signature change. Unknown slot → `()` (the `"has this slot any
-    copy?"` read is valid and must not raise).
+    zero or one element. The plural return shape keeps the read API stable
+    if catalog ownership later allows multiple questions per slot. Unknown
+    slot -> `()` (the `"has this slot any copy?"` read is valid and must
+    not raise).
     """
     if slot not in QUESTION_CATALOG:
         return ()
