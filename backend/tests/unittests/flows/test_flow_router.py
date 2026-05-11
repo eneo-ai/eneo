@@ -364,7 +364,12 @@ def _user() -> SimpleNamespace:
 
 
 def _service_key() -> SimpleNamespace:
-    return SimpleNamespace(id=uuid4(), ownership="service")
+    return SimpleNamespace(
+        id=uuid4(),
+        ownership="service",
+        name="Flow service key",
+        key_prefix="sk_test",
+    )
 
 
 @pytest.mark.asyncio
@@ -764,7 +769,7 @@ async def test_create_flow_run_allows_service_key_principals():
         id=uuid4(),
         tenant_id=uuid4(),
         permissions=[Permission.FLOWS],
-        active_api_key=SimpleNamespace(id=uuid4(), ownership="service"),
+        active_api_key=_service_key(),
     )
     _enable_space_access(container, user_permissions=[Permission.FLOWS])
 
