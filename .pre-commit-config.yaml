@@ -38,6 +38,15 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      - id: pyright
+        name: pyright
+        entry: bash backend/scripts/run_pyright_in_devcontainer.sh
+        language: system
+        types: [python]
+        files: ^backend/src/intric/
+        pass_filenames: false
+        stages: [pre-commit]
+
   # Keep uv.lock in sync with pyproject.toml
   - repo: https://github.com/astral-sh/uv-pre-commit
     rev: 0.8.22

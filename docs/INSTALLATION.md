@@ -217,15 +217,15 @@ pre-commit install --install-hooks --hook-type pre-commit --hook-type commit-msg
 This enables:
 
 - staged-file preflight checks before commit
+- backend Pyright checks before commit when backend source changed
 - commit-message validation
 - push-time branch safety
-- backend Pyright checks when backend source changed
 - route metadata checks when route files changed
 
 Full backend tests, frontend type checks/lint/build, and Docker validation run in
-CI. The local pre-push hook runs the backend type check before backend code is
-pushed, but avoids rerunning the full frontend/test/Docker suite. For a WIP push
-or a CI rerun on a feature branch where you intentionally want to skip local
+CI. The local pre-push hook stays focused on branch safety and route metadata, so
+the backend type check is not repeated at both commit and push time. For a WIP
+push or a CI rerun on a feature branch where you intentionally want to skip local
 hooks, use `git push --no-verify`; do not use it to bypass a real failure before
 opening or merging a PR, and do not use it for protected branches such as
 `develop` or `main`.

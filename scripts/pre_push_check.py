@@ -118,19 +118,12 @@ def main() -> int:
         print("[pre-push] no branch-local file changes detected.", file=sys.stderr)
         return 0
 
-    backend_changed = any(path.startswith("backend/src/intric/") for path in paths)
     router_paths = [
         path for path in paths if path.startswith("backend/src/") and is_router_file_path(path)
     ]
     router_changed = bool(router_paths)
 
     try:
-        if backend_changed:
-            run_check(
-                "backend pyright",
-                ["bash", "backend/scripts/run_pyright_in_devcontainer.sh"],
-                root,
-            )
         if router_changed:
             run_check(
                 "route metadata",

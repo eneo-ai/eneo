@@ -132,29 +132,33 @@ class CommitHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("refusing direct push from protected branch", result.stderr)
 
-    def test_pre_push_check_does_not_run_frontend_check(self) -> None:
+    def test_pre_push_check_does_not_run_backend_or_frontend_type_checks(self) -> None:
         root = self.make_repo()
         bin_dir = root / "bin"
-        marker = root / "frontend-check-ran"
+        marker = root / "type-check-ran"
         bin_dir.mkdir()
-        bun = bin_dir / "bun"
-        bun.write_text(
-            f"#!/usr/bin/env sh\nprintf '%s\\n' bun > {marker}\nexit 99\n",
-            encoding="utf-8",
-        )
-        bun.chmod(0o755)
+        for executable in ("bash", "bun"):
+            candidate = bin_dir / executable
+            candidate.write_text(
+                f"#!/usr/bin/env sh\nprintf '%s\\n' {executable} > {marker}\nexit 99\n",
+                encoding="utf-8",
+            )
+            candidate.chmod(0o755)
 
         readme = root / "README.md"
         readme.write_text("hello\n", encoding="utf-8")
         subprocess.run(["git", "add", "README.md"], cwd=root, check=True, capture_output=True, text=True)
         subprocess.run(["git", "commit", "-m", "docs: seed"], cwd=root, check=True, capture_output=True, text=True)
 
+        backend_source = root / "backend" / "src" / "intric" / "service.py"
         frontend_source = root / "frontend" / "apps" / "web" / "src" / "page.ts"
+        backend_source.write_text("VALUE = 1\n", encoding="utf-8")
         frontend_source.write_text("export const value = 1;\n", encoding="utf-8")
         subprocess.run(
             [
                 "git",
                 "add",
+                str(backend_source.relative_to(root)),
                 str(frontend_source.relative_to(root)),
             ],
             cwd=root,
@@ -168,39 +172,6 @@ class CommitHookTests(unittest.TestCase):
         result = run_script(PRE_PUSH_CHECK, cwd=root, env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(marker.exists(), result.stderr)
-
-    def test_pre_push_check_runs_pyright_for_backend_source_changes(self) -> None:
-        root = self.make_repo()
-        bin_dir = root / "bin"
-        marker = root / "pyright-check-ran"
-        bin_dir.mkdir()
-        bash = bin_dir / "bash"
-        bash.write_text(
-            f"#!/usr/bin/env sh\nprintf '%s\\n' \"$*\" > {marker}\nexit 0\n",
-            encoding="utf-8",
-        )
-        bash.chmod(0o755)
-
-        readme = root / "README.md"
-        readme.write_text("hello\n", encoding="utf-8")
-        subprocess.run(["git", "add", "README.md"], cwd=root, check=True, capture_output=True, text=True)
-        subprocess.run(["git", "commit", "-m", "docs: seed"], cwd=root, check=True, capture_output=True, text=True)
-
-        backend_source = root / "backend" / "src" / "intric" / "service.py"
-        backend_source.write_text("VALUE = 1\n", encoding="utf-8")
-        subprocess.run(
-            ["git", "add", str(backend_source.relative_to(root))],
-            cwd=root,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        subprocess.run(["git", "commit", "-m", "feat: add backend source"], cwd=root, check=True, capture_output=True, text=True)
-
-        env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
-        result = run_script(PRE_PUSH_CHECK, cwd=root, env=env)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(marker.read_text(encoding="utf-8"), "backend/scripts/run_pyright_in_devcontainer.sh\n")
 
     def test_pre_push_check_runs_route_metadata_for_router_changes(self) -> None:
         root = self.make_repo()
