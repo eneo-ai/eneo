@@ -57,6 +57,19 @@ test("partial timeout outcome has a localized label", () => {
   ).toBe("Partially completed");
 });
 
+test("shutdown outcome has a localized label", () => {
+  expect(
+    getCrawlOutcomeLabel(
+      {
+        code: "CRAWL_SHUTDOWN_ERROR",
+        severity: "error",
+        message_key: "crawl_outcome_shutdown_error"
+      },
+      "fallback"
+    )
+  ).toBe("Crawler shutdown failed");
+});
+
 test("unknown outcome message key falls back to detail", () => {
   expect(
     getCrawlOutcomeLabel(

@@ -65,6 +65,14 @@ class _FakeRecoverySession:
         return 0
 
 
+class _FakeOutcomeSession:
+    def __init__(self):
+        self.statements: list[object] = []
+
+    async def execute(self, stmt: object) -> None:
+        self.statements.append(stmt)
+
+
 class _FakeRedis:
     async def get(self, _key: str) -> None:
         return None
@@ -254,9 +262,13 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
         "intric.database.database.sessionmanager.create_session",
         lambda: _FakeBootstrapSession(website),
     )
-    monkeypatch.setattr(crawl_tasks, "_get_primary_active_job_id", primary_active_job_id)
+    monkeypatch.setattr(
+        crawl_tasks, "_get_primary_active_job_id", primary_active_job_id
+    )
     monkeypatch.setattr(crawl_tasks, "execute_with_recovery", execute_with_recovery)
-    monkeypatch.setattr(crawl_tasks, "reset_tenant_retry_delay", reset_tenant_retry_delay)
+    monkeypatch.setattr(
+        crawl_tasks, "reset_tenant_retry_delay", reset_tenant_retry_delay
+    )
 
     result = await crawl_tasks.crawl_task(
         job_id=uuid4(),
@@ -295,3 +307,24 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
         "successful": False,
         "outcome_code": expected_outcome_code.value,
     }
+
+
+@pytest.mark.asyncio
+async def test_record_crawl_run_outcome_code_preserves_precise_existing_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake_session = _FakeOutcomeSession()
+
+    @asynccontextmanager
+    async def session_scope() -> AsyncIterator[_FakeOutcomeSession]:
+        yield fake_session
+
+    monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
+
+    await crawl_tasks._record_crawl_run_outcome_code(
+        run_id=uuid4(),
+        outcome_code=CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR,
+    )
+
+    assert len(fake_session.statements) == 1
+    assert "outcome_code IS NULL" in str(fake_session.statements[0])

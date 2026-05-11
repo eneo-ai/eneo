@@ -61,6 +61,39 @@ export type Limits = components["schemas"]["Limits"];
 export type UploadedFile = components["schemas"]["FilePublic"];
 export type Website = components["schemas"]["WebsitePublic"];
 export type Settings = components["schemas"]["SettingsPublic"];
+export type EffectiveCrawlerSettings = {
+  crawl_max_length: number;
+  download_timeout: number;
+  download_max_size: number;
+  dns_timeout: number;
+  retry_times: number;
+  closespider_itemcount: number;
+  obey_robots: boolean;
+  autothrottle_enabled: boolean;
+  tenant_worker_concurrency_limit: number;
+  crawl_stale_threshold_minutes: number;
+  queued_stale_threshold_minutes: number;
+  crawl_heartbeat_interval_seconds: number;
+  crawl_feeder_enabled: boolean;
+  crawl_feeder_interval_seconds: number;
+  crawl_feeder_batch_size: number;
+  crawl_job_max_age_seconds: number;
+  tenant_worker_semaphore_ttl_seconds: number;
+  crawl_page_batch_size: number;
+  crawl_sitemap_lastmod_skip_enabled: boolean;
+};
+export type CrawlerSettings = {
+  tenant_id: string;
+  settings: EffectiveCrawlerSettings;
+  overrides: string[];
+  updated_at?: string | null;
+};
+export type CrawlerSettingsUpdate = Partial<
+  Pick<
+    EffectiveCrawlerSettings,
+    "crawl_sitemap_lastmod_skip_enabled" | "obey_robots" | "autothrottle_enabled"
+  >
+>;
 export type WebsiteSparse = components["schemas"]["WebsiteSparse"];
 export type Space = components["schemas"]["SpacePublic"];
 export type SpaceSparse = components["schemas"]["SpaceSparse"];

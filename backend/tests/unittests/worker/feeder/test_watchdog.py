@@ -11,6 +11,46 @@ from uuid import uuid4
 import pytest
 
 
+class TestWatchdogRequeue:
+    """Tests for watchdog requeue idempotency boundaries."""
+
+    @pytest.mark.asyncio
+    async def test_requeue_does_not_parse_duplicate_exception_text(self):
+        """ARQ duplicates are represented by enqueue(False), not exception text."""
+        from arq.jobs import JobStatus
+
+        from intric.worker.feeder.watchdog import OrphanWatchdog
+
+        redis_mock = MagicMock()
+        settings_mock = MagicMock()
+        watchdog = OrphanWatchdog(redis_mock, settings_mock)
+        expected_error = Exception("Job already exists")
+
+        with (
+            patch(
+                "arq.jobs.Job.status",
+                new=AsyncMock(return_value=JobStatus.not_found),
+            ),
+            patch(
+                "intric.jobs.job_manager.job_manager.enqueue",
+                new=AsyncMock(side_effect=expected_error),
+            ),
+        ):
+            with pytest.raises(Exception) as exc_info:
+                await watchdog._requeue_job(
+                    job_id=uuid4(),
+                    user_id=uuid4(),
+                    run_id=uuid4(),
+                    tenant_id=uuid4(),
+                    website_id=uuid4(),
+                    url="https://example.com",
+                    download_files=False,
+                    crawl_type="crawl",
+                )
+
+        assert exc_info.value is expected_error
+
+
 class TestWatchdogPhase0ZombieReconciliation:
     """Tests for Phase 0: Zombie counter reconciliation."""
 

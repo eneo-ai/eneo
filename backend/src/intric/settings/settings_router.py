@@ -1,7 +1,9 @@
-from typing import Annotated
+from typing import Annotated, Mapping, cast
 
 from fastapi import APIRouter, Depends
 
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.authentication import auth_dependencies
 from intric.files.audio import AudioMimeTypes
 from intric.files.image import ImageMimeTypes
@@ -18,6 +20,10 @@ from intric.settings.settings import (
     GetModelsResponse,
     SettingsPublic,
     ToggleSettingUpdate,
+)
+from intric.tenants.crawler_settings_models import (
+    CrawlerSettingsResponse,
+    CrawlerSettingsSelfServiceUpdate,
 )
 
 logger = get_logger(__name__)
@@ -235,3 +241,67 @@ async def update_api_key_expiry_notifications_setting(
     return await service.update_api_key_expiry_notifications_setting(
         enabled=data.enabled
     )
+
+
+@settings_admin_router.get(
+    "/crawler",
+    response_model=CrawlerSettingsResponse,
+    summary="Get crawler settings",
+)
+async def get_current_tenant_crawler_settings(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> CrawlerSettingsResponse:
+    validate_permission(container.user(), Permission.ADMIN)
+    tenant_service = container.tenant_service()
+    result = await tenant_service.get_crawler_settings(
+        tenant_id=container.user().tenant_id
+    )
+    return CrawlerSettingsResponse.model_validate(result)
+
+
+@settings_admin_router.patch(
+    "/crawler",
+    response_model=CrawlerSettingsResponse,
+    summary="Update crawler settings",
+)
+async def update_current_tenant_crawler_settings(
+    data: CrawlerSettingsSelfServiceUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> CrawlerSettingsResponse:
+    validate_permission(container.user(), Permission.ADMIN)
+    user = container.user()
+    tenant_service = container.tenant_service()
+    updates = data.model_dump(exclude_none=True)
+
+    if not updates:
+        result = await tenant_service.get_crawler_settings(tenant_id=user.tenant_id)
+        return CrawlerSettingsResponse.model_validate(result)
+
+    before = await tenant_service.get_crawler_settings(tenant_id=user.tenant_id)
+    before_settings = cast(Mapping[str, object], before["settings"])
+    result = await tenant_service.update_crawler_settings(
+        tenant_id=user.tenant_id,
+        settings=updates,
+    )
+    after_settings = cast(Mapping[str, object], result["settings"])
+
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.TENANT_SETTINGS_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=user.tenant_id,
+        description="Updated crawler settings",
+        metadata={
+            "setting": "crawler_settings",
+            "changes": {
+                key: {
+                    "old": before_settings.get(key),
+                    "new": after_settings.get(key),
+                }
+                for key in updates
+            },
+        },
+    )
+
+    return CrawlerSettingsResponse.model_validate(result)

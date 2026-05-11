@@ -234,8 +234,8 @@ class TestJobEnqueuerEnqueue:
         assert returned_id == UUID("00000000-0000-0000-0000-000000000000")
 
     @pytest.mark.asyncio
-    async def test_treats_duplicate_job_as_success(self):
-        """Should return (True, True, job_id) when job already exists in ARQ."""
+    async def test_does_not_parse_duplicate_exceptions_as_success(self):
+        """Only JobManager.enqueue(False) is a duplicate signal."""
         from intric.worker.feeder.queues import JobEnqueuer
 
         job_id = uuid4()
@@ -264,8 +264,8 @@ class TestJobEnqueuerEnqueue:
                 job_data, uuid4()
             )
 
-            assert success is True
-            assert is_duplicate is True  # This is a duplicate!
+            assert success is False
+            assert is_duplicate is False
             assert returned_id == job_id
 
     @pytest.mark.asyncio
@@ -305,7 +305,7 @@ class TestJobEnqueuerEnqueue:
 
 
 class TestJobEnqueuerDuplicateDetection:
-    """Tests for duplicate job detection patterns."""
+    """Tests that duplicate detection stays bound to ARQ's native signal."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -318,8 +318,10 @@ class TestJobEnqueuerDuplicateDetection:
             "Duplicate entry",
         ],
     )
-    async def test_detects_various_duplicate_patterns(self, error_message):
-        """Should detect various duplicate job error patterns."""
+    async def test_exception_text_does_not_define_duplicate_semantics(
+        self, error_message
+    ):
+        """Wrapped queue errors must stay visible instead of becoming duplicates."""
         from intric.worker.feeder.queues import JobEnqueuer
 
         job_id = uuid4()
@@ -344,7 +346,7 @@ class TestJobEnqueuerDuplicateDetection:
             enqueuer = JobEnqueuer()
             success, is_duplicate, _ = await enqueuer.enqueue(job_data, uuid4())
 
-            assert success is True, f"Should treat '{error_message}' as duplicate"
-            assert is_duplicate is True, (
-                f"'{error_message}' should be marked as duplicate"
+            assert success is False, f"Should not swallow '{error_message}'"
+            assert is_duplicate is False, (
+                f"'{error_message}' should not be marked as duplicate"
             )

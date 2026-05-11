@@ -172,9 +172,6 @@ class JobEnqueuer:
     Handles job reconstruction and duplicate detection for safe retries.
     """
 
-    # Patterns indicating a duplicate job (case-insensitive matching)
-    _DUPLICATE_PATTERNS = ("already exists", "duplicate", "job exists")
-
     async def enqueue(
         self, job_data: CrawlPendingJobData, tenant_id: UUID
     ) -> tuple[bool, bool, UUID]:
@@ -189,7 +186,7 @@ class JobEnqueuer:
 
         Returns:
             Tuple of (success: bool, is_duplicate: bool, job_id: UUID).
-            is_duplicate=True when job already exists in ARQ (idempotent success).
+            is_duplicate=True when ARQ reports an existing deterministic job id.
             Returns nil UUID on invalid job_id.
         """
         # Parse job_id early for clean error handling
@@ -249,42 +246,7 @@ class JobEnqueuer:
         job_data: CrawlPendingJobData,
         tenant_id: UUID,
     ) -> tuple[bool, bool, UUID]:
-        """Handle enqueue errors with duplicate detection.
-
-        Duplicate jobs are treated as success for idempotency. The canonical
-        duplicate signal is JobManager.enqueue() returning False when ARQ
-        returns None for an existing job id. This exception path is a defensive
-        fallback for wrapped queue errors so LREM can still clear pending work.
-
-        IMPORTANT: Caller must release slot when is_duplicate=True, since
-        the original enqueue already acquired a slot.
-
-        Args:
-            exc: The exception that occurred.
-            job_id: The job identifier.
-            job_data: Original job data for logging.
-            tenant_id: Tenant identifier.
-
-        Returns:
-            Tuple of (success: bool, is_duplicate: bool, job_id: UUID).
-        """
-        error_msg = str(exc).lower()
-
-        is_duplicate = any(pattern in error_msg for pattern in self._DUPLICATE_PATTERNS)
-
-        if is_duplicate:
-            # Debug-level per-job log; summary is at INFO in crawl_feeder.py
-            logger.debug(
-                "Job already in ARQ queue (idempotent), treating as success",
-                extra={
-                    "tenant_id": str(tenant_id),
-                    "job_id": str(job_id),
-                    "url": job_data.get("url"),
-                    "reason": "duplicate_job_id",
-                },
-            )
-            return True, True, job_id  # success, IS duplicate
-
+        """Handle enqueue errors without inferring ARQ state from text."""
         logger.error(
             "Failed to enqueue crawl job from feeder",
             extra={

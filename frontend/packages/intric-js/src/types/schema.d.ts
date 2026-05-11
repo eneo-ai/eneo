@@ -856,6 +856,24 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/settings/crawler": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Crawler Settings */
+    get: operations["get_current_tenant_crawler_settings_api_v1_settings_crawler_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Update Crawler Settings */
+    patch: operations["update_current_tenant_crawler_settings_api_v1_settings_crawler_patch"];
+    trace?: never;
+  };
   "/api/v1/settings/templates": {
     parameters: {
       query?: never;
@@ -9520,6 +9538,15 @@ export interface components {
        * @example 1800
        */
       crawl_job_max_age_seconds?: number | null;
+    };
+    /** CrawlerSettingsSelfServiceUpdate */
+    CrawlerSettingsSelfServiceUpdate: {
+      /** Crawl Sitemap Lastmod Skip Enabled */
+      crawl_sitemap_lastmod_skip_enabled?: boolean | null;
+      /** Obey Robots */
+      obey_robots?: boolean | null;
+      /** Autothrottle Enabled */
+      autothrottle_enabled?: boolean | null;
     };
     /** CreateGroupRequest */
     CreateGroupRequest: {
@@ -19834,6 +19861,59 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_current_tenant_crawler_settings_api_v1_settings_crawler_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerSettingsResponse"];
+        };
+      };
+    };
+  };
+  update_current_tenant_crawler_settings_api_v1_settings_crawler_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CrawlerSettingsSelfServiceUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerSettingsResponse"];
         };
       };
       /** @description Validation Error */

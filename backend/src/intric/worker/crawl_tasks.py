@@ -15,6 +15,7 @@ from arq import Retry
 from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from intric.crawler.crawler import CrawlShutdownError
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.main.config import get_settings
 from intric.main.container.container import Container
@@ -246,7 +247,9 @@ async def _update_website_circuit_breaker(
     from intric.database.tables.websites_table import Websites as WebsitesTable
 
     if crawl_successful:
-        logger.info(f"Crawl successful, resetting circuit breaker for website {website_id}")
+        logger.info(
+            f"Crawl successful, resetting circuit breaker for website {website_id}"
+        )
         reset_stmt = (
             sa.update(WebsitesTable)
             .where(WebsitesTable.id == website_id)
@@ -326,6 +329,7 @@ async def _record_crawl_run_outcome_code(
         stmt = (
             sa.update(CrawlRuns)
             .where(CrawlRuns.id == run_id)
+            .where(CrawlRuns.outcome_code.is_(None))
             .values(outcome_code=outcome_code.value)
         )
         await session.execute(stmt)
@@ -1520,7 +1524,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 if crawl.source_retained_urls:
                     must_keep_titles.update(crawl.source_retained_urls)
                     num_source_retained_pages = crawl.source_retained_count
-                    num_skipped_pages += crawl.source_retained_count
                     logger.warning(
                         "Retained sitemap URLs without fetching due to lastmod",
                         extra={
@@ -1826,8 +1829,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             # Calculate skip rates for performance analysis
             total_page_source_count = num_pages + num_source_retained_pages
+            total_retained_pages = num_skipped_pages + num_source_retained_pages
             page_skip_rate = (
-                (num_skipped_pages / total_page_source_count * 100)
+                (total_retained_pages / total_page_source_count * 100)
                 if total_page_source_count > 0
                 else 0
             )
@@ -1845,7 +1849,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 "=" * 60,
                 f"{status_label}: {params.url}",
                 "-" * 60,
-                f"Pages:   {num_pages} crawled, {num_failed_pages} failed, {num_skipped_pages} unchanged ({page_skip_rate:.1f}%)",
+                f"Pages:   {num_pages} fetched, {num_source_retained_pages} source-retained, {num_failed_pages} failed, {num_skipped_pages} hash-retained ({page_skip_rate:.1f}% retained)",
                 f"Files:   {num_files} downloaded, {num_failed_files} failed, {num_skipped_files} skipped ({file_skip_rate:.1f}%)",
                 f"Cleanup: {num_deleted_blobs} stale entries removed",
             ]
@@ -2067,6 +2071,23 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
         return task_manager.successful()
     except Retry:
+        raise
+    except CrawlShutdownError:
+        try:
+            await _record_crawl_run_outcome_code(
+                run_id=params.run_id,
+                outcome_code=CrawlOutcomeCode.CRAWL_SHUTDOWN_ERROR,
+            )
+        except Exception as outcome_exc:
+            logger.warning(
+                "Failed to record crawl shutdown outcome code after crawl exception",
+                extra={
+                    "job_id": str(job_id),
+                    "run_id": str(params.run_id),
+                    "outcome_code": CrawlOutcomeCode.CRAWL_SHUTDOWN_ERROR.value,
+                    "error": str(outcome_exc),
+                },
+            )
         raise
     except Exception:
         try:

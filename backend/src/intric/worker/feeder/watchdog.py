@@ -684,35 +684,23 @@ class OrphanWatchdog:
             crawl_type=CrawlType(crawl_type),
         )
 
-        try:
-            enqueued = await job_manager.enqueue(
-                task=Task.CRAWL,
-                job_id=job_id,
-                params=params,
-            )
-            if not enqueued:
-                logger.info(
-                    "Job appeared in ARQ during re-queue attempt",
-                    extra={"job_id": str(job_id), "tenant_id": str(tenant_id)},
-                )
-                return False
-
+        enqueued = await job_manager.enqueue(
+            task=Task.CRAWL,
+            job_id=job_id,
+            params=params,
+        )
+        if not enqueued:
             logger.info(
-                "Re-queued stuck job to ARQ",
+                "Job appeared in ARQ during re-queue attempt",
                 extra={"job_id": str(job_id), "tenant_id": str(tenant_id)},
             )
-            return True
-        except Exception as exc:
-            error_msg = str(exc).lower()
-            if "already exists" in error_msg or "duplicate" in error_msg:
-                # Canonical duplicate detection is enqueue() returning False;
-                # this keeps wrapped queue errors idempotent too.
-                logger.info(
-                    "Job already in ARQ during re-queue attempt",
-                    extra={"job_id": str(job_id), "tenant_id": str(tenant_id)},
-                )
-                return False
-            raise
+            return False
+
+        logger.info(
+            "Re-queued stuck job to ARQ",
+            extra={"job_id": str(job_id), "tenant_id": str(tenant_id)},
+        )
+        return True
 
     async def _fail_stalled_startup_jobs(
         self, session: AsyncSession, now: datetime

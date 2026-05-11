@@ -18,6 +18,32 @@ export function initSettings(client) {
     },
 
     /**
+     * Get crawler settings for the current tenant
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').CrawlerSettings>}
+     */
+    getCrawler: async () => {
+      const res = await client.fetch("/api/v1/settings/crawler", {
+        method: "get"
+      });
+      return /** @type {import('../types/resources').CrawlerSettings} */ (res);
+    },
+
+    /**
+     * Update self-service crawler settings for the current tenant
+     * @param {import('../types/resources').CrawlerSettingsUpdate} settings Settings to update
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').CrawlerSettings>}
+     */
+    updateCrawler: async (settings) => {
+      const res = await client.fetch("/api/v1/settings/crawler", {
+        method: "patch",
+        requestBody: { "application/json": settings }
+      });
+      return /** @type {import('../types/resources').CrawlerSettings} */ (res);
+    },
+
+    /**
      * Update template feature setting for the tenant
      * @param {boolean} enabled Whether to enable templates
      * @throws {IntricError}

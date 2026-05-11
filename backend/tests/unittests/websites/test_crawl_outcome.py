@@ -169,6 +169,24 @@ def test_stored_partial_timeout_outcome_is_warning():
     assert outcome.message_key == "crawl_outcome_partial_timeout"
 
 
+def test_stored_shutdown_outcome_has_specific_error_message():
+    outcome = derive_crawl_outcome(
+        status=Status.FAILED,
+        result_location="Scrapy reactor did not stop cleanly",
+        failure_summary=None,
+        pages_failed=0,
+        files_failed=0,
+        pages_source_retained=0,
+        outcome_code=CrawlOutcomeCode.CRAWL_SHUTDOWN_ERROR,
+    )
+
+    assert outcome is not None
+    assert outcome.code == CrawlOutcomeCode.CRAWL_SHUTDOWN_ERROR
+    assert outcome.severity == CrawlOutcomeSeverity.ERROR
+    assert outcome.message_key == "crawl_outcome_shutdown_error"
+    assert outcome.detail == "Scrapy reactor did not stop cleanly"
+
+
 def test_source_retention_outcome_uses_source_retained_count():
     outcome = derive_crawl_outcome(
         status=Status.COMPLETE,

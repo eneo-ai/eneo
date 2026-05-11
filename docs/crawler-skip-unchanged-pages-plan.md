@@ -19,6 +19,7 @@ Purpose: reduce embedding-token spend and database churn for scheduled website c
 - [x] Sitemap no-page failures are classified separately from generic crawl no-page failures, while timeout precedence is preserved.
 - [x] Sitemap `<lastmod>` source-skip is controlled by the canonical tenant crawler settings path, so operators can enable it per tenant without a deploy.
 - [x] ARQ duplicate enqueue handling uses ARQ's native `enqueue_job()` return value instead of relying only on exception text.
+- [x] ARQ feeder/watchdog duplicate handling no longer parses exception strings as duplicate signals; `JobManager.enqueue(False)` is the only duplicate signal.
 - [x] Database pool settings declared in `Settings` are wired into SQLAlchemy engine initialization.
 - [x] Frontend-visible crawl/job failure states.
 - [x] Frontend source-retention-only success state is visible instead of showing a misleading `0 pages crawled` result.
@@ -26,6 +27,8 @@ Purpose: reduce embedding-token spend and database churn for scheduled website c
 - [x] Crawler no-output and timeout/no-output results now cross the crawler-worker seam as typed crawl facts instead of exception-string protocols.
 - [x] A single domain classifier owns write-time crawl outcome selection, including source-retention-only, partial-timeout, no-page, and embedding-config outcomes.
 - [x] Terminal zero-output crawls mark the job failed with a fixed sanitized result message, record a stored outcome code, write failed audit metadata, increment the website circuit breaker, and skip stale cleanup.
+- [x] Broad crawler exception handling records unknown crawl outcomes only when no more precise outcome was already stored.
+- [x] Scrapy crawler shutdown failures now have a typed backend/frontend outcome code instead of falling through to unknown errors.
 - [x] Partial timeout crawls with any output keep their output, skip stale cleanup, and surface `CRAWL_PARTIAL_TIMEOUT` as a warning outcome.
 - [x] Page-level `FailureReason` now has a domain home in `websites/domain/crawl_outcome.py`; worker persistence imports it from the domain instead of making presentation code depend on worker context.
 - [x] Source-retained timeout salvage: timeouts with retained sitemap output now yield partial crawl output instead of failing as empty crawls.
@@ -33,6 +36,11 @@ Purpose: reduce embedding-token spend and database churn for scheduled website c
 - [x] Mixed source-retention visibility: crawl runs now expose `pages_source_retained`, and crawl history shows retained unchanged pages alongside fetched pages.
 - [x] DB-backed `CrawlRunRepository` round-trip coverage for `pages_source_retained`.
 - [x] Mixed crawl-history labels now render fetched/succeeded/retained/failed states in a clearer scan order.
+- [x] Source-retained page counts and hash-retained unchanged page counts stay disjoint in worker logs/audit metadata.
+- [x] Current-tenant admin crawler settings API and admin UI expose the safe self-service controls: trusted sitemap `<lastmod>` source-skip, robots.txt behavior, and Scrapy autothrottle.
+- [x] Unchanged content hash/embedding-model skip is shown as an always-on built-in crawler optimization, not as a user toggle.
+- [x] Crawler settings response models are typed at the backend boundary; HTTP cache storage controls remain operator-only and are not exposed through tenant admin settings.
+- [x] Normal `intric-js` OpenAPI generation path verified against an OpenAPI-only backend; broad unrelated generated schema drift kept out of this commit, with a narrow crawler endpoint type shim added for the new admin page.
 - [x] Custom Scrapy sitemap parser override reviewed against installed Scrapy 2.11.2 and official Scrapy docs; keep it narrow because public `sitemap_filter()` can filter request entries but cannot emit cleanup-visible retained feed items.
 - [x] Targeted tests, strict pyright, ruff, and regression validation.
 - [x] Claude peer-loop implementation review.
@@ -87,6 +95,7 @@ Claude artifact:
 - `.codex/artifacts/claude-peer-loop-crawler-typed-failure-outcome-green-contract-20260511T190958Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-typed-outcome-hardening-implementation-review-20260511T200635Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-typed-outcome-hardening-post-fix-verification-20260511T201518Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-admin-settings-hardening-20260511T210925Z.md`
 
 Claude loop summary:
 
@@ -111,6 +120,7 @@ Claude loop summary:
 - Typed failure-outcome architecture review: two `changes_required` passes and a final `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; blockers removed the stringly typed no-output exception classifier, required one write-time domain classifier, required terminal zero-output stale-cleanup bypass, and kept broad DNS/TLS/robots taxonomy out of this slice.
 - Typed outcome hardening implementation review: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; follow-up notes led to parameterizing terminal zero-output worker coverage across crawl, sitemap, and timeout outcomes, removing the unused `"error"` termination literal, and renaming/logging the legacy outcome metric as a general fallback metric.
 - Typed outcome hardening post-fix verification: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; confirmed no blockers after the post-review test hardening, metric rename, narrowed termination literal, and classifier call-site comment.
+- Admin crawler settings hardening review: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 5`; blockers drove the typed tenant-owned crawler settings model, current-tenant endpoint, narrow self-service UI, HTTP-cache exclusion from admin UI, exception-string duplicate fallback removal, precise-outcome preservation, and typed shutdown outcome.
 
 Claude agreed with the core architecture:
 

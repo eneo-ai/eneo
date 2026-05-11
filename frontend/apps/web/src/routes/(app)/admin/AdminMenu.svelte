@@ -14,7 +14,7 @@
   import { IconHistory } from "@intric/icons/history";
   import { page } from "$app/stores";
   import { Navigation } from "$lib/components/layout";
-  import { ChartPie, LayoutTemplate, Cloud, Plug, ShieldCheck } from "lucide-svelte";
+  import { ChartPie, LayoutTemplate, Cloud, Plug, ShieldCheck, Gauge } from "lucide-svelte";
   import { IconKey } from "@intric/icons/key";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
@@ -73,6 +73,12 @@
     isActive={isSelected("/admin/mcp-servers", currentRoute)}
     icon={Plug}
     label={m.mcp()}
+  />
+  <Navigation.Link
+    href={localizeHref("/admin/crawler")}
+    isActive={isSelected("/admin/crawler", currentRoute)}
+    icon={Gauge}
+    label={m.crawler_settings()}
   />
   <Navigation.Link
     href="/admin/audit-logs"

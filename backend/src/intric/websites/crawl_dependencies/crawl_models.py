@@ -220,6 +220,14 @@ def _crawl_outcome_from_code(
             detail=detail,
         )
 
+    if code == CrawlOutcomeCode.CRAWL_SHUTDOWN_ERROR:
+        return CrawlOutcomePublic(
+            code=code,
+            severity=CrawlOutcomeSeverity.ERROR,
+            message_key="crawl_outcome_shutdown_error",
+            detail=detail,
+        )
+
     if code == CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED:
         return CrawlOutcomePublic(
             code=code,

@@ -25,6 +25,7 @@ class CrawlOutcomeCode(str, Enum):
     CRAWL_MAX_AGE_EXCEEDED = "CRAWL_MAX_AGE_EXCEEDED"
     CRAWL_SOURCE_RETENTION_ONLY = "CRAWL_SOURCE_RETENTION_ONLY"
     CRAWL_PARTIAL_TIMEOUT = "CRAWL_PARTIAL_TIMEOUT"
+    CRAWL_SHUTDOWN_ERROR = "CRAWL_SHUTDOWN_ERROR"
     CRAWL_COMPLETED_WITH_PAGE_FAILURES = "CRAWL_COMPLETED_WITH_PAGE_FAILURES"
     EMBEDDING_CONFIG_MISSING = "EMBEDDING_CONFIG_MISSING"
     UNKNOWN_CRAWL_ERROR = "UNKNOWN_CRAWL_ERROR"
@@ -65,10 +66,14 @@ def classify_crawl_outcome(
     if termination_reason == "timeout" or is_partial:
         return CrawlOutcomeCode.CRAWL_PARTIAL_TIMEOUT
 
-    if source_retained_count > 0 and pages_count == 0 and not _has_failures(
-        failure_summary=failure_summary,
-        pages_failed=pages_failed,
-        files_failed=files_failed,
+    if (
+        source_retained_count > 0
+        and pages_count == 0
+        and not _has_failures(
+            failure_summary=failure_summary,
+            pages_failed=pages_failed,
+            files_failed=files_failed,
+        )
     ):
         return CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY
 
