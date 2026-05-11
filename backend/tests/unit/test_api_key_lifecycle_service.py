@@ -123,6 +123,42 @@ async def test_rotate_logs_audit(user):
     audit.log_async.assert_awaited()
     assert audit.log_async.call_args.kwargs["action"] == ActionType.API_KEY_ROTATED
     assert response.secret.startswith(ApiKeyType.SK.value)
+    metadata = audit.log_async.call_args.kwargs["metadata"]
+    assert metadata["extra"]["grace_period_disabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_rotate_disable_grace_period_collapses_grace_window(user):
+    key = _make_key(tenant_id=user.tenant_id)
+    new_key = _make_key(tenant_id=user.tenant_id, rotated_from_key_id=key.id)
+    repo = AsyncMock()
+    repo.get.return_value = key
+    repo.create.return_value = new_key
+    repo.update.return_value = key
+    policy = SimpleNamespace(
+        ensure_manage_authorized=AsyncMock(),
+        ensure_ownership_authorized=AsyncMock(),
+        validate_key_state=AsyncMock(),
+    )
+    audit = AsyncMock()
+
+    service = ApiKeyLifecycleService(
+        api_key_repo=repo,
+        policy_service=policy,
+        audit_service=audit,
+        user=user,
+    )
+
+    await service.rotate_key(
+        key_id=key.id,
+        request=ApiKeyRotateRequest(disable_grace_period=True),
+    )
+
+    grace_until = repo.update.call_args.kwargs["rotation_grace_until"]
+    assert grace_until <= datetime.now(timezone.utc)
+
+    metadata = audit.log_async.call_args.kwargs["metadata"]
+    assert metadata["extra"]["grace_period_disabled"] is True
 
 
 @pytest.mark.asyncio

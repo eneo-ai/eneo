@@ -729,7 +729,7 @@ def test_openapi_resume_review_checkpoint_uses_idempotency_header(
     )
     parameter = _find_parameter(operation, name="Idempotency-Key", location="header")
 
-    assert parameter.get("required") is False
+    assert parameter.get("required") is True
 
 
 def test_openapi_flow_public_run_and_step_expose_result_files(

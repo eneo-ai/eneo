@@ -3475,7 +3475,82 @@ async def test_create_run_rejects_invalid_published_snapshot(
         "resume_review_checkpoint",
     ],
 )
-async def test_review_mutations_reject_service_key_principals(user, method_name):
+async def test_review_mutations_allow_service_key_for_own_run(user, method_name):
+    service_user = _service_key_user(user)
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    terminalizer = AsyncMock()
+    service = FlowRunService(
+        user=service_user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        flow_run_terminalizer=terminalizer,
+        max_concurrent_runs=5,
+    )
+    method = getattr(service, method_name)
+    flow_id = uuid4()
+    run = _run(user=user, flow_id=flow_id).model_copy(
+        update={
+            "user_id": None,
+            "principal_type": PrincipalType.SERVICE_KEY.value,
+            "principal_user_id": None,
+            "principal_api_key_id": service_user.active_api_key.id,
+        }
+    )
+    checkpoint = _review_checkpoint(user, run).model_copy(
+        update={
+            "requester_user_id": None,
+            "requester_principal_type": PrincipalType.SERVICE_KEY,
+        }
+    )
+    flow_run_repo.get.return_value = run
+    flow_run_repo.get_review_checkpoint_for_edit.return_value = checkpoint
+    flow_run_repo.edit_review_checkpoint_payload.return_value = checkpoint
+    flow_run_repo.approve_review_checkpoint.return_value = checkpoint
+    flow_run_repo.reject_review_checkpoint.return_value = checkpoint
+    flow_run_repo.resume_review_checkpoint.return_value = (
+        FlowRunReviewCheckpointResumeResult(
+            checkpoint=checkpoint,
+            run=run,
+            accepted=True,
+        )
+    )
+    kwargs = {
+        "flow_id": flow_id,
+        "run_id": run.id,
+        "checkpoint_id": checkpoint.id,
+        "expected_checkpoint_revision": 1,
+    }
+    if method_name == "edit_review_checkpoint":
+        kwargs["current_payload_json"] = {"text": "Edited"}
+    if method_name == "reject_review_checkpoint":
+        kwargs["reason"] = "Reject the draft."
+    if method_name == "resume_review_checkpoint":
+        kwargs["idempotency_key"] = "resume-key"
+
+    result = await method(**kwargs)
+
+    if method_name == "resume_review_checkpoint":
+        assert result.checkpoint == checkpoint
+        awaited = flow_run_repo.resume_review_checkpoint.await_args.kwargs
+    else:
+        assert result == checkpoint
+        repo_method_name = (
+            "edit_review_checkpoint_payload"
+            if method_name == "edit_review_checkpoint"
+            else method_name
+        )
+        awaited = getattr(flow_run_repo, repo_method_name).await_args.kwargs
+    principal = awaited["principal"]
+    assert principal.principal_type == PrincipalType.SERVICE_KEY
+    assert principal.principal_api_key_id == service_user.active_api_key.id
+    flow_run_repo.get.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_review_mutations_reject_service_key_for_run_owned_by_another_principal(user):
     service_user = _service_key_user(user)
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
@@ -3487,26 +3562,21 @@ async def test_review_mutations_reject_service_key_principals(user, method_name)
         flow_version_repo=flow_version_repo,
         max_concurrent_runs=5,
     )
-    method = getattr(service, method_name)
-    kwargs = {
-        "flow_id": uuid4(),
-        "run_id": uuid4(),
-        "checkpoint_id": uuid4(),
-        "expected_checkpoint_revision": 1,
-    }
-    if method_name == "edit_review_checkpoint":
-        kwargs["current_payload_json"] = {"text": "Edited"}
-    if method_name == "reject_review_checkpoint":
-        kwargs["reason"] = "Reject the draft."
-    if method_name == "resume_review_checkpoint":
-        kwargs["idempotency_key"] = "resume-key"
+    flow_id = uuid4()
+    run = _run(user=user, flow_id=flow_id)
+    flow_run_repo.get.return_value = run
 
     with pytest.raises(UnauthorizedException) as exc_info:
-        await method(**kwargs)
+        await service.edit_review_checkpoint(
+            flow_id=flow_id,
+            run_id=run.id,
+            checkpoint_id=uuid4(),
+            expected_checkpoint_revision=1,
+            current_payload_json={"text": "Edited"},
+        )
 
-    assert exc_info.value.code == "flow_service_key_principal_not_supported"
-    assert exc_info.value.context["auth_layer"] == "service_key_principal"
-    flow_run_repo.get.assert_not_awaited()
+    assert exc_info.value.code == "flow_run_access_denied"
+    flow_run_repo.get_review_checkpoint_for_edit.assert_not_awaited()
 
 
 @pytest.mark.asyncio

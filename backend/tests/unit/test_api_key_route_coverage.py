@@ -61,6 +61,22 @@ def _route_has_dep_name(route, dep_name: str) -> bool:
     )
 
 
+def _route_resource_permission_types(route) -> set[str]:
+    resource_types: set[str] = set()
+    for dep in getattr(route, "dependencies", []):
+        fn = getattr(dep, "dependency", None)
+        if getattr(fn, "__name__", "") != "_resource_permission_dep":
+            continue
+        code = getattr(fn, "__code__", None)
+        closure = getattr(fn, "__closure__", None)
+        if code is None or closure is None:
+            continue
+        for name, cell in zip(code.co_freevars, closure):
+            if name == "resource_type":
+                resource_types.add(str(cell.cell_contents))
+    return resource_types
+
+
 def _find_route_by_method_and_paths(method: str, *paths: str):
     router = _get_router()
     for route in router.routes:
@@ -600,16 +616,30 @@ class TestHighRiskExactRouteGuards:
             "DELETE /files/{id}/ missing deferred tenant-scope delete guard (_stash)"
         )
 
-    def test_prompts_route_has_scope_guard_without_resource_permission_guard(self):
+    def test_prompts_route_has_scope_and_resource_permission_guard(self):
         route = _find_route_by_method_and_paths(
             "GET", "/prompts/{id}/", "/prompts/{id}"
         )
         assert _route_has_dep_name(route, "_scope_check_dep"), (
             "GET /prompts/{id}/ missing _scope_check_dep"
         )
-        assert not _route_has_dep_name(route, "_resource_permission_dep"), (
-            "GET /prompts/{id}/ should not require resource-permission guard"
+        assert _route_has_dep_name(route, "_resource_permission_dep"), (
+            "GET /prompts/{id}/ missing _resource_permission_dep"
         )
+
+    def test_conversation_history_routes_require_conversation_permission(self):
+        for method, path in (
+            ("GET", "/conversations/"),
+            ("GET", "/conversations/{session_id}/"),
+            ("DELETE", "/conversations/{session_id}/"),
+            ("GET", "/assistants/{id}/sessions/"),
+            ("GET", "/assistants/{id}/sessions/{session_id}/"),
+            ("DELETE", "/assistants/{id}/sessions/{session_id}/"),
+        ):
+            route = _find_route_by_method_and_paths(method, path, path.rstrip("/"))
+            assert "conversations" in _route_resource_permission_types(route), (
+                f"{method} {path} missing conversations resource permission guard"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -879,7 +909,16 @@ class TestMutatingRoutesArePerRouteGuarded:
 # Closed vocabularies for resource_type values.
 # Fine-grained resource permissions map to Pydantic ResourcePermissions fields.
 RESOURCE_PERM_VOCABULARY: frozenset[str] = frozenset(
-    {"assistants", "apps", "spaces", "knowledge"}
+    {
+        "assistants",
+        "apps",
+        "spaces",
+        "knowledge",
+        "conversations",
+        "files",
+        "jobs",
+        "prompts",
+    }
 )
 
 # Scope-check vocabulary is different — it names specific resource kinds used

@@ -156,11 +156,13 @@ FLOW_ACTION_REQUIREMENTS: dict[FlowApiAction, FlowActionRequirement] = {
         required_permissions=(Permission.FLOWS_MANAGE,),
         denial_message="You do not have permission to review flows.",
         service_key_capability="review",
+        service_key_allowed_when_requested=True,
     ),
     FlowApiAction.RESUME: FlowActionRequirement(
         required_permissions=(Permission.FLOWS_MANAGE,),
         denial_message="You do not have permission to resume flows.",
         service_key_capability="resume",
+        service_key_allowed_when_requested=True,
     ),
     FlowApiAction.RERUN: FlowActionRequirement(
         required_permissions=(Permission.FLOWS_MANAGE,),

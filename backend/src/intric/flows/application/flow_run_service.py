@@ -372,19 +372,6 @@ class FlowRunService:
             )
         return normalized
 
-    def _review_user_principal(self, *, capability: str) -> FlowPrincipal:
-        principal = self._principal()
-        if principal.is_service_key:
-            raise UnauthorizedException(
-                "This Flows endpoint requires a user principal. Service-key principals cannot use this action.",
-                code="flow_service_key_principal_not_supported",
-                context={
-                    "auth_layer": "service_key_principal",
-                    "capability": capability,
-                },
-            )
-        return principal
-
     def _validate_review_resume_idempotency_key(self, key: str | None) -> str:
         if key is None or not key.strip():
             raise BadRequestException(
@@ -939,7 +926,7 @@ class FlowRunService:
         expected_checkpoint_revision: int,
         current_payload_json: JsonObject,
     ) -> FlowRunReviewCheckpoint:
-        principal = self._review_user_principal(capability="review")
+        principal = self._principal()
         run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="content")
         checkpoint = await self.flow_run_repo.get_review_checkpoint_for_edit(
             checkpoint_id=checkpoint_id,
@@ -1001,7 +988,7 @@ class FlowRunService:
         checkpoint_id: UUID,
         expected_checkpoint_revision: int,
     ) -> FlowRunReviewCheckpoint:
-        principal = self._review_user_principal(capability="review")
+        principal = self._principal()
         run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="content")
         return await self.flow_run_repo.approve_review_checkpoint(
             checkpoint_id=checkpoint_id,
@@ -1021,7 +1008,7 @@ class FlowRunService:
         expected_checkpoint_revision: int,
         reason: str,
     ) -> FlowRunReviewCheckpoint:
-        principal = self._review_user_principal(capability="review")
+        principal = self._principal()
         normalized_reason = self._normalize_review_reject_reason(reason)
         run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="content")
         checkpoint = await self.flow_run_repo.reject_review_checkpoint(
@@ -1054,7 +1041,7 @@ class FlowRunService:
         expected_checkpoint_revision: int,
         idempotency_key: str | None,
     ) -> FlowRunReviewCheckpointResumeResult:
-        principal = self._review_user_principal(capability="resume")
+        principal = self._principal()
         normalized_key = self._validate_review_resume_idempotency_key(idempotency_key)
         run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="content")
         return await self.flow_run_repo.resume_review_checkpoint(

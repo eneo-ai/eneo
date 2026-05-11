@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Path, Request
 from intric.authentication.auth_dependencies import (
     get_current_active_user,
     get_scope_filter,
+    require_user_identity,
 )
 from intric.info_blobs.info_blob import (
     InfoBlobPublic,
@@ -82,6 +83,7 @@ async def update_info_blob(
     info_blob: InfoBlobUpdatePublic,
     container: ContainerDep,
     current_user: CurrentUserDep,
+    _user_identity_guard: None = Depends(require_user_identity),
 ):
     """Omitted fields are not updated."""
 

@@ -120,7 +120,10 @@ replay of the same rerun request. Use the response `status` to track the rerun o
 lifecycle. On replay, the nested `run` is the current persisted run state, so
 `run.revision` can be newer than the submitted `expected_run_revision`.
 
-Rerun is a run lifecycle mutation and currently requires flow management access.
+Rerun is a run lifecycle mutation and currently requires a user principal with flow
+management access. Service-key principals can edit and resume human-review checkpoints
+for their own runs, but rerun operations are still persisted against a human actor in
+this API version.
     """
 
 _FLOW_RUN_REVIEW_ACTIVE_DESCRIPTION = """
@@ -157,6 +160,9 @@ When the checkpoint has an `output_contract`, edited structured payloads are val
 checkpoint, step-result projection, or audit state is persisted. Contract failures return `400`
 with code `typed_io_contract_violation` and context fields `checkpoint_id`, `step_id`,
 `step_order`, and `payload_field`.
+
+Service-key principals may edit checkpoints only for runs they own. Human callers follow the
+same flow review permission policy used by the approve and reject endpoints.
     """
 
 _FLOW_RUN_REVIEW_EDIT_CONTRACT_ERROR_EXAMPLE: dict[str, object] = {
@@ -188,6 +194,8 @@ Approve the current payload for a human review checkpoint.
 Approval advances the checkpoint revision. Resume is a separate command so clients can make
 the decision durable before dispatching more runtime work. Use the latest checkpoint `revision`;
 stale approvals return `400` with code `flow_review_stale_revision`.
+
+Service-key principals may approve checkpoints only for runs they own.
     """
 
 _FLOW_RUN_REVIEW_REJECT_DESCRIPTION = """
@@ -195,6 +203,8 @@ Reject a human review checkpoint and cancel the run.
 
 The rejection reason is written to lifecycle audit metadata and the run is terminalized with
 `cancelled` status using the `review_rejected` lifecycle source.
+
+Service-key principals may reject checkpoints only for runs they own.
     """
 
 _FLOW_RUN_REVIEW_RESUME_DESCRIPTION = """
@@ -203,6 +213,8 @@ Resume a run after an approved human review checkpoint.
 Use the `Idempotency-Key` header for retries. Replaying the same key returns the current
 checkpoint and run without dispatching another worker task. A successful response is
 `202 Accepted`: poll the run and step endpoints after this call to observe resumed execution.
+
+Service-key principals may resume approved checkpoints only for runs they own.
     """
 
 
@@ -542,6 +554,7 @@ async def edit_flow_run_review_checkpoint(
         container,
         flow_id=id,
         required_access=common.FlowApiAction.REVIEW,
+        allow_service_key_principals=True,
     )
     checkpoint = await _get_flow_run_service(container).edit_review_checkpoint(
         flow_id=id,
@@ -600,6 +613,7 @@ async def approve_flow_run_review_checkpoint(
         container,
         flow_id=id,
         required_access=common.FlowApiAction.REVIEW,
+        allow_service_key_principals=True,
     )
     checkpoint = await _get_flow_run_service(container).approve_review_checkpoint(
         flow_id=id,
@@ -658,6 +672,7 @@ async def reject_flow_run_review_checkpoint(
         container,
         flow_id=id,
         required_access=common.FlowApiAction.REVIEW,
+        allow_service_key_principals=True,
     )
     checkpoint = await _get_flow_run_service(container).reject_review_checkpoint(
         flow_id=id,
@@ -713,12 +728,12 @@ async def resume_flow_run_review_checkpoint(
     review_in: FlowRunReviewCheckpointResumeRequest,
     background_tasks: BackgroundTasks,
     idempotency_key: Annotated[
-        str | None,
+        str,
         Header(
             alias="Idempotency-Key",
             description="Required caller-supplied idempotency key for review resume retries.",
         ),
-    ] = None,
+    ],
     container: Container = Depends(get_container(with_user=True)),
 ):
     await common.enforce_flow_scope_for_request(
@@ -726,6 +741,7 @@ async def resume_flow_run_review_checkpoint(
         container,
         flow_id=id,
         required_access=common.FlowApiAction.RESUME,
+        allow_service_key_principals=True,
     )
     run_service = _get_flow_run_service(container)
     result = await run_service.resume_review_checkpoint(

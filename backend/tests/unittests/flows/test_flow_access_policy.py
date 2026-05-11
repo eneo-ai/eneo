@@ -133,7 +133,7 @@ def test_rerun_rejects_service_key_principals() -> None:
         (FlowApiAction.RESUME, "resume"),
     ],
 )
-def test_review_mutations_reject_service_key_principals(
+def test_review_mutations_require_explicit_service_key_opt_in(
     action: FlowApiAction,
     capability: str,
 ) -> None:
@@ -147,6 +147,12 @@ def test_review_mutations_reject_service_key_principals(
         "auth_layer": "service_key_principal",
         "capability": capability,
     }
+
+    require_flow_action(
+        service_key_user,
+        action,
+        allow_service_key_principals=True,
+    )
 
 
 def test_builder_actions_require_edit_and_builder_permissions() -> None:

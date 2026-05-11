@@ -11,6 +11,8 @@ from intric.authentication.auth_models import (
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyType,
+    ResourcePermissionLevel,
+    ResourcePermissions,
 )
 from intric.roles.permissions import Permission
 
@@ -167,6 +169,338 @@ async def test_update_request_rejects_non_read_permission_for_pk():
         assert exc.value.status_code == 400
         assert exc.value.code == "invalid_request"
         assert "can only have read permission" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_create_pk_defaults_to_safe_public_resource_permissions():
+    service = _service_with_user(permissions=[Permission.ADMIN])
+
+    request = ApiKeyCreateRequest(
+        name="Public key",
+        key_type=ApiKeyType.PK,
+        permission=ApiKeyPermission.READ,
+        scope_type=ApiKeyScopeType.TENANT,
+        scope_id=None,
+        allowed_origins=["http://localhost:3000"],
+    )
+
+    await service.validate_create_request(request=request)
+
+    assert request.resource_permissions == ResourcePermissions(
+        assistants=ResourcePermissionLevel.READ,
+        apps=ResourcePermissionLevel.READ,
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_pk_assistant_scope_does_not_default_resource_permissions(
+    monkeypatch,
+):
+    service = _service_with_user(permissions=[Permission.ADMIN])
+
+    async def allow_creator_authorized(*, scope_type, scope_id):
+        return None
+
+    monkeypatch.setattr(
+        service,
+        "ensure_creator_authorized",
+        allow_creator_authorized,
+    )
+
+    request = ApiKeyCreateRequest(
+        name="Public assistant key",
+        key_type=ApiKeyType.PK,
+        permission=ApiKeyPermission.READ,
+        scope_type=ApiKeyScopeType.ASSISTANT,
+        scope_id=uuid4(),
+        allowed_origins=["http://localhost:3000"],
+    )
+
+    await service.validate_create_request(request=request)
+
+    assert request.resource_permissions is None
+
+
+@pytest.mark.asyncio
+async def test_create_pk_assistant_scope_allows_scoped_resource_permissions(
+    monkeypatch,
+):
+    service = _service_with_user(permissions=[Permission.ADMIN])
+
+    async def allow_creator_authorized(*, scope_type, scope_id):
+        return None
+
+    monkeypatch.setattr(
+        service,
+        "ensure_creator_authorized",
+        allow_creator_authorized,
+    )
+
+    request = ApiKeyCreateRequest(
+        name="Public assistant key",
+        key_type=ApiKeyType.PK,
+        permission=ApiKeyPermission.READ,
+        scope_type=ApiKeyScopeType.ASSISTANT,
+        scope_id=uuid4(),
+        allowed_origins=["http://localhost:3000"],
+        resource_permissions=ResourcePermissions(
+            assistants=ResourcePermissionLevel.READ
+        ),
+    )
+
+    await service.validate_create_request(request=request)
+
+    assert request.resource_permissions == ResourcePermissions(
+        assistants=ResourcePermissionLevel.READ
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_pk_assistant_scope_rejects_unreachable_resource_permissions():
+    service = _service_with_user(permissions=[Permission.ADMIN])
+
+    request = ApiKeyCreateRequest(
+        name="Public assistant key",
+        key_type=ApiKeyType.PK,
+        permission=ApiKeyPermission.READ,
+        scope_type=ApiKeyScopeType.ASSISTANT,
+        scope_id=uuid4(),
+        allowed_origins=["http://localhost:3000"],
+        resource_permissions=ResourcePermissions(apps=ResourcePermissionLevel.READ),
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_create_request(request=request)
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+    assert "assistant-scoped keys do not support" in exc.value.message
+    assert "apps" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_create_pk_assistant_scope_rejects_missing_assistant_permission():
+    service = _service_with_user(permissions=[Permission.ADMIN])
+
+    request = ApiKeyCreateRequest(
+        name="Public assistant key",
+        key_type=ApiKeyType.PK,
+        permission=ApiKeyPermission.READ,
+        scope_type=ApiKeyScopeType.ASSISTANT,
+        scope_id=uuid4(),
+        allowed_origins=["http://localhost:3000"],
+        resource_permissions=ResourcePermissions(files=ResourcePermissionLevel.READ),
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_create_request(request=request)
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+    assert "require 'assistants' resource permission" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_create_pk_rejects_write_resource_permissions():
+    service = _service_with_user(permissions=[Permission.ADMIN])
+
+    request = ApiKeyCreateRequest(
+        name="Public key",
+        key_type=ApiKeyType.PK,
+        permission=ApiKeyPermission.READ,
+        scope_type=ApiKeyScopeType.TENANT,
+        scope_id=None,
+        allowed_origins=["http://localhost:3000"],
+        resource_permissions=ResourcePermissions(files=ResourcePermissionLevel.WRITE),
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_create_request(request=request)
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+    assert "pk_ keys only support" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_create_pk_rejects_jobs_resource_permission():
+    """jobs is on the pk_ denylist regardless of level — even read is too much."""
+    service = _service_with_user(permissions=[Permission.ADMIN])
+
+    request = ApiKeyCreateRequest(
+        name="Public key",
+        key_type=ApiKeyType.PK,
+        permission=ApiKeyPermission.READ,
+        scope_type=ApiKeyScopeType.TENANT,
+        scope_id=None,
+        allowed_origins=["http://localhost:3000"],
+        resource_permissions=ResourcePermissions(jobs=ResourcePermissionLevel.READ),
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_create_request(request=request)
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+    assert "jobs" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_create_pk_rejects_prompts_resource_permission():
+    service = _service_with_user(permissions=[Permission.ADMIN])
+
+    request = ApiKeyCreateRequest(
+        name="Public key",
+        key_type=ApiKeyType.PK,
+        permission=ApiKeyPermission.READ,
+        scope_type=ApiKeyScopeType.TENANT,
+        scope_id=None,
+        allowed_origins=["http://localhost:3000"],
+        resource_permissions=ResourcePermissions(prompts=ResourcePermissionLevel.READ),
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_create_request(request=request)
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+    assert "prompts" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_update_pk_rejects_jobs_resource_permission():
+    service = _service()
+    key = SimpleNamespace(
+        key_type=ApiKeyType.PK.value,
+        scope_type=ApiKeyScopeType.TENANT.value,
+        tenant_id=uuid4(),
+        permission=ApiKeyPermission.READ.value,
+        resource_permissions=None,
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_update_request(
+            key=key,
+            updates={"resource_permissions": {"jobs": "read"}},
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+    assert "jobs" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_update_pk_null_resource_permissions_normalizes_to_public_default():
+    service = _service()
+    key = SimpleNamespace(
+        key_type=ApiKeyType.PK.value,
+        scope_type=ApiKeyScopeType.TENANT.value,
+        tenant_id=uuid4(),
+        permission=ApiKeyPermission.READ.value,
+        resource_permissions=None,
+    )
+    updates = {"resource_permissions": None}
+
+    await service.validate_update_request(key=key, updates=updates)  # type: ignore[arg-type]
+
+    assert updates["resource_permissions"] == {
+        "assistants": "read",
+        "apps": "read",
+        "spaces": "none",
+        "knowledge": "none",
+        "conversations": "none",
+        "files": "none",
+        "jobs": "none",
+        "prompts": "none",
+    }
+
+
+@pytest.mark.asyncio
+async def test_update_pk_assistant_scope_allows_scoped_resource_permissions():
+    service = _service()
+    key = SimpleNamespace(
+        key_type=ApiKeyType.PK.value,
+        scope_type=ApiKeyScopeType.ASSISTANT.value,
+        tenant_id=uuid4(),
+        permission=ApiKeyPermission.READ.value,
+        resource_permissions=None,
+    )
+    updates = {"resource_permissions": {"assistants": "read", "files": "read"}}
+
+    await service.validate_update_request(key=key, updates=updates)
+
+    assert updates["resource_permissions"] == {
+        "assistants": "read",
+        "apps": "none",
+        "spaces": "none",
+        "knowledge": "none",
+        "conversations": "none",
+        "files": "read",
+        "jobs": "none",
+        "prompts": "none",
+    }
+
+
+@pytest.mark.asyncio
+async def test_update_sk_app_scope_rejects_unreachable_resource_permissions():
+    service = _service()
+    key = SimpleNamespace(
+        key_type=ApiKeyType.SK.value,
+        scope_type=ApiKeyScopeType.APP.value,
+        tenant_id=uuid4(),
+        permission=ApiKeyPermission.WRITE.value,
+        resource_permissions=None,
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_update_request(
+            key=key,
+            updates={"resource_permissions": {"apps": "read", "conversations": "read"}},
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+    assert "app-scoped keys do not support" in exc.value.message
+    assert "conversations" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_update_sk_app_scope_rejects_missing_app_permission():
+    service = _service()
+    key = SimpleNamespace(
+        key_type=ApiKeyType.SK.value,
+        scope_type=ApiKeyScopeType.APP.value,
+        tenant_id=uuid4(),
+        permission=ApiKeyPermission.WRITE.value,
+        resource_permissions=None,
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_update_request(
+            key=key,
+            updates={"resource_permissions": {"apps": "none", "files": "read"}},
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+    assert "require 'apps' resource permission" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_update_pk_assistant_scope_allows_clearing_resource_permissions():
+    service = _service()
+    key = SimpleNamespace(
+        key_type=ApiKeyType.PK.value,
+        scope_type=ApiKeyScopeType.ASSISTANT.value,
+        tenant_id=uuid4(),
+        permission=ApiKeyPermission.READ.value,
+        resource_permissions={"assistants": "read"},
+    )
+    updates = {"resource_permissions": None}
+
+    await service.validate_update_request(key=key, updates=updates)  # type: ignore[arg-type]
+
+    assert updates["resource_permissions"] is None
 
 
 # ---------------------------------------------------------------------------

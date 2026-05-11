@@ -319,7 +319,10 @@ router.include_router(
     jobs_router,
     prefix="/jobs",
     tags=["jobs"],
-    dependencies=TENANT_ADMIN_SCOPE_GUARDS,
+    dependencies=[
+        *TENANT_ADMIN_SCOPE_GUARDS,
+        Depends(require_resource_permission_for_method("jobs")),
+    ],
 )
 router.include_router(
     user_groups_router,
@@ -382,7 +385,7 @@ router.include_router(
     dependencies=[
         Depends(
             require_resource_permission_for_method(
-                "knowledge", read_override_endpoints=FILES_READ_OVERRIDES
+                "files", read_override_endpoints=FILES_READ_OVERRIDES
             )
         ),
         Depends(require_api_key_scope_check(resource_type="file", path_param=None)),
@@ -432,6 +435,7 @@ router.include_router(
     prefix="/prompts",
     tags=["prompts"],
     dependencies=[
+        Depends(require_resource_permission_for_method("prompts")),
         Depends(require_api_key_scope_check(resource_type="prompt", path_param="id")),
     ],
 )

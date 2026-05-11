@@ -9,6 +9,7 @@ from pydantic import (
     EmailStr,
     Field,
     ValidationInfo,
+    field_serializer,
     field_validator,
 )
 
@@ -136,22 +137,63 @@ class ResourcePermissionLevel(str, Enum):
 
 
 class ResourcePermissions(BaseModel):
-    """Per-resource-type permission overrides for sk_ keys.
+    """Per-resource-type permission overrides for API keys.
 
     For sk_ keys, the top-level ``permission`` field is derived automatically
-    as ``max(assistants, apps, spaces, knowledge)`` by
-    :func:`derive_permission_from_resource_permissions`.  pk_ keys do not
-    support fine-grained permissions.
+    as the maximum configured level by
+    :func:`derive_permission_from_resource_permissions`.  pk_ keys may use the
+    same shape, but policy validation caps each resource at ``read``.
     """
 
-    flows: ResourcePermissionLevel | None = None
+    flows: ResourcePermissionLevel | None = Field(
+        default=None,
+        description=(
+            "Explicit Flow access. Null means this key has no fine-grained Flow "
+            "grant; keys without resource_permissions use their top-level permission."
+        ),
+    )
     assistants: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     apps: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     spaces: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     knowledge: ResourcePermissionLevel = ResourcePermissionLevel.NONE
-    flow_evidence: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    conversations: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    files: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    jobs: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    prompts: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    flow_evidence: ResourcePermissionLevel = Field(
+        default=ResourcePermissionLevel.NONE,
+        description=(
+            "Explicit Flow evidence access. Omitted or 'none' means this key has "
+            "no fine-grained evidence grant."
+        ),
+    )
 
     model_config = ConfigDict(extra="forbid")
+
+
+RESOURCE_PERMISSION_FIELDS: tuple[str, ...] = (
+    "assistants",
+    "apps",
+    "spaces",
+    "knowledge",
+    "conversations",
+    "files",
+    "jobs",
+    "prompts",
+)
+
+
+FLOW_RESOURCE_PERMISSION_FIELDS: tuple[str, ...] = (
+    "flows",
+    "flow_evidence",
+)
+
+
+PK_FORBIDDEN_RESOURCE_FIELDS: tuple[str, ...] = (
+    "jobs",
+    "prompts",
+    "flow_evidence",
+)
 
 
 _LEVEL_TO_PERMISSION: dict[int, ApiKeyPermission] = {
@@ -170,13 +212,21 @@ def derive_permission_from_resource_permissions(
     Returns the highest permission level found across all resource types.
     If all resource types are ``none``, defaults to ``read``.
     """
-    max_level = max(
-        PERMISSION_LEVEL_ORDER.get(rp.assistants.value, 0),
-        PERMISSION_LEVEL_ORDER.get(rp.apps.value, 0),
-        PERMISSION_LEVEL_ORDER.get(rp.spaces.value, 0),
-        PERMISSION_LEVEL_ORDER.get(rp.knowledge.value, 0),
-    )
+    max_level = 0
+    for field in (*RESOURCE_PERMISSION_FIELDS, *FLOW_RESOURCE_PERMISSION_FIELDS):
+        level = getattr(rp, field)
+        if level is None:
+            continue
+        max_level = max(max_level, PERMISSION_LEVEL_ORDER.get(level.value, 0))
     return _LEVEL_TO_PERMISSION.get(max_level, ApiKeyPermission.READ)
+
+
+def default_public_resource_permissions() -> ResourcePermissions:
+    """Safe default allowlist for newly created browser/public keys."""
+    return ResourcePermissions(
+        assistants=ResourcePermissionLevel.READ,
+        apps=ResourcePermissionLevel.READ,
+    )
 
 
 class ApiKeyScopeType(str, Enum):
@@ -288,6 +338,7 @@ class ApiKeyExtendRequest(BaseModel):
 class ApiKeyRotateRequest(BaseModel):
     update_expiration: bool = False
     expires_at: Optional[datetime] = None
+    disable_grace_period: bool = False
 
 
 class ApiKeyUserSnapshot(BaseModel):
@@ -333,6 +384,14 @@ class ApiKeyV2(BaseModel):
     search_match_reasons: Optional[list[ApiKeySearchMatchReason]] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("resource_permissions")
+    def _serialize_resource_permissions(
+        self, resource_permissions: ResourcePermissions | None
+    ) -> dict[str, str] | None:
+        if resource_permissions is None:
+            return None
+        return resource_permissions.model_dump(mode="json", exclude_unset=True)
 
 
 class ApiKeyV2InDB(ApiKeyV2):

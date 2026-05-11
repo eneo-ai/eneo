@@ -25,7 +25,11 @@ from intric.authentication.api_key_notification_auto_follow import (
 from intric.authentication.api_key_router_helpers import (
     error_responses as api_key_error_responses,
 )
-from intric.authentication.auth_dependencies import get_scope_filter
+from intric.authentication.auth_dependencies import (
+    get_scope_filter,
+    require_resource_permission_for_method,
+    require_user_identity,
+)
 from intric.authentication.auth_models import (
     ApiKey,
     ApiKeyNotificationTargetType,
@@ -839,6 +843,7 @@ async def ask_assistant(
     "/{id}/sessions/",
     response_model=CursorPaginatedResponse[SessionMetadataPublic],
     responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def get_assistant_sessions(
     id: UUID,
@@ -874,6 +879,7 @@ async def get_assistant_sessions(
     "/{id}/sessions/{session_id}/",
     response_model=SessionPublic,
     responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def get_assistant_session(
     id: UUID,
@@ -889,6 +895,7 @@ async def get_assistant_session(
     "/{id}/sessions/{session_id}/",
     response_model=SessionPublic,
     responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def delete_assistant_session(
     id: UUID,
@@ -981,6 +988,7 @@ async def ask_followup(
     "/{id}/sessions/{session_id}/feedback/",
     response_model=SessionPublic,
     responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def leave_feedback(
     id: UUID,
@@ -1033,6 +1041,7 @@ async def leave_feedback(
 async def generate_read_only_assistant_key(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_identity_guard: None = Depends(require_user_identity),
 ):
     """Generates a read-only api key for this assistant.
 
