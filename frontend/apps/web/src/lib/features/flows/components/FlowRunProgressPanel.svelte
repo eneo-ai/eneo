@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { FlowGraph, FlowRunStep, Intric } from "@intric/intric-js";
+  import { IntricError, type FlowGraph, type FlowRunStep, type Intric } from "@intric/intric-js";
   import { onMount, untrack } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -11,6 +11,7 @@
   import { isFlowRunActive } from "./flowRunStatusSets";
 
   const POLL_INTERVAL_MS = 3000;
+  const INITIAL_PROGRESS_RETRY_DELAYS_MS = [250, 750, 1500] as const;
   const STALE_WARNING_THRESHOLD = 3;
 
   let {
@@ -53,13 +54,47 @@
     onSnapshotUpdate?.(snapshot);
   }
 
+  function isNotFoundError(error: unknown): boolean {
+    if (error instanceof IntricError) return error.status === 404;
+    if (error !== null && typeof error === "object") {
+      const status = (error as { status?: unknown }).status;
+      return status === 404;
+    }
+    return false;
+  }
+
+  function shouldRetryInitialProgressLoad(
+    error: unknown,
+    retryDelay: number | undefined
+  ): retryDelay is number {
+    return retryDelay !== undefined && isFlowRunActive(runStatus) && isNotFoundError(error);
+  }
+
+  async function wait(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   async function loadInitial() {
     loading = snapshot.steps.length === 0;
     loadError = null;
     try {
-      const [graph, steps] = await Promise.all([fetchGraphSnapshot(), fetchStepStatuses()]);
-      applySnapshot({ graph, steps });
-      pollFailureCount = 0;
+      for (let attemptIndex = 0; ; attemptIndex += 1) {
+        try {
+          const [graph, steps] = await Promise.all([fetchGraphSnapshot(), fetchStepStatuses()]);
+          applySnapshot({ graph, steps });
+          pollFailureCount = 0;
+          return;
+        } catch (error) {
+          const retryDelay = INITIAL_PROGRESS_RETRY_DELAYS_MS[attemptIndex];
+          if (shouldRetryInitialProgressLoad(error, retryDelay)) {
+            await wait(retryDelay);
+            continue;
+          }
+          console.error("Failed to load live run progress", error);
+          loadError = error instanceof Error ? error.message : "Failed to load run progress";
+          return;
+        }
+      }
     } catch (error) {
       console.error("Failed to load live run progress", error);
       loadError = error instanceof Error ? error.message : "Failed to load run progress";

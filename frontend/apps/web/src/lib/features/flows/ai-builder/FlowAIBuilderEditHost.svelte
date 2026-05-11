@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
 
   import type { Intric } from "@intric/intric-js";
 
@@ -15,7 +15,7 @@
 
   let { intric, spaceId, flowId, onapplied }: Props = $props();
 
-  const service = initAIBuilderService(intric, spaceId, flowId);
+  const service = untrack(() => initAIBuilderService(intric, spaceId, flowId));
 
   onDestroy(() => {
     service.destroy();
