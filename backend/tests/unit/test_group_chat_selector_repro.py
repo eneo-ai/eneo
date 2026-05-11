@@ -1,28 +1,21 @@
-"""Reproduction for the group-chat selector NoneType crash.
+"""Tests for the group-chat selector contract.
 
-Production traceback (see incident notes):
+Background — the original production crash:
 
     File ".../group_chat/application/group_chat_service.py", line 399, in ask_group_chat
         response_from_selector = selection_result.response_str
     AttributeError: 'NoneType' object has no attribute 'response_str'
 
-Root cause is in `_select_assistant_with_completion_model`:
+`_is_match` did `re.search(r"(\\d+)", text)` with no bounds-check and accepted
+any digit anywhere in the selector model's response. Out-of-range digits (a
+year like "2024", a hallucinated index, a list marker) fell through a nested
+if/else and returned None implicitly, crashing the caller.
 
-    if assistant_match:
-        if 1 <= assistant_match <= len(assistants):
-            return GroupChatAssistantSelectionResult(...)
-        # ← no else: falls through to implicit None
-    else:
-        return GroupChatAssistantSelectionResult(assistant=None, ...)
-
-`_is_match` does no bounds-check — it returns the first digit run found in
-the selector model's response. When that run is outside `1..len(assistants)`
-the function silently returns None and the caller crashes.
-
-These tests cover the cases that can hit it in prod:
-- model picks an index strictly greater than len(assistants)
-- model embeds a stray year / large number in clarification prose
-- happy paths must keep working (sanity)
+The fix moves the selector to a strict sentinel contract: the model must
+reply with exactly `ASSISTANT=<n>` to route. Anything else — bare digits,
+prose containing numbers, out-of-range sentinels — is treated as
+clarification text and surfaced to the user. This eliminates both the crash
+class and the silent false-positive routing class.
 """
 
 from types import SimpleNamespace
@@ -65,41 +58,87 @@ def _make_service(selector_text: str) -> GroupChatService:
     )
 
 
-@pytest.mark.asyncio
-async def test_selector_returns_index_greater_than_assistant_count():
-    """Selector picks '3' with only 2 assistants — current code returns None."""
-    service = _make_service(selector_text="3")
-    assistants = [
+def _two_assistants() -> list[GroupChatAssistant]:
+    return [
         _make_assistant("Knowledge", "Looks up policy docs"),
         _make_assistant("Reasoning", "Performs multi-step reasoning"),
     ]
+
+
+# --- routing happy path ---------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sentinel_routes_to_named_assistant():
+    service = _make_service(selector_text="ASSISTANT=2")
+    assistants = _two_assistants()
+
+    result = await service._select_assistant_with_completion_model(
+        question="Walk me through this proof",
+        assistants=assistants,
+    )
+
+    assert result is not None
+    assert result.assistant is assistants[1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "selector_text",
+    [
+        "ASSISTANT=2",
+        "assistant=2",
+        "Assistant = 2",
+        "  ASSISTANT=2  ",
+        "ASSISTANT = 2\n",
+    ],
+)
+async def test_sentinel_tolerates_whitespace_and_case(selector_text: str):
+    service = _make_service(selector_text=selector_text)
+    assistants = _two_assistants()
+
+    result = await service._select_assistant_with_completion_model(
+        question="…",
+        assistants=assistants,
+    )
+
+    assert result is not None
+    assert result.assistant is assistants[1]
+
+
+# --- regressions for the original crash class -----------------------------
+
+
+@pytest.mark.asyncio
+async def test_bare_out_of_range_digit_does_not_crash():
+    """Original crash repro: model emits '3' with 2 assistants.
+
+    Pre-fix: implicit None return → AttributeError in caller.
+    Post-fix: no sentinel match → clarification, no crash.
+    """
+    service = _make_service(selector_text="3")
+    assistants = _two_assistants()
 
     result = await service._select_assistant_with_completion_model(
         question="Who should answer this?",
         assistants=assistants,
     )
 
-    # FAILS today (returns None) — proves the missing-else fall-through.
-    # Expected after fix: a result with assistant=None so the clarification
-    # branch in ask_group_chat runs instead of crashing.
-    assert result is not None, (
-        "Out-of-range selector index returned None — caller will crash on "
-        ".response_str at group_chat_service.py:449"
-    )
+    assert result is not None
     assert result.assistant is None
 
 
 @pytest.mark.asyncio
-async def test_selector_response_contains_stray_year():
-    """Selector emits prose like 'Regarding your 2024 budget question' — `\\d+`
-    picks up 2024, which is out of range and crashes."""
+async def test_stray_year_in_prose_does_not_crash():
+    """`\\d+` used to grab '2024' from any clarification text.
+
+    Pre-fix: out of range → implicit None → caller crash.
+    Post-fix: no sentinel → clarification surfaced as-is.
+    """
     service = _make_service(
         selector_text="Regarding your 2024 budget question, please clarify."
     )
-    assistants = [
-        _make_assistant("Knowledge", "Looks up policy docs"),
-        _make_assistant("Reasoning", "Performs multi-step reasoning"),
-    ]
+    assistants = _two_assistants()
 
     result = await service._select_assistant_with_completion_model(
         question="Tell me about taxes",
@@ -108,37 +147,73 @@ async def test_selector_response_contains_stray_year():
 
     assert result is not None
     assert result.assistant is None
-    # The full prose should still be available so the clarification branch
-    # can surface it back to the user.
     assert "clarify" in result.response_str
 
 
 @pytest.mark.asyncio
-async def test_selector_picks_valid_index():
-    """Sanity: '2' with 2 assistants must keep working."""
-    service = _make_service(selector_text="2")
-    a1 = _make_assistant("Knowledge", "Looks up policy docs")
-    a2 = _make_assistant("Reasoning", "Performs multi-step reasoning")
+async def test_out_of_range_sentinel_falls_through_to_clarification():
+    """Even with the right token, an out-of-range index must not route."""
+    service = _make_service(selector_text="ASSISTANT=5")
+    assistants = _two_assistants()
 
     result = await service._select_assistant_with_completion_model(
-        question="Walk me through this proof",
-        assistants=[a1, a2],
+        question="…",
+        assistants=assistants,
     )
 
     assert result is not None
-    assert result.assistant is a2
+    assert result.assistant is None
+
+
+# --- new in-range false-positive class (the sentinel's main win) ---------
 
 
 @pytest.mark.asyncio
-async def test_selector_returns_no_digit_goes_to_clarification():
-    """Sanity: pure clarification text (no digits) must keep working."""
+async def test_numbered_list_in_clarification_does_not_route():
+    """Pre-sentinel, this routed to assistant 1 because `\\d+` matched '1)'.
+
+    The user was being asked to clarify, but the parser silently picked an
+    assistant and answered as if the question were unambiguous.
+    """
+    service = _make_service(
+        selector_text="Could you specify if you mean 1) tax questions or 2) HR questions?"
+    )
+    assistants = _two_assistants()
+
+    result = await service._select_assistant_with_completion_model(
+        question="help",
+        assistants=assistants,
+    )
+
+    assert result is not None
+    assert result.assistant is None
+    assert "specify" in result.response_str
+
+
+@pytest.mark.asyncio
+async def test_bare_digit_without_sentinel_does_not_route():
+    """Strict contract: a number alone is not a routing decision."""
+    service = _make_service(selector_text="2")
+    assistants = _two_assistants()
+
+    result = await service._select_assistant_with_completion_model(
+        question="…",
+        assistants=assistants,
+    )
+
+    assert result is not None
+    assert result.assistant is None
+
+
+# --- pure clarification path -----------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_clarification_text_with_no_digits():
     service = _make_service(
         selector_text="Could you be more specific about what you need?"
     )
-    assistants = [
-        _make_assistant("Knowledge", "Looks up policy docs"),
-        _make_assistant("Reasoning", "Performs multi-step reasoning"),
-    ]
+    assistants = _two_assistants()
 
     result = await service._select_assistant_with_completion_model(
         question="help",
@@ -148,3 +223,21 @@ async def test_selector_returns_no_digit_goes_to_clarification():
     assert result is not None
     assert result.assistant is None
     assert "specific" in result.response_str
+
+
+# --- single-assistant shortcut (no model call) ----------------------------
+
+
+@pytest.mark.asyncio
+async def test_single_assistant_shortcut_bypasses_selector():
+    service = _make_service(selector_text="<should not be read>")
+    only = _make_assistant("Solo", "Handles everything")
+
+    result = await service._select_assistant_with_completion_model(
+        question="anything",
+        assistants=[only],
+    )
+
+    assert result is not None
+    assert result.assistant is only
+    service.completion_service.get_response.assert_not_called()
