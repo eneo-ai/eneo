@@ -627,7 +627,7 @@ class FlowRepository:
             .where(FlowRunStepResultFiles.tenant_id == result_row.tenant_id)
             .where(FlowRunStepResultFiles.attempt_no == attempt_no)
         )
-        if result_row.step_id is None or not result_file_references:
+        if not result_file_references:
             return
 
         rows = [

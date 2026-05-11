@@ -6,6 +6,7 @@ export const FLOW_API_ERROR_CODES = [
   "flow_run_top_level_file_ids_not_supported",
   "flow_run_idempotency_conflict",
   "typed_io_contract_violation",
+  "flow_published_form_schema_invalid",
   "flow_review_stale_revision",
   "flow_review_not_active",
   "flow_review_step_result_not_found",

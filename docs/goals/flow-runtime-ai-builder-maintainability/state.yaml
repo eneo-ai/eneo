@@ -86,7 +86,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T052
+active_task: T058
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -163,7 +163,7 @@ maintainability_findings:
   - id: JSONB-boundaries-typed
     severity: P1
     title: "Flow metadata and published definitions are still broad JSONB contracts with scattered readers."
-    proposed_owner: "PublishedFlowDefinitionV1 / FlowMetadataV1 typed parsers"
+    proposed_owner: "PublishedFlowDefinition plus FlowMetadata typed parsers"
     after: "P0s"
   - id: PREPROD-legacy-cleanup
     severity: P1
@@ -239,7 +239,7 @@ verify_first_findings:
     title: "Static delete candidates may be false positives."
     position: "Because Flows is pre-production, production DB proof is not required, but grep proof, test migration, fixture cleanup, and local migration/schema proof are required."
   - id: metadata-vs-published-definition-priority
-    title: "FlowMetadataV1 vs PublishedFlowDefinitionV1 first after P0s."
+    title: "FlowMetadata vs PublishedFlowDefinition first after P0s."
     position: "Decide after P0s based on actual corruption/mismatch evidence and fear-of-change reduction."
 
 tasks:
@@ -3408,7 +3408,7 @@ tasks:
   - id: T052
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe slice after T051 result persistence cleanup."
     inputs:
@@ -3428,6 +3428,276 @@ tasks:
       - "verification commands."
       - "stop_if."
       - "Claude gate decision."
+    receipt:
+      result: done
+      decision: "Activate T053 tranche audit instead of starting another implementation Worker."
+      summary: "No queued safe implementation Worker remains after T010 was no-op'd by Scout evidence and T008 was fulfilled by T051. The next board-safe step is to audit whether the current tranche is complete or whether a new major lane should be opened."
+      next_task: T053
+      claude_gate_required: true
+      claude_gate_reason: "Goal charter requires the host Claude peer loop before marking the tranche complete or green-lighting a new major phase."
+
+  - id: T053
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit current tranche completion after typed-boundary, material-efficiency, and result-persistence cleanup work."
+    inputs:
+      - "All done task receipts through T052."
+      - "Current branch and dirty worktree."
+      - "Goal charter current tranche and maintainability rubric."
+      - "Host Claude peer-loop audit."
+    constraints:
+      - "Do not modify source in this Judge task."
+      - "Run Claude only through /Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py."
+      - "Use --model claude-opus-4-7 --effort xhigh and a long timeout."
+      - "Do not mark the goal complete if Claude or local evidence finds required safe Worker work remains."
+      - "Preserve unrelated dirty files."
+    expected_output:
+      - "complete | not_complete."
+      - "Remaining P0/P1/P2 or no findings."
+      - "Maintainability score estimate."
+      - "Verification matrix."
+      - "Claude audit result and disposition."
+      - "Next task if not complete."
+    receipt:
+      result: changes_required
+      decision: "Do not mark the tranche complete yet; activate T054 for the accepted dead-branch cleanup, then continue with reachability and deferral follow-ups."
+      verdict: "not_complete"
+      artifact: ".codex/artifacts/claude-peer-loop-t053-tranche-audit-20260511T100424Z.md"
+      claude_phase_gate:
+        model: "claude-opus-4-7"
+        effort: "xhigh"
+        verdict: "changes_required"
+        green_light: false
+        min_score: 7
+      summary: "Host Claude rejected tranche completion. Codex accepted the concrete T051 cleanup orphan: _replace_step_result_file_rows still checks result_row.step_id is None even though save_step_result now rejects missing step_id before writes. Claude also asked for a published form-schema error reachability Scout and explicit deferral rows for remaining P2 follow-ups before tranche completion."
+      accepted_findings:
+        - "T054: remove dead result_row.step_id is None branch in _replace_step_result_file_rows."
+        - "T055: scout flow_published_form_schema_invalid public/frontend reachability."
+        - "T056: map the reachable published form-schema API error in the existing frontend Flow error owner."
+        - "T057: write explicit deferral rows for remaining P2 follow-ups before a final green-light attempt."
+      next_task: T054
+
+  - id: T054
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Remove the dead step_id None branch from FlowRepository result-file replacement after T051 made result writes strict."
+    allowed_files:
+      - "backend/src/intric/flows/infrastructure/flow_repo.py"
+      - "backend/tests/integration/flows/test_flow_step_file_mapping_contract.py"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_step_file_mapping_contract.py -q"
+      - "cd backend && uv run pyright src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_step_file_mapping_contract.py"
+      - "cd backend && uv run ruff check src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_step_file_mapping_contract.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_step_file_mapping_contract.py"
+      - "git diff --check"
+      - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    stop_if:
+      - "A current write path can still return a saved FlowStepResults row with step_id NULL."
+      - "The fix requires schema or domain model changes."
+      - "The implementation adds compatibility branches, broad Any, Pyright ignores, or slop comments."
+    receipt:
+      result: done
+      summary: "Removed the dead result_row.step_id is None branch from _replace_step_result_file_rows after T051 made save_step_result reject missing step_id before persistence."
+      changed_files:
+        - "backend/src/intric/flows/infrastructure/flow_repo.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      behavior:
+        - "Result-file replacement still returns early for an intentionally empty result_file_references sequence."
+        - "The result_row.step_id is None half was deleted because current write rows must have step_id."
+      verification:
+        - "PASS cd backend && uv run pytest tests/integration/flows/test_flow_step_file_mapping_contract.py -q -> 4 passed, 16 warnings."
+        - "PASS cd backend && uv run pyright src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_step_file_mapping_contract.py -> 0 errors."
+        - "PASS cd backend && uv run ruff check src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_step_file_mapping_contract.py."
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_step_file_mapping_contract.py."
+        - "PASS git diff --check."
+      commands:
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_step_file_mapping_contract.py -q"
+        - "cd backend && uv run pyright src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_step_file_mapping_contract.py"
+        - "cd backend && uv run ruff check src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_step_file_mapping_contract.py"
+        - "cd backend && uv run ruff format --check src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_step_file_mapping_contract.py"
+        - "git diff --check"
+      type_debt:
+        new_any: 0
+        new_cast: 0
+        new_type_ignore: 0
+        new_pyright_ignore: 0
+      comments_added_or_changed: 0
+      next_task: T055
+
+  - id: T055
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: medium
+    objective: "Trace flow_published_form_schema_invalid reachability and decide whether frontend follow-through is required."
+    inputs:
+      - "T053 Claude audit."
+      - "PublishedFlowDefinition metadata callers."
+      - "Flow API consumer/public endpoints and frontend Flow runtime error mapping."
+    constraints:
+      - "Read-only except board receipt and optional Scout note under docs/goals/flow-runtime-ai-builder-maintainability/notes/."
+      - "Do not modify source or tests."
+      - "Name exact public paths if the error can reach a public consumer endpoint."
+      - "If frontend follow-through is required, queue a narrow Worker instead of editing frontend in this Scout."
+    expected_output:
+      - "Reachable public path yes/no."
+      - "File:line evidence for caller path."
+      - "Frontend mapping present/missing."
+      - "Decision: queue frontend Worker, queue backend test/doc Worker, or defer with evidence."
+    receipt:
+      result: done
+      note: "notes/T055-published-form-schema-error-reachability.md"
+      summary: "The published form-schema error is reachable from public run-contract and run-create paths, while the frontend Flow API error mapper lacks the code and localized messages. Queue a narrow frontend Worker under the existing mapper owner."
+      reachable_public_path: true
+      frontend_mapping_present: false
+      decision: "Queue T056 as a narrow frontend Worker under the existing Flow API error mapping owner."
+      evidence:
+        - "backend/src/intric/flows/published_definition.py:50-75 raises flow_published_form_schema_invalid while parsing published metadata."
+        - "backend/src/intric/flows/flow_run_contract_service.py:246-263 reads published_definition.metadata().form_schema for the run contract."
+        - "backend/src/intric/flows/api/flow_upload_router.py:73-91 exposes GET /api/v1/flows/{id}/run-contract/."
+        - "backend/src/intric/flows/application/flow_run_service.py:455-462 validates create-run input against published_definition.metadata()."
+        - "frontend/apps/web/src/lib/features/flows/flowRuntimeErrorMapping.ts:4-29 lacks flow_published_form_schema_invalid."
+        - "frontend/apps/web/messages/en.json:1799-1822 and frontend/apps/web/messages/sv.json:1799-1822 lack flow_error_flow_published_form_schema_invalid."
+      next_task: T056
+
+  - id: T056
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Map the reachable flow_published_form_schema_invalid API error through the existing frontend Flow runtime error owner."
+    canonical_owner: "frontend/apps/web/src/lib/features/flows/flowRuntimeErrorMapping.ts owns Flow API error-code extraction, descriptors, and string wrapper resolution."
+    allowed_files:
+      - "frontend/apps/web/src/lib/features/flows/flowRuntimeErrorMapping.ts"
+      - "frontend/apps/web/src/lib/features/flows/flowRuntimeErrorMapping.test.ts"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T055-published-form-schema-error-reachability.md"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    verify:
+      - "cd frontend/apps/web && bunx vitest run src/lib/features/flows/flowRuntimeErrorMapping.test.ts"
+      - "cd frontend/apps/web && bun run i18n:compile"
+      - "cd frontend/apps/web && bunx prettier --check src/lib/features/flows/flowRuntimeErrorMapping.ts src/lib/features/flows/flowRuntimeErrorMapping.test.ts messages/en.json messages/sv.json"
+      - "cd frontend/apps/web && bunx eslint src/lib/features/flows/flowRuntimeErrorMapping.ts src/lib/features/flows/flowRuntimeErrorMapping.test.ts"
+      - "git diff --check"
+      - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    stop_if:
+      - "The implementation needs backend contract changes or generated API client changes."
+      - "The implementation needs a second Flow error-code mapping owner."
+      - "The implementation expands into Flow UI redesign or broad frontend error-boundary refactoring."
+      - "The implementation introduces any, as any, @ts-ignore, pyright ignore, or broad compatibility code."
+      - "The error name or message implies a versioned contract, legacy behavior, or runner-caused input mistake."
+    receipt:
+      result: done
+      summary: "Mapped flow_published_form_schema_invalid through the existing frontend Flow API error descriptor owner with localized English and Swedish messages."
+      changed_files:
+        - "frontend/apps/web/src/lib/features/flows/flowRuntimeErrorMapping.ts"
+        - "frontend/apps/web/src/lib/features/flows/flowRuntimeErrorMapping.test.ts"
+        - "frontend/apps/web/messages/en.json"
+        - "frontend/apps/web/messages/sv.json"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T055-published-form-schema-error-reachability.md"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      behavior:
+        - "Run-contract and run-create UI paths now resolve the stable backend code to the shared frontend Flow API error message owner."
+        - "The message names the published flow form setup as invalid and directs the user to a flow editor, without implying runner-caused input failure."
+      verification:
+        - "PASS cd frontend/apps/web && bunx vitest run src/lib/features/flows/flowRuntimeErrorMapping.test.ts -> 16 tests passed."
+        - "PASS cd frontend/apps/web && bunx prettier --check src/lib/features/flows/flowRuntimeErrorMapping.ts src/lib/features/flows/flowRuntimeErrorMapping.test.ts messages/en.json messages/sv.json."
+        - "PASS cd frontend/apps/web && bunx eslint src/lib/features/flows/flowRuntimeErrorMapping.ts src/lib/features/flows/flowRuntimeErrorMapping.test.ts."
+        - "PASS cd frontend/apps/web && bun run i18n:compile."
+        - "PASS git diff --check."
+      commands:
+        - "cd frontend/apps/web && bunx vitest run src/lib/features/flows/flowRuntimeErrorMapping.test.ts"
+        - "cd frontend/apps/web && bunx prettier --check src/lib/features/flows/flowRuntimeErrorMapping.ts src/lib/features/flows/flowRuntimeErrorMapping.test.ts messages/en.json messages/sv.json"
+        - "cd frontend/apps/web && bunx eslint src/lib/features/flows/flowRuntimeErrorMapping.ts src/lib/features/flows/flowRuntimeErrorMapping.test.ts"
+        - "cd frontend/apps/web && bun run i18n:compile"
+        - "git diff --check"
+      type_debt:
+        new_any: 0
+        new_as_any: 0
+        new_type_ignore: 0
+        new_pyright_ignore: 0
+      comments_added_or_changed: 0
+      anti_patterns_avoided:
+        - "No new Flow error-code owner."
+        - "No backend contract or generated-client change."
+        - "No compatibility branch for unpublished legacy Flow behavior."
+        - "No broad UI redesign."
+      next_task: T057
+
+  - id: T057
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: medium
+    objective: "Write explicit deferral rows for the remaining P2 follow-ups before the next tranche green-light attempt."
+    inputs:
+      - "T053 Claude audit."
+      - "Current maintainability_findings follow-ups."
+      - "Done receipts through T056."
+    constraints:
+      - "Do not modify source or tests."
+      - "Make deferred work explicit with owner, trigger, acceptance criteria, and reason it does not block the current tranche."
+      - "Do not hide real P0/P1 work as a deferral."
+      - "Preserve unrelated dirty files."
+    expected_output:
+      - "Deferral rows for review-edit-openapi-error-examples, review-edit-validator-callback-followup, comments-ai-slop-audit, and any remaining phase-boundary smoke/deferred evidence."
+      - "Decision on whether to re-run Claude phase green-light after deferrals."
+    receipt:
+      result: done
+      note: "notes/T057-phase-boundary-deferrals.md"
+      summary: "Recorded explicit deferral rows for the remaining P2/API-doc/comment/smoke follow-ups and corrected current board guidance to use unversioned FlowMetadata and PublishedFlowDefinition names."
+      decision: "Re-run the host Claude phase green-light after committing the verified T054-T057 slice."
+      deferrals:
+        - id: "review-edit-openapi-error-examples"
+          owner: "Flow run execution router OpenAPI response docs."
+          trigger: "Next API documentation polish or public API golden journey extension that touches review-edit docs."
+          non_blocking_reason: "Runtime behavior and frontend rendering are already covered; this is API documentation quality."
+        - id: "review-edit-validator-callback-followup"
+          owner: "FlowRunRepository.edit_review_checkpoint_payload plus FlowRunService review-edit validation boundary."
+          trigger: "Before the next review-lifecycle slice that adds another edit, approve, reject, or resume precondition hook."
+          non_blocking_reason: "Current behavior is protected; this is a future complexity guard before adding more lifecycle hooks."
+        - id: "comments-ai-slop-audit"
+          owner: "Each touched module owner."
+          trigger: "Opportunistically when touching Flow runtime/API/AI Builder modules, or when Scout proves a low-risk cleanup cluster."
+          non_blocking_reason: "No current comment issue blocks runtime/API correctness after the accepted dead branch was removed."
+        - id: "ai-builder-live-material-efficiency-smoke"
+          owner: "Flow AI Builder eval/live smoke harness owner."
+          trigger: "Before declaring the broader Flow AI Builder production-readiness goal complete, or when a local API/server and credentials are available."
+          non_blocking_reason: "T049 found the concrete source-routing concern already covered by focused tests; live smoke is environment-dependent."
+      naming_check:
+        source_names: "Current source uses FlowMetadata, FlowFormSchema, FlowCareDataPolicy, and PublishedFlowDefinition; no source-level FlowMetadataV1 or PublishedFlowDefinitionV1 remains."
+        board_cleanup: "Updated current non-historical guidance to use unversioned names."
+      next_task: T058
+
+  - id: T058
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Verify and locally commit the T054-T057 cleanup/error-mapping/deferral slice, then run the host Claude phase green-light for tranche completion."
+    inputs:
+      - "T054 dead branch cleanup receipt."
+      - "T055 published form-schema reachability Scout receipt."
+      - "T056 frontend error mapping Worker receipt."
+      - "T057 phase-boundary deferral receipt."
+      - "Current diff."
+    constraints:
+      - "Stage only files changed by T054-T057; preserve unrelated dirty files."
+      - "Use a concise human-readable commit subject with no internal planning vocabulary."
+      - "Do not push."
+      - "Run Claude only through /Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py."
+      - "Use --model claude-opus-4-7 --effort xhigh and a long timeout."
+    expected_output:
+      - "Verification results."
+      - "Local commit hash."
+      - "Claude phase green-light result."
+      - "Next task or completion decision."
     receipt: null
 
 validation_command_candidates:

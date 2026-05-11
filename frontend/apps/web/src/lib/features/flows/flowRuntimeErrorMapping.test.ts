@@ -120,6 +120,23 @@ describe("flowRuntimeErrorMapping", () => {
     });
     expect(getFlowRuntimeErrorMessage(error, "fallback")).not.toBe("fallback");
   });
+
+  it("maps invalid published form schema errors through the Flow API descriptor", () => {
+    const error = new IntricError(
+      "Published flow form schema is invalid.",
+      "RESPONSE",
+      400,
+      0,
+      { code: "flow_published_form_schema_invalid" },
+      { endpoint: "GET@test" }
+    );
+
+    expect(describeFlowApiError(error)).toMatchObject({
+      code: "flow_published_form_schema_invalid",
+      messageKey: "flow_error_flow_published_form_schema_invalid"
+    });
+    expect(getFlowRuntimeErrorMessage(error, "fallback")).not.toBe("fallback");
+  });
 });
 
 describe("classifyUploadError", () => {

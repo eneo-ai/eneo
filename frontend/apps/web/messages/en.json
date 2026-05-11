@@ -1807,6 +1807,7 @@
   "flow_error_flow_review_rejected": "This review was rejected and the run cannot be resumed.",
   "flow_error_flow_review_stale_revision": "This review changed after it was loaded. Reload and try again.",
   "flow_error_flow_review_step_result_not_found": "The reviewed step output is no longer available. Reload the run and try again.",
+  "flow_error_flow_published_form_schema_invalid": "This published flow has an invalid form setup. Ask a flow editor to review the form fields before running it.",
   "flow_error_flow_run_idempotency_conflict": "This retry key was already used with different input. Start a new run or retry with the original input.",
   "flow_error_flow_run_required_step_input_missing": "Required runtime files are missing. Add the required files and start the run again.",
   "flow_error_flow_run_rerun_step_inputs_unsupported": "This run cannot be rerun with step inputs. Start a new run instead.",
