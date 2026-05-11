@@ -16,6 +16,10 @@ Purpose: reduce embedding-token spend and database churn for scheduled website c
 - [x] Scrapy sitemap API smoke test guarding the upstream internals used by the source-retention parser.
 - [x] Typed backend crawl/job failure details suitable for frontend display.
 - [x] Stored crawl outcome codes for durable frontend/backend failure details instead of relying only on raw `result_location` text.
+- [x] Sitemap no-page failures are classified separately from generic crawl no-page failures, while timeout precedence is preserved.
+- [x] Sitemap `<lastmod>` source-skip is controlled by the canonical tenant crawler settings path, so operators can enable it per tenant without a deploy.
+- [x] ARQ duplicate enqueue handling uses ARQ's native `enqueue_job()` return value instead of relying only on exception text.
+- [x] Database pool settings declared in `Settings` are wired into SQLAlchemy engine initialization.
 - [x] Frontend-visible crawl/job failure states.
 - [x] Targeted tests, strict pyright, ruff, and regression validation.
 - [x] Claude peer-loop implementation review.
@@ -645,7 +649,7 @@ Acceptance criteria for the follow-up:
 - Frontend tests prove `failure_summary` and job-level failure codes render understandable text.
 - Frontend tests prove skipped crawl classification is driven by typed code, not string prefixes.
 
-### 11. ARQ Layer Does Not Need Hash-Retention Changes
+### 11. ARQ, Redis, And Queue Reliability Review
 
 Evidence:
 
@@ -654,18 +658,53 @@ Evidence:
 - `backend/src/intric/worker/worker.py:314-407` shows `long_running_function()` intentionally creates a sessionless container and leaves the long-running task to manage its own short-lived DB sessions.
 - `backend/src/intric/worker/crawl_tasks.py:328-345` creates `TaskManager` with `job_service=None` and documents that crawl status is handled inside `crawl_task`.
 - `backend/src/intric/worker/crawl_tasks.py:1565-1599` completes crawl jobs with an explicit session-per-operation update and then sets `_job_already_handled`.
+- `backend/src/intric/worker/crawl_tasks.py:276-312` uses a Redis scheduler leader lock to avoid multiple workers enqueueing the same due scheduled crawls.
+- `backend/src/intric/worker/feeder/queues.py:129-159` stores pending crawl jobs in a per-tenant Redis FIFO list.
+- `backend/src/intric/worker/crawl_feeder.py:199-238` acquires a Redis concurrency slot before enqueueing to ARQ and marks a pre-acquired slot for the worker handoff.
+- ARQ `ArqRedis.enqueue_job(..., _job_id=...)` returns `None` when a job with that id already exists. It does not need to raise an exception.
 - `backend/src/intric/jobs/job_repo.py:83-109` has `mark_job_failed_if_running(error_message)`, but the current update does not persist `error_message`; `backend/src/intric/jobs/job_service.py:48-55` does persist ordinary failure text through `result_location`.
 
 Decision:
 
 - No ARQ worker setting change is needed for hash/model retention.
 - Do not put crawl skip or cleanup semantics in `backend/src/intric/worker/arq.py`; it is a worker registration/configuration Module, not the crawl persistence owner.
+- Use ARQ's native duplicate signal in `JobManager.enqueue()` and `JobEnqueuer.enqueue()` so duplicate enqueue races are handled deterministically.
+- Keep Redis pending queue and semaphore ownership in the existing feeder/capacity Modules; do not add a second queue or lock system for source-skip.
 - Crawl error-reporting improvements should be made in `crawl_task` / crawl-run and job persistence, because crawl jobs bypass the generic `TaskManager` success/failure path.
 - Track the `mark_job_failed_if_running(error_message)` mismatch in the failure-UX follow-up unless this branch deliberately includes the typed crawl/job outcome work.
 
 Reason:
 
 - ARQ schedules and runs the job, but the retained/persisted/failed/stale distinctions are crawl-domain semantics. Putting them at the ARQ layer would reduce Locality and make the behavior harder to test.
+- The queue layer still matters for reliability: if a feeder crash leaves a job in Redis pending after ARQ enqueue, the next feeder pass must remove the pending entry and release only the slot it acquired for that duplicate attempt.
+- Treating ARQ duplicate `None` as success plus duplicate is the long-term fix because it follows the library's documented behavior instead of pattern-matching strings.
+- Source-skip reduces downstream crawl work only after the job starts; it should not alter scheduler, pending queue, or ARQ retry semantics.
+
+Time and space complexity:
+
+- Scheduler due-website selection remains O(due websites) and uses short-lived DB sessions.
+- Pending queue scans remain O(active tenant queues) per feeder cycle through Redis `SCAN`, not blocking `KEYS`.
+- Per-tenant queue processing remains O(min(available capacity, configured feeder batch size)).
+- Source-skip URL eligibility remains O(existing blobs for the website) in memory, which matches the existing stale-cleanup bootstrap that already materializes existing titles.
+
+### 12. Database Connection Review
+
+Evidence:
+
+- `backend/src/intric/main/config.py:265-277` defines `db_pool_size`, `db_pool_max_overflow`, `db_pool_timeout`, `db_pool_pre_ping`, `db_pool_recycle`, and `db_pool_debug`.
+- `backend/src/intric/database/database.py:37-49` previously hard-coded `create_async_engine(host, pool_size=20, max_overflow=10)`, leaving timeout, pre-ping, recycle, and debug settings unused.
+- `backend/src/intric/server/dependencies/lifespan.py:24-28` is the production startup owner that initializes `sessionmanager`.
+
+Decision:
+
+- Wire the existing DB pool settings into `DatabaseSessionManager.init()` and pass them from application startup.
+- Keep pool size and overflow equal to the previous hard-coded engine values. Honor the already-declared timeout, pre-ping, recycle, and debug settings instead of leaving them inert.
+- Do not make crawler-specific DB engines or pools. The crawler already uses session-per-operation and explicit recovery for long-running work.
+
+Reason:
+
+- The crawler improvements reduce DB writes, but production readiness also depends on being able to tune the shared async pool without editing code.
+- Keeping one configured session manager preserves Locality and avoids a second DB connection owner.
 
 ## Intended Implementation
 
@@ -961,6 +1000,10 @@ Reason:
 19. Scrapy HTTP cache support is available through disabled-by-default settings and uses tenant/website-scoped filesystem directories when enabled.
 20. Duplicate crawl skips and crawl failures are exposed to the frontend through typed crawl outcomes rather than frontend-only string-prefix detection.
 21. Frontend crawl status views render translated outcome labels/details for known failure and skip states.
+22. Sitemap source-skip is controlled through `crawler_settings`, not only a process-wide environment flag.
+23. ARQ duplicate enqueue races are detected from `enqueue_job()` returning `None`, and the feeder treats them as idempotent duplicates.
+24. Watchdog rescue only counts a queued job as rescued when it actually re-enqueues it.
+25. DB pool settings defined in `Settings` are passed to SQLAlchemy engine initialization.
 
 ## Required Tests
 
