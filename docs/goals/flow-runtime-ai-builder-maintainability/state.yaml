@@ -5,7 +5,7 @@ goal:
   slug: "flow-runtime-ai-builder-maintainability"
   kind: open_ended
   tranche: "Backend-first maintainability and production-readiness hardening: fix P0 runtime/API risks, improve public API error contracts, type critical data boundaries, remove pre-production legacy/dead code after proof, and improve AI Builder material efficiency."
-  status: active
+  status: in_progress
 
 context:
   branch: "feature/refactor-flows-flowai"
@@ -85,7 +85,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T027
+active_task: T009
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -1398,7 +1398,7 @@ tasks:
   - id: T026
     type: judge
     assignee: Judge
-    status: blocked
+    status: done
     reasoning_hint: high
     objective: "Review T025 typed metadata-boundary Scout and decide whether to activate the first typed-boundary Worker, revise the Worker sequence, or request more evidence."
     inputs:
@@ -1422,8 +1422,9 @@ tasks:
       - "Maintainability self-review questions for the Worker."
       - "Whether to commit the T025 Scout docs before implementation."
     receipt:
-      result: blocked
+      result: done
       note: "notes/T026-typed-form-schema-worker-decision.md"
+      decision: "Revise the next Worker to a narrower FlowFormSchemaV1/FlowFormFieldV1 boundary slice and require a same-session Claude recovery gate before source implementation."
       summary: "Claude iteration 1 rejected the broad typed metadata Worker because it half-claimed a FlowMetadataV1 envelope while care_data_policy and other metadata readers remained raw. Codex accepted the critique and revised the next Worker to a narrower FlowFormSchemaV1/FlowFormFieldV1 boundary slice that defers FlowMetadataV1 to the later care-data/published snapshot Worker, preserves error semantics, adds OpenAPI and consumer API verification, and treats FlowMetadataPatch as a Worker 3 delete-or-wire decision."
       claude_iteration_1:
         artifact: ".codex/artifacts/claude-peer-loop-t026-typed-metadata-worker-plan-20260511T022334Z.md"
@@ -1446,16 +1447,12 @@ tasks:
         defer_to_worker_3:
           - "FlowMetadataPatch delete-or-wire decision."
           - "AI Builder raw form-schema reader cleanup."
-      blocker: "Claude plan-gate iteration 2 and retry both failed before review with API Error: 401 Invalid authentication credentials, so the required Claude green light is unavailable."
-      retry_artifacts:
-        - ".codex/artifacts/claude-peer-loop-t026-typed-form-schema-worker-revised-plan-20260511T022528Z.md"
-        - ".codex/artifacts/claude-peer-loop-t026-typed-form-schema-worker-revised-plan-retry-20260511T022606Z.md"
-      required_next_action: "Restore Claude CLI authentication, then resume the same session with iteration 4 and require green before activating any source Worker."
+      required_next_action: "Completed by T027 recovery gate; proceed only with the narrower FlowFormSchemaV1/FlowFormFieldV1 Worker."
 
   - id: T027
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Recover the required Claude plan gate for the revised T026 typed form-schema Worker plan before any implementation starts."
     inputs:
@@ -1465,14 +1462,31 @@ tasks:
     constraints:
       - "Do not implement source changes."
       - "Use the same Claude session `flow-runtime-maintainability-t026-typed-metadata-worker-plan`."
+      - "Run Claude only through the host-installed peer-loop wrapper at `/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py`."
+      - "Use explicit `--model claude-opus-4-7 --effort xhigh` for this gate."
+      - "Do not attempt Claude OAuth/login recovery from a sandboxed or containerized environment; verify host auth with `claude auth status --text` and a tiny `claude -p` smoke test instead."
       - "Use at least a 15 minute timeout, preferably 20 minutes."
       - "Require Claude green light with minimum score 8 before activating any Worker."
-      - "If Claude authentication still returns 401, stop and ask the owner to restore Claude CLI authentication."
     expected_output:
-      - "Claude iteration 4 result."
+      - "Claude iteration 5 result."
       - "If green: exact active Worker card with allowed files, red tests, validation commands, stop conditions, and receipt requirements."
       - "If not green: revised plan or explicit blocker receipt."
-    receipt: null
+    receipt:
+      result: done
+      decision: "Activate T009 as the narrower FlowFormSchemaV1/FlowFormFieldV1 Worker 1 after host Claude returned green with minimum score 8."
+      summary: "Host Claude peer-loop gate completed with VERDICT green, GREEN_LIGHT yes, MIN_SCORE 8. Activate the narrower FlowFormSchemaV1/FlowFormFieldV1 Worker 1 only; keep FlowMetadataV1 envelope, care-data, FlowService write paths, published-definition metadata access, and AI Builder cleanup deferred."
+      artifact: ".codex/artifacts/claude-peer-loop-t027-recover-typed-form-schema-plan-gate-iteration-5-20260511T051901Z.md"
+      model: "claude-opus-4-7"
+      effort: "xhigh"
+      command_shape: "Host-installed /Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py with --model claude-opus-4-7 --effort xhigh --timeout-seconds 1200."
+      verdict: "green"
+      green_light: true
+      min_score: 8
+      accepted_followups:
+        - "Worker must either wire serialize_flow_form_schema through a real Worker 1 caller or defer the serializer to Worker 2."
+        - "Add a parametrized test for the form-schema error-preservation table if feasible."
+        - "If flow_metadata.py is introduced before the full envelope, keep any module docstring to one invariant-focused line."
+        - "Before implementation, activate the Worker task and keep the stop-if list strict."
 
   - id: T008
     type: worker
@@ -1491,18 +1505,33 @@ tasks:
   - id: T009
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: high
-    objective: "Start the highest-ROI typed data-boundary slice: PublishedFlowDefinitionV1 or FlowMetadataV1, selected by fresh evidence."
-    allowed_files: []
-    verify: []
+    objective: "Introduce the Worker 1 typed form-schema boundary with FlowFormSchemaV1 and FlowFormFieldV1 only, replacing duplicate raw form-schema walks in validation, run input payload, and run contract without introducing the full FlowMetadataV1 envelope."
+    allowed_files:
+      - "backend/src/intric/flows/flow_metadata.py"
+      - "backend/src/intric/flows/flow_validators_form.py"
+      - "backend/src/intric/flows/flow_run_input_payload.py"
+      - "backend/src/intric/flows/flow_run_contract_service.py"
+      - "backend/tests/unittests/flows/test_flow_metadata.py"
+      - "backend/tests/unittests/flows/test_flow_run_input_payload.py"
+      - "backend/tests/unittests/flows/test_flow_validators.py"
+      - "backend/tests/unittests/flows/test_flow_run_contract_service.py"
+      - "backend/tests/unit/test_flow_openapi_contract.py"
+      - "backend/tests/integration/flows/test_flow_consumer_api_contract.py"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_run_contract_service.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_consumer_api_contract.py -q"
+      - "cd backend && uv run pyright src/intric/flows/flow_metadata.py src/intric/flows/flow_validators_form.py src/intric/flows/flow_run_input_payload.py src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_run_contract_service.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_consumer_api_contract.py"
+      - "cd backend && uv run ruff check src/intric/flows/flow_metadata.py src/intric/flows/flow_validators_form.py src/intric/flows/flow_run_input_payload.py src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_run_contract_service.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_consumer_api_contract.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/flow_metadata.py src/intric/flows/flow_validators_form.py src/intric/flows/flow_run_input_payload.py src/intric/flows/flow_run_contract_service.py tests/unittests/flows/test_flow_metadata.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_run_contract_service.py tests/unit/test_flow_openapi_contract.py tests/integration/flows/test_flow_consumer_api_contract.py"
     stop_if:
-      - "P0 slices are not stable."
-      - "No clear owner boundary is selected."
-      - "Would introduce large rewrite or shallow wrappers."
-      - "Model is added without forbid or explicit handling for unknown keys."
-      - "Introduces cast/Any to bridge old call sites instead of migrating them in the same slice."
-      - "Adds typed wrapper that does not become the canonical parser/serializer at the boundary."
+      - "The implementation needs to touch care-data policy, FlowService write paths, published-definition metadata access, or AI Builder behavior."
+      - "The implementation adds Any, cast, or # type: ignore outside the parser boundary without an explicit boundary reason."
+      - "The public run-contract endpoint leaks typed parser errors instead of preserving flow_published_form_schema_invalid."
+      - "The new module contains tutorial comments or comments longer than two lines that do not document a real invariant."
+      - "FlowFormFieldV1.options uses a mutable default instead of list[str] | None."
+      - "The Worker cannot remove the duplicate run-payload legacy normalization map."
+      - "serialize_flow_form_schema has neither a real Worker 1 caller nor an explicit deferral to Worker 2."
     receipt: null
 
   - id: T010

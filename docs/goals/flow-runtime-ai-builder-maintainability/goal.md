@@ -111,6 +111,14 @@ A phase is not 9/10 maintainable if it fixes the bug by adding another ad hoc br
 
 Use the Claude peer loop as a maintainability challenge before green-lighting the next big phase or any important architecture/runtime/API decision.
 
+Claude must run from the host-installed CLI through exactly this peer-loop wrapper:
+
+```bash
+/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py
+```
+
+Do not run Claude login, OAuth recovery, or phase gates from a sandboxed/containerized environment. If authentication fails, first verify the host CLI with `claude auth status --text` and a small `claude -p` smoke test. Then run the peer-loop wrapper from the host with explicit `--model claude-opus-4-7 --effort xhigh`; do not switch to one-off `claude -p` reviews or a different script for goal gates.
+
 Run Claude reviews with a long enough timeout for meaningful analysis. Use at least 15 minutes and prefer 20 minutes for phase gates, commit gates, and difficult architecture decisions. Iterate in the same Claude session until `GREEN_LIGHT: yes`, or document an evidence-backed disagreement before proceeding.
 
 Gate tiering:
