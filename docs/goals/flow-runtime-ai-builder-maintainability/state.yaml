@@ -5,7 +5,7 @@ goal:
   slug: "flow-runtime-ai-builder-maintainability"
   kind: open_ended
   tranche: "Backend-first maintainability and production-readiness hardening: fix P0 runtime/API risks, improve public API error contracts, type critical data boundaries, remove pre-production legacy/dead code after proof, and improve AI Builder material efficiency."
-  status: in_progress
+  status: blocked
 
 context:
   branch: "feature/refactor-flows-flowai"
@@ -86,7 +86,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T065
+active_task: null
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -4006,7 +4006,7 @@ tasks:
   - id: T065
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Audit the board after local follow-ups and decide whether any safe unblocked next task remains."
     inputs:
@@ -4025,7 +4025,29 @@ tasks:
       - "complete | blocked | next task."
       - "Which remaining follow-ups are blocked, future-triggered, or safe now."
       - "Decision on goal.status and active_task."
-    receipt: null
+    receipt:
+      result: blocked
+      decision: "blocked"
+      summary: "No safe unblocked local task remains in the current board. The broader goal is not complete because live AI Builder smoke still requires ENEO_LOCAL_API_KEY, and the remaining review-edit callback follow-up is future-triggered by new review-lifecycle work."
+      objective_status:
+        tranche: "Current backend-first maintainability tranche remains complete from T059."
+        broader_goal: "Not complete."
+      audited_requirements:
+        - requirement: "Run live AI Builder material-efficiency smoke before declaring broader production readiness complete."
+          status: "blocked"
+          evidence: "ENEO_LOCAL_API_KEY and ENEO_LOCAL_API_BASE are still missing from the host shell; T060 and T061 record the runner blocker."
+        - requirement: "review-edit-openapi-error-examples."
+          status: "done"
+          evidence: "T062 added worked examples for typed_io_contract_violation and flow_review_stale_revision and verified the OpenAPI contract test."
+        - requirement: "comments-ai-slop-audit."
+          status: "done_for_current_low_risk_cluster"
+          evidence: "T063 found one narrow source-comment cluster and T064 removed internal planning vocabulary from question_catalog.py."
+        - requirement: "review-edit-validator-callback-followup."
+          status: "future_triggered"
+          evidence: "T057 trigger is before the next review-lifecycle slice that adds another edit/approve/reject/resume precondition hook; no such slice is active now."
+      remaining_blockers:
+        - "Owner must export ENEO_LOCAL_API_BASE and ENEO_LOCAL_API_KEY before live AI Builder smoke can run."
+      active_task_decision: "Set goal.status to blocked and active_task to null until credentials or new owner direction are available."
 
 validation_command_candidates:
   shared:
