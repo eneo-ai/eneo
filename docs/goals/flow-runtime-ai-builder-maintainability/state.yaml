@@ -85,7 +85,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T034
+active_task: T035
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -2130,7 +2130,7 @@ tasks:
   - id: T034
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Scope the typed published-definition metadata accessor so runtime/contract readers can stop consuming raw published_definition.metadata_json without broadening into AI Builder cleanup."
     inputs:
@@ -2151,6 +2151,65 @@ tasks:
       - "verification commands"
       - "stop_if"
       - "whether Claude plan gate is required before activation"
+    receipt:
+      result: done
+      decision: "Activate T035 after host Claude plan gate iteration 2 returned green."
+      summary: "Scoped a published-definition typed metadata accessor Worker: remove metadata_json from the PublishedFlowDefinition dataclass, add lazy metadata() parsing from definition_json through FlowMetadataV1, move run-contract and rerun readers off published_definition.metadata_json, keep flow_published_form_schema_invalid owned by flow_run_contract_service, and defer flow_run_input_payload.py signature tightening."
+      note: "docs/goals/flow-runtime-ai-builder-maintainability/notes/T034-published-definition-metadata-accessor-scope.md"
+      claude_plan_gate:
+        session: "flow-runtime-maintainability-t034-published-definition-metadata-plan"
+        artifact_iteration_1: ".codex/artifacts/claude-peer-loop-t034-published-definition-metadata-accessor-plan-gate-20260511T073434Z.md"
+        artifact_iteration_2: ".codex/artifacts/claude-peer-loop-t034-published-definition-metadata-accessor-plan-gate-iteration-2-20260511T073643Z.md"
+        model: "claude-opus-4-7"
+        effort: "xhigh"
+        verdict: "green"
+        green_light: true
+        min_score: 8
+        accepted_changes:
+          - "Remove metadata_json from PublishedFlowDefinition instead of dual-storing raw and typed metadata."
+          - "Use lazy metadata() parsing from definition_json so published_definition.py does not own public run-contract error codes."
+          - "Keep flow_published_form_schema_invalid translation in flow_run_contract_service._published_form_fields."
+          - "Explicitly defer flow_run_input_payload.py signature tightening; rerun serializes typed published metadata back to JSON in this slice."
+          - "Require typed metadata shape, metadata_json field removal, rerun required-field behavior, and grep-proof tests."
+          - "Tighten the cast-removal grep proof to cast(JsonObject, metadata_json) so unrelated step casts do not obscure the result."
+      next_task: T035
+
+  - id: T035
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Add lazy FlowMetadataV1 access to PublishedFlowDefinition and move published run-contract/rerun readers off published_definition.metadata_json without touching AI Builder or flow_run_input_payload.py."
+    allowed_files:
+      - "backend/src/intric/flows/published_definition.py"
+      - "backend/src/intric/flows/flow_run_contract_service.py"
+      - "backend/src/intric/flows/application/flow_run_service.py"
+      - "backend/tests/unittests/flows/test_published_definition_contract.py"
+      - "backend/tests/unittests/flows/test_flow_run_contract_service.py"
+      - "backend/tests/unittests/flows/test_flow_run_service.py"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py -q"
+      - "cd backend && uv run pyright src/intric/flows/published_definition.py src/intric/flows/flow_run_contract_service.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py"
+      - "cd backend && uv run ruff check src/intric/flows/published_definition.py src/intric/flows/flow_run_contract_service.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/published_definition.py src/intric/flows/flow_run_contract_service.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py"
+    stop_if:
+      - "The implementation needs AI Builder files, routers, generated clients, migrations, frontend files, flow_run_input_payload.py, or unrelated dirty files."
+      - "The implementation creates a parallel PublishedFlowDefinitionV1 outer snapshot model."
+      - "PublishedFlowDefinition keeps both metadata_json and typed metadata as dataclass storage fields."
+      - "public run-contract error code flow_published_form_schema_invalid changes unintentionally."
+      - "rerun payload validation behavior changes without a dedicated test."
+      - "published_definition.py starts owning metadata schema rules instead of delegating to flow_metadata.py."
+      - "New Any, casts, # type: ignore, or Pyright ignore comments are added to get green checks."
+    expected_output:
+      - "Red tests first, then implementation."
+      - "PublishedFlowDefinition metadata_json dataclass field removed."
+      - "metadata() lazy accessor returns FlowMetadataV1."
+      - "_published_form_fields parameter type choice recorded."
+      - "flow_published_form_schema_invalid remains translated in flow_run_contract_service."
+      - "Rerun re-serialize cost and deferred flow_run_input_payload.py follow-up recorded."
+      - "Grep proof: no published_definition.metadata_json consumers and no cast(JsonObject, metadata_json) in published_definition.py."
+      - "All verify commands passed."
+      - "Claude commit gate before source commit."
     receipt: null
 
 validation_command_candidates:
