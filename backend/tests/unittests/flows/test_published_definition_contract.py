@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import fields
 from uuid import uuid4
 
 import pytest
 
 from intric.flows.assistant_execution_snapshot import stable_hash
+from intric.flows.flow_metadata import FlowFormFieldType, serialize_flow_metadata
 from intric.flows.flow_review_policy import (
     FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED,
     FlowStepReviewMode,
@@ -75,6 +77,40 @@ def test_parser_round_trips_definition_and_runtime_steps() -> None:
     assert parsed.steps == definition["steps"]
     assert len(runtime_steps) == 1
     assert runtime_steps[0].step_order == 1
+
+
+def test_parser_exposes_typed_metadata_without_raw_metadata_field() -> None:
+    definition = build_published_definition_json(
+        flow_id=uuid4(),
+        name="Flow",
+        description=None,
+        metadata_json={
+            "form_schema": {
+                "fields": [
+                    {
+                        "name": "case_id",
+                        "type": "email",
+                        "label": "Case",
+                        "required": True,
+                        "order": 2,
+                    }
+                ]
+            },
+            "care_data_policy": {"sensitive": True},
+            "external_owner": "case-system",
+        },
+        steps=[_step(order=1)],
+    )
+
+    parsed = parse_published_definition(definition)
+    metadata = parsed.metadata()
+
+    assert "metadata_json" not in {field.name for field in fields(parsed)}
+    assert metadata.form_schema is not None
+    assert metadata.form_schema.fields[0].name == "case_id"
+    assert metadata.form_schema.fields[0].type is FlowFormFieldType.TEXT
+    assert metadata.care_data_policy.sensitive is True
+    assert serialize_flow_metadata(metadata)["external_owner"] == "case-system"
 
 
 def test_parser_round_trips_step_review_policy() -> None:

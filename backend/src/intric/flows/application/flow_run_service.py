@@ -31,6 +31,7 @@ from intric.flows.flow_evidence_policy import (
     resolve_service_key_evidence_capability,
 )
 from intric.flows.flow_input_limits import FlowInputLimits, resolve_flow_input_limits
+from intric.flows.flow_metadata import serialize_flow_metadata
 from intric.flows.flow_permissions import user_can_view_flow_trace
 from intric.flows.flow_run_evidence_bundle import (
     EvidenceBundle,
@@ -729,7 +730,7 @@ class FlowRunService:
         if input_payload_json is None:
             return None
         normalized_inline_payload = normalize_and_validate_flow_run_payload(
-            metadata_json=published_definition.metadata_json,
+            metadata_json=serialize_flow_metadata(published_definition.metadata()),
             payload=input_payload_json,
         )
         self._reject_reserved_input_payload_keys(normalized_inline_payload)

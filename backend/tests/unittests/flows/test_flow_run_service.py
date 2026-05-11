@@ -1795,6 +1795,92 @@ async def test_rerun_step_omitted_payload_does_not_require_form_fields(user):
 
 
 @pytest.mark.asyncio
+async def test_rerun_step_rejects_empty_payload_missing_required_form_field(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _form_schema_flow(user)
+    root_step = flow.steps[0]
+    downstream_step = flow.steps[1].model_copy(update={"input_source": "previous_step"})
+    flow = flow.model_copy(update={"steps": [root_step, downstream_step]})
+    run = _run(user=user, flow_id=flow.id).model_copy(
+        update={"status": FlowRunStatus.COMPLETED}
+    )
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+    flow_run_repo.get.return_value = run
+    flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.rerun_step(
+            flow_id=flow.id,
+            run_id=run.id,
+            rerun_step_id=root_step.id,
+            expected_run_revision=1,
+            reason="Refresh answer",
+            input_payload_json={},
+        )
+
+    assert exc_info.value.code == "flow_input_required_field_missing"
+    assert exc_info.value.context == {
+        "field_name": "Namn på brukare",
+        "field_type": "text",
+    }
+    flow_run_repo.get_latest_completed_attempt_id_for_step.assert_not_awaited()
+    flow_run_repo.accept_or_replay_rerun_operation.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_rerun_step_rejects_malformed_published_form_schema(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _form_schema_flow(user).model_copy(
+        update={
+            "metadata_json": {
+                "form_schema": {"fields": [{"name": "case_id", "type": "unsupported"}]}
+            }
+        }
+    )
+    root_step = flow.steps[0]
+    downstream_step = flow.steps[1].model_copy(update={"input_source": "previous_step"})
+    flow = flow.model_copy(update={"steps": [root_step, downstream_step]})
+    run = _run(user=user, flow_id=flow.id).model_copy(
+        update={"status": FlowRunStatus.COMPLETED}
+    )
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+    flow_run_repo.get.return_value = run
+    flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
+
+    with pytest.raises(
+        BadRequestException, match="metadata_json.form_schema.fields\\[0\\].type"
+    ) as exc_info:
+        await service.rerun_step(
+            flow_id=flow.id,
+            run_id=run.id,
+            rerun_step_id=root_step.id,
+            expected_run_revision=1,
+            reason="Refresh answer",
+            input_payload_json={"case_id": "A-123"},
+        )
+
+    assert exc_info.value.code is None
+    flow_run_repo.get_latest_completed_attempt_id_for_step.assert_not_awaited()
+    flow_run_repo.accept_or_replay_rerun_operation.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_rerun_step_rejects_reserved_payload_keys(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
@@ -2010,7 +2096,9 @@ async def test_get_evidence_allows_service_key_with_view_capability(user):
             "principal_api_key_id": service_user.active_api_key.id,
         }
     )
-    version = _version(user=user, flow=_flow(user=user), version=1)
+    flow = _flow(user=user).model_copy(update={"id": run.flow_id})
+    version = _version(user=user, flow=flow, version=1)
+    flow_repo.get.return_value = flow
     flow_run_repo.get.return_value = run
     flow_run_repo.list_step_results.return_value = []
     flow_run_repo.list_step_attempts.return_value = []
@@ -2048,7 +2136,9 @@ async def test_export_evidence_json_allows_service_key_redacted_export_with_writ
             "principal_api_key_id": service_user.active_api_key.id,
         }
     )
-    version = _version(user=user, flow=_flow(user=user), version=1)
+    flow = _flow(user=user).model_copy(update={"id": run.flow_id})
+    version = _version(user=user, flow=flow, version=1)
+    flow_repo.get.return_value = flow
     flow_run_repo.get.return_value = run
     flow_run_repo.list_step_results.return_value = []
     flow_run_repo.list_step_attempts.return_value = []
@@ -3668,6 +3758,7 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
     run = _run(user=user, flow_id=flow.id)
+    flow_repo.get.return_value = flow
     flow_run_repo.get.return_value = run
     flow_version_repo.get.return_value = FlowVersion(
         flow_id=flow.id,
@@ -3850,6 +3941,7 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
     run = _run(user=user, flow_id=flow.id)
+    flow_repo.get.return_value = flow
     flow_run_repo.get.return_value = run
     flow_version_repo.get.return_value = FlowVersion(
         flow_id=flow.id,

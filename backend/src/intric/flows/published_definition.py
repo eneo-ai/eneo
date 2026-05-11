@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping, cast
+from typing import Mapping, TypeGuard, cast
 from uuid import UUID
 
 from intric.flows.assistant_execution_snapshot import stable_hash
 from intric.flows.domain.flow import JsonObject
+from intric.flows.flow_metadata import (
+    FlowMetadataParseMode,
+    FlowMetadataV1,
+    parse_flow_metadata,
+)
 from intric.flows.runtime.models import RuntimeStep
 from intric.flows.runtime.step_definition_parser import parse_runtime_steps
 from intric.main.exceptions import BadRequestException
@@ -27,15 +32,28 @@ def _step_order_sort_key(step: JsonObject) -> int:
     return 0
 
 
+def _is_json_object(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 @dataclass(frozen=True)
 class PublishedFlowDefinition:
     schema_version: int
     flow_id: UUID
     name: str
     description: str | None
-    metadata_json: JsonObject | None
     steps: list[JsonObject]
     definition_json: JsonObject
+
+    def metadata(self) -> FlowMetadataV1:
+        raw_metadata: object = self.definition_json.get("metadata_json")
+        metadata_json: Mapping[str, object] | None = (
+            raw_metadata if _is_json_object(raw_metadata) else None
+        )
+        return parse_flow_metadata(
+            metadata_json,
+            mode=FlowMetadataParseMode.PERSISTED_READ,
+        )
 
     def runtime_steps(self) -> list[RuntimeStep]:
         try:
@@ -115,15 +133,11 @@ def parse_published_definition(
 
     name = definition_json.get("name")
     description = definition_json.get("description")
-    metadata_json = definition_json.get("metadata_json")
     return PublishedFlowDefinition(
         schema_version=schema_version,
         flow_id=flow_id,
         name=name if isinstance(name, str) else "",
         description=description if isinstance(description, str) else None,
-        metadata_json=cast(JsonObject, metadata_json)
-        if isinstance(metadata_json, dict)
-        else None,
         steps=[cast(JsonObject, step) for step in step_items],
         definition_json=dict(definition_json),
     )

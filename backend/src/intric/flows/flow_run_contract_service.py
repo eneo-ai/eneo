@@ -5,14 +5,13 @@ from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
-from intric.flows.domain.flow import Flow, FlowTemplateAsset, FlowVersion, JsonObject
+from intric.flows.domain.flow import Flow, FlowTemplateAsset, FlowVersion
 from intric.flows.enums import FlowOutputMode, FlowOutputType, FlowTemplateAssetStatus
 from intric.flows.flow_input_limits import (
     FlowInputLimits,
     effective_flow_input_limit,
     effective_runtime_max_files,
 )
-from intric.flows.flow_metadata import FlowFormSchemaParseMode, parse_flow_form_schema
 from intric.flows.flow_run_contract_models import (
     FlowFinalOutputContractPublic,
     FlowOutputDelivery,
@@ -22,7 +21,10 @@ from intric.flows.flow_run_contract_models import (
     FlowTemplateReadinessPublic,
     FormFieldPublic,
 )
-from intric.flows.published_definition import parse_published_definition
+from intric.flows.published_definition import (
+    PublishedFlowDefinition,
+    parse_published_definition,
+)
 from intric.flows.runtime.models import RuntimeStep
 from intric.flows.runtime_input import (
     build_runtime_input_config,
@@ -88,7 +90,7 @@ class FlowRunContractService:
             flow_id=persisted_flow_id,
             published_flow_version=flow.published_version,
             final_output=_build_final_output(steps),
-            form_fields=_published_form_fields(published_definition.metadata_json),
+            form_fields=_published_form_fields(published_definition),
             steps_requiring_input=_runtime_input_contracts(steps, limits),
             steps_requiring_review=_review_step_contracts(steps),
             aggregate_max_files=_aggregate_max_files(steps, limits),
@@ -241,11 +243,11 @@ def _output_delivery(
     return FlowOutputDelivery.PAYLOAD
 
 
-def _published_form_fields(metadata_json: JsonObject | None) -> list[FormFieldPublic]:
+def _published_form_fields(
+    published_definition: PublishedFlowDefinition,
+) -> list[FormFieldPublic]:
     try:
-        form_schema = parse_flow_form_schema(
-            metadata_json, mode=FlowFormSchemaParseMode.PERSISTED_READ
-        )
+        form_schema = published_definition.metadata().form_schema
     except BadRequestException as exc:
         raise BadRequestException(
             "Published flow form schema is invalid.",

@@ -85,7 +85,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T035
+active_task: T036
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -2177,7 +2177,7 @@ tasks:
   - id: T035
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Add lazy FlowMetadataV1 access to PublishedFlowDefinition and move published run-contract/rerun readers off published_definition.metadata_json without touching AI Builder or flow_run_input_payload.py."
     allowed_files:
@@ -2210,6 +2210,96 @@ tasks:
       - "Grep proof: no published_definition.metadata_json consumers and no cast(JsonObject, metadata_json) in published_definition.py."
       - "All verify commands passed."
       - "Claude commit gate before source commit."
+    receipt:
+      result: done
+      summary: "PublishedFlowDefinition now exposes lazy typed metadata() through FlowMetadataV1, no longer stores raw metadata_json as a dataclass field, and the two live published runtime readers no longer consume published_definition.metadata_json directly."
+      changed_files:
+        - "backend/src/intric/flows/published_definition.py"
+        - "backend/src/intric/flows/flow_run_contract_service.py"
+        - "backend/src/intric/flows/application/flow_run_service.py"
+        - "backend/tests/unittests/flows/test_published_definition_contract.py"
+        - "backend/tests/unittests/flows/test_flow_run_service.py"
+      red_test: "cd backend && uv run pytest tests/unittests/flows/test_published_definition_contract.py -q failed on missing PublishedFlowDefinition.metadata() before implementation."
+      commands:
+        - "PASS cd backend && uv run pytest tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py -q -> 127 passed"
+        - "PASS cd backend && uv run pyright src/intric/flows/published_definition.py src/intric/flows/flow_run_contract_service.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py -> 0 errors"
+        - "PASS cd backend && uv run ruff check src/intric/flows/published_definition.py src/intric/flows/flow_run_contract_service.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py"
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/published_definition.py src/intric/flows/flow_run_contract_service.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_service.py"
+        - "PASS git grep -n \"published_definition.metadata_json\" -- backend/src backend/tests -> no hits"
+        - "PASS git grep -n \"cast(JsonObject, metadata_json)\" -- backend/src/intric/flows/published_definition.py -> no hits"
+        - "PASS git diff --check"
+      claude:
+        session: "flow-runtime-maintainability-t034-published-definition-metadata-plan"
+        commit_gate_iteration_3:
+          artifact: ".codex/artifacts/claude-peer-loop-t035-published-definition-metadata-implementation-review-20260511T075035Z.md"
+          verdict: "green"
+          green_light: true
+          min_score: 8
+          accepted_change: "Added malformed published metadata rerun test to close Claude's P2 defensive-test gap."
+        commit_gate_iteration_4:
+          artifact: ".codex/artifacts/claude-peer-loop-t035-published-definition-metadata-implementation-review-iteration-4-20260511T075321Z.md"
+          verdict: "green"
+          green_light: true
+          min_score: 8
+      implementation_notes:
+        canonical_owner: "PublishedFlowDefinition remains the published snapshot envelope owner; flow_metadata.py remains the metadata shape/parser owner; flow_run_contract_service.py remains the public run-contract error translation owner."
+        published_form_fields_parameter: "_published_form_fields accepts PublishedFlowDefinition so the lazy metadata parse and flow_published_form_schema_invalid translation stay inside the same run-contract helper."
+        rerun_reserialize_debt: "Rerun serializes FlowMetadataV1 back to JSON before calling normalize_and_validate_flow_run_payload because flow_run_input_payload.py signature tightening was explicitly deferred."
+        rerun_error_asymmetry: "Malformed published metadata now fails loud in rerun before persistence with an uncoded BadRequestException, while run-contract translates malformed form schema to flow_published_form_schema_invalid; align these when the input-payload signature is tightened."
+        evidence_fixture_scope: "Evidence-export tests now return real Flow fixtures because stricter care-data metadata parsing no longer tolerates AsyncMock metadata_json; this is fallout from earlier care-data parser tightening, not new published-definition behavior."
+      type_debt_counts:
+        new_any: 0
+        new_cast: 0
+        new_type_ignore: 0
+        new_pyright_ignore: 0
+      comments_added_or_changed: "None."
+      anti_patterns_avoided:
+        - "No PublishedFlowDefinitionV1 parallel model."
+        - "No flow_run_input_payload.py changes in this deferred-signature slice."
+        - "No AI Builder, routers, migrations, generated clients, frontend, or unrelated dirty-file changes."
+        - "No new Any, casts, type ignores, or Pyright ignores."
+      maintainability_rubric:
+        maintainability: 9
+        code_quality: 9
+        clean_architecture: 9
+        separation_of_concerns: 9
+        single_source_of_truth: 9
+        human_readability: 9
+        human_reviewability: 9
+        type_contracts_pyright: 9
+        test_quality: 9
+        time_space_complexity: 8
+        comment_quality: 9
+        overall: 8
+      followups:
+        - "Tighten normalize_and_validate_flow_run_payload(...) to accept FlowMetadataV1 | None so rerun no longer serializes and reparses typed metadata."
+        - "Align malformed published metadata rerun errors with run-contract's flow_published_form_schema_invalid code when the input-payload signature is tightened."
+      next_task: T036
+
+  - id: T036
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe typed metadata boundary task after the published-definition accessor, with flow_run_input_payload.py signature tightening as the leading candidate unless fresh evidence shows a higher-value task."
+    inputs:
+      - "T035 receipt"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T034-published-definition-metadata-accessor-scope.md"
+      - ".codex/artifacts/claude-peer-loop-t035-published-definition-metadata-implementation-review-iteration-4-20260511T075321Z.md"
+    constraints:
+      - "Read-only. Do not implement source changes."
+      - "Inspect flow_run_input_payload.py, FlowRunService create-run/rerun callers, and run-contract malformed-metadata error behavior before deciding."
+      - "Prefer a narrow typed signature cleanup if it removes the rerun serialize/reparse wash and aligns malformed published metadata error contracts."
+      - "Do not broaden into AI Builder, frontend, routers, generated clients, migrations, or unrelated cleanup."
+      - "Run a host Claude plan gate if the next Worker changes public error codes or shared input-payload signatures."
+    expected_output:
+      - "decision"
+      - "next Worker objective or reason to pick a different task"
+      - "allowed_files"
+      - "red tests"
+      - "verification commands"
+      - "stop_if"
+      - "whether Claude plan gate is required before activation"
     receipt: null
 
 validation_command_candidates:
