@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from check_route_metadata import is_router_file_path
+
 PREFERRED_BRANCH_RE = re.compile(
     r"^(feature|feat|fix|hotfix|security|chore|deps|docs|test|refactor|remove|ci)/"
 )
@@ -116,7 +118,10 @@ def main() -> int:
 
     backend_changed = any(path.startswith("backend/src/intric/") for path in paths)
     frontend_changed = any(path.startswith("frontend/apps/web/src/") for path in paths)
-    router_changed = any(path.startswith("backend/src/") and ("router" in path or "/routes/" in path) for path in paths)
+    router_paths = [
+        path for path in paths if path.startswith("backend/src/") and is_router_file_path(path)
+    ]
+    router_changed = bool(router_paths)
 
     try:
         if backend_changed:
@@ -128,7 +133,6 @@ def main() -> int:
         if frontend_changed:
             run_check("frontend check", ["bun", "run", "check"], root / "frontend")
         if router_changed:
-            router_paths = [path for path in paths if path.startswith("backend/src/") and ("router" in path or "/routes/" in path)]
             run_check(
                 "route metadata",
                 ["python3", "scripts/check_route_metadata.py", "--repo-root", str(root), "--base", base, *router_paths],

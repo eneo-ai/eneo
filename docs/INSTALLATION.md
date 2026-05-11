@@ -220,6 +220,11 @@ This enables:
 - commit-message validation
 - push-time branch safety and final local checks
 
+The pre-push checks only run the heavier backend or frontend checks when files in
+those areas changed. For a WIP push or a CI rerun where you intentionally want to
+skip local hooks, use `git push --no-verify`; do not use it to bypass a real
+failure before opening or merging a PR.
+
 ### Testing Your Changes
 
 **Backend Tests:**

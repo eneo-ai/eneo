@@ -7,9 +7,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROUTE_START_RE = re.compile(r"^(\s*)@router\.(get|post|put|patch|delete)\(")
-ROUTER_FILE_RE = re.compile(r"(?:^|/)(?:routes|[^/]*router)\.py$")
+ROUTE_START_RE = re.compile(
+    r"^(\s*)@[A-Za-z_][A-Za-z0-9_]*\.(get|post|put|patch|delete)\("
+)
+ROUTER_FILE_RE = re.compile(r"(?:^|/)(?:routes|routes/.*|[^/]*router)\.py$")
 HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+
+
+def is_router_file_path(raw_path: str) -> bool:
+    return bool(ROUTER_FILE_RE.search(raw_path.replace("\\", "/")))
 
 
 def iter_route_blocks(text: str) -> list[tuple[int, str, str]]:
@@ -103,7 +109,7 @@ def main() -> int:
     for raw in args.paths:
         path = Path(raw)
         normalized = path.as_posix()
-        if not ROUTER_FILE_RE.search(normalized):
+        if not is_router_file_path(normalized):
             continue
         changed = None
         if repo_root is not None and args.base:

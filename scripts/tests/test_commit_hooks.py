@@ -91,9 +91,21 @@ class CommitHookTests(unittest.TestCase):
     def test_commit_preflight_flags_high_confidence_secret_pattern(self) -> None:
         root = self.make_repo()
         (root / ".gitignore").write_text("", encoding="utf-8")
-        target = root / "backend" / "src" / "intric" / "secret_demo.py"
-        fake_secret = "ghp_" + "abcdefghijklmnopqrstuvwx" + "yz123456"
-        target.write_text(f'TOKEN = "{fake_secret}"\n', encoding="utf-8")
+        target = root / "backend" / "src" / "intric" / "pattern_demo.py"
+        candidate = "".join(["gh", "p_", "a" * 30])
+        target.write_text(f'value = "{candidate}"\n', encoding="utf-8")
+        subprocess.run(["git", "add", str(target.relative_to(root))], cwd=root, check=True, capture_output=True, text=True)
+
+        result = run_script(COMMIT_PREFLIGHT, "--repo-root", str(root))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("High-confidence secret", result.stderr)
+
+    def test_commit_preflight_flags_anthropic_key_pattern(self) -> None:
+        root = self.make_repo()
+        (root / ".gitignore").write_text("", encoding="utf-8")
+        target = root / "backend" / "src" / "intric" / "anthropic_pattern_demo.py"
+        candidate = "".join(["sk", "-ant-api03-", "a" * 40])
+        target.write_text(f'value = "{candidate}"\n', encoding="utf-8")
         subprocess.run(["git", "add", str(target.relative_to(root))], cwd=root, check=True, capture_output=True, text=True)
 
         result = run_script(COMMIT_PREFLIGHT, "--repo-root", str(root))
@@ -116,6 +128,23 @@ class CommitHookTests(unittest.TestCase):
         router = root / "backend" / "src" / "intric" / "demo_router.py"
         router.write_text(
             "@router.post(\n"
+            '    "/demo",\n'
+            "    response_model=DemoResponse,\n"
+            ")\n"
+            "async def create_demo():\n"
+            "    return {}\n",
+            encoding="utf-8",
+        )
+
+        result = run_script(ROUTE_METADATA_CHECK, str(router))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("missing description, responses", result.stderr)
+
+    def test_route_metadata_check_handles_named_router_variables(self) -> None:
+        root = self.make_repo()
+        router = root / "backend" / "src" / "intric" / "demo_router.py"
+        router.write_text(
+            "@users_admin_router.post(\n"
             '    "/demo",\n'
             "    response_model=DemoResponse,\n"
             ")\n"

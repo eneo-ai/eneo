@@ -68,6 +68,10 @@ git commit -m "feat: add your feature description"
 git push origin feature/your-feature-name
 ```
 
+For a WIP push or a CI rerun where local hooks are not useful, use
+`git push --no-verify`. Do not use it to bypass a real failure before opening or
+merging a PR.
+
 ---
 
 ## 📏 Contribution Standards and Requirements

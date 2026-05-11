@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from check_route_metadata import is_router_file_path
+
 ENV_PATH_RE = re.compile(r"(^|/)\.env(\.[^/]+)?$")
 SAFE_ENV_TEMPLATE_RE = re.compile(
     r"(^|/)(\.env\.(example|template)|env_[^/]+\.(template|example))$"
@@ -15,6 +17,7 @@ SECRET_PATTERNS = [
     re.compile(r"^\+.*-----BEGIN [A-Z ]*PRIVATE KEY-----", re.MULTILINE),
     re.compile(r"^\+.*github_pat_[A-Za-z0-9_]{20,}", re.MULTILINE),
     re.compile(r"^\+.*ghp_[A-Za-z0-9]{20,}", re.MULTILINE),
+    re.compile(r"^\+.*sk-ant-api\d+-[A-Za-z0-9_\-]{30,}", re.MULTILINE),
     re.compile(r"^\+.*sk-[A-Za-z0-9]{20,}", re.MULTILINE),
     re.compile(r"^\+.*AIza[0-9A-Za-z\-_]{20,}", re.MULTILINE),
     re.compile(r"^\+.*AKIA[0-9A-Z]{16}", re.MULTILINE),
@@ -116,16 +119,9 @@ def main() -> int:
             )
             break
 
-    if any(path.startswith("backend/src/") and ("router" in path or "/routes/" in path) for path in paths):
+    if any(path.startswith("backend/src/") and is_router_file_path(path) for path in paths):
         warnings.append(
             "Backend route files are staged. Verify OpenAPI docs (`description=`, `responses=`, `response_model=`) before push."
-        )
-
-    if any(path.startswith(("backend/src/", "frontend/apps/web/src/")) for path in paths) and not any(
-        path.startswith(("docs/", "README.md", "frontend/apps/web/messages/")) for path in paths
-    ):
-        warnings.append(
-            "Behavioral source changes are staged without docs updates. If behavior changed, add a small surgical docs update."
         )
 
     for warning in warnings:

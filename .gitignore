@@ -61,8 +61,10 @@ Thumbs.db
 .idea/
 .vscode/
 *.code-workspace
+.codex/
 .env.*
 !.env.example
+!.env.template
 node_modules/
 .next/
 .svelte-kit/
