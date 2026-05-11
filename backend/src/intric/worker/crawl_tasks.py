@@ -22,10 +22,10 @@ from intric.main.exceptions import CrawlerException, CrawlTimeoutError
 from intric.main.logging import get_logger
 from intric.tenants.crawler_settings_helper import get_crawler_setting
 from intric.websites.crawl_dependencies.crawl_models import (
-    CrawlOutcomeCode,
     CrawlTask,
     derive_crawl_outcome_code,
 )
+from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.websites.domain.crawl_run import CrawlType
 from intric.worker.crawl import (
     ExistingBlobState,
@@ -666,7 +666,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                         crawl_run.status = Status.FAILED
                         crawl_run.update(
-                            outcome_code=CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED.value
+                            outcome_code=CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED
                         )
                         await crawl_run_repo.update(crawl_run)
                 except Exception as update_exc:

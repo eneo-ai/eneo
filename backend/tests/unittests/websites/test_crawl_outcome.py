@@ -1,11 +1,11 @@
 from intric.main.models import Status
 from intric.websites.crawl_dependencies.crawl_models import (
-    CrawlOutcomeCode,
     CrawlOutcomeSeverity,
     CrawlRunSparse,
     derive_crawl_outcome,
     derive_crawl_outcome_code,
 )
+from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.worker.crawl_context import FailureReason
 
 

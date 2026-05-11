@@ -5,6 +5,10 @@ from typing_extensions import override
 
 from intric.base.base_entity import Entity
 from intric.main.models import Status
+from intric.websites.domain.crawl_outcome import (
+    CrawlOutcomeCode,
+    parse_crawl_outcome_code,
+)
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -37,7 +41,7 @@ class CrawlRun(Entity):
         finished_at: Optional["datetime"],
         job_id: Optional["UUID"],
         failure_summary: Optional[dict[str, int]] = None,
-        outcome_code: Optional[str] = None,
+        outcome_code: Optional[CrawlOutcomeCode] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.status = status
@@ -129,7 +133,7 @@ class CrawlRun(Entity):
             result_location=job.result_location if job else None,
             finished_at=job.finished_at if job else None,
             failure_summary=record.failure_summary,
-            outcome_code=record.outcome_code,
+            outcome_code=parse_crawl_outcome_code(record.outcome_code),
         )
 
     def update(
@@ -139,7 +143,7 @@ class CrawlRun(Entity):
         files_downloaded: Optional[int] = None,
         pages_failed: Optional[int] = None,
         files_failed: Optional[int] = None,
-        outcome_code: Optional[str] = None,
+        outcome_code: Optional[CrawlOutcomeCode] = None,
     ) -> "CrawlRun":
         if job_id is not None:
             self.job_id = job_id

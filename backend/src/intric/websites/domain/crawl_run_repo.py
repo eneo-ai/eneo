@@ -6,10 +6,17 @@ from sqlalchemy.orm import selectinload
 
 from intric.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from intric.main.exceptions import NotFoundException
+from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.websites.domain.crawl_run import CrawlRun
 
 if TYPE_CHECKING:
     from intric.database.database import AsyncSession
+
+
+def _serialize_crawl_outcome_code(
+    outcome_code: CrawlOutcomeCode | None,
+) -> str | None:
+    return outcome_code.value if outcome_code is not None else None
 
 
 class CrawlRunRepository:
@@ -48,7 +55,7 @@ class CrawlRunRepository:
                 files_downloaded=crawl_run.files_downloaded,
                 pages_failed=crawl_run.pages_failed,
                 files_failed=crawl_run.files_failed,
-                outcome_code=crawl_run.outcome_code,
+                outcome_code=_serialize_crawl_outcome_code(crawl_run.outcome_code),
                 job_id=crawl_run.job_id,
             )
             .options(selectinload(CrawlRunsTable.job))
@@ -67,7 +74,7 @@ class CrawlRunRepository:
                 files_downloaded=crawl_run.files_downloaded,
                 pages_failed=crawl_run.pages_failed,
                 files_failed=crawl_run.files_failed,
-                outcome_code=crawl_run.outcome_code,
+                outcome_code=_serialize_crawl_outcome_code(crawl_run.outcome_code),
                 job_id=crawl_run.job_id,
             )
             .where(CrawlRunsTable.id == crawl_run.id)

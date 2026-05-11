@@ -7,6 +7,10 @@ from pydantic import AliasChoices, AliasPath, BaseModel, Field, model_validator
 
 from intric.jobs.task_models import TaskParams
 from intric.main.models import InDB, Status
+from intric.websites.domain.crawl_outcome import (
+    CrawlOutcomeCode,
+    parse_crawl_outcome_code,
+)
 from intric.websites.domain.crawl_run import CrawlType
 from intric.worker.crawl_context import FailureReason
 
@@ -34,17 +38,6 @@ class CrawlOutcomeSeverity(str, Enum):
     ERROR = "error"
 
 
-class CrawlOutcomeCode(str, Enum):
-    CRAWL_DUPLICATE_SKIPPED = "CRAWL_DUPLICATE_SKIPPED"
-    CRAWL_NO_PAGES_RETURNED = "CRAWL_NO_PAGES_RETURNED"
-    CRAWL_TIMEOUT_NO_PAGES = "CRAWL_TIMEOUT_NO_PAGES"
-    CRAWL_MAX_AGE_EXCEEDED = "CRAWL_MAX_AGE_EXCEEDED"
-    CRAWL_SOURCE_RETENTION_ONLY = "CRAWL_SOURCE_RETENTION_ONLY"
-    CRAWL_COMPLETED_WITH_PAGE_FAILURES = "CRAWL_COMPLETED_WITH_PAGE_FAILURES"
-    EMBEDDING_CONFIG_MISSING = "EMBEDDING_CONFIG_MISSING"
-    UNKNOWN_CRAWL_ERROR = "UNKNOWN_CRAWL_ERROR"
-
-
 class CrawlOutcomePublic(BaseModel):
     code: CrawlOutcomeCode
     severity: CrawlOutcomeSeverity
@@ -64,7 +57,7 @@ def derive_crawl_outcome(
     outcome_code: CrawlOutcomeCode | str | None = None,
 ) -> CrawlOutcomePublic | None:
     resolved_code = (
-        CrawlOutcomeCode(outcome_code)
+        parse_crawl_outcome_code(outcome_code)
         if outcome_code is not None
         else derive_crawl_outcome_code(
             status=status,

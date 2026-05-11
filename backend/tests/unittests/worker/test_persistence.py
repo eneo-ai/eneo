@@ -329,7 +329,7 @@ class TestCrawlTaskRetentionHelpers:
 
     def test_crawl_exception_maps_to_specific_outcome_code(self):
         from intric.main.exceptions import CrawlerException, CrawlTimeoutError
-        from intric.websites.crawl_dependencies.crawl_models import CrawlOutcomeCode
+        from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
         from intric.worker.crawl_tasks import _crawl_outcome_code_for_exception
 
         assert (
