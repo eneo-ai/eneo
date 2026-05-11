@@ -86,7 +86,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T048
+active_task: T052
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -1492,7 +1492,7 @@ tasks:
   - id: T008
     type: worker
     assignee: Worker
-    status: queued
+    status: done
     reasoning_hint: medium
     objective: "Execute one proof-backed pre-production legacy/dead-code cleanup slice after T007 and Judge approval."
     allowed_files: []
@@ -1501,7 +1501,20 @@ tasks:
       - "No proof-backed delete candidate exists."
       - "Deletion touches unrelated P0 runtime/API behavior."
       - "Deletion requires migration strategy not yet reviewed."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Fulfilled by the concrete T051 cleanup Worker after later typed-boundary work and T049/T050 reassessment made a narrow proof-backed cleanup slice safe."
+      fulfilled_by: T051
+      changed_files:
+        - "backend/src/intric/flows/infrastructure/flow_repo.py"
+        - "backend/tests/integration/flows/test_flow_repository.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      commands:
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_repository.py -q"
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_step_file_mapping_contract.py -q"
+        - "cd backend && uv run pyright src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_repository.py"
+        - "cd backend && uv run ruff check src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_repository.py"
+        - "cd backend && uv run ruff format --check src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_repository.py"
 
   - id: T009
     type: worker
@@ -1620,7 +1633,7 @@ tasks:
   - id: T010
     type: worker
     assignee: Worker
-    status: queued
+    status: done
     reasoning_hint: medium
     objective: "Improve AI Builder material efficiency with red golden/metrics if Scout proves source-material routing risk remains."
     allowed_files: []
@@ -1630,7 +1643,24 @@ tasks:
       - "Implementation introduces parallel material planner without Judge approval."
       - "Introduces a parallel material-routing owner without red-test proof that one existing owner cannot be extended."
       - "Fix uses all_previous_steps as a band-aid."
-    receipt: null
+    receipt:
+      result: no_op
+      decision: "Do not activate the AI Builder material-efficiency implementation Worker now."
+      note: "notes/T049-ai-builder-material-efficiency-scout.md"
+      summary: "T049 found the activation condition is not met. The current source already has a canonical source-material owner, compile-path and compiled-spec normalization, deterministic scoring, and material metrics covering the expected T010 behaviors."
+      changed_files:
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T049-ai-builder-material-efficiency-scout.md"
+      evidence:
+        - "backend/src/intric/flows/ai_builder/ai_builder_source_material.py owns create-draft source-material normalization, compiled boundary detection, binding status, and question construction."
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py asserts compiled source text plus structured fields in input_bindings.question."
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py asserts JSON-only negative and idempotent normalization."
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py asserts binding bytes, fan-in width, structured field count, whole-output refs, source duplication, and all_previous_steps count."
+      commands:
+        - "Read-only code/test inspection for source-material routing and material metrics."
+        - "git diff --check"
+        - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      next_task: T050
 
   - id: T900
     type: judge
@@ -3181,7 +3211,7 @@ tasks:
   - id: T048
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe implementation slice after the tracked-doc naming cleanup."
     inputs:
@@ -3199,6 +3229,205 @@ tasks:
       - "verify commands."
       - "stop_if."
       - "whether Claude plan gate is required before activation."
+    receipt:
+      result: done
+      decision: "Activate T049 Scout before any AI Builder material-efficiency implementation."
+      summary: "Runtime/API P0s, public API golden journey, frontend error-contract flow, typed metadata/published-definition hardening, and tracked-doc V1 naming cleanup are complete. The remaining named current-tranche lane is AI Builder material efficiency/source-material routing, but T010 explicitly requires Scout proof before implementation. A direct Worker would be too speculative without identifying the canonical material owner, current red-test gap, and exact metrics."
+      next_task: T049
+      worker_objective: "Defer implementation. First map AI Builder source-material routing and material-efficiency evidence, then propose the smallest red-testable Worker only if a measurable source-material loss remains."
+      allowed_files: []
+      verify_commands:
+        - "git diff --check"
+        - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      stop_if:
+        - "Scout cannot find a red/captured failing flow that proves material loss."
+        - "The only plausible fix would introduce a parallel material planner or material-routing owner."
+        - "The fix depends on all_previous_steps as a band-aid."
+        - "The implementation would need speculative V1/version suffixes, broad Any, Pyright ignores, legacy/backwards-compatible branches, or slop naming."
+      claude_plan_gate_required: "Not for the read-only Scout. Required before any implementation Worker if the Scout proposes ownership changes, broad prompt/material-routing edits, public/runtime contract changes, or a non-obvious red-test harness."
+
+  - id: T049
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Map AI Builder material-efficiency and source-material routing evidence before activating T010."
+    inputs:
+      - "T048 receipt."
+      - "Goal charter AI Builder material-efficiency lane."
+      - "Existing AI Builder source-material routing code and tests."
+      - "User constraints on naming, type safety, comments, and pre-production compatibility."
+    constraints:
+      - "Read-only except for this board receipt and a Scout note under docs/goals/flow-runtime-ai-builder-maintainability/notes/."
+      - "Do not modify source, tests, migrations, or prompts."
+      - "Name canonical owners and existing candidates before proposing new code."
+      - "Reject speculative V1/version suffixes unless a real versioned contract exists."
+      - "Do not propose Pyright ignores, broad Any, or legacy/backwards-compatible branches."
+    expected_output:
+      - "File:line evidence for current source-material routing and materialization owners."
+      - "Existing test coverage and missing red-test gap."
+      - "Whether source-material routing risk remains."
+      - "Smallest safe Worker objective with allowed_files, red tests, verification, stop_if, and Claude plan-gate decision, or a no-op decision."
+    receipt:
+      result: done
+      note: "notes/T049-ai-builder-material-efficiency-scout.md"
+      summary: "Mapped AI Builder material-efficiency/source-material routing evidence. Source-material routing risk is already covered strongly enough that T010 should be marked no-op instead of implemented."
+      decision: "No implementation Worker for T010 unless a fresh failing flow or metric regression appears."
+      canonical_owner: "backend/src/intric/flows/ai_builder/ai_builder_source_material.py"
+      supporting_owner: "backend/src/intric/flows/ai_builder/ai_builder_material_metrics.py"
+      tests_covering_t010_expectations:
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py"
+        - "backend/tests/integration/flows/ai_builder/benchmark/test_manual_api_scoring.py"
+      next_task: T050
+
+  - id: T050
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next proof-backed cleanup slice after AI Builder material-efficiency no-op."
+    inputs:
+      - "T007 cleanup Scout."
+      - "T049 AI Builder material-efficiency Scout."
+      - "Current source and tests for remaining cleanup candidates."
+      - "User constraints on naming, Pyright, comments, and pre-production compatibility."
+    constraints:
+      - "Do not modify source in this Judge task."
+      - "Prefer deletion/rename over compatibility preservation when local proof is sufficient."
+      - "Do not activate a cleanup Worker without exact allowed_files, replacement behavior tests, fixture/migration implications, verify commands, and stop_if conditions."
+      - "Reject speculative V1/version suffixes, broad Any, Pyright ignores, and slop naming."
+    expected_output:
+      - "Decision."
+      - "Chosen cleanup Worker objective or no-op."
+      - "allowed_files."
+      - "replacement tests."
+      - "verify commands."
+      - "stop_if."
+      - "Claude plan-gate requirement."
+    receipt:
+      result: done
+      decision: "Activate T051 as a narrow proof-backed cleanup Worker for FlowRepository.save_step_result missing-step-id writes."
+      summary: "T007 classified the result.step_id is None branch as delete_after_tests. Current source proof shows run creation pre-seeds step result rows with concrete step_id values, runtime success/failure builders preserve claimed step IDs, and executor save_step_result callers operate on claimed runtime step results. The cleanup can remove the old missing-step-id write/update path and replace the legacy missing-row test with a current contract test that rejects missing step IDs before persistence."
+      worker_objective: "Make FlowRepository.save_step_result reject FlowStepResult values without step_id before building the persistence payload, delete the legacy insert/update branch for step_id None, and replace the legacy integration test with a current behavior test."
+      allowed_files:
+        - "backend/src/intric/flows/infrastructure/flow_repo.py"
+        - "backend/tests/integration/flows/test_flow_repository.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      replacement_tests:
+        - "Replace test_save_step_result_legacy_update_raises_when_row_missing with a test that a missing step_id result is rejected and no flow_step_results row is inserted."
+        - "Keep existing upsert-by-run-step integration coverage passing."
+      verify_commands:
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_repository.py -q"
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_step_file_mapping_contract.py -q"
+        - "cd backend && uv run pyright src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_repository.py"
+        - "cd backend && uv run ruff check src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_repository.py"
+        - "cd backend && uv run ruff format --check src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_repository.py"
+        - "git diff --check"
+        - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      stop_if:
+        - "Any current runtime or repository caller intentionally saves a FlowStepResult without step_id."
+        - "Schema or migration evidence shows current intended behavior needs newly inserted step_id IS NULL result rows."
+        - "The fix requires changing the FlowStepResult domain model optionality or adding a migration."
+        - "The implementation adds compatibility branches, broad Any, Pyright ignores, or slop comments."
+      claude_plan_gate_required: false
+      claude_plan_gate_reason: "This is a narrow cleanup selected from prior Scout proof and current caller proof. It does not change public API/schema ownership, add a new owner, or require a new red-test harness. Run normal validation; use Claude only if implementation reveals broader persistence/schema ambiguity."
+      next_task: T051
+
+  - id: T051
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Delete FlowRepository.save_step_result missing-step-id persistence compatibility and replace the legacy test with a current rejection contract."
+    allowed_files:
+      - "backend/src/intric/flows/infrastructure/flow_repo.py"
+      - "backend/tests/integration/flows/test_flow_repository.py"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_repository.py -q"
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_step_file_mapping_contract.py -q"
+      - "cd backend && uv run pyright src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_repository.py"
+      - "cd backend && uv run ruff check src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_repository.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_repository.py"
+      - "git diff --check"
+      - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    stop_if:
+      - "Any current runtime or repository caller intentionally saves a FlowStepResult without step_id."
+      - "Schema or migration evidence shows current intended behavior needs newly inserted step_id IS NULL result rows."
+      - "The fix requires changing the FlowStepResult domain model optionality or adding a migration."
+      - "The implementation adds compatibility branches, broad Any, Pyright ignores, or slop comments."
+    receipt:
+      result: done
+      summary: "Removed FlowRepository.save_step_result's missing-step-id insert/update compatibility branch and replaced the old missing-row integration test with a current contract test that rejects step results without step_id before persistence."
+      changed_files:
+        - "backend/src/intric/flows/infrastructure/flow_repo.py"
+        - "backend/tests/integration/flows/test_flow_repository.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      canonical_owner: "backend/src/intric/flows/infrastructure/flow_repo.py owns result-row persistence and now requires a concrete step_id for writes."
+      behavior:
+        - "save_step_result raises BadRequestException with code flow_step_result_step_id_required when result.step_id is None."
+        - "The old step_id None insert/update path and legacy missing-row NotFound path were deleted."
+        - "Existing run/step upsert behavior remains covered by test_save_step_result_upserts_on_run_and_step."
+        - "Result-file row replacement contract remains covered by test_flow_step_file_mapping_contract.py."
+      verification:
+        - "PASS cd backend && uv run pytest tests/integration/flows/test_flow_repository.py -q -> 11 passed, 16 warnings."
+        - "PASS cd backend && uv run pytest tests/integration/flows/test_flow_step_file_mapping_contract.py -q -> 4 passed, 16 warnings."
+        - "PASS cd backend && uv run pyright src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_repository.py -> 0 errors."
+        - "PASS cd backend && uv run ruff check src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_repository.py."
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_repository.py."
+        - "PASS git diff --check."
+        - "PASS node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml -> ok true, active_task T051 before receipt update."
+      commands:
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_repository.py -q"
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_step_file_mapping_contract.py -q"
+        - "cd backend && uv run pyright src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_repository.py"
+        - "cd backend && uv run ruff check src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_repository.py"
+        - "cd backend && uv run ruff format --check src/intric/flows/infrastructure/flow_repo.py tests/integration/flows/test_flow_repository.py"
+        - "git diff --check"
+        - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      type_debt:
+        new_any: 0
+        new_cast: 0
+        new_type_ignore: 0
+        new_pyright_ignore: 0
+      comments_added_or_changed: 0
+      maintainability_rubric:
+        canonical_ownership: 1
+        fear_of_change_reduction: 1
+        type_safety: 1
+        error_contract_quality: 1
+        test_quality: 1
+        comment_quality: 1
+        complexity: 1
+        deletion_quality: 1
+        score: "8/8"
+      next_task: T052
+
+  - id: T052
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe slice after T051 result persistence cleanup."
+    inputs:
+      - "T051 receipt."
+      - "Remaining goal board priorities."
+      - "Current dirty worktree."
+      - "User constraints on naming, Pyright, comments, and pre-production compatibility."
+    constraints:
+      - "Do not modify source in this Judge task."
+      - "Preserve unrelated dirty files."
+      - "Do not activate a Worker without exact allowed_files, tests, verify commands, and stop_if conditions."
+      - "Reject speculative V1/version suffixes, broad Any, Pyright ignores, slop comments, and backwards-compatible branches for never-shipped Flow behavior."
+    expected_output:
+      - "Decision."
+      - "Next Worker/Scout objective or no-op."
+      - "allowed_files."
+      - "verification commands."
+      - "stop_if."
+      - "Claude gate decision."
     receipt: null
 
 validation_command_candidates:

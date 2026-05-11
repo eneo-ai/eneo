@@ -547,6 +547,13 @@ class FlowRepository:
         """
         db_session = session or self.session
 
+        if result.step_id is None:
+            raise BadRequestException(
+                "Flow step result step_id is required.",
+                code="flow_step_result_step_id_required",
+                context={"step_order": result.step_order},
+            )
+
         payload: dict[str, Any] = {
             "flow_run_id": flow_run_id,
             "flow_id": result.flow_id,
@@ -573,27 +580,6 @@ class FlowRepository:
             payload["finished_at"] = datetime.now(timezone.utc)
         if result.status == FlowStepResultStatus.COMPLETED:
             payload["current_attempt_no"] = attempt_no
-
-        if result.step_id is None:
-            if result.id is None:
-                saved = await db_session.scalar(
-                    sa.insert(FlowStepResults)
-                    .values(payload)
-                    .returning(FlowStepResults)
-                )
-                if saved is None:
-                    return None
-                return self.factory.from_flow_step_result_db(saved)
-            saved = await db_session.scalar(
-                sa.update(FlowStepResults)
-                .where(FlowStepResults.id == result.id)
-                .where(FlowStepResults.tenant_id == tenant_id)
-                .values(**payload)
-                .returning(FlowStepResults)
-            )
-            if saved is None:
-                raise NotFoundException("Flow step result not found for legacy update.")
-            return self.factory.from_flow_step_result_db(saved)
 
         active_run_exists = (
             sa.select(sa.literal(1))

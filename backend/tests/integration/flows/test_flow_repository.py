@@ -23,7 +23,7 @@ from intric.flows import (
     FlowStepResultStatus,
     FlowVersionRepository,
 )
-from intric.main.exceptions import NotFoundException
+from intric.main.exceptions import BadRequestException, NotFoundException
 
 
 def _build_flow(
@@ -294,7 +294,7 @@ async def test_save_step_result_upserts_on_run_and_step(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_save_step_result_legacy_update_raises_when_row_missing(
+async def test_save_step_result_rejects_missing_step_id(
     db_container,
     completion_model_factory,
     space_factory,
@@ -304,10 +304,10 @@ async def test_save_step_result_legacy_update_raises_when_row_missing(
     async with db_container() as container:
         session = container.session()
         model = await completion_model_factory(session, "gpt-4o-mini")
-        space = await space_factory(session, "Legacy flow space", [model.id])
+        space = await space_factory(session, "Flow result contract space", [model.id])
         assistant = await assistant_factory(
             session,
-            "Legacy Assistant",
+            "Flow Result Assistant",
             model.id,
             space_id=space.id,
         )
@@ -327,7 +327,7 @@ async def test_save_step_result_legacy_update_raises_when_row_missing(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-legacy",
+            definition_checksum="checksum-result-contract",
             definition_json={"steps": [{"id": str(step_id), "step_order": 1}]},
             tenant_id=admin_user.tenant_id,
         )
@@ -355,24 +355,32 @@ async def test_save_step_result_legacy_update_raises_when_row_missing(
             step_order=1,
             assistant_id=assistant.id,
             input_payload_json={"question": "What happened?"},
-            effective_prompt="legacy",
-            output_payload_json={"summary": "legacy output"},
+            effective_prompt="missing step id",
+            output_payload_json={"summary": "should not be saved"},
             model_parameters_json={"temperature": 0.2},
             num_tokens_input=10,
             num_tokens_output=10,
             status=FlowStepResultStatus.COMPLETED,
             error_message=None,
-            flow_step_execution_hash="hash-legacy",
+            flow_step_execution_hash="hash-missing-step-id",
             created_at=now,
             updated_at=now,
         )
 
-        with pytest.raises(NotFoundException):
+        with pytest.raises(BadRequestException) as exc_info:
             await flow_repo.save_step_result(
                 flow_run_id=run_row.id,
                 result=missing_row_update,
                 tenant_id=admin_user.tenant_id,
             )
+        assert exc_info.value.code == "flow_step_result_step_id_required"
+
+        result_count = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == run_row.id)
+        )
+        assert result_count == 0
 
 
 @pytest.mark.asyncio
