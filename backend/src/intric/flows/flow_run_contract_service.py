@@ -246,13 +246,7 @@ def _output_delivery(
 def _published_form_fields(
     published_definition: PublishedFlowDefinition,
 ) -> list[FormFieldPublic]:
-    try:
-        form_schema = published_definition.metadata().form_schema
-    except BadRequestException as exc:
-        raise BadRequestException(
-            "Published flow form schema is invalid.",
-            code="flow_published_form_schema_invalid",
-        ) from exc
+    form_schema = published_definition.metadata().form_schema
     if form_schema is None:
         return []
     fields = [

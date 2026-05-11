@@ -4,32 +4,41 @@ from copy import deepcopy
 
 import pytest
 
+from intric.flows.flow_metadata import (
+    FlowMetadataParseMode,
+    FlowMetadataV1,
+    parse_flow_metadata,
+)
 from intric.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
 from intric.main.exceptions import BadRequestException
 
 
-def _metadata(fields: list[dict[str, object]]) -> dict[str, object]:
-    return {"form_schema": {"fields": fields}}
+def _metadata(fields: list[dict[str, object]]) -> FlowMetadataV1:
+    return parse_flow_metadata(
+        {"form_schema": {"fields": fields}},
+        mode=FlowMetadataParseMode.PERSISTED_READ,
+    )
+
+
+def _empty_metadata() -> FlowMetadataV1:
+    return parse_flow_metadata(None, mode=FlowMetadataParseMode.PERSISTED_READ)
 
 
 @pytest.mark.parametrize(
-    "metadata_json",
+    "metadata",
     [
         None,
-        {},
-        {"form_schema": None},
-        {"form_schema": {}},
-        {"form_schema": {"fields": "invalid"}},
-        {"form_schema": {"fields": []}},
+        _empty_metadata(),
+        _metadata([]),
     ],
 )
-def test_payload_passthrough_when_form_schema_missing_or_invalid(
-    metadata_json: dict[str, object] | None,
+def test_payload_passthrough_when_form_schema_missing_or_empty(
+    metadata: FlowMetadataV1 | None,
 ) -> None:
     payload = {"note": "raw payload value", "file_ids": ["abc"]}
 
     normalized = normalize_and_validate_flow_run_payload(
-        metadata_json=metadata_json,
+        metadata=metadata,
         payload=payload,
     )
 
@@ -44,7 +53,7 @@ def test_missing_required_field_emits_machine_readable_error_contract() -> None:
     with pytest.raises(
         BadRequestException, match=r"Missing required input field 'case_id'\."
     ) as exc_info:
-        normalize_and_validate_flow_run_payload(metadata_json=metadata, payload={})
+        normalize_and_validate_flow_run_payload(metadata=metadata, payload={})
 
     assert exc_info.value.code == "flow_input_required_field_missing"
     assert exc_info.value.context == {
@@ -142,7 +151,7 @@ def test_required_field_rejects_none_and_blank(
 
     with pytest.raises(BadRequestException, match=message) as exc_info:
         normalize_and_validate_flow_run_payload(
-            metadata_json=metadata,
+            metadata=metadata,
             payload={"field": value},
         )
 
@@ -160,7 +169,7 @@ def test_legacy_text_types_are_normalized_to_text(legacy_type: str) -> None:
     )
 
     normalized = normalize_and_validate_flow_run_payload(
-        metadata_json=metadata,
+        metadata=metadata,
         payload={"note": 123},
     )
 
@@ -175,7 +184,7 @@ def test_unknown_fields_are_preserved_and_payload_is_not_mutated() -> None:
     original_payload = deepcopy(payload)
 
     normalized = normalize_and_validate_flow_run_payload(
-        metadata_json=metadata,
+        metadata=metadata,
         payload=payload,
     )
 
@@ -198,7 +207,7 @@ def test_number_field_accepts_scientific_notation(
     )
 
     normalized = normalize_and_validate_flow_run_payload(
-        metadata_json=metadata,
+        metadata=metadata,
         payload={"attempts": raw_value},
     )
 
@@ -223,7 +232,7 @@ def test_number_field_rejects_non_finite_values(raw_value: object) -> None:
         BadRequestException, match=r"Field 'attempts' must be a finite number\."
     ) as exc_info:
         normalize_and_validate_flow_run_payload(
-            metadata_json=metadata,
+            metadata=metadata,
             payload={"attempts": raw_value},
         )
 
@@ -248,7 +257,7 @@ def test_optional_select_empty_string_normalizes_to_none() -> None:
     )
 
     normalized = normalize_and_validate_flow_run_payload(
-        metadata_json=metadata,
+        metadata=metadata,
         payload={"priority": "   "},
     )
 
@@ -269,7 +278,7 @@ def test_multiselect_string_payload_is_split_and_trimmed() -> None:
     )
 
     normalized = normalize_and_validate_flow_run_payload(
-        metadata_json=metadata,
+        metadata=metadata,
         payload={"tags": " care, follow-up "},
     )
 
@@ -282,7 +291,7 @@ def test_optional_number_empty_string_normalizes_to_none() -> None:
     )
 
     normalized = normalize_and_validate_flow_run_payload(
-        metadata_json=metadata,
+        metadata=metadata,
         payload={"attempts": "   "},
     )
 
@@ -295,7 +304,7 @@ def test_optional_date_allows_empty_string_and_normalizes_to_none() -> None:
     )
 
     normalized = normalize_and_validate_flow_run_payload(
-        metadata_json=metadata,
+        metadata=metadata,
         payload={"visit_date": "   "},
     )
 
@@ -332,14 +341,26 @@ def test_optional_date_allows_empty_string_and_normalizes_to_none() -> None:
             "must be one of the configured options",
         ),
         (
-            {"name": "tags", "type": "multiselect", "required": True, "order": 1},
+            {
+                "name": "tags",
+                "type": "multiselect",
+                "required": True,
+                "order": 1,
+                "options": ["care", "follow-up", "legal"],
+            },
             {"tags": 42},
             "flow_input_invalid_multiselect_type",
             {"field_name": "tags", "field_type": "multiselect"},
             "must be an array of strings",
         ),
         (
-            {"name": "tags", "type": "multiselect", "required": True, "order": 1},
+            {
+                "name": "tags",
+                "type": "multiselect",
+                "required": True,
+                "order": 1,
+                "options": ["care", "follow-up", "legal"],
+            },
             {"tags": ["care", 42]},
             "flow_input_invalid_multiselect_value",
             {"field_name": "tags", "field_type": "multiselect"},
@@ -392,7 +413,7 @@ def test_field_validation_errors_emit_machine_readable_code_and_context(
 
     with pytest.raises(BadRequestException, match=message) as exc_info:
         normalize_and_validate_flow_run_payload(
-            metadata_json=metadata,
+            metadata=metadata,
             payload=payload,
         )
 

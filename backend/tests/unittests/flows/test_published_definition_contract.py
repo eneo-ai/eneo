@@ -17,6 +17,7 @@ from intric.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION_MISSING,
     FLOW_DEFINITION_SCHEMA_VERSION_UNSUPPORTED,
     FLOW_DEFINITION_STEPS_INVALID,
+    FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
     build_published_definition_json,
     parse_published_definition,
     parse_published_runtime_steps,
@@ -111,6 +112,31 @@ def test_parser_exposes_typed_metadata_without_raw_metadata_field() -> None:
     assert metadata.form_schema.fields[0].type is FlowFormFieldType.TEXT
     assert metadata.care_data_policy.sensitive is True
     assert serialize_flow_metadata(metadata)["external_owner"] == "case-system"
+
+
+@pytest.mark.parametrize(
+    "metadata_json",
+    [
+        {"form_schema": {"fields": "not-a-list"}},
+        {"form_schema": {"fields": [{"name": "case_id", "type": "unsupported"}]}},
+        {"form_schema": {"fields": [{"type": "text"}]}},
+    ],
+)
+def test_metadata_maps_corrupt_published_form_schema_to_named_error(
+    metadata_json: dict[str, object],
+) -> None:
+    definition = build_published_definition_json(
+        flow_id=uuid4(),
+        name="Flow",
+        description=None,
+        metadata_json=metadata_json,
+        steps=[_step(order=1)],
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        parse_published_definition(definition).metadata()
+
+    assert exc_info.value.code == FLOW_PUBLISHED_FORM_SCHEMA_INVALID
 
 
 def test_parser_round_trips_step_review_policy() -> None:

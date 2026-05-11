@@ -859,6 +859,46 @@ async def test_create_run_rejects_missing_required_form_field(user):
     }
 
 
+@pytest.mark.parametrize(
+    "metadata_json",
+    [
+        {"form_schema": {"fields": "not-a-list"}},
+        {"form_schema": {"fields": [{"name": "case_id", "type": "unsupported"}]}},
+        {"form_schema": {"fields": [{"type": "text"}]}},
+    ],
+)
+@pytest.mark.asyncio
+async def test_create_run_preserves_passthrough_when_draft_metadata_is_malformed(
+    user,
+    metadata_json: dict[str, object],
+):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1, metadata_json=metadata_json)
+    created_run = _run(user=user, flow_id=flow.id)
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+    flow_repo.get.return_value = flow
+    flow_run_repo.get_idempotent_run.return_value = None
+    flow_run_repo.count_active_runs.return_value = 0
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    flow_run_repo.create.return_value = created_run
+
+    result = await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
+
+    assert result == created_run
+    assert flow_run_repo.create.await_args.kwargs["input_payload_json"] == {
+        "x": "y",
+        "expected_flow_version": 1,
+    }
+
+
 @pytest.mark.asyncio
 async def test_create_run_rejects_invalid_select_option(user):
     flow_repo = _flow_repo()
@@ -1005,7 +1045,17 @@ async def test_create_run_rejects_stale_expected_flow_version(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
-    flow = _flow(user=user, published_version=3)
+    flow = _flow(
+        user=user,
+        published_version=3,
+        metadata_json={
+            "form_schema": {
+                "fields": [
+                    {"name": "case_id", "type": "text", "required": True, "order": 1}
+                ]
+            }
+        },
+    )
     service = FlowRunService(
         user=user,
         flow_repo=flow_repo,
@@ -1292,7 +1342,17 @@ async def test_rerun_step_builds_repository_command(user):
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     file_repo = AsyncMock()
-    flow = _flow(user=user, published_version=3)
+    flow = _flow(
+        user=user,
+        published_version=3,
+        metadata_json={
+            "form_schema": {
+                "fields": [
+                    {"name": "case_id", "type": "text", "required": True, "order": 1}
+                ]
+            }
+        },
+    )
     root_step = flow.steps[0].model_copy(
         update={
             "input_config": {
@@ -1351,7 +1411,7 @@ async def test_rerun_step_builds_repository_command(user):
         rerun_step_id=root_step.id,
         expected_run_revision=7,
         reason="  Corrected source  ",
-        input_payload_json={"case_id": "A-123"},
+        input_payload_json={"case_id": 123},
         step_inputs={root_step.id: {"file_ids": [file_b_id, file_a_id, file_b_id]}},
     )
 
@@ -1386,7 +1446,7 @@ async def test_rerun_step_builds_repository_command(user):
             rerun_step_id=root_step.id,
             expected_run_revision=7,
             prior_root_attempt_id=prior_root_attempt_id,
-            input_payload_json={"case_id": "A-123"},
+            input_payload_json={"case_id": "123"},
             root_step_inputs={root_step.id: expected_file_ids},
         )
     )
@@ -1399,7 +1459,7 @@ async def test_rerun_step_builds_repository_command(user):
     assert kwargs["request_fingerprint"] == expected_fingerprint
     assert kwargs["expected_run_revision"] == 7
     assert kwargs["reason"] == "Corrected source"
-    assert kwargs["input_payload_json"] == {"case_id": "A-123"}
+    assert kwargs["input_payload_json"] == {"case_id": "123"}
     assert kwargs["step_inputs_json"] == {
         str(root_step.id): {"file_ids": [str(file_id) for file_id in expected_file_ids]}
     }
@@ -1864,7 +1924,7 @@ async def test_rerun_step_rejects_malformed_published_form_schema(user):
     flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
 
     with pytest.raises(
-        BadRequestException, match="metadata_json.form_schema.fields\\[0\\].type"
+        BadRequestException, match="Published flow form schema is invalid"
     ) as exc_info:
         await service.rerun_step(
             flow_id=flow.id,
@@ -1875,7 +1935,7 @@ async def test_rerun_step_rejects_malformed_published_form_schema(user):
             input_payload_json={"case_id": "A-123"},
         )
 
-    assert exc_info.value.code is None
+    assert exc_info.value.code == "flow_published_form_schema_invalid"
     flow_run_repo.get_latest_completed_attempt_id_for_step.assert_not_awaited()
     flow_run_repo.accept_or_replay_rerun_operation.assert_not_awaited()
 

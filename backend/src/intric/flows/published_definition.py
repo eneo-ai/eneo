@@ -23,6 +23,7 @@ FLOW_DEFINITION_SCHEMA_VERSION_UNSUPPORTED = (
 )
 FLOW_DEFINITION_FLOW_ID_INVALID = "flow_definition_flow_id_invalid"
 FLOW_DEFINITION_STEPS_INVALID = "flow_definition_steps_invalid"
+FLOW_PUBLISHED_FORM_SCHEMA_INVALID = "flow_published_form_schema_invalid"
 
 
 def _step_order_sort_key(step: JsonObject) -> int:
@@ -50,10 +51,26 @@ class PublishedFlowDefinition:
         metadata_json: Mapping[str, object] | None = (
             raw_metadata if _is_json_object(raw_metadata) else None
         )
-        return parse_flow_metadata(
-            metadata_json,
-            mode=FlowMetadataParseMode.PERSISTED_READ,
-        )
+        try:
+            metadata = parse_flow_metadata(
+                metadata_json,
+                mode=FlowMetadataParseMode.PERSISTED_READ,
+            )
+        except BadRequestException as exc:
+            raise BadRequestException(
+                "Published flow form schema is invalid.",
+                code=FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
+            ) from exc
+        if (
+            metadata_json is not None
+            and metadata_json.get("form_schema") is not None
+            and metadata.form_schema is None
+        ):
+            raise BadRequestException(
+                "Published flow form schema is invalid.",
+                code=FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
+            )
+        return metadata
 
     def runtime_steps(self) -> list[RuntimeStep]:
         try:

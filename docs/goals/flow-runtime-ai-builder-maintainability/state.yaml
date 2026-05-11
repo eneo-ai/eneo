@@ -70,6 +70,7 @@ rules:
   cleanup_entry_gate_required: true
   frontend_worker_requires_stable_backend_contract: true
   comments_explain_why_not_what: true
+  no_version_suffix_without_version_contract: true
   public_api_errors_are_contracts: true
   frontend_error_states_follow_backend_contracts: true
   worker_receipt_must_include_maintainability_self_review: true
@@ -85,7 +86,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T037
+active_task: T038
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -2324,7 +2325,7 @@ tasks:
   - id: T037
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Change flow run input-payload normalization to consume FlowMetadataV1 | None, remove rerun metadata serialize/reparse, and make PublishedFlowDefinition.metadata() the single corrupt-published-metadata error translation point."
     allowed_files:
@@ -2361,6 +2362,124 @@ tasks:
       - "Grep proofs for no metadata_json= helper calls, no flow_metadata import in flow_run_input_payload.py, no serialize_flow_metadata import in FlowRunService, and no metadata_or_invalid parallel accessor."
       - "All verify commands passed."
       - "Claude commit gate before source commit."
+    receipt:
+      result: done
+      summary: "Changed flow run input-payload normalization to consume typed FlowMetadataV1 | None, removed rerun metadata serialize/reparse, and centralized corrupt published form-schema error translation in PublishedFlowDefinition.metadata()."
+      changed_files:
+        - "backend/src/intric/flows/published_definition.py"
+        - "backend/src/intric/flows/flow_run_contract_service.py"
+        - "backend/src/intric/flows/flow_run_input_payload.py"
+        - "backend/src/intric/flows/application/flow_run_service.py"
+        - "backend/tests/unittests/flows/test_published_definition_contract.py"
+        - "backend/tests/unittests/flows/test_flow_run_input_payload.py"
+        - "backend/tests/unittests/flows/test_flow_run_service.py"
+      red_tests:
+        - "PublishedFlowDefinition.metadata() malformed metadata cases initially failed because flow_published_form_schema_invalid did not exist at that owner."
+        - "flow_run_input_payload helper tests initially failed after switching from metadata_json= to metadata=."
+        - "create-run malformed draft metadata passthrough initially failed until FlowRunService owned the lenient typed parse."
+        - "rerun typed normalization and malformed published metadata code tests initially failed until rerun consumed published_definition.metadata() directly."
+      implementation_notes:
+        - "normalize_and_validate_flow_run_payload(...) accepts metadata: FlowMetadataV1 | None and no longer parses raw metadata JSON."
+        - "FlowRunService._parse_draft_metadata_lenient(...) preserves the existing create-run behavior where malformed mutable draft metadata disables form-field normalization instead of failing the run request."
+        - "FlowRunService rerun path passes published_definition.metadata() directly and no longer imports serialize_flow_metadata."
+        - "PublishedFlowDefinition.metadata() raises code flow_published_form_schema_invalid for corrupt published form-schema metadata."
+        - "flow_run_contract_service no longer keeps a second local error translation point for malformed published form schema."
+      stop_condition_adjustment:
+        - "The task card's literal 'no flow_metadata import in flow_run_input_payload.py' grep proof was corrected after implementation review: the helper should import FlowMetadataV1 for its public typed signature, but must not import metadata parsers or own raw metadata parsing. Claude agreed this is cleaner than weakening the type or inventing a protocol to satisfy a cosmetic grep."
+      verification:
+        - "PASS cd backend && uv run pytest tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_run_service.py -q -> 170 passed, 11 warnings."
+        - "PASS cd backend && uv run pyright src/intric/flows/published_definition.py src/intric/flows/flow_run_contract_service.py src/intric/flows/flow_run_input_payload.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_run_service.py -> 0 errors, 0 warnings, 0 informations."
+        - "PASS cd backend && uv run ruff check src/intric/flows/published_definition.py src/intric/flows/flow_run_contract_service.py src/intric/flows/flow_run_input_payload.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_run_service.py."
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/published_definition.py src/intric/flows/flow_run_contract_service.py src/intric/flows/flow_run_input_payload.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_run_service.py."
+        - "PASS git diff --check."
+        - "PASS rg -n \"serialize_flow_metadata\" backend/src/intric/flows/application/flow_run_service.py || true -> no hits."
+        - "PASS rg -n \"metadata_or_invalid\" backend/src/intric/flows backend/tests/unittests/flows || true -> no hits."
+        - "PASS rg -n \"parse_flow_form_schema|FlowFormSchemaParseMode\" backend/src/intric/flows/flow_run_input_payload.py || true -> no hits."
+        - "PASS rg -n \"normalize_and_validate_flow_run_payload\\([^\\n]*metadata_json=|metadata_json=.*normalize_and_validate_flow_run_payload\" backend/src backend/tests || true -> no hits."
+      commands:
+        - "cd backend && uv run pytest tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_run_service.py -q"
+        - "cd backend && uv run pyright src/intric/flows/published_definition.py src/intric/flows/flow_run_contract_service.py src/intric/flows/flow_run_input_payload.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_run_service.py"
+        - "cd backend && uv run ruff check src/intric/flows/published_definition.py src/intric/flows/flow_run_contract_service.py src/intric/flows/flow_run_input_payload.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_run_service.py"
+        - "cd backend && uv run ruff format --check src/intric/flows/published_definition.py src/intric/flows/flow_run_contract_service.py src/intric/flows/flow_run_input_payload.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_contract_service.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_run_service.py"
+        - "git diff --check"
+        - "rg -n \"serialize_flow_metadata\" backend/src/intric/flows/application/flow_run_service.py || true"
+        - "rg -n \"metadata_or_invalid\" backend/src/intric/flows backend/tests/unittests/flows || true"
+        - "rg -n \"parse_flow_form_schema|FlowFormSchemaParseMode\" backend/src/intric/flows/flow_run_input_payload.py || true"
+        - "rg -n \"normalize_and_validate_flow_run_payload\\([^\\n]*metadata_json=|metadata_json=.*normalize_and_validate_flow_run_payload\" backend/src backend/tests || true"
+        - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flow-runtime-maintainability-t036-flow-run-input-payload-plan --title 'T037 typed run payload metadata implementation review' --phase commit-gate --iteration 3 --require-green --required-min-score 8 --model claude-opus-4-7 --effort xhigh --timeout-seconds 1200 ..."
+      claude_commit_gate:
+        session: "flow-runtime-maintainability-t036-flow-run-input-payload-plan"
+        artifact: ".codex/artifacts/claude-peer-loop-t037-typed-run-payload-metadata-implementation-review-20260511T081723Z.md"
+        model: "claude-opus-4-7"
+        effort: "xhigh"
+        verdict: "green"
+        green_light: true
+        min_score: 9
+        accepted_as_non_blocking_followups:
+          - "Forward parser context when PublishedFlowDefinition.metadata() re-raises flow_published_form_schema_invalid."
+          - "Replace remaining test string literals for flow_published_form_schema_invalid with the exported constant."
+          - "Document that create-run draft metadata leniency still swallows coded flow_form_field_* draft parse errors by design."
+      comments_added_or_changed:
+        - "# Draft metadata can be mid-edit; preserve create-run passthrough behavior."
+      type_debt:
+        new_any: 0
+        new_cast: 0
+        new_type_ignore: 0
+        new_pyright_ignore: 0
+        note: "No broad Any, new cast, type-ignore, or Pyright ignore was added; the FlowMetadataV1 type import in flow_run_input_payload.py is intentional typed-boundary coupling."
+      maintainability_self_review:
+        canonical_owner: "FlowMetadataV1 remains the metadata shape owner; PublishedFlowDefinition.metadata() owns published snapshot metadata error translation; FlowRunService owns mutable draft metadata leniency."
+        single_source_of_truth: "Malformed published form-schema code now comes from PublishedFlowDefinition.metadata() for both run-contract and rerun."
+        anti_patterns_avoided:
+          - "No parallel metadata_or_invalid accessor."
+          - "No helper signature that accepts both raw metadata_json and typed metadata."
+          - "No Pyright/type-ignore escape hatch."
+          - "No protocol or fake interface only to avoid importing FlowMetadataV1."
+        comments_quality: "One added comment explains the non-obvious draft metadata policy, not the mechanics."
+      maintainability_rubric:
+        maintainability: 9
+        code_quality: 9
+        clean_architecture: 9
+        separation_of_concerns: 9
+        single_source_of_truth: 9
+        human_readability: 9
+        human_reviewability: 9
+        overall_min: 9
+      deferred_followups:
+        - "PublishedFlowDefinition.metadata() currently maps corrupt published metadata to the stable public code but does not forward the underlying parser context."
+        - "test_flow_run_service.py and test_flow_run_contract_service.py still contain literal flow_published_form_schema_invalid assertions instead of importing FLOW_PUBLISHED_FORM_SCHEMA_INVALID."
+        - "Create-run still treats malformed mutable draft metadata leniently while rerun treats malformed published metadata as invalid; this preserves prior behavior and is now isolated in _parse_draft_metadata_lenient(...)."
+      next_task: T038
+
+  - id: T038
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe maintainability slice after T037 typed run-payload metadata, explicitly judging whether the FlowMetadataV1/FlowFormSchemaV1 names should be renamed before more code depends on them."
+    inputs:
+      - "T037 receipt"
+      - ".codex/artifacts/claude-peer-loop-t037-typed-run-payload-metadata-implementation-review-20260511T081723Z.md"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T036-flow-run-input-payload-typed-metadata-scope.md"
+      - "confirmed_p0_candidates"
+      - "maintainability_findings"
+    constraints:
+      - "Read-only. Do not implement source changes."
+      - "Prefer proof-backed cleanup only if it improves the just-touched public contract without delaying higher-value P0/API/runtime/data-boundary work."
+      - "Treat a V1/V2 suffix as unjustified unless the code has a real persisted schema version, discriminator, migration plan, or concurrent second version."
+      - "Because Flows are pre-production, do not preserve legacy/backwards-compatible naming or behavior without proof it protects intended current product behavior."
+      - "If selecting a Worker that changes public API/error contracts, runtime lifecycle, schema ownership, or shared typed boundaries, require the host Claude plan gate before activation."
+      - "Preserve unrelated dirty files and stay on feature/refactor-flows-flowai."
+      - "Do not select cosmetic churn or broad cleanup without a deletion/proof table."
+    expected_output:
+      - "decision"
+      - "naming verdict for FlowMetadataV1, FlowFormSchemaV1, FlowFormFieldV1, and FlowCareDataPolicyV1"
+      - "next Worker objective or reason to pick Scout/PM/audit instead"
+      - "allowed_files"
+      - "red tests"
+      - "verification commands"
+      - "stop_if"
+      - "whether Claude plan gate is required before activation"
     receipt: null
 
 validation_command_candidates:

@@ -31,7 +31,11 @@ from intric.flows.flow_evidence_policy import (
     resolve_service_key_evidence_capability,
 )
 from intric.flows.flow_input_limits import FlowInputLimits, resolve_flow_input_limits
-from intric.flows.flow_metadata import serialize_flow_metadata
+from intric.flows.flow_metadata import (
+    FlowMetadataParseMode,
+    FlowMetadataV1,
+    parse_flow_metadata,
+)
 from intric.flows.flow_permissions import user_can_view_flow_trace
 from intric.flows.flow_run_evidence_bundle import (
     EvidenceBundle,
@@ -450,9 +454,7 @@ class FlowRunService:
             )
 
         normalized_inline_payload = normalize_and_validate_flow_run_payload(
-            metadata_json=flow.metadata_json
-            if isinstance(flow.metadata_json, dict)
-            else None,
+            metadata=self._parse_draft_metadata_lenient(flow.metadata_json),
             payload=input_payload_json,
         )
         self._reject_reserved_input_payload_keys(normalized_inline_payload)
@@ -730,7 +732,7 @@ class FlowRunService:
         if input_payload_json is None:
             return None
         normalized_inline_payload = normalize_and_validate_flow_run_payload(
-            metadata_json=serialize_flow_metadata(published_definition.metadata()),
+            metadata=published_definition.metadata(),
             payload=input_payload_json,
         )
         self._reject_reserved_input_payload_keys(normalized_inline_payload)
@@ -739,6 +741,18 @@ class FlowRunService:
             input_payload_json=normalized_inline_payload,
         )
         return normalized_inline_payload
+
+    @staticmethod
+    def _parse_draft_metadata_lenient(
+        metadata_json: JsonObject | None,
+    ) -> FlowMetadataV1 | None:
+        try:
+            return parse_flow_metadata(
+                metadata_json, mode=FlowMetadataParseMode.PERSISTED_READ
+            )
+        except BadRequestException:
+            # Draft metadata can be mid-edit; preserve create-run passthrough behavior.
+            return None
 
     async def _normalize_and_validate_rerun_step_inputs(
         self,
