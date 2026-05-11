@@ -21,6 +21,8 @@ Purpose: reduce embedding-token spend and database churn for scheduled website c
 - [x] ARQ duplicate enqueue handling uses ARQ's native `enqueue_job()` return value instead of relying only on exception text.
 - [x] Database pool settings declared in `Settings` are wired into SQLAlchemy engine initialization.
 - [x] Frontend-visible crawl/job failure states.
+- [x] Frontend source-retention-only success state is visible instead of showing a misleading `0 pages crawled` result.
+- [x] Frontend crawl outcome labels/tooltips are centralized in a narrow knowledge Module instead of duplicated across website status and crawl history components.
 - [x] Targeted tests, strict pyright, ruff, and regression validation.
 - [x] Claude peer-loop implementation review.
 - [x] Local commit only; do not push from this branch.
@@ -60,6 +62,7 @@ Claude artifact:
 - `.codex/artifacts/claude-peer-loop-crawler-source-skip-hardening-plan-20260511T123556Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-source-skip-hardening-implementation-review-20260511T125758Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-source-skip-hardening-implementation-re-review-20260511T132343Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-skip-next-roi-review-20260511T143100Z.md`
 
 Claude loop summary:
 
@@ -74,6 +77,7 @@ Claude loop summary:
 - Source-skip hardening plan review: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`; blockers drove the switch from manual sidecar writes to Scrapy feed output, default-off warning logs, source-retention tests, and dropping the unused outcome-code index.
 - Source-skip implementation review: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 4`; blockers found sitemap lastmod kwargs routed to the wrong crawl path and a tautological skip helper.
 - Source-skip implementation re-review after routing tests and helper cleanup: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`.
+- Next-ROI review: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`; blocker found source-retention-only runs were still rendered as empty complete crawls in the frontend. This drove the shared crawl outcome presentation Module and complete-state source-retention rendering fix.
 
 Claude agreed with the core architecture:
 
@@ -1279,8 +1283,11 @@ Goal:
 4. Consider update-in-place for changed pages to reduce chunk-table churn further.
 5. Add more specific user-facing warning states for sitemap-not-found and malformed-sitemap failures.
 6. Add a query/reporting view for stored crawl outcome codes if product wants operational dashboards.
+7. Add source-retained timeout salvage as its own crawler lifecycle slice: if Scrapy emits retained sitemap URLs before timing out with zero fetched pages, `_crawl()` should treat the retained feed as partial crawl output instead of raising `CrawlTimeoutError`. Write the red timeout test first.
 8. Add a stored processing fingerprint that includes embedding model, chunking version, text-normalization version, and embedding dimensions.
 9. Review broader info-blob tenant-scoping outside the website crawl paths, such as group and integration deletes, as a separate hardening slice.
+10. Add mixed source-retention outcome visibility: crawls that retain some sitemap URLs and fetch some changed pages should expose retained count through a typed public field or outcome summary, not only logs.
+11. Revisit the custom `SitemapSpider._parse_sitemap()` implementation after the current branch ships. Prefer Scrapy-owned lifecycle hooks where possible, and keep the current smoke/behavior tests as the guard while this branch needs cleanup-visible retained URL feed items.
 
 ## Questions For ChatGPT Extended Pro
 

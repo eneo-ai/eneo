@@ -4,6 +4,12 @@
   import { createRender } from "svelte-headless-table";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
+  import {
+    getCrawlOutcome,
+    getCrawlOutcomeLabel,
+    isDuplicateCrawlSkip,
+    isSourceRetentionOnly
+  } from "$lib/features/knowledge/crawlOutcomePresentation";
 
   import dayjs from "dayjs";
   import relativeTime from "dayjs/plugin/relativeTime";
@@ -18,12 +24,8 @@
   // eslint-disable-next-line svelte/no-immutable-reactive-statements
   $: dayjs.locale(getLocale());
 
-  type CrawlOutcome = { code: string };
-  type CrawlRunWithOutcome = CrawlRun & { outcome?: CrawlOutcome | null };
-
   function isSkipped(crawl: CrawlRun): boolean {
-    const outcome = (crawl as CrawlRunWithOutcome).outcome;
-    return crawl.status?.toLowerCase() === "failed" && outcome?.code === "CRAWL_DUPLICATE_SKIPPED";
+    return crawl.status?.toLowerCase() === "failed" && isDuplicateCrawlSkip(getCrawlOutcome(crawl));
   }
 
   function hasWarnings(crawl: CrawlRun): boolean {
@@ -44,8 +46,13 @@
     }
 
     switch (crawl.status?.toLowerCase()) {
-      case "complete":
+      case "complete": {
+        const outcome = getCrawlOutcome(crawl);
+        if (isSourceRetentionOnly(outcome)) {
+          return getCrawlOutcomeLabel(outcome, m.complete());
+        }
         return hasWarnings(crawl) ? m.crawl_completed_with_warnings() : m.complete();
+      }
       case "in progress":
         return m.in_progress();
       case "queued":

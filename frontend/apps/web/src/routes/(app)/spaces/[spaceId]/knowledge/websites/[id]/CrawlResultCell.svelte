@@ -2,6 +2,14 @@
   import type { CrawlRun } from "@intric/intric-js";
   import { Label } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import {
+    getCrawlOutcome,
+    getCrawlOutcomeLabel,
+    getCrawlOutcomeTooltip,
+    getFailureSummaryTooltip,
+    isDuplicateCrawlSkip,
+    isSourceRetentionOnly
+  } from "$lib/features/knowledge/crawlOutcomePresentation";
 
   export let crawl: CrawlRun;
   export let align: "start" | "end" | "center" = "start";
@@ -9,78 +17,11 @@
   let cls = "";
   export { cls as class };
 
-  type CrawlOutcome = {
-    code: string;
-    severity: "info" | "warning" | "error";
-    message_key: string;
-    detail?: string | null;
-    affected_count?: number | null;
-  };
-  type CrawlRunWithOutcome = CrawlRun & { outcome?: CrawlOutcome | null };
-
   const successPages = (crawl.pages_crawled ?? 0) - (crawl.pages_failed ?? 0);
   const successFiles = (crawl.files_downloaded ?? 0) - (crawl.files_failed ?? 0);
 
-  // Map failure reason codes to i18n labels
-  function getFailureReasonLabel(reason: string): string {
-    const labels: Record<string, () => string> = {
-      EMPTY_CONTENT: () => m.failure_reason_EMPTY_CONTENT(),
-      NO_CHUNKS: () => m.failure_reason_NO_CHUNKS(),
-      EMBEDDING_TIMEOUT: () => m.failure_reason_EMBEDDING_TIMEOUT(),
-      EMBEDDING_ERROR: () => m.failure_reason_EMBEDDING_ERROR(),
-      EMBEDDING_BATCH_LIMIT: () => m.failure_reason_EMBEDDING_BATCH_LIMIT(),
-      DB_ERROR: () => m.failure_reason_DB_ERROR(),
-      NO_EMBEDDING_MODEL: () => m.failure_reason_NO_EMBEDDING_MODEL(),
-      MISSING_PROVIDER: () => m.failure_reason_MISSING_PROVIDER()
-    };
-    return labels[reason]?.() ?? reason;
-  }
-
-  function getOutcome(): CrawlOutcome | undefined {
-    return (crawl as CrawlRunWithOutcome).outcome ?? undefined;
-  }
-
-  function getOutcomeLabel(outcome: CrawlOutcome): string {
-    const labels: Record<string, () => string> = {
-      crawl_outcome_duplicate_skipped: () => m.crawl_outcome_duplicate_skipped(),
-      crawl_outcome_embedding_config_missing: () => m.crawl_outcome_embedding_config_missing(),
-      crawl_outcome_no_pages_returned: () => m.crawl_outcome_no_pages_returned(),
-      crawl_outcome_timeout_no_pages: () => m.crawl_outcome_timeout_no_pages(),
-      crawl_outcome_max_age_exceeded: () => m.crawl_outcome_max_age_exceeded(),
-      crawl_outcome_source_retention_only: () => m.crawl_outcome_source_retention_only(),
-      crawl_outcome_page_failures: () => m.crawl_outcome_page_failures(),
-      crawl_outcome_unknown_error: () => m.crawl_outcome_unknown_error()
-    };
-    return labels[outcome.message_key]?.() ?? outcome.detail ?? m.crawl_failed();
-  }
-
-  function getOutcomeTooltip(): string | undefined {
-    const outcome = getOutcome();
-    if (!outcome) {
-      return undefined;
-    }
-
-    const label = getOutcomeLabel(outcome);
-    const affected = outcome.affected_count
-      ? `\n${m.crawl_outcome_affected_count({ count: outcome.affected_count })}`
-      : "";
-    const detail = outcome.detail ? `\n${outcome.detail}` : "";
-    return `${label}${affected}${detail}`;
-  }
-
-  // Build tooltip content from failure_summary
   function getFailureTooltip(): string | undefined {
-    const summary = (crawl as CrawlRun & { failure_summary?: Record<string, number> })
-      .failure_summary;
-    if (!summary || Object.keys(summary).length === 0) {
-      return undefined;
-    }
-
-    const lines = Object.entries(summary)
-      .map(([reason, count]) => `${getFailureReasonLabel(reason)}: ${count}`)
-      .join("\n");
-
-    return `${m.failure_reasons_tooltip()}:\n${lines}`;
+    return getFailureSummaryTooltip(crawl.failure_summary);
   }
 
   function totalLabel(): { label: string; color: Label.LabelColor } {
@@ -143,11 +84,20 @@
     }
   }
 
+  function sourceRetentionLabel(): { label: string; color: Label.LabelColor; tooltip?: string } {
+    const outcome = getCrawlOutcome(crawl);
+    return {
+      color: "green",
+      label: outcome ? getCrawlOutcomeLabel(outcome, m.complete()) : m.complete(),
+      tooltip: getCrawlOutcomeTooltip(outcome, m.complete())
+    };
+  }
+
   function crawlStatus(): { label: string; color: Label.LabelColor; tooltip?: string } {
     const reason = crawl.result_location ?? undefined;
-    const outcome = getOutcome();
-    const outcomeTooltip = getOutcomeTooltip();
-    const isDuplicateSkip = outcome?.code === "CRAWL_DUPLICATE_SKIPPED";
+    const outcome = getCrawlOutcome(crawl);
+    const outcomeTooltip = getCrawlOutcomeTooltip(outcome, m.crawl_failed());
+    const isDuplicateSkip = isDuplicateCrawlSkip(outcome);
     const skipTooltip = isDuplicateSkip ? m.crawl_skipped_duplicate() : (outcomeTooltip ?? reason);
     if (crawl.status === "failed" && isDuplicateSkip) {
       return {
@@ -160,7 +110,7 @@
     if (crawl.status === "failed" || crawl.status === "not found") {
       return {
         color: "orange",
-        label: outcome ? getOutcomeLabel(outcome) : m.crawl_failed(),
+        label: outcome ? getCrawlOutcomeLabel(outcome, m.crawl_failed()) : m.crawl_failed(),
         tooltip: outcomeTooltip ?? reason
       };
     }
@@ -188,12 +138,16 @@
 
 <div class="flex w-full items-center gap-2 {cls}" style="justify-content: flex-{align}">
   {#if crawl.status === "complete"}
-    <Label.Single capitalize={false} item={totalLabel()}></Label.Single>
-    {#if successPages || successFiles}
-      <Label.Single capitalize={false} item={successLabel()}></Label.Single>
-    {/if}
-    {#if crawl.pages_failed || crawl.files_failed}
-      <Label.Single capitalize={false} item={failedLabel()}></Label.Single>
+    {#if isSourceRetentionOnly(getCrawlOutcome(crawl))}
+      <Label.Single capitalize={false} item={sourceRetentionLabel()}></Label.Single>
+    {:else}
+      <Label.Single capitalize={false} item={totalLabel()}></Label.Single>
+      {#if successPages || successFiles}
+        <Label.Single capitalize={false} item={successLabel()}></Label.Single>
+      {/if}
+      {#if crawl.pages_failed || crawl.files_failed}
+        <Label.Single capitalize={false} item={failedLabel()}></Label.Single>
+      {/if}
     {/if}
   {:else}
     <Label.Single capitalize={false} item={crawlStatus()}></Label.Single>
