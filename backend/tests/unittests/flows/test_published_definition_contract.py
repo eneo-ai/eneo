@@ -159,6 +159,74 @@ def test_parser_round_trips_step_review_policy() -> None:
     assert runtime_steps[0].review_policy.mode == FlowStepReviewMode.EDIT
 
 
+@pytest.mark.parametrize(
+    ("input_config", "expected"),
+    [
+        ({"runtime_input": {"enabled": True, "required": True}}, True),
+        ({"runtime_input": {"enabled": True, "required": False}}, False),
+        ({"runtime_input": {"enabled": False, "required": True}}, False),
+        ({}, False),
+        (None, False),
+    ],
+)
+def test_published_definition_detects_required_runtime_input(
+    input_config: dict[str, object] | None,
+    expected: bool,
+) -> None:
+    definition = build_published_definition_json(
+        flow_id=uuid4(),
+        name="Flow",
+        description=None,
+        metadata_json=None,
+        steps=[{**_step(order=1), "input_config": input_config}],
+    )
+
+    published_definition = parse_published_definition(definition)
+
+    assert published_definition.has_required_runtime_input() is expected
+
+
+def test_published_definition_rejects_non_object_input_config() -> None:
+    definition = build_published_definition_json(
+        flow_id=uuid4(),
+        name="Flow",
+        description=None,
+        metadata_json=None,
+        steps=[{**_step(order=1), "input_config": "not-an-object"}],
+    )
+    published_definition = parse_published_definition(definition)
+
+    with pytest.raises(
+        BadRequestException, match="Step input_config must be an object"
+    ):
+        published_definition.has_required_runtime_input()
+
+
+def test_published_definition_detects_required_runtime_input_after_optional_step() -> (
+    None
+):
+    definition = build_published_definition_json(
+        flow_id=uuid4(),
+        name="Flow",
+        description=None,
+        metadata_json=None,
+        steps=[
+            {
+                **_step(order=1),
+                "input_config": {"runtime_input": {"enabled": True}},
+            },
+            {
+                **_step(order=2),
+                "input_source": "previous_step",
+                "input_config": {"runtime_input": {"enabled": True, "required": True}},
+            },
+        ],
+    )
+    published_definition = parse_published_definition(definition)
+
+    assert published_definition.has_required_runtime_input()
+
+
 def test_parser_rejects_review_policy_for_outbound_delivery() -> None:
     definition = build_published_definition_json(
         flow_id=uuid4(),

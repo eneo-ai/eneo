@@ -86,7 +86,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T044
+active_task: T046
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -2898,7 +2898,7 @@ tasks:
   - id: T044
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe implementation slice after create-run inline payload validation now uses the published snapshot metadata."
     inputs:
@@ -2921,6 +2921,172 @@ tasks:
       - "verification commands"
       - "stop_if"
       - "whether Claude plan gate is required before activation"
+    receipt:
+      result: done
+      decision: "Activate T045 to move the required runtime input presence query out of FlowRunService and onto PublishedFlowDefinition using the typed runtime input accessor."
+      summary: "The next safe slice is the deferred ownership cleanup from T043: delete FlowRunService's raw published JSON walker for required runtime inputs and use build_runtime_input_config(...).required through PublishedFlowDefinition instead. Claude rejected moving the raw walker as-is, then green-lit the typed-accessor revision."
+      evidence:
+        - "backend/src/intric/flows/application/flow_run_service.py:470-473 calls _definition_has_required_runtime_step_inputs(...) before published_definition.runtime_steps()."
+        - "backend/src/intric/flows/application/flow_run_service.py:1449-1474 implements the predicate by walking raw definition_json and casting nested dicts."
+        - "backend/src/intric/flows/runtime_input.py:41-53 already defines build_runtime_input_config(...), the typed runtime input accessor."
+        - "backend/src/intric/flows/flow_run_step_inputs.py:199 already uses build_runtime_input_config(spec.step.input_config).required for the same predicate."
+      claude_plan_gate:
+        session: "flow-runtime-maintainability-t044-required-runtime-inputs-owner-plan"
+        iteration_1_artifact: ".codex/artifacts/claude-peer-loop-t044-required-runtime-inputs-owner-plan-20260511T085859Z.md"
+        iteration_1_verdict: "changes_required"
+        iteration_2_artifact: ".codex/artifacts/claude-peer-loop-t044-required-runtime-inputs-owner-plan-iteration-2-20260511T090232Z.md"
+        model: "claude-opus-4-7"
+        effort: "xhigh"
+        verdict: "green"
+        green_light: true
+        min_score: 8
+        accepted_changes:
+          - "Use build_runtime_input_config(step.input_config).required instead of relocating the raw JSON walker."
+          - "Avoid double parsing in the step_inputs path."
+          - "Acknowledge malformed published runtime_input now raises instead of silently returning False."
+          - "Trim tests to the new method's truth table instead of duplicating parser malformed-shape coverage."
+      next_task: T045
+
+  - id: T045
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Move the required-runtime-input presence query from FlowRunService to PublishedFlowDefinition using the existing typed runtime input accessor."
+    allowed_files:
+      - "backend/src/intric/flows/published_definition.py"
+      - "backend/src/intric/flows/application/flow_run_service.py"
+      - "backend/tests/unittests/flows/test_published_definition_contract.py"
+      - "backend/tests/unittests/flows/test_flow_run_service.py"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py -q"
+      - "cd backend && uv run pyright src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py"
+      - "cd backend && uv run ruff check src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py"
+      - "rg -n \"_definition_has_required_runtime_step_inputs\" backend/ || true"
+      - "rg -n \"has_required_runtime_input\" backend/src/intric/flows backend/tests/unittests/flows/test_published_definition_contract.py"
+      - "rg -n \"raw_runtime_input|raw_input_config_obj|raw_step_dict\" backend/src/intric/flows/application/flow_run_service.py || true"
+      - "cd backend && uv run python -c \"from intric.flows.published_definition import PublishedFlowDefinition; print(PublishedFlowDefinition.__name__)\""
+      - "git diff --check"
+      - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    stop_if:
+      - "The change requires routers, repositories, frontend, AI Builder, migrations, generated clients, or runtime step-input semantic redesign."
+      - "It becomes necessary to preserve malformed published runtime_input as silent False."
+      - "Any broad Any, cast, type-ignore, Pyright ignore, compatibility alias, version suffix, generic helper/service abstraction, or mechanics comment is needed."
+      - "The service parses runtime steps twice in the step_inputs is not None path."
+      - "Tests need to assert implementation call chains rather than published-definition method truth table or existing service behavior."
+    expected_output:
+      - "PublishedFlowDefinition exposes a clearly named predicate for required runtime input presence over its published step snapshot."
+      - "The predicate uses build_runtime_input_config(input_config) and does not keep FlowRunService's raw definition_json walker or casts."
+      - "create_run parses runtime_steps only when step_inputs are submitted or the published definition has required runtime input, preserving existing minimal-snapshot fallback behavior."
+      - "FlowRunService._definition_has_required_runtime_step_inputs(...) is deleted."
+      - "The raw-runtime-input walker casts are removed from FlowRunService; the unrelated settings-service cast stays untouched."
+      - "Published-definition tests cover enabled+required true, optional false, disabled false, empty input_config false, missing config false, malformed input_config fail-loud, and a two-step case where only the second step is required."
+      - "Receipt records the accepted malformed published runtime_input behavior shift: corrupt shape now raises through the typed parser instead of silently returning False."
+      - "No new comments, broad Any, casts, type ignores, Pyright ignores, compatibility paths, version suffixes, or generic helpers are added."
+      - "All verify commands passed."
+    receipt:
+      result: done
+      summary: "Moved required-runtime-input presence detection from FlowRunService to PublishedFlowDefinition.has_required_runtime_input(). The method reads the published step snapshot, delegates runtime_input defaults and truth-table semantics to build_runtime_input_config(...), and preserves the create_run path that only parses runtime_steps when submitted step_inputs or required runtime input make that validation necessary."
+      changed_files:
+        - "backend/src/intric/flows/published_definition.py"
+        - "backend/src/intric/flows/application/flow_run_service.py"
+        - "backend/tests/unittests/flows/test_published_definition_contract.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      deleted:
+        - "FlowRunService._definition_has_required_runtime_step_inputs(...)."
+        - "The service-owned raw runtime_input walker and its nested raw-step/input/runtime casts."
+      naming_review:
+        source_method_name: "has_required_runtime_input"
+        rationale: "Predicate name states the question without speculative versioning, generic helper/service wording, or compatibility language."
+        changed_name: "FlowRunService local published-step loop variable raw_step_dict -> step_snapshot."
+        version_suffixes_added: 0
+        compatibility_aliases_added: 0
+        comments_added_or_changed: []
+      accepted_behavior:
+        malformed_published_input_config: "Non-object step input_config now raises BadRequestException through PublishedFlowDefinition.has_required_runtime_input() instead of being silently treated as no required runtime input."
+        disabled_required_runtime_input: "runtime_input with enabled=false and required=true does not require submitted step_inputs."
+        minimal_snapshot_fallback: "create_run still avoids full runtime_steps parsing until step_inputs are submitted or has_required_runtime_input() returns true."
+      local_corrections:
+        - "Initial RuntimeStep-based predicate attempt was rejected by local evidence because it forced runtime_steps parsing and broke 17 flow_run_service tests that cover minimal published-snapshot fallback behavior."
+        - "After Claude's commit-gate suggestions, added tests for empty input_config false and non-object input_config fail-loud behavior."
+      red_tests:
+        - "RED cd backend && uv run pytest tests/unittests/flows/test_published_definition_contract.py -q -k \"required_runtime_input\" -> 5 failed with AttributeError before has_required_runtime_input existed."
+      verification:
+        - "PASS cd backend && uv run pytest tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py -q -> 136 passed, 10 warnings."
+        - "PASS cd backend && uv run pyright src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py -> 0 errors, 0 warnings, 0 informations."
+        - "PASS cd backend && uv run ruff check src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py -> All checks passed."
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py -> 4 files already formatted."
+        - "PASS rg -n \"_definition_has_required_runtime_step_inputs\" backend/ || true -> no hits."
+        - "PASS rg -n \"has_required_runtime_input\" backend/src/intric/flows backend/tests/unittests/flows/test_published_definition_contract.py -> method, service call, and tests only."
+        - "PASS rg -n \"raw_runtime_input|raw_input_config_obj|raw_step_dict\" backend/src/intric/flows/application/flow_run_service.py || true -> no hits."
+        - "PASS cd backend && uv run python -c \"from intric.flows.published_definition import PublishedFlowDefinition; print(PublishedFlowDefinition.__name__)\" -> PublishedFlowDefinition."
+        - "PASS git diff --check."
+        - "PASS node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml -> ok true, active_task T046 after receipt update."
+      commands:
+        - "cd backend && uv run pytest tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py -q"
+        - "cd backend && uv run pyright src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py"
+        - "cd backend && uv run ruff check src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py"
+        - "cd backend && uv run ruff format --check src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py"
+        - "rg -n \"_definition_has_required_runtime_step_inputs\" backend/ || true"
+        - "rg -n \"has_required_runtime_input\" backend/src/intric/flows backend/tests/unittests/flows/test_published_definition_contract.py"
+        - "rg -n \"raw_runtime_input|raw_input_config_obj|raw_step_dict\" backend/src/intric/flows/application/flow_run_service.py || true"
+        - "cd backend && uv run python -c \"from intric.flows.published_definition import PublishedFlowDefinition; print(PublishedFlowDefinition.__name__)\""
+        - "git diff --check"
+        - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+        - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flow-runtime-maintainability-t044-required-runtime-inputs-owner-plan --title \"T045 required runtime input owner implementation review\" --phase commit-gate --iteration 3 --require-green --required-min-score 8 --model claude-opus-4-7 --effort xhigh --timeout-seconds 1200 ..."
+      claude_commit_gate:
+        session: "flow-runtime-maintainability-t044-required-runtime-inputs-owner-plan"
+        artifact: ".codex/artifacts/claude-peer-loop-t045-required-runtime-input-owner-implementation-review-20260511T093037Z.md"
+        model: "claude-opus-4-7"
+        effort: "xhigh"
+        verdict: "green"
+        green_light: true
+        min_score: 8
+        accepted_followup_notes:
+          - "A future slice can make runtime_steps() tolerant of minimal snapshots before moving the predicate onto fully typed RuntimeStep objects."
+          - "Do not commit unrelated frontend/apps/web/project.inlang dirty files."
+      type_debt:
+        new_any: 0
+        new_cast: 0
+        new_type_ignore: 0
+        new_pyright_ignore: 0
+      human_reviewability: "Small ownership cleanup: one service call now asks PublishedFlowDefinition the published-snapshot question, the deleted service method is gone, and tests document the predicate truth table and fail-loud malformed shape."
+      rubric:
+        maintainability: 8
+        code_quality: 8
+        clean_architecture: 8
+        separation_of_concerns: 8
+        single_source_of_truth: 8
+        human_readability: 8
+        human_reviewability: 8
+        overall: 8
+      next_task: T046
+
+  - id: T046
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe implementation slice after the required-runtime-input ownership cleanup, with explicit attention to stale naming/docs cleanup versus the next runtime/API risk."
+    inputs:
+      - "T045 receipt and Claude commit-gate artifact."
+      - "Current git diff and unrelated dirty-file list."
+      - "User naming guidance: no speculative V1 suffixes, no slop comments, no legacy/backwards-compatible code for pre-production Flows without proof."
+    constraints:
+      - "Do not modify source in this Judge task."
+      - "Do not touch unrelated frontend/apps/web/project.inlang dirty files."
+      - "Prefer a narrow, locally verifiable next Worker with no new Any/casts/type ignores/Pyright ignores."
+      - "If stale docs mention obsolete FlowMetadataV1/PublishedFlowDefinitionV1 names, decide whether cleanup is the next highest-value slice or just historical context to leave alone."
+    expected_output:
+      - "Decision."
+      - "Current owner and proposed canonical home for the next concept."
+      - "Exact Worker objective."
+      - "allowed_files."
+      - "verify commands."
+      - "stop_if."
+      - "whether Claude plan gate is required before activation."
     receipt: null
 
 validation_command_candidates:

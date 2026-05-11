@@ -467,9 +467,7 @@ class FlowRunService:
             fallback_steps=flow.steps,
         )
         step_input_file_projections: list[StepInputFileProjection] = []
-        if step_inputs is not None or self._definition_has_required_runtime_step_inputs(
-            definition_json
-        ):
+        if step_inputs is not None or published_definition.has_required_runtime_input():
             runtime_steps = published_definition.runtime_steps()
             limits = await self._resolve_flow_input_limits()
             runtime_specs = build_runtime_step_input_specs(
@@ -1375,8 +1373,8 @@ class FlowRunService:
             by_step_order[int(step.step_order)] = step
 
         preseed: list[PreseedStep] = []
-        for raw_step_dict in raw_steps:
-            step_order_raw = raw_step_dict.get("step_order", 0)
+        for step_snapshot in raw_steps:
+            step_order_raw = step_snapshot.get("step_order", 0)
             if isinstance(step_order_raw, bool):
                 raise BadRequestException(
                     "Invalid flow version step order.",
@@ -1398,8 +1396,8 @@ class FlowRunService:
                     context={"step_order": step_order},
                 )
 
-            step_id_raw = raw_step_dict.get("step_id")
-            assistant_id_raw = raw_step_dict.get("assistant_id")
+            step_id_raw = step_snapshot.get("step_id")
+            assistant_id_raw = step_snapshot.get("assistant_id")
             if step_id_raw is None or assistant_id_raw is None:
                 fallback = by_step_order.get(step_order)
                 if fallback is None:
@@ -1445,30 +1443,3 @@ class FlowRunService:
                 }
             )
         return preseed
-
-    @staticmethod
-    def _definition_has_required_runtime_step_inputs(
-        definition_json: JsonObject,
-    ) -> bool:
-        raw_steps_obj: object = definition_json.get("steps")
-        if not isinstance(raw_steps_obj, list):
-            return False
-        raw_steps = cast(list[object], raw_steps_obj)
-        for raw_step in raw_steps:
-            if not isinstance(raw_step, dict):
-                continue
-            raw_step_dict = cast(dict[str, object], raw_step)
-            raw_input_config_obj: object = raw_step_dict.get("input_config")
-            if not isinstance(raw_input_config_obj, dict):
-                continue
-            raw_input_config = cast(dict[str, object], raw_input_config_obj)
-            raw_runtime_input_obj: object = raw_input_config.get("runtime_input")
-            if not isinstance(raw_runtime_input_obj, dict):
-                continue
-            raw_runtime_input = cast(dict[str, object], raw_runtime_input_obj)
-            if (
-                raw_runtime_input.get("enabled") is True
-                and raw_runtime_input.get("required") is True
-            ):
-                return True
-        return False

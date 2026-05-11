@@ -13,6 +13,7 @@ from intric.flows.flow_metadata import (
 )
 from intric.flows.runtime.models import RuntimeStep
 from intric.flows.runtime.step_definition_parser import parse_runtime_steps
+from intric.flows.runtime_input import build_runtime_input_config
 from intric.main.exceptions import BadRequestException
 
 FLOW_DEFINITION_SCHEMA_VERSION = 1
@@ -84,6 +85,20 @@ class PublishedFlowDefinition:
                 code=FLOW_DEFINITION_STEPS_INVALID,
                 context=exc.context,
             ) from exc
+
+    def has_required_runtime_input(self) -> bool:
+        for step in self.steps:
+            raw_input_config: object = step.get("input_config")
+            if raw_input_config is None:
+                input_config = None
+            elif _is_json_object(raw_input_config):
+                input_config = raw_input_config
+            else:
+                raise BadRequestException("Step input_config must be an object.")
+            runtime_input = build_runtime_input_config(input_config)
+            if runtime_input.enabled and runtime_input.required:
+                return True
+        return False
 
     def checksum(self) -> str:
         return published_definition_checksum(self.definition_json)
