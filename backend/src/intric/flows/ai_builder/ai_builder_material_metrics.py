@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import cast
 
 from intric.flows.ai_builder.ai_builder_domain_models import FlowDraftSpecCore
+from intric.flows.ai_builder.ai_builder_source_material import question_binding
 from intric.flows.enums import AIBuilderInputSource, AIBuilderInputType, FlowOutputType
 from intric.flows.template_reference_analyzer import (
     TemplateReference,
@@ -57,7 +57,7 @@ def material_metric_steps_from_draft(
             input_source=step.input_source.value,
             input_type=step.input_type.value,
             output_type=step.output_type.value,
-            question=question_from_input_bindings(step.input_bindings),
+            question=question_binding(step.input_bindings) or "",
         )
         for index, step in enumerate(spec.steps, start=1)
     )
@@ -185,14 +185,6 @@ def compute_per_step_material_metrics(
         )
         for step in steps
     )
-
-
-def question_from_input_bindings(input_bindings: object) -> str:
-    if not isinstance(input_bindings, dict):
-        return ""
-    bindings = cast(dict[str, object], input_bindings)
-    question = bindings.get("question")
-    return question if isinstance(question, str) else ""
 
 
 def _source_surfacing_step_refs(

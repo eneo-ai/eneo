@@ -224,3 +224,155 @@ def test_per_step_metrics_sum_to_aggregate_for_additive_material_costs() -> None
     assert sum(
         metrics.all_previous_steps_count for _step_order, metrics in per_step
     ) == (aggregate.all_previous_steps_count)
+
+
+def test_canonical_wide_targeted_fan_in_keeps_source_duplication_per_step_bounded() -> (
+    None
+):
+    section_steps = tuple(
+        _metric_step(
+            ref=f"step_{letter}",
+            order=order,
+            output_type="json",
+            question=(
+                f"{{{{ step_{chr(ord(letter) - 1)}.output.structured }}}}\n\n"
+                "Källmaterial: {{ step_a.output.text }}"
+            ),
+        )
+        for order, letter in enumerate("cdefghijk", start=3)
+    )
+    final_question = "\n\n".join(
+        [
+            "{{ step_k.output.structured }}",
+            *(
+                f"Section {letter}: {{{{ step_{letter}.output.structured.field }}}}"
+                for letter in "bcdefghijk"
+            ),
+            "Transkribera ljud: {{ step_a.output.text }}",
+        ]
+    )
+    steps = (
+        _metric_step(
+            ref="step_a",
+            order=1,
+            input_source="flow_input",
+            input_type="audio",
+            output_type="text",
+        ),
+        _metric_step(ref="step_b", order=2, output_type="json"),
+        *section_steps,
+        _metric_step(ref="step_l", order=12, question=final_question),
+        _metric_step(ref="step_m", order=13, output_type="docx"),
+    )
+
+    aggregate = compute_material_metrics(steps)
+    per_step = dict(compute_per_step_material_metrics(steps))
+
+    assert aggregate.all_previous_steps_count == 0
+    assert aggregate.fan_in_width == 11
+    assert aggregate.source_duplication_count == 10
+    assert aggregate.whole_output_reference_count == 20
+    assert max(metrics.source_duplication_count for metrics in per_step.values()) == 1
+    assert per_step[12].structured_field_count == 10
+
+
+def test_canonical_legitimate_broad_fan_in_is_limited_to_comparison_step() -> None:
+    steps = (
+        _metric_step(
+            ref="step_a",
+            order=1,
+            input_source="flow_input",
+            input_type="document",
+            output_type="json",
+        ),
+        _metric_step(ref="step_b", order=2, output_type="text"),
+        _metric_step(
+            ref="step_c",
+            order=3,
+            input_source="all_previous_steps",
+            output_type="text",
+        ),
+        _metric_step(
+            ref="step_d",
+            order=4,
+            output_type="text",
+            question="{{ step_c.output.text }}\n{{ step_a.output.structured.fact }}",
+        ),
+    )
+
+    aggregate = compute_material_metrics(steps)
+    per_step = dict(compute_per_step_material_metrics(steps))
+
+    assert aggregate.all_previous_steps_count == 1
+    assert per_step[3].all_previous_steps_count == 1
+    assert per_step[4].all_previous_steps_count == 0
+    assert per_step[4].fan_in_width == 2
+    assert per_step[4].source_duplication_count == 0
+
+
+def test_canonical_quality_chain_routes_only_needed_material() -> None:
+    steps = (
+        _metric_step(
+            ref="step_a",
+            order=1,
+            input_source="flow_input",
+            input_type="audio",
+            output_type="text",
+        ),
+        _metric_step(
+            ref="step_b",
+            order=2,
+            output_type="json",
+            question="{{ step_a.output.text }}\n\nrapportton: {{ rapportton }}",
+        ),
+        _metric_step(
+            ref="step_c",
+            order=3,
+            output_type="text",
+            question=(
+                "{{ step_b.output.structured }}\n\n"
+                "Källmaterial: {{ step_a.output.text }}\n\n"
+                "ticket_id: {{ ticket_id }}\n"
+                "kundnamn: {{ kundnamn }}\n"
+                "rapportton: {{ rapportton }}"
+            ),
+        ),
+        _metric_step(
+            ref="step_d",
+            order=4,
+            output_type="json",
+            question="{{ step_c.output.text }}\n\nrapportton: {{ rapportton }}",
+        ),
+        _metric_step(
+            ref="step_e",
+            order=5,
+            output_type="text",
+            question=(
+                "{{ step_d.output.structured }}\n\n"
+                "{{ step_b.output.structured.agenda_point_1_json }}\n"
+                "{{ step_b.output.structured.agenda_point_2_json }}\n"
+                "{{ step_b.output.structured.agenda_point_3_json }}\n"
+                "{{ step_b.output.structured.agenda_point_4_json }}\n"
+                "{{ step_d.output.structured.tackning }}\n"
+                "{{ step_d.output.structured.ton }}\n"
+                "{{ step_d.output.structured.saknade_beslut }}\n\n"
+                "Transkribera ljud: {{ step_a.output.text }}\n\n"
+                "Skriv Word-utkast för rapport: {{ step_c.output.text }}\n\n"
+                "rapportton: {{ rapportton }}"
+            ),
+        ),
+        _metric_step(ref="step_f", order=6, output_type="docx"),
+    )
+
+    aggregate = compute_material_metrics(steps, form_field_names={"rapportton"})
+    per_step = dict(
+        compute_per_step_material_metrics(steps, form_field_names={"rapportton"})
+    )
+
+    assert aggregate.all_previous_steps_count == 0
+    assert aggregate.fan_in_width == 4
+    assert aggregate.source_duplication_count == 3
+    assert aggregate.whole_output_reference_count == 7
+    assert aggregate.structured_field_count == 7
+    assert per_step[5].fan_in_width == 4
+    assert per_step[5].source_duplication_count == 1

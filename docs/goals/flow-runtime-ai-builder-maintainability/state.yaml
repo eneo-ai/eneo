@@ -5,7 +5,7 @@ goal:
   slug: "flow-runtime-ai-builder-maintainability"
   kind: open_ended
   tranche: "Backend-first maintainability and production-readiness hardening: fix P0 runtime/API risks, improve public API error contracts, type critical data boundaries, remove pre-production legacy/dead code after proof, and improve AI Builder material efficiency."
-  status: blocked
+  status: done
 
 context:
   branch: "feature/refactor-flows-flowai"
@@ -191,6 +191,17 @@ maintainability_findings:
     title: "Generated flows need measurable material routing and token/context efficiency, not only valid specs."
     proposed_owner: "Existing AI Builder source-material/dataflow owners; no new parallel material planner unless red test proves need"
     after: "runtime/API first P0s or when AI Builder touched"
+  - id: AI-builder-source-material-policy-twin
+    severity: P1
+    title: "Draft and compiled source-material report-shape policy still has twin implementations."
+    proposed_owner: "AI Builder source-material policy owner"
+    after: "next behavior change to source-material report-shape detection"
+    evidence:
+      - "backend/src/intric/flows/ai_builder/ai_builder_source_material.py:310-391"
+    acceptance:
+      - "Draft and compiled source-material report-shape detection share one policy abstraction or an explicit documented reason to remain separate."
+      - "Existing canonical material-metrics tests still pass."
+      - "No new planner/materializer parallel source-material path is introduced."
   - id: comments-ai-slop-audit
     severity: P2
     title: "Remove verbose what-comments, internal planning vocabulary, decorative confidence prose, vague TODOs, and obsolete compatibility comments."
@@ -4048,6 +4059,305 @@ tasks:
       remaining_blockers:
         - "Owner must export ENEO_LOCAL_API_BASE and ENEO_LOCAL_API_KEY before live AI Builder smoke can run."
       active_task_decision: "Set goal.status to blocked and active_task to null until credentials or new owner direction are available."
+
+  - id: T066
+    type: scout
+    assignee: PM
+    status: done
+    reasoning_hint: low
+    objective: "Run the existing live AI Builder material-efficiency smoke now that the owner supplied local API credentials."
+    inputs:
+      - "T061 live-smoke blocker receipt."
+      - "Owner-supplied ENEO_LOCAL_API_BASE and ENEO_LOCAL_API_KEY in the current conversation."
+      - "docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py"
+    constraints:
+      - "Do not paste API keys into repo files, goal receipts, command summaries, or final messages."
+      - "Use the existing runner; do not create a new smoke harness."
+      - "Keep raw eval outputs under /tmp/material-efficiency-live-eval/ and do not commit them."
+      - "Preserve unrelated dirty files."
+    expected_output:
+      - "Run the smoke command with the owner-provided API base/key."
+      - "Record pass/fail and sanitized output path."
+      - "If smoke passes, decide whether to run the recorded one-run create suite next."
+    receipt:
+      result: done
+      summary: "Credential blocker cleared. Existing live smoke and one-run create suite both completed against the local API without hard runner errors."
+      evidence:
+        - "/tmp/material-efficiency-live-eval/20260511T111711Z-t066-smoke/summary.json"
+        - "/tmp/material-efficiency-live-eval/20260511T111739Z-t066-create-suite/summary.json"
+      sanitized_outputs:
+        smoke_summary: "/tmp/material-efficiency-live-eval/20260511T111711Z-t066-smoke/summary.json"
+        create_suite_summary: "/tmp/material-efficiency-live-eval/20260511T111739Z-t066-create-suite/summary.json"
+      commands_run:
+        - "uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --smoke --output-dir /tmp/material-efficiency-live-eval/20260511T111711Z-t066-smoke"
+        - "uv run --directory backend python ../docs/goals/material-efficiency/run_flow_ai_builder_live_eval.py --all --runs 1 --apply --output-dir /tmp/material-efficiency-live-eval/20260511T111739Z-t066-create-suite"
+      smoke_result:
+        status: "passed"
+        evidence:
+          - "Summary written with api_base http://localhost:8123 and no result cases, as expected for reachability smoke."
+          - "Smoke artifacts include sessions.json and flow inventory JSON files under /tmp."
+      create_suite_result:
+        status: "completed"
+        result_count: 10
+        statuses:
+          applied: 7
+          clarification_required: 3
+        applied_case_ids:
+          - V1
+          - V2
+          - C1
+          - C2
+          - C3
+          - C4
+          - C5
+        clarification_case_ids:
+          - V3
+          - V4
+          - V5
+      material_efficiency_signals:
+        positive:
+          - "No stream or runner errors were recorded in the summary for the 10 executed cases."
+          - "V1, V2, C1, C2, C3, C4, and C5 reached applied flow state."
+          - "V3, V4, and V5 stopped for clarification instead of forcing a premature topology."
+        follow_up_review_needed:
+          - "C1 metrics show fan_in_width=11, source_duplication_count=10, whole_output_reference_count=20."
+          - "C3 metrics show all_previous_steps_count=1 despite the goal preference against all_previous_steps band-aids."
+          - "C5 metrics show fan_in_width=4, source_duplication_count=3, whole_output_reference_count=7."
+          - "The runner records score axes but leaves manual score values unset, so a pass/fail maintainability judgment still needs PM/Judge review."
+      decision: "Live credential blocker is resolved and operational smoke/eval gate ran. Activate T067 to audit whether the material-efficiency metrics are acceptable, require follow-up implementation, or only need a handoff note."
+
+  - id: T067
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Audit the T066 live material-efficiency results and decide whether the broader goal can close, remains blocked, or needs a concrete follow-up task."
+    inputs:
+      - "T066 live smoke and create-suite receipt."
+      - "/tmp/material-efficiency-live-eval/20260511T111711Z-t066-smoke/summary.json"
+      - "/tmp/material-efficiency-live-eval/20260511T111739Z-t066-create-suite/summary.json"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/goal.md"
+    constraints:
+      - "Do not paste API keys into repo files, receipts, command summaries, or final messages."
+      - "Do not treat successful runner exit as sufficient if material-efficiency metrics reveal goal-relevant weakness."
+      - "Preserve unrelated dirty files."
+    expected_output:
+      - "Completion audit against the live material-efficiency requirement."
+      - "Decision: complete, blocked, or follow-up task."
+      - "If follow-up is needed, define objective, owner, allowed files, and validation commands."
+    receipt:
+      result: done
+      summary: "Live material-efficiency verification found no hard smoke/create-suite regression. The generated plans show meaningful improvements over broad all_previous_steps routing, but the broader goal is not closed until the phase-boundary review records a manual quality judgment and Claude green-light."
+      evidence:
+        - "/tmp/material-efficiency-live-eval/20260511T111739Z-t066-create-suite/summary.json"
+        - "/tmp/material-efficiency-live-eval/20260511T111739Z-t066-create-suite/C1-run1/case.json"
+        - "/tmp/material-efficiency-live-eval/20260511T111739Z-t066-create-suite/C1-run1/plan.json"
+        - "/tmp/material-efficiency-live-eval/20260511T111739Z-t066-create-suite/C3-run1/case.json"
+        - "/tmp/material-efficiency-live-eval/20260511T111739Z-t066-create-suite/C5-run1/case.json"
+        - "/tmp/material-efficiency-live-eval/20260511T111739Z-t066-create-suite/C5-run1/plan.json"
+        - "backend/src/intric/flows/ai_builder/ai_builder_create_dataflow.py:249"
+        - "backend/src/intric/flows/ai_builder/ai_builder_step_transition_policy.py:88"
+        - "backend/src/intric/flows/ai_builder/ai_builder_source_material.py:98"
+        - "backend/src/intric/flows/ai_builder/ai_builder_material_metrics.py:66"
+      operational_result:
+        no_hard_regression_observed: true
+        smoke_result: "passed"
+        create_suite_result: "completed"
+        create_suite_statuses:
+          applied: 7
+          clarification_required: 3
+      quality_assessment:
+        current_overall_rating: "8/10"
+        backend_api_runtime_maintainability_rating: "8-8.5/10"
+        ai_builder_material_efficiency_rating: "7/10 before final manual scoring and Claude review"
+        reason: "The runtime/API/validation shape is stronger and no live smoke failure was observed. AI Builder generated-flow quality is materially better than raw broad fan-in, but the evidence still includes high targeted-fan-in metrics in C1 and C5, and the runner leaves manual score axes unset."
+      findings:
+        - "C1 is a deliberate wide-targeted-fan-in case: the prompt requires separate JSON section underlag and a final Word report fed by explicit field references, so high fan_in_width is not automatically a regression."
+        - "C1 still shows source duplication pressure because many JSON extraction steps include the original transcript as source material; this is correct for evidence preservation but not a 10/10 material-efficiency shape."
+        - "C3's single all_previous_steps occurrence matches the case's legitimate_broad_fan_in requirement for contradiction analysis, so it is not counted as a regression."
+        - "C5 routes transcript, agenda JSON, draft, critique, revision, and metadata through targeted bindings instead of dumping all previous step outputs, but the final revision still has enough whole-output references to justify manual score review."
+      decision: "Do not claim only improvements or close the broader goal yet. Activate T068 as the final phase-boundary completion audit and Claude review gate; no immediate source-code follow-up is required before that gate unless Claude or the final audit identifies one."
+
+  - id: T068
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Run the phase-boundary completion audit for the maintainability goal after the live AI Builder material-efficiency gate."
+    inputs:
+      - "T066 live smoke/create-suite receipt."
+      - "T067 material-efficiency quality audit receipt."
+      - "docs/goals/flow-runtime-ai-builder-maintainability/goal.md"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    constraints:
+      - "Do not paste API keys into repo files, receipts, command summaries, or final messages."
+      - "Use the host Claude peer-loop wrapper if Claude review is needed; do not attempt OAuth/login recovery from the sandbox."
+      - "Preserve unrelated dirty files and do not push."
+      - "Do not mark the broader goal complete unless the board, verification, and Claude phase-boundary gate all support it."
+    expected_output:
+      - "Run board validation and diff hygiene checks."
+      - "Ask Claude to challenge the phase-boundary completion claim or record a concrete blocker if Claude cannot run."
+      - "Record a final decision: complete, blocked, or a specific follow-up Worker/Scout task."
+      - "If complete, set goal.status complete and active_task null only after validation."
+    receipt:
+      result: done
+      summary: "Claude phase-boundary review returned changes_required, GREEN_LIGHT no, MIN_SCORE 6. Do not close the goal yet."
+      evidence:
+        - "/Users/ccimen/eneo/eneo/.codex/artifacts/claude-peer-loop-t068-phase-boundary-completion-audit-20260511T113817Z.md"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_material_metrics.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_source_material.py"
+      commands_run:
+        - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --model claude-opus-4-7 --effort xhigh --session flow-runtime-ai-builder-t068-phase-boundary --new-session --title \"T068 phase-boundary completion audit\" --phase review --iteration 1 ..."
+        - "rg -n \"compute_material_metrics|compute_per_step_material_metrics|material_metrics|FlowDraftSpecCore\" backend/tests -g '*.py'"
+      claude_result:
+        verdict: "changes_required"
+        green_light: false
+        min_score: 6
+        blocker_summary:
+          - "Do not close on operational smoke alone."
+          - "Pin material-efficiency behavior with canonical metric tests or fill an explicit accepted-by-design scorecard."
+          - "Resolve or document the duplicate source-material question binding / draft-vs-compiled policy concerns."
+      codex_verification:
+        - "Claude's claim that no material-metrics tests exist was too broad: backend/tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py already covers the metric helper."
+        - "Existing tests cover generic section-chain metrics, all_previous counting, and per-step additive metrics, but they do not explicitly pin the canonical live C1/C3/C5 shapes that drove the close/no-close decision."
+        - "Claude's duplicate question-binding concern is valid: ai_builder_material_metrics.py has question_from_input_bindings while ai_builder_source_material.py has question_binding for the same input_bindings.question access pattern."
+      decision: "Activate T069 as a bounded Worker to add the missing canonical material-metrics contract tests and remove the duplicate question-binding helper before re-running the Claude green-light pass."
+
+  - id: T069
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: low
+    objective: "Pin canonical AI Builder material-efficiency metric contracts and remove the duplicate question-binding helper."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_material_metrics.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    constraints:
+      - "Keep the change narrow; do not refactor source-material draft/compiled policy in this worker."
+      - "Reuse existing source-material question_binding instead of creating another helper."
+      - "Add behavior-focused tests for canonical C1/C3/C5 material-metrics expectations."
+      - "Preserve unrelated dirty files and do not push."
+    expected_output:
+      - "One small code cleanup in ai_builder_material_metrics.py."
+      - "Canonical material-metrics tests for wide targeted fan-in, legitimate broad fan-in, and multi-step quality chain."
+      - "Focused ruff/pyright/pytest verification."
+      - "Worker receipt with changed files, tests run, maintainability self-review, and whether Claude should be resumed."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py"
+      - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py"
+      - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      - "git diff --check"
+    stop_if:
+      - "Implementing the worker would require changing planner/materializer/source-material architecture beyond the two allowed files."
+      - "Tests reveal the existing live metric interpretation is wrong and needs a Judge decision before implementation."
+    receipt:
+      result: done
+      summary: "Added canonical material-efficiency metric contract tests for the live C1/C3/C5 shapes and removed the duplicate material-metrics question binding helper by reusing the source-material owner."
+      changed_files:
+        - "backend/src/intric/flows/ai_builder/ai_builder_material_metrics.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py"
+      canonical_owner_decision:
+        concept: "Reading input_bindings.question from AI Builder step bindings."
+        previous_locations:
+          - "backend/src/intric/flows/ai_builder/ai_builder_material_metrics.py::question_from_input_bindings"
+          - "backend/src/intric/flows/ai_builder/ai_builder_source_material.py::question_binding"
+        canonical_home: "backend/src/intric/flows/ai_builder/ai_builder_source_material.py::question_binding"
+        merge_delete_path: "Deleted question_from_input_bindings and reused question_binding with an explicit empty-string fallback in material_metric_steps_from_draft."
+      tests_added:
+        - "test_canonical_wide_targeted_fan_in_keeps_source_duplication_per_step_bounded"
+        - "test_canonical_legitimate_broad_fan_in_is_limited_to_comparison_step"
+        - "test_canonical_quality_chain_routes_only_needed_material"
+      commands:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py"
+        - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py"
+        - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py"
+        - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py"
+        - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+        - "git diff --check"
+      verification:
+        - "PASS cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py -> 11 passed."
+        - "PASS cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py"
+        - "PASS cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py"
+        - "PASS cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_material_metrics.py tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py -> 0 errors"
+        - "PASS node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml -> ok true, active_task T069 before receipt update."
+        - "PASS git diff --check"
+      maintainability_self_review:
+        single_source_of_truth: "Improved by deleting the duplicate question-binding helper and reusing the source-material helper."
+        behavior_contract: "Improved by pinning the three canonical metric interpretations that drove the live phase-boundary decision."
+        reviewability: "Small two-file source/test change; no planner/materializer architecture refactor."
+        anti_patterns_avoided:
+          - "No new Any/cast/type ignore."
+          - "No new parallel helper or compatibility path."
+          - "No source-code comments added."
+          - "No broad AI Builder architecture rewrite."
+      maintainability_rubric_score:
+        maintainability: 8
+        code_quality: 8
+        clean_architecture: 8
+        separation_of_concerns: 8
+        single_source_of_truth: 8
+        human_readability: 8
+        human_reviewability: 9
+        tests: 8
+        overall: 8
+      diff_type_debt_counts:
+        new_any: 0
+        new_cast: 0
+        new_type_ignore: 0
+        new_comments: 0
+        helper_deleted: 1
+      claude_resume_needed: true
+      decision: "Activate T070 to resume Claude on the same phase-boundary session and check whether T069 resolves the blocker or exposes another bounded follow-up."
+
+  - id: T070
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Resume Claude phase-boundary review after T069 and decide whether the goal can close or needs another specific follow-up."
+    inputs:
+      - "T068 Claude review receipt."
+      - "T069 worker receipt."
+      - "/Users/ccimen/eneo/eneo/.codex/artifacts/claude-peer-loop-t068-phase-boundary-completion-audit-20260511T113817Z.md"
+      - "backend/src/intric/flows/ai_builder/ai_builder_material_metrics.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    constraints:
+      - "Use the same Claude session flow-runtime-ai-builder-t068-phase-boundary."
+      - "Do not paste API keys into repo files, receipts, command summaries, or final messages."
+      - "Preserve unrelated dirty files and do not push."
+    expected_output:
+      - "Claude iteration 2 verdict."
+      - "Codex verification of any new Claude blockers."
+      - "Decision: complete, blocked, or another bounded follow-up."
+      - "If complete, update goal.status and active_task only after validation."
+    receipt:
+      result: done
+      summary: "Claude iteration 2 returned green, GREEN_LIGHT yes, MIN_SCORE 8. The material-efficiency contract and duplicate-helper blockers are resolved, with the remaining source-material policy twin recorded as a deferred P1 follow-up."
+      evidence:
+        - "/Users/ccimen/eneo/eneo/.codex/artifacts/claude-peer-loop-t070-phase-boundary-re-review-20260511T114433Z.md"
+        - "backend/src/intric/flows/ai_builder/ai_builder_material_metrics.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_material_metrics.py"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      commands:
+        - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --model claude-opus-4-7 --effort xhigh --session flow-runtime-ai-builder-t068-phase-boundary --title \"T070 phase-boundary re-review\" --phase review --iteration 2 ..."
+      claude_result:
+        verdict: "green"
+        green_light: true
+        min_score: 8
+        non_blocking_followups:
+          - "Record the draft/compiled source-material policy twin as deferred P1 with trigger next behavior change to source-material report-shape detection."
+          - "Optionally add an end-to-end material_metric_steps_from_draft projection test later."
+          - "Optionally audit runtime token cost of repeated source-material references later."
+      codex_verification:
+        - "The source-material policy twin was recorded in maintainability_findings as AI-builder-source-material-policy-twin."
+        - "No further source-code follow-up is required before closing the current goal."
+      decision: complete
+      final_decision: "Close the current maintainability/production-readiness goal locally after final validation and commit. Do not push without explicit owner permission."
 
 validation_command_candidates:
   shared:
