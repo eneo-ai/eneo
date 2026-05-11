@@ -133,7 +133,7 @@ Expected responsibilities:
 
 | Responsibility | Contract |
 |---|---|
-| Writer | Build `PublishedFlowDefinitionV1` from a draft `Flow` and produce canonical JSON for checksum/storage. |
+| Writer | Build `PublishedFlowDefinition` from a draft `Flow` and produce canonical JSON for checksum/storage. |
 | Parser | Parse and validate a stored definition into runtime DTOs; fail closed with typed domain/application errors. |
 | Versioning | Own `FLOW_DEFINITION_SCHEMA_VERSION`, supported versions, migration policy, and corruption behavior. |
 | Persistence projection | Store first-class `schema_version` on `flow_versions` in addition to JSON payload. |
@@ -149,12 +149,12 @@ Acceptance criteria:
 
 - Publication and runtime both import the same definition contract module.
 - The DB row has a first-class `schema_version` column and JSON payload version parity test.
-- Old `v1` definitions parse through an explicit supported-version path.
+- Stored `schema_version=1` definitions parse through an explicit supported-version path.
 - Corrupt/missing definition JSON has a documented failure mode and API/runtime test.
 
 Tests required:
 
-- Domain contract tests for building/parsing `PublishedFlowDefinitionV1`.
+- Domain contract tests for building/parsing `PublishedFlowDefinition`.
 - Repository/data migration test for backfilling `flow_versions.schema_version`.
 - Runtime integration test executing a run from a versioned snapshot.
 - Contract test proving invalid snapshot shape fails with a typed error, not broad `KeyError`/`BadRequestException` leakage.

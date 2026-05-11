@@ -86,7 +86,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T046
+active_task: T048
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -3067,7 +3067,7 @@ tasks:
   - id: T046
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe implementation slice after the required-runtime-input ownership cleanup, with explicit attention to stale naming/docs cleanup versus the next runtime/API risk."
     inputs:
@@ -3082,6 +3082,118 @@ tasks:
     expected_output:
       - "Decision."
       - "Current owner and proposed canonical home for the next concept."
+      - "Exact Worker objective."
+      - "allowed_files."
+      - "verify commands."
+      - "stop_if."
+      - "whether Claude plan gate is required before activation."
+    receipt:
+      result: done
+      decision: "Activate T047 for a tracked-doc naming cleanup that removes stale PublishedFlowDefinitionV1 guidance and aligns docs with the actual PublishedFlowDefinition class plus schema_version field."
+      summary: "Source is already on the unversioned PublishedFlowDefinition name, but tracked planning/refactor docs still tell future agents to create or choose PublishedFlowDefinitionV1. Because the user explicitly called out speculative V1 naming as slop, a docs-only cleanup is the safest next slice before more implementation."
+      evidence:
+        - "backend/src/intric/flows/published_definition.py:42 defines class PublishedFlowDefinition."
+        - "backend/src/intric/flows/published_definition.py:19 and 43 show versioning belongs to FLOW_DEFINITION_SCHEMA_VERSION/schema_version, not the class name."
+        - "docs/goals/flow-runtime-ai-builder-maintainability/goal.md:185 still says choose PublishedFlowDefinitionV1."
+        - "docs/refactor/phase1/06-data-model.md:105 proposes PublishedFlowDefinitionV1."
+        - "docs/refactor/phase1/11-concept-invariants.md:136 and 157 mention building/testing PublishedFlowDefinitionV1."
+        - "docs/refactor/phase2/synthesis.md:51 proposes domain/flow_definition.py with PublishedFlowDefinitionV1."
+        - "docs/refactor/phase5/codex-rules.md:17 uses PublishedFlowDefinitionV1 as an allowed example."
+      current_owner: "backend/src/intric/flows/published_definition.py owns the published flow definition snapshot contract."
+      proposed_canonical_home: "Keep PublishedFlowDefinition as the class name; keep FLOW_DEFINITION_SCHEMA_VERSION/schema_version as the version contract."
+      exact_worker_objective: "Replace stale tracked-doc PublishedFlowDefinitionV1 references with PublishedFlowDefinition plus explicit schema_version wording, without touching historical goal receipts or source code."
+      allowed_files:
+        - "docs/goals/flow-runtime-ai-builder-maintainability/goal.md"
+        - "docs/refactor/phase1/06-data-model.md"
+        - "docs/refactor/phase1/11-concept-invariants.md"
+        - "docs/refactor/phase2/synthesis.md"
+        - "docs/refactor/phase5/codex-rules.md"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      verify:
+        - "git grep -n -E '\\bFlow(Metadata|FormSchema|FormField|CareDataPolicy)V1\\b|PublishedFlowDefinitionV1' -- docs/goals/flow-runtime-ai-builder-maintainability/goal.md docs/refactor ':!docs/goals/flow-runtime-ai-builder-maintainability/state.yaml' || true"
+        - "git diff --check"
+        - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      stop_if:
+        - "A doc reference is intentionally historical and changing it would rewrite old receipts instead of active guidance."
+        - "The cleanup requires source code, tests, migrations, generated clients, or broad architecture edits."
+        - "Any replacement introduces a new speculative class, fake version suffix, compatibility story, or generic placeholder module name."
+      claude_plan_gate_required: false
+      next_task: T047
+
+  - id: T047
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "Replace stale tracked-doc PublishedFlowDefinitionV1 references with PublishedFlowDefinition plus explicit schema_version wording."
+    allowed_files:
+      - "docs/goals/flow-runtime-ai-builder-maintainability/goal.md"
+      - "docs/refactor/phase1/06-data-model.md"
+      - "docs/refactor/phase1/11-concept-invariants.md"
+      - "docs/refactor/phase2/synthesis.md"
+      - "docs/refactor/phase5/codex-rules.md"
+      - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    verify:
+      - "git grep -n -E '\\bFlow(Metadata|FormSchema|FormField|CareDataPolicy)V1\\b|PublishedFlowDefinitionV1' -- docs/goals/flow-runtime-ai-builder-maintainability/goal.md docs/refactor ':!docs/goals/flow-runtime-ai-builder-maintainability/state.yaml' || true"
+      - "git diff --check"
+      - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+    stop_if:
+      - "The change needs implementation files, tests, migrations, generated clients, or broader architecture rewrites."
+      - "A reference is part of an old receipt/history section rather than current guidance."
+      - "The replacement wording implies a new class, compatibility alias, or V2 plan."
+    expected_output:
+      - "Tracked current guidance no longer references PublishedFlowDefinitionV1."
+      - "Docs describe PublishedFlowDefinition as the class/contract name and schema_version/FLOW_DEFINITION_SCHEMA_VERSION as the version mechanism."
+      - "No source code, tests, generated files, or unrelated dirty files are touched."
+      - "Verification commands pass."
+    receipt:
+      result: done
+      summary: "Removed stale PublishedFlowDefinitionV1 references from current tracked guidance and refactor docs. The docs now name PublishedFlowDefinition as the class/contract and schema_version/FLOW_DEFINITION_SCHEMA_VERSION as the version mechanism."
+      changed_files:
+        - "docs/goals/flow-runtime-ai-builder-maintainability/goal.md"
+        - "docs/refactor/phase1/06-data-model.md"
+        - "docs/refactor/phase1/11-concept-invariants.md"
+        - "docs/refactor/phase2/synthesis.md"
+        - "docs/refactor/phase5/codex-rules.md"
+        - "docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      naming_review:
+        removed_name: "PublishedFlowDefinitionV1"
+        canonical_name: "PublishedFlowDefinition"
+        version_owner: "FLOW_DEFINITION_SCHEMA_VERSION/schema_version"
+        version_suffixes_added: 0
+        compatibility_aliases_added: 0
+      verification:
+        - "PASS git grep -n -E '\\bFlow(Metadata|FormSchema|FormField|CareDataPolicy)V1\\b|PublishedFlowDefinitionV1' -- docs/goals/flow-runtime-ai-builder-maintainability/goal.md docs/refactor ':!docs/goals/flow-runtime-ai-builder-maintainability/state.yaml' || true -> no hits."
+        - "PASS git diff --check."
+        - "PASS node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml -> ok true, active_task T048 after receipt update."
+      commands:
+        - "git grep -n -E '\\bFlow(Metadata|FormSchema|FormField|CareDataPolicy)V1\\b|PublishedFlowDefinitionV1' -- docs/goals/flow-runtime-ai-builder-maintainability/goal.md docs/refactor ':!docs/goals/flow-runtime-ai-builder-maintainability/state.yaml' || true"
+        - "git diff --check"
+        - "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/flow-runtime-ai-builder-maintainability/state.yaml"
+      type_debt:
+        new_any: 0
+        new_cast: 0
+        new_type_ignore: 0
+        new_pyright_ignore: 0
+      human_reviewability: "Docs now point future reviewers and agents at the actual unversioned class name while keeping versioning language on schema_version, where the code implements it."
+      next_task: T048
+
+  - id: T048
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe implementation slice after the tracked-doc naming cleanup."
+    inputs:
+      - "T047 receipt."
+      - "Current branch and dirty worktree."
+      - "Remaining goal board priorities and user constraints."
+    constraints:
+      - "Do not modify source in this Judge task."
+      - "Preserve unrelated dirty files."
+      - "Keep naming, type safety, and pre-production deletion bias explicit."
+    expected_output:
+      - "Decision."
       - "Exact Worker objective."
       - "allowed_files."
       - "verify commands."

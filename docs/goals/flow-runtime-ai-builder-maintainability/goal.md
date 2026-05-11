@@ -182,7 +182,7 @@ It must assert:
 8. Idempotency-key replay behavior is either asserted in the journey when touched, or explicitly deferred to `API-create-run-step-inputs-fingerprint-canonicalization`.
 
 2. Typed JSONB boundaries:
-   - choose `PublishedFlowDefinitionV1` first if runtime/contract corruption is the dominant risk,
+   - choose `PublishedFlowDefinition` / `schema_version` first if runtime/contract corruption is the dominant risk,
    - choose `FlowMetadata` / `FlowFormSchema` first if form/run-contract mismatch is dominant.
 
 3. Pre-production legacy cleanup:

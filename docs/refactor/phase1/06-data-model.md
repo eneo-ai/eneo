@@ -102,8 +102,8 @@ Proposed canonical home:
 
 Create a domain/application contract module for published flow definitions, for example `backend/src/intric/flows/domain/flow_definition.py`, containing:
 
-- `PublishedFlowDefinitionV1`
-- `PublishedFlowStepDefinitionV1`
+- `PublishedFlowDefinition`
+- a narrow published step snapshot parser/validator owned by `PublishedFlowDefinition`
 - `parse_published_flow_definition(schema_version, payload)`
 - `render_published_flow_definition(definition)`
 - a declared corruption behavior for unknown/malformed versions
