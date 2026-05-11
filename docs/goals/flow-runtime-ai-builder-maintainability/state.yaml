@@ -85,7 +85,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T026
+active_task: T027
 
 confirmed_p0_candidates:
   - id: P0-required-step-inputs-omitted
@@ -1398,7 +1398,7 @@ tasks:
   - id: T026
     type: judge
     assignee: Judge
-    status: active
+    status: blocked
     reasoning_hint: high
     objective: "Review T025 typed metadata-boundary Scout and decide whether to activate the first typed-boundary Worker, revise the Worker sequence, or request more evidence."
     inputs:
@@ -1421,6 +1421,57 @@ tasks:
       - "Stop conditions."
       - "Maintainability self-review questions for the Worker."
       - "Whether to commit the T025 Scout docs before implementation."
+    receipt:
+      result: blocked
+      note: "notes/T026-typed-form-schema-worker-decision.md"
+      summary: "Claude iteration 1 rejected the broad typed metadata Worker because it half-claimed a FlowMetadataV1 envelope while care_data_policy and other metadata readers remained raw. Codex accepted the critique and revised the next Worker to a narrower FlowFormSchemaV1/FlowFormFieldV1 boundary slice that defers FlowMetadataV1 to the later care-data/published snapshot Worker, preserves error semantics, adds OpenAPI and consumer API verification, and treats FlowMetadataPatch as a Worker 3 delete-or-wire decision."
+      claude_iteration_1:
+        artifact: ".codex/artifacts/claude-peer-loop-t026-typed-metadata-worker-plan-20260511T022334Z.md"
+        verdict: "changes_required"
+        green_light: false
+        min_score: 6
+      accepted_claude_findings:
+        - "Narrow Worker 1 to form-schema ownership instead of a partial metadata envelope."
+        - "Enumerate validate_form_schema error-contract preservation."
+        - "Make read-tolerant versus write-strict parsing explicit."
+        - "Add OpenAPI and consumer API verification for run-contract form fields."
+        - "Resolve FlowMetadataPatch in the AI Builder closer as delete-or-wire."
+      revised_decision:
+        next_worker_scope: "FlowFormSchemaV1 and FlowFormFieldV1 only."
+        defer_to_worker_2:
+          - "FlowMetadataV1 envelope."
+          - "care_data_policy typed ownership."
+          - "FlowService create/update/publish metadata serialization."
+          - "PublishedDefinition typed metadata accessor."
+        defer_to_worker_3:
+          - "FlowMetadataPatch delete-or-wire decision."
+          - "AI Builder raw form-schema reader cleanup."
+      blocker: "Claude plan-gate iteration 2 and retry both failed before review with API Error: 401 Invalid authentication credentials, so the required Claude green light is unavailable."
+      retry_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t026-typed-form-schema-worker-revised-plan-20260511T022528Z.md"
+        - ".codex/artifacts/claude-peer-loop-t026-typed-form-schema-worker-revised-plan-retry-20260511T022606Z.md"
+      required_next_action: "Restore Claude CLI authentication, then resume the same session with iteration 4 and require green before activating any source Worker."
+
+  - id: T027
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Recover the required Claude plan gate for the revised T026 typed form-schema Worker plan before any implementation starts."
+    inputs:
+      - "docs/goals/flow-runtime-ai-builder-maintainability/notes/T026-typed-form-schema-worker-decision.md"
+      - ".codex/artifacts/claude-peer-loop-t026-typed-metadata-worker-plan-20260511T022334Z.md"
+      - ".codex/artifacts/claude-peer-loop-t026-typed-form-schema-worker-revised-plan-retry-20260511T022606Z.md"
+    constraints:
+      - "Do not implement source changes."
+      - "Use the same Claude session `flow-runtime-maintainability-t026-typed-metadata-worker-plan`."
+      - "Use at least a 15 minute timeout, preferably 20 minutes."
+      - "Require Claude green light with minimum score 8 before activating any Worker."
+      - "If Claude authentication still returns 401, stop and ask the owner to restore Claude CLI authentication."
+    expected_output:
+      - "Claude iteration 4 result."
+      - "If green: exact active Worker card with allowed files, red tests, validation commands, stop conditions, and receipt requirements."
+      - "If not green: revised plan or explicit blocker receipt."
     receipt: null
 
   - id: T008
