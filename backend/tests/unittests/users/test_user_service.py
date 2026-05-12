@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.authentication.auth_models import AccessToken, ApiKeyCreated
+from intric.authentication.auth_models import AccessToken
 from intric.main.exceptions import AuthenticationException, UniqueUserException
 from intric.main.models import ModelId
 from intric.settings.settings import SettingsUpsert
@@ -130,9 +130,6 @@ async def test_register_user_creates_a_user_and_settings(service: UserService):
         test_salt,
         hashed_password,
     )
-    service.auth_service._create_and_hash_api_key.return_value = ApiKeyCreated(
-        key="api_key", truncated_key="ey", hashed_key="4p1 k3y"
-    )
     service.auth_service.create_access_token_for_user = MagicMock()
     service.auth_service.create_access_token_for_user.return_value = (
         "bingobongo you have access"
@@ -146,12 +143,15 @@ async def test_register_user_creates_a_user_and_settings(service: UserService):
         tenant_id=TEST_TENANT.id,
     )
 
-    user, access_token, api_key = await service.register(new_user)
+    user, access_token = await service.register(new_user)
 
     assert user == expected_user_in_db
 
     service.repo.add.assert_awaited_with(expected_user_upsert)
     service.settings_repo.add.assert_awaited_with(expected_settings)
+    # Personal API keys are no longer auto-provisioned at user creation —
+    # users mint their own via POST /api/v1/api-keys when they need one.
+    service.auth_service.create_user_api_key_v2.assert_not_called()
 
 
 async def test_update_used_tokens(service: UserService):
