@@ -294,6 +294,7 @@ async def update_current_tenant_crawler_settings(
         description="Updated crawler settings",
         metadata={
             "setting": "crawler_settings",
+            # Values are stored in crawler canonical units from CRAWLER_SETTING_SPECS.
             "changes": {
                 key: {
                     "old": before_settings.get(key),

@@ -87,11 +87,30 @@ export type CrawlerSettings = {
   settings: EffectiveCrawlerSettings;
   overrides: string[];
   updated_at?: string | null;
+  editable_settings?: string[];
+  specs?: Partial<
+    Record<
+      keyof CrawlerSettingsUpdate,
+      {
+        type: "int" | "bool";
+        description: string;
+        min?: number | null;
+        max?: number | null;
+      }
+    >
+  >;
 };
 export type CrawlerSettingsUpdate = Partial<
   Pick<
     EffectiveCrawlerSettings,
-    "crawl_sitemap_lastmod_skip_enabled" | "obey_robots" | "autothrottle_enabled"
+    | "crawl_sitemap_lastmod_skip_enabled"
+    | "obey_robots"
+    | "autothrottle_enabled"
+    | "download_max_size"
+    | "download_timeout"
+    | "dns_timeout"
+    | "retry_times"
+    | "closespider_itemcount"
   >
 >;
 export type WebsiteSparse = components["schemas"]["WebsiteSparse"];

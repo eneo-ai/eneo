@@ -1,3 +1,5 @@
+export const BYTES_PER_MIB = 1024 * 1024;
+
 export type EffectiveCrawlerSettings = {
   crawl_max_length: number;
   download_timeout: number;
@@ -20,45 +22,131 @@ export type EffectiveCrawlerSettings = {
   crawl_sitemap_lastmod_skip_enabled: boolean;
 };
 
+export type CrawlerSettingSpec = {
+  type: "int" | "bool";
+  description: string;
+  min?: number | null;
+  max?: number | null;
+};
+
 export type CrawlerSettings = {
   tenant_id: string;
   settings: EffectiveCrawlerSettings;
   overrides: string[];
   updated_at?: string | null;
+  editable_settings?: string[];
+  specs?: Partial<Record<CrawlerSettingsEditableKey, CrawlerSettingSpec>>;
 };
 
 export type CrawlerSettingsUpdate = Partial<
   Pick<
     EffectiveCrawlerSettings,
-    "crawl_sitemap_lastmod_skip_enabled" | "obey_robots" | "autothrottle_enabled"
+    | "crawl_sitemap_lastmod_skip_enabled"
+    | "obey_robots"
+    | "autothrottle_enabled"
+    | "download_max_size"
+    | "download_timeout"
+    | "dns_timeout"
+    | "retry_times"
+    | "closespider_itemcount"
   >
 >;
 
 export type CrawlerSettingsEditableKey = keyof CrawlerSettingsUpdate;
+export type CrawlerSettingsBooleanKey =
+  | "crawl_sitemap_lastmod_skip_enabled"
+  | "obey_robots"
+  | "autothrottle_enabled";
+export type CrawlerSettingsNumberKey = Exclude<
+  CrawlerSettingsEditableKey,
+  CrawlerSettingsBooleanKey
+>;
 
-export type CrawlerSettingsField = {
-  key: CrawlerSettingsEditableKey;
+export type CrawlerBooleanField = {
+  kind: "boolean";
+  key: CrawlerSettingsBooleanKey;
   titleKey: string;
   descriptionKey: string;
   warningKey?: string;
 };
 
-export const CRAWLER_SETTINGS_EDITABLE_FIELDS: CrawlerSettingsField[] = [
+export type CrawlerNumberField = {
+  kind: "number";
+  key: CrawlerSettingsNumberKey;
+  titleKey: string;
+  descriptionKey: string;
+  unitKey: string;
+  displayUnit: "mib" | "native";
+  step: number;
+};
+
+export const CRAWLER_SETTINGS_BOOLEAN_FIELDS: CrawlerBooleanField[] = [
   {
+    kind: "boolean",
     key: "crawl_sitemap_lastmod_skip_enabled",
     titleKey: "crawler_lastmod_skip_title",
     descriptionKey: "crawler_lastmod_skip_description",
     warningKey: "crawler_lastmod_skip_warning"
   },
   {
+    kind: "boolean",
     key: "obey_robots",
     titleKey: "crawler_obey_robots_title",
     descriptionKey: "crawler_obey_robots_description"
   },
   {
+    kind: "boolean",
     key: "autothrottle_enabled",
     titleKey: "crawler_autothrottle_title",
     descriptionKey: "crawler_autothrottle_description"
+  }
+];
+
+export const CRAWLER_SETTINGS_NUMBER_FIELDS: CrawlerNumberField[] = [
+  {
+    kind: "number",
+    key: "download_max_size",
+    titleKey: "crawler_download_max_size_title",
+    descriptionKey: "crawler_download_max_size_description",
+    unitKey: "crawler_unit_mib",
+    displayUnit: "mib",
+    step: 1
+  },
+  {
+    kind: "number",
+    key: "download_timeout",
+    titleKey: "crawler_download_timeout_title",
+    descriptionKey: "crawler_download_timeout_description",
+    unitKey: "crawler_unit_seconds",
+    displayUnit: "native",
+    step: 1
+  },
+  {
+    kind: "number",
+    key: "dns_timeout",
+    titleKey: "crawler_dns_timeout_title",
+    descriptionKey: "crawler_dns_timeout_description",
+    unitKey: "crawler_unit_seconds",
+    displayUnit: "native",
+    step: 1
+  },
+  {
+    kind: "number",
+    key: "retry_times",
+    titleKey: "crawler_retry_times_title",
+    descriptionKey: "crawler_retry_times_description",
+    unitKey: "crawler_unit_attempts",
+    displayUnit: "native",
+    step: 1
+  },
+  {
+    kind: "number",
+    key: "closespider_itemcount",
+    titleKey: "crawler_closespider_itemcount_title",
+    descriptionKey: "crawler_closespider_itemcount_description",
+    unitKey: "crawler_unit_items",
+    displayUnit: "native",
+    step: 100
   }
 ];
 
@@ -78,13 +166,96 @@ export const CRAWLER_SETTINGS_READ_ONLY_OPTIMIZATIONS: CrawlerReadOnlyOptimizati
   }
 ];
 
-export function toCrawlerSettingsUpdate(values: Record<string, unknown>): CrawlerSettingsUpdate {
+export type CrawlerNumberValidation =
+  | { valid: true; canonicalValue: number }
+  | {
+      valid: false;
+      reason: "not_integer" | "below_min" | "above_max";
+      min?: number;
+      max?: number;
+    };
+
+export function getCrawlerSettingDisplayValue(
+  key: CrawlerSettingsNumberKey,
+  value: number
+): number {
+  return key === "download_max_size" ? value / BYTES_PER_MIB : value;
+}
+
+export function getCrawlerSettingDisplayBounds(
+  field: CrawlerNumberField,
+  specs: CrawlerSettings["specs"]
+): { min?: number; max?: number } {
+  const spec = specs?.[field.key];
+  const min = typeof spec?.min === "number" ? spec.min : undefined;
+  const max = typeof spec?.max === "number" ? spec.max : undefined;
+
+  if (field.displayUnit === "mib") {
+    return {
+      min: min === undefined ? undefined : getCrawlerSettingDisplayValue(field.key, min),
+      max: max === undefined ? undefined : getCrawlerSettingDisplayValue(field.key, max)
+    };
+  }
+
+  return { min, max };
+}
+
+export function validateCrawlerNumberField(
+  field: CrawlerNumberField,
+  value: unknown,
+  specs: CrawlerSettings["specs"]
+): CrawlerNumberValidation {
+  const numericValue = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+
+  if (typeof numericValue !== "number" || !Number.isFinite(numericValue)) {
+    return { valid: false, reason: "not_integer" };
+  }
+
+  if (!Number.isInteger(numericValue)) {
+    return { valid: false, reason: "not_integer" };
+  }
+
+  const canonicalValue = field.displayUnit === "mib" ? numericValue * BYTES_PER_MIB : numericValue;
+  const spec = specs?.[field.key];
+  const min = typeof spec?.min === "number" ? spec.min : undefined;
+  const max = typeof spec?.max === "number" ? spec.max : undefined;
+
+  if (min !== undefined && canonicalValue < min) {
+    return {
+      valid: false,
+      reason: "below_min",
+      min: getCrawlerSettingDisplayBounds(field, specs).min
+    };
+  }
+
+  if (max !== undefined && canonicalValue > max) {
+    return {
+      valid: false,
+      reason: "above_max",
+      max: getCrawlerSettingDisplayBounds(field, specs).max
+    };
+  }
+
+  return { valid: true, canonicalValue };
+}
+
+export function toCrawlerSettingsUpdate(
+  values: Record<string, unknown>,
+  specs?: CrawlerSettings["specs"]
+): CrawlerSettingsUpdate {
   const update: CrawlerSettingsUpdate = {};
 
-  for (const field of CRAWLER_SETTINGS_EDITABLE_FIELDS) {
+  for (const field of CRAWLER_SETTINGS_BOOLEAN_FIELDS) {
     const value = values[field.key];
     if (typeof value === "boolean") {
       update[field.key] = value;
+    }
+  }
+
+  for (const field of CRAWLER_SETTINGS_NUMBER_FIELDS) {
+    const validation = validateCrawlerNumberField(field, values[field.key], specs);
+    if (validation.valid) {
+      update[field.key] = validation.canonicalValue;
     }
   }
 

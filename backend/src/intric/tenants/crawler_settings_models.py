@@ -1,9 +1,14 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from intric.tenants.crawler_settings_helper import CRAWLER_SETTING_SPECS
+from intric.tenants.crawler_settings_helper import (
+    CRAWLER_SETTING_SPECS,
+    SELF_SERVICE_CRAWLER_SETTING_KEYS,
+    get_crawler_setting_specs,
+)
 
 _SPECS = CRAWLER_SETTING_SPECS
 
@@ -190,6 +195,52 @@ class CrawlerSettingsSelfServiceUpdate(BaseModel):
         None,
         description=_SPECS["autothrottle_enabled"]["description"],
     )
+    download_max_size: int | None = Field(
+        None,
+        ge=_SPECS["download_max_size"]["min"],
+        le=_SPECS["download_max_size"]["max"],
+        description=_SPECS["download_max_size"]["description"],
+    )
+    download_timeout: int | None = Field(
+        None,
+        ge=_SPECS["download_timeout"]["min"],
+        le=_SPECS["download_timeout"]["max"],
+        description=_SPECS["download_timeout"]["description"],
+    )
+    dns_timeout: int | None = Field(
+        None,
+        ge=_SPECS["dns_timeout"]["min"],
+        le=_SPECS["dns_timeout"]["max"],
+        description=_SPECS["dns_timeout"]["description"],
+    )
+    retry_times: int | None = Field(
+        None,
+        ge=_SPECS["retry_times"]["min"],
+        le=_SPECS["retry_times"]["max"],
+        description=_SPECS["retry_times"]["description"],
+    )
+    closespider_itemcount: int | None = Field(
+        None,
+        ge=_SPECS["closespider_itemcount"]["min"],
+        le=_SPECS["closespider_itemcount"]["max"],
+        description=_SPECS["closespider_itemcount"]["description"],
+    )
+
+
+class CrawlerSettingSpecPublic(BaseModel):
+    type: Literal["int", "bool"] = Field(..., description="Crawler setting value type")
+    description: str = Field(..., description="Backend description of the setting")
+    min: int | None = Field(None, description="Minimum allowed integer value")
+    max: int | None = Field(None, description="Maximum allowed integer value")
+
+
+def _self_service_setting_specs() -> dict[str, CrawlerSettingSpecPublic]:
+    return {
+        key: CrawlerSettingSpecPublic.model_validate(value)
+        for key, value in get_crawler_setting_specs(
+            sorted(SELF_SERVICE_CRAWLER_SETTING_KEYS)
+        ).items()
+    }
 
 
 class CrawlerSettingsResponse(BaseModel):
@@ -202,6 +253,14 @@ class CrawlerSettingsResponse(BaseModel):
     )
     updated_at: datetime | None = Field(
         None, description="Timestamp of last settings update"
+    )
+    editable_settings: list[str] = Field(
+        default_factory=lambda: sorted(SELF_SERVICE_CRAWLER_SETTING_KEYS),
+        description="Setting keys editable through the tenant admin settings endpoint",
+    )
+    specs: dict[str, CrawlerSettingSpecPublic] = Field(
+        default_factory=_self_service_setting_specs,
+        description="Validation metadata for tenant-admin editable crawler settings",
     )
 
 

@@ -9,7 +9,7 @@ It defines types, validation ranges, defaults, and descriptions.
 All consumers (tenant.py validator, router Pydantic model) should import from here.
 """
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Literal, TypeVar, cast, get_args, overload
@@ -46,6 +46,8 @@ BoolCrawlerSetting = Literal[
     "crawl_feeder_enabled",
     "crawl_sitemap_lastmod_skip_enabled",
 ]
+
+CrawlerSetting = IntCrawlerSetting | BoolCrawlerSetting
 
 # Buffer time (5 minutes) between semaphore TTL and job max age
 # This ensures the flag doesn't expire before watchdog can kill stale jobs
@@ -188,6 +190,41 @@ def _typed_setting_names() -> set[str]:
 
 if _typed_setting_names() != set(CRAWLER_SETTING_SPECS):
     raise RuntimeError("Crawler setting Literal names must match CRAWLER_SETTING_SPECS")
+
+
+SELF_SERVICE_CRAWLER_SETTING_KEYS: frozenset[CrawlerSetting] = frozenset(
+    {
+        "crawl_sitemap_lastmod_skip_enabled",
+        "obey_robots",
+        "autothrottle_enabled",
+        "download_max_size",
+        "download_timeout",
+        "dns_timeout",
+        "retry_times",
+        "closespider_itemcount",
+    }
+)
+
+
+def get_crawler_setting_specs(
+    setting_names: Iterable[str] | None = None,
+) -> dict[str, dict[str, object]]:
+    names = setting_names if setting_names is not None else CRAWLER_SETTING_SPECS.keys()
+    specs: dict[str, dict[str, object]] = {}
+
+    for setting_name in names:
+        spec = CRAWLER_SETTING_SPECS[setting_name]
+        public_spec: dict[str, object] = {
+            "type": "bool" if spec["type"] is bool else "int",
+            "description": str(spec["description"]),
+        }
+        if "min" in spec:
+            public_spec["min"] = int(spec["min"])
+        if "max" in spec:
+            public_spec["max"] = int(spec["max"])
+        specs[setting_name] = public_spec
+
+    return specs
 
 
 @dataclass(frozen=True, slots=True)
