@@ -367,7 +367,7 @@ class UserAdminView(UserPublicBase):
 
 
 class UserCreatedAdminView(UserAdminView):
-    pass
+    api_key: ApiKey
 
 
 class UserUpdatePublic(BaseModel):
