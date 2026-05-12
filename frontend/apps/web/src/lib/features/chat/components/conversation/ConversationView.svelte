@@ -7,6 +7,7 @@
   import Message from "./Message.svelte";
   import ConversationAttachments from "./ConversationAttachments.svelte";
   import ConversationInput from "./ConversationInput.svelte";
+  import ContextUsageBar from "./ContextUsageBar.svelte";
   import { fade } from "svelte/transition";
   import { browser } from "$app/environment";
   import { Tooltip } from "@intric/ui";
@@ -16,9 +17,10 @@
 
   type Props = {
     children?: Snippet;
+    onNewConversation?: () => void;
   };
 
-  let { children }: Props = $props();
+  let { children, onNewConversation }: Props = $props();
 
   const chat = getChatService();
 
@@ -121,7 +123,10 @@
       </div>
     {/if}
     <ConversationAttachments></ConversationAttachments>
-    <ConversationInput {scrollToBottom}></ConversationInput>
+    <div class="w-[100%] max-w-[74ch] md:w-full">
+      <ContextUsageBar {onNewConversation}></ContextUsageBar>
+    </div>
+    <ConversationInput {scrollToBottom} {onNewConversation}></ConversationInput>
   </div>
 </div>
 {#if isDragging}
