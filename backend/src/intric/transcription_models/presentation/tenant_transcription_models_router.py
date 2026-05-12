@@ -63,6 +63,11 @@ class TenantTranscriptionModelUpdate(BaseModel):
     cost_per_minute: Decimal | None = Field(
         None, description="Indicative USD per minute of audio"
     )
+    # See TenantCompletionModelUpdate for the rationale on folding these in.
+    is_default: bool | None = Field(None, description="Set as tenant default")
+    security_classification: ModelId | None = Field(
+        None, description="Security classification reference (null clears it)"
+    )
 
 
 def _service(

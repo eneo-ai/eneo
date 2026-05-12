@@ -70,6 +70,11 @@ class TenantEmbeddingModelUpdate(BaseModel):
     output_cost_per_token: Decimal | None = Field(
         None, description="Indicative USD per output token"
     )
+    # See TenantCompletionModelUpdate for the rationale on folding these in.
+    is_default: bool | None = Field(None, description="Set as tenant default")
+    security_classification: ModelId | None = Field(
+        None, description="Security classification reference (null clears it)"
+    )
 
 
 def _service(

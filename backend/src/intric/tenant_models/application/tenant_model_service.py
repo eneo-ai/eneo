@@ -275,6 +275,20 @@ class TenantCompletionModelService:
             model.input_cost_per_token = payload.input_cost_per_token
         if "output_cost_per_token" in provided:
             model.output_cost_per_token = payload.output_cost_per_token
+        if "is_default" in provided and payload.is_default is not None:
+            if payload.is_default:
+                await _unset_other_defaults(
+                    self.session, CompletionModels, self.user.tenant_id
+                )
+            model.is_default = payload.is_default
+        if "security_classification" in provided:
+            model.security_classification_id = (
+                await resolve_tenant_security_classification(
+                    self.session,
+                    payload.security_classification,
+                    self.user.tenant_id,
+                )
+            )
 
         await self.session.flush()
 
@@ -434,6 +448,20 @@ class TenantEmbeddingModelService:
             model.input_cost_per_token = payload.input_cost_per_token
         if "output_cost_per_token" in provided:
             model.output_cost_per_token = payload.output_cost_per_token
+        if "is_default" in provided and payload.is_default is not None:
+            if payload.is_default:
+                await _unset_other_defaults(
+                    self.session, EmbeddingModels, self.user.tenant_id
+                )
+            model.is_default = payload.is_default
+        if "security_classification" in provided:
+            model.security_classification_id = (
+                await resolve_tenant_security_classification(
+                    self.session,
+                    payload.security_classification,
+                    self.user.tenant_id,
+                )
+            )
 
         await self.session.flush()
 
@@ -607,6 +635,20 @@ class TenantTranscriptionModelService:
             model.stability = payload.stability
         if "cost_per_minute" in provided:
             model.cost_per_minute = payload.cost_per_minute
+        if "is_default" in provided and payload.is_default is not None:
+            if payload.is_default:
+                await _unset_other_defaults(
+                    self.session, TranscriptionModels, self.user.tenant_id
+                )
+            model.is_default = payload.is_default
+        if "security_classification" in provided:
+            model.security_classification_id = (
+                await resolve_tenant_security_classification(
+                    self.session,
+                    payload.security_classification,
+                    self.user.tenant_id,
+                )
+            )
 
         await self.session.flush()
 

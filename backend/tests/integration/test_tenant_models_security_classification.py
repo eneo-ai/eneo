@@ -735,3 +735,248 @@ async def test_update_completion_in_other_tenant_404(
         json={"display_name": "hijacked"},
     )
     assert response.status_code == 404, response.text
+
+
+# ---------------------------------------------------------------------------
+# Update: is_default + security_classification (the legacy edit-dialog path
+# used to split these across a second /models/{id} PUT, which could partial-
+# fail and leave the UI showing fields that disagreed with the DB. Folding
+# them into the tenant update endpoint means one transaction, one audit.)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_update_completion_promotes_default_and_unsets_sibling(
+    client,
+    admin_token,
+    tenant_provider_id,
+    db_container,
+):
+    """is_default=True must demote any existing default in the same tenant.
+
+    The schema accepts multiple defaults; the UI assumes at most one. The
+    create path already unsets siblings — update must match so flipping the
+    default through the edit dialog doesn't leave two defaults active."""
+    first = await _create_completion_model(
+        client, admin_token, tenant_provider_id, is_default=True
+    )
+    second = await _create_completion_model(
+        client, admin_token, tenant_provider_id, is_default=False
+    )
+
+    response = await client.put(
+        f"/api/v1/admin/tenant-models/completion/{second['id']}/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"is_default": True},
+    )
+    assert response.status_code == 200, response.text
+
+    async with db_container() as container:
+        session = container.session()
+        rows = (
+            await session.execute(
+                sa.select(CompletionModels.id, CompletionModels.is_default).where(
+                    CompletionModels.id.in_([first["id"], second["id"]])
+                )
+            )
+        ).all()
+    defaults = {str(r.id): r.is_default for r in rows}
+    assert defaults[second["id"]] is True
+    assert defaults[first["id"]] is False
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_update_completion_sets_and_clears_security_classification(
+    client,
+    admin_token,
+    tenant_provider_id,
+    tenant_classification,
+    db_container,
+):
+    """Round-trip: set classification through update, then clear it.
+
+    `security_classification` is a `ModelId | None`; sending `null`
+    explicitly must clear it (legacy two-step save used to need a separate
+    request for this)."""
+    created = await _create_completion_model(client, admin_token, tenant_provider_id)
+    model_id = created["id"]
+
+    set_response = await client.put(
+        f"/api/v1/admin/tenant-models/completion/{model_id}/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"security_classification": {"id": str(tenant_classification)}},
+    )
+    assert set_response.status_code == 200, set_response.text
+    assert set_response.json()["security_classification"]["id"] == str(
+        tenant_classification
+    )
+
+    clear_response = await client.put(
+        f"/api/v1/admin/tenant-models/completion/{model_id}/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"security_classification": None},
+    )
+    assert clear_response.status_code == 200, clear_response.text
+    assert clear_response.json()["security_classification"] is None
+
+    async with db_container() as container:
+        session = container.session()
+        stored = await session.execute(
+            sa.select(CompletionModels.security_classification_id).where(
+                CompletionModels.id == model_id
+            )
+        )
+        assert stored.scalar_one() is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_update_completion_rejects_cross_tenant_classification(
+    client,
+    admin_token,
+    tenant_provider_id,
+    other_tenant_classification,
+):
+    """Same cross-tenant guard as create — the legacy save path used to bypass
+    this entirely because the second request went through a different
+    endpoint that didn't share the tenant_validation helper."""
+    created = await _create_completion_model(client, admin_token, tenant_provider_id)
+
+    response = await client.put(
+        f"/api/v1/admin/tenant-models/completion/{created['id']}/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"security_classification": {"id": str(other_tenant_classification)}},
+    )
+    assert response.status_code == 404, response.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_update_completion_combines_default_and_classification(
+    client,
+    admin_token,
+    tenant_provider_id,
+    tenant_classification,
+    db_container,
+):
+    """A single PUT mutating both fields succeeds atomically. Regression guard
+    for the partial-success case the legacy two-step save was prone to."""
+    created = await _create_completion_model(client, admin_token, tenant_provider_id)
+    model_id = created["id"]
+
+    response = await client.put(
+        f"/api/v1/admin/tenant-models/completion/{model_id}/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={
+            "display_name": "promoted",
+            "is_default": True,
+            "security_classification": {"id": str(tenant_classification)},
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    async with db_container() as container:
+        session = container.session()
+        row = (
+            await session.execute(
+                sa.select(
+                    CompletionModels.nickname,
+                    CompletionModels.is_default,
+                    CompletionModels.security_classification_id,
+                ).where(CompletionModels.id == model_id)
+            )
+        ).one()
+    assert row.nickname == "promoted"
+    assert row.is_default is True
+    assert row.security_classification_id == tenant_classification
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_update_embedding_promotes_default_and_clears_classification(
+    client,
+    admin_token,
+    tenant_provider_id,
+    tenant_classification,
+    db_container,
+):
+    """Embedding mirror of the completion update test — same contract, same
+    service helpers, but the three model types each have their own table so
+    the unset-siblings path is exercised independently."""
+    created = await client.post(
+        "/api/v1/admin/tenant-models/embedding/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json=_embedding_payload(
+            tenant_provider_id,
+            is_default=False,
+            security_classification={"id": str(tenant_classification)},
+        ),
+    )
+    assert created.status_code == 200, created.text
+    model_id = created.json()["id"]
+
+    response = await client.put(
+        f"/api/v1/admin/tenant-models/embedding/{model_id}/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"is_default": True, "security_classification": None},
+    )
+    assert response.status_code == 200, response.text
+
+    async with db_container() as container:
+        session = container.session()
+        row = (
+            await session.execute(
+                sa.select(
+                    EmbeddingModels.is_default,
+                    EmbeddingModels.security_classification_id,
+                ).where(EmbeddingModels.id == model_id)
+            )
+        ).one()
+    assert row.is_default is True
+    assert row.security_classification_id is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_update_transcription_promotes_default_and_sets_classification(
+    client,
+    admin_token,
+    tenant_provider_id,
+    tenant_classification,
+    db_container,
+):
+    """Transcription mirror — completes coverage across all three tenant
+    model types so a future refactor of the shared helpers can't regress one
+    silently."""
+    created = await client.post(
+        "/api/v1/admin/tenant-models/transcription/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json=_transcription_payload(tenant_provider_id, is_default=False),
+    )
+    assert created.status_code == 200, created.text
+    model_id = created.json()["id"]
+
+    response = await client.put(
+        f"/api/v1/admin/tenant-models/transcription/{model_id}/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={
+            "is_default": True,
+            "security_classification": {"id": str(tenant_classification)},
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    async with db_container() as container:
+        session = container.session()
+        row = (
+            await session.execute(
+                sa.select(
+                    TranscriptionModels.is_default,
+                    TranscriptionModels.security_classification_id,
+                ).where(TranscriptionModels.id == model_id)
+            )
+        ).one()
+    assert row.is_default is True
+    assert row.security_classification_id == tenant_classification

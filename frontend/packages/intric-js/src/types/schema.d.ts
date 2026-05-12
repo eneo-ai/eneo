@@ -14767,6 +14767,9 @@ export interface components {
       input_cost_per_token?: number | string | null;
       /** Output Cost Per Token */
       output_cost_per_token?: number | string | null;
+      /** Is Default */
+      is_default?: boolean | null;
+      security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TenantEmbeddingModelCreate */
     TenantEmbeddingModelCreate: {
@@ -14890,6 +14893,13 @@ export interface components {
        * @description Indicative USD per output token
        */
       output_cost_per_token?: number | string | null;
+      /**
+       * Is Default
+       * @description Set as tenant default
+       */
+      is_default?: boolean | null;
+      /** @description Security classification reference (null clears it) */
+      security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TenantInDB */
     TenantInDB: {
@@ -15233,6 +15243,13 @@ export interface components {
        * @description Indicative USD per minute of audio
        */
       cost_per_minute?: number | string | null;
+      /**
+       * Is Default
+       * @description Set as tenant default
+       */
+      is_default?: boolean | null;
+      /** @description Security classification reference (null clears it) */
+      security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TenantUpdatePublic */
     TenantUpdatePublic: {

@@ -58,6 +58,14 @@ class TenantCompletionModelUpdate(BaseModel):
     stability: str | None = None
     input_cost_per_token: Decimal | None = None
     output_cost_per_token: Decimal | None = None
+    # Cross-cutting fields that used to live on the legacy /models/{id} update
+    # endpoint. Folded in so the edit dialog can save everything in one round
+    # trip — partial-success ("display name saved, classification didn't")
+    # was the worst-case before. `is_default=True` unsets sibling defaults in
+    # the same transaction; `security_classification` is validated against
+    # the caller's tenant.
+    is_default: bool | None = None
+    security_classification: ModelId | None = None
 
 
 def _service(

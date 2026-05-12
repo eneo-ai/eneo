@@ -3,12 +3,12 @@
 <!--
   Edit a single existing model. Reuses the same `ModelDraftForm` that the
   AddWizard's Step 3 uses, so cost/description/lookup-defaults stay in one
-  place. The only thing this component owns is:
+  place. The component owns:
     - converting the API model into the form's draft shape on open
-    - building the right Tenant*Update body on submit
-    - persisting security_classification + is_org_default through the
-      legacy `intric.models.update` endpoint (the tenant routes don't
-      cover those two fields).
+    - building the right Tenant*Update body on submit (a single round-trip;
+      the legacy intric.models.update fallback for security_classification
+      and is_default no longer exists — those fields live on the tenant
+      update contract now).
 -->
 
 <script lang="ts">
@@ -100,6 +100,24 @@
 
   // --- Submit -----------------------------------------------------------
 
+  // `is_default` is only edited via the dialog for model types that surface
+  // an `is_org_default` field (completion + embedding today). Including it
+  // in the payload when the checkbox wasn't rendered would let a stale UI
+  // state silently demote a tenant default.
+  const hasDefaultToggle = $derived("is_org_default" in model);
+
+  // Send security_classification only when it actually changed — and use
+  // explicit null (rather than omission) when the user cleared it, since
+  // the backend distinguishes "field omitted" from "field set to null".
+  function securityClassificationPatch():
+    | { security_classification: { id: string } | null }
+    | Record<string, never> {
+    const next = draft.securityClassification?.id ?? null;
+    const prev = model.security_classification?.id ?? null;
+    if (next === prev) return {};
+    return { security_classification: next ? { id: next } : null };
+  }
+
   function buildCompletionUpdate(): TenantCompletionModelUpdate {
     return {
       name: draft.name.trim(),
@@ -113,7 +131,9 @@
       reasoning: draft.reasoning,
       supports_tool_calling: draft.supportsToolCalling,
       input_cost_per_token: tokenCostFromPerMillion(draft.inputCostPerTokenStr),
-      output_cost_per_token: tokenCostFromPerMillion(draft.outputCostPerTokenStr)
+      output_cost_per_token: tokenCostFromPerMillion(draft.outputCostPerTokenStr),
+      ...(hasDefaultToggle ? { is_default: isDefault } : {}),
+      ...securityClassificationPatch()
     };
   }
 
@@ -127,7 +147,9 @@
       hosting: draft.hosting,
       open_source: openSource,
       input_cost_per_token: tokenCostFromPerMillion(draft.inputCostPerTokenStr),
-      output_cost_per_token: tokenCostFromPerMillion(draft.outputCostPerTokenStr)
+      output_cost_per_token: tokenCostFromPerMillion(draft.outputCostPerTokenStr),
+      ...(hasDefaultToggle ? { is_default: isDefault } : {}),
+      ...securityClassificationPatch()
     };
   }
 
@@ -137,7 +159,9 @@
       description: draft.description.trim() || null,
       hosting: draft.hosting,
       open_source: openSource,
-      cost_per_minute: rawCostToNumber(draft.costPerMinuteStr)
+      cost_per_minute: rawCostToNumber(draft.costPerMinuteStr),
+      ...(hasDefaultToggle ? { is_default: isDefault } : {}),
+      ...securityClassificationPatch()
     };
   }
 
@@ -161,8 +185,6 @@
         await intric.tenantModels.updateTranscription({ id: model.id }, buildTranscriptionUpdate());
       }
 
-      await syncSecurityAndDefault();
-
       await invalidate("admin:model-providers:load");
       toast.success(m.model_updated_success());
       dialogOpen = false;
@@ -171,37 +193,6 @@
       toastError(e, m.failed_to_update_model());
     } finally {
       isSubmitting = false;
-    }
-  }
-
-  // The two cross-cutting fields live on a different endpoint; we only call
-  // it when something actually changed, and we branch the call so the
-  // discriminated-union typings narrow without a cast.
-  async function syncSecurityAndDefault() {
-    const classificationChanged =
-      (draft.securityClassification?.id ?? null) !== (model.security_classification?.id ?? null);
-    const defaultChanged = "is_org_default" in model && isDefault !== model.is_org_default;
-    if (!classificationChanged && !defaultChanged) return;
-
-    const update: Record<string, unknown> = {};
-    if (classificationChanged) update.security_classification = draft.securityClassification;
-    if (defaultChanged) update.is_org_default = isDefault;
-
-    if (type === "completionModel") {
-      await intric.models.update({
-        completionModel: { id: model.id },
-        update
-      });
-    } else if (type === "embeddingModel") {
-      await intric.models.update({
-        embeddingModel: { id: model.id },
-        update
-      });
-    } else {
-      await intric.models.update({
-        transcriptionModel: { id: model.id },
-        update
-      });
     }
   }
 
