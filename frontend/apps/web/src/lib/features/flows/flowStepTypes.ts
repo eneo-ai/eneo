@@ -2,6 +2,7 @@ import type { FlowStep } from "@intric/intric-js";
 
 type InputType = FlowStep["input_type"];
 type InputSource = FlowStep["input_source"];
+type OutputMode = FlowStep["output_mode"];
 type OutputType = FlowStep["output_type"];
 
 export type FlowStepLike = Pick<
@@ -46,6 +47,7 @@ const INPUT_SOURCE_ORDER: InputSource[] = [
 ];
 
 const ADVANCED_ONLY_INPUT_TYPES = new Set<InputType>(["file", "any"]);
+const OUTBOUND_DELIVERY_OUTPUT_MODES = new Set<OutputMode>(["http_post"]);
 
 const COMPATIBLE_COERCIONS: Record<OutputType, InputType[]> = {
   text: ["text", "json", "any"],
@@ -58,6 +60,10 @@ export function mapOutputToInputType(outputType?: OutputType): InputType {
   if (!outputType) return "text";
   const validInputTypes = new Set<InputType>(["text", "json", "image", "audio", "document", "file", "any"]);
   return validInputTypes.has(outputType as InputType) ? (outputType as InputType) : "text";
+}
+
+export function hasOutboundDeliveryOutputMode(outputMode: OutputMode): boolean {
+  return OUTBOUND_DELIVERY_OUTPUT_MODES.has(outputMode);
 }
 
 export function getValidInputTypes(

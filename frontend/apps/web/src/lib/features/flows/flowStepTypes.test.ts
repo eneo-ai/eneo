@@ -3,6 +3,7 @@ import {
   getFlowStepValidationIssues,
   getSelectableInputTypeOptions,
   getValidInputTypes,
+  hasOutboundDeliveryOutputMode,
   mapOutputToInputType,
 } from "./flowStepTypes";
 
@@ -10,6 +11,15 @@ describe("mapOutputToInputType", () => {
   it("maps rendered document outputs back to text for chaining", () => {
     expect(mapOutputToInputType("pdf")).toBe("text");
     expect(mapOutputToInputType("docx")).toBe("text");
+  });
+});
+
+describe("hasOutboundDeliveryOutputMode", () => {
+  it("centralizes which output modes deliver outside the run result payload", () => {
+    expect(hasOutboundDeliveryOutputMode("http_post")).toBe(true);
+    expect(hasOutboundDeliveryOutputMode("pass_through")).toBe(false);
+    expect(hasOutboundDeliveryOutputMode("template_fill")).toBe(false);
+    expect(hasOutboundDeliveryOutputMode("transcribe_only")).toBe(false);
   });
 });
 

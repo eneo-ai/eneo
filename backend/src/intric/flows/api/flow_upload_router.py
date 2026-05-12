@@ -19,6 +19,27 @@ from intric.server.dependencies.container import get_container
 router = APIRouter()
 
 
+def _upload_file_multipart_openapi_extra() -> dict[str, object]:
+    return {
+        "requestBody": {
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["upload_file"],
+                        "properties": {
+                            "upload_file": {
+                                "type": "string",
+                                "format": "binary",
+                            }
+                        },
+                    }
+                }
+            }
+        }
+    }
+
+
 @router.get(
     "/{id}/run-contract/",
     response_model=FlowRunContractPublic,
@@ -88,7 +109,9 @@ async def get_flow_run_contract(
         allow_service_key_principals=True,
         require_published_for_service_key=True,
     )
-    return await common.flow_run_contract_service(container).get_run_contract(flow_id=id)
+    return await common.flow_run_contract_service(container).get_run_contract(
+        flow_id=id
+    )
 
 
 @router.get(
@@ -161,24 +184,7 @@ async def get_flow_input_policy(
     response_model=FilePublic,
     status_code=status.HTTP_201_CREATED,
     operation_id="upload_flow_file",
-    openapi_extra={
-        "requestBody": {
-            "content": {
-                "multipart/form-data": {
-                    "schema": {
-                        "type": "object",
-                        "required": ["upload_file"],
-                        "properties": {
-                            "upload_file": {
-                                "type": "string",
-                                "format": "binary",
-                            }
-                        },
-                    }
-                }
-            }
-        }
-    },
+    openapi_extra=_upload_file_multipart_openapi_extra(),
     summary="Upload flow input file",
     description="""
 Upload a file using flow-specific policy checks.
@@ -281,24 +287,7 @@ async def upload_flow_file(
     response_model=FilePublic,
     status_code=status.HTTP_201_CREATED,
     operation_id="upload_flow_runtime_file",
-    openapi_extra={
-        "requestBody": {
-            "content": {
-                "multipart/form-data": {
-                    "schema": {
-                        "type": "object",
-                        "required": ["upload_file"],
-                        "properties": {
-                            "upload_file": {
-                                "type": "string",
-                                "format": "binary",
-                            }
-                        },
-                    }
-                }
-            }
-        }
-    },
+    openapi_extra=_upload_file_multipart_openapi_extra(),
     summary="Upload step runtime file",
     description="""
 Upload a file for a specific published runtime-input step.

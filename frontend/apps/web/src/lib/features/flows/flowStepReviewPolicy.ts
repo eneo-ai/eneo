@@ -1,5 +1,7 @@
 import type { FlowStep } from "@intric/intric-js";
 
+import { hasOutboundDeliveryOutputMode } from "./flowStepTypes";
+
 export const FLOW_STEP_REVIEW_MODE_CHOICES = ["none", "view", "edit"] as const;
 
 export type FlowStepReviewModeChoice = (typeof FLOW_STEP_REVIEW_MODE_CHOICES)[number];
@@ -24,7 +26,7 @@ export function buildFlowStepReviewPolicyPatch(
 }
 
 export function isFlowStepReviewPolicySupported(step: Pick<FlowStep, "output_mode">): boolean {
-  return step.output_mode !== "http_post";
+  return !hasOutboundDeliveryOutputMode(step.output_mode);
 }
 
 export function sanitizeFlowStepReviewPolicy(step: FlowStep): FlowStep {
