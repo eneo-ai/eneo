@@ -8,6 +8,8 @@ import pytest
 
 from intric.flows.ai_builder import ai_builder_discovery_runtime as runtime
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
+    analyze_discovery_runtime,
+    build_discovery_block_message_runtime,
     build_runtime_planning_state,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
@@ -109,7 +111,7 @@ async def test_runtime_planning_state_classifies_weak_existing_slots(
                 "slots": [
                     {
                         "slot_name": "runtime_metadata_fields",
-                        "value": "detailed_case_metadata",
+                        "value": "basic_case_metadata",
                         "confidence": "high",
                         "reason": "runtime fields requested",
                     }
@@ -137,9 +139,7 @@ async def test_runtime_planning_state_classifies_weak_existing_slots(
     )
 
     assert state.resolved_slots["runtime_metadata_fields"].source == "model"
-    assert state.resolved_slots["runtime_metadata_fields"].value == (
-        "detailed_case_metadata"
-    )
+    assert state.resolved_slots["runtime_metadata_fields"].value == "basic_case_metadata"
 
 
 @pytest.mark.asyncio
@@ -203,7 +203,10 @@ async def test_runtime_planning_state_overlays_model_slots() -> None:
         [
             ConversationMessage(
                 role="user",
-                content="Jag vill beskriva ett ärende i text och få en tydlig sammanfattning.",
+                content=(
+                    "Jag vill klistra in ett kundmeddelande och få en tydlig "
+                    "sammanfattning."
+                ),
             )
         ],
         litellm_client=litellm_client,
@@ -213,7 +216,245 @@ async def test_runtime_planning_state_overlays_model_slots() -> None:
         ui_language="sv",
     )
 
-    assert state.resolved_slots["primary_runtime_input"].source == "model"
+    assert state.resolved_slots["primary_runtime_input"].source == "heuristic"
     assert state.resolved_slots["primary_runtime_input"].value == "text"
     assert state.resolved_slots["terminal_output"].source == "model"
     assert state.resolved_slots["terminal_output"].value == "structured_text"
+
+    messages = litellm_client.acompletion.await_args.kwargs["messages"]
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "primary_runtime_input" not in prompt
+    assert "terminal_output" in prompt
+
+
+@pytest.mark.asyncio
+async def test_runtime_planning_state_does_not_let_model_override_structured_answer() -> (
+    None
+):
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "primary_runtime_input",
+                        "value": "documents",
+                        "confidence": "high",
+                        "reason": "incorrect model guess",
+                    },
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "structured_text",
+                        "confidence": "high",
+                        "reason": "summary requested",
+                    },
+                ]
+            }
+        )
+    )
+
+    state = await build_runtime_planning_state(
+        [
+            ConversationMessage(
+                role="user",
+                content="Text",
+                metadata={
+                    "question_answer": {
+                        "question_id": "input_material_mode",
+                        "selected_values": ["text"],
+                    }
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="Bygg ett flöde som sammanfattar innehållet tydligt.",
+            ),
+        ],
+        litellm_client=litellm_client,
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        tenant_id=uuid4(),
+        ui_language="sv",
+    )
+
+    assert state.resolved_slots["primary_runtime_input"].source == "structured_answer"
+    assert state.resolved_slots["primary_runtime_input"].value == "text"
+
+    messages = litellm_client.acompletion.await_args.kwargs["messages"]
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "primary_runtime_input" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_flow() -> (
+    None
+):
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "primary_runtime_input",
+                        "value": "text",
+                        "confidence": "high",
+                        "reason": "the source material is user-provided prose",
+                    },
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "structured_json",
+                        "confidence": "high",
+                        "reason": "structured data is requested for downstream use",
+                    },
+                ]
+            }
+        )
+    )
+
+    analysis = await analyze_discovery_runtime(
+        [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Gör ett smart supportflöde där användaren klistrar in ett "
+                    "kundmeddelande, klassificerar avsikt och prioritet, föreslår "
+                    "svar, markerar om mänsklig granskning behövs och returnerar "
+                    "både kort text och strukturerad data."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ],
+        litellm_client=litellm_client,
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        tenant_id=uuid4(),
+        ui_language="sv",
+    )
+
+    question_ids = {
+        issue.suggestion.question_id
+        for issue in analysis.blocking_issues
+        if issue.suggestion is not None
+    }
+    assert "input_material_mode" not in question_ids
+    assert "final_output_mode" not in question_ids
+    assert analysis.ready_for_confirmation is True
+
+    messages = litellm_client.acompletion.await_args.kwargs["messages"]
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "primary_runtime_input" in prompt
+    assert "terminal_output" in prompt
+
+
+@pytest.mark.asyncio
+async def test_runtime_discovery_uses_llm_baseline_for_swedish_document_json_flow() -> (
+    None
+):
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "primary_runtime_input",
+                        "value": "documents",
+                        "confidence": "high",
+                        "reason": "the source material is uploaded documents",
+                    },
+                    {
+                        "slot_name": "document_material_scope",
+                        "value": "multiple_documents_case",
+                        "confidence": "high",
+                        "reason": "the user says several related files",
+                    },
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "structured_json",
+                        "confidence": "high",
+                        "reason": "structured JSON is requested for another system",
+                    },
+                ]
+            }
+        )
+    )
+
+    analysis = await analyze_discovery_runtime(
+        [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Skapa ett flöde som tar emot flera leverantörsavtal och bilagor, "
+                    "extraherar risker, rekommendationer och öppna frågor, "
+                    "låter en människa granska, och returnerar strukturerad "
+                    "JSON för ett uppföljningssystem."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ],
+        litellm_client=litellm_client,
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        tenant_id=uuid4(),
+        ui_language="sv",
+    )
+
+    question_ids = {
+        issue.suggestion.question_id
+        for issue in analysis.blocking_issues
+        if issue.suggestion is not None
+    }
+    assert "input_material_mode" not in question_ids
+    assert "document_material_scope" not in question_ids
+    assert "final_output_mode" not in question_ids
+    assert analysis.ready_for_confirmation is True
+
+
+@pytest.mark.asyncio
+async def test_discovery_block_runtime_uses_one_classification_for_analysis_and_state() -> (
+    None
+):
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "primary_runtime_input",
+                        "value": "text",
+                        "confidence": "high",
+                        "reason": "the user provides text",
+                    },
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "structured_text",
+                        "confidence": "high",
+                        "reason": "a readable summary is requested",
+                    },
+                ]
+            }
+        )
+    )
+
+    message, analysis, planning_state = await build_discovery_block_message_runtime(
+        [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde där användaren klistrar in intervjusvar och får "
+                    "en läsbar sammanfattning med viktiga teman."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ],
+        litellm_client=litellm_client,
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        tenant_id=uuid4(),
+        ui_language="sv",
+    )
+
+    assert message is None
+    assert analysis.ready_for_confirmation is True
+    assert planning_state.resolved_slots["primary_runtime_input"].source == "model"
+    assert planning_state.resolved_slots["terminal_output"].source == "model"
+    litellm_client.acompletion.assert_awaited_once()

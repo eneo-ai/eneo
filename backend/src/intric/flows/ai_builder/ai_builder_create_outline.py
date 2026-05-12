@@ -116,13 +116,31 @@ _OUTLINE_STEP_BACKEND_OWNED_KEYS = frozenset(
     }
 )
 logger = logging.getLogger(__name__)
-_OUTLINE_ROOT_IGNORED_KEYS = frozenset(
+_OUTLINE_STEP_ONLY_ROOT_IGNORED_KEYS = frozenset(
     {
         "citations_requested",
+        "knowledge_refs",
+        "mcp_server_refs",
+        "mcp_tool_refs",
+        "model_ref",
+        "name",
         "output_fields",
         "output_type",
         "reasoning",
+        "review_mode",
+        "task",
         "uses_input_fields",
+    }
+)
+_OUTLINE_ROOT_IGNORED_KEYS = (
+    _OUTLINE_STEP_BACKEND_OWNED_KEYS | _OUTLINE_STEP_ONLY_ROOT_IGNORED_KEYS
+)
+_DOCUMENT_MATERIAL_RUNTIME_INPUT_TYPES = frozenset({InputType.DOCUMENT, InputType.FILE})
+_DOCUMENT_SCOPE_AGGREGATION_VALUES = frozenset(
+    {
+        "multiple_documents_case",
+        "multiple_pdfs_same_run",
+        "same_run_multiple_documents",
     }
 )
 ArchitectureEnvelope = ArchitectureCommit | ArchitectureCommitDraft
@@ -927,6 +945,10 @@ def _aggregation_intent_for_compile_context(
     not have to know when Eneo Flow should use `all_previous_steps`.
     """
 
+    runtime_input_type = (
+        _runtime_input_type_from_architecture(architecture)
+        or _runtime_input_type_from_planning_state(state)
+    )
     if architecture is not None:
         if architecture.aggregation_intent != "linear":
             return architecture.aggregation_intent
@@ -934,19 +956,19 @@ def _aggregation_intent_for_compile_context(
             return "compare"
 
     document_scope = _resolved_slot_value(state, "document_material_scope")
-    if document_scope in {
-        "multiple_documents_case",
-        "multiple_pdfs_same_run",
-        "same_run_multiple_documents",
-    }:
+    if (
+        runtime_input_type in _DOCUMENT_MATERIAL_RUNTIME_INPUT_TYPES
+        and document_scope in _DOCUMENT_SCOPE_AGGREGATION_VALUES
+    ):
         return "aggregate"
 
     comparison_scope = _resolved_slot_value(state, "comparison_scope")
-    if comparison_scope in {
-        "same_run_compare",
-        "same_run_multiple_documents",
-        "multiple_documents_case",
-    }:
+    if comparison_scope == "same_run_compare":
+        return "compare"
+    if (
+        runtime_input_type in _DOCUMENT_MATERIAL_RUNTIME_INPUT_TYPES
+        and comparison_scope in {"same_run_multiple_documents", "multiple_documents_case"}
+    ):
         return "compare"
     return "linear"
 

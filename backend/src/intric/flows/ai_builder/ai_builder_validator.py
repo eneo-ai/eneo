@@ -23,7 +23,6 @@ from intric.flows.ai_builder.ai_builder_validation_flow_parity import (
 from intric.flows.ai_builder.ai_builder_validation_quality import (
     lint_all_previous_steps_overuse,
     lint_all_previous_with_specific_refs,
-    lint_contract_fields_without_descriptions,
     lint_contract_instruction_alignment,
     lint_json_output_without_contract,
     lint_multi_goal_prompts,
@@ -102,7 +101,6 @@ def validate_spec(
         lint_multi_goal_prompts(spec, result)
         lint_single_step_flow(spec, result)
         lint_json_output_without_contract(spec, result)
-        lint_contract_fields_without_descriptions(spec, result)
         lint_contract_instruction_alignment(spec, result)
         lint_unused_form_fields(spec, result)
         lint_shadowed_form_field_bare_references(spec, result)

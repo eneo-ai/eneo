@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, cast
 
 from intric.flows.ai_builder.ai_builder_models import (
     FlowDraftSpecCore,
     OutputType,
+    StepSpec,
     TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
@@ -53,23 +55,26 @@ def prepare_compiled_spec_for_session(
     prepared_spec, normalization_changes = normalize_ai_builder_spec(
         prepared_spec,
         terminal_output_type=terminal_output_type,
+        disambiguate_duplicate_step_names=target_kind == TargetKind.EDIT,
     )
-    artifact_tail_changes = [
+    prepared_spec = _normalize_output_contract_steps(prepared_spec)
+    terminal_contract_changes = [
         {
             "step_ref": step.plan_step_ref,
             "code": change.code,
             "field": change.field_suffix,
         }
         for step, change in normalization_changes
-        if change.code == "terminal_artifact_helper_folded"
+        if change.code
+        in {"terminal_artifact_helper_folded", "terminal_artifact_contract_promoted"}
     ]
-    if artifact_tail_changes:
+    if terminal_contract_changes:
         logger.info(
-            "ai_builder_terminal_artifact_tail_normalized "
+            "ai_builder_terminal_artifact_contract_normalized "
             "target_kind=%s terminal_output_type=%s changes=%s",
             target_kind,
             terminal_output_type,
-            artifact_tail_changes,
+            terminal_contract_changes,
         )
     if resource_catalog is not None:
         prepared_spec, resolution_issues = canonicalize_flow_spec_resources(
@@ -109,6 +114,74 @@ def prepare_compiled_spec_for_session(
         spec=prepared_spec,
         validation=validation,
     )
+
+
+def _normalize_output_contract_steps(spec: FlowDraftSpecCore) -> FlowDraftSpecCore:
+    updated_steps: list[StepSpec] = []
+    changed = False
+
+    for step in spec.steps:
+        updated_step = step
+        contract = step.output_contract
+        if isinstance(contract, dict):
+            property_names = _contract_property_names(contract)
+            if property_names:
+                updates: dict[str, object] = {}
+
+                instructions = _instructions_with_contract_fields(
+                    step.assistant_spec.instructions,
+                    property_names=property_names,
+                )
+                if instructions != step.assistant_spec.instructions:
+                    updates["assistant_spec"] = step.assistant_spec.model_copy(
+                        update={"instructions": instructions}
+                    )
+
+                if updates:
+                    updated_step = step.model_copy(update=updates)
+                    changed = True
+
+        updated_steps.append(updated_step)
+
+    if not changed:
+        return spec
+    return spec.model_copy(update={"steps": updated_steps})
+
+
+def _contract_property_names(contract: dict[str, Any]) -> list[str]:
+    properties = contract.get("properties")
+    if not isinstance(properties, dict):
+        return []
+
+    property_map = cast(dict[str, object], properties)
+    names: list[str] = []
+    for raw_name in property_map:
+        name = str(raw_name).strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def _instructions_with_contract_fields(
+    instructions: str,
+    *,
+    property_names: list[str],
+) -> str:
+    normalized = instructions.casefold()
+    missing_names = [
+        field_name
+        for field_name in property_names
+        if field_name.casefold() not in normalized
+    ]
+    if not missing_names:
+        return instructions
+
+    field_list = ", ".join(property_names)
+    instruction_line = f"Required output fields: {field_list}."
+    stripped = instructions.rstrip()
+    if not stripped:
+        return instruction_line
+    return f"{stripped}\n\n{instruction_line}"
 
 
 def _add_terminal_output_alignment_error(

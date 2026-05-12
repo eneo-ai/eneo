@@ -156,36 +156,7 @@ def build_new_step_draft_schema(
         mcp_tool_ref_items["enum"] = mcp_tool_refs
 
     if expose_previous_field_refs:
-        properties["uses_previous_fields"] = {
-            "type": "array",
-            "description": (
-                "Optional field-level reuse intent for earlier JSON-producing steps. "
-                "The backend compiles these into explicit underlag bindings."
-            ),
-            "items": {
-                "type": "object",
-                "required": ["from_step", "field_path"],
-                "properties": {
-                    "from_step": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "description": "1-based earlier step number to reuse structured fields from.",
-                    },
-                    "field_path": {
-                        "type": "string",
-                        "description": (
-                            "Dot path inside the earlier step's structured JSON output, "
-                            "for example `sammanfattning` or `risker.0.rubrik`."
-                        ),
-                    },
-                    "label": {
-                        "type": ["string", "null"],
-                        "description": "Optional human-readable label to use in the compiled underlag.",
-                    },
-                },
-                "additionalProperties": False,
-            },
-        }
+        properties["uses_previous_fields"] = build_previous_field_refs_schema()
 
     step_description = description
     if expose_previous_field_refs:
@@ -200,6 +171,43 @@ def build_new_step_draft_schema(
         "required": ["name", "instructions", "input_source"],
         "properties": properties,
         "additionalProperties": False,
+    }
+
+
+def build_previous_field_refs_schema() -> dict[str, Any]:
+    return {
+        "type": "array",
+        "description": (
+            "Optional field-level reuse intent for earlier JSON-producing steps. "
+            "The backend compiles these into explicit underlag bindings."
+        ),
+        "items": {
+            "type": "object",
+            "required": ["from_step", "field_path"],
+            "properties": {
+                "from_step": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "1-based earlier step number to reuse structured fields from."
+                    ),
+                },
+                "field_path": {
+                    "type": "string",
+                    "description": (
+                        "Dot path inside the earlier step's structured JSON output, "
+                        "for example `sammanfattning` or `risker.0.rubrik`."
+                    ),
+                },
+                "label": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Optional human-readable label to use in the compiled underlag."
+                    ),
+                },
+            },
+            "additionalProperties": False,
+        },
     }
 
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import pytest
+
 from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
 from intric.flows.ai_builder.ai_builder_edit_models import (
     AddStepPayload,
@@ -99,6 +101,28 @@ def _make_add_payload(
         runtime_upload=runtime_upload,
         runtime_required=runtime_required,
     )
+
+
+def test_compile_edit_draft_rejects_uncanonicalized_duplicate_modifies() -> None:
+    existing = [_make_flow_step(step_order=1)]
+    draft = FlowEditDraft(
+        plan_rationale="Duplicate modify operations should not reach compiler.",
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(name="Skapa rapport"),
+            ),
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(output_type=OutputType.DOCX),
+            ),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="canonicalized before compilation"):
+        compile_edit_draft(draft, existing, base_flow_revision=1)
 
 
 def test_compile_edit_draft_clears_all_previous_input_contract() -> None:
@@ -847,6 +871,115 @@ def test_edit_compiler_preserves_template_fill_docx_when_patch_omits_output_mech
     assert step.output_mode == OutputMode.TEMPLATE_FILL
     assert step.output_type == OutputType.DOCX
     assert step.output_config == {"template_file_id": "template-1"}
+
+
+def test_edit_compiler_preserves_audio_transcription_mode_when_patch_only_renames() -> (
+    None
+):
+    existing_step = _make_flow_step(
+        step_order=1,
+        user_description="Transkribera",
+        input_type="audio",
+        output_mode="transcribe_only",
+        output_type="text",
+    )
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(name="Transkribera ljud"),
+            )
+        ]
+    )
+
+    result = compile_edit_draft(draft, [existing_step], base_flow_revision=1)
+
+    step = result.compiled_spec.steps[0]
+    assert step.name == "Transkribera ljud"
+    assert step.output_mode == OutputMode.TRANSCRIBE_ONLY
+    assert step.output_type == OutputType.TEXT
+
+
+def test_edit_compiler_preserves_generated_docx_mode_when_patch_only_renames() -> (
+    None
+):
+    existing_step = _make_flow_step(
+        step_order=1,
+        user_description="Skapa dokument",
+        output_mode="pass_through",
+        output_type="docx",
+    )
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(name="Skapa DOCX"),
+            )
+        ]
+    )
+
+    result = compile_edit_draft(draft, [existing_step], base_flow_revision=1)
+
+    step = result.compiled_spec.steps[0]
+    assert step.name == "Skapa DOCX"
+    assert step.output_mode == OutputMode.PASS_THROUGH
+    assert step.output_type == OutputType.DOCX
+
+
+def test_edit_compiler_uses_document_delivery_mode_to_switch_template_docx_to_generated() -> (
+    None
+):
+    existing_step = _make_flow_step(
+        step_order=1,
+        user_description="Fyll mall",
+        output_mode="template_fill",
+        output_type="docx",
+        output_config={"template_file_id": "template-1"},
+    )
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(document_delivery_mode="generated"),
+            )
+        ]
+    )
+
+    result = compile_edit_draft(draft, [existing_step], base_flow_revision=1)
+
+    step = result.compiled_spec.steps[0]
+    assert step.output_mode == OutputMode.PASS_THROUGH
+    assert step.output_type == OutputType.DOCX
+    assert step.output_config is None
+
+
+def test_edit_compiler_uses_document_delivery_mode_to_switch_generated_docx_to_template() -> (
+    None
+):
+    existing_step = _make_flow_step(
+        step_order=1,
+        user_description="Skapa dokument",
+        output_mode="pass_through",
+        output_type="docx",
+    )
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(document_delivery_mode="template_fill"),
+            )
+        ]
+    )
+
+    result = compile_edit_draft(draft, [existing_step], base_flow_revision=1)
+
+    step = result.compiled_spec.steps[0]
+    assert step.output_mode == OutputMode.TEMPLATE_FILL
+    assert step.output_type == OutputType.DOCX
 
 
 def test_edit_compiler_derives_generated_pdf_when_template_fill_step_changes_to_pdf() -> (

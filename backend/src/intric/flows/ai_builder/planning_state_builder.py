@@ -37,8 +37,7 @@ from intric.flows.ai_builder.ai_builder_slot_classifier import (
     SlotClassificationResult,
 )
 from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
-    KNOWN_REQUIREMENT_SLOT_NAMES,
-    NON_LLM_RESOLVABLE_SLOT_NAMES,
+    LLM_RESOLVABLE_SLOT_NAMES,
 )
 from intric.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
@@ -124,7 +123,7 @@ _PHASE_ORDER: tuple[str, ...] = (
 )
 
 _MODEL_PROTECTED_SOURCES: frozenset[SlotSource] = frozenset(
-    {"structured_answer", "requirements_summary", "flow_default"}
+    {"structured_answer", "flow_default"}
 )
 
 
@@ -203,11 +202,89 @@ def merge_llm_resolved_slots(
         state.phase = "discovering"
 
 
+def apply_policy_defaults_from_resolved_slots(
+    state: PlanningState,
+    *,
+    freeform_text: str,
+) -> None:
+    primary_runtime_input = state.resolved_slots.get("primary_runtime_input")
+    if primary_runtime_input is not None:
+        if (
+            "document_material_scope" not in state.resolved_slots
+            and primary_runtime_input.value in {"documents", "text_and_documents"}
+        ):
+            state.resolved_slots["document_material_scope"] = ResolvedSlot(
+                name="document_material_scope",
+                value="flexible_document_case",
+                source="policy_default",
+                evidence=[
+                    "policy_default:document_material_scope=flexible_document_case",
+                ],
+                confidence="medium",
+            )
+        if (
+            "runtime_metadata_fields" not in state.resolved_slots
+            and not mentions_runtime_metadata(freeform_text)
+        ):
+            state.resolved_slots["runtime_metadata_fields"] = ResolvedSlot(
+                name="runtime_metadata_fields",
+                value="no_extra_metadata",
+                source="policy_default",
+                evidence=[
+                    "policy_default:runtime_metadata_fields=no_extra_metadata",
+                ],
+                confidence="medium",
+            )
+
+    terminal_output = state.resolved_slots.get("terminal_output")
+    if terminal_output is not None:
+        if (
+            terminal_output.value == "docx_document"
+            and "docx_output_mode" not in state.resolved_slots
+            and not has_explicit_docx_mode_text(freeform_text)
+        ):
+            state.resolved_slots["docx_output_mode"] = ResolvedSlot(
+                name="docx_output_mode",
+                value="generated_docx",
+                source="policy_default",
+                evidence=["policy_default:docx_output_mode=generated_docx"],
+                confidence="medium",
+            )
+        if (
+            terminal_output.value == "pdf_document"
+            and "pdf_generation_mode" not in state.resolved_slots
+            and not has_explicit_pdf_mode_text(freeform_text)
+        ):
+            state.resolved_slots["pdf_generation_mode"] = ResolvedSlot(
+                name="pdf_generation_mode",
+                value="generated_pdf",
+                source="policy_default",
+                evidence=["policy_default:pdf_generation_mode=generated_pdf"],
+                confidence="medium",
+            )
+
+    if state.resolved_slots and state.phase == "awaiting_input":
+        state.phase = "discovering"
+
+
+def llm_resolvable_slot_values_for_state(
+    state: PlanningState,
+) -> dict[str, frozenset[str]]:
+    candidate_slots = {
+        slot_name
+        for slot_name in LLM_RESOLVABLE_SLOT_NAMES
+        if _model_slot_can_replace(
+            existing_slot=state.resolved_slots.get(slot_name),
+            model_confidence="high",
+        )
+    }
+    return {
+        slot_name: legal_slot_values(slot_name) for slot_name in sorted(candidate_slots)
+    }
+
+
 def _model_slot_is_persistable(slot_name: str) -> bool:
-    return (
-        slot_name in KNOWN_REQUIREMENT_SLOT_NAMES
-        and slot_name not in NON_LLM_RESOLVABLE_SLOT_NAMES
-    )
+    return slot_name in LLM_RESOLVABLE_SLOT_NAMES
 
 
 def _model_slot_can_replace(
@@ -219,6 +296,8 @@ def _model_slot_can_replace(
         return model_confidence in {"high", "medium"}
     if existing_slot.source in _MODEL_PROTECTED_SOURCES:
         return False
+    if existing_slot.source == "requirements_summary":
+        return model_confidence == "high"
     if existing_slot.source == "policy_default":
         return model_confidence == "high"
     if existing_slot.source == "heuristic":
@@ -455,22 +534,31 @@ def _resolve_slot_origin(
             "high",
         )
 
-    latest_summary = requirements_state.latest_summary
-    if latest_summary is not None and summary_field is not None:
-        summary_value = getattr(latest_summary, summary_field)
-        if isinstance(summary_value, str) and summary_value:
-            return (
-                "requirements_summary",
-                (f"requirements_summary.{summary_field}={summary_value}",),
-                "high",
-            )
-
-    if flow_defaults.get(question_id):
+    flow_default_values = flow_defaults.get(question_id, set())
+    if slot_value in flow_default_values:
         return (
             "flow_default",
             (f"flow_default:{question_id}",),
             "high",
         )
+
+    latest_summary = requirements_state.latest_summary
+    if latest_summary is not None and summary_field is not None:
+        summary_value = getattr(latest_summary, summary_field)
+        if (
+            isinstance(summary_value, str)
+            and summary_value
+            and _requirements_summary_supports_slot(
+                question_id=question_id,
+                summary_value=summary_value,
+                slot_value=slot_value,
+            )
+        ):
+            return (
+                "requirements_summary",
+                (f"requirements_summary.{summary_field}={summary_value}",),
+                "high",
+            )
 
     if _is_policy_default_slot(
         question_id=question_id,
@@ -497,6 +585,25 @@ def _resolve_slot_origin(
             freeform_text=freeform_text,
         ),
     )
+
+
+def _requirements_summary_supports_slot(
+    *,
+    question_id: str,
+    summary_value: str,
+    slot_value: str,
+) -> bool:
+    if question_id == "input_material_mode":
+        return resolve_input_intent(summary_value, {}).primary_runtime_input == slot_value
+
+    output_intent = resolve_output_intent(summary_value, {})
+    if question_id == "final_output_mode":
+        return output_intent.terminal_output == slot_value
+    if question_id == "docx_output_mode":
+        return output_intent.docx_output_mode == slot_value
+    if question_id == "pdf_generation_mode":
+        return output_intent.pdf_generation_mode == slot_value
+    return False
 
 
 def _heuristic_slot_confidence(

@@ -29,3 +29,7 @@ NON_LLM_RESOLVABLE_SLOT_NAMES: frozenset[str] = frozenset(
         "pdf_generation_mode",
     }
 )
+
+LLM_RESOLVABLE_SLOT_NAMES: frozenset[str] = (
+    KNOWN_REQUIREMENT_SLOT_NAMES - NON_LLM_RESOLVABLE_SLOT_NAMES
+)

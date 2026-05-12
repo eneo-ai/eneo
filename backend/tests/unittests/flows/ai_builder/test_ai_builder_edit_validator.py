@@ -622,6 +622,55 @@ class TestValidModifyOperations:
         assert "output_mode 'template_fill'" in result.errors[0].message
         assert "output_type 'pdf'" in result.errors[0].message
 
+    def test_modify_template_fill_document_delivery_requires_docx_output(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_1",
+                    patch=StepPatch(
+                        document_delivery_mode="template_fill",
+                        output_type=OutputType.PDF,
+                    ),
+                )
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+
+        assert not result.valid
+        assert "template_fill_requires_docx" in _error_codes(result)
+
+    def test_modify_document_delivery_mode_requires_document_output(self):
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_1",
+                    patch=StepPatch(document_delivery_mode="generated"),
+                )
+            ]
+        )
+        result = validate_edit_draft(
+            draft,
+            VALID_REFS,
+            current_steps=[
+                _existing_step(step_order=1, output_type="text"),
+                _existing_step(step_order=2),
+                _existing_step(step_order=3),
+            ],
+        )
+
+        assert not result.valid
+        assert "document_delivery_mode_type_mismatch" in _error_codes(result)
+
     def test_modify_previous_field_reference_requires_earlier_target(self):
         draft = FlowEditDraft(
             operations=[

@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Protocol, cast, runtime_checkable
 from uuid import UUID, uuid4
 
@@ -52,6 +52,7 @@ class _ToolFailureCodes(Protocol):
 class _ProposalRepairRetryState:
     attempts_remaining: int
     extra_retry_available: bool = True
+    text_feedback_retry_available: bool = True
     retry_count: int = 0
 
     @classmethod
@@ -71,22 +72,37 @@ class _ProposalRepairRetryState:
             failure_kind in _EXTRA_RETRY_FAILURE_KINDS and self.extra_retry_available
         )
 
+    def can_retry_text_feedback(
+        self, *, failure_kind: ToolProcessingFailureKind | None
+    ) -> bool:
+        return self.text_feedback_retry_available and self.can_retry(
+            failure_kind=failure_kind
+        )
+
     def consume(
         self, *, failure_kind: ToolProcessingFailureKind | None
     ) -> "_ProposalRepairRetryState":
         if self.attempts_remaining > 0:
-            return _ProposalRepairRetryState(
+            return replace(
+                self,
                 attempts_remaining=self.attempts_remaining - 1,
-                extra_retry_available=self.extra_retry_available,
                 retry_count=self.retry_count + 1,
             )
         if failure_kind in _EXTRA_RETRY_FAILURE_KINDS and self.extra_retry_available:
-            return _ProposalRepairRetryState(
-                attempts_remaining=self.attempts_remaining,
+            return replace(
+                self,
                 extra_retry_available=False,
                 retry_count=self.retry_count + 1,
             )
         return self
+
+    def consume_text_feedback(
+        self, *, failure_kind: ToolProcessingFailureKind | None
+    ) -> "_ProposalRepairRetryState":
+        return replace(
+            self.consume(failure_kind=failure_kind),
+            text_feedback_retry_available=False,
+        )
 
 
 def _invalid_tool_arguments_message(error: Exception) -> str:
@@ -199,6 +215,18 @@ def append_retry_feedback_turn(
     )
 
 
+def append_text_retry_feedback_turn(
+    *,
+    llm_messages: list[dict[str, Any]],
+    assistant_content: str,
+    feedback: str,
+) -> list[dict[str, Any]]:
+    return list(llm_messages) + [
+        {"role": "assistant", "content": assistant_content},
+        {"role": "user", "content": feedback},
+    ]
+
+
 def _build_retry_feedback(
     *,
     target_tool_name: str,
@@ -306,7 +334,7 @@ async def request_self_correction(
         assistant_text = _safe_assistant_text(getattr(message, "content", None))
 
         if hasattr(message, "tool_calls") and message.tool_calls:
-            retry_feedback: tuple[Any, str, str | None] | None = None
+            retry_feedback: tuple[Any, str, ToolProcessingFailureKind | None] | None = None
             for correction_tool_call in message.tool_calls:
                 if correction_tool_call.function.name != target_tool_name:
                     continue
@@ -418,13 +446,36 @@ async def request_self_correction(
                     yield event
                 return
 
+            forced_failure_kind = forced_outcome.failure_kind or "validation"
+            if (
+                forced_outcome.feedback is not None
+                and retry_state.can_retry_text_feedback(
+                    failure_kind=forced_failure_kind
+                )
+            ):
+                text_retry_feedback = _build_retry_feedback(
+                    target_tool_name=target_tool_name,
+                    feedback=forced_outcome.feedback,
+                    failure_kind=forced_failure_kind,
+                    retry_count=retry_state.next_retry_count,
+                )
+                retry_state = retry_state.consume_text_feedback(
+                    failure_kind=forced_failure_kind
+                )
+                correction_messages = append_text_retry_feedback_turn(
+                    llm_messages=correction_messages,
+                    assistant_content=assistant_text,
+                    feedback=text_retry_feedback,
+                )
+                continue
+
             logger.warning(
                 "Self-correction bailed to conversational text after forced retry: %s",
                 assistant_text,
             )
             yield build_self_correction_error_event(
                 feedback=forced_outcome.feedback,
-                failure_kind=forced_outcome.failure_kind or "validation",
+                failure_kind=forced_failure_kind,
             )
             return
 

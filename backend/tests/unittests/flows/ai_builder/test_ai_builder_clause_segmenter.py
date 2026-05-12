@@ -25,6 +25,21 @@ def test_role_scoped_text_splits_terminal_word_file_after_audio_input() -> None:
     assert "word fil" not in scoped.input_text
 
 
+def test_role_scoped_text_splits_inflected_swedish_final_docx_output() -> None:
+    scoped = build_role_scoped_text(
+        (
+            "Bygg ett Flow för en extern webbapp där användaren laddar upp ljud, "
+            "får transkribering, kan granska och korrigera texten, och sedan får "
+            "en slutlig DOCX-rapport. Använd strukturerad JSON där det hjälper "
+            "API-konsumenten, men håll slutresultatet som dokument."
+        )
+    )
+
+    assert "laddar upp ljud" in scoped.input_text
+    assert "får en slutlig docx rapport" in scoped.output_text
+    assert "docx rapport" not in scoped.input_text
+
+
 def test_role_scoped_text_does_not_promote_uploaded_pdf_before_terminal_connector() -> (
     None
 ):

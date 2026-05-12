@@ -34,6 +34,7 @@ from intric.flows.ai_builder.planning_state import (
     StepTriple,
 )
 from intric.flows.ai_builder.planning_state_builder import (
+    apply_policy_defaults_from_resolved_slots,
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
     merge_llm_resolved_slots,
@@ -475,7 +476,7 @@ class TestPolicyDefaults:
 
 
 class TestModelSlotMerge:
-    def test_model_output_cannot_displace_explicit_summary_or_flow_defaults(
+    def test_model_output_preserves_user_and_flow_sources_but_can_correct_summary(
         self,
     ) -> None:
         state = _state()
@@ -514,10 +515,70 @@ class TestModelSlotMerge:
         )
 
         assert state.resolved_slots["primary_runtime_input"].value == "documents"
-        assert state.resolved_slots["terminal_output"].value == "structured_text"
+        corrected_output = state.resolved_slots["terminal_output"]
+        assert corrected_output.value == "pdf_document"
+        assert corrected_output.source == "model"
         assert state.resolved_slots["runtime_metadata_fields"].value == (
             "no_extra_metadata"
         )
+
+    def test_medium_model_output_does_not_replace_requirements_summary(self) -> None:
+        state = _state()
+        state.resolved_slots = {
+            "terminal_output": _slot(
+                name="terminal_output",
+                value="structured_text",
+                source="requirements_summary",
+            )
+        }
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(_classified("terminal_output", "pdf_document", "medium"),)
+            ),
+            prompt_hash="a" * 64,
+        )
+
+        assert state.resolved_slots["terminal_output"].value == "structured_text"
+
+    def test_policy_defaults_generated_docx_after_model_terminal_output(self) -> None:
+        state = _state()
+        state.resolved_slots = {
+            "terminal_output": _slot(
+                name="terminal_output",
+                value="docx_document",
+                source="model",
+            )
+        }
+
+        apply_policy_defaults_from_resolved_slots(
+            state,
+            freeform_text=(
+                "Slutlig DOCX-rapport skapas efter mänsklig granskning."
+            ),
+        )
+
+        slot = state.resolved_slots["docx_output_mode"]
+        assert slot.value == "generated_docx"
+        assert slot.source == "policy_default"
+
+    def test_policy_defaults_do_not_mask_explicit_docx_template_mode(self) -> None:
+        state = _state()
+        state.resolved_slots = {
+            "terminal_output": _slot(
+                name="terminal_output",
+                value="docx_document",
+                source="model",
+            )
+        }
+
+        apply_policy_defaults_from_resolved_slots(
+            state,
+            freeform_text="Slutrapporten ska fylla en DOCX-mall.",
+        )
+
+        assert "docx_output_mode" not in state.resolved_slots
 
     def test_high_model_output_replaces_policy_default(self) -> None:
         state = _state()

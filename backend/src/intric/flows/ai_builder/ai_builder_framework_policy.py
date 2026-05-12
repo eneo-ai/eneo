@@ -63,6 +63,7 @@ __all__ = [
     "mentions_output_change",
     "mentions_runtime_metadata",
     "needs_structured_extraction",
+    "normalize_requirements_summary_for_flow",
     "normalize_question_answer",
     "normalize_structured_question_payload",
     "question_is_already_resolved",
@@ -434,11 +435,13 @@ def _score_option_match(message: str, option: Mapping[str, Any]) -> float:
 def extract_answer_signals(
     conversation: Sequence[ConversationMessage | Mapping[str, Any]],
 ) -> dict[str, set[str]]:
-    """Extract effective answer signals with latest-turn precedence per question.
+    """Extract user-authored answer signals with latest-turn precedence.
 
     Freeform inference and structured answers are both read from the conversation,
     but newer turns replace older values for the same question family instead of
-    accumulating a bag of stale signals across the whole session.
+    accumulating a bag of stale signals across the whole session. Tool-generated
+    requirement summaries are intentionally resolved by the planning-state owner,
+    so model paraphrases cannot masquerade as explicit user answers.
     """
     signals: dict[str, set[str]] = {}
     for message in conversation:
@@ -458,16 +461,6 @@ def extract_answer_signals(
             else message.get("content")
         )
         if role != "user":
-            if role == "tool" and isinstance(metadata, dict):
-                requirements_summary = cast(JsonObject, metadata).get(
-                    "requirements_summary"
-                )
-                if isinstance(requirements_summary, Mapping):
-                    signals.update(
-                        _extract_requirements_summary_signals(
-                            cast(Mapping[str, Any], requirements_summary)
-                        )
-                    )
             continue
 
         answer = (
@@ -529,24 +522,141 @@ def extract_answer_signals(
     return signals
 
 
-def _extract_requirements_summary_signals(
-    requirements_summary: Mapping[str, Any],
-) -> dict[str, set[str]]:
-    signals: dict[str, set[str]] = {}
-    input_description = normalize_signal_text(
-        str(requirements_summary.get("input_description") or "")
-    )
-    input_intent = resolve_input_intent(input_description, {})
-    if input_intent.primary_runtime_input != "unknown":
-        signals["input_material_mode"] = {input_intent.primary_runtime_input}
+def normalize_requirements_summary_for_flow(
+    requirements_data: Mapping[str, Any],
+    *,
+    conversation: Sequence[ConversationMessage | Mapping[str, Any]],
+    flow: Flow | None,
+    language: str | None = None,
+) -> dict[str, Any]:
+    if flow is None:
+        return dict(requirements_data)
 
-    output_description = normalize_signal_text(
-        str(requirements_summary.get("output_description") or "")
+    default_runtime_input = _single_runtime_input_default(
+        build_flow_discovery_defaults(flow).get("input_material_mode", set())
     )
-    output_intent = resolve_output_intent(output_description, {})
-    if output_intent.terminal_output is not None:
-        signals["final_output_mode"] = {output_intent.terminal_output}
-    return signals
+    if default_runtime_input is None:
+        return dict(requirements_data)
+
+    input_description = normalize_signal_text(
+        str(requirements_data.get("input_description") or "")
+    )
+    summary_runtime_input = resolve_input_intent(input_description, {}).primary_runtime_input
+    if summary_runtime_input in {"unknown", default_runtime_input}:
+        return dict(requirements_data)
+
+    if _conversation_explicitly_changes_runtime_input(
+        conversation=conversation,
+        default_runtime_input=default_runtime_input,
+    ):
+        return dict(requirements_data)
+
+    normalized = dict(requirements_data)
+    normalized["input_description"] = _format_runtime_input_description(
+        default_runtime_input,
+        language=language,
+    )
+    normalized["key_decisions"] = _replace_runtime_input_decision(
+        requirements_data.get("key_decisions"),
+        default_runtime_input=default_runtime_input,
+        language=language,
+    )
+    return normalized
+
+
+def _single_runtime_input_default(values: set[str]) -> str | None:
+    ordered_defaults = ("audio", "documents", "text_and_documents", "text")
+    matches = [value for value in ordered_defaults if value in values]
+    if len(matches) != 1:
+        return None
+    return matches[0]
+
+
+def _conversation_explicitly_changes_runtime_input(
+    *,
+    conversation: Sequence[ConversationMessage | Mapping[str, Any]],
+    default_runtime_input: str,
+) -> bool:
+    if has_explicit_structured_answer(conversation, "input_material_mode"):
+        return True
+    if has_explicit_structured_answer(conversation, "flow_input_architecture"):
+        return True
+
+    requested_input = resolve_input_intent(
+        aggregate_freeform_user_text(conversation),
+        {},
+    ).primary_runtime_input
+    return requested_input not in {"unknown", default_runtime_input}
+
+
+def _format_runtime_input_description(
+    runtime_input: str,
+    *,
+    language: str | None,
+) -> str:
+    if language == "en":
+        return f"Primary runtime input: {_runtime_input_label(runtime_input, language='en')}."
+    return (
+        "Primär indata vid körning: "
+        f"{_runtime_input_label(runtime_input, language='sv')}."
+    )
+
+
+def _replace_runtime_input_decision(
+    raw_decisions: object,
+    *,
+    default_runtime_input: str,
+    language: str | None,
+) -> list[dict[str, str]]:
+    label = _runtime_input_label(default_runtime_input, language=language)
+    if language == "en":
+        topic = "Runtime input"
+        decision = f"Keep the existing flow runtime input: {label}."
+    else:
+        topic = "Indata"
+        decision = f"Behåll befintlig körningsindata: {label}."
+
+    replacement = {"topic": topic, "decision": decision}
+    if not isinstance(raw_decisions, list):
+        return [replacement]
+
+    decisions: list[dict[str, str]] = []
+    replaced = False
+    for item in cast(list[object], raw_decisions):
+        if not isinstance(item, Mapping):
+            continue
+        decision_item = cast(Mapping[str, object], item)
+        item_topic = decision_item.get("topic")
+        item_decision = decision_item.get("decision")
+        if not isinstance(item_topic, str) or not isinstance(item_decision, str):
+            continue
+        normalized_topic = normalize_signal_text(item_topic)
+        if normalized_topic in {"indata", "input", "runtime input", "körningsindata"}:
+            if not replaced:
+                decisions.append(replacement)
+                replaced = True
+            continue
+        decisions.append({"topic": item_topic, "decision": item_decision})
+
+    if not replaced:
+        return [replacement, *decisions]
+    return decisions or [replacement]
+
+
+def _runtime_input_label(runtime_input: str, *, language: str | None) -> str:
+    if language == "en":
+        return {
+            "audio": "audio",
+            "documents": "documents",
+            "text": "text",
+            "text_and_documents": "text and documents",
+        }.get(runtime_input, runtime_input)
+    return {
+        "audio": "ljud",
+        "documents": "dokument",
+        "text": "text",
+        "text_and_documents": "text och dokument",
+    }.get(runtime_input, runtime_input)
 
 
 def question_is_already_resolved(
@@ -619,7 +729,10 @@ def resolve_explicit_output_choice(
 
     if _looks_like_text_analysis_output(normalized_text):
         return "structured_text"
-    if _infer_output_content_shape(normalized_text) == "structured_report":
+    if (
+        _infer_output_content_shape(normalized_text) == "structured_report"
+        and not _mentions_supported_document_artifact(normalized_text)
+    ):
         return "structured_text"
 
     return None
@@ -748,6 +861,13 @@ def _looks_like_text_terminal_output(text: str) -> bool:
             "sammanställning som text",
             "sammanstallning som text",
         ),
+    )
+
+
+def _mentions_supported_document_artifact(text: str) -> bool:
+    return contains_any_phrase(
+        text,
+        (*DOCX_CONTEXT_MARKERS, *PDF_OUTPUT_CONTEXT_MARKERS),
     )
 
 

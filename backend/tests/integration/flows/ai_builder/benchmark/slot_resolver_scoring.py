@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from intric.flows.ai_builder.ai_builder_slot_classifier import UNKNOWN_SLOT_VALUE
 from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
-    NON_LLM_RESOLVABLE_SLOT_NAMES,
+    LLM_RESOLVABLE_SLOT_NAMES,
 )
 from intric.flows.ai_builder.planning_state import ResolvedSlot
 from tests.integration.flows.ai_builder.benchmark.cases import (
@@ -185,7 +185,7 @@ def slot_resolver_corpus_hash(
 
 
 def is_llm_resolvable_slot(slot_name: str) -> bool:
-    return slot_name not in NON_LLM_RESOLVABLE_SLOT_NAMES
+    return slot_name in LLM_RESOLVABLE_SLOT_NAMES
 
 
 def _score_observed_value(score: SlotScore | None) -> str | None:

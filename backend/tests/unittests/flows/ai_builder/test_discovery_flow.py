@@ -2281,7 +2281,7 @@ class TestPlannerConversationEncoding:
 
 class TestPlannerDiscoveryShortCircuit:
     @pytest.mark.asyncio
-    async def test_uses_backend_followup_without_llm_for_blocking_discovery(
+    async def test_uses_backend_followup_after_llm_slot_classification_for_blocking_discovery(
         self,
     ) -> None:
         repo = AsyncMock()
@@ -2322,7 +2322,7 @@ class TestPlannerDiscoveryShortCircuit:
                 events.append(event)
 
         assert [event["event"] for event in events] == ["text", "question", "done"]
-        planner.litellm_client.acompletion.assert_not_awaited()
+        assert planner.litellm_client.acompletion.await_count == 1
         repo.commit_turn.assert_awaited_once()
 
 

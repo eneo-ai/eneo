@@ -978,6 +978,29 @@ _ARCHETYPE_CASES: tuple[dict[str, Any], ...] = (
         expected_assistants_to_create=2,
         expected_output_modes=["transcribe_only", "pass_through"],
     ),
+    # text_to_artifact_report — text input can generate a fresh
+    # downloadable artifact without pretending the source was a document.
+    _archetype_case(
+        pattern_id="text_to_artifact_report",
+        tuples_chain=[
+            StepTriple(
+                input_type="text",
+                output_type="docx",
+                output_mode="pass_through",
+            ),
+        ],
+        envelope_steps=[
+            {
+                "name": "Skapa DOCX-rapport",
+                "instructions": "Skapa en DOCX-rapport från textunderlaget.",
+                "input_source": "flow_input",
+                "input_type": "text",
+                "output_type": "docx",
+            },
+        ],
+        expected_assistants_to_create=1,
+        expected_output_modes=["pass_through"],
+    ),
     # multi_step_quality_chain — 4-step chain: document intake, JSON
     # extraction, text review, text terminal. Each step explicitly
     # declares its tuple so the bridge's tuple-authoritative contract

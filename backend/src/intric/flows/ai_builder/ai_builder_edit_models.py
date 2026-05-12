@@ -26,6 +26,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     OutputType,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import (
+    DocumentDeliveryMode,
     NewStepDraft,
     PreviousFieldRef,
 )
@@ -52,6 +53,7 @@ class StepPatch(BaseModel):
     input_type: InputType | None = None
     output_mode: OutputMode | None = None
     output_type: OutputType | None = None
+    document_delivery_mode: DocumentDeliveryMode | None = None
     mcp_policy: MCPPolicy | None = None
     uses_form_fields: list[str] | None = None
     uses_previous_fields: list[PreviousFieldRef] | None = None

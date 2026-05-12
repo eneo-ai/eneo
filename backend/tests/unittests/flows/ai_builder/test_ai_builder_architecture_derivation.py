@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from intric.flows.ai_builder import ai_builder_architecture_derivation
 from intric.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
@@ -91,6 +94,92 @@ def test_derives_audio_to_pdf_architecture_without_document_scope() -> None:
     assert draft.required_capabilities == ["input_audio", "output_mode_pass_through"]
 
 
+def test_derives_text_to_docx_architecture_with_non_empty_pattern() -> None:
+    draft = derive_architecture_commit_draft(
+        _state_with_slots(
+            primary_runtime_input="text",
+            terminal_output="docx_document",
+        )
+    )
+
+    assert draft is not None
+    assert [triple.model_dump() for triple in draft.tuples_chain] == [
+        {
+            "input_type": "text",
+            "output_type": "docx",
+            "output_mode": "pass_through",
+        }
+    ]
+    assert draft.chosen_patterns == ["text_to_artifact_report"]
+    assert draft.required_capabilities == ["input_text", "output_mode_pass_through"]
+
+
+def test_derives_text_to_pdf_architecture_without_document_pattern() -> None:
+    draft = derive_architecture_commit_draft(
+        _state_with_slots(
+            primary_runtime_input="text",
+            terminal_output="pdf_document",
+        )
+    )
+
+    assert draft is not None
+    assert [triple.model_dump() for triple in draft.tuples_chain] == [
+        {
+            "input_type": "text",
+            "output_type": "pdf",
+            "output_mode": "pass_through",
+        }
+    ]
+    assert draft.chosen_patterns == ["text_to_artifact_report"]
+
+
+def test_returns_none_when_no_primary_pattern_can_be_chosen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def no_primary_pattern(*args: object, **kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(
+        ai_builder_architecture_derivation,
+        "_primary_pattern_id",
+        no_primary_pattern,
+    )
+
+    assert (
+        derive_architecture_commit_draft(
+            _state_with_slots(
+                primary_runtime_input="text",
+                terminal_output="structured_text",
+            )
+        )
+        is None
+    )
+
+
+def test_metadata_fields_do_not_create_architecture_without_primary_pattern(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def no_primary_pattern(*args: object, **kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(
+        ai_builder_architecture_derivation,
+        "_primary_pattern_id",
+        no_primary_pattern,
+    )
+
+    assert (
+        derive_architecture_commit_draft(
+            _state_with_slots(
+                primary_runtime_input="text",
+                terminal_output="structured_text",
+                runtime_metadata_fields="has_extra_metadata",
+            )
+        )
+        is None
+    )
+
+
 def test_prefers_multi_step_quality_pattern_when_structured_analysis_is_resolved() -> (
     None
 ):
@@ -126,6 +215,20 @@ def test_derives_aggregate_intent_for_multiple_document_scope() -> None:
 
     assert draft is not None
     assert draft.aggregation_intent == "aggregate"
+
+
+def test_document_scope_does_not_make_audio_artifact_aggregate() -> None:
+    draft = derive_architecture_commit_draft(
+        _state_with_slots(
+            primary_runtime_input="audio",
+            terminal_output="docx_document",
+            document_material_scope="multiple_documents_case",
+        )
+    )
+
+    assert draft is not None
+    assert draft.chosen_patterns == ["audio_to_artifact_report"]
+    assert draft.aggregation_intent == "linear"
 
 
 def test_derives_compare_intent_for_same_run_comparison_scope() -> None:

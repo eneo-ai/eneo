@@ -12,8 +12,8 @@ from intric.flows.ai_builder.ai_builder_edit_tool_schema import (
 from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_input_source_values,
     builder_input_type_values,
-    builder_output_mode_values,
     builder_output_type_values,
+    document_delivery_mode_values,
 )
 from intric.flows.flow import FlowStep
 
@@ -143,7 +143,8 @@ class TestBuildEditFlowToolSchema:
         assert "instructions" in add_payload["properties"]
         assert "document_delivery_mode" in add_payload["properties"]
         assert "output_fields" in add_payload["properties"]
-        assert "uses_previous_fields" not in add_payload["properties"]
+        previous_fields = add_payload["properties"]["uses_previous_fields"]
+        assert previous_fields["items"]["required"] == ["from_step", "field_path"]
         assert add_payload["properties"]["review_mode"]["enum"] == [
             "view",
             "edit",
@@ -199,15 +200,17 @@ class TestBuildEditFlowToolSchema:
         assert "enum" not in add_payload["properties"]["mcp_server_refs"]["items"]
         assert "enum" not in add_payload["properties"]["mcp_tool_refs"]["items"]
 
-    def test_patch_schema_hides_backend_owned_previous_field_paths(self):
+    def test_patch_schema_exposes_typed_previous_field_refs(self):
         schema = build_edit_flow_tool_schema([_make_step(1), _make_step(2)])
         patch = schema["function"]["parameters"]["properties"]["operations"]["items"][
             "properties"
         ]["patch"]
 
-        assert "uses_previous_fields" not in patch["properties"]
+        previous_fields = patch["properties"]["uses_previous_fields"]
+        assert previous_fields["items"]["required"] == ["from_step", "field_path"]
+        assert "input_bindings" not in patch["properties"]
         assert "uses_form_fields" in patch["properties"]
-        assert "field-level previous-step paths" in patch["description"]
+        assert "typed `uses_previous_fields`" in patch["description"]
 
     def test_patch_schema_uses_generated_flow_schema_values(self):
         schema = build_edit_flow_tool_schema([_make_step(1), _make_step(2)])
@@ -218,8 +221,9 @@ class TestBuildEditFlowToolSchema:
 
         assert props["input_source"]["enum"] == builder_input_source_values()
         assert props["input_type"]["enum"] == builder_input_type_values()
-        assert props["output_mode"]["enum"] == builder_output_mode_values()
+        assert "output_mode" not in props
         assert props["output_type"]["enum"] == builder_output_type_values()
+        assert props["document_delivery_mode"]["enum"] == document_delivery_mode_values()
         assert props["review_mode"]["enum"] == ["view", "edit", None]
 
 

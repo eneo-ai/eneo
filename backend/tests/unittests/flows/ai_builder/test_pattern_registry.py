@@ -58,6 +58,7 @@ _EXPECTED_POSITIVE_IDS: frozenset[str] = frozenset(
         "document_to_pdf_report",
         "audio_transcription",
         "audio_to_artifact_report",
+        "text_to_artifact_report",
         "multi_step_quality_chain",
         "comparison",
         "sectioned_form_intake",
@@ -140,8 +141,8 @@ _NEGATIVE_FCM_ASSERTIONS: dict[str, Callable[[], None]] = {
 
 
 class TestPatternDataclass:
-    def test_pattern_version_is_six(self) -> None:
-        assert PATTERN_REGISTRY_VERSION == 6
+    def test_pattern_version_is_seven(self) -> None:
+        assert PATTERN_REGISTRY_VERSION == 7
 
     def test_pattern_is_frozen_with_structural_fields(self) -> None:
         pattern = Pattern(

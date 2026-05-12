@@ -41,6 +41,7 @@ _UNFOLDABLE = object()
 _TERMINAL_HELPER_FOLD_OUTPUT_TYPES = frozenset(
     {OutputType.JSON, OutputType.PDF, OutputType.DOCX}
 )
+_TERMINAL_ARTIFACT_OUTPUT_TYPES = frozenset({OutputType.PDF, OutputType.DOCX})
 _ARTIFACT_GENERATION_PREFIXES = (
     "create",
     "generate",
@@ -65,10 +66,12 @@ def normalize_ai_builder_spec(
     spec: FlowDraftSpecCore,
     *,
     terminal_output_type: OutputType | None = None,
+    disambiguate_duplicate_step_names: bool = False,
 ) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
     spec, topology_changes = normalize_ai_builder_step_topology(
         spec,
         terminal_output_type=terminal_output_type,
+        disambiguate_duplicate_step_names=disambiguate_duplicate_step_names,
     )
     normalized_steps: list[StepSpec] = []
     changes: list[tuple[StepSpec, StepNormalizationChange]] = list(topology_changes)
@@ -89,6 +92,7 @@ def normalize_ai_builder_step_topology(
     spec: FlowDraftSpecCore,
     *,
     terminal_output_type: OutputType | None = None,
+    disambiguate_duplicate_step_names: bool = False,
 ) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
     """Normalize redundant Flow graph mechanics before quality validation.
 
@@ -104,6 +108,10 @@ def normalize_ai_builder_step_topology(
     """
 
     spec, artifact_tail_changes = _normalize_terminal_artifact_tail(
+        spec,
+        terminal_output_type=terminal_output_type,
+    )
+    spec, terminal_artifact_changes = _normalize_terminal_artifact_contract(
         spec,
         terminal_output_type=terminal_output_type,
     )
@@ -126,6 +134,7 @@ def normalize_ai_builder_step_topology(
     normalized_steps: list[StepSpec] = []
     changes: list[tuple[StepSpec, StepNormalizationChange]] = [
         *artifact_tail_changes,
+        *terminal_artifact_changes,
         *artifact_body_changes,
     ]
     mutated = bool(changes)
@@ -169,9 +178,69 @@ def normalize_ai_builder_step_topology(
     changes.extend(source_material_changes)
     mutated = mutated or bool(source_material_changes)
 
+    if disambiguate_duplicate_step_names:
+        normalized_spec, step_name_changes = _normalize_duplicate_step_names(
+            normalized_spec
+        )
+        changes.extend(step_name_changes)
+        mutated = mutated or bool(step_name_changes)
+
     if not mutated:
         return spec, changes
     return normalized_spec, changes
+
+
+def _normalize_duplicate_step_names(
+    spec: FlowDraftSpecCore,
+) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
+    used_names: set[str] = set()
+    updated_steps: list[StepSpec] = []
+    changes: list[tuple[StepSpec, StepNormalizationChange]] = []
+
+    for step in spec.steps:
+        next_name = _unique_step_name(step.name, used_names=used_names)
+        if next_name == step.name:
+            used_names.add(_step_name_key(next_name))
+            updated_steps.append(step)
+            continue
+
+        normalized_step = step.model_copy(update={"name": next_name})
+        used_names.add(_step_name_key(next_name))
+        updated_steps.append(normalized_step)
+        changes.append(
+            (
+                normalized_step,
+                StepNormalizationChange(
+                    code="duplicate_step_name_disambiguated",
+                    field_suffix="name",
+                    message=(
+                        "Disambiguated a duplicate step name so the compiled "
+                        "flow remains publishable without another LLM repair pass."
+                    ),
+                ),
+            )
+        )
+
+    if not changes:
+        return spec, []
+    return spec.model_copy(update={"steps": updated_steps}), changes
+
+
+def _unique_step_name(name: str, *, used_names: set[str]) -> str:
+    base_name = name.strip() or "Step"
+    if _step_name_key(base_name) not in used_names:
+        return base_name
+
+    suffix = 2
+    while True:
+        candidate = f"{base_name} ({suffix})"
+        if _step_name_key(candidate) not in used_names:
+            return candidate
+        suffix += 1
+
+
+def _step_name_key(name: str) -> str:
+    return name.strip().casefold()
 
 
 def _normalize_source_material_underlag(
@@ -238,19 +307,37 @@ def _normalize_pre_terminal_artifact_body_step(
     if terminal_step.output_type != output_type:
         return spec, []
 
+    body_step_indexes = {
+        index
+        for index, step in enumerate(spec.steps[:-1])
+        if _looks_like_artifact_body_step(step, output_type=output_type)
+    }
+    if not body_step_indexes:
+        return spec, []
+
+    used_step_names = {
+        _step_name_key(step.name)
+        for index, step in enumerate(spec.steps)
+        if index not in body_step_indexes
+    }
     normalized_steps: list[StepSpec] = []
     changes: list[tuple[StepSpec, StepNormalizationChange]] = []
-    for step in spec.steps[:-1]:
-        if not _looks_like_artifact_body_step(step, output_type=output_type):
+    for index, step in enumerate(spec.steps[:-1]):
+        if index not in body_step_indexes:
             normalized_steps.append(step)
             continue
 
+        body_step_name = _unique_step_name(
+            _artifact_body_step_name(
+                output_type=output_type,
+                source_text=_step_instruction_text(step),
+            ),
+            used_names=used_step_names,
+        )
+        used_step_names.add(_step_name_key(body_step_name))
         normalized_body = step.model_copy(
             update={
-                "name": _artifact_body_step_name(
-                    output_type=output_type,
-                    source_text=_step_instruction_text(step),
-                ),
+                "name": body_step_name,
                 "assistant_spec": _artifact_body_step_assistant(
                     step=step,
                     output_type=output_type,
@@ -423,6 +510,112 @@ def _normalize_terminal_artifact_tail(
     return spec.model_copy(update={"steps": normalized_steps}), [
         (promoted_terminal, change)
     ]
+
+
+def _normalize_terminal_artifact_contract(
+    spec: FlowDraftSpecCore,
+    *,
+    terminal_output_type: OutputType | None,
+) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
+    if terminal_output_type not in _TERMINAL_ARTIFACT_OUTPUT_TYPES:
+        return spec, []
+    output_type = cast(OutputType, terminal_output_type)
+    if not spec.steps:
+        return spec, []
+
+    terminal_step = spec.steps[-1]
+    if terminal_step.output_type == output_type:
+        return spec, []
+    if terminal_step.output_type != OutputType.TEXT:
+        return spec, []
+    if terminal_step.output_mode != OutputMode.PASS_THROUGH:
+        return spec, []
+    if _previous_step_is_requested_artifact(spec, output_type=output_type):
+        return spec, []
+
+    promoted_terminal = terminal_step.model_copy(
+        update={
+            "assistant_spec": _terminal_artifact_assistant(
+                step=terminal_step,
+                output_type=output_type,
+            ),
+            "output_type": output_type,
+            "output_contract": None,
+            "output_config": None,
+        }
+    )
+    normalized_steps = [*spec.steps[:-1], promoted_terminal]
+    change = StepNormalizationChange(
+        code="terminal_artifact_contract_promoted",
+        field_suffix="output_type",
+        message=(
+            "Promoted the terminal text step to the requested artifact output type "
+            "because the framework owns strict final DOCX/PDF contracts."
+        ),
+    )
+    return spec.model_copy(update={"steps": normalized_steps}), [
+        (promoted_terminal, change)
+    ]
+
+
+def _previous_step_is_requested_artifact(
+    spec: FlowDraftSpecCore,
+    *,
+    output_type: OutputType,
+) -> bool:
+    if len(spec.steps) < 2:
+        return False
+    return spec.steps[-2].output_type == output_type
+
+
+def _terminal_artifact_assistant(
+    *,
+    step: StepSpec,
+    output_type: OutputType,
+) -> AssistantSpec:
+    source_text = _step_instruction_text(step)
+    instructions = step.assistant_spec.instructions.strip()
+    if _looks_like_artifact_instruction(source_text, output_type=output_type):
+        return step.assistant_spec
+
+    prefix = _terminal_artifact_instruction_prefix(
+        output_type=output_type,
+        source_text=source_text,
+    )
+    return step.assistant_spec.model_copy(
+        update={
+            "instructions": (f"{prefix}\n\n{instructions}" if instructions else prefix)
+        }
+    )
+
+
+def _looks_like_artifact_instruction(
+    text: str,
+    *,
+    output_type: OutputType,
+) -> bool:
+    normalized = normalize_discovery_text(text)
+    if not _mentions_artifact_type(normalized, output_type=output_type):
+        return False
+    return contains_any_token_prefix(normalized, _ARTIFACT_GENERATION_PREFIXES)
+
+
+def _terminal_artifact_instruction_prefix(
+    *,
+    output_type: OutputType,
+    source_text: str,
+) -> str:
+    artifact_name = output_type.value.upper()
+    normalized = normalize_discovery_text(source_text)
+    if contains_any_token_prefix(normalized, _SWEDISH_ARTIFACT_GENERATION_PREFIXES):
+        return (
+            f"Skapa den slutliga {artifact_name}-filen från föregående steg. "
+            "Bevara rapportens struktur, rubriker och punktlistor."
+        )
+    return (
+        f"Create the final {artifact_name} file from the previous step. "
+        "Preserve the report structure, headings, and bullet lists."
+    )
 
 
 def _fold_artifact_helper_assistant(

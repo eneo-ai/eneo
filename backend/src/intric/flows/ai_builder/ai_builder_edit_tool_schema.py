@@ -14,14 +14,15 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_form_field_type_values,
     builder_input_source_values,
     builder_input_type_values,
-    builder_output_mode_values,
     builder_output_type_values,
+    document_delivery_mode_values,
 )
 from intric.flows.ai_builder.ai_builder_mcp_resources import (
     AIBuilderMCPResourceInput,
 )
 from intric.flows.ai_builder.ai_builder_new_step_schema import (
     build_new_step_draft_schema,
+    build_previous_field_refs_schema,
     build_review_mode_schema,
     small_ref_enums,
 )
@@ -75,8 +76,8 @@ def build_edit_flow_tool_schema(
                 "a specific step by its ref. Unmentioned steps are kept as-is. "
                 "Use form_operations to add, modify, or remove flow-level inmatningsfält/form fields, "
                 "then reference those fields from consuming steps with uses_form_fields. "
-                "When you change output_type or output_mode, clear or omit incompatible "
-                "output_config fields instead of rewriting unrelated step config."
+                "When you change output_type or document_delivery_mode, clear or omit "
+                "incompatible output_config fields instead of rewriting unrelated step config."
             ),
             "parameters": {
                 "type": "object",
@@ -101,7 +102,9 @@ def build_edit_flow_tool_schema(
                     "operations": {
                         "type": "array",
                         "description": (
-                            "List of step operations. Each operation is add, modify, or remove."
+                            "List of step operations. Each operation is add, modify, or remove. "
+                            "Use at most one modify operation per existing target_ref; combine "
+                            "all changes for the same step into that one patch."
                         ),
                         "items": {
                             "type": "object",
@@ -270,7 +273,7 @@ def _build_step_payload_schema(
             "the added step becomes the new entry step; otherwise use 'previous_step' "
             "or 'all_previous_steps'."
         ),
-        expose_previous_field_refs=False,
+        expose_previous_field_refs=True,
     )
 
 
@@ -293,8 +296,8 @@ def _build_patch_schema(
         "description": (
             "Partial update for existing steps (modify operations). "
             "Only include fields you want to change. "
-            "Do not author raw `input_bindings` or field-level previous-step paths; "
-            "the backend preserves and derives mechanical dataflow wiring."
+            "Use typed `uses_previous_fields` for field-level reuse from earlier "
+            "JSON-producing steps; do not author raw `input_bindings`."
         ),
         "properties": {
             "name": {"type": "string"},
@@ -312,13 +315,19 @@ def _build_patch_schema(
                 "items": {"type": "string"},
                 "description": "Optional form field variable names this existing step should reuse in its compiled underlag.",
             },
-            "output_mode": {
-                "type": "string",
-                "enum": builder_output_mode_values(),
-            },
+            "uses_previous_fields": build_previous_field_refs_schema(),
             "output_type": {
                 "type": "string",
                 "enum": builder_output_type_values(),
+            },
+            "document_delivery_mode": {
+                "type": "string",
+                "enum": document_delivery_mode_values(),
+                "description": (
+                    "How a DOCX/PDF output should be produced. Use 'generated' for normal "
+                    "generated DOCX/PDF and 'template_fill' only when filling a DOCX template. "
+                    "Do not use this for human review checkpoints; use review_mode."
+                ),
             },
             "output_config": {
                 "type": ["object", "null"],

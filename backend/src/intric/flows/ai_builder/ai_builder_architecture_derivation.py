@@ -23,6 +23,15 @@ from intric.flows.enums import (
 )
 from intric.flows.flow_capability_manifest import resolve_capability_for_tuple
 
+_DOCUMENT_MATERIAL_INPUT_TYPES = frozenset({FlowInputType.DOCUMENT, FlowInputType.FILE})
+_DOCUMENT_SCOPE_AGGREGATION_VALUES = frozenset(
+    {
+        "multiple_documents_case",
+        "multiple_pdfs_same_run",
+        "same_run_multiple_documents",
+    }
+)
+
 
 def derive_architecture_commit_draft(
     state: PlanningState,
@@ -48,6 +57,15 @@ def derive_architecture_commit_draft(
     if capabilities is None:
         return None
 
+    chosen_patterns = _chosen_patterns_for_state(
+        state=state,
+        input_type=input_type,
+        output_type=output_type,
+        output_mode=output_mode,
+    )
+    if not chosen_patterns:
+        return None
+
     return ArchitectureCommitDraft(
         tuples_chain=[
             StepTriple(
@@ -56,14 +74,12 @@ def derive_architecture_commit_draft(
                 output_mode=output_mode.value,
             )
         ],
-        chosen_patterns=_chosen_patterns_for_state(
-            state=state,
-            input_type=input_type,
-            output_type=output_type,
-            output_mode=output_mode,
-        ),
+        chosen_patterns=chosen_patterns,
         required_capabilities=[capability.id for capability in capabilities],
-        aggregation_intent=_aggregation_intent_from_state(state),
+        aggregation_intent=_aggregation_intent_from_state(
+            state,
+            input_type=input_type,
+        ),
     )
 
 
@@ -120,8 +136,9 @@ def _chosen_patterns_for_state(
 ) -> list[str]:
     pattern_ids: list[str] = []
     primary = _primary_pattern_id(state, input_type, output_type, output_mode)
-    if primary is not None:
-        pattern_ids.append(primary)
+    if primary is None:
+        return []
+    pattern_ids.append(primary)
 
     runtime_metadata = state.resolved_slots.get("runtime_metadata_fields")
     if (
@@ -139,21 +156,25 @@ def _chosen_patterns_for_state(
     ]
 
 
-def _aggregation_intent_from_state(state: PlanningState) -> AggregationIntent:
+def _aggregation_intent_from_state(
+    state: PlanningState,
+    *,
+    input_type: FlowInputType,
+) -> AggregationIntent:
     comparison_scope = _resolved_slot_value(state, "comparison_scope")
-    if comparison_scope in {
-        "same_run_compare",
-        "same_run_multiple_documents",
-        "multiple_documents_case",
-    }:
+    if comparison_scope == "same_run_compare":
+        return "compare"
+    if (
+        input_type in _DOCUMENT_MATERIAL_INPUT_TYPES
+        and comparison_scope in {"same_run_multiple_documents", "multiple_documents_case"}
+    ):
         return "compare"
 
     document_scope = _resolved_slot_value(state, "document_material_scope")
-    if document_scope in {
-        "multiple_documents_case",
-        "multiple_pdfs_same_run",
-        "same_run_multiple_documents",
-    }:
+    if (
+        input_type in _DOCUMENT_MATERIAL_INPUT_TYPES
+        and document_scope in _DOCUMENT_SCOPE_AGGREGATION_VALUES
+    ):
         return "aggregate"
 
     return "linear"
@@ -176,6 +197,11 @@ def _primary_pattern_id(
         return "audio_transcription"
     if input_type is FlowInputType.AUDIO:
         return "audio_to_artifact_report"
+    if input_type is FlowInputType.TEXT and output_type in {
+        FlowOutputType.DOCX,
+        FlowOutputType.PDF,
+    }:
+        return "text_to_artifact_report"
     structured_analysis = state.resolved_slots.get("structured_analysis_need")
     if (
         input_type in {FlowInputType.DOCUMENT, FlowInputType.FILE}

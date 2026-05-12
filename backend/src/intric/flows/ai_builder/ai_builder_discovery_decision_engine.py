@@ -33,6 +33,7 @@ from intric.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
     SlotClassificationResult,
 )
+from intric.flows.ai_builder.question_catalog import slot_name_for_legacy_question_id
 
 _QUESTION_IMPACT: dict[str, DiscoveryImpact] = {
     "comparison_scope_conflict": "architecture",
@@ -247,8 +248,9 @@ def candidate_confidence(
     slot_classification_result: SlotClassificationResult | None,
 ) -> tuple[DiscoveryConfidence, DiscoveryResolvedBy, tuple[str, ...]]:
     if slot_classification_result is not None and question_id is not None:
+        classification_slot_name = slot_name_for_legacy_question_id(question_id)
         for slot in slot_classification_result.slots:
-            if slot.slot_name != question_id:
+            if slot.slot_name != classification_slot_name:
                 continue
             if slot.value == UNKNOWN_SLOT_VALUE:
                 return "low", "llm_semantic_inference", (slot.reason,)

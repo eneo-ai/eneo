@@ -65,6 +65,7 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
 )
 from intric.flows.ai_builder.ai_builder_service import (
+    QUALITY_RETRY_WARNING_CODES,
     SSE_EVENT_DONE,
     SSE_EVENT_ERROR,
     SSE_EVENT_QUESTION,
@@ -84,6 +85,13 @@ from intric.main.exceptions import BadRequestException, UnauthorizedException
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def test_quality_retry_codes_exclude_informational_policy_warnings() -> None:
+    assert not {
+        "multi_goal_prompt",
+        "contract_instruction_mismatch",
+    } & QUALITY_RETRY_WARNING_CODES
 
 
 def _make_user(
@@ -1293,7 +1301,7 @@ class TestSendMessage:
 
 class TestSendMessageToolCall:
     @pytest.mark.anyio
-    async def test_backend_discovery_commits_explicit_flexible_pdf_docx_flow_before_llm_call(
+    async def test_backend_discovery_commits_explicit_flexible_pdf_docx_flow_after_slot_classification(
         self,
     ):
         user = _make_user()
@@ -1319,7 +1327,7 @@ class TestSendMessageToolCall:
                 )
             )
 
-        assert mock_litellm.acompletion.await_count == 0
+        assert mock_litellm.acompletion.await_count == 1
         question_events = [e for e in events if e["event"] == SSE_EVENT_QUESTION]
         assert question_events == []
         status_events = [e for e in events if e["event"] == SSE_EVENT_STATUS]

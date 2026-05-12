@@ -72,8 +72,8 @@ async def classify_slots(
 
     started_at = time.perf_counter()
     completion_kwargs = {
-        "response_format": _SLOT_CLASSIFICATION_RESPONSE_FORMAT,
         **litellm_kwargs,
+        "response_format": _SLOT_CLASSIFICATION_RESPONSE_FORMAT,
     }
     try:
         response = await litellm_client.acompletion(
@@ -238,12 +238,25 @@ def _build_slot_classification_prompt(
         "You classify unresolved flow-builder intent into constrained slot values. "
         "Return JSON only. Never explain outside the schema. "
         "Use a slot only when the conversation provides real evidence. "
-        "Separate runtime source material from intermediate work and final artifacts. "
-        "A final DOCX/PDF/Word document is not document input. "
-        "Uploaded or recorded audio for transcription is audio input, even when the "
-        "final output is a Word/PDF document. "
-        "If the user says values must be derived from source material or that the "
-        "builder should not ask the user, do not classify that as runtime form fields. "
+        "Interpret natural Swedish and English phrasing by meaning, not by exact "
+        "keywords. The allowed values are framework concepts, so choose a value only "
+        "when a normal product user would reasonably expect that architecture. "
+        "Distinguish runtime source material from intermediate work and final "
+        "deliverables. Uploaded files are document input; pasted or typed prose is "
+        "text input; uploaded or recorded speech for transcription is audio input. "
+        "A requested final document is terminal_output, not primary input. "
+        "If the final deliverable is a DOCX, Word, PDF, or document artifact, choose "
+        "that artifact as terminal_output even when the document contains a readable "
+        "report, memo, or summary. Treat structured JSON mentioned as helpful "
+        "intermediate/API context as structured_analysis_need, not terminal_output, "
+        "unless the user says the final response/output itself must be JSON. "
+        "Readable summaries, memos, and reports are structured_text terminal output; "
+        "machine-readable records or downstream integration payloads are "
+        "structured_json terminal output. "
+        "For runtime metadata, choose no_extra_metadata when all needed data comes "
+        "from the source material and no separate per-run fields are requested. "
+        "If the user says values should be derived from source material, do not "
+        "classify that as runtime form fields. "
         "If still ambiguous, use value `unknown` with confidence `low` and explain "
         "what question should be asked in contradictions."
     )

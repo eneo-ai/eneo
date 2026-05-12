@@ -274,6 +274,11 @@ def _apply_modify(
 ) -> None:
     if op.target_ref is None or op.patch is None:
         return
+    if op.target_ref in modified_refs:
+        raise ValueError(
+            f"Duplicate modify operation for {op.target_ref}; edit drafts must be "
+            "canonicalized before compilation."
+        )
     modified_refs[op.target_ref] = op.patch
 
 
@@ -500,21 +505,32 @@ def _flow_step_to_spec(
         if updates:
             spec = spec.model_copy(update=updates)
         if "output_mode" not in patch.model_fields_set:
-            derived_output_mode = _derive_modify_patch_output_mode(spec)
+            derived_output_mode = _derive_modify_patch_output_mode(
+                spec,
+                document_delivery_mode=patch.document_delivery_mode,
+            )
             if derived_output_mode != spec.output_mode:
                 spec = spec.model_copy(update={"output_mode": derived_output_mode})
 
     return spec
 
 
-def _derive_modify_patch_output_mode(spec: StepSpec) -> OutputMode:
+def _derive_modify_patch_output_mode(
+    spec: StepSpec,
+    *,
+    document_delivery_mode: DocumentDeliveryMode | None = None,
+) -> OutputMode:
     output_mode_draft = NewStepDraft(
         name=spec.name or spec.plan_step_ref,
         instructions="Derive output mode.",
         input_source=spec.input_source,
         input_type=spec.input_type,
         output_type=spec.output_type,
-        document_delivery_mode=_document_delivery_mode_for_effective_step(spec),
+        document_delivery_mode=(
+            document_delivery_mode
+            if document_delivery_mode is not None
+            else _document_delivery_mode_for_effective_step(spec)
+        ),
     )
     return derive_new_step_output_mode(output_mode_draft)
 

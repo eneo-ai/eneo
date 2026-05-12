@@ -592,7 +592,7 @@ async def test_request_self_correction_includes_forced_retry_validation_feedback
         max_output_tokens=1024,
         self_correction_temperature=0.35,
         self_correction_bumped_temperature=0.6,
-        max_self_correction_retries=3,
+        max_self_correction_retries=0,
         call_proposal_completion=call_proposal_completion,
         process_tool_arguments=AsyncMock(),
         target_tool_name="outline_flow",
@@ -612,6 +612,173 @@ async def test_request_self_correction_includes_forced_retry_validation_feedback
         "data": "Validation errors:\n1. Invalid step reference 'step_k'.",
     }
     forced_retry.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_request_self_correction_retries_forced_retry_validation_feedback() -> (
+    None
+):
+    text_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=json.dumps(
+                        {
+                            "plan_rationale": "Try to repair as plain JSON.",
+                            "operations": [],
+                        }
+                    ),
+                    tool_calls=None,
+                )
+            )
+        ]
+    )
+    tool_response = _tool_response(
+        tool_name="outline_flow",
+        arguments={
+            "flow_name": "Valid repaired flow",
+            "plan_rationale": "Repair duplicate names.",
+            "steps": [{"name": "Unique step", "task": "Do the work."}],
+        },
+    )
+    responses = [text_response, tool_response]
+    observed_messages: list[list[dict[str, Any]]] = []
+
+    async def call_proposal_completion(
+        *,
+        messages: list[dict[str, Any]],
+        **_: Any,
+    ) -> SimpleNamespace:
+        observed_messages.append(messages)
+        return responses.pop(0)
+
+    forced_retry = AsyncMock(
+        return_value=ForcedToolRetryOutcome(
+            feedback="Compiled edit spec validation failed: Duplicate step name 'Förbered DOCX-innehåll'.",
+            failure_kind="validation",
+        )
+    )
+
+    async def process_tool_arguments(**_: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            event={"event": "plan", "data": "{}"},
+            feedback=None,
+            failure_kind=None,
+        )
+
+    events: list[dict[str, str]] = []
+    async for event in request_self_correction(
+        session_id=uuid4(),
+        conversation=[],
+        new_messages_start=0,
+        error_message="Invalid edit_flow draft.",
+        llm_messages=[{"role": "user", "content": "edit flow"}],
+        tool_call=_original_tool_call(),
+        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        available_model_refs=None,
+        available_kb_refs=None,
+        max_output_tokens=1024,
+        self_correction_temperature=0.35,
+        self_correction_bumped_temperature=0.6,
+        max_self_correction_retries=3,
+        call_proposal_completion=call_proposal_completion,
+        process_tool_arguments=process_tool_arguments,
+        target_tool_name="outline_flow",
+        forced_tool_prompt="Call outline_flow.",
+        build_self_correction_error_event=lambda *, feedback, failure_kind: {
+            "event": "error",
+            "data": feedback or "",
+        },
+        retry_forced_tool_after_text=forced_retry,
+        process_tool_kwargs=None,
+        flow=None,
+    ):
+        events.append(event)
+
+    assert events[-1] == {"event": "plan", "data": "{}"}
+    assert len(observed_messages) == 2
+    retry_feedback = observed_messages[1][-1]
+    assert retry_feedback["role"] == "user"
+    assert "Duplicate step name" in str(retry_feedback["content"])
+    forced_retry.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_request_self_correction_limits_text_feedback_retry_budget() -> None:
+    text_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=json.dumps(
+                        {
+                            "plan_rationale": "Still returning plain JSON.",
+                            "operations": [],
+                        }
+                    ),
+                    tool_calls=None,
+                )
+            )
+        ]
+    )
+    observed_messages: list[list[dict[str, Any]]] = []
+
+    async def call_proposal_completion(
+        *,
+        messages: list[dict[str, Any]],
+        **_: Any,
+    ) -> SimpleNamespace:
+        observed_messages.append(messages)
+        return text_response
+
+    forced_retry = AsyncMock(
+        return_value=ForcedToolRetryOutcome(
+            feedback="Compiled edit spec validation failed: duplicate step name.",
+            failure_kind="validation",
+        )
+    )
+
+    events: list[dict[str, str]] = []
+    async for event in request_self_correction(
+        session_id=uuid4(),
+        conversation=[],
+        new_messages_start=0,
+        error_message="Invalid edit_flow draft.",
+        llm_messages=[{"role": "user", "content": "edit flow"}],
+        tool_call=_original_tool_call(),
+        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        available_model_refs=None,
+        available_kb_refs=None,
+        max_output_tokens=1024,
+        self_correction_temperature=0.35,
+        self_correction_bumped_temperature=0.6,
+        max_self_correction_retries=3,
+        call_proposal_completion=call_proposal_completion,
+        process_tool_arguments=AsyncMock(),
+        target_tool_name="outline_flow",
+        forced_tool_prompt="Call outline_flow.",
+        build_self_correction_error_event=lambda *, feedback, failure_kind: {
+            "event": "error",
+            "data": feedback or "",
+        },
+        retry_forced_tool_after_text=forced_retry,
+        process_tool_kwargs=None,
+        flow=None,
+    ):
+        events.append(event)
+
+    assert events[-1] == {
+        "event": "error",
+        "data": "Compiled edit spec validation failed: duplicate step name.",
+    }
+    assert len(observed_messages) == 2
+    assert forced_retry.await_count == 2
+    retry_feedback = observed_messages[1][-1]
+    assert retry_feedback["role"] == "user"
+    assert "duplicate step name" in str(retry_feedback["content"])
 
 
 @pytest.mark.asyncio

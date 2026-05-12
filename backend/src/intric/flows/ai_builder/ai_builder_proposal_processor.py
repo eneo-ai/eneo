@@ -26,7 +26,7 @@ from intric.flows.ai_builder.ai_builder_create_dataflow import (
 )
 from intric.flows.ai_builder.ai_builder_create_feedback import (
     format_create_critic_feedback,
-    format_create_quality_feedback,
+    format_create_outline_quality_feedback,
     format_create_validation_feedback,
 )
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
@@ -74,6 +74,7 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     extract_answer_signals,
     is_supported_structured_question_id,
+    normalize_requirements_summary_for_flow,
     normalize_structured_question_payload,
     resolve_output_intent,
 )
@@ -696,6 +697,10 @@ class AIBuilderProposalProcessor:
         draft = normalize_create_draft_mechanics(draft)
         create_validation = validate_create_draft(draft)
         if create_validation.errors:
+            logger.info(
+                "Create draft validation failed: %s",
+                [error.message for error in create_validation.errors],
+            )
             return ToolProcessingResult(
                 feedback=format_create_validation_feedback(create_validation),
                 failure_kind="validation",
@@ -727,6 +732,11 @@ class AIBuilderProposalProcessor:
             ),
         )
         if prepared.failure_feedback is not None:
+            if prepared.validation is not None and prepared.validation.errors:
+                logger.info(
+                    "Prepared create spec validation failed: %s",
+                    [error.message for error in prepared.validation.errors],
+                )
             return ToolProcessingResult(
                 feedback=prepared.failure_feedback,
                 failure_kind="validation",
@@ -766,7 +776,9 @@ class AIBuilderProposalProcessor:
                 target_step_ref,
             )
             return ToolProcessingResult(
-                feedback=format_create_quality_feedback(scoped_revision_feedback),
+                feedback=format_create_outline_quality_feedback(
+                    scoped_revision_feedback
+                ),
                 failure_kind="quality",
             )
 
@@ -801,9 +813,13 @@ class AIBuilderProposalProcessor:
                 "session_id=%s tool_call_id=%s",
                 session_id,
                 tool_call_id,
-            )
+        )
 
         if not validation.valid:
+            logger.info(
+                "Compiled create spec validation failed: %s",
+                [error.message for error in validation.errors],
+            )
             quality_hint = self.format_quality_feedback(validation)
             contextual_hint = self._format_create_contextual_quality_feedback(
                 conversation=conversation,
@@ -825,7 +841,7 @@ class AIBuilderProposalProcessor:
                 )
                 if feedback
             )
-            combined_feedback = format_create_quality_feedback(combined_feedback)
+            combined_feedback = format_create_outline_quality_feedback(combined_feedback)
             return ToolProcessingResult(
                 feedback=combined_feedback,
                 failure_kind="validation",
@@ -851,7 +867,7 @@ class AIBuilderProposalProcessor:
             )
             or None
         )
-        combined_quality_feedback = format_create_quality_feedback(
+        combined_quality_feedback = format_create_outline_quality_feedback(
             combined_quality_feedback
         )
         if combined_quality_feedback is not None:
@@ -2208,6 +2224,7 @@ class AIBuilderProposalProcessor:
         (
             discovery_block_message,
             discovery_analysis,
+            _planning_state,
         ) = await build_discovery_block_message_runtime(
             conversation,
             flow=flow,
@@ -2231,6 +2248,12 @@ class AIBuilderProposalProcessor:
             )
         )
         requirements_data["assumptions"] = merged_assumptions
+        requirements_data = normalize_requirements_summary_for_flow(
+            requirements_data,
+            conversation=conversation,
+            flow=flow,
+            language=_resolve_ui_language(conversation),
+        )
 
         requirements_payload_model = RequirementsSummaryPayload.model_validate(
             requirements_data

@@ -34,7 +34,6 @@ from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
 )
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
     build_discovery_block_message_runtime,
-    build_runtime_planning_state,
 )
 from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
@@ -48,7 +47,9 @@ from intric.flows.ai_builder.ai_builder_events import (
 )
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     infer_question_answer_from_freeform,
+    latest_pending_structured_question,
     normalize_question_answer,
+    normalize_requirements_summary_for_flow,
 )
 from intric.flows.ai_builder.ai_builder_interaction_utils import (
     looks_like_information_request,
@@ -480,7 +481,7 @@ class AIBuilderPlanner:
             inferred_answer = infer_question_answer_from_freeform(conversation, message)
             if inferred_answer is not None:
                 metadata = {"question_answer": inferred_answer}
-            else:
+            elif latest_pending_structured_question(conversation) is not None:
                 adjudicated_answer = await adjudicate_pending_question_answer(
                     litellm_client=self.litellm_client,
                     litellm_model=litellm_model,
@@ -489,7 +490,9 @@ class AIBuilderPlanner:
                     user_message=message,
                 )
                 if adjudicated_answer is not None:
-                    metadata = {"question_answer": adjudicated_answer}
+                    metadata = {
+                        "question_answer": adjudicated_answer.to_question_answer()
+                    }
                 used_auxiliary_llm = True
 
         if ui_language is not None:
@@ -565,6 +568,7 @@ class AIBuilderPlanner:
         (
             discovery_block_message,
             discovery_analysis,
+            rebuilt_planning_state,
         ) = await build_discovery_block_message_runtime(
             conversation,
             flow=flow,
@@ -601,16 +605,6 @@ class AIBuilderPlanner:
             conversation=conversation,
             latest_user_message=message,
             flow=flow,
-        )
-        rebuilt_planning_state = await build_runtime_planning_state(
-            conversation,
-            flow=flow,
-            litellm_client=self.litellm_client,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            ui_language=ui_language,
-            tenant_id=self.user.tenant_id,
-            allow_classification=discovery_block_message is None,
         )
         carry_forward_persisted_planner_state(
             rebuilt_planning_state, persisted_planning_state
@@ -907,14 +901,15 @@ class AIBuilderPlanner:
                 raise AssertionError(
                     "post-commit chained server action must be confirm_requirements"
                 )
-            requirements_payload = RequirementsSummaryPayload.model_validate(
-                action.payload.model_dump()
+            requirements_payload = _requirements_summary_data(
+                action.payload,
+                conversation=conversation,
+                flow=flow,
+                ui_language=ui_language,
             )
             base_metadata = {
-                "requirements_summary": requirements_payload.model_dump(mode="json"),
-                "requirements_version": build_requirements_version(
-                    requirements_payload
-                ),
+                "requirements_summary": requirements_payload,
+                "requirements_version": requirements_payload["requirements_version"],
             }
             planner_telemetry = build_planner_telemetry_from_turn(
                 telemetry,
@@ -1325,20 +1320,17 @@ class AIBuilderPlanner:
                     return [*conversation[new_messages_start:]]
                 else:
                     assistant_content = action.payload.summary
-                    requirements_payload = RequirementsSummaryPayload.model_validate(
-                        action.payload.model_dump()
-                    )
-                    requirements_version = build_requirements_version(
-                        requirements_payload
-                    )
-                    requirements_payload = requirements_payload.model_copy(
-                        update={"requirements_version": requirements_version}
+                    requirements_payload = _requirements_summary_data(
+                        action.payload,
+                        conversation=conversation,
+                        flow=flow,
+                        ui_language=ui_language,
                     )
                     base_metadata = {
-                        "requirements_summary": requirements_payload.model_dump(
-                            mode="json"
-                        ),
-                        "requirements_version": requirements_version,
+                        "requirements_summary": requirements_payload,
+                        "requirements_version": requirements_payload[
+                            "requirements_version"
+                        ],
                     }
                 planner_telemetry = build_planner_telemetry_from_turn(
                     telemetry,
@@ -1554,23 +1546,19 @@ class AIBuilderPlanner:
                             chained_action = (
                                 chained_result.accepted_output.planner_action
                             )
-                            confirmed_payload = (
-                                RequirementsSummaryPayload.model_validate(
-                                    chained_action.payload.model_dump()
-                                )
-                            )
-                            confirmed_data = confirmed_payload.model_dump(mode="json")
-                            confirmed_data["requirements_version"] = (
-                                build_requirements_version(confirmed_payload)
+                            confirmed_data = _requirements_summary_data(
+                                chained_action.payload,
+                                conversation=conversation,
+                                flow=flow,
+                                ui_language=ui_language,
                             )
                             yield build_requirements_summary_event(confirmed_data)
                 else:
-                    confirmed_payload = RequirementsSummaryPayload.model_validate(
-                        action.payload.model_dump()
-                    )
-                    confirmed_data = confirmed_payload.model_dump(mode="json")
-                    confirmed_data["requirements_version"] = build_requirements_version(
-                        confirmed_payload
+                    confirmed_data = _requirements_summary_data(
+                        action.payload,
+                        conversation=conversation,
+                        flow=flow,
+                        ui_language=ui_language,
                     )
                     yield build_requirements_summary_event(confirmed_data)
 
@@ -1694,6 +1682,27 @@ def _resolve_ui_language(conversation: list[ConversationMessage]) -> str | None:
         if ui_language in {"sv", "en"}:
             return ui_language
     return None
+
+
+def _requirements_summary_data(
+    payload: Any,
+    *,
+    conversation: list[ConversationMessage],
+    flow: "Flow | None",
+    ui_language: str | None,
+) -> dict[str, Any]:
+    normalized = normalize_requirements_summary_for_flow(
+        payload.model_dump(),
+        conversation=conversation,
+        flow=flow,
+        language=ui_language,
+    )
+    requirements_payload = RequirementsSummaryPayload.model_validate(normalized)
+    requirements_data = requirements_payload.model_dump(mode="json")
+    requirements_data["requirements_version"] = build_requirements_version(
+        requirements_payload
+    )
+    return requirements_data
 
 
 def _count_free_discovery_turns(conversation: list[ConversationMessage]) -> int:

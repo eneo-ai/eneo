@@ -87,9 +87,6 @@ SELF_CORRECTION_BUMPED_TEMPERATURE = 0.6
 FORCED_PROPOSAL_TEMPERATURE = 0.1
 QUALITY_RETRY_WARNING_CODES = {
     "json_output_no_contract",
-    "contract_missing_descriptions",
-    "contract_instruction_mismatch",
-    "multi_goal_prompt",
 }
 
 SSE_EVENT_TEXT = _SSE_EVENT_TEXT

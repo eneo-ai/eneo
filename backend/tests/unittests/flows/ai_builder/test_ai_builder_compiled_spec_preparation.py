@@ -44,6 +44,34 @@ def _make_spec() -> FlowDraftSpecCore:
     )
 
 
+def _duplicate_step_name_spec() -> FlowDraftSpecCore:
+    return FlowDraftSpecCore(
+        flow_name="Duplicate step names",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Förbered DOCX-innehåll",
+                assistant_spec=AssistantSpec(instructions="Prepare report text."),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+                mcp_policy=MCPPolicy.INHERIT,
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                name="förbered docx-innehåll",
+                assistant_spec=AssistantSpec(instructions="Prepare final document text."),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+                mcp_policy=MCPPolicy.INHERIT,
+            ),
+        ],
+    )
+
+
 def _json_helper_before_text_terminal_spec(
     *,
     helper_input_source: InputSource = InputSource.PREVIOUS_STEP,
@@ -242,6 +270,63 @@ def test_prepare_compiled_spec_for_session_expands_mcp_server_refs_to_tools() ->
     assert assistant_spec.mcp_tool_refs == ["tool-current-time", "tool-convert-time"]
 
 
+def test_prepare_compiled_spec_normalizes_output_contract_prompt_metadata() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Structured extraction",
+        flow_description="Extract structured meeting facts.",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Extract meeting facts",
+                assistant_spec=AssistantSpec(
+                    instructions="Extract the important meeting facts.",
+                ),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "meeting_context": {"type": "string"},
+                        "participants": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["meeting_context", "participants"],
+                },
+                mcp_policy=MCPPolicy.INHERIT,
+            )
+        ],
+    )
+
+    result = prepare_compiled_spec_for_session(
+        spec=spec,
+        target_kind=TargetKind.CREATE,
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=None,
+        valid_existing_step_refs=None,
+    )
+
+    assert result.spec is not None
+    assert result.validation is not None
+    prepared_step = result.spec.steps[0]
+    instructions = prepared_step.assistant_spec.instructions
+    assert "meeting_context" in instructions
+    assert "participants" in instructions
+    contract = prepared_step.output_contract
+    assert contract is not None
+    properties = contract["properties"]
+    assert isinstance(properties, dict)
+    meeting_context = properties["meeting_context"]
+    participants = properties["participants"]
+    assert isinstance(meeting_context, dict)
+    assert isinstance(participants, dict)
+    assert "description" not in meeting_context
+    assert "description" not in participants
+    warning_codes = {warning.code for warning in result.validation.warnings}
+    assert "contract_instruction_mismatch" not in warning_codes
+
+
 def test_prepare_compiled_spec_for_session_rejects_terminal_output_type_drift() -> None:
     spec = _make_spec()
 
@@ -276,6 +361,70 @@ def test_prepare_compiled_spec_for_session_rejects_terminal_output_type_drift() 
     assert result.validation is not None
     assert not result.validation.valid
     assert result.validation.errors[0].code == "terminal_output_type_mismatch"
+
+
+def test_prepare_compiled_spec_for_session_promotes_terminal_text_artifact_contract() -> (
+    None
+):
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_compiled_spec_for_session",
+            side_effect=lambda spec, target_kind: spec,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
+            return_value=SpecValidationResult(),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_compiled_spec_for_session",
+            return_value=MagicMock(errors=[]),
+        ),
+    ):
+        result = prepare_compiled_spec_for_session(
+            spec=_make_spec(),
+            target_kind=TargetKind.CREATE,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+            valid_existing_step_refs=None,
+            terminal_output_type=OutputType.DOCX,
+        )
+
+    assert result.spec is not None
+    assert result.validation is not None
+    assert result.validation.valid
+    terminal = result.spec.steps[-1]
+    assert terminal.output_type == OutputType.DOCX
+    assert "Create the final DOCX file" in terminal.assistant_spec.instructions
+
+
+def test_prepare_compiled_spec_for_session_disambiguates_duplicate_step_names() -> None:
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_compiled_spec_for_session",
+            side_effect=lambda spec, target_kind: spec,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_compiled_spec_for_session",
+            return_value=MagicMock(errors=[]),
+        ),
+    ):
+        result = prepare_compiled_spec_for_session(
+            spec=_duplicate_step_name_spec(),
+            target_kind=TargetKind.EDIT,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+            valid_existing_step_refs=[],
+        )
+
+    assert result.spec is not None
+    assert result.validation is not None
+    assert result.validation.valid
+    assert [step.name for step in result.spec.steps] == [
+        "Förbered DOCX-innehåll",
+        "förbered docx-innehåll (2)",
+    ]
 
 
 def test_prepare_compiled_spec_for_session_folds_json_helper_before_text_terminal() -> (

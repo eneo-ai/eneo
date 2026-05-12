@@ -95,7 +95,7 @@ async def emit_discovery_followup_if_needed(
     lease_lock_token: UUID | None = None,
 ) -> list[dict[str, str]]:
     """Persist and return the next backend-generated discovery follow-up, if any."""
-    followup, _analysis = await build_discovery_followup_runtime(
+    followup, _analysis, _planning_state = await build_discovery_followup_runtime(
         conversation,
         flow=flow,
         litellm_client=litellm_client,

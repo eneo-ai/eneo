@@ -28,14 +28,29 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
-from intric.flows.ai_builder.ai_builder_slot_classifier import (
-    UNKNOWN_SLOT_VALUE,
-    SlotClassificationResult,
-)
+from intric.flows.ai_builder.planning_state import PlanningState
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
+from intric.flows.ai_builder.question_catalog import legacy_question_id_for_slot
 from intric.flows.domain.flow import Flow
+
+_PROFILE_ANSWER_SOURCES: frozenset[str] = frozenset(
+    {
+        "flow_default",
+        "model",
+        "policy_default",
+        "requirements_summary",
+        "structured_answer",
+    }
+)
+_ACTIVE_REQUEST_ANSWER_SOURCES: frozenset[str] = frozenset(
+    {
+        "model",
+        "requirements_summary",
+        "structured_answer",
+    }
+)
 
 _TASK_VERBS_SV = (
     "sammanfatta",
@@ -112,19 +127,33 @@ def build_discovery_profile(
     conversation: list[ConversationMessage],
     *,
     flow: Flow | None = None,
-    supplemental_answers: dict[str, set[str]] | None = None,
+    planning_state: PlanningState | None = None,
 ) -> DiscoveryProfile:
     full_text = aggregate_freeform_user_text(conversation)
-    answers = merge_answer_signals(
-        extract_answer_signals(conversation),
-        supplemental_answers,
-    )
     capabilities = build_flow_capability_profile(flow)
     flow_defaults = capabilities.to_signal_defaults()
     active_window = (
         build_active_request_window(conversation, flow_defaults=flow_defaults)
         if flow is not None
         else None
+    )
+    active_conversation = (
+        conversation[active_window.start_index :]
+        if active_window is not None and active_window.start_index is not None
+        else conversation
+    )
+    planning_state = planning_state or build_planning_state_from_conversation(
+        active_conversation,
+        flow=flow,
+    )
+    planning_state_answers = answer_signals_from_planning_state(planning_state)
+    active_planning_state_answers = answer_signals_from_planning_state(
+        planning_state,
+        accepted_sources=_ACTIVE_REQUEST_ANSWER_SOURCES,
+    )
+    answers = merge_answer_signals(
+        extract_answer_signals(conversation),
+        planning_state_answers,
     )
     text = (
         active_window.text
@@ -133,16 +162,13 @@ def build_discovery_profile(
     )
     active_answers = merge_answer_signals(
         extract_answer_signals(
-            conversation[active_window.start_index :]
-            if active_window is not None and active_window.start_index is not None
-            else conversation
+            (
+                conversation[active_window.start_index :]
+                if active_window is not None and active_window.start_index is not None
+                else conversation
+            )
         ),
-        supplemental_answers,
-    )
-    active_conversation = (
-        conversation[active_window.start_index :]
-        if active_window is not None and active_window.start_index is not None
-        else conversation
+        active_planning_state_answers,
     )
     active_explicit_question_ids = {
         question_id
@@ -201,10 +227,6 @@ def build_discovery_profile(
         output_intent=output_intent,
         flow_defaults=flow_defaults,
         answers=answers,
-    )
-    planning_state = build_planning_state_from_conversation(
-        active_conversation,
-        flow=flow,
     )
     return DiscoveryProfile(
         language=resolve_discovery_language(conversation, text),
@@ -273,17 +295,18 @@ def merge_answer_signals(
     return merged
 
 
-def classification_answers(
-    classification_result: SlotClassificationResult | None,
-) -> dict[str, set[str]] | None:
-    if classification_result is None:
-        return None
-    merged: dict[str, set[str]] = {}
-    for slot in classification_result.slots:
-        if slot.confidence == "low" or slot.value == UNKNOWN_SLOT_VALUE:
+def answer_signals_from_planning_state(
+    planning_state: PlanningState,
+    *,
+    accepted_sources: frozenset[str] = _PROFILE_ANSWER_SOURCES,
+) -> dict[str, set[str]]:
+    answers: dict[str, set[str]] = {}
+    for slot in planning_state.resolved_slots.values():
+        if slot.source not in accepted_sources:
             continue
-        merged.setdefault(slot.slot_name, set()).add(slot.value)
-    return merged or None
+        question_id = legacy_question_id_for_slot(slot.name)
+        answers.setdefault(question_id, set()).add(slot.value)
+    return answers
 
 
 def default_discovery_assumptions(
@@ -293,6 +316,13 @@ def default_discovery_assumptions(
     existing_assumptions: list[str],
 ) -> list[str]:
     assumptions: list[str] = []
+    document_scope_slot = profile.planning_state.resolved_slots.get(
+        "document_material_scope"
+    )
+    document_scope_answer_is_user_or_model_owned = (
+        "document_material_scope" in profile.answers
+        and (document_scope_slot is None or document_scope_slot.source != "policy_default")
+    )
     if (
         "processing_scope" not in profile.answers
         and "processing_scope" not in selected_question_ids
@@ -309,7 +339,7 @@ def default_discovery_assumptions(
             )
         )
     if (
-        "document_material_scope" not in profile.answers
+        not document_scope_answer_is_user_or_model_owned
         and "document_material_scope" not in selected_question_ids
         and profile.document_like_input
         and implies_single_primary_document(profile.text)

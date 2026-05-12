@@ -43,7 +43,7 @@ from typing import Literal
 from intric.flows.ai_builder.question_catalog import QUESTION_CATALOG, QuestionTemplate
 from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY, FlowCapability
 
-PATTERN_REGISTRY_VERSION: int = 6
+PATTERN_REGISTRY_VERSION: int = 7
 
 PatternId = str
 ChainStepToken = str
@@ -356,6 +356,25 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             TERMINAL_ARTIFACT_STEP,
         ),
         chain_kind="compiled",
+    ),
+    _pattern(
+        id="text_to_artifact_report",
+        examples=(
+            "text in, generated report artifact out",
+            "turn pasted or transcribed text into a PDF or DOCX report",
+        ),
+        retrieval_hints=(
+            "text report artifact pdf docx generated",
+            "input_type=text output_type=pdf docx output_mode=pass_through",
+        ),
+        required_architectural_slots=(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
+        question_template_ids=(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
     ),
     # These structural hints are intentionally not coupled to prompt recipes.
     # The server-owned outline compiler and Flow capability manifest own

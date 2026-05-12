@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, cast
+import json
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any, TypeAlias, cast
+
+from pydantic import BaseModel
 
 from intric.flows.ai_builder.ai_builder_edit_effective_steps import (
     EffectiveStepState,
@@ -21,7 +26,10 @@ from intric.flows.ai_builder.ai_builder_mechanical_refs import (
     clean_raw_form_field_refs,
     clean_raw_previous_field_refs,
 )
-from intric.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
+from intric.flows.ai_builder.ai_builder_new_step_models import (
+    DocumentDeliveryMode,
+    PreviousFieldRef,
+)
 from intric.flows.ai_builder.ai_builder_structured_field_normalizer import (
     normalize_structured_field_list,
 )
@@ -29,6 +37,33 @@ from intric.flows.ai_builder.ai_builder_structured_field_paths import (
     missing_structured_output_path,
 )
 from intric.flows.flow import FlowStep
+from intric.flows.flow_review_policy import FlowStepReviewMode
+from intric.main.logging import get_logger
+
+_ADDITIVE_PATCH_FIELDS = frozenset({"uses_previous_fields", "uses_form_fields"})
+_STEP_PATCH_FIELDS = frozenset(StepPatch.model_fields)
+_REVIEW_MODE_OUTPUT_MODE_ALIASES = frozenset(
+    mode.value for mode in FlowStepReviewMode
+)
+_OUTPUT_MODE_DOCUMENT_DELIVERY_ALIASES: dict[str, DocumentDeliveryMode] = {
+    "generated": "generated"
+}
+logger = get_logger(__name__)
+JsonValue: TypeAlias = (
+    None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
+)
+
+
+@dataclass(frozen=True, slots=True)
+class DuplicateModifyConflict:
+    target_ref: str
+    field_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class EditDraftCanonicalizationResult:
+    draft: FlowEditDraft
+    conflicts: tuple[DuplicateModifyConflict, ...]
 
 
 def normalize_loose_edit_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -65,7 +100,7 @@ def normalize_loose_edit_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
         raw_patch = operation.get("patch")
         if isinstance(raw_patch, dict):
             patch = cast(dict[str, Any], raw_patch)
-            cleaned_patch = _strip_malformed_payload_refs(patch)
+            cleaned_patch = _normalize_loose_patch(patch)
             if cleaned_patch != patch:
                 changed = True
                 updated_operation["patch"] = cleaned_patch
@@ -149,6 +184,188 @@ def normalize_edit_draft_mechanics(
     return draft.model_copy(update={"operations": normalized_operations})
 
 
+def canonicalize_duplicate_modify_operations(
+    draft: FlowEditDraft,
+) -> EditDraftCanonicalizationResult:
+    removed_targets = {
+        operation.target_ref
+        for operation in draft.operations
+        if operation.op == "remove" and operation.target_ref is not None
+    }
+    emitted_removes: set[str] = set()
+    operations: list[StepEditOperation] = []
+    modify_indexes_by_target: dict[str, int] = {}
+    conflicts: list[DuplicateModifyConflict] = []
+    changed = False
+
+    for operation in draft.operations:
+        target_ref = operation.target_ref
+        if target_ref is not None and target_ref in removed_targets:
+            if operation.op == "remove" and target_ref not in emitted_removes:
+                operations.append(operation)
+                emitted_removes.add(target_ref)
+                continue
+            changed = True
+            continue
+
+        if operation.op != "modify" or operation.target_ref is None:
+            operations.append(operation)
+            continue
+        if operation.patch is None:
+            operations.append(operation)
+            continue
+
+        existing_index = modify_indexes_by_target.get(operation.target_ref)
+        if existing_index is None:
+            modify_indexes_by_target[operation.target_ref] = len(operations)
+            operations.append(operation)
+            continue
+
+        existing_operation = operations[existing_index]
+        if existing_operation.patch is None:
+            operations.append(operation)
+            continue
+
+        merged_patch = _merge_compatible_step_patches(
+            existing_operation.patch,
+            operation.patch,
+            target_ref=operation.target_ref,
+            conflicts=conflicts,
+        )
+        if merged_patch is None:
+            operations.append(operation)
+            continue
+
+        changed = True
+        operations[existing_index] = existing_operation.model_copy(
+            update={"patch": merged_patch}
+        )
+
+    if conflicts:
+        return EditDraftCanonicalizationResult(draft=draft, conflicts=tuple(conflicts))
+    if not changed:
+        return EditDraftCanonicalizationResult(draft=draft, conflicts=())
+    return EditDraftCanonicalizationResult(
+        draft=draft.model_copy(update={"operations": operations}),
+        conflicts=(),
+    )
+
+
+def format_duplicate_modify_conflicts(
+    conflicts: tuple[DuplicateModifyConflict, ...],
+) -> str:
+    by_target: dict[str, list[str]] = {}
+    for conflict in conflicts:
+        by_target.setdefault(conflict.target_ref, []).append(conflict.field_name)
+
+    parts = [
+        f"{target_ref}: {', '.join(sorted(set(field_names)))}"
+        for target_ref, field_names in sorted(by_target.items())
+    ]
+    return (
+        "Edit validation failed: multiple modify operations target the same step "
+        "with conflicting patch fields. Merge compatible changes into one modify "
+        "operation per step and choose one value for each conflicting field: "
+        + "; ".join(parts)
+    )
+
+
+def _merge_compatible_step_patches(
+    first: StepPatch,
+    second: StepPatch,
+    *,
+    target_ref: str,
+    conflicts: list[DuplicateModifyConflict],
+) -> StepPatch | None:
+    merged_data = cast(
+        dict[str, object],
+        first.model_dump(mode="json", exclude_unset=True),
+    )
+    local_conflicts: list[DuplicateModifyConflict] = []
+    changed = False
+
+    for field_name in second.model_fields_set:
+        assert field_name in _STEP_PATCH_FIELDS, field_name
+
+        second_value = getattr(second, field_name)
+        if field_name not in first.model_fields_set:
+            merged_data[field_name] = _jsonable_patch_value(second_value)
+            changed = True
+            continue
+
+        first_value = getattr(first, field_name)
+        if field_name in _ADDITIVE_PATCH_FIELDS:
+            merged_value = _merge_additive_patch_values(first_value, second_value)
+            if merged_value is None:
+                local_conflicts.append(
+                    DuplicateModifyConflict(
+                        target_ref=target_ref,
+                        field_name=field_name,
+                    )
+                )
+                continue
+            merged_data[field_name] = merged_value
+            changed = True
+            continue
+
+        if _jsonable_patch_value(first_value) != _jsonable_patch_value(second_value):
+            local_conflicts.append(
+                DuplicateModifyConflict(target_ref=target_ref, field_name=field_name)
+            )
+
+    if local_conflicts:
+        conflicts.extend(local_conflicts)
+        return None
+    if not changed:
+        return first
+    return StepPatch.model_validate(merged_data)
+
+
+def _merge_additive_patch_values(
+    first: object,
+    second: object,
+) -> list[JsonValue] | None:
+    if not isinstance(first, list) or not isinstance(second, list):
+        return None
+
+    merged: list[JsonValue] = []
+    seen: set[str] = set()
+    for value in [*cast(list[object], first), *cast(list[object], second)]:
+        jsonable_value = _jsonable_patch_value(value)
+        key = json.dumps(jsonable_value, sort_keys=True)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(jsonable_value)
+    return merged
+
+
+def _jsonable_patch_value(value: object) -> JsonValue:
+    if isinstance(value, BaseModel):
+        return _jsonable_patch_value(
+            cast(
+                dict[str, object],
+                value.model_dump(mode="json", exclude_unset=True),
+            )
+        )
+    if isinstance(value, Enum):
+        return _jsonable_patch_value(value.value)
+    if isinstance(value, list):
+        return [_jsonable_patch_value(item) for item in cast(list[object], value)]
+    if isinstance(value, dict):
+        typed_value = cast(dict[object, object], value)
+        return {
+            str(key): _jsonable_patch_value(child)
+            for key, child in sorted(
+                typed_value.items(),
+                key=lambda item: str(item[0]),
+            )
+        }
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    raise TypeError(f"Unsupported StepPatch value type: {type(value).__name__}")
+
+
 def _strip_malformed_payload_refs(payload: dict[str, Any]) -> dict[str, Any]:
     changed = False
     updated = dict(payload)
@@ -174,6 +391,41 @@ def _strip_malformed_payload_refs(payload: dict[str, Any]) -> dict[str, Any]:
                 updated.pop("uses_form_fields", None)
 
     return updated if changed else payload
+
+
+def _normalize_loose_patch(payload: dict[str, Any]) -> dict[str, Any]:
+    cleaned_payload = _strip_malformed_payload_refs(payload)
+    updated = dict(cleaned_payload)
+    changed = cleaned_payload != payload
+
+    raw_output_mode = cleaned_payload.get("output_mode")
+    output_mode_symbol = _normalized_loose_symbol(raw_output_mode)
+    if output_mode_symbol in _REVIEW_MODE_OUTPUT_MODE_ALIASES:
+        if "review_mode" not in updated or updated.get("review_mode") is None:
+            updated["review_mode"] = output_mode_symbol
+        updated.pop("output_mode", None)
+        changed = True
+        logger.info("ai_builder_edit_output_mode_moved_to_review_mode")
+    elif output_mode_symbol in _OUTPUT_MODE_DOCUMENT_DELIVERY_ALIASES:
+        if (
+            "document_delivery_mode" not in updated
+            or updated.get("document_delivery_mode") is None
+        ):
+            updated["document_delivery_mode"] = _OUTPUT_MODE_DOCUMENT_DELIVERY_ALIASES[
+                output_mode_symbol
+            ]
+        updated.pop("output_mode", None)
+        changed = True
+        logger.info("ai_builder_edit_output_mode_moved_to_document_delivery_mode")
+
+    return updated if changed else payload
+
+
+def _normalized_loose_symbol(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+    return normalized or None
 
 
 def _normalize_loose_add_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -348,6 +600,10 @@ def _step_order_from_ref(step_ref: str | None) -> int:
 
 
 __all__ = [
+    "DuplicateModifyConflict",
+    "EditDraftCanonicalizationResult",
+    "canonicalize_duplicate_modify_operations",
+    "format_duplicate_modify_conflicts",
     "normalize_loose_edit_arguments",
     "normalize_edit_draft_mechanics",
 ]

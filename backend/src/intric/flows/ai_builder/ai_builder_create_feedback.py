@@ -109,6 +109,28 @@ def format_create_quality_feedback(feedback: str | None) -> str | None:
     )
 
 
+def format_create_outline_quality_feedback(feedback: str | None) -> str | None:
+    if feedback is None:
+        return None
+
+    outline_feedback = feedback.replace("output_contract", "output_fields")
+    normalized_feedback = outline_feedback.casefold()
+    repair_rules: list[str] = []
+    if "output_type 'json'" in normalized_feedback and "output_fields" in (
+        normalized_feedback
+    ):
+        repair_rules.append(
+            "For every JSON outline step that feeds later steps, set output_fields with named fields that match the step's extracted data."
+        )
+
+    formatted = format_create_quality_feedback(outline_feedback)
+    if not repair_rules:
+        return formatted
+    return f"{formatted}\n\nOutline-flow schema repair rules:\n- " + "\n- ".join(
+        repair_rules
+    )
+
+
 def format_create_critic_feedback(issues: tuple[CriticIssue, ...]) -> str | None:
     remediations: list[str] = []
     for issue in issues:

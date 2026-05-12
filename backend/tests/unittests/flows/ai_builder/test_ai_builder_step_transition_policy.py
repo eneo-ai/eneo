@@ -329,6 +329,135 @@ def test_normalize_ai_builder_spec_promotes_trailing_text_after_requested_pdf() 
     ] == ["terminal_artifact_helper_folded"]
 
 
+def test_normalize_ai_builder_spec_promotes_terminal_text_to_requested_docx() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Transkribering till DOCX",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Transkribera ljud",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.AUDIO,
+                output_type=OutputType.TEXT,
+            ),
+            _step(
+                ref="step_b",
+                name="Skriv slutrapport",
+                instructions="Skriv en tydlig slutrapport med rubriker och punktlistor.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.DOCX,
+    )
+
+    assert [step.plan_step_ref for step in normalized.steps] == ["step_a", "step_b"]
+    terminal = normalized.steps[-1]
+    assert terminal.output_type == OutputType.DOCX
+    assert terminal.output_mode == OutputMode.PASS_THROUGH
+    assert terminal.output_contract is None
+    assert terminal.output_config is None
+    assert "Create the final DOCX file" in terminal.assistant_spec.instructions
+    assert [
+        change.code
+        for _step_spec, change in changes
+        if change.code == "terminal_artifact_contract_promoted"
+    ] == ["terminal_artifact_contract_promoted"]
+
+
+def test_normalize_ai_builder_spec_does_not_promote_unfoldable_artifact_helper_tail() -> (
+    None
+):
+    spec = FlowDraftSpecCore(
+        flow_name="Ambiguous PDF tail",
+        steps=[
+            _step(ref="step_a", name="Extract", input_source=InputSource.FLOW_INPUT),
+            _step(
+                ref="step_b",
+                name="Generate PDF",
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                output_type=OutputType.PDF,
+            ),
+            _step(
+                ref="step_c",
+                name="Create final result",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.TEXT,
+                input_bindings={"question": "{{ step_b.output.text }}"},
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.PDF,
+    )
+
+    assert [step.plan_step_ref for step in normalized.steps] == [
+        "step_a",
+        "step_b",
+        "step_c",
+    ]
+    assert normalized.steps[-1].output_type == OutputType.TEXT
+    assert not any(
+        change.code == "terminal_artifact_contract_promoted"
+        for _step_spec, change in changes
+    )
+
+
+def test_normalize_ai_builder_spec_disambiguates_duplicate_step_names() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Duplicate names",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Förbered DOCX-innehåll",
+                input_source=InputSource.FLOW_INPUT,
+            ),
+            _step(
+                ref="step_b",
+                name="förbered docx-innehåll",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+            _step(
+                ref="step_c",
+                name="Förbered DOCX-innehåll (2)",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+            _step(
+                ref="step_d",
+                name="Förbered DOCX-innehåll",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(
+        spec,
+        disambiguate_duplicate_step_names=True,
+    )
+
+    assert [step.name for step in normalized.steps] == [
+        "Förbered DOCX-innehåll",
+        "förbered docx-innehåll (2)",
+        "Förbered DOCX-innehåll (2) (2)",
+        "Förbered DOCX-innehåll (3)",
+    ]
+    assert [
+        change.code
+        for _step_spec, change in changes
+        if change.code == "duplicate_step_name_disambiguated"
+    ] == [
+        "duplicate_step_name_disambiguated",
+        "duplicate_step_name_disambiguated",
+        "duplicate_step_name_disambiguated",
+    ]
+
+
 def test_normalize_ai_builder_spec_promotes_trailing_text_after_requested_json() -> (
     None
 ):
@@ -664,6 +793,62 @@ def test_normalize_ai_builder_spec_renames_pre_terminal_docx_body_step() -> None
         for _step_spec, change in changes
         if change.code == "pre_terminal_artifact_body_step_renamed"
     ] == ["pre_terminal_artifact_body_step_renamed"]
+
+
+def test_normalize_ai_builder_spec_keeps_artifact_body_names_unique() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Audio DOCX",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Transkribera ljud",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.AUDIO,
+                output_type=OutputType.TEXT,
+                output_mode=OutputMode.TRANSCRIBE_ONLY,
+            ),
+            _step(
+                ref="step_b",
+                name="Skapa rapportutkast",
+                instructions="Generera DOCX-innehåll med rubriker från transkriptionen.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.TEXT,
+            ),
+            _step(
+                ref="step_c",
+                name="Skapa DOCX-rapport",
+                instructions="Skapa DOCX-dokumentets slutliga textinnehåll.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.TEXT,
+            ),
+            _step(
+                ref="step_d",
+                name="Skapa DOCX",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.DOCX,
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.DOCX,
+    )
+
+    assert [step.name for step in normalized.steps] == [
+        "Transkribera ljud",
+        "Förbered DOCX-innehåll",
+        "Förbered DOCX-innehåll (2)",
+        "Skapa DOCX",
+    ]
+    assert [
+        change.code
+        for _step_spec, change in changes
+        if change.code == "pre_terminal_artifact_body_step_renamed"
+    ] == [
+        "pre_terminal_artifact_body_step_renamed",
+        "pre_terminal_artifact_body_step_renamed",
+    ]
 
 
 def test_normalize_ai_builder_spec_renames_non_adjacent_pdf_body_step() -> None:

@@ -123,12 +123,26 @@ class CriticInvariant:
 
 # ── Shared helpers ───────────────────────────────────────────────────────
 
-# Markers for the user explicitly asking for structured JSON extraction for
-# downstream reuse — not any incidental mention of "json".
+# Markers for the user explicitly asking for structured extraction for
+# downstream reuse. Terminal JSON output is resolved by `OutputIntentResolution`;
+# this list is deliberately stricter than a bare "json" mention.
 _JSON_CONTRACT_MARKERS: tuple[str, ...] = (
-    "json",
     "strukturerad data",
     "structured data",
+    "strukturerad json",
+    "structured json",
+    "som json",
+    "as json",
+    "i json",
+    "in json",
+    "till json",
+    "to json",
+    "json-schema",
+    "json schema",
+    "jsonfält",
+    "json-fält",
+    "json fields",
+    "json field",
     "extract fields",
     "extrahera fält",
     "output contract",
@@ -1080,6 +1094,8 @@ def _redundant_terminal_json_format_tail_after_final_text_composer_evidence(
     if context.aggregation_intent in {"aggregate", "compare"}:
         return False
     if context.output_intent.terminal_output == "structured_json":
+        return False
+    if _conversation_requests_json_contract(context.text):
         return False
     if len(spec.steps) < 4:
         return False

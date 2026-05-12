@@ -1312,7 +1312,12 @@ def test_parse_outline_flow_ignores_step_only_fields_at_root() -> None:
             "plan_rationale": "Weak models may place step-only fields at root.",
             "uses_input_fields": ["audience"],
             "citations_requested": True,
+            "model_ref": "model-default",
+            "knowledge_refs": ["kb-ref"],
+            "mcp_server_refs": ["server-ref"],
+            "mcp_tool_refs": ["tool-ref"],
             "output_type": "json",
+            "review_mode": "edit",
             "steps": [
                 {
                     "name": "Do the work",
@@ -5853,6 +5858,57 @@ def test_compile_outline_flow_multiple_document_scope_owns_one_fan_in() -> None:
     assert not any(
         warning.code == "all_previous_overuse" for warning in validation.warnings
     )
+
+
+def test_compile_outline_flow_audio_docx_ignores_document_scope_fan_in() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Audio DOCX report",
+            "plan_rationale": "Create a DOCX report from uploaded audio.",
+            "steps": [
+                {
+                    "name": "Summarize recording",
+                    "task": "Summarize the transcribed audio for a final document.",
+                }
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="audio",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="docx_document",
+            source="structured_answer",
+            confidence="high",
+        ),
+        "document_material_scope": ResolvedSlot(
+            name="document_material_scope",
+            value="multiple_documents_case",
+            source="heuristic",
+            confidence="medium",
+        ),
+    }
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state),
+    )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+
+    assert [step.input_source.value for step in draft.steps] == [
+        "flow_input",
+        "previous_step",
+        "previous_step",
+    ]
+    assert compiled.steps[-1].output_type == OutputType.DOCX
+    assert validation.valid
 
 
 def test_compile_outline_flow_all_previous_with_form_fields_avoids_relisting_sources() -> (

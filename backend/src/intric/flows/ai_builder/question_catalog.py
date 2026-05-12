@@ -571,10 +571,32 @@ def _build_catalog() -> Mapping[str, QuestionTemplate]:
 
 QUESTION_CATALOG: Mapping[str, QuestionTemplate] = _build_catalog()
 
+_LEGACY_QUESTION_ID_BY_SLOT_NAME: Mapping[str, str] = MappingProxyType(
+    {
+        **{slot_name: slot_name for slot_name in KNOWN_REQUIREMENT_SLOT_NAMES},
+        "primary_runtime_input": "input_material_mode",
+        "terminal_output": "final_output_mode",
+    }
+)
+_SLOT_NAME_BY_LEGACY_QUESTION_ID: Mapping[str, str] = MappingProxyType(
+    {
+        legacy_question_id: slot_name
+        for slot_name, legacy_question_id in _LEGACY_QUESTION_ID_BY_SLOT_NAME.items()
+    }
+)
+
 
 def legal_slot_values(slot_name: str) -> frozenset[str]:
     template = QUESTION_CATALOG[slot_name]
     return frozenset(option.value for option in template.options)
+
+
+def legacy_question_id_for_slot(slot_name: str) -> str:
+    return _LEGACY_QUESTION_ID_BY_SLOT_NAME.get(slot_name, slot_name)
+
+
+def slot_name_for_legacy_question_id(question_id: str) -> str:
+    return _SLOT_NAME_BY_LEGACY_QUESTION_ID.get(question_id, question_id)
 
 
 @dataclass(frozen=True, slots=True)

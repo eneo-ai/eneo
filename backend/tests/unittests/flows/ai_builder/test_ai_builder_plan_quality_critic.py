@@ -2637,6 +2637,7 @@ def _final_text_step_critic_context(
     *,
     aggregation_intent: str = "linear",
     terminal_output: str | None = None,
+    text: str = "",
 ) -> "CriticContext":
     from intric.flows.ai_builder.ai_builder_critic_invariants import (
         CriticContext,
@@ -2652,7 +2653,7 @@ def _final_text_step_critic_context(
         spec=spec,
         flow=None,
         answer_signals={},
-        text="",
+        text=text.casefold(),
         requirements_text="",
         signal_text="",
         planner_patterns=PlannerPatternSignals(),
@@ -2783,6 +2784,48 @@ class TestRedundantTerminalJsonFormatTailAfterFinalTextComposer:
         )
 
         assert not any(
+            issue.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID for issue in issues
+        )
+
+    def test_silent_when_conversation_requests_structured_terminal_data(
+        self,
+    ) -> None:
+        spec = _quality_chain_with_redundant_terminal_json_tail(
+            terminal_text_unwrap=False
+        )
+
+        issues = evaluate_critic_invariants(
+            _final_text_step_critic_context(
+                spec,
+                text=(
+                    "Returnera både kort text och strukturerad data så att "
+                    "en extern app kan läsa klassificering och nästa steg."
+                ),
+            )
+        )
+
+        assert not any(
+            issue.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID for issue in issues
+        )
+
+    def test_incidental_json_mention_does_not_silence_redundant_tail(
+        self,
+    ) -> None:
+        spec = _quality_chain_with_redundant_terminal_json_tail(
+            terminal_text_unwrap=False
+        )
+
+        issues = evaluate_critic_invariants(
+            _final_text_step_critic_context(
+                spec,
+                text=(
+                    "Använd JSON internt där det hjälper, men returnera en "
+                    "vanlig text till användaren."
+                ),
+            )
+        )
+
+        assert any(
             issue.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID for issue in issues
         )
 

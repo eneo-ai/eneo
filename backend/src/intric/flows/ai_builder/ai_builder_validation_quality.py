@@ -125,34 +125,6 @@ def lint_json_output_without_contract(
             )
 
 
-def lint_contract_fields_without_descriptions(
-    spec: FlowDraftSpecCore, result: SpecValidationResult
-) -> None:
-    for step in spec.steps:
-        contract = step.output_contract
-        if not contract:
-            continue
-        props = contract.get("properties")
-        if not isinstance(props, dict):
-            continue
-        property_map = cast(dict[str, object], props)
-        missing = [
-            key
-            for key, value in property_map.items()
-            if isinstance(value, dict) and "description" not in value
-        ]
-        if missing:
-            result.add_warning(
-                step_ref=step.plan_step_ref,
-                code="contract_missing_descriptions",
-                message=(
-                    f"Output contract fields without descriptions: {', '.join(missing[:3])}. "
-                    "Add descriptions for the variable picker."
-                ),
-                severity=LintSeverity.INFO,
-            )
-
-
 def lint_contract_instruction_alignment(
     spec: FlowDraftSpecCore,
     result: SpecValidationResult,

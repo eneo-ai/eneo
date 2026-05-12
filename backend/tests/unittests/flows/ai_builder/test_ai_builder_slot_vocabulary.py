@@ -15,6 +15,7 @@ import pathlib
 import intric.flows.ai_builder.ai_builder_slot_vocabulary as slot_vocabulary
 from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
+    LLM_RESOLVABLE_SLOT_NAMES,
     NON_LLM_RESOLVABLE_SLOT_NAMES,
 )
 
@@ -44,6 +45,11 @@ class TestSlotVocabularyShape:
             }
         )
         assert NON_LLM_RESOLVABLE_SLOT_NAMES <= KNOWN_REQUIREMENT_SLOT_NAMES
+
+    def test_llm_resolvable_slots_are_derived_from_canonical_sets(self) -> None:
+        assert LLM_RESOLVABLE_SLOT_NAMES == (
+            KNOWN_REQUIREMENT_SLOT_NAMES - NON_LLM_RESOLVABLE_SLOT_NAMES
+        )
 
 
 class TestLeafPurity:

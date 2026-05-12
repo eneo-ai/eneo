@@ -1,92 +1,30 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any, cast
-from uuid import UUID
 
-from intric.flows.ai_builder.ai_builder_discovery_models import (
-    DiscoveryAnalysis,
-)
-from intric.flows.ai_builder.ai_builder_discovery_questions import (
-    question_suggestion_for_id,
-)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
-    aggregate_freeform_user_text,
     latest_pending_structured_question,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
-from intric.flows.ai_builder.ai_builder_slot_classifier import (
-    SlotClassificationResult,
-    classify_slots,
-)
-from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
-    NON_LLM_RESOLVABLE_SLOT_NAMES,
-)
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-def should_run_semantic_adjudication(analysis: DiscoveryAnalysis) -> bool:
-    if not analysis.mvs_met:
-        return False
-    if analysis.next_issue is not None:
-        return False
+@dataclass(frozen=True, slots=True)
+class PendingQuestionResolution:
+    question_id: str
+    selected_option_ids: tuple[str, ...]
+    selected_values: tuple[str, ...]
 
-    for candidate in analysis.candidates:
-        if candidate.impact == "polish":
-            continue
-        if candidate.confidence != "low":
-            continue
-        if candidate.question_id is None:
-            continue
-        if candidate.question_id in NON_LLM_RESOLVABLE_SLOT_NAMES:
-            continue
-        return True
-    return False
-
-
-async def adjudicate_discovery_semantics(
-    *,
-    litellm_client: Any,
-    litellm_model: str,
-    litellm_kwargs: dict[str, Any],
-    conversation: list[ConversationMessage],
-    analysis: DiscoveryAnalysis,
-    tenant_id: UUID,
-    ui_language: str | None = None,
-) -> SlotClassificationResult | None:
-    candidate_ids = [
-        candidate.question_id
-        for candidate in analysis.candidates
-        if candidate.question_id is not None
-        and candidate.question_id not in NON_LLM_RESOLVABLE_SLOT_NAMES
-        and candidate.impact in {"architecture", "quality"}
-        and candidate.confidence == "low"
-    ]
-    if not candidate_ids:
-        return None
-
-    text = aggregate_freeform_user_text(conversation)
-    if not text.strip():
-        return None
-
-    allowed_values = _candidate_allowed_values(
-        candidate_ids=candidate_ids,
-        ui_language=ui_language,
-    )
-    if not allowed_values:
-        return None
-
-    return await classify_slots(
-        litellm_client=litellm_client,
-        litellm_model=litellm_model,
-        litellm_kwargs=litellm_kwargs,
-        text=text,
-        allowed_slot_values=allowed_values,
-        tenant_id=tenant_id,
-        ui_language=ui_language,
-    )
+    def to_question_answer(self) -> dict[str, object]:
+        return {
+            "question_id": self.question_id,
+            "selected_option_ids": list(self.selected_option_ids),
+            "selected_values": list(self.selected_values),
+        }
 
 
 async def adjudicate_pending_question_answer(
@@ -96,7 +34,7 @@ async def adjudicate_pending_question_answer(
     litellm_kwargs: dict[str, Any],
     conversation: list[ConversationMessage],
     user_message: str,
-) -> dict[str, Any] | None:
+) -> PendingQuestionResolution | None:
     pending = latest_pending_structured_question(conversation)
     if not isinstance(pending, dict):
         return None
@@ -173,28 +111,11 @@ async def adjudicate_pending_question_answer(
         return None
 
     selected_value = valid_option_ids[option_id]
-    return {
-        "question_id": question_id,
-        "selected_option_ids": [option_id],
-        "selected_values": [selected_value],
-    }
-
-
-def _candidate_allowed_values(
-    *,
-    candidate_ids: list[str],
-    ui_language: str | None,
-) -> dict[str, frozenset[str]]:
-    language = "en" if ui_language == "en" else "sv"
-    allowed: dict[str, frozenset[str]] = {}
-    for question_id in candidate_ids:
-        suggestion = question_suggestion_for_id(question_id, language=language)
-        if suggestion is None:
-            continue
-        allowed[question_id] = frozenset(
-            option.value or option.id for option in suggestion.options
-        )
-    return allowed
+    return PendingQuestionResolution(
+        question_id=question_id,
+        selected_option_ids=(option_id,),
+        selected_values=(selected_value,),
+    )
 
 
 def _build_answer_prompt(

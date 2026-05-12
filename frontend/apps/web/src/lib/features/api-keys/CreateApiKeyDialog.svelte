@@ -44,7 +44,8 @@
     Copy,
     CheckCircle2,
     Ban,
-    Link2
+    Link2,
+    Workflow
   } from "lucide-svelte";
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
@@ -141,6 +142,8 @@
   type ResourcePermissionKey =
     | "assistants"
     | "apps"
+    | "flows"
+    | "flow_evidence"
     | "spaces"
     | "knowledge"
     | "conversations"
@@ -151,6 +154,8 @@
   const ALL_RESOURCE_PERMISSION_KEYS: ReadonlyArray<ResourcePermissionKey> = [
     "assistants",
     "apps",
+    "flows",
+    "flow_evidence",
     "spaces",
     "knowledge",
     "conversations",
@@ -159,9 +164,6 @@
     "prompts"
   ];
 
-  // Visible permission controls track the general API-key model from develop.
-  // Flow-specific fields are preserved in buildResourcePermissionsRequest
-  // without adding unrelated controls to this dialog.
   const SCOPE_RESOURCE_PERMISSION_KEYS: Record<
     ApiKeyScopeType,
     ReadonlyArray<ResourcePermissionKey>
@@ -188,6 +190,8 @@
   // Per-resource permission levels
   let assistantsPermission = $state<ResourcePermission>("read");
   let appsPermission = $state<ResourcePermission>("read");
+  let flowsPermission = $state<ResourcePermission>("read");
+  let flowEvidencePermission = $state<ResourcePermission>("none");
   let spacesPermission = $state<ResourcePermission>("read");
   let knowledgePermission = $state<ResourcePermission>("read");
   let conversationsPermission = $state<ResourcePermission>("read");
@@ -275,7 +279,11 @@
   // jobs/prompts are infrastructure concepts that browser-side end-users do
   // not understand; the backend rejects them on pk_ keys, so the UI hides
   // them too.
-  const PK_FORBIDDEN_RESOURCES: ReadonlySet<ResourcePermissionKey> = new Set(["jobs", "prompts"]);
+  const PK_FORBIDDEN_RESOURCES: ReadonlySet<ResourcePermissionKey> = new Set([
+    "jobs",
+    "prompts",
+    "flow_evidence"
+  ]);
 
   const allResourcePermissionOptions: ReadonlyArray<ResourcePermissionOption> = [
     {
@@ -301,6 +309,18 @@
           ? m.api_keys_resource_selected_app_desc()
           : m.api_keys_resource_applications_desc(),
       icon: AppWindow
+    },
+    {
+      key: "flows",
+      label: () => m.api_keys_resource_flows(),
+      description: () => m.api_keys_resource_flows_desc(),
+      icon: Workflow
+    },
+    {
+      key: "flow_evidence",
+      label: () => m.api_keys_resource_flow_evidence(),
+      description: () => m.api_keys_resource_flow_evidence_desc(),
+      icon: ShieldCheck
     },
     {
       key: "spaces",
@@ -436,6 +456,7 @@
     if (keyType === "pk_") {
       if (jobsPermission !== "none") jobsPermission = "none";
       if (promptsPermission !== "none") promptsPermission = "none";
+      if (flowEvidencePermission !== "none") flowEvidencePermission = "none";
     }
   });
 
@@ -580,6 +601,9 @@
     if (key.resource_permissions && scopeSupportsFineGrained) {
       assistantsPermission = (key.resource_permissions.assistants ?? "none") as ResourcePermission;
       appsPermission = (key.resource_permissions.apps ?? "none") as ResourcePermission;
+      flowsPermission = (key.resource_permissions.flows ?? "none") as ResourcePermission;
+      flowEvidencePermission = (key.resource_permissions.flow_evidence ??
+        "none") as ResourcePermission;
       spacesPermission = (key.resource_permissions.spaces ?? "none") as ResourcePermission;
       knowledgePermission = (key.resource_permissions.knowledge ?? "none") as ResourcePermission;
       conversationsPermission = (key.resource_permissions.conversations ??
@@ -595,6 +619,8 @@
       } else {
         assistantsPermission = "none";
         appsPermission = "none";
+        flowsPermission = "none";
+        flowEvidencePermission = "none";
         spacesPermission = "none";
         knowledgePermission = "none";
         conversationsPermission = "none";
@@ -855,6 +881,8 @@
     };
     assistantsPermission = clamp("assistants");
     appsPermission = clamp("apps");
+    flowsPermission = clamp("flows");
+    flowEvidencePermission = "none";
     spacesPermission = clamp("spaces");
     knowledgePermission = clamp("knowledge");
     conversationsPermission = clamp("conversations");
@@ -867,6 +895,8 @@
     permission = "read";
     assistantsPermission = "read";
     appsPermission = "read";
+    flowsPermission = "none";
+    flowEvidencePermission = "none";
     spacesPermission = "none";
     knowledgePermission = "none";
     conversationsPermission = "none";
@@ -892,6 +922,10 @@
           return assistantsPermission;
         case "apps":
           return appsPermission;
+        case "flows":
+          return flowsPermission;
+        case "flow_evidence":
+          return flowEvidencePermission;
         case "spaces":
           return spacesPermission;
         case "knowledge":
@@ -921,6 +955,12 @@
       case "apps":
         appsPermission = level;
         break;
+      case "flows":
+        flowsPermission = level;
+        break;
+      case "flow_evidence":
+        flowEvidencePermission = level;
+        break;
       case "spaces":
         spacesPermission = level;
         break;
@@ -944,13 +984,18 @@
 
   function buildResourcePermissionsRequest(): ResourcePermissions {
     const allowedKeys = new Set(scopeResourcePermissionKeys);
-    const existing = apiKey?.resource_permissions;
     const request: ResourcePermissions = {
       assistants: (allowedKeys.has("assistants")
         ? getResourcePermission("assistants")
         : "none") as ResourcePermissionLevel,
       apps: (allowedKeys.has("apps")
         ? getResourcePermission("apps")
+        : "none") as ResourcePermissionLevel,
+      flows: (allowedKeys.has("flows")
+        ? getResourcePermission("flows")
+        : "none") as ResourcePermissionLevel,
+      flow_evidence: (allowedKeys.has("flow_evidence")
+        ? getResourcePermission("flow_evidence")
         : "none") as ResourcePermissionLevel,
       spaces: (allowedKeys.has("spaces")
         ? getResourcePermission("spaces")
@@ -971,12 +1016,6 @@
         ? getResourcePermission("prompts")
         : "none") as ResourcePermissionLevel
     };
-    if (existing && "flows" in existing) {
-      request.flows = (existing.flows ?? null) as ResourcePermissionLevel | null;
-    }
-    if (existing && "flow_evidence" in existing) {
-      request.flow_evidence = (existing.flow_evidence ?? "none") as ResourcePermissionLevel;
-    }
     return request;
   }
 

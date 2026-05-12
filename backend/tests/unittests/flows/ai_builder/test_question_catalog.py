@@ -28,9 +28,11 @@ from intric.flows.ai_builder.question_catalog import (
     QuestionTemplate,
     RenderedOption,
     RenderedQuestion,
+    legacy_question_id_for_slot,
     legal_slot_values,
     question_ids_for_slot,
     render_question,
+    slot_name_for_legacy_question_id,
 )
 
 
@@ -343,6 +345,21 @@ class TestCatalogInvariants:
     def test_legal_slot_values_fails_loudly_for_unknown_slot(self) -> None:
         with pytest.raises(KeyError):
             legal_slot_values("unknown_slot")
+
+    def test_legacy_question_id_bridge_is_explicit_for_slot_renames(self) -> None:
+        assert legacy_question_id_for_slot("primary_runtime_input") == (
+            "input_material_mode"
+        )
+        assert legacy_question_id_for_slot("terminal_output") == "final_output_mode"
+        assert legacy_question_id_for_slot("document_material_scope") == (
+            "document_material_scope"
+        )
+        assert slot_name_for_legacy_question_id("input_material_mode") == (
+            "primary_runtime_input"
+        )
+        assert slot_name_for_legacy_question_id("final_output_mode") == (
+            "terminal_output"
+        )
 
 
 class TestBilingualContract:

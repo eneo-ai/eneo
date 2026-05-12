@@ -210,8 +210,32 @@ def test_slot_classification_prompt_separates_source_material_from_artifacts() -
     )
 
     prompt = "\n".join(message["content"] for message in messages)
-    assert "final DOCX/PDF/Word document is not document input" in prompt
-    assert "recorded audio for transcription is audio input" in prompt
+    assert "requested final document is terminal_output" in prompt
+    assert "structured JSON mentioned as helpful intermediate/API context" in prompt
+    assert "uploaded or recorded speech for transcription is audio input" in prompt
+
+
+def test_slot_classification_system_prompt_stays_domain_neutral() -> None:
+    messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
+        text="Skapa ett generellt flöde.",
+        allowed_slot_values={
+            "primary_runtime_input": frozenset({"audio", "documents", "text"}),
+            "terminal_output": frozenset({"structured_json", "structured_text"}),
+        },
+        ui_language="sv",
+    )
+
+    system_prompt = messages[0]["content"].casefold()
+    banned_tokens = (
+        "case description",
+        "beslutsunderlag",
+        "ärende",
+        "handlägg",
+        "remiss",
+        "tjänsteskriv",
+    )
+    for token in banned_tokens:
+        assert token not in system_prompt
 
 
 @pytest.mark.asyncio

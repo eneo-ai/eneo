@@ -5,6 +5,10 @@ from datetime import datetime, timezone
 from intric.flows.ai_builder.ai_builder_action_policy import (
     build_planner_action_policy,
 )
+from intric.flows.ai_builder.ai_builder_orchestrator import (
+    OrchestrationContext,
+    evaluate_planner_output,
+)
 from intric.flows.ai_builder.ai_builder_server_actions import (
     build_server_planner_output,
 )
@@ -78,6 +82,41 @@ def test_server_builds_commit_when_no_questions_remain() -> None:
     assert output.planning_state_delta.base_planning_state_version == 8
     assert output.planner_action.kind == "commit_architecture"
     assert output.planning_state_delta.architecture_commit is not None
+
+
+def test_server_commit_for_text_docx_has_resolvable_pattern() -> None:
+    state = _state(
+        primary_runtime_input="text",
+        terminal_output="docx_document",
+    )
+    policy = build_planner_action_policy(
+        session_state=state,
+        unresolved_architectural_choices=frozenset(),
+        selected_discovery_question_ids=frozenset(),
+    )
+
+    output = build_server_planner_output(
+        action_policy=policy,
+        session_state=state,
+        base_planning_state_version=8,
+        ui_language="sv",
+    )
+
+    assert output is not None
+    commit = output.planning_state_delta.architecture_commit
+    assert commit is not None
+    assert commit.chosen_patterns == ["text_to_artifact_report"]
+    assert (
+        evaluate_planner_output(
+            output,
+            OrchestrationContext(
+                current_version=8,
+                session_state=state,
+                action_policy=policy,
+            ),
+        )
+        is None
+    )
 
 
 def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:

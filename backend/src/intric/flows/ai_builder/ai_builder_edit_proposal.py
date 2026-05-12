@@ -16,6 +16,8 @@ from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
 from intric.flows.ai_builder.ai_builder_edit_mechanics import fill_edit_draft_mechanics
 from intric.flows.ai_builder.ai_builder_edit_models import FlowEditDraft
 from intric.flows.ai_builder.ai_builder_edit_normalizer import (
+    canonicalize_duplicate_modify_operations,
+    format_duplicate_modify_conflicts,
     normalize_edit_draft_mechanics,
     normalize_loose_edit_arguments,
 )
@@ -125,6 +127,14 @@ async def process_edit_arguments(
                 feedback=format_resource_resolution_feedback(resolution_issues),
                 failure_kind="validation",
             )
+
+    canonicalized = canonicalize_duplicate_modify_operations(draft)
+    if canonicalized.conflicts:
+        return ToolProcessingResult(
+            feedback=format_duplicate_modify_conflicts(canonicalized.conflicts),
+            failure_kind="validation",
+        )
+    draft = canonicalized.draft
 
     draft = normalize_edit_draft_mechanics(
         draft,
@@ -306,6 +316,13 @@ async def process_edit_arguments(
         if feedback
     )
     if combined_quality_feedback:
+        logger.info(
+            "ai_builder_edit_quality_feedback "
+            "session_id=%s warning_codes=%s feedback=%s",
+            session_id,
+            ",".join(warning.code for warning in validation.warnings) or "-",
+            combined_quality_feedback[:1200],
+        )
         return ToolProcessingResult(
             feedback=combined_quality_feedback,
             failure_kind="quality",

@@ -77,9 +77,6 @@ from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile as _build_discovery_profile,
 )
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
-    classification_answers as _classification_answers,
-)
-from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
     default_discovery_assumptions as _default_discovery_assumptions,
 )
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
@@ -120,6 +117,7 @@ from intric.flows.ai_builder.ai_builder_signal_confidence import (
     score_conversation_signals,
 )
 from intric.flows.ai_builder.ai_builder_slot_classifier import SlotClassificationResult
+from intric.flows.ai_builder.planning_state import PlanningState
 from intric.flows.domain.flow import Flow
 
 
@@ -127,12 +125,13 @@ def analyze_discovery(
     conversation: list[ConversationMessage],
     *,
     flow: Flow | None = None,
+    planning_state: PlanningState | None = None,
     slot_classification_result: SlotClassificationResult | None = None,
 ) -> DiscoveryAnalysis:
     profile = _build_discovery_profile(
         conversation,
         flow=flow,
-        supplemental_answers=_classification_answers(slot_classification_result),
+        planning_state=planning_state,
     )
     text = profile.text
     answers = profile.answers

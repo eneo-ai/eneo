@@ -6,6 +6,7 @@ from intric.flows.ai_builder.ai_builder_create_feedback import (
     CREATE_CRITIC_REMEDIATION,
     CREATE_CRITIC_REMEDIATION_PASSTHROUGH_IDS,
     format_create_critic_feedback,
+    format_create_outline_quality_feedback,
     format_create_quality_feedback,
     format_create_validation_feedback,
 )
@@ -82,6 +83,21 @@ def test_format_create_quality_feedback_does_not_redirect_input_source_authoring
     assert "Outline-flow quality repair rules" not in feedback
     assert "let the backend compile the dataflow" not in feedback
     assert "do not author input_source" not in feedback.casefold()
+
+
+def test_format_create_outline_quality_feedback_maps_contracts_to_output_fields() -> (
+    None
+):
+    feedback = format_create_outline_quality_feedback(
+        "Quality issues:\n"
+        "1. Step has output_type 'json' but no output_contract. Adding one enables structured variable access for downstream steps."
+    )
+
+    assert feedback is not None
+    assert "output_fields" in feedback
+    assert "output_contract" not in feedback
+    assert "Outline-flow schema repair rules" in feedback
+    assert "named fields" in feedback
 
 
 @pytest.mark.parametrize(

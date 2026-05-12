@@ -18,6 +18,7 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     mentions_runtime_metadata,
     needs_structured_extraction,
     normalize_question_answer,
+    normalize_requirements_summary_for_flow,
     normalize_structured_question_payload,
     question_is_already_resolved,
     resolve_docx_output_mode,
@@ -46,6 +47,63 @@ _AUDIO_TO_WORD_REPORT_PROMPT = (
     "innehållet i mötet. "
     "Flödet ska ge en färdig Word-fil (.docx) med rapporten."
 )
+
+
+def _make_flow_step(
+    *,
+    step_order: int,
+    user_description: str,
+    input_source: str,
+    input_type: str,
+    output_mode: str,
+    output_type: str,
+) -> FlowStep:
+    return FlowStep(
+        id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=uuid4(),
+        assistant_id=uuid4(),
+        step_order=step_order,
+        user_description=user_description,
+        input_source=input_source,
+        input_type=input_type,
+        output_mode=output_mode,
+        output_type=output_type,
+        mcp_policy="inherit",
+    )
+
+
+def _make_audio_docx_flow() -> Flow:
+    return Flow(
+        id=uuid4(),
+        name="Transkribering till rapport",
+        description="Transkriberar ljud och skapar DOCX.",
+        tenant_id=uuid4(),
+        user_id=uuid4(),
+        space_id=uuid4(),
+        steps=[
+            _make_flow_step(
+                step_order=1,
+                user_description="Transkribera ljud",
+                input_source="flow_input",
+                input_type="audio",
+                output_mode="transcribe_only",
+                output_type="text",
+            ),
+            _make_flow_step(
+                step_order=2,
+                user_description="Skapa DOCX",
+                input_source="previous_step",
+                input_type="text",
+                output_mode="pass_through",
+                output_type="docx",
+            ),
+        ],
+        metadata_json=None,
+        published=True,
+        published_version=1,
+        draft_revision=3,
+    )
 
 
 def test_resolve_explicit_output_choice_detects_pdf_from_swedish_prompt() -> None:
@@ -1031,7 +1089,7 @@ def test_extract_answer_signals_does_not_treat_input_pdfs_as_pdf_output_mode() -
     assert intent.docx_output_mode == "generated_docx"
 
 
-def test_extract_answer_signals_reads_confirmed_requirements_summary_output_mode() -> (
+def test_extract_answer_signals_ignores_tool_requirements_summary_output_mode() -> (
     None
 ):
     signals = extract_answer_signals(
@@ -1048,10 +1106,10 @@ def test_extract_answer_signals_reads_confirmed_requirements_summary_output_mode
         ]
     )
 
-    assert signals["final_output_mode"] == {"docx_document"}
+    assert signals == {}
 
 
-def test_extract_answer_signals_reads_confirmed_audio_requirements_summary() -> None:
+def test_extract_answer_signals_ignores_tool_requirements_summary_input_mode() -> None:
     signals = extract_answer_signals(
         [
             {
@@ -1067,28 +1125,180 @@ def test_extract_answer_signals_reads_confirmed_audio_requirements_summary() -> 
         ]
     )
 
-    assert signals["input_material_mode"] == {"audio"}
-    assert signals["final_output_mode"] == {"docx_document"}
+    assert signals == {}
 
 
-def test_resolve_output_intent_prefers_confirmed_docx_summary_over_pdf_input_reference() -> (
+def test_extract_answer_signals_does_not_treat_edit_summary_as_user_answer() -> (
     None
 ):
-    prompt = "Bygg ett flöde som tar ett uppladdat PDF-dokument och genererar en DOCX-rapport."
     signals = extract_answer_signals(
         [
-            {"role": "user", "content": prompt},
             {
                 "role": "tool",
                 "content": "Requirements presented to user.",
                 "metadata": {
                     "requirements_summary": {
-                        "output_description": "En genererad DOCX-rapport baserad på PDF-underlaget."
+                        "input_description": "Primär indata vid körning: Dokument.",
+                        "output_description": "Huvudsakligt slutresultat: DOCX-dokument.",
                     }
                 },
-            },
+            }
         ]
     )
+
+    assert signals == {}
+
+
+def test_requirements_summary_normalization_keeps_existing_audio_input() -> None:
+    normalized = normalize_requirements_summary_for_flow(
+        {
+            "summary": "Flödet ska ta emot dokument och leverera DOCX.",
+            "key_decisions": [
+                {"topic": "Indata", "decision": "Dokument vid körning."},
+                {"topic": "Output", "decision": "DOCX."},
+            ],
+            "input_description": "Primär indata vid körning: Dokument.",
+            "output_description": "Huvudsakligt slutresultat: DOCX-dokument.",
+            "assumptions": [],
+            "manual_setup_notes": [],
+        },
+        conversation=[
+            {
+                "role": "user",
+                "content": (
+                    "Granska detta befintliga Flow för transkribering till DOCX "
+                    "och förbättra det utan att ändra den avsedda produkten."
+                ),
+            }
+        ],
+        flow=_make_audio_docx_flow(),
+        language="sv",
+    )
+
+    assert normalized["input_description"] == "Primär indata vid körning: ljud."
+    assert normalized["key_decisions"][0] == {
+        "topic": "Indata",
+        "decision": "Behåll befintlig körningsindata: ljud.",
+    }
+
+
+def test_requirements_summary_normalization_preserves_explicit_input_change() -> (
+    None
+):
+    requirements_data = {
+        "summary": "Flödet ska ta emot dokument och leverera DOCX.",
+        "key_decisions": [{"topic": "Indata", "decision": "Dokument vid körning."}],
+        "input_description": "Primär indata vid körning: Dokument.",
+        "output_description": "Huvudsakligt slutresultat: DOCX-dokument.",
+        "assumptions": [],
+        "manual_setup_notes": [],
+    }
+
+    normalized = normalize_requirements_summary_for_flow(
+        requirements_data,
+        conversation=[
+            {
+                "role": "user",
+                "content": "Ändra indata så att användaren laddar upp dokument.",
+            }
+        ],
+        flow=_make_audio_docx_flow(),
+        language="sv",
+    )
+
+    assert normalized == requirements_data
+
+
+def test_requirements_summary_normalization_preserves_create_mode_summary() -> None:
+    requirements_data = {
+        "summary": "Flödet ska ta emot dokument och leverera DOCX.",
+        "key_decisions": [{"topic": "Indata", "decision": "Dokument vid körning."}],
+        "input_description": "Primär indata vid körning: Dokument.",
+        "output_description": "Huvudsakligt slutresultat: DOCX-dokument.",
+        "assumptions": [],
+        "manual_setup_notes": [],
+    }
+
+    normalized = normalize_requirements_summary_for_flow(
+        requirements_data,
+        conversation=[],
+        flow=None,
+        language="sv",
+    )
+
+    assert normalized == requirements_data
+
+
+def test_planning_state_uses_existing_audio_input_when_edit_summary_drifts() -> None:
+    state = build_planning_state_from_conversation(
+        [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Granska detta befintliga Flow för transkribering till DOCX "
+                    "och förbättra det utan att ändra den avsedda produkten."
+                ),
+            ),
+            ConversationMessage(
+                role="tool",
+                content="Requirements presented to user.",
+                metadata={
+                    "requirements_summary": {
+                        "summary": "Flödet ska ta emot dokument och leverera DOCX.",
+                        "key_decisions": [
+                            {
+                                "topic": "Indata",
+                                "decision": "Dokument vid körning.",
+                            }
+                        ],
+                        "input_description": "Primär indata vid körning: Dokument.",
+                        "output_description": (
+                            "Huvudsakligt slutresultat: DOCX-dokument."
+                        ),
+                    }
+                },
+            ),
+        ],
+        flow=_make_audio_docx_flow(),
+    )
+
+    primary_runtime_input = state.resolved_slots["primary_runtime_input"]
+    assert primary_runtime_input.value == "audio"
+    assert primary_runtime_input.source == "flow_default"
+
+
+def test_planning_state_uses_requirements_summary_without_flow_default() -> None:
+    state = build_planning_state_from_conversation(
+        [
+            ConversationMessage(
+                role="tool",
+                content="Requirements presented to user.",
+                metadata={
+                    "requirements_summary": {
+                        "summary": "Skapa en DOCX-rapport.",
+                        "key_decisions": [
+                            {"topic": "Output", "decision": "DOCX-dokument."}
+                        ],
+                        "input_description": "Primär indata vid körning: text.",
+                        "output_description": (
+                            "Huvudsakligt slutresultat: DOCX-dokument."
+                        ),
+                    }
+                },
+            )
+        ],
+    )
+
+    terminal_output = state.resolved_slots["terminal_output"]
+    assert terminal_output.value == "docx_document"
+    assert terminal_output.source == "requirements_summary"
+
+
+def test_resolve_output_intent_prefers_docx_output_role_over_pdf_input_reference() -> (
+    None
+):
+    prompt = "Bygg ett flöde som tar ett uppladdat PDF-dokument och genererar en DOCX-rapport."
+    signals = extract_answer_signals([{"role": "user", "content": prompt}])
 
     intent = resolve_output_intent(prompt, signals)
 
@@ -1236,6 +1446,41 @@ def test_intermediate_json_extraction_with_final_docx_keeps_docx() -> None:
     assert intent.terminal_output == "docx_document"
 
 
+def test_swedish_audio_review_docx_request_avoids_text_default_when_artifact_scoping_is_passive() -> (
+    None
+):
+    prompt = (
+        "Bygg ett flöde för en extern webbapp: användaren laddar upp ljud, "
+        "får transkribering, en människa ska kunna granska och korrigera innan "
+        "slutlig DOCX-rapport skapas. Flödet ska vara lätt att förstå via "
+        "run-contract och använda strukturerad JSON där det hjälper."
+    )
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output is None
+
+
+def test_swedish_audio_review_docx_request_keeps_docx_despite_intermediate_json() -> (
+    None
+):
+    prompt = (
+        "Bygg ett flöde för en extern webbapp där användaren laddar upp ljud, "
+        "får transkribering, kan granska och korrigera texten, och sedan får "
+        "en slutlig DOCX-rapport. Använd strukturerad JSON där det hjälper "
+        "API-konsumenten, men håll slutresultatet som dokument."
+    )
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output == "docx_document"
+    assert intent.docx_output_mode == "generated_docx"
+
+
 def test_intermediate_json_extraction_with_final_pdf_keeps_pdf() -> None:
     prompt = (
         "Extrahera nyckelfakta som strukturerad JSON från varje fil och "
@@ -1249,40 +1494,26 @@ def test_intermediate_json_extraction_with_final_pdf_keeps_pdf() -> None:
     assert intent.terminal_output == "pdf_document"
 
 
-def test_requirements_summary_structured_text_does_not_become_json_output() -> None:
-    signals = extract_answer_signals(
-        [
-            {
-                "role": "tool",
-                "content": "Requirements presented to user.",
-                "metadata": {
-                    "requirements_summary": {
-                        "output_description": "Strukturerad sammanställning som text."
-                    }
-                },
-            }
-        ]
+def test_resolve_output_intent_structured_text_does_not_become_json_output() -> None:
+    signals = extract_answer_signals([])
+
+    intent = resolve_output_intent(
+        "Strukturerad sammanställning som text.",
+        signals,
     )
 
-    assert signals["final_output_mode"] == {"structured_text"}
+    assert intent.terminal_output == "structured_text"
 
 
-def test_requirements_summary_ascii_structured_text_is_supported() -> None:
-    signals = extract_answer_signals(
-        [
-            {
-                "role": "tool",
-                "content": "Requirements presented to user.",
-                "metadata": {
-                    "requirements_summary": {
-                        "output_description": "Strukturerad sammanstallning som text."
-                    }
-                },
-            }
-        ]
+def test_resolve_output_intent_ascii_structured_text_is_supported() -> None:
+    signals = extract_answer_signals([])
+
+    intent = resolve_output_intent(
+        "Strukturerad sammanstallning som text.",
+        signals,
     )
 
-    assert signals["final_output_mode"] == {"structured_text"}
+    assert intent.terminal_output == "structured_text"
 
 
 def test_resolve_output_intent_keeps_pdf_when_summary_phrase_describes_pdf_content() -> (

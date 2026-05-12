@@ -25,6 +25,7 @@ from intric.flows.ai_builder.ai_builder_form_fields import (
 )
 from intric.flows.ai_builder.ai_builder_models import (
     InputType,
+    OutputType,
 )
 from intric.flows.ai_builder.ai_builder_new_step_mechanics import (
     validate_new_step_mechanics,
@@ -258,6 +259,12 @@ def _validate_modify_op(
                 step_ref=op.target_ref,
                 result=result,
             )
+            _validate_patch_document_delivery_mode(
+                patch=op.patch,
+                current_steps=current_steps,
+                step_ref=op.target_ref,
+                result=result,
+            )
 
 
 def _validate_remove_op(
@@ -344,6 +351,43 @@ def _validate_patch_output_mode(
             f"input_type '{input_type_value}' and output_type '{output_type_value}'."
         ),
     )
+
+
+def _validate_patch_document_delivery_mode(
+    *,
+    patch: StepPatch,
+    current_steps: list[FlowStep],
+    step_ref: str | None,
+    result: SpecValidationResult,
+) -> None:
+    if patch.document_delivery_mode is None or step_ref is None:
+        return
+
+    current_step = _current_step_for_ref(current_steps, step_ref)
+    if current_step is None:
+        return
+
+    output_type_value = _enum_value(patch.output_type or current_step.output_type)
+    if (
+        patch.document_delivery_mode == "template_fill"
+        and output_type_value != OutputType.DOCX.value
+    ):
+        result.add_error(
+            step_ref=step_ref,
+            code="template_fill_requires_docx",
+            message="document_delivery_mode 'template_fill' requires output_type 'docx'.",
+        )
+        return
+
+    if (
+        patch.document_delivery_mode != "not_applicable"
+        and output_type_value not in {OutputType.DOCX.value, OutputType.PDF.value}
+    ):
+        result.add_error(
+            step_ref=step_ref,
+            code="document_delivery_mode_type_mismatch",
+            message="document_delivery_mode is only valid for docx or pdf outputs.",
+        )
 
 
 def _current_step_for_ref(
