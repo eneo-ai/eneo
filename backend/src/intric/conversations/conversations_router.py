@@ -15,6 +15,9 @@ from intric.audit.infrastructure.rate_limiting import (
     RateLimitServiceUnavailableError,
     enforce_rate_limit,
 )
+from intric.authentication.auth_dependencies import (
+    require_resource_permission_for_method,
+)
 from intric.conversations.conversation_models import (
     ConversationRequest,
     PreflightRequest,
@@ -405,6 +408,7 @@ async def preflight_tokens(
     "/",
     response_model=CursorPaginatedResponse[SessionMetadataPublic],
     responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def list_conversations(
     http_request: Request,
@@ -490,6 +494,7 @@ async def list_conversations(
     "/{session_id}/",
     response_model=SessionPublic,
     responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def get_conversation(
     session_id: Annotated[
@@ -509,6 +514,7 @@ async def get_conversation(
     "/{session_id}/",
     status_code=204,
     responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def delete_conversation(
     session_id: Annotated[
@@ -536,6 +542,7 @@ async def delete_conversation(
     "/{session_id}/feedback/",
     response_model=SessionPublic,
     responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def leave_feedback(
     feedback: SessionFeedback,
@@ -570,6 +577,7 @@ async def leave_feedback(
     "/{session_id}/title/",
     response_model=SessionPublic,
     responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def set_title_of_conversation(
     session_id: UUID,
