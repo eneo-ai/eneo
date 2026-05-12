@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from intric.crawler.crawler import Crawl
+from intric.crawler.parse_html import CrawledPage
 from intric.websites.crawl_dependencies.crawl_models import CrawlTask
 from intric.websites.domain.crawl_outcome import (
     CrawlOutcomeCode,
@@ -116,6 +117,7 @@ class _FakeAuditService:
 class _FakeCrawler:
     is_partial: bool
     termination_reason: CrawlTerminationReason
+    pages: tuple[CrawledPage, ...] = ()
     source_retained_urls: frozenset[str] = frozenset()
     captured_kwargs: dict[str, object] | None = None
 
@@ -123,11 +125,11 @@ class _FakeCrawler:
     async def crawl(self, **kwargs: object) -> AsyncIterator[Crawl]:
         self.captured_kwargs = kwargs
         yield Crawl(
-            pages=(),
+            pages=self.pages,
             files=(),
             is_partial=self.is_partial,
             termination_reason=self.termination_reason,
-            pages_count=0,
+            pages_count=len(self.pages),
             source_retained_urls=self.source_retained_urls,
         )
 
@@ -476,6 +478,127 @@ async def test_sitemap_source_skip_cutoff_is_passed_to_crawler_when_enabled(
     )
     assert "last_crawled_at" in emitted_sql
     assert "last_source_verified_at" in emitted_sql
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("last_source_verified_at", "lastmod_skip_enabled"),
+    [
+        (datetime.fromisoformat("2026-05-12T08:00:00+00:00"), False),
+        (None, True),
+    ],
+)
+async def test_sitemap_source_skip_kwargs_stay_empty_when_not_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+    last_source_verified_at: datetime | None,
+    lastmod_skip_enabled: bool,
+):
+    from intric.worker.crawl.persistence import PersistBatchResult
+
+    tenant = SimpleNamespace(
+        id=uuid4(),
+        slug="test",
+        crawler_settings={
+            "crawl_sitemap_lastmod_skip_enabled": lastmod_skip_enabled,
+            "crawl_heartbeat_interval_seconds": 60,
+        },
+    )
+    user = SimpleNamespace(id=uuid4())
+    embedding_model_id = uuid4()
+    page_url = "https://example.com/stable"
+    website = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=tenant.id,
+        url="https://example.com",
+        last_crawled_at=None,
+        embedding_model=SimpleNamespace(
+            id=embedding_model_id,
+            name="text-embedding-3-small",
+            litellm_model_name="openai/text-embedding-3-small",
+            family=None,
+            max_input=8191,
+            max_batch_size=32,
+            dimensions=1536,
+            open_source=False,
+            provider_id=None,
+        ),
+        http_auth_username=None,
+        encrypted_auth_password=None,
+        user_id=user.id,
+        name="Example",
+        last_source_verified_at=last_source_verified_at,
+    )
+    crawler = _FakeCrawler(
+        is_partial=False,
+        termination_reason="completed",
+        pages=(CrawledPage(url=page_url, title=page_url, content="changed"),),
+    )
+    audit_service = _FakeAuditService()
+    container = _FakeContainer(
+        tenant=tenant,
+        user=user,
+        audit_service=audit_service,
+        crawler=crawler,
+    )
+
+    @asynccontextmanager
+    async def session_scope() -> AsyncIterator[_FakeRecoverySession]:
+        yield _FakeRecoverySession()
+
+    async def primary_active_job_id(
+        _session: object,
+        *,
+        website_id: UUID,
+    ) -> None:
+        assert website_id == website.id
+        return None
+
+    async def execute_with_recovery(
+        *,
+        operation,
+        **_kwargs: object,
+    ):
+        return await operation(_FakeRecoverySession())
+
+    async def persist_batch(**_kwargs: object) -> PersistBatchResult:
+        return PersistBatchResult(persisted_urls=(page_url,))
+
+    async def reset_tenant_retry_delay(**_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
+    monkeypatch.setattr(
+        "intric.database.database.sessionmanager.create_session",
+        lambda: _FakeBootstrapSession(
+            website,
+            rows=((page_url, b"hash", embedding_model_id),),
+        ),
+    )
+    monkeypatch.setattr(
+        crawl_tasks, "_get_primary_active_job_id", primary_active_job_id
+    )
+    monkeypatch.setattr(crawl_tasks, "execute_with_recovery", execute_with_recovery)
+    monkeypatch.setattr(crawl_tasks, "persist_batch", persist_batch)
+    monkeypatch.setattr(
+        crawl_tasks, "reset_tenant_retry_delay", reset_tenant_retry_delay
+    )
+
+    result = await crawl_tasks.crawl_task(
+        job_id=uuid4(),
+        params=CrawlTask(
+            user_id=user.id,
+            website_id=website.id,
+            run_id=uuid4(),
+            url=website.url,
+            crawl_type=CrawlType.SITEMAP,
+        ),
+        container=container,
+    )
+
+    assert result
+    assert crawler.captured_kwargs is not None
+    assert crawler.captured_kwargs["sitemap_lastmod_skip_cutoff"] is None
+    assert crawler.captured_kwargs["sitemap_lastmod_skip_allowed_urls"] == frozenset()
 
 
 @pytest.mark.asyncio

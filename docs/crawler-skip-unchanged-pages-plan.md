@@ -53,6 +53,7 @@ Purpose: reduce embedding-token spend and database churn for scheduled website c
 - [x] Partial timeout outcome precedence is pinned by tests when page-level embedding failures are also present.
 - [x] Post-crawl website timestamp updates now have one canonical helper, so terminal zero-output, partial timeout, complete sitemap, and page-failure timestamp behavior is unit-tested without deep crawl-task fakes.
 - [x] Crawl-task lifecycle hardening now asserts terminal zero-output paths do not emit `last_crawled_at` or `last_source_verified_at` updates, while source-skip cutoffs are passed into Scrapy only from the verified sitemap cutoff and compatible existing URL blobs.
+- [x] Source-skip seam tests now cover the negative cases too: Scrapy receives no sitemap lastmod cutoff when the tenant setting is disabled or no verified sitemap source timestamp exists.
 - [x] Targeted tests, strict pyright, ruff, and regression validation.
 - [x] Claude peer-loop implementation review.
 - [x] Local commit only; do not push from this branch.
@@ -116,6 +117,7 @@ Claude artifact:
 - `.codex/artifacts/claude-peer-loop-crawler-lifecycle-reliability-hardening-20260512T061246Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-lifecycle-reliability-hardening-implementation-20260512T062128Z.md`
 - `.codex/artifacts/claude-peer-loop-crawler-lifecycle-reliability-hardening-final-verification-20260512T062540Z.md`
+- `.codex/artifacts/claude-peer-loop-crawler-lifecycle-negative-source-skip-seam-test-20260512T080234Z.md`
 
 Claude loop summary:
 
@@ -145,6 +147,7 @@ Claude loop summary:
 - Lifecycle hardening plan review: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`; blockers rejected expanding the nine-fake crawl-task harness and instead required one canonical timestamp-policy helper, one SQL-contract assertion for terminal zero-output paths, and one source-skip kwargs assertion at the crawl-task seam.
 - Lifecycle hardening implementation review: first pass was `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 7`; blockers removed an unused terminal parameter from the timestamp helper and renamed stale `last_crawled_at_update` wording.
 - Lifecycle hardening final verification: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; confirmed the timestamp-policy helper, terminal SQL-contract assertion, source-skip kwargs assertion, and complete-clean-sitemap timestamp SQL assertion are safe to commit.
+- Negative source-skip seam follow-up: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 9`; confirmed the disabled-setting and missing-source-verification cases now keep Scrapy source-skip kwargs empty without adding new fake harness debt.
 
 Claude agreed with the core architecture:
 
