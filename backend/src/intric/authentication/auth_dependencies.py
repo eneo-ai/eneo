@@ -171,6 +171,35 @@ async def require_session_auth(
         )
 
 
+async def require_user_identity(
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+) -> None:
+    """Reject service-key callers; require a real user identity.
+
+    Service keys resolve to a synthetic ``UserInDB`` with no row in the
+    ``users`` table. Endpoints that operate on the caller's personal data
+    (``/me``, "my keys", endpoints that write ``user_id`` columns) cannot
+    serve them meaningfully — the synthetic uuid would either match nothing
+    or violate FK constraints.
+
+    Bearer-token users and user-owned API keys both pass.
+    """
+    from intric.authentication.auth_models import is_service_api_key
+
+    if is_service_api_key(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "user_identity_required",
+                "message": (
+                    "This endpoint requires a user identity. "
+                    "Service API keys cannot access endpoints scoped to a "
+                    "specific user."
+                ),
+            },
+        )
+
+
 ASSISTANTS_READ_OVERRIDES: frozenset[str] = frozenset(
     {
         "ask_assistant",

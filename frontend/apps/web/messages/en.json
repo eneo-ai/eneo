@@ -2717,6 +2717,7 @@
   "api_keys_ownership_service_desc": "Independent of any user. For integrations and automation.",
   "api_keys_ownership_service_badge": "Service",
   "api_keys_ownership_service_guardrail_hint": "Service keys with tenant write/admin scope require an IP allowlist or expiration.",
+  "api_keys_ownership_service_user_endpoints_hint": "Service keys cannot use endpoints that require a user identity (e.g. \"my profile\", legacy user keys, info blob updates). They also cannot manage other API keys — use a session login for those operations.",
   "api_keys_capability_summary_title": "What this key can do",
   "api_keys_capability_read_resources": "Read assistants, apps, knowledge, and other resources",
   "api_keys_capability_no_create": "Cannot create, edit, or delete any resources",

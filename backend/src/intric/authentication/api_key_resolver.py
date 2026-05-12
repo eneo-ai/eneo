@@ -293,6 +293,12 @@ class ApiKeyAuthResolver:
             tenant_id, owner_user_id = await self._get_user_tenant(
                 legacy_record.user_id
             )
+            # v1 keys had no permission tier — they inherited the owner's live
+            # access. Map to tenant+admin only if the owner currently has
+            # Permission.ADMIN; otherwise tenant+write, so the resolver's
+            # owner-admin guard doesn't reject the migrated key on first use.
+            has_admin = await self._user_has_admin_permission(owner_user_id)
+            permission = ApiKeyPermission.ADMIN if has_admin else ApiKeyPermission.WRITE
             try:
                 migrated = await self.api_key_repo.create(
                     tenant_id=tenant_id,
@@ -300,7 +306,7 @@ class ApiKeyAuthResolver:
                     created_by_user_id=owner_user_id,
                     scope_type=ApiKeyScopeType.TENANT.value,
                     scope_id=None,
-                    permission=ApiKeyPermission.ADMIN.value,
+                    permission=permission.value,
                     key_type=ApiKeyType.SK.value,
                     key_hash=self._hash_sha256(plain_key),
                     hash_version=ApiKeyHashVersion.SHA256.value,
@@ -396,6 +402,23 @@ class ApiKeyAuthResolver:
                 message="Legacy API key owner not found.",
             )
         return row.tenant_id, row.id
+
+    async def _user_has_admin_permission(self, user_id: UUID) -> bool:
+        from intric.database.tables.roles_table import Roles
+        from intric.database.tables.users_table import users_roles_table
+        from intric.roles.permissions import Permission
+
+        stmt = (
+            sa.select(sa.literal(1))
+            .select_from(users_roles_table)
+            .join(Roles, Roles.id == users_roles_table.c.role_id)
+            .where(
+                users_roles_table.c.user_id == user_id,
+                Roles.permissions.contains([Permission.ADMIN.value]),
+            )
+            .limit(1)
+        )
+        return await self.legacy_repo.session.scalar(stmt) is not None
 
     async def _get_assistant_context(self, assistant_id: UUID) -> tuple[UUID, UUID]:
         stmt = (

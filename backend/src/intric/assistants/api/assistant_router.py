@@ -27,6 +27,7 @@ from intric.authentication.api_key_router_helpers import (
 from intric.authentication.auth_dependencies import (
     get_scope_filter,
     require_resource_permission_for_method,
+    require_user_identity,
 )
 from intric.authentication.auth_models import (
     ApiKey,
@@ -1007,6 +1008,7 @@ async def leave_feedback(
 async def generate_read_only_assistant_key(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_identity_guard: None = Depends(require_user_identity),
 ):
     """Generates a read-only api key for this assistant.
 
