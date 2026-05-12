@@ -1,5 +1,6 @@
 # MIT License
 
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -34,6 +35,7 @@ from intric.server.protocol import responses
 from intric.users.user import UserInDB
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class ModelUsageDetailsQuery(BaseModel):
@@ -195,79 +197,12 @@ async def get_model_usage_details(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ModelUsagePaginatedResponse | None:
-    """Get detailed list of entities using this model with cursor pagination"""
+    """Get detailed list of entities using this model with cursor pagination."""
     validate_permission(user, Permission.ADMIN)
-    import logging
-
-    logger = logging.getLogger(__name__)
-
-    logger.info(
-        "Starting get_model_usage_details endpoint",
-        extra={
-            "model_id": str(model_id),
-            "tenant_id": str(user.tenant_id),
-            "user_id": str(user.id),
-            "entity_type": query.entity_type,
-            "cursor": query.cursor,
-            "limit": query.limit,
-        },
+    service = container.completion_model_usage_service()
+    return await service.get_model_usage_details(
+        model_id, user.tenant_id, query.entity_type, query.cursor, query.limit
     )
-
-    try:
-        # Get the service and verify container is properly configured
-        logger.debug("Getting completion_model_usage_service from container")
-        service = container.completion_model_usage_service()
-        logger.debug(f"Got service instance: {type(service)}")
-
-        # Validate inputs
-        if not model_id:
-            logger.error("Model ID is required but was None")
-            from fastapi import HTTPException
-
-            raise HTTPException(status_code=400, detail="Model ID is required")
-
-        if not user.tenant_id:
-            logger.error("User tenant_id is required but was None")
-            from fastapi import HTTPException
-
-            raise HTTPException(status_code=400, detail="User tenant_id is required")
-
-        # Call the service method
-        logger.info("Calling service.get_model_usage_details")
-        result = await service.get_model_usage_details(
-            model_id, user.tenant_id, query.entity_type, query.cursor, query.limit
-        )
-
-        logger.info(
-            "Successfully retrieved model usage details",
-            extra={
-                "model_id": str(model_id),
-                "tenant_id": str(user.tenant_id),
-                "results_count": len(result.items) if result and result.items else 0,
-                "has_more": result.has_more if result else False,
-                "total": result.total if result else 0,
-            },
-        )
-
-        return result
-
-    except Exception as e:
-        logger.error(
-            "Error in get_model_usage_details endpoint",
-            extra={
-                "model_id": str(model_id),
-                "tenant_id": str(user.tenant_id),
-                "user_id": str(user.id),
-                "entity_type": query.entity_type,
-                "cursor": query.cursor,
-                "limit": query.limit,
-                "error": str(e),
-                "error_type": type(e).__name__,
-            },
-            exc_info=True,
-        )
-        # Re-raise to let FastAPI handle the error response
-        raise
 
 
 @router.get(
@@ -302,131 +237,60 @@ async def migrate_model_usage(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> MigrationResult:
-    """Migrate all usage from one model to another with safety checks"""
-    import logging
+    """Migrate all usage from one model to another.
 
-    logger = logging.getLogger(__name__)
+    Source/target validity, same-model rejection, tenant ownership and
+    entity-type whitelisting all live in
+    `CompletionModelMigrationService.migrate_model_usage` — the router
+    only enforces admin permission and persists the audit log on success.
+    """
+    validate_permission(user, Permission.ADMIN)
 
-    logger.info(
-        "Starting migrate_model_usage endpoint",
-        extra={
-            "from_model_id": str(model_id),
-            "to_model_id": str(migration_request.to_model_id),
-            "tenant_id": str(user.tenant_id),
-            "user_id": str(user.id),
-            "entity_types": migration_request.entity_types,
-            "confirm_migration": migration_request.confirm_migration,
-        },
+    migration_service = container.completion_model_migration_service()
+    result = await migration_service.migrate_model_usage(
+        from_model_id=model_id,
+        to_model_id=migration_request.to_model_id,
+        entity_types=migration_request.entity_types,
+        user=user,
+        confirm_migration=migration_request.confirm_migration,
     )
 
+    # Audit happens after the service returns so it captures the actual
+    # migrated/failed counts. A failed audit must not break the user-facing
+    # response — the migration already committed.
     try:
-        # Get the service and verify container is properly configured
-        logger.debug("Getting completion_model_migration_service from container")
-        migration_service = container.completion_model_migration_service()
-        logger.debug(f"Got migration service instance: {type(migration_service)}")
-
-        # Validate inputs
-        if not model_id:
-            logger.error("From model ID is required but was None")
-            from fastapi import HTTPException
-
-            raise HTTPException(status_code=400, detail="From model ID is required")
-
-        if not migration_request.to_model_id:
-            logger.error("To model ID is required but was None")
-            from fastapi import HTTPException
-
-            raise HTTPException(status_code=400, detail="To model ID is required")
-
-        if model_id == migration_request.to_model_id:
-            logger.error("From and to model IDs cannot be the same")
-            from fastapi import HTTPException
-
-            raise HTTPException(
-                status_code=400, detail="From and to model IDs cannot be the same"
-            )
-
-        if not user.tenant_id:
-            logger.error("User tenant_id is required but was None")
-            from fastapi import HTTPException
-
-            raise HTTPException(status_code=400, detail="User tenant_id is required")
-
-        # Validate admin permissions
-        validate_permission(user, Permission.ADMIN)
-
-        # Call the service method
-        logger.info("Calling migration_service.migrate_model_usage")
-        result = await migration_service.migrate_model_usage(
-            from_model_id=model_id,
-            to_model_id=migration_request.to_model_id,
-            entity_types=migration_request.entity_types,
-            user=user,
-            confirm_migration=migration_request.confirm_migration,
+        audit_service = container.audit_service()
+        completion_model_repo = container.completion_model_repo2()
+        from_model = await completion_model_repo.one(model_id=model_id)
+        await audit_service.log_async(
+            tenant_id=user.tenant_id,
+            actor_id=user.id,
+            action=ActionType.COMPLETION_MODEL_MIGRATED,
+            entity_type=EntityType.COMPLETION_MODEL,
+            entity_id=model_id,
+            description=(
+                f"Migrated model usage from {from_model.name} to "
+                f"{migration_request.to_model_id} "
+                f"({result.migrated_count} entities)"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=from_model,
+                changes={
+                    "from_model_id": str(model_id),
+                    "to_model_id": str(migration_request.to_model_id),
+                    "migrated_count": result.migrated_count,
+                    "failed_count": result.failed_count,
+                    "duration": result.duration,
+                    "details": result.details,
+                    "warnings": result.warnings,
+                },
+            ),
         )
+    except Exception as audit_err:
+        logger.warning("Failed to create audit log for migration: %s", audit_err)
 
-        logger.info(
-            "Successfully completed model migration",
-            extra={
-                "from_model_id": str(model_id),
-                "to_model_id": str(migration_request.to_model_id),
-                "tenant_id": str(user.tenant_id),
-                "migration_id": str(result.migration_id),
-                "migrated_count": result.migrated_count,
-                "failed_count": result.failed_count,
-                "duration": result.duration,
-                "success": result.success,
-                "warnings": result.warnings,
-            },
-        )
-
-        # Audit log migration (always, even if 0 entities migrated)
-        try:
-            audit_service = container.audit_service()
-            completion_model_repo = container.completion_model_repo2()
-            from_model = await completion_model_repo.one(model_id=model_id)
-            await audit_service.log_async(
-                tenant_id=user.tenant_id,
-                actor_id=user.id,
-                action=ActionType.COMPLETION_MODEL_MIGRATED,
-                entity_type=EntityType.COMPLETION_MODEL,
-                entity_id=model_id,
-                description=f"Migrated model usage from {from_model.name} to {migration_request.to_model_id} ({result.migrated_count} entities)",
-                metadata=AuditMetadata.standard(
-                    actor=user,
-                    target=from_model,
-                    changes={
-                        "from_model_id": str(model_id),
-                        "to_model_id": str(migration_request.to_model_id),
-                        "migrated_count": result.migrated_count,
-                        "failed_count": result.failed_count,
-                        "duration": result.duration,
-                        "details": result.details,
-                        "warnings": result.warnings,
-                    },
-                ),
-            )
-        except Exception as audit_err:
-            logger.warning(f"Failed to create audit log for migration: {audit_err}")
-
-        return result
-
-    except Exception as e:
-        logger.error(
-            "Error in migrate_model_usage endpoint",
-            extra={
-                "from_model_id": str(model_id),
-                "to_model_id": str(migration_request.to_model_id),
-                "tenant_id": str(user.tenant_id),
-                "user_id": str(user.id),
-                "entity_types": migration_request.entity_types,
-                "error": str(e),
-                "error_type": type(e).__name__,
-            },
-            exc_info=True,
-        )
-        # Re-raise to let FastAPI handle the error response
-        raise
+    return result
 
 
 @router.get(
@@ -437,27 +301,10 @@ async def get_all_models_usage_summary(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> list[ModelUsageSummary]:
-    """Get usage summary for all models (optimized with pre-aggregation)"""
+    """Get usage summary for all models (optimized with pre-aggregation)."""
     validate_permission(user, Permission.ADMIN)
-    try:
-        service = container.completion_model_usage_service()
-        return await service.get_all_models_usage_summary(user.tenant_id)
-    except Exception as e:
-        import logging
-
-        logger = logging.getLogger(__name__)
-        logger.error(
-            "Error in get_all_models_usage_summary endpoint",
-            extra={
-                "tenant_id": str(user.tenant_id),
-                "user_id": str(user.id),
-                "error": str(e),
-                "error_type": type(e).__name__,
-            },
-            exc_info=True,
-        )
-        # Re-raise to let FastAPI handle the error response
-        raise
+    service = container.completion_model_usage_service()
+    return await service.get_all_models_usage_summary(user.tenant_id)
 
 
 @router.get(
