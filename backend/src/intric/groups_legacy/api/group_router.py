@@ -135,7 +135,7 @@ async def update_group(
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.COLLECTION_UPDATED,
         entity_type=EntityType.COLLECTION,
         entity_id=collection_updated.id,
@@ -195,7 +195,7 @@ async def delete_group_by_id(
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.COLLECTION_DELETED,
         entity_type=EntityType.COLLECTION,
         entity_id=id,
@@ -285,7 +285,7 @@ async def add_info_blobs(
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.FILE_UPLOADED,
         entity_type=EntityType.FILE,
         entity_id=id,  # Group ID
@@ -376,7 +376,7 @@ async def upload_file(
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.FILE_UPLOADED,
         entity_type=EntityType.FILE,
         entity_id=id,  # Use group ID as entity

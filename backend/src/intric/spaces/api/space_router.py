@@ -118,7 +118,7 @@ async def create_space(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.SPACE_CREATED,
         entity_type=EntityType.SPACE,
         entity_id=space_id,
@@ -291,7 +291,7 @@ async def update_space(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.SPACE_UPDATED,
         entity_type=EntityType.SPACE,
         entity_id=id,
@@ -348,7 +348,7 @@ async def delete_space(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.SPACE_DELETED,
         entity_type=EntityType.SPACE,
         entity_id=id,
@@ -444,7 +444,7 @@ async def create_space_assistant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.ASSISTANT_CREATED,
         entity_type=EntityType.ASSISTANT,
         entity_id=assistant.id,
@@ -490,7 +490,7 @@ async def create_group_chat(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.GROUP_CHAT_CREATED,
         entity_type=EntityType.GROUP_CHAT,
         entity_id=group_chat.id,
@@ -530,7 +530,7 @@ async def create_app(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.APP_CREATED,
         entity_type=EntityType.APP,
         entity_id=app.id,
@@ -630,7 +630,7 @@ async def create_space_groups(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.COLLECTION_CREATED,
         entity_type=EntityType.COLLECTION,
         entity_id=created_collection.id,
@@ -721,7 +721,7 @@ async def create_space_websites(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.WEBSITE_CREATED,
         entity_type=EntityType.WEBSITE,
         entity_id=created_website.id,
@@ -783,7 +783,7 @@ async def create_space_integration_knowledge(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.INTEGRATION_KNOWLEDGE_CREATED,
         entity_type=EntityType.INTEGRATION_KNOWLEDGE,
         entity_id=knowledge.id,
@@ -876,7 +876,7 @@ async def create_space_integration_knowledge_batch(
 
             await audit_service.log_async(
                 tenant_id=user.tenant_id,
-                actor_id=user.id,
+                user=user,
                 action=ActionType.INTEGRATION_KNOWLEDGE_CREATED,
                 entity_type=EntityType.INTEGRATION_KNOWLEDGE,
                 entity_id=knowledge.id,
@@ -942,7 +942,7 @@ async def delete_space_integration_knowledge(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.INTEGRATION_KNOWLEDGE_DELETED,
         entity_type=EntityType.INTEGRATION_KNOWLEDGE,
         entity_id=integration_knowledge_id,
@@ -1038,7 +1038,7 @@ async def trigger_integration_full_sync(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.INTEGRATION_KNOWLEDGE_SYNCED,
         entity_type=EntityType.INTEGRATION_KNOWLEDGE,
         entity_id=integration_knowledge_id,
@@ -1100,7 +1100,7 @@ async def add_space_member(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.SPACE_MEMBER_ADDED,
         entity_type=EntityType.SPACE,
         entity_id=id,
@@ -1179,7 +1179,7 @@ async def change_role_of_member(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.ROLE_MODIFIED,
         entity_type=EntityType.SPACE,
         entity_id=id,
@@ -1246,7 +1246,7 @@ async def remove_space_member(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.SPACE_MEMBER_REMOVED,
         entity_type=EntityType.SPACE,
         entity_id=id,
@@ -1324,7 +1324,7 @@ async def add_space_group_member(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.SPACE_MEMBER_ADDED,
         entity_type=EntityType.SPACE,
         entity_id=id,
@@ -1390,7 +1390,7 @@ async def change_group_member_role(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.ROLE_MODIFIED,
         entity_type=EntityType.SPACE,
         entity_id=id,
@@ -1452,7 +1452,7 @@ async def remove_space_group_member(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.SPACE_MEMBER_REMOVED,
         entity_type=EntityType.SPACE,
         entity_id=id,

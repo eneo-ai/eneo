@@ -652,7 +652,7 @@ async def approve_tools(
         audit_service = container.audit_service()
         await audit_service.log_async(
             tenant_id=current_user.tenant_id,
-            actor_id=current_user.id,
+            user=current_user,
             action=ActionType.TOOL_APPROVAL_SUBMITTED,
             entity_type=entity_type,
             entity_id=entity_id,

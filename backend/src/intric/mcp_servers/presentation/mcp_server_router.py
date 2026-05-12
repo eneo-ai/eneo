@@ -111,7 +111,7 @@ async def enable_mcp_for_tenant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_ENABLED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=settings.id,
@@ -170,7 +170,7 @@ async def disable_mcp_for_tenant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_DISABLED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=mcp_server_id,
@@ -210,7 +210,7 @@ async def update_tenant_tool_enabled(
     )
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=action,
         entity_type=EntityType.MCP_SERVER_TOOL,
         entity_id=tool.id,
@@ -299,7 +299,7 @@ async def create_mcp_server(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_CREATED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=result.server.id,
@@ -398,7 +398,7 @@ async def update_mcp_server(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_UPDATED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=mcp_server.id,
@@ -431,7 +431,7 @@ async def delete_mcp_server(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_DELETED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=id,
@@ -540,7 +540,7 @@ async def approve_tool_changes(
     mcp_server = await service.get_mcp_server(id)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_UPDATED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=id,
@@ -585,7 +585,7 @@ async def reject_tool_changes(
     mcp_server = await service.get_mcp_server(id)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_UPDATED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=id,
@@ -624,7 +624,7 @@ async def approve_all_tool_changes(
     mcp_server = await service.get_mcp_server(id)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_UPDATED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=id,
@@ -668,7 +668,7 @@ async def update_tool_default_enabled(
     )
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=action,
         entity_type=EntityType.MCP_SERVER_TOOL,
         entity_id=tool.id,

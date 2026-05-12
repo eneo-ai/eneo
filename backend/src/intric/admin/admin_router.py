@@ -378,7 +378,7 @@ async def register_user(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.USER_CREATED,
         entity_type=EntityType.USER,
         entity_id=user.id,
@@ -573,7 +573,7 @@ async def update_user(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.USER_UPDATED,
         entity_type=EntityType.USER,
         entity_id=user_updated.id,
@@ -657,7 +657,7 @@ async def delete_user(username: str, container: AdminContainer):
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.USER_DELETED,
         entity_type=EntityType.USER,
         entity_id=user_to_delete.id,
@@ -723,7 +723,7 @@ async def deactivate_user(username: str, container: AdminContainer):
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.USER_UPDATED,  # Deactivation is a state update
         entity_type=EntityType.USER,
         entity_id=user.id,
@@ -789,7 +789,7 @@ async def reactivate_user(username: str, container: AdminContainer):
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.USER_UPDATED,  # Reactivation is a state update
         entity_type=EntityType.USER,
         entity_id=user.id,
@@ -916,7 +916,7 @@ async def update_privacy_policy(url: PrivacyPolicy, container: AdminContainer):
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.TENANT_SETTINGS_UPDATED,
         entity_type=EntityType.TENANT_SETTINGS,
         entity_id=user.tenant_id,
@@ -1174,7 +1174,7 @@ async def update_api_key_policy(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.TENANT_POLICY_UPDATED,
         entity_type=EntityType.TENANT_SETTINGS,
         entity_id=user.tenant_id,
@@ -1278,7 +1278,7 @@ async def update_api_key_notification_policy(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.TENANT_POLICY_UPDATED,
         entity_type=EntityType.TENANT_SETTINGS,
         entity_id=user.tenant_id,

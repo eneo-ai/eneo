@@ -78,7 +78,7 @@ class ApiKeyScopeRevoker:
             if self.audit_service is not None:
                 await self.audit_service.log_async(
                     tenant_id=self.user.tenant_id,
-                    actor_id=self.user.id,
+                    user=self.user,
                     action=ActionType.API_KEY_REVOKED,
                     entity_type=EntityType.API_KEY,
                     entity_id=updated_key.id,

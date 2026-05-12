@@ -60,7 +60,7 @@ async def upload_file(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.FILE_UPLOADED,
         entity_type=EntityType.FILE,
         entity_id=file.id,
@@ -134,7 +134,7 @@ async def delete_file(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.FILE_DELETED,
         entity_type=EntityType.FILE,
         entity_id=id,

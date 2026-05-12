@@ -93,7 +93,7 @@ async def create_role(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.ROLE_CREATED,
         entity_type=EntityType.ROLE,
         entity_id=created_role.id,
@@ -142,7 +142,7 @@ async def update_role(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.ROLE_MODIFIED,
         entity_type=EntityType.ROLE,
         entity_id=role_id,
@@ -180,7 +180,7 @@ async def delete_role_by_id(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.ROLE_DELETED,
         entity_type=EntityType.ROLE,
         entity_id=role_id,
@@ -217,7 +217,7 @@ async def reset_role_to_default(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.ROLE_MODIFIED,
         entity_type=EntityType.ROLE,
         entity_id=role_id,
@@ -264,7 +264,7 @@ async def set_default_role(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.TENANT_SETTINGS_UPDATED,
         entity_type=EntityType.TENANT_SETTINGS,
         entity_id=user.tenant_id,
