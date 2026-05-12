@@ -9,7 +9,38 @@ import { m } from "$lib/paraglide/messages";
 import { toast } from "$lib/components/toast";
 export { getJobManager, initJobManager, jobCompletionEvents };
 
-// Global store for job completion events (can be subscribed to from any component)
+type JobStatusLike = { status: string };
+
+const activeJobStatuses = new Set(["in progress", "queued"]);
+const terminalJobStatuses = new Set(["complete", "failed"]);
+
+function isActiveJob(status: string): boolean {
+  return activeJobStatuses.has(status);
+}
+
+function isTerminalJob(status: string): boolean {
+  return terminalJobStatuses.has(status);
+}
+
+export function shouldRefreshAfterJobUpdate(
+  previousJobs: ReadonlyMap<string, JobStatusLike>,
+  updatedJobs: ReadonlyMap<string, JobStatusLike>
+): boolean {
+  for (const [id, oldJob] of previousJobs) {
+    if (!isActiveJob(oldJob.status)) {
+      continue;
+    }
+
+    const newJob = updatedJobs.get(id);
+    if (!newJob || isTerminalJob(newJob.status)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Historical name; emitted when a job reaches a terminal state so dependent views refresh.
 const jobCompletionEvents = writable<{ timestamp: number; jobId: string } | null>(null);
 
 const [getJobManager, setJobManager] =
@@ -71,29 +102,12 @@ function createJobManager(data: { intric: Intric }) {
         .map((job) => [job.id, job])
     );
 
-    // Detect if any jobs changed from active to complete
-    let jobsCompleted = false;
-    for (const [id, newJob] of updatedJobs) {
-      const oldJob = currentJobs.get(id);
-      if (
-        oldJob &&
-        (oldJob.status === "in progress" || oldJob.status === "queued") &&
-        newJob.status === "complete"
-      ) {
-        jobsCompleted = true;
-        break;
-      }
-    }
-
-    // Also check if jobs were removed (size decreased)
-    const jobsRemoved = updatedJobs.size < currentJobs.size;
-
-    if (jobsCompleted || jobsRemoved) {
+    if (shouldRefreshAfterJobUpdate(currentJobs, updatedJobs)) {
       // Some jobs have finished: refresh related data
       if (browser) {
         // Invalidate data dependencies to trigger SvelteKit page data refresh
         invalidate("blobs:list");
-        // Emit job completion event that components can subscribe to
+        // Emit terminal job event that components can subscribe to
         jobCompletionEvents.set({ timestamp: Date.now(), jobId: "any" });
       }
     }

@@ -30,11 +30,9 @@
     refreshCurrentSpace
   } = getSpacesManager();
 
-  // Listen for job completion events and refresh knowledge
   $effect(() => {
     const event = $jobCompletionEvents;
     if (event) {
-      console.log("Knowledge page: Job completion event received, refreshing knowledge");
       refreshCurrentSpace("knowledge");
     }
   });

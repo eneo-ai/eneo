@@ -1,6 +1,6 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.crawler.crawler import Crawl
+from intric.crawler.crawler import Crawl, CrawlDiagnostics
 from intric.crawler.parse_html import CrawledPage
 from intric.websites.crawl_dependencies.crawl_models import CrawlTask
 from intric.websites.domain.crawl_outcome import (
@@ -17,6 +17,23 @@ from intric.websites.domain.crawl_outcome import (
 )
 from intric.websites.domain.crawl_run import CrawlType
 from intric.worker import crawl_tasks
+
+
+def test_terminal_zero_output_message_includes_scrapy_diagnostics() -> None:
+    diagnostics = CrawlDiagnostics.from_scrapy_stats(
+        {
+            "downloader/request_count": 1,
+            "downloader/exception_type_count/twisted.internet.error.DNSLookupError": 1,
+        }
+    )
+
+    assert crawl_tasks._terminal_zero_output_message(
+        CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED,
+        diagnostics,
+    ) == (
+        "Crawl produced no pages: downloader exceptions: "
+        "twisted.internet.error.DNSLookupError=1"
+    )
 
 
 @dataclass
@@ -82,6 +99,14 @@ class _FakeOutcomeSession:
         self.statements.append(stmt)
 
 
+def _compiled_params(stmt: object) -> dict[str, object]:
+    compile_stmt = getattr(stmt, "compile", None)
+    assert callable(compile_stmt)
+    params = compile_stmt().params
+    assert isinstance(params, Mapping)
+    return dict(params)
+
+
 class _FakeRedis:
     async def get(self, _key: str) -> None:
         return None
@@ -120,6 +145,7 @@ class _FakeCrawler:
     pages: tuple[CrawledPage, ...] = ()
     source_retained_urls: frozenset[str] = frozenset()
     captured_kwargs: dict[str, object] | None = None
+    diagnostics: CrawlDiagnostics = field(default_factory=CrawlDiagnostics)
 
     @asynccontextmanager
     async def crawl(self, **kwargs: object) -> AsyncIterator[Crawl]:
@@ -131,6 +157,7 @@ class _FakeCrawler:
             termination_reason=self.termination_reason,
             pages_count=len(self.pages),
             source_retained_urls=self.source_retained_urls,
+            diagnostics=self.diagnostics,
         )
 
 
@@ -252,6 +279,16 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
         last_source_verified_at=None,
     )
     audit_service = _FakeAuditService()
+    diagnostics = CrawlDiagnostics.from_scrapy_stats(
+        {
+            "downloader/request_count": 1,
+            "downloader/exception_type_count/twisted.internet.error.DNSLookupError": 1,
+        }
+    )
+    expected_job_message = (
+        f"{expected_message}: downloader exceptions: "
+        "twisted.internet.error.DNSLookupError=1"
+    )
     container = _FakeContainer(
         tenant=tenant,
         user=user,
@@ -259,6 +296,7 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
         crawler=_FakeCrawler(
             is_partial=is_partial,
             termination_reason=termination_reason,
+            diagnostics=diagnostics,
         ),
     )
     operations: list[str] = []
@@ -335,6 +373,13 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
     assert "last_crawled_at" not in emitted_sql
     assert "last_source_verified_at" not in emitted_sql
     assert "websites.tenant_id" in emitted_sql
+    terminal_job_messages = [
+        _compiled_params(stmt).get("result_location")
+        for session in recovery_sessions
+        for stmt in session.executed
+        if "jobs" in str(stmt).lower() and "result_location" in str(stmt)
+    ]
+    assert terminal_job_messages == [expected_job_message]
     assert audit_service.metadata is not None
     assert audit_service.metadata["crawl_stats"] == {
         "pages_crawled": 0,

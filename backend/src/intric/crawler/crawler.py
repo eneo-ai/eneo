@@ -3,12 +3,23 @@ import json
 import logging
 import os
 import threading
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
-from typing import Any, Callable, Coroutine, Iterable, Optional, cast
+from typing import (
+    Any,
+    Callable,
+    Coroutine,
+    Iterable,
+    Optional,
+    Protocol,
+    Self,
+    cast,
+    runtime_checkable,
+)
 
 import crochet
 from scrapy.crawler import Crawler as ScrapyCrawler
@@ -30,6 +41,20 @@ from intric.websites.domain.crawl_outcome import CrawlTerminationReason
 from intric.websites.domain.crawl_run import CrawlType
 
 logger = logging.getLogger(__name__)
+
+
+class _StatsCollector(Protocol):
+    def get_stats(self) -> Mapping[object, object]: ...
+
+
+class _CrawlerWithStats(Protocol):
+    stats: _StatsCollector
+
+
+@runtime_checkable
+class _DiagnosticsOwner(Protocol):
+    @property
+    def diagnostics(self) -> "CrawlDiagnostics": ...
 
 
 class CrawlShutdownError(Exception):
@@ -65,6 +90,7 @@ class CrawlManager:
         self._crawl_deferred: Any = None  # Deferred from Scrapy/Twisted
         self._runner: CrawlerRunner | None = None
         self._completion_event = threading.Event()
+        self._stats_snapshot: dict[str, object] = {}
 
     @crochet.run_in_reactor
     def start_crawl(
@@ -80,8 +106,8 @@ class CrawlManager:
     ) -> Any:
         """Start a crawl and return the EventualResult.
 
-        Unlike the previous approach that lost the crawler reference,
-        this method stores it so we can stop the crawler on timeout.
+        The active crawler reference is retained so timeout handling can stop
+        the crawl and wait for feed exporters to flush before reading output.
 
         Returns:
             EventualResult wrapping the crawl Deferred
@@ -102,12 +128,13 @@ class CrawlManager:
             self._crawler, **spider_kwargs
         )
 
-        # Add callback to signal completion
         def on_complete(_: Any) -> None:
+            self._capture_stats_snapshot()
             logger.debug("Crawl deferred completed")
             self._completion_event.set()
 
         def on_error(failure: Failure) -> None:
+            self._capture_stats_snapshot()
             logger.warning(f"Crawl deferred errored: {failure}")
             self._completion_event.set()
 
@@ -115,6 +142,28 @@ class CrawlManager:
         self._crawl_deferred.addErrback(on_error)
 
         return self._crawl_deferred
+
+    def _capture_stats_snapshot(self) -> None:
+        if self._crawler is None:
+            self._stats_snapshot = {}
+            return
+
+        try:
+            crawler_with_stats = cast(_CrawlerWithStats, self._crawler)
+            stats = crawler_with_stats.stats.get_stats()
+        except Exception as exc:
+            logger.warning(
+                "Failed to capture Scrapy crawl stats",
+                extra={"error": str(exc)},
+            )
+            self._stats_snapshot = {}
+            return
+
+        self._stats_snapshot = {str(key): value for key, value in stats.items()}
+
+    @property
+    def diagnostics(self) -> "CrawlDiagnostics":
+        return CrawlDiagnostics.from_scrapy_stats(self._stats_snapshot)
 
     @crochet.run_in_reactor
     def stop_crawl(self, reason: str = "timeout") -> None:
@@ -165,6 +214,168 @@ class CrawlManager:
         return completed
 
 
+def _empty_int_counts() -> dict[int, int]:
+    return {}
+
+
+def _empty_string_counts() -> dict[str, int]:
+    return {}
+
+
+@dataclass(frozen=True)
+class CrawlDiagnostics:
+    request_count: int = 0
+    response_count: int = 0
+    item_scraped_count: int = 0
+    file_count: int = 0
+    robotstxt_forbidden_count: int = 0
+    httperror_ignored_count: int = 0
+    response_status_counts: dict[int, int] = field(default_factory=_empty_int_counts)
+    robotstxt_status_counts: dict[int, int] = field(default_factory=_empty_int_counts)
+    downloader_exception_counts: dict[str, int] = field(
+        default_factory=_empty_string_counts
+    )
+    finish_reason: str | None = None
+    elapsed_time_seconds: float | None = None
+
+    @classmethod
+    def from_scrapy_stats(cls, stats: Mapping[object, object] | object) -> Self:
+        if not isinstance(stats, Mapping):
+            return cls()
+        stats_mapping = cast(Mapping[object, object], stats)
+        typed_stats: dict[object, object] = dict(stats_mapping.items())
+
+        return cls(
+            request_count=_int_stat(typed_stats, "downloader/request_count"),
+            response_count=_int_stat(typed_stats, "downloader/response_count"),
+            item_scraped_count=_int_stat(typed_stats, "item_scraped_count"),
+            file_count=_int_stat(typed_stats, "file_count"),
+            robotstxt_forbidden_count=_int_stat(typed_stats, "robotstxt/forbidden"),
+            httperror_ignored_count=_int_stat(
+                typed_stats, "httperror/response_ignored_count"
+            ),
+            response_status_counts=_status_counts(
+                typed_stats, "downloader/response_status_count/"
+            ),
+            robotstxt_status_counts=_status_counts(
+                typed_stats, "robotstxt/response_status_count/"
+            ),
+            downloader_exception_counts=_string_counts(
+                typed_stats, "downloader/exception_type_count/"
+            ),
+            finish_reason=_str_stat(typed_stats, "finish_reason"),
+            elapsed_time_seconds=_float_stat(typed_stats, "elapsed_time_seconds"),
+        )
+
+    def describe_empty_output(self) -> str:
+        if self.request_count == 0:
+            return "Scrapy did not issue any requests; check crawler startup and runner setup"
+
+        if self.robotstxt_forbidden_count > 0:
+            detail = f"robots.txt blocked {self.robotstxt_forbidden_count} request(s)"
+            if self.robotstxt_status_counts:
+                detail += (
+                    f"; robots responses: {_format_int_counts(self.robotstxt_status_counts)}"
+                )
+            return detail
+
+        if self.downloader_exception_counts:
+            return (
+                "downloader exceptions: "
+                f"{_format_string_counts(self.downloader_exception_counts)}"
+            )
+
+        if self.item_scraped_count > 0:
+            return (
+                f"Scrapy scraped {self.item_scraped_count} item(s), but no page items "
+                "reached the page feed; check FEEDS item_classes and item pipelines"
+            )
+
+        if self.response_status_counts:
+            detail = (
+                "responses received but no page items scraped; HTTP statuses: "
+                f"{_format_int_counts(self.response_status_counts)}"
+            )
+            if self.httperror_ignored_count > 0:
+                detail += f"; httperror ignored={self.httperror_ignored_count}"
+            if self.finish_reason:
+                detail += f"; finish_reason={self.finish_reason}"
+            return detail
+
+        detail = f"requests={self.request_count}, responses={self.response_count}"
+        if self.finish_reason:
+            detail += f", finish_reason={self.finish_reason}"
+        return detail
+
+    def to_log_fields(self) -> dict[str, object]:
+        return {
+            "request_count": self.request_count,
+            "response_count": self.response_count,
+            "item_scraped_count": self.item_scraped_count,
+            "file_count": self.file_count,
+            "robotstxt_forbidden_count": self.robotstxt_forbidden_count,
+            "httperror_ignored_count": self.httperror_ignored_count,
+            "response_status_counts": {
+                str(status): count
+                for status, count in sorted(self.response_status_counts.items())
+            },
+            "robotstxt_status_counts": {
+                str(status): count
+                for status, count in sorted(self.robotstxt_status_counts.items())
+            },
+            "downloader_exception_counts": self.downloader_exception_counts,
+            "finish_reason": self.finish_reason,
+            "elapsed_time_seconds": self.elapsed_time_seconds,
+        }
+
+
+def _int_stat(stats: dict[object, object], key: str) -> int:
+    value = stats.get(key)
+    return value if isinstance(value, int) else 0
+
+
+def _float_stat(stats: dict[object, object], key: str) -> float | None:
+    value = stats.get(key)
+    if isinstance(value, int | float):
+        return float(value)
+    return None
+
+
+def _str_stat(stats: dict[object, object], key: str) -> str | None:
+    value = stats.get(key)
+    return value if isinstance(value, str) else None
+
+
+def _status_counts(stats: dict[object, object], prefix: str) -> dict[int, int]:
+    counts: dict[int, int] = {}
+    for key, value in stats.items():
+        if not isinstance(key, str) or not key.startswith(prefix):
+            continue
+        if not isinstance(value, int):
+            continue
+        status_text = key.removeprefix(prefix)
+        if not status_text.isdigit():
+            continue
+        counts[int(status_text)] = value
+    return dict(sorted(counts.items()))
+
+
+def _string_counts(stats: dict[object, object], prefix: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for key, value in stats.items():
+        if isinstance(key, str) and key.startswith(prefix) and isinstance(value, int):
+            counts[key.removeprefix(prefix)] = value
+    return dict(sorted(counts.items()))
+
+
+def _format_int_counts(counts: dict[int, int]) -> str:
+    return ", ".join(f"{key}={value}" for key, value in sorted(counts.items()))
+
+
+def _format_string_counts(counts: dict[str, int]) -> str:
+    return ", ".join(f"{key}={value}" for key, value in sorted(counts.items()))
+
+
 @dataclass(frozen=True)
 class Crawl:
     """Result of a web crawl operation.
@@ -184,6 +395,7 @@ class Crawl:
     termination_reason: CrawlTerminationReason = "completed"
     pages_count: int = 0
     source_retained_urls: frozenset[str] = frozenset()
+    diagnostics: CrawlDiagnostics = field(default_factory=CrawlDiagnostics)
 
     @property
     def source_retained_count(self) -> int:
@@ -322,8 +534,14 @@ def _read_crawl_outputs(
     )
 
 
+def _crawl_manager_diagnostics(manager: object) -> CrawlDiagnostics:
+    if isinstance(manager, _DiagnosticsOwner):
+        return manager.diagnostics
+    return CrawlDiagnostics()
+
+
 # Type alias for the async crawl functions used by _crawl()
-_CrawlFunc = Callable[..., Coroutine[Any, Any, None]]
+_CrawlFunc = Callable[..., Coroutine[Any, Any, CrawlDiagnostics]]
 
 
 class Crawler:
@@ -420,7 +638,7 @@ class Crawler:
         max_length: int,
         heartbeat_callback: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
         heartbeat_interval: float = 60.0,
-    ) -> None:
+    ) -> CrawlDiagnostics:
         """Async wrapper with tenant-aware timeout, graceful shutdown, and heartbeat.
 
         Uses CrawlManager to properly handle timeout scenarios:
@@ -459,7 +677,6 @@ class Crawler:
             )
 
             try:
-                # Block until crawl completes or timeout
                 eventual_result.wait(timeout=max_length)
             except crochet.TimeoutError:
                 timed_out = True
@@ -486,7 +703,6 @@ class Crawler:
                         await heartbeat_callback()
                 except Exception as e:
                     logger.warning(f"Heartbeat error during crawl: {e}")
-                # Wait for interval or until crawl completes
                 try:
                     await asyncio.wait_for(
                         crawl_done.wait(), timeout=heartbeat_interval
@@ -518,7 +734,10 @@ class Crawler:
             raise CrawlTimeoutError(
                 url=url,
                 timeout_seconds=max_length,
+                diagnostics=_crawl_manager_diagnostics(manager),
             )
+
+        return _crawl_manager_diagnostics(manager)
 
     @staticmethod
     async def _run_sitemap_crawl_with_timeout(
@@ -536,7 +755,7 @@ class Crawler:
         max_length: int,
         heartbeat_callback: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
         heartbeat_interval: float = 60.0,
-    ) -> None:
+    ) -> CrawlDiagnostics:
         """Async wrapper with tenant-aware timeout, graceful shutdown, and heartbeat for sitemap.
 
         Uses CrawlManager to properly handle timeout scenarios:
@@ -573,7 +792,6 @@ class Crawler:
             )
 
             try:
-                # Block until crawl completes or timeout
                 eventual_result.wait(timeout=max_length)
             except crochet.TimeoutError:
                 timed_out = True
@@ -631,7 +849,10 @@ class Crawler:
             raise CrawlTimeoutError(
                 url=sitemap_url,
                 timeout_seconds=max_length,
+                diagnostics=_crawl_manager_diagnostics(manager),
             )
+
+        return _crawl_manager_diagnostics(manager)
 
     @asynccontextmanager
     async def _crawl(
@@ -668,13 +889,14 @@ class Crawler:
         is_partial = False
         termination_reason: CrawlTerminationReason = "completed"
         crawl_outputs: _CrawlOutputSummary | None = None
+        crawl_diagnostics = CrawlDiagnostics()
 
         try:
             crawl_kwargs = dict(kwargs)
             if "sitemap_url" in crawl_kwargs:
                 crawl_kwargs["source_retained_filepath"] = source_retained_file_path
 
-            await func(
+            crawl_diagnostics = await func(
                 filepath=tmp_file_path,
                 files_dir=tmp_dir,
                 max_length=max_length,
@@ -697,6 +919,8 @@ class Crawler:
             )
 
             timeout_err.pages_collected = crawl_outputs.pages_count
+            if timeout_err.diagnostics is not None:
+                crawl_diagnostics = timeout_err.diagnostics
 
         try:
             if crawl_outputs is None:
@@ -722,6 +946,7 @@ class Crawler:
                 termination_reason=termination_reason,
                 pages_count=crawl_outputs.pages_count,
                 source_retained_urls=crawl_outputs.source_retained_urls,
+                diagnostics=crawl_diagnostics,
             )
 
         finally:

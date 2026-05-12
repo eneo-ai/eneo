@@ -1,5 +1,5 @@
 from enum import Enum, unique
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from intric.files.text import (
     CorruptFileError,
@@ -7,6 +7,9 @@ from intric.files.text import (
     ExtractionError,
     UnsupportedFormatError,
 )
+
+if TYPE_CHECKING:
+    from intric.crawler.crawler import CrawlDiagnostics
 
 
 @unique
@@ -268,10 +271,12 @@ class CrawlTimeoutError(CrawlerException):
         timeout_seconds: int,
         pages_collected: int = 0,
         message: str | None = None,
+        diagnostics: "CrawlDiagnostics | None" = None,
     ):
         self.url = url
         self.timeout_seconds = timeout_seconds
         self.pages_collected = pages_collected
+        self.diagnostics = diagnostics
         msg = message or f"Crawl timeout: exceeded {timeout_seconds}s for {url}"
         if pages_collected > 0:
             msg += f" ({pages_collected} pages collected)"

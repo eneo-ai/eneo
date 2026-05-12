@@ -15,7 +15,7 @@ from arq import Retry
 from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.crawler.crawler import CrawlShutdownError
+from intric.crawler.crawler import CrawlDiagnostics, CrawlShutdownError
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.main.config import get_settings
 from intric.main.container.container import Container
@@ -264,10 +264,22 @@ def _crawl_type_for_outcome(crawl_type: CrawlType) -> CrawlOutcomeCrawlType:
     return "crawl"
 
 
-def _terminal_zero_output_message(outcome_code: CrawlOutcomeCode | None) -> str | None:
+def _terminal_zero_output_message(
+    outcome_code: CrawlOutcomeCode | None,
+    diagnostics: CrawlDiagnostics | None = None,
+) -> str | None:
     if outcome_code is None:
         return None
-    return _TERMINAL_ZERO_OUTPUT_MESSAGES.get(outcome_code)
+    base_message = _TERMINAL_ZERO_OUTPUT_MESSAGES.get(outcome_code)
+    if base_message is None:
+        return None
+    if diagnostics is None:
+        return base_message
+
+    diagnostic_detail = diagnostics.describe_empty_output()
+    if not diagnostic_detail:
+        return base_message
+    return f"{base_message}: {diagnostic_detail}"
 
 
 async def _update_website_circuit_breaker(
@@ -1407,7 +1419,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     files_failed=0,
                 )
                 terminal_failure_message = _terminal_zero_output_message(
-                    crawl_output_outcome_code
+                    crawl_output_outcome_code,
+                    crawl.diagnostics,
                 )
                 if terminal_failure_message is not None:
                     assert crawl_output_outcome_code is not None
@@ -1427,6 +1440,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             "crawl_type": params.crawl_type.value,
                             "outcome_code": terminal_outcome_code.value,
                             "termination_reason": crawl_termination_reason,
+                            "scrapy_diagnostics": crawl.diagnostics.to_log_fields(),
                         },
                     )
 
