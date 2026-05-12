@@ -21,8 +21,10 @@ from intric.main.models import (
 )
 from intric.websites.crawl_dependencies.crawl_models import (
     CrawlOutcomePublic,
+    CrawlRunProcessingSummary,
     CrawlRunSparse,
     derive_crawl_outcome,
+    derive_crawl_processing_summary,
 )
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.websites.domain.crawl_run import CrawlRun, CrawlType
@@ -78,15 +80,27 @@ class CrawlRunPublic(BaseResponse):
     pages_failed: Optional[int]
     files_failed: Optional[int]
     pages_source_retained: Optional[int] = None
+    pages_hash_retained: Optional[int] = None
+    files_hash_retained: Optional[int] = None
     failure_summary: Optional[dict[str, int]] = None
     outcome_code: Optional[CrawlOutcomeCode] = None
     status: Status
     result_location: Optional[str]
     finished_at: Optional[datetime]
+    processing_summary: Optional[CrawlRunProcessingSummary] = None
     outcome: Optional[CrawlOutcomePublic] = None
 
     @classmethod
     def from_domain(cls, crawl_run: CrawlRun):
+        processing_summary = derive_crawl_processing_summary(
+            pages_crawled=crawl_run.pages_crawled,
+            files_downloaded=crawl_run.files_downloaded,
+            pages_failed=crawl_run.pages_failed,
+            files_failed=crawl_run.files_failed,
+            pages_source_retained=crawl_run.pages_source_retained,
+            pages_hash_retained=crawl_run.pages_hash_retained,
+            files_hash_retained=crawl_run.files_hash_retained,
+        )
         return cls(
             id=crawl_run.id,
             created_at=crawl_run.created_at,
@@ -96,11 +110,14 @@ class CrawlRunPublic(BaseResponse):
             pages_failed=crawl_run.pages_failed,
             files_failed=crawl_run.files_failed,
             pages_source_retained=crawl_run.pages_source_retained,
+            pages_hash_retained=crawl_run.pages_hash_retained,
+            files_hash_retained=crawl_run.files_hash_retained,
             failure_summary=crawl_run.failure_summary,
             outcome_code=crawl_run.outcome_code,
             status=crawl_run.status,
             result_location=crawl_run.result_location,
             finished_at=crawl_run.finished_at,
+            processing_summary=processing_summary,
             outcome=derive_crawl_outcome(
                 status=crawl_run.status,
                 result_location=crawl_run.result_location,
@@ -108,6 +125,9 @@ class CrawlRunPublic(BaseResponse):
                 pages_failed=crawl_run.pages_failed,
                 files_failed=crawl_run.files_failed,
                 pages_source_retained=crawl_run.pages_source_retained,
+                pages_hash_retained=crawl_run.pages_hash_retained,
+                files_hash_retained=crawl_run.files_hash_retained,
+                processing_summary=processing_summary,
                 outcome_code=crawl_run.outcome_code,
             ),
         )

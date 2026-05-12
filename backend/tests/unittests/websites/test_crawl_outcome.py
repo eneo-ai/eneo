@@ -5,6 +5,7 @@ from intric.websites.crawl_dependencies.crawl_models import (
     CrawlRunSparse,
     derive_crawl_outcome,
     derive_crawl_outcome_code,
+    derive_crawl_processing_summary,
 )
 from intric.websites.domain.crawl_outcome import (
     CrawlOutcomeCode,
@@ -83,6 +84,103 @@ def test_embedding_failure_summary_becomes_config_outcome():
     assert outcome.code == CrawlOutcomeCode.EMBEDDING_CONFIG_MISSING
     assert outcome.severity == CrawlOutcomeSeverity.WARNING
     assert outcome.affected_count == 2
+
+
+def test_processing_summary_partitions_indexed_hash_retained_and_failed_counts():
+    summary = derive_crawl_processing_summary(
+        pages_crawled=300,
+        files_downloaded=4,
+        pages_failed=0,
+        files_failed=1,
+        pages_source_retained=12,
+        pages_hash_retained=290,
+        files_hash_retained=1,
+    )
+
+    assert summary.pages_fetched == 300
+    assert summary.pages_indexed == 10
+    assert summary.pages_hash_retained == 290
+    assert summary.pages_source_retained == 12
+    assert summary.files_downloaded == 4
+    assert summary.files_indexed == 2
+    assert summary.files_hash_retained == 1
+    assert summary.files_failed == 1
+
+
+def test_processing_summary_logs_invalid_count_invariant(monkeypatch):
+    class CapturingLogger:
+        def __init__(self):
+            self.extra: dict[str, object] | None = None
+
+        def warning(self, _message: str, *, extra: dict[str, object]) -> None:
+            self.extra = extra
+
+    logger = CapturingLogger()
+    monkeypatch.setattr(crawl_models, "logger", logger)
+
+    summary = derive_crawl_processing_summary(
+        pages_crawled=2,
+        files_downloaded=0,
+        pages_failed=1,
+        files_failed=0,
+        pages_source_retained=0,
+        pages_hash_retained=2,
+        files_hash_retained=0,
+    )
+
+    assert summary.pages_indexed == 0
+    assert logger.extra == {
+        "metric_name": "crawler.processing_summary.invalid_count_invariant",
+        "metric_value": 1,
+        "resource_type": "pages",
+        "total": 2,
+        "hash_retained": 2,
+        "failed": 1,
+    }
+
+
+def test_completed_run_with_only_hash_retained_content_is_all_unchanged():
+    processing_summary = derive_crawl_processing_summary(
+        pages_crawled=3,
+        files_downloaded=1,
+        pages_failed=0,
+        files_failed=0,
+        pages_source_retained=0,
+        pages_hash_retained=3,
+        files_hash_retained=1,
+    )
+
+    outcome = derive_crawl_outcome(
+        status=Status.COMPLETE,
+        result_location=None,
+        failure_summary=None,
+        pages_failed=0,
+        files_failed=0,
+        pages_source_retained=0,
+        pages_hash_retained=3,
+        files_hash_retained=1,
+        processing_summary=processing_summary,
+    )
+
+    assert outcome is not None
+    assert outcome.code == CrawlOutcomeCode.CRAWL_ALL_UNCHANGED
+    assert outcome.severity == CrawlOutcomeSeverity.INFO
+    assert outcome.message_key == "crawl_outcome_all_unchanged"
+    assert outcome.affected_count == 4
+
+
+def test_completed_run_with_hash_retained_content_still_needs_summary_for_all_unchanged():
+    outcome_code = derive_crawl_outcome_code(
+        status=Status.COMPLETE,
+        result_location=None,
+        failure_summary=None,
+        pages_failed=0,
+        files_failed=0,
+        pages_hash_retained=3,
+        files_hash_retained=1,
+    )
+
+    assert outcome_code is None
 
 
 def test_failed_no_pages_result_location_becomes_typed_error():
@@ -310,6 +408,25 @@ def test_classify_source_retention_only():
             files_failed=0,
         )
         == CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY
+    )
+
+
+def test_classify_all_unchanged_crawl():
+    assert (
+        classify_crawl_outcome(
+            crawl_type="crawl",
+            is_partial=False,
+            termination_reason="completed",
+            pages_count=3,
+            files_count=1,
+            source_retained_count=0,
+            pages_hash_retained=3,
+            files_hash_retained=1,
+            failure_summary=None,
+            pages_failed=0,
+            files_failed=0,
+        )
+        == CrawlOutcomeCode.CRAWL_ALL_UNCHANGED
     )
 
 

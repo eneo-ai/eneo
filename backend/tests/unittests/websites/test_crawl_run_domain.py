@@ -15,6 +15,8 @@ def _crawl_run_record(
     *,
     outcome_code: str | None,
     pages_source_retained: int | None = None,
+    pages_hash_retained: int | None = None,
+    files_hash_retained: int | None = None,
 ):
     now = datetime.now(timezone.utc)
     return SimpleNamespace(
@@ -28,6 +30,8 @@ def _crawl_run_record(
         pages_failed=0,
         files_failed=0,
         pages_source_retained=pages_source_retained,
+        pages_hash_retained=pages_hash_retained,
+        files_hash_retained=files_hash_retained,
         job_id=uuid4(),
         job=SimpleNamespace(
             status=Status.FAILED.value,
@@ -71,12 +75,27 @@ def test_crawl_run_domain_maps_pages_source_retained():
     assert crawl_run.pages_source_retained == 7
 
 
+def test_crawl_run_domain_maps_hash_retained_counts():
+    crawl_run = CrawlRun.to_domain(
+        record=_crawl_run_record(
+            outcome_code=None,
+            pages_hash_retained=3,
+            files_hash_retained=1,
+        )
+    )
+
+    assert crawl_run.pages_hash_retained == 3
+    assert crawl_run.files_hash_retained == 1
+
+
 def test_crawl_run_create_defaults_pages_source_retained_to_none():
     website = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
 
     crawl_run = CrawlRun.create(website=website)
 
     assert crawl_run.pages_source_retained is None
+    assert crawl_run.pages_hash_retained is None
+    assert crawl_run.files_hash_retained is None
 
 
 def test_crawl_run_update_accepts_typed_outcome_code():
@@ -91,6 +110,8 @@ def test_crawl_run_update_accepts_typed_outcome_code():
         pages_failed=None,
         files_failed=None,
         pages_source_retained=None,
+        pages_hash_retained=None,
+        files_hash_retained=None,
         status=Status.QUEUED,
         result_location=None,
         finished_at=None,
@@ -116,6 +137,8 @@ def test_crawl_run_update_accepts_pages_source_retained():
         pages_failed=None,
         files_failed=None,
         pages_source_retained=None,
+        pages_hash_retained=None,
+        files_hash_retained=None,
         status=Status.QUEUED,
         result_location=None,
         finished_at=None,
@@ -127,6 +150,34 @@ def test_crawl_run_update_accepts_pages_source_retained():
     crawl_run.update(pages_source_retained=5)
 
     assert crawl_run.pages_source_retained == 5
+
+
+def test_crawl_run_update_accepts_hash_retained_counts():
+    crawl_run = CrawlRun(
+        id=uuid4(),
+        created_at=None,
+        updated_at=None,
+        website_id=uuid4(),
+        tenant_id=uuid4(),
+        pages_crawled=None,
+        files_downloaded=None,
+        pages_failed=None,
+        files_failed=None,
+        pages_source_retained=None,
+        pages_hash_retained=None,
+        files_hash_retained=None,
+        status=Status.QUEUED,
+        result_location=None,
+        finished_at=None,
+        job_id=None,
+        failure_summary=None,
+        outcome_code=None,
+    )
+
+    crawl_run.update(pages_hash_retained=4, files_hash_retained=2)
+
+    assert crawl_run.pages_hash_retained == 4
+    assert crawl_run.files_hash_retained == 2
 
 
 def test_presentation_crawl_run_public_exposes_pages_source_retained():
@@ -142,6 +193,8 @@ def test_presentation_crawl_run_public_exposes_pages_source_retained():
         pages_failed=0,
         files_failed=0,
         pages_source_retained=8,
+        pages_hash_retained=0,
+        files_hash_retained=0,
         status=Status.COMPLETE,
         result_location=None,
         finished_at=now,
@@ -155,6 +208,44 @@ def test_presentation_crawl_run_public_exposes_pages_source_retained():
     assert public.pages_source_retained == 8
     assert public.outcome is not None
     assert public.outcome.affected_count == 8
+
+
+def test_presentation_crawl_run_public_exposes_processing_summary():
+    now = datetime.now(timezone.utc)
+    crawl_run = CrawlRun(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        website_id=uuid4(),
+        tenant_id=uuid4(),
+        pages_crawled=300,
+        files_downloaded=4,
+        pages_failed=0,
+        files_failed=1,
+        pages_source_retained=12,
+        pages_hash_retained=290,
+        files_hash_retained=1,
+        status=Status.COMPLETE,
+        result_location=None,
+        finished_at=now,
+        job_id=uuid4(),
+        failure_summary=None,
+        outcome_code=None,
+    )
+
+    public = PresentationCrawlRunPublic.from_domain(crawl_run)
+
+    assert public.pages_hash_retained == 290
+    assert public.files_hash_retained == 1
+    assert public.processing_summary is not None
+    assert public.processing_summary.pages_fetched == 300
+    assert public.processing_summary.pages_indexed == 10
+    assert public.processing_summary.pages_hash_retained == 290
+    assert public.processing_summary.pages_source_retained == 12
+    assert public.processing_summary.files_downloaded == 4
+    assert public.processing_summary.files_indexed == 2
+    assert public.processing_summary.files_hash_retained == 1
+    assert public.processing_summary.files_failed == 1
 
 
 def test_crawl_run_repository_serializes_outcome_code_for_database():

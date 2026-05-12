@@ -25,6 +25,20 @@ class CrawlRuns(BasePublic):
         nullable=True,
         comment="Sitemap page URLs retained without downloading during source skip",
     )
+    pages_hash_retained: Mapped[Optional[int]] = mapped_column(
+        nullable=True,
+        comment=(
+            "Fetched pages retained without re-indexing because content hash and "
+            "embedding model matched the existing blob"
+        ),
+    )
+    files_hash_retained: Mapped[Optional[int]] = mapped_column(
+        nullable=True,
+        comment=(
+            "Downloaded files retained without re-indexing because content hash and "
+            "embedding model matched the existing blob"
+        ),
+    )
     outcome_code: Mapped[Optional[str]] = mapped_column(
         String,
         nullable=True,

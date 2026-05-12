@@ -1283,8 +1283,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             num_failed_pages = 0
             num_failed_files = 0
             num_deleted_blobs = 0
-            num_skipped_pages = 0  # URL pages retained because content/model match
-            num_skipped_files = 0  # Files with unchanged content (hash match)
+            num_hash_retained_pages = 0
+            num_hash_retained_files = 0
             num_source_retained_pages = 0
 
             # Aggregate failure reasons across all batches
@@ -1456,6 +1456,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                 pages_failed=0,
                                 files_failed=0,
                                 pages_source_retained=0,
+                                pages_hash_retained=0,
+                                files_hash_retained=0,
                                 failure_summary=None,
                                 outcome_code=terminal_outcome_code.value,
                             )
@@ -1511,11 +1513,11 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             "crawl_stats": {
                                 "pages_crawled": 0,
                                 "pages_failed": 0,
-                                "pages_skipped": 0,
+                                "pages_hash_retained": 0,
                                 "pages_source_retained": 0,
                                 "files_downloaded": 0,
                                 "files_failed": 0,
-                                "files_skipped": 0,
+                                "files_hash_retained": 0,
                                 "blobs_deleted": 0,
                                 "successful": False,
                                 "outcome_code": terminal_outcome_code.value,
@@ -1650,7 +1652,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             failure_counts[reason.value] += len(urls)
                             failed_titles.update(urls)
                         num_failed_pages += batch_result.failed_count
-                        num_skipped_pages += batch_result.retained_count
+                        num_hash_retained_pages += batch_result.retained_count
                         page_buffer.clear()
 
                         logger.debug(
@@ -1679,7 +1681,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         failure_counts[reason.value] += len(urls)
                         failed_titles.update(urls)
                     num_failed_pages += batch_result.failed_count
-                    num_skipped_pages += batch_result.retained_count
+                    num_hash_retained_pages += batch_result.retained_count
 
                     logger.debug(
                         f"Final flush of {len(page_buffer)} pages",
@@ -1716,7 +1718,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             )
                         ):
                             # File unchanged - skip processing
-                            num_skipped_files += 1
+                            num_hash_retained_files += 1
                             must_keep_titles.add(filename)
                             logger.debug(
                                 f"Skipping unchanged file: {filename}",
@@ -1855,9 +1857,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 pages_failed=num_failed_pages,
                 files_failed=num_failed_files,
             )
-            last_crawled_values = {
-                field: sa.func.now() for field in timestamp_fields
-            }
+            last_crawled_values = {field: sa.func.now() for field in timestamp_fields}
 
             last_crawled_stmt = (
                 sa.update(WebsitesTable)
@@ -1883,22 +1883,22 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             _warn_if_retained_items_without_embedding_config(
                 embedding_model=embedding_model_spec,
-                retained_pages=num_skipped_pages,
-                retained_files=num_skipped_files,
+                retained_pages=num_hash_retained_pages,
+                retained_files=num_hash_retained_files,
                 website_id=params.website_id,
                 tenant_id=crawl_context.tenant_id,
             )
 
             # Calculate skip rates for performance analysis
             total_page_source_count = num_pages + num_source_retained_pages
-            total_retained_pages = num_skipped_pages + num_source_retained_pages
+            total_retained_pages = num_hash_retained_pages + num_source_retained_pages
             page_skip_rate = (
                 (total_retained_pages / total_page_source_count * 100)
                 if total_page_source_count > 0
                 else 0
             )
             file_skip_rate = (
-                (num_skipped_files / num_files * 100) if num_files > 0 else 0
+                (num_hash_retained_files / num_files * 100) if num_files > 0 else 0
             )
 
             # Structured crawl summary for easy log scanning
@@ -1911,8 +1911,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 "=" * 60,
                 f"{status_label}: {params.url}",
                 "-" * 60,
-                f"Pages:   {num_pages} fetched, {num_source_retained_pages} source-retained, {num_failed_pages} failed, {num_skipped_pages} hash-retained ({page_skip_rate:.1f}% retained)",
-                f"Files:   {num_files} downloaded, {num_failed_files} failed, {num_skipped_files} skipped ({file_skip_rate:.1f}%)",
+                f"Pages:   {num_pages} fetched, {num_source_retained_pages} source-retained, {num_failed_pages} failed, {num_hash_retained_pages} hash-retained ({page_skip_rate:.1f}% retained)",
+                f"Files:   {num_files} downloaded, {num_failed_files} failed, {num_hash_retained_files} hash-retained ({file_skip_rate:.1f}%)",
                 f"Cleanup: {num_deleted_blobs} stale entries removed",
             ]
             if crawl_is_partial:
@@ -1936,11 +1936,11 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     "pages_crawled": num_pages,
                     "pages_source_retained": num_source_retained_pages,
                     "pages_failed": num_failed_pages,
-                    "pages_skipped": num_skipped_pages,
+                    "pages_hash_retained": num_hash_retained_pages,
                     "page_skip_rate_percent": page_skip_rate,
                     "files_crawled": num_files,
                     "files_failed": num_failed_files,
-                    "files_skipped": num_skipped_files,
+                    "files_hash_retained": num_hash_retained_files,
                     "file_skip_rate_percent": file_skip_rate,
                     "blobs_deleted": num_deleted_blobs,
                 },
@@ -1992,7 +1992,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 is_partial=crawl_is_partial,
                 termination_reason=crawl_termination_reason,
                 pages_count=num_pages,
+                files_count=num_files,
                 source_retained_count=num_source_retained_pages,
+                pages_hash_retained=num_hash_retained_pages,
+                files_hash_retained=num_hash_retained_files,
                 failure_summary=failure_summary,
                 pages_failed=num_failed_pages,
                 files_failed=num_failed_files,
@@ -2009,6 +2012,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         pages_failed=num_failed_pages,
                         files_failed=num_failed_files,
                         pages_source_retained=num_source_retained_pages,
+                        pages_hash_retained=num_hash_retained_pages,
+                        files_hash_retained=num_hash_retained_files,
                         failure_summary=failure_summary,
                         outcome_code=crawl_run_outcome_code.value
                         if crawl_run_outcome_code is not None
@@ -2080,11 +2085,11 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     "crawl_stats": {
                         "pages_crawled": num_pages,
                         "pages_failed": num_failed_pages,
-                        "pages_skipped": num_skipped_pages,
+                        "pages_hash_retained": num_hash_retained_pages,
                         "pages_source_retained": num_source_retained_pages,
                         "files_downloaded": num_files,
                         "files_failed": num_failed_files,
-                        "files_skipped": num_skipped_files,
+                        "files_hash_retained": num_hash_retained_files,
                         "blobs_deleted": num_deleted_blobs,
                         "successful": crawl_successful,
                     },

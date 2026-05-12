@@ -5,6 +5,8 @@ import {
   getCrawlOutcome,
   getCrawlOutcomeLabel,
   getCrawlOutcomeTooltip,
+  getCrawlRunCountBreakdown,
+  getCrawlRunResultLabels,
   getFailureSummaryTooltip,
   getLatestCrawlOutcome,
   getPagesSourceRetained,
@@ -132,4 +134,88 @@ test("source-retained count is exposed for mixed source-skip crawls", () => {
 
   expect(getPagesSourceRetained(crawl)).toBe(100);
   expect(getSourceRetainedLabel(100)).toBe("Retained 100 unchanged pages");
+});
+
+test("crawl run count breakdown uses backend processing summary when present", () => {
+  const crawl = {
+    pages_crawled: 999,
+    files_downloaded: 999,
+    pages_failed: 0,
+    files_failed: 0,
+    processing_summary: {
+      pages_fetched: 300,
+      files_downloaded: 4,
+      pages_indexed: 10,
+      files_indexed: 2,
+      pages_hash_retained: 290,
+      files_hash_retained: 1,
+      pages_source_retained: 12,
+      pages_failed: 0,
+      files_failed: 1
+    }
+  } as unknown as CrawlRun;
+
+  expect(getCrawlRunCountBreakdown(crawl)).toEqual({
+    pages_fetched: 300,
+    files_downloaded: 4,
+    pages_indexed: 10,
+    files_indexed: 2,
+    pages_hash_retained: 290,
+    files_hash_retained: 1,
+    pages_source_retained: 12,
+    pages_failed: 0,
+    files_failed: 1
+  });
+});
+
+test("crawl run result labels distinguish fetched indexed and unchanged content", () => {
+  const crawl = {
+    status: "complete",
+    processing_summary: {
+      pages_fetched: 300,
+      files_downloaded: 1,
+      pages_indexed: 10,
+      files_indexed: 0,
+      pages_hash_retained: 290,
+      files_hash_retained: 1,
+      pages_source_retained: 0,
+      pages_failed: 0,
+      files_failed: 0
+    }
+  } as unknown as CrawlRun;
+
+  expect(getCrawlRunResultLabels(crawl).map((item) => item.label)).toEqual([
+    "Fetched 300 pages and 1 file",
+    "Indexed 10 pages",
+    "Unchanged: 290 pages and 1 file"
+  ]);
+});
+
+test("all unchanged crawl run labels do not claim content was indexed", () => {
+  const crawl = {
+    status: "complete",
+    outcome: {
+      code: "CRAWL_ALL_UNCHANGED",
+      severity: "info",
+      message_key: "crawl_outcome_all_unchanged",
+      affected_count: 4
+    },
+    processing_summary: {
+      pages_fetched: 3,
+      files_downloaded: 1,
+      pages_indexed: 0,
+      files_indexed: 0,
+      pages_hash_retained: 3,
+      files_hash_retained: 1,
+      pages_source_retained: 0,
+      pages_failed: 0,
+      files_failed: 0
+    }
+  } as unknown as CrawlRun;
+
+  expect(getCrawlRunResultLabels(crawl).map((item) => item.label)).toEqual([
+    "Fetched 3 pages and 1 file",
+    "Unchanged: 3 pages and 1 file"
+  ]);
+  expect(getCrawlRunResultLabels(crawl)[1].tooltip).toBe("All content was unchanged\n4 affected");
 });

@@ -20,6 +20,8 @@ def _crawl_run_for_website(
     website_id: UUID,
     tenant_id: UUID,
     pages_source_retained: int,
+    pages_hash_retained: int,
+    files_hash_retained: int,
     outcome_code: CrawlOutcomeCode,
 ) -> CrawlRun:
     return CrawlRun(
@@ -33,6 +35,8 @@ def _crawl_run_for_website(
         pages_failed=1,
         files_failed=0,
         pages_source_retained=pages_source_retained,
+        pages_hash_retained=pages_hash_retained,
+        files_hash_retained=files_hash_retained,
         status=Status.QUEUED,
         result_location=None,
         finished_at=None,
@@ -77,30 +81,46 @@ async def test_crawl_run_repository_round_trips_source_retention_fields(
                 website_id=website.id,
                 tenant_id=admin_user.tenant_id,
                 pages_source_retained=12,
+                pages_hash_retained=4,
+                files_hash_retained=1,
                 outcome_code=CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY,
             )
         )
         assert inserted.id is not None
         inserted_id = inserted.id
         assert inserted.pages_source_retained == 12
+        assert inserted.pages_hash_retained == 4
+        assert inserted.files_hash_retained == 1
         assert inserted.outcome_code == CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY
 
     async with db_session() as session:
         repo = CrawlRunRepository(session)
         loaded = await repo.one(inserted_id)
         assert loaded.pages_source_retained == 12
+        assert loaded.pages_hash_retained == 4
+        assert loaded.files_hash_retained == 1
         assert loaded.outcome_code == CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY
 
         loaded.update(
             pages_source_retained=15,
+            pages_hash_retained=8,
+            files_hash_retained=2,
             outcome_code=CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES,
         )
         updated = await repo.update(loaded)
         assert updated.pages_source_retained == 15
-        assert updated.outcome_code == CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
+        assert updated.pages_hash_retained == 8
+        assert updated.files_hash_retained == 2
+        assert (
+            updated.outcome_code == CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
+        )
 
     async with db_session() as session:
         repo = CrawlRunRepository(session)
         reloaded = await repo.one(inserted_id)
         assert reloaded.pages_source_retained == 15
-        assert reloaded.outcome_code == CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
+        assert reloaded.pages_hash_retained == 8
+        assert reloaded.files_hash_retained == 2
+        assert (
+            reloaded.outcome_code == CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
+        )

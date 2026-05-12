@@ -373,6 +373,15 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
     assert "last_crawled_at" not in emitted_sql
     assert "last_source_verified_at" not in emitted_sql
     assert "websites.tenant_id" in emitted_sql
+    terminal_crawl_run_updates = [
+        _compiled_params(stmt)
+        for session in recovery_sessions
+        for stmt in session.executed
+        if "crawl_runs" in str(stmt).lower() and "pages_crawled" in str(stmt)
+    ]
+    assert terminal_crawl_run_updates
+    assert terminal_crawl_run_updates[0]["pages_hash_retained"] == 0
+    assert terminal_crawl_run_updates[0]["files_hash_retained"] == 0
     terminal_job_messages = [
         _compiled_params(stmt).get("result_location")
         for session in recovery_sessions
@@ -384,11 +393,11 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
     assert audit_service.metadata["crawl_stats"] == {
         "pages_crawled": 0,
         "pages_failed": 0,
-        "pages_skipped": 0,
+        "pages_hash_retained": 0,
         "pages_source_retained": 0,
         "files_downloaded": 0,
         "files_failed": 0,
-        "files_skipped": 0,
+        "files_hash_retained": 0,
         "blobs_deleted": 0,
         "successful": False,
         "outcome_code": expected_outcome_code.value,

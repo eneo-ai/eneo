@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import Optional, Self
+from typing import Literal, Optional, Self
 from uuid import UUID
 
 from pydantic import AliasChoices, AliasPath, BaseModel, Field, model_validator
@@ -32,8 +32,88 @@ class CrawlRunBase(BaseModel):
     pages_failed: Optional[int] = None
     files_failed: Optional[int] = None
     pages_source_retained: Optional[int] = None
+    pages_hash_retained: Optional[int] = None
+    files_hash_retained: Optional[int] = None
     failure_summary: Optional[dict[str, int]] = None
     outcome_code: Optional["CrawlOutcomeCode"] = None
+
+
+class CrawlRunProcessingSummary(BaseModel):
+    pages_fetched: int = 0
+    files_downloaded: int = 0
+    pages_indexed: int = 0
+    files_indexed: int = 0
+    pages_hash_retained: int = 0
+    files_hash_retained: int = 0
+    pages_source_retained: int = 0
+    pages_failed: int = 0
+    files_failed: int = 0
+
+
+def derive_crawl_processing_summary(
+    *,
+    pages_crawled: int | None,
+    files_downloaded: int | None,
+    pages_failed: int | None,
+    files_failed: int | None,
+    pages_source_retained: int | None,
+    pages_hash_retained: int | None,
+    files_hash_retained: int | None,
+) -> CrawlRunProcessingSummary:
+    pages_fetched = pages_crawled or 0
+    downloaded_files = files_downloaded or 0
+    failed_pages = pages_failed or 0
+    failed_files = files_failed or 0
+    source_retained_pages = pages_source_retained or 0
+    hash_retained_pages = pages_hash_retained or 0
+    hash_retained_files = files_hash_retained or 0
+
+    return CrawlRunProcessingSummary(
+        pages_fetched=pages_fetched,
+        files_downloaded=downloaded_files,
+        pages_indexed=_indexed_count(
+            resource_type="pages",
+            total=pages_fetched,
+            hash_retained=hash_retained_pages,
+            failed=failed_pages,
+        ),
+        files_indexed=_indexed_count(
+            resource_type="files",
+            total=downloaded_files,
+            hash_retained=hash_retained_files,
+            failed=failed_files,
+        ),
+        pages_hash_retained=hash_retained_pages,
+        files_hash_retained=hash_retained_files,
+        pages_source_retained=source_retained_pages,
+        pages_failed=failed_pages,
+        files_failed=failed_files,
+    )
+
+
+def _indexed_count(
+    *,
+    resource_type: Literal["pages", "files"],
+    total: int,
+    hash_retained: int,
+    failed: int,
+) -> int:
+    indexed = total - hash_retained - failed
+    if indexed >= 0:
+        return indexed
+
+    logger.warning(
+        "Invalid crawl run count invariant while deriving processing summary",
+        extra={
+            "metric_name": "crawler.processing_summary.invalid_count_invariant",
+            "metric_value": 1,
+            "resource_type": resource_type,
+            "total": total,
+            "hash_retained": hash_retained,
+            "failed": failed,
+        },
+    )
+    return 0
 
 
 class CrawlOutcomeSeverity(str, Enum):
@@ -59,6 +139,9 @@ def derive_crawl_outcome(
     pages_failed: int | None,
     files_failed: int | None,
     pages_source_retained: int | None,
+    pages_hash_retained: int | None = None,
+    files_hash_retained: int | None = None,
+    processing_summary: CrawlRunProcessingSummary | None = None,
     outcome_code: CrawlOutcomeCode | str | None = None,
 ) -> CrawlOutcomePublic | None:
     resolved_code = (
@@ -70,6 +153,9 @@ def derive_crawl_outcome(
             failure_summary=failure_summary,
             pages_failed=pages_failed,
             files_failed=files_failed,
+            pages_hash_retained=pages_hash_retained,
+            files_hash_retained=files_hash_retained,
+            processing_summary=processing_summary,
         )
     )
     if resolved_code is None:
@@ -82,6 +168,9 @@ def derive_crawl_outcome(
         pages_failed=pages_failed,
         files_failed=files_failed,
         pages_source_retained=pages_source_retained,
+        pages_hash_retained=pages_hash_retained,
+        files_hash_retained=files_hash_retained,
+        processing_summary=processing_summary,
     )
 
 
@@ -92,11 +181,26 @@ def derive_crawl_outcome_code(
     failure_summary: dict[str, int] | None,
     pages_failed: int | None,
     files_failed: int | None,
+    pages_hash_retained: int | None = None,
+    files_hash_retained: int | None = None,
+    processing_summary: CrawlRunProcessingSummary | None = None,
 ) -> CrawlOutcomeCode | None:
+    # Read-side fallback for historical rows without stored outcome_code. Keep
+    # shared outcome rules aligned with the worker-time classifier in crawl_outcome.py.
     status_value = status.value if isinstance(status, Status) else status
     detail = result_location.strip() if result_location else None
     detail_lower = detail.lower() if detail else ""
     affected_count = (pages_failed or 0) + (files_failed or 0)
+    hash_retained_count = (pages_hash_retained or 0) + (files_hash_retained or 0)
+    indexed_count = 0
+    if processing_summary is not None:
+        hash_retained_count = (
+            processing_summary.pages_hash_retained
+            + processing_summary.files_hash_retained
+        )
+        indexed_count = (
+            processing_summary.pages_indexed + processing_summary.files_indexed
+        )
 
     # Legacy rows only stored crawl outcomes in result_location text. New writes
     # should set outcome_code and use these branches only as a read fallback.
@@ -137,6 +241,14 @@ def derive_crawl_outcome_code(
         )
         return CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
 
+    if (
+        status_value == Status.COMPLETE.value
+        and processing_summary is not None
+        and hash_retained_count > 0
+        and indexed_count == 0
+    ):
+        return CrawlOutcomeCode.CRAWL_ALL_UNCHANGED
+
     return None
 
 
@@ -159,10 +271,19 @@ def _crawl_outcome_from_code(
     pages_failed: int | None,
     files_failed: int | None,
     pages_source_retained: int | None,
+    pages_hash_retained: int | None,
+    files_hash_retained: int | None,
+    processing_summary: CrawlRunProcessingSummary | None,
 ) -> CrawlOutcomePublic:
     detail = result_location.strip() if result_location else None
     affected_count = (pages_failed or 0) + (files_failed or 0)
     failure_count = sum(failure_summary.values()) if failure_summary else None
+    hash_retained_count = (pages_hash_retained or 0) + (files_hash_retained or 0)
+    if processing_summary is not None:
+        hash_retained_count = (
+            processing_summary.pages_hash_retained
+            + processing_summary.files_hash_retained
+        )
 
     if code == CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED:
         return CrawlOutcomePublic(
@@ -244,6 +365,14 @@ def _crawl_outcome_from_code(
             affected_count=pages_source_retained or None,
         )
 
+    if code == CrawlOutcomeCode.CRAWL_ALL_UNCHANGED:
+        return CrawlOutcomePublic(
+            code=code,
+            severity=CrawlOutcomeSeverity.INFO,
+            message_key="crawl_outcome_all_unchanged",
+            affected_count=hash_retained_count or None,
+        )
+
     return CrawlOutcomePublic(
         code=CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR,
         severity=CrawlOutcomeSeverity.ERROR,
@@ -278,10 +407,21 @@ class CrawlRunSparse(CrawlRunBase, InDB):
         validation_alias=AliasChoices(AliasPath("job", "finished_at"), "finished_at"),
         default=None,
     )
+    processing_summary: Optional[CrawlRunProcessingSummary] = None
     outcome: Optional[CrawlOutcomePublic] = None
 
     @model_validator(mode="after")
     def derive_outcome(self) -> Self:
+        if self.processing_summary is None:
+            self.processing_summary = derive_crawl_processing_summary(
+                pages_crawled=self.pages_crawled,
+                files_downloaded=self.files_downloaded,
+                pages_failed=self.pages_failed,
+                files_failed=self.files_failed,
+                pages_source_retained=self.pages_source_retained,
+                pages_hash_retained=self.pages_hash_retained,
+                files_hash_retained=self.files_hash_retained,
+            )
         if self.outcome is None:
             self.outcome = derive_crawl_outcome(
                 status=self.status,
@@ -290,6 +430,9 @@ class CrawlRunSparse(CrawlRunBase, InDB):
                 pages_failed=self.pages_failed,
                 files_failed=self.files_failed,
                 pages_source_retained=self.pages_source_retained,
+                pages_hash_retained=self.pages_hash_retained,
+                files_hash_retained=self.files_hash_retained,
+                processing_summary=self.processing_summary,
                 outcome_code=self.outcome_code,
             )
         return self
