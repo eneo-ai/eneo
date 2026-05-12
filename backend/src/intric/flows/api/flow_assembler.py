@@ -12,6 +12,7 @@ from intric.flows.api.flow_models import (
     FlowRunStepRerunResponse,
     FlowRuntimePathsPublic,
     FlowRuntimePublic,
+    FlowRunTokenUsagePublic,
     FlowSparsePublic,
     FlowStepCreateRequest,
 )
@@ -21,6 +22,7 @@ from intric.flows.domain.flow import (
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
     FlowRunReviewCheckpoint,
+    FlowRunTokenUsage,
     FlowSparse,
     FlowStep,
     FlowStepResult,
@@ -126,9 +128,18 @@ class FlowAssembler:
         run: FlowRun,
         *,
         result_files: Sequence[FlowRunStepResultFile] = (),
+        token_usage: FlowRunTokenUsage | None = None,
     ) -> FlowRunPublic:
+        public_token_usage = (
+            FlowRunTokenUsagePublic.model_validate(token_usage)
+            if token_usage is not None
+            else None
+        )
         return FlowRunPublic.model_validate(run).model_copy(
-            update={"result_files": list(result_files)}
+            update={
+                "result_files": list(result_files),
+                "token_usage": public_token_usage,
+            }
         )
 
     def to_step_public(

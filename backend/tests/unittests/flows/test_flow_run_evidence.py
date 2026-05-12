@@ -758,6 +758,36 @@ def test_build_debug_export_adds_rag_source_names_and_run_summary() -> None:
     assert export["steps"][0]["rag"]["has_named_sources"] is True
 
 
+def test_build_debug_export_adds_run_token_usage_summary() -> None:
+    run, version = _evidence_run_and_version()
+    first_attempt = _attempt_with_provenance(run, None).model_copy(
+        update={
+            "num_tokens_input": 10,
+            "num_tokens_output": 4,
+        }
+    )
+    second_attempt = _attempt_with_provenance(run, None).model_copy(
+        update={
+            "id": uuid4(),
+            "attempt_no": 2,
+            "num_tokens_input": None,
+            "num_tokens_output": 6,
+        }
+    )
+
+    export = build_debug_export(
+        run=run,
+        version=version,
+        step_attempts=[first_attempt, second_attempt],
+    )
+
+    assert export["run"]["summary"]["token_usage"] == {
+        "num_tokens_input": 10,
+        "num_tokens_output": 10,
+        "num_tokens_total": 20,
+    }
+
+
 def test_normalize_rag_payload_adds_prompt_context_display_names_and_usage_state() -> (
     None
 ):

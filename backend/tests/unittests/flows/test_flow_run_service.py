@@ -21,6 +21,7 @@ from intric.flows.domain.flow import (
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
     FlowRunReviewCheckpoint,
+    FlowRunTokenUsage,
 )
 from intric.flows.enums import (
     FlowRunLifecycleSource,
@@ -4532,6 +4533,58 @@ async def test_list_result_files_for_runs_rejects_foreign_tenant_run(user):
     assert exc_info.value.code == "flow_run_access_denied"
     assert exc_info.value.context == {"auth_layer": "flow_run_argument"}
     flow_run_repo.list_result_files_for_runs.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_list_token_usage_for_runs_delegates_for_authorized_runs(user):
+    flow_run_repo = AsyncMock()
+    service = FlowRunService(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=AsyncMock(),
+    )
+    run_with_usage = _run(user=user, flow_id=uuid4())
+    run_without_usage = _run(user=user, flow_id=run_with_usage.flow_id)
+    usage = FlowRunTokenUsage(
+        num_tokens_input=12,
+        num_tokens_output=5,
+        num_tokens_total=17,
+    )
+    flow_run_repo.list_token_usage_for_runs.return_value = {
+        run_with_usage.id: usage,
+    }
+
+    result = await service.list_token_usage_for_runs(
+        runs=[run_with_usage, run_without_usage],
+    )
+
+    assert result == {run_with_usage.id: usage}
+    flow_run_repo.list_token_usage_for_runs.assert_awaited_once_with(
+        run_ids=[run_with_usage.id, run_without_usage.id],
+        tenant_id=user.tenant_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_token_usage_for_runs_rejects_foreign_tenant_run(user):
+    flow_run_repo = AsyncMock()
+    service = FlowRunService(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=AsyncMock(),
+    )
+    foreign_run = _run(user=user, flow_id=uuid4()).model_copy(
+        update={"tenant_id": uuid4()}
+    )
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await service.list_token_usage_for_runs(runs=[foreign_run])
+
+    assert exc_info.value.code == "flow_run_access_denied"
+    assert exc_info.value.context == {"auth_layer": "flow_run_argument"}
+    flow_run_repo.list_token_usage_for_runs.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -475,12 +475,16 @@ async def list_flow_runs_alias(
     result_files_by_run_id = _result_files_by_run_id(
         await run_service.list_result_files_for_runs(runs=page_items)
     )
+    token_usage_by_run_id = await run_service.list_token_usage_for_runs(
+        runs=page_items
+    )
     return {
         "count": len(page_items),
         "items": [
             assembler.to_run_public(
                 item,
                 result_files=result_files_by_run_id.get(item.id, []),
+                token_usage=token_usage_by_run_id.get(item.id),
             )
             for item in page_items
         ],
@@ -529,7 +533,12 @@ async def get_flow_run_alias(
     run_service = _get_flow_run_service(container)
     run = await run_service.get_run(run_id=run_id, flow_id=id)
     result_files = await run_service.list_result_files_for_runs(runs=[run])
-    return FlowAssembler().to_run_public(run, result_files=result_files)
+    token_usage_by_run_id = await run_service.list_token_usage_for_runs(runs=[run])
+    return FlowAssembler().to_run_public(
+        run,
+        result_files=result_files,
+        token_usage=token_usage_by_run_id.get(run.id),
+    )
 
 
 @router.get(

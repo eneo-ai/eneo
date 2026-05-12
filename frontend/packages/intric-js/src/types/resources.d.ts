@@ -162,6 +162,7 @@ export type AIBuilderApplyResult = components["schemas"]["ApplyResultResponse"];
 export type AIBuilderModel = components["schemas"]["SessionModelOption"];
 export type AIBuilderSessionTelemetrySummary = components["schemas"]["SessionTelemetrySummary"];
 export type FlowRunResultFile = components["schemas"]["FlowRunStepResultFile"];
+export type FlowRunTokenUsage = components["schemas"]["FlowRunTokenUsagePublic"];
 
 export type FlowRunOutputPayload = {
   text?: string;

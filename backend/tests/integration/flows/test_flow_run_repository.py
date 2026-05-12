@@ -304,6 +304,238 @@ async def test_list_runs_filters_by_flow_id(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_list_token_usage_for_runs_sums_provider_usage_across_attempts(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flows token usage space", [model.id])
+        assistant = await assistant_factory(
+            session,
+            "Flow token usage assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        flow = await flow_repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        await version_repo.create(
+            flow_id=flow.id,
+            version=1,
+            definition_checksum="checksum-token-usage",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(flow.steps[0].id),
+                        "assistant_id": str(flow.steps[0].assistant_id),
+                        "step_order": 1,
+                    },
+                    {
+                        "step_id": str(flow.steps[1].id),
+                        "assistant_id": str(flow.steps[1].assistant_id),
+                        "step_order": 2,
+                    },
+                ]
+            },
+            tenant_id=admin_user.tenant_id,
+        )
+        run = await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "token-usage"},
+            preseed_steps=[
+                {
+                    "step_id": flow.steps[0].id,
+                    "assistant_id": flow.steps[0].assistant_id,
+                    "step_order": 1,
+                },
+                {
+                    "step_id": flow.steps[1].id,
+                    "assistant_id": flow.steps[1].assistant_id,
+                    "step_order": 2,
+                },
+            ],
+        )
+
+        first_attempt = await run_repo.create_or_get_attempt_started(
+            run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            step_id=flow.steps[0].id,
+            step_order=1,
+            attempt_no=1,
+            celery_task_id="token-usage-failed",
+        )
+        await run_repo.finish_attempt(
+            run_id=run.id,
+            step_id=flow.steps[0].id,
+            attempt_no=1,
+            tenant_id=admin_user.tenant_id,
+            status=FlowStepAttemptStatus.FAILED,
+            num_tokens_input=10,
+            num_tokens_output=4,
+        )
+
+        await run_repo.create_or_get_attempt_started(
+            run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            step_id=flow.steps[0].id,
+            step_order=1,
+            attempt_no=2,
+            celery_task_id="token-usage-completed",
+            predecessor_attempt_id=first_attempt.id,
+        )
+        await run_repo.finish_attempt(
+            run_id=run.id,
+            step_id=flow.steps[0].id,
+            attempt_no=2,
+            tenant_id=admin_user.tenant_id,
+            status=FlowStepAttemptStatus.COMPLETED,
+            num_tokens_input=20,
+            num_tokens_output=6,
+        )
+
+        await run_repo.create_or_get_attempt_started(
+            run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            step_id=flow.steps[1].id,
+            step_order=2,
+            attempt_no=1,
+            celery_task_id="token-usage-partial",
+        )
+        await run_repo.finish_attempt(
+            run_id=run.id,
+            step_id=flow.steps[1].id,
+            attempt_no=1,
+            tenant_id=admin_user.tenant_id,
+            status=FlowStepAttemptStatus.COMPLETED,
+            num_tokens_input=None,
+            num_tokens_output=7,
+        )
+
+        usage_by_run_id = await run_repo.list_token_usage_for_runs(
+            run_ids=[run.id],
+            tenant_id=admin_user.tenant_id,
+        )
+
+    usage = usage_by_run_id[run.id]
+    assert usage.num_tokens_input == 30
+    assert usage.num_tokens_output == 17
+    assert usage.num_tokens_total == 47
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_list_token_usage_for_runs_returns_sparse_map_when_usage_is_empty(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(
+            session, "Flows empty token usage space", [model.id]
+        )
+        assistant = await assistant_factory(
+            session,
+            "Flow empty token usage assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        flow = await flow_repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        await version_repo.create(
+            flow_id=flow.id,
+            version=1,
+            definition_checksum="checksum-empty-token-usage",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(flow.steps[0].id),
+                        "assistant_id": str(flow.steps[0].assistant_id),
+                        "step_order": 1,
+                    }
+                ]
+            },
+            tenant_id=admin_user.tenant_id,
+        )
+        run = await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "empty-token-usage"},
+            preseed_steps=[
+                {
+                    "step_id": flow.steps[0].id,
+                    "assistant_id": flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+
+        await run_repo.create_or_get_attempt_started(
+            run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            step_id=flow.steps[0].id,
+            step_order=1,
+            attempt_no=1,
+            celery_task_id="empty-token-usage",
+        )
+        await run_repo.finish_attempt(
+            run_id=run.id,
+            step_id=flow.steps[0].id,
+            attempt_no=1,
+            tenant_id=admin_user.tenant_id,
+            status=FlowStepAttemptStatus.COMPLETED,
+            num_tokens_input=None,
+            num_tokens_output=0,
+        )
+
+        usage_by_run_id = await run_repo.list_token_usage_for_runs(
+            run_ids=[run.id],
+            tenant_id=admin_user.tenant_id,
+        )
+
+    assert usage_by_run_id == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_get_idempotent_run_returns_existing_run_and_fingerprint(
     db_container,
     completion_model_factory,

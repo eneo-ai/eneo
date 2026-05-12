@@ -17,6 +17,7 @@ from intric.flows.domain.flow import (
     FlowRun,
     FlowRunReviewCheckpoint,
     FlowRunStatus,
+    FlowRunTokenUsage,
     FlowStep,
     FlowStepResult,
     JsonObject,
@@ -901,6 +902,21 @@ class FlowRunService:
                 self._raise_run_access_denied(auth_layer="flow_run_argument")
             run_ids.append(run.id)
         return await self.flow_run_repo.list_result_files_for_runs(
+            run_ids=run_ids,
+            tenant_id=self.user.tenant_id,
+        )
+
+    async def list_token_usage_for_runs(
+        self, *, runs: Sequence[FlowRun]
+    ) -> dict[UUID, FlowRunTokenUsage]:
+        if not runs:
+            return {}
+        run_ids: list[UUID] = []
+        for run in runs:
+            if run.tenant_id != self.user.tenant_id:
+                self._raise_run_access_denied(auth_layer="flow_run_argument")
+            run_ids.append(run.id)
+        return await self.flow_run_repo.list_token_usage_for_runs(
             run_ids=run_ids,
             tenant_id=self.user.tenant_id,
         )

@@ -152,6 +152,7 @@ FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "input_payload_json": {"employee_name": "Alex Example"},
     "output_payload_json": None,
     "result_files": [],
+    "token_usage": None,
     "error_message": None,
     "job_id": "00000000-0000-0000-0000-000000000401",
     "created_at": "2026-03-17T10:05:00Z",
@@ -737,6 +738,23 @@ class FlowAssistantCreateRequest(BaseModel):
     name: str
 
 
+class FlowRunTokenUsagePublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    num_tokens_input: int = Field(
+        ge=0,
+        description="Provider-reported input tokens consumed by the run.",
+    )
+    num_tokens_output: int = Field(
+        ge=0,
+        description="Provider-reported output tokens consumed by the run.",
+    )
+    num_tokens_total: int = Field(
+        ge=0,
+        description="Total provider-reported tokens consumed by the run.",
+    )
+
+
 class FlowRunPublic(BaseModel):
     model_config = ConfigDict(
         from_attributes=True, json_schema_extra={"example": FLOW_RUN_PUBLIC_EXAMPLE}
@@ -763,6 +781,13 @@ class FlowRunPublic(BaseModel):
     output_payload_json: dict[str, Any] | None = None
     result_files: list[FlowRunStepResultFile] = Field(
         default_factory=lambda: cast(list[FlowRunStepResultFile], [])
+    )
+    token_usage: FlowRunTokenUsagePublic | None = Field(
+        default=None,
+        description=(
+            "Aggregated provider-reported token usage for model attempts in this "
+            "run. Null when the run has not produced token-metered model usage."
+        ),
     )
     error_message: str | None = None
     job_id: UUID | None = None
@@ -1358,6 +1383,7 @@ class FlowRunDebugRunSummary(BaseModel):
     artifacts_count: int
     duration_ms: int | None = None
     models_used: list[str] = Field(default_factory=list)
+    token_usage: FlowRunTokenUsagePublic | None = None
 
 
 class FlowRunDebugRun(BaseModel):

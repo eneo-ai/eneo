@@ -13258,6 +13258,7 @@ export interface components {
       duration_ms?: number | null;
       /** Models Used */
       models_used?: string[];
+      token_usage?: components["schemas"]["FlowRunTokenUsagePublic"] | null;
     };
     /** FlowRunDebugSecurity */
     FlowRunDebugSecurity: {
@@ -14088,6 +14089,11 @@ export interface components {
       } | null;
       /** Result Files */
       result_files?: components["schemas"]["FlowRunStepResultFile"][];
+      /**
+       * Token Usage
+       * @description Aggregated provider-reported token usage for model attempts in this run. Null when the run has not produced token-metered model usage.
+       */
+      token_usage?: components["schemas"]["FlowRunTokenUsagePublic"] | null;
       /** Error Message */
       error_message?: string | null;
       /** Job Id */
@@ -14102,6 +14108,24 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+    };
+    /** FlowRunTokenUsagePublic */
+    FlowRunTokenUsagePublic: {
+      /**
+       * Num Tokens Input
+       * @description Provider-reported input tokens consumed by the run.
+       */
+      num_tokens_input: number;
+      /**
+       * Num Tokens Output
+       * @description Provider-reported output tokens consumed by the run.
+       */
+      num_tokens_output: number;
+      /**
+       * Num Tokens Total
+       * @description Total provider-reported tokens consumed by the run.
+       */
+      num_tokens_total: number;
     };
     /**
      * FlowRunRedispatchResponse

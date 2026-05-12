@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional, TypeAlias
+from typing import Any, Optional, Self, TypeAlias
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from intric.authentication.principal_types import PrincipalType
 from intric.flows.enums import (
@@ -164,6 +164,34 @@ class FlowRun(BaseModel):
     job_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
+
+
+class FlowRunTokenUsage(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    num_tokens_input: int = Field(ge=0)
+    num_tokens_output: int = Field(ge=0)
+    num_tokens_total: int = Field(ge=0)
+
+    @classmethod
+    def from_counts(
+        cls,
+        *,
+        num_tokens_input: int,
+        num_tokens_output: int,
+    ) -> Self:
+        return cls(
+            num_tokens_input=num_tokens_input,
+            num_tokens_output=num_tokens_output,
+            num_tokens_total=num_tokens_input + num_tokens_output,
+        )
+
+    @model_validator(mode="after")
+    def _validate_total(self) -> Self:
+        expected_total = self.num_tokens_input + self.num_tokens_output
+        if self.num_tokens_total != expected_total:
+            raise ValueError("num_tokens_total must equal input plus output tokens.")
+        return self
 
 
 class FlowStepResult(BaseModel):
