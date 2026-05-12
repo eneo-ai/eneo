@@ -39,6 +39,7 @@ class CrawlRun(Entity):
         pages_source_retained: Optional[int],
         pages_hash_retained: Optional[int],
         files_hash_retained: Optional[int],
+        files_too_large_skipped: Optional[int],
         status: Status,
         result_location: Optional[str],
         finished_at: Optional["datetime"],
@@ -56,6 +57,7 @@ class CrawlRun(Entity):
         self.pages_source_retained = pages_source_retained
         self.pages_hash_retained = pages_hash_retained
         self.files_hash_retained = files_hash_retained
+        self.files_too_large_skipped = files_too_large_skipped
         self.finished_at = finished_at
         self.website_id = website_id
         self.tenant_id = tenant_id
@@ -92,6 +94,7 @@ class CrawlRun(Entity):
             pages_source_retained=None,
             pages_hash_retained=None,
             files_hash_retained=None,
+            files_too_large_skipped=None,
             status=Status.QUEUED,
             result_location=None,
             finished_at=None,
@@ -140,6 +143,7 @@ class CrawlRun(Entity):
             pages_source_retained=record.pages_source_retained,
             pages_hash_retained=record.pages_hash_retained,
             files_hash_retained=record.files_hash_retained,
+            files_too_large_skipped=record.files_too_large_skipped,
             job_id=record.job_id,
             status=Status(job.status) if job else Status.QUEUED,
             result_location=job.result_location if job else None,
@@ -158,6 +162,7 @@ class CrawlRun(Entity):
         pages_source_retained: Optional[int] = None,
         pages_hash_retained: Optional[int] = None,
         files_hash_retained: Optional[int] = None,
+        files_too_large_skipped: Optional[int] = None,
         outcome_code: Optional[CrawlOutcomeCode] = None,
     ) -> "CrawlRun":
         if job_id is not None:
@@ -183,6 +188,9 @@ class CrawlRun(Entity):
 
         if files_hash_retained is not None:
             self.files_hash_retained = files_hash_retained
+
+        if files_too_large_skipped is not None:
+            self.files_too_large_skipped = files_too_large_skipped
 
         if outcome_code is not None:
             self.outcome_code = outcome_code

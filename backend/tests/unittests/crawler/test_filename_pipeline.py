@@ -1,6 +1,23 @@
 """Unit tests for FileNamePipeline filename truncation logic."""
 
-from intric.crawler.pipelines import _truncate_filename, MAX_FILENAME_BYTES
+from types import SimpleNamespace
+
+import pytest
+from scrapy.exceptions import StopDownload
+from twisted.internet.defer import CancelledError
+from twisted.python.failure import Failure
+
+from intric.crawler.pipelines import (
+    FILE_SIZE_SKIP_RECORDED_META_KEY,
+    FILE_STATUS_TOO_LARGE,
+    FILE_TOO_LARGE_SKIPPED_STAT,
+    INTRIC_FILE_DOWNLOAD_META_KEY,
+    MAX_FILENAME_BYTES,
+    FileNamePipeline,
+    FileSizeLimitStatsExtension,
+    _is_file_download_too_large_failure,
+    _truncate_filename,
+)
 
 
 class TestTruncateFilename:
@@ -216,3 +233,122 @@ class TestEdgeCases:
         """URL-encoded spaces should be decoded."""
         result = _truncate_filename("my%20file.pdf")
         assert result == "my file.pdf"
+
+
+class _Stats:
+    def __init__(self) -> None:
+        self.values: dict[str, int] = {}
+
+    def inc_value(self, key: str, count: int = 1, spider: object = None) -> None:
+        del spider
+        self.values[key] = self.values.get(key, 0) + count
+
+    def max_value(self, key: str, value: int, spider: object = None) -> None:
+        del spider
+        self.values[key] = max(self.values.get(key, value), value)
+
+
+class TestFileSizeLimitStats:
+    def test_headers_over_download_max_size_are_counted_and_stopped(self):
+        stats = _Stats()
+        spider = SimpleNamespace(crawler=SimpleNamespace(stats=stats))
+        request = SimpleNamespace(url="https://example.com/large.pdf", meta={})
+        request.meta[INTRIC_FILE_DOWNLOAD_META_KEY] = True
+        extension = FileSizeLimitStatsExtension(download_max_size=10)
+
+        with pytest.raises(StopDownload):
+            extension.headers_received(
+                headers=object(),
+                body_length=11,
+                request=request,
+                spider=spider,
+            )
+
+        assert stats.values[FILE_TOO_LARGE_SKIPPED_STAT] == 1
+        assert stats.values[f"file_status_count/{FILE_STATUS_TOO_LARGE}"] == 1
+        assert request.meta[FILE_SIZE_SKIP_RECORDED_META_KEY] is True
+
+    def test_bytes_over_download_max_size_are_counted_and_stopped(self):
+        stats = _Stats()
+        spider = SimpleNamespace(crawler=SimpleNamespace(stats=stats))
+        request = SimpleNamespace(url="https://example.com/large.pdf", meta={})
+        request.meta[INTRIC_FILE_DOWNLOAD_META_KEY] = True
+        extension = FileSizeLimitStatsExtension(download_max_size=10)
+
+        extension.bytes_received(
+            data=b"12345",
+            request=request,
+            spider=spider,
+        )
+        assert stats.values == {}
+
+        with pytest.raises(StopDownload):
+            extension.bytes_received(
+                data=b"678901",
+                request=request,
+                spider=spider,
+            )
+
+        assert stats.values[FILE_TOO_LARGE_SKIPPED_STAT] == 1
+        assert stats.values[f"file_status_count/{FILE_STATUS_TOO_LARGE}"] == 1
+        assert request.meta[FILE_SIZE_SKIP_RECORDED_META_KEY] is True
+
+    def test_size_limit_signal_and_pipeline_share_status_without_double_counting(self):
+        stats = _Stats()
+        spider = SimpleNamespace(crawler=SimpleNamespace(stats=stats))
+        request = SimpleNamespace(url="https://example.com/large.pdf", meta={})
+        request.meta[INTRIC_FILE_DOWNLOAD_META_KEY] = True
+        extension = FileSizeLimitStatsExtension(download_max_size=10)
+
+        with pytest.raises(StopDownload) as stopped:
+            extension.headers_received(
+                headers=object(),
+                body_length=11,
+                request=request,
+                spider=spider,
+            )
+
+        extension.bytes_received(
+            data=b"still buffered",
+            request=request,
+            spider=spider,
+        )
+        pipeline = FileNamePipeline.__new__(FileNamePipeline)
+        result = pipeline.media_failed(
+            Failure(stopped.value),
+            request,
+            SimpleNamespace(spider=spider),
+        )
+
+        assert result == {
+            "url": "https://example.com/large.pdf",
+            "path": None,
+            "checksum": None,
+            "status": FILE_STATUS_TOO_LARGE,
+        }
+        assert stats.values[FILE_TOO_LARGE_SKIPPED_STAT] == 1
+        assert stats.values[f"file_status_count/{FILE_STATUS_TOO_LARGE}"] == 1
+
+    def test_unmarked_requests_are_left_to_scrapy(self):
+        stats = _Stats()
+        spider = SimpleNamespace(crawler=SimpleNamespace(stats=stats))
+        request = SimpleNamespace(url="https://example.com/large.pdf", meta={})
+        extension = FileSizeLimitStatsExtension(download_max_size=10)
+
+        extension.headers_received(
+            headers=object(),
+            body_length=11,
+            request=request,
+            spider=spider,
+        )
+
+        assert stats.values == {}
+
+    def test_scrapy_download_max_size_failures_are_recognized(self):
+        failure = Failure(
+            CancelledError(
+                "expected response size (11) larger than download max size (10)"
+            )
+        )
+
+        assert _is_file_download_too_large_failure(failure) is True

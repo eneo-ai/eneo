@@ -82,6 +82,7 @@ class CrawlRunPublic(BaseResponse):
     pages_source_retained: Optional[int] = None
     pages_hash_retained: Optional[int] = None
     files_hash_retained: Optional[int] = None
+    files_too_large_skipped: Optional[int] = None
     failure_summary: Optional[dict[str, int]] = None
     outcome_code: Optional[CrawlOutcomeCode] = None
     status: Status
@@ -100,6 +101,7 @@ class CrawlRunPublic(BaseResponse):
             pages_source_retained=crawl_run.pages_source_retained,
             pages_hash_retained=crawl_run.pages_hash_retained,
             files_hash_retained=crawl_run.files_hash_retained,
+            files_too_large_skipped=crawl_run.files_too_large_skipped,
         )
         return cls(
             id=crawl_run.id,
@@ -112,6 +114,7 @@ class CrawlRunPublic(BaseResponse):
             pages_source_retained=crawl_run.pages_source_retained,
             pages_hash_retained=crawl_run.pages_hash_retained,
             files_hash_retained=crawl_run.files_hash_retained,
+            files_too_large_skipped=crawl_run.files_too_large_skipped,
             failure_summary=crawl_run.failure_summary,
             outcome_code=crawl_run.outcome_code,
             status=crawl_run.status,
@@ -127,6 +130,7 @@ class CrawlRunPublic(BaseResponse):
                 pages_source_retained=crawl_run.pages_source_retained,
                 pages_hash_retained=crawl_run.pages_hash_retained,
                 files_hash_retained=crawl_run.files_hash_retained,
+                files_too_large_skipped=crawl_run.files_too_large_skipped,
                 processing_summary=processing_summary,
                 outcome_code=crawl_run.outcome_code,
             ),

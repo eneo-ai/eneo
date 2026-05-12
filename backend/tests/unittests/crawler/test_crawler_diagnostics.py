@@ -54,6 +54,23 @@ def test_empty_output_diagnostics_explains_feed_export_mismatch() -> None:
     )
 
 
+def test_diagnostics_extracts_files_skipped_by_download_size_limit() -> None:
+    diagnostics = CrawlDiagnostics.from_scrapy_stats(
+        {
+            "downloader/request_count": 3,
+            "file_status_count/downloaded": 1,
+            "file_status_count/too_large": 2,
+        }
+    )
+
+    assert diagnostics.file_status_counts == {"downloaded": 1, "too_large": 2}
+    assert diagnostics.files_too_large_skipped_count == 2
+    assert diagnostics.to_log_fields()["file_status_counts"] == {
+        "downloaded": 1,
+        "too_large": 2,
+    }
+
+
 def test_empty_output_diagnostics_summarizes_status_codes() -> None:
     diagnostics = CrawlDiagnostics.from_scrapy_stats(
         {

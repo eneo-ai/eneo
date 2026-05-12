@@ -95,6 +95,7 @@ def test_processing_summary_partitions_indexed_hash_retained_and_failed_counts()
         pages_source_retained=12,
         pages_hash_retained=290,
         files_hash_retained=1,
+        files_too_large_skipped=2,
     )
 
     assert summary.pages_fetched == 300
@@ -104,6 +105,7 @@ def test_processing_summary_partitions_indexed_hash_retained_and_failed_counts()
     assert summary.files_downloaded == 4
     assert summary.files_indexed == 2
     assert summary.files_hash_retained == 1
+    assert summary.files_too_large_skipped == 2
     assert summary.files_failed == 1
 
 
@@ -126,6 +128,7 @@ def test_processing_summary_logs_invalid_count_invariant(monkeypatch):
         pages_source_retained=0,
         pages_hash_retained=2,
         files_hash_retained=0,
+        files_too_large_skipped=0,
     )
 
     assert summary.pages_indexed == 0
@@ -148,6 +151,7 @@ def test_completed_run_with_only_hash_retained_content_is_all_unchanged():
         pages_source_retained=0,
         pages_hash_retained=3,
         files_hash_retained=1,
+        files_too_large_skipped=0,
     )
 
     outcome = derive_crawl_outcome(
@@ -159,6 +163,7 @@ def test_completed_run_with_only_hash_retained_content_is_all_unchanged():
         pages_source_retained=0,
         pages_hash_retained=3,
         files_hash_retained=1,
+        files_too_large_skipped=0,
         processing_summary=processing_summary,
     )
 
@@ -181,6 +186,23 @@ def test_completed_run_with_hash_retained_content_still_needs_summary_for_all_un
     )
 
     assert outcome_code is None
+
+
+def test_completed_run_with_only_too_large_files_has_specific_outcome():
+    outcome_code = classify_crawl_outcome(
+        crawl_type="crawl",
+        is_partial=False,
+        termination_reason="completed",
+        pages_count=0,
+        files_count=0,
+        source_retained_count=0,
+        files_too_large_skipped=3,
+        failure_summary=None,
+        pages_failed=0,
+        files_failed=0,
+    )
+
+    assert outcome_code == CrawlOutcomeCode.CRAWL_FILES_TOO_LARGE_ONLY
 
 
 def test_failed_no_pages_result_location_becomes_typed_error():

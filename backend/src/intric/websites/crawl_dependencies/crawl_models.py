@@ -34,6 +34,7 @@ class CrawlRunBase(BaseModel):
     pages_source_retained: Optional[int] = None
     pages_hash_retained: Optional[int] = None
     files_hash_retained: Optional[int] = None
+    files_too_large_skipped: Optional[int] = None
     failure_summary: Optional[dict[str, int]] = None
     outcome_code: Optional["CrawlOutcomeCode"] = None
 
@@ -45,6 +46,7 @@ class CrawlRunProcessingSummary(BaseModel):
     files_indexed: int = 0
     pages_hash_retained: int = 0
     files_hash_retained: int = 0
+    files_too_large_skipped: int = 0
     pages_source_retained: int = 0
     pages_failed: int = 0
     files_failed: int = 0
@@ -59,6 +61,7 @@ def derive_crawl_processing_summary(
     pages_source_retained: int | None,
     pages_hash_retained: int | None,
     files_hash_retained: int | None,
+    files_too_large_skipped: int | None = None,
 ) -> CrawlRunProcessingSummary:
     pages_fetched = pages_crawled or 0
     downloaded_files = files_downloaded or 0
@@ -67,6 +70,7 @@ def derive_crawl_processing_summary(
     source_retained_pages = pages_source_retained or 0
     hash_retained_pages = pages_hash_retained or 0
     hash_retained_files = files_hash_retained or 0
+    too_large_skipped_files = files_too_large_skipped or 0
 
     return CrawlRunProcessingSummary(
         pages_fetched=pages_fetched,
@@ -85,6 +89,7 @@ def derive_crawl_processing_summary(
         ),
         pages_hash_retained=hash_retained_pages,
         files_hash_retained=hash_retained_files,
+        files_too_large_skipped=too_large_skipped_files,
         pages_source_retained=source_retained_pages,
         pages_failed=failed_pages,
         files_failed=failed_files,
@@ -141,6 +146,7 @@ def derive_crawl_outcome(
     pages_source_retained: int | None,
     pages_hash_retained: int | None = None,
     files_hash_retained: int | None = None,
+    files_too_large_skipped: int | None = None,
     processing_summary: CrawlRunProcessingSummary | None = None,
     outcome_code: CrawlOutcomeCode | str | None = None,
 ) -> CrawlOutcomePublic | None:
@@ -155,6 +161,7 @@ def derive_crawl_outcome(
             files_failed=files_failed,
             pages_hash_retained=pages_hash_retained,
             files_hash_retained=files_hash_retained,
+            files_too_large_skipped=files_too_large_skipped,
             processing_summary=processing_summary,
         )
     )
@@ -170,6 +177,7 @@ def derive_crawl_outcome(
         pages_source_retained=pages_source_retained,
         pages_hash_retained=pages_hash_retained,
         files_hash_retained=files_hash_retained,
+        files_too_large_skipped=files_too_large_skipped,
         processing_summary=processing_summary,
     )
 
@@ -183,6 +191,7 @@ def derive_crawl_outcome_code(
     files_failed: int | None,
     pages_hash_retained: int | None = None,
     files_hash_retained: int | None = None,
+    files_too_large_skipped: int | None = None,
     processing_summary: CrawlRunProcessingSummary | None = None,
 ) -> CrawlOutcomeCode | None:
     # Read-side fallback for historical rows without stored outcome_code. Keep
@@ -192,6 +201,7 @@ def derive_crawl_outcome_code(
     detail_lower = detail.lower() if detail else ""
     affected_count = (pages_failed or 0) + (files_failed or 0)
     hash_retained_count = (pages_hash_retained or 0) + (files_hash_retained or 0)
+    too_large_count = files_too_large_skipped or 0
     indexed_count = 0
     if processing_summary is not None:
         hash_retained_count = (
@@ -201,6 +211,7 @@ def derive_crawl_outcome_code(
         indexed_count = (
             processing_summary.pages_indexed + processing_summary.files_indexed
         )
+        too_large_count = processing_summary.files_too_large_skipped
 
     # Legacy rows only stored crawl outcomes in result_location text. New writes
     # should set outcome_code and use these branches only as a read fallback.
@@ -234,6 +245,13 @@ def derive_crawl_outcome_code(
 
         _log_legacy_outcome_fallback_used(CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR)
         return CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
+
+    if (
+        status_value == Status.COMPLETE.value
+        and too_large_count > 0
+        and indexed_count == 0
+    ):
+        return CrawlOutcomeCode.CRAWL_FILES_TOO_LARGE_ONLY
 
     if affected_count > 0:
         _log_legacy_outcome_fallback_used(
@@ -273,6 +291,7 @@ def _crawl_outcome_from_code(
     pages_source_retained: int | None,
     pages_hash_retained: int | None,
     files_hash_retained: int | None,
+    files_too_large_skipped: int | None,
     processing_summary: CrawlRunProcessingSummary | None,
 ) -> CrawlOutcomePublic:
     detail = result_location.strip() if result_location else None
@@ -284,6 +303,7 @@ def _crawl_outcome_from_code(
             processing_summary.pages_hash_retained
             + processing_summary.files_hash_retained
         )
+        files_too_large_skipped = processing_summary.files_too_large_skipped
 
     if code == CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED:
         return CrawlOutcomePublic(
@@ -373,6 +393,14 @@ def _crawl_outcome_from_code(
             affected_count=hash_retained_count or None,
         )
 
+    if code == CrawlOutcomeCode.CRAWL_FILES_TOO_LARGE_ONLY:
+        return CrawlOutcomePublic(
+            code=code,
+            severity=CrawlOutcomeSeverity.WARNING,
+            message_key="crawl_outcome_files_too_large_only",
+            affected_count=files_too_large_skipped or None,
+        )
+
     return CrawlOutcomePublic(
         code=CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR,
         severity=CrawlOutcomeSeverity.ERROR,
@@ -421,6 +449,7 @@ class CrawlRunSparse(CrawlRunBase, InDB):
                 pages_source_retained=self.pages_source_retained,
                 pages_hash_retained=self.pages_hash_retained,
                 files_hash_retained=self.files_hash_retained,
+                files_too_large_skipped=self.files_too_large_skipped,
             )
         if self.outcome is None:
             self.outcome = derive_crawl_outcome(
@@ -432,6 +461,7 @@ class CrawlRunSparse(CrawlRunBase, InDB):
                 pages_source_retained=self.pages_source_retained,
                 pages_hash_retained=self.pages_hash_retained,
                 files_hash_retained=self.files_hash_retained,
+                files_too_large_skipped=self.files_too_large_skipped,
                 processing_summary=self.processing_summary,
                 outcome_code=self.outcome_code,
             )

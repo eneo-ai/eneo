@@ -25,6 +25,7 @@ class CrawlOutcomeCode(str, Enum):
     CRAWL_MAX_AGE_EXCEEDED = "CRAWL_MAX_AGE_EXCEEDED"
     CRAWL_SOURCE_RETENTION_ONLY = "CRAWL_SOURCE_RETENTION_ONLY"
     CRAWL_ALL_UNCHANGED = "CRAWL_ALL_UNCHANGED"
+    CRAWL_FILES_TOO_LARGE_ONLY = "CRAWL_FILES_TOO_LARGE_ONLY"
     CRAWL_PARTIAL_TIMEOUT = "CRAWL_PARTIAL_TIMEOUT"
     CRAWL_SHUTDOWN_ERROR = "CRAWL_SHUTDOWN_ERROR"
     CRAWL_COMPLETED_WITH_PAGE_FAILURES = "CRAWL_COMPLETED_WITH_PAGE_FAILURES"
@@ -54,6 +55,7 @@ def classify_crawl_outcome(
     source_retained_count: int,
     pages_hash_retained: int = 0,
     files_hash_retained: int = 0,
+    files_too_large_skipped: int = 0,
     failure_summary: Mapping[str, int] | None,
     pages_failed: int | None,
     files_failed: int | None,
@@ -70,6 +72,8 @@ def classify_crawl_outcome(
         return CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES
 
     if termination_reason == "completed" and not has_output:
+        if files_too_large_skipped > 0:
+            return CrawlOutcomeCode.CRAWL_FILES_TOO_LARGE_ONLY
         if crawl_type == "sitemap":
             return CrawlOutcomeCode.CRAWL_SITEMAP_NO_PAGES
         return CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED

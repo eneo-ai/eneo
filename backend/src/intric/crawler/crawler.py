@@ -28,7 +28,11 @@ from scrapy.spiders import Spider
 from twisted.python.failure import Failure
 
 from intric.crawler.parse_html import CrawledPage
-from intric.crawler.pipelines import FileNamePipeline
+from intric.crawler.pipelines import (
+    FILE_STATUS_TOO_LARGE,
+    FileNamePipeline,
+    FileSizeLimitStatsExtension,
+)
 from intric.crawler.spiders.crawl_spider import CrawlSpider
 from intric.crawler.spiders.sitemap_spider import SitemapSpider, SourceRetainedUrl
 from intric.main.config import get_settings
@@ -235,6 +239,7 @@ class CrawlDiagnostics:
     downloader_exception_counts: dict[str, int] = field(
         default_factory=_empty_string_counts
     )
+    file_status_counts: dict[str, int] = field(default_factory=_empty_string_counts)
     finish_reason: str | None = None
     elapsed_time_seconds: float | None = None
 
@@ -263,9 +268,14 @@ class CrawlDiagnostics:
             downloader_exception_counts=_string_counts(
                 typed_stats, "downloader/exception_type_count/"
             ),
+            file_status_counts=_string_counts(typed_stats, "file_status_count/"),
             finish_reason=_str_stat(typed_stats, "finish_reason"),
             elapsed_time_seconds=_float_stat(typed_stats, "elapsed_time_seconds"),
         )
+
+    @property
+    def files_too_large_skipped_count(self) -> int:
+        return self.file_status_counts.get(FILE_STATUS_TOO_LARGE, 0)
 
     def describe_empty_output(self) -> str:
         if self.request_count == 0:
@@ -274,15 +284,19 @@ class CrawlDiagnostics:
         if self.robotstxt_forbidden_count > 0:
             detail = f"robots.txt blocked {self.robotstxt_forbidden_count} request(s)"
             if self.robotstxt_status_counts:
-                detail += (
-                    f"; robots responses: {_format_int_counts(self.robotstxt_status_counts)}"
-                )
+                detail += f"; robots responses: {_format_int_counts(self.robotstxt_status_counts)}"
             return detail
 
         if self.downloader_exception_counts:
             return (
                 "downloader exceptions: "
                 f"{_format_string_counts(self.downloader_exception_counts)}"
+            )
+
+        if self.files_too_large_skipped_count > 0:
+            return (
+                f"{self.files_too_large_skipped_count} file(s) exceeded the crawler "
+                "download size limit"
             )
 
         if self.item_scraped_count > 0:
@@ -324,6 +338,7 @@ class CrawlDiagnostics:
                 for status, count in sorted(self.robotstxt_status_counts.items())
             },
             "downloader_exception_counts": self.downloader_exception_counts,
+            "file_status_counts": self.file_status_counts,
             "finish_reason": self.finish_reason,
             "elapsed_time_seconds": self.elapsed_time_seconds,
         }
@@ -461,6 +476,7 @@ def create_runner(
         "DNS_TIMEOUT": get_crawler_setting("dns_timeout", tenant_crawler_settings),
         "RETRY_TIMES": get_crawler_setting("retry_times", tenant_crawler_settings),
         "RETRY_ENABLED": True,
+        "EXTENSIONS": {FileSizeLimitStatsExtension: 500},
     }
 
     if http_cache_dir is not None:

@@ -10,6 +10,7 @@ export type CrawlOutcomeCode =
   | "CRAWL_MAX_AGE_EXCEEDED"
   | "CRAWL_SOURCE_RETENTION_ONLY"
   | "CRAWL_ALL_UNCHANGED"
+  | "CRAWL_FILES_TOO_LARGE_ONLY"
   | "CRAWL_PARTIAL_TIMEOUT"
   | "CRAWL_SHUTDOWN_ERROR"
   | "CRAWL_COMPLETED_WITH_PAGE_FAILURES"
@@ -35,6 +36,7 @@ export type CrawlRunCountBreakdown = {
   files_indexed: number;
   pages_hash_retained: number;
   files_hash_retained: number;
+  files_too_large_skipped: number;
   pages_source_retained: number;
   pages_failed: number;
   files_failed: number;
@@ -51,6 +53,7 @@ type CrawlRunWithOutcome = CrawlRun & {
   pages_source_retained?: number | null;
   pages_hash_retained?: number | null;
   files_hash_retained?: number | null;
+  files_too_large_skipped?: number | null;
   processing_summary?: CrawlRunCountBreakdown | null;
 };
 
@@ -72,6 +75,7 @@ const outcomeLabels: Record<string, () => string> = {
   crawl_outcome_max_age_exceeded: () => m.crawl_outcome_max_age_exceeded(),
   crawl_outcome_source_retention_only: () => m.crawl_outcome_source_retention_only(),
   crawl_outcome_all_unchanged: () => m.crawl_outcome_all_unchanged(),
+  crawl_outcome_files_too_large_only: () => m.crawl_outcome_files_too_large_only(),
   crawl_outcome_shutdown_error: () => m.crawl_outcome_shutdown_error(),
   crawl_outcome_page_failures: () => m.crawl_outcome_page_failures(),
   crawl_outcome_unknown_error: () => m.crawl_outcome_unknown_error()
@@ -100,7 +104,12 @@ export function getPagesSourceRetained(crawl: CrawlRun): number | undefined {
 export function getCrawlRunCountBreakdown(crawl: CrawlRun): CrawlRunCountBreakdown {
   const crawlWithOutcome = crawl as CrawlRunWithOutcome;
   if (crawlWithOutcome.processing_summary) {
-    return crawlWithOutcome.processing_summary;
+    return {
+      ...crawlWithOutcome.processing_summary,
+      files_too_large_skipped: positiveCount(
+        crawlWithOutcome.processing_summary.files_too_large_skipped
+      )
+    };
   }
 
   const pagesFetched = positiveCount(crawl.pages_crawled);
@@ -109,6 +118,7 @@ export function getCrawlRunCountBreakdown(crawl: CrawlRun): CrawlRunCountBreakdo
   const filesFailed = positiveCount(crawl.files_failed);
   const pagesHashRetained = positiveCount(crawlWithOutcome.pages_hash_retained);
   const filesHashRetained = positiveCount(crawlWithOutcome.files_hash_retained);
+  const filesTooLargeSkipped = positiveCount(crawlWithOutcome.files_too_large_skipped);
 
   return {
     pages_fetched: pagesFetched,
@@ -117,6 +127,7 @@ export function getCrawlRunCountBreakdown(crawl: CrawlRun): CrawlRunCountBreakdo
     files_indexed: indexedCount(filesDownloaded, filesHashRetained, filesFailed),
     pages_hash_retained: pagesHashRetained,
     files_hash_retained: filesHashRetained,
+    files_too_large_skipped: filesTooLargeSkipped,
     pages_source_retained: positiveCount(crawlWithOutcome.pages_source_retained),
     pages_failed: pagesFailed,
     files_failed: filesFailed
@@ -165,6 +176,17 @@ export function getCrawlRunResultLabels(crawl: CrawlRun): CrawlRunResultLabel[] 
       color: "blue",
       label: m.crawl_source_retained_resources({
         resources: sourceRetainedResources
+      })
+    });
+  }
+
+  const tooLargeResources = fileResourceLabel(breakdown.files_too_large_skipped);
+  if (tooLargeResources) {
+    labels.push({
+      color: "orange",
+      label: m.crawl_too_large_skipped_resources({ resources: tooLargeResources }),
+      tooltip: m.crawl_too_large_skipped_tooltip({
+        resources: tooLargeResources
       })
     });
   }

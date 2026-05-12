@@ -39,6 +39,10 @@ class CrawlRuns(BasePublic):
             "embedding model matched the existing blob"
         ),
     )
+    files_too_large_skipped: Mapped[Optional[int]] = mapped_column(
+        nullable=True,
+        comment="Files skipped because Scrapy stopped the download at DOWNLOAD_MAXSIZE",
+    )
     outcome_code: Mapped[Optional[str]] = mapped_column(
         String,
         nullable=True,

@@ -382,6 +382,7 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
     assert terminal_crawl_run_updates
     assert terminal_crawl_run_updates[0]["pages_hash_retained"] == 0
     assert terminal_crawl_run_updates[0]["files_hash_retained"] == 0
+    assert terminal_crawl_run_updates[0]["files_too_large_skipped"] == 0
     terminal_job_messages = [
         _compiled_params(stmt).get("result_location")
         for session in recovery_sessions
@@ -398,6 +399,7 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
         "files_downloaded": 0,
         "files_failed": 0,
         "files_hash_retained": 0,
+        "files_too_large_skipped": 0,
         "blobs_deleted": 0,
         "successful": False,
         "outcome_code": expected_outcome_code.value,

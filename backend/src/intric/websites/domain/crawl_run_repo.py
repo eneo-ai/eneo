@@ -58,6 +58,7 @@ class CrawlRunRepository:
                 pages_source_retained=crawl_run.pages_source_retained,
                 pages_hash_retained=crawl_run.pages_hash_retained,
                 files_hash_retained=crawl_run.files_hash_retained,
+                files_too_large_skipped=crawl_run.files_too_large_skipped,
                 outcome_code=_serialize_crawl_outcome_code(crawl_run.outcome_code),
                 job_id=crawl_run.job_id,
             )
@@ -80,6 +81,7 @@ class CrawlRunRepository:
                 pages_source_retained=crawl_run.pages_source_retained,
                 pages_hash_retained=crawl_run.pages_hash_retained,
                 files_hash_retained=crawl_run.files_hash_retained,
+                files_too_large_skipped=crawl_run.files_too_large_skipped,
                 outcome_code=_serialize_crawl_outcome_code(crawl_run.outcome_code),
                 job_id=crawl_run.job_id,
             )
