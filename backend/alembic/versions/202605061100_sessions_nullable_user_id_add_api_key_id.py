@@ -1,4 +1,4 @@
-"""sessions: nullable user_id + add api_key_id
+"""sessions: nullable user_id + add api_key_id + XOR check
 
 Service API keys resolve to a synthetic UserInDB whose id is never inserted
 into ``users``. Writing that synthetic id into ``sessions.user_id`` (NOT NULL
@@ -11,9 +11,15 @@ This migration:
    so service-key sessions still have an owning principal recorded for
    ownership checks and audit.
 3. Indexes ``api_key_id`` for the ownership-check query path.
+4. Enforces the application invariant — exactly one of ``user_id`` /
+   ``api_key_id`` is set per row — as a DB CHECK constraint. The ORM mapping
+   in ``sessions_table.py`` mirrors the same constraint so model-driven
+   setups stay in sync. Without this guard, a future regression in any
+   write path (or a manual tweak) could land a NULL/NULL row that is
+   invisible to user-scoped listings and dereferences nothing useful.
 
 Revision ID: 202605061100
-Revises: 202604291030
+Revises: 20260501_backfill_model_costs
 Create Date: 2026-05-06
 """
 
@@ -23,7 +29,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "202605061100"
-down_revision = "202604291030"
+down_revision = "20260501_backfill_model_costs"
 branch_labels = None
 depends_on = None
 
@@ -50,9 +56,17 @@ def upgrade() -> None:
         ["api_key_id"],
         unique=False,
     )
+    op.create_check_constraint(
+        "ck_sessions_user_xor_api_key",
+        "sessions",
+        "(user_id IS NOT NULL) <> (api_key_id IS NOT NULL)",
+    )
 
 
 def downgrade() -> None:
+    op.drop_constraint(
+        "ck_sessions_user_xor_api_key", "sessions", type_="check"
+    )
     # Service-key sessions (user_id NULL, api_key_id set) can't be represented
     # in the pre-migration schema where user_id is NOT NULL. Purge them BEFORE
     # dropping api_key_id — otherwise the column is gone and there is no way
