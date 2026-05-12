@@ -31,6 +31,10 @@ from typing import Any
 import sqlalchemy as sa
 
 from alembic import op
+from intric.model_providers.domain.model_defaults_lookup import (
+    is_ambiguous,
+    resolve_model_defaults,
+)
 
 # revision identifiers, used by Alembic
 revision = "20260501_backfill_model_costs"
@@ -48,51 +52,6 @@ def _load_model_cost() -> dict[str, dict[str, Any]]:
     except Exception:
         return {}
     return getattr(litellm, "model_cost", {}) or {}
-
-
-def _lookup(
-    model_cost: dict[str, dict[str, Any]],
-    names: list[str | None],
-    provider_type: str | None,
-) -> dict[str, Any] | None:
-    """Resolve a row's cost entry from LiteLLM's ``model_cost`` map.
-
-    ``names`` is tried in order — typically ``[litellm_model_name, name]`` so an
-    operator override wins over the display name.
-
-    Resolution order:
-      1. If ``provider_type`` is known (tenant-specific model with a configured
-         provider), prefer ``{provider_type}/{name}`` — Azure-served ``gpt-4o``
-         must pick up ``azure/gpt-4o`` prices, not the bare ``gpt-4o`` entry.
-      2. Exact ``name`` match — LiteLLM lists many models (esp. OpenAI
-         embeddings) only by bare name.
-      3. For global models (``provider_type`` unknown), accept a prefixed
-         variant only when *exactly one* provider prefix matches the name.
-         Multiple matches (e.g. ``openai/gpt-4o`` AND ``azure/gpt-4o``) → skip,
-         because picking alphabetically silently writes wrong prices.
-    """
-    candidates = [n for n in names if n]
-    if not candidates:
-        return None
-
-    if provider_type:
-        for n in candidates:
-            info = model_cost.get(f"{provider_type}/{n}")
-            if info is not None:
-                return info
-
-    for n in candidates:
-        info = model_cost.get(n)
-        if info is not None:
-            return info
-
-    if provider_type is None:
-        prefixes = {key.split("/", 1)[0] for key in model_cost if "/" in key}
-        for n in candidates:
-            matching = [p for p in prefixes if f"{p}/{n}" in model_cost]
-            if len(matching) == 1:
-                return model_cost[f"{matching[0]}/{n}"]
-    return None
 
 
 def _backfill_token_costs(
@@ -118,13 +77,13 @@ def _backfill_token_costs(
     updates = 0
     ambiguous = 0
     for row in rows:
-        info = _lookup(
+        info = resolve_model_defaults(
             model_cost,
             [row["litellm_model_name"], row["name"]],
             row["provider_type"],
         )
         if info is None:
-            if row["provider_type"] is None and _is_ambiguous(model_cost, row["name"]):
+            if row["provider_type"] is None and is_ambiguous(model_cost, row["name"]):
                 ambiguous += 1
             continue
         in_rate = info.get("input_cost_per_token")
@@ -163,13 +122,13 @@ def _backfill_per_minute(
     updates = 0
     ambiguous = 0
     for row in rows:
-        info = _lookup(
+        info = resolve_model_defaults(
             model_cost,
             [row["model_name"], row["name"]],
             row["provider_type"],
         )
         if info is None:
-            if row["provider_type"] is None and _is_ambiguous(model_cost, row["name"]):
+            if row["provider_type"] is None and is_ambiguous(model_cost, row["name"]):
                 ambiguous += 1
             continue
         per_second = info.get("input_cost_per_second")
@@ -184,20 +143,6 @@ def _backfill_per_minute(
         )
         updates += 1
     return updates, ambiguous
-
-
-def _is_ambiguous(model_cost: dict[str, Any], name: str | None) -> bool:
-    """True iff ``name`` appears under more than one provider prefix and is not
-    listed without prefix. Used only to count skipped rows for the progress
-    summary so operators know to disambiguate manually."""
-    if not name or name in model_cost:
-        return False
-    prefixes = {
-        key.split("/", 1)[0]
-        for key in model_cost
-        if "/" in key and key.split("/", 1)[1] == name
-    }
-    return len(prefixes) > 1
 
 
 def upgrade() -> None:

@@ -232,11 +232,8 @@ export function initConversations(client) {
         );
       }
 
-      /** @type {import('../types/resources').PreflightResponse} */
-      // @ts-ignore - path not yet in generated schema.d.ts; will resolve on next regen
       const res = await client.fetch("/api/v1/conversations/preflight", {
         method: "post",
-        // @ts-ignore - same reason
         requestBody: {
           "application/json": {
             ...target,

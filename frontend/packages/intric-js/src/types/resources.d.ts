@@ -125,16 +125,7 @@ export type ConversationMessage = components["schemas"]["Message"] & {
   num_tokens_answer?: number;
 };
 export type ConversationTools = components["schemas"]["UseTools"];
-// Hand-authored to match backend PreflightResponse — added separately from a
-// full schema regen to avoid unrelated openapi-typescript formatting churn.
-// `model_name` and `context_window` are echoed by the backend so the client
-// can compute percentage-fill without a separate metadata fetch.
-export type PreflightResponse = {
-  input_tokens: number;
-  file_tokens: number;
-  model_name: string;
-  context_window: number;
-};
+export type PreflightResponse = components["schemas"]["PreflightResponse"];
 export type GroupChat = components["schemas"]["GroupChatPublic"];
 export type GroupChatSparse = Omit<components["schemas"]["GroupChatSparse"], "user_id">;
 export type ChatPartner =

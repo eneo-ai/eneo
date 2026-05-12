@@ -1315,6 +1315,34 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/conversations/preflight": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Preflight Tokens
+     * @description Returns the exact token cost the next chat request will add.
+     *
+     *     Excludes knowledge/RAG and web-search content (selected at request time
+     *     and unknowable up-front). Designed to be called debounced from the input
+     *     field — the cost is dominated by tokenization (~5-20ms).
+     *
+     *     Rate-limited at 600 req/min/user; a 400ms-debounced typist tops out at
+     *     ~150 req/min, so the limit catches scripted abuse while leaving multiple
+     *     tabs and fast input untouched.
+     */
+    post: operations["preflight_tokens_api_v1_conversations_preflight_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/conversations/{session_id}/": {
     parameters: {
       query?: never;
@@ -4611,9 +4639,18 @@ export interface paths {
     /**
      * Delete Security Classification
      * @description Delete a security classification.
+     *
+     *     Refuses if any model, space or MCP server still references it — the
+     *     FK is `ON DELETE SET NULL`, so dropping a referenced classification
+     *     would silently downgrade every dependent row to "no classification".
+     *     Pass `?force=true` to override after reviewing the usage report.
+     *
      *     Args:
      *         id: The ID of the security classification to delete.
+     *         force: When true, delete even if rows still reference this
+     *             classification. Those rows will be downgraded to NULL.
      *     Raises:
+     *         400: If the classification is referenced and `force` is false.
      *         403: If the user doesn't have permission to delete the security classification.
      *         404: If the security classification doesn't exist.
      */
@@ -6930,10 +6967,16 @@ export interface components {
       | "integration_knowledge_created"
       | "integration_knowledge_deleted"
       | "integration_knowledge_synced"
+      | "completion_model_created"
       | "completion_model_updated"
+      | "completion_model_deleted"
       | "completion_model_migrated"
+      | "embedding_model_created"
       | "embedding_model_updated"
+      | "embedding_model_deleted"
+      | "transcription_model_created"
       | "transcription_model_updated"
+      | "transcription_model_deleted"
       | "template_created"
       | "template_updated"
       | "template_deleted"
@@ -9281,14 +9324,14 @@ export interface components {
      *     - If no assistant is targeted, the most appropriate assistant will be selected.
      */
     ConversationRequest: {
-      /** Question */
-      question: string;
       /** Session Id */
       session_id?: string | null;
       /** Assistant Id */
       assistant_id?: string | null;
       /** Group Chat Id */
       group_chat_id?: string | null;
+      /** Question */
+      question: string;
       /**
        * Files
        * @default []
@@ -11664,6 +11707,16 @@ export interface components {
        * @default []
        */
       tool_calls?: components["schemas"]["ToolCallInfo"][];
+      /**
+       * Num Tokens Question
+       * @default 0
+       */
+      num_tokens_question?: number;
+      /**
+       * Num Tokens Answer
+       * @default 0
+       */
+      num_tokens_answer?: number;
     };
     /** MessageLogging */
     MessageLogging: {
@@ -11692,6 +11745,16 @@ export interface components {
        * @default []
        */
       tool_calls?: components["schemas"]["ToolCallInfo"][];
+      /**
+       * Num Tokens Question
+       * @default 0
+       */
+      num_tokens_question?: number;
+      /**
+       * Num Tokens Answer
+       * @default 0
+       */
+      num_tokens_answer?: number;
       logging_details: components["schemas"]["LoggingDetailsPublic"];
     };
     /** MetadataCount */
@@ -13212,6 +13275,55 @@ export interface components {
       /** Description */
       description: string;
     };
+    /**
+     * PreflightRequest
+     * @description Request shape for /conversations/preflight.
+     *
+     *     Inherits the "exactly one target" rule from `_ConversationTarget`. Adds
+     *     its own rule that at least one of `question` or `file_ids` must be
+     *     non-empty — an empty preflight would still trigger a model lookup with
+     *     no useful answer.
+     */
+    PreflightRequest: {
+      /** Session Id */
+      session_id?: string | null;
+      /** Assistant Id */
+      assistant_id?: string | null;
+      /** Group Chat Id */
+      group_chat_id?: string | null;
+      /**
+       * Question
+       * @default
+       */
+      question?: string;
+      /**
+       * File Ids
+       * @default []
+       */
+      file_ids?: string[];
+    };
+    /**
+     * PreflightResponse
+     * @description Exact token cost the next request will add to the context window.
+     *
+     *     Excludes knowledge/RAG chunks and web-search results — those are selected
+     *     at request time. The frontend pairs this delta with the persisted history
+     *     tokens to project total context fill.
+     *
+     *     `model_name` and `context_window` are echoed so a client can compute the
+     *     percentage fill locally without a separate round-trip to fetch model
+     *     metadata.
+     */
+    PreflightResponse: {
+      /** Input Tokens */
+      input_tokens: number;
+      /** File Tokens */
+      file_tokens: number;
+      /** Model Name */
+      model_name: string;
+      /** Context Window */
+      context_window: number;
+    };
     /** PrivacyPolicy */
     PrivacyPolicy: {
       /** Url */
@@ -14625,7 +14737,6 @@ export interface components {
       input_cost_per_token?: number | string | null;
       /** Output Cost Per Token */
       output_cost_per_token?: number | string | null;
-      /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TenantCompletionModelUpdate */
@@ -14724,10 +14835,7 @@ export interface components {
        * @description Indicative USD per output token (usually 0)
        */
       output_cost_per_token?: number | string | null;
-      /**
-       * Security Classification
-       * @description Security classification
-       */
+      /** @description Security classification */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TenantEmbeddingModelUpdate */
@@ -15090,10 +15198,7 @@ export interface components {
        * @description Indicative USD per minute of audio
        */
       cost_per_minute?: number | string | null;
-      /**
-       * Security Classification
-       * @description Security classification
-       */
+      /** @description Security classification */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TenantTranscriptionModelUpdate */
@@ -22149,6 +22254,75 @@ export interface operations {
       };
     };
   };
+  preflight_tokens_api_v1_conversations_preflight_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PreflightRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PreflightResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_conversation_api_v1_conversations__session_id___get: {
     parameters: {
       query?: never;
@@ -27490,6 +27664,8 @@ export interface operations {
     parameters: {
       query: {
         model_name: string;
+        /** @description Canonical provider type the model belongs to (e.g. 'openai', 'azure'). When provided, '{provider_type}/{model_name}' is preferred over the bare entry so Azure-served gpt-4o picks up azure/gpt-4o prices instead of openai/gpt-4o. */
+        provider_type?: string | null;
       };
       header?: never;
       path?: never;
@@ -31102,7 +31278,9 @@ export interface operations {
   };
   delete_security_classification_api_v1_security_classifications__id___delete: {
     parameters: {
-      query?: never;
+      query?: {
+        force?: boolean;
+      };
       header?: never;
       path: {
         id: string;
@@ -31117,6 +31295,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Forbidden */
       403: {

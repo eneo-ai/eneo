@@ -179,6 +179,7 @@
     <ModelDraftForm
       bind:draft
       {modelType}
+      {providerType}
       isSelfHosted={selfHosted}
       canAdd={draftComplete}
       showAddAnotherHint={draftComplete && models.length === 0}

@@ -10,6 +10,7 @@ from typing_extensions import TypedDict
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.main.config import get_settings
+from intric.model_providers.domain.model_defaults_lookup import resolve_model_defaults
 from intric.model_providers.domain.model_provider_service import ModelProviderService
 from intric.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
@@ -303,27 +304,23 @@ async def set_favorite_providers(
 async def get_model_defaults(
     model_name: str,
     _user: CurrentUser,
+    provider_type: str | None = Query(
+        default=None,
+        description=(
+            "Canonical provider type the model belongs to (e.g. 'openai', "
+            "'azure'). When provided, '{provider_type}/{model_name}' is "
+            "preferred over the bare entry so Azure-served gpt-4o picks up "
+            "azure/gpt-4o prices instead of openai/gpt-4o."
+        ),
+    ),
 ) -> dict[str, object]:
     """Look up recommended default values for a model from LiteLLM's model_cost database."""
     import litellm
 
     model_cost = cast(dict[str, ModelCostInfo], getattr(litellm, "model_cost"))
-
-    # Try exact match first
-    info = model_cost.get(model_name)
-
-    # If no exact match, try common prefixed variants
-    if info is None:
-        prefixes: set[str] = set()
-        for key in model_cost:
-            if "/" in key:
-                prefix = key.split("/")[0]
-                prefixes.add(prefix)
-        for prefix in sorted(prefixes):
-            candidate = f"{prefix}/{model_name}"
-            info = model_cost.get(candidate)
-            if info is not None:
-                break
+    info = resolve_model_defaults(
+        cast(dict[str, dict[str, Any]], model_cost), model_name, provider_type
+    )
 
     if info is None:
         return {"found": False}

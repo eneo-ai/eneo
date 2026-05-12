@@ -36,6 +36,13 @@
     draft = $bindable(),
     modelType,
     isSelfHosted = false,
+    /** Canonical provider type (e.g. "openai", "azure"). Threaded into the
+     *  "Lookup defaults" call so LiteLLM rows are disambiguated correctly —
+     *  Azure-served gpt-4o picks up azure/gpt-4o prices, not openai/gpt-4o.
+     *  Optional only because the edit dialog may not always know the
+     *  provider context; without it, the backend falls back to bare-name
+     *  resolution with unambiguous-prefix matching. */
+    providerType,
     /** Show the bottom "Add another model" form-submit button. Set false
      *  when the form is hosted in a dialog that supplies its own footer. */
     showAddAnotherButton = true,
@@ -49,6 +56,7 @@
     draft: ModelDraftState;
     modelType: ModelType;
     isSelfHosted?: boolean;
+    providerType?: string;
     showAddAnotherButton?: boolean;
     canAdd?: boolean;
     showAddAnotherHint?: boolean;
@@ -77,7 +85,8 @@
       // The hand-maintained client typings don't include the cost fields yet,
       // so we read them through an explicit cast.
       const result = (await intric.modelProviders.getModelDefaults(
-        draft.name.trim()
+        draft.name.trim(),
+        providerType
       )) as unknown as {
         found: boolean;
         max_input_tokens?: number | null;

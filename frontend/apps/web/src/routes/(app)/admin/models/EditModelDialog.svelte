@@ -231,6 +231,7 @@
         <ModelDraftForm
           bind:draft
           {modelType}
+          providerType={"provider_type" in model ? (model.provider_type ?? undefined) : undefined}
           showAddAnotherButton={false}
           nameReadOnly={type !== "completionModel"}
         />
