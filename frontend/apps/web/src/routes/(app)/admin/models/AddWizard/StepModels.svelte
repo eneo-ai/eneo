@@ -16,7 +16,10 @@
   import { m } from "$lib/paraglide/messages";
   import { getIntric } from "$lib/core/Intric";
 
-  import { type ModelProviderCapabilities } from "../modelProviderCapabilities";
+  import {
+    formatProviderLabel,
+    type ModelProviderCapabilities
+  } from "../modelProviderCapabilities";
   import type { WizardModelDraft } from "./wizardState";
   import {
     type ModelDraftState,
@@ -125,6 +128,19 @@
   const supportStatus = $derived(providerSupportsMode(capabilities, providerType, modelType));
   const selfHosted = $derived(isSelfHostedProvider(capabilities, providerType));
 
+  // Raw `providerType` ("openai", "hosted_vllm") and `modelType`
+  // ("completion") are machine identifiers — surface them via the
+  // existing formatter + localised type labels so admins don't see
+  // "hosted_vllm" or "transcription" in plain text alerts.
+  const providerLabel = $derived(formatProviderLabel(providerType));
+  const modelTypeLabel = $derived(
+    modelType === "completion"
+      ? m.model_type_completion()
+      : modelType === "embedding"
+        ? m.model_type_embedding()
+        : m.model_type_transcription()
+  );
+
   // --- Handlers ----------------------------------------------------------
 
   function selectFromCatalog(info: ModelInfo) {
@@ -157,7 +173,10 @@
       <TriangleAlert class="text-warning-stronger mt-0.5 size-5 shrink-0" aria-hidden="true" />
       <div>
         <p class="text-warning-stronger font-medium">
-          {m.provider_no_support_title({ providerType, modelType })}
+          {m.provider_no_support_title({
+            providerType: providerLabel,
+            modelType: modelTypeLabel
+          })}
         </p>
         <p class="text-warning-default mt-0.5">{m.provider_no_support_description()}</p>
       </div>

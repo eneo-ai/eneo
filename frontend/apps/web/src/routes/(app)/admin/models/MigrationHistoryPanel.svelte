@@ -56,7 +56,7 @@
       const result = await intric.models.getAllMigrationHistory();
       history = result as MigrationRecord[];
     } catch (e: unknown) {
-      error = e instanceof Error ? e.message : "Failed to load migration history";
+      error = e instanceof Error ? e.message : m.migration_history_load_failed();
     } finally {
       loading = false;
     }
@@ -106,6 +106,22 @@
         return "secondary";
       default:
         return "secondary";
+    }
+  }
+
+  // Map backend status strings to localised labels. Unknown values fall
+  // back to the raw key so a future backend addition doesn't render as
+  // an empty badge — operators still see something actionable.
+  function statusLabel(status: string): string {
+    switch (status) {
+      case "completed":
+        return m.migration_status_completed();
+      case "failed":
+        return m.migration_status_failed();
+      case "in_progress":
+        return m.migration_status_in_progress();
+      default:
+        return status;
     }
   }
 
@@ -185,7 +201,7 @@
             <Table.Cell class="text-right tabular-nums">{record.migrated_count}</Table.Cell>
             <Table.Cell class="text-muted">{record.initiated_by_name}</Table.Cell>
             <Table.Cell>
-              <Badge variant={statusVariant(record.status)}>{record.status}</Badge>
+              <Badge variant={statusVariant(record.status)}>{statusLabel(record.status)}</Badge>
             </Table.Cell>
           </Table.Row>
 
