@@ -390,7 +390,7 @@ async def register_user(
         ),
     )
 
-    user_admin_view = UserCreatedAdminView(**user.model_dump(exclude={"api_key"}))
+    user_admin_view = UserCreatedAdminView(**user.model_dump())
 
     return user_admin_view
 

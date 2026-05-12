@@ -1892,7 +1892,7 @@ export interface paths {
     put?: never;
     /**
      * Create new user in tenant
-     * @description Creates a new user account within your tenant. The user will be created with the provided credentials and automatically associated with your organization. Returns user details including a new API key for the user.
+     * @description Creates a new user account within your tenant. The user will be created with the provided credentials and automatically associated with your organization. Personal API keys are no longer auto-provisioned; the user can create one via POST /api/v1/api-keys when needed.
      */
     post: operations["register_user_api_v1_admin_users__post"];
     delete?: never;
@@ -15664,7 +15664,6 @@ export interface components {
       roles: components["schemas"]["RolePublic"][];
       /** User Groups */
       user_groups: components["schemas"]["UserGroupRead"][];
-      api_key: components["schemas"]["ApiKey"];
     };
     /**
      * UserDeletedListItem
