@@ -81,8 +81,8 @@ class CompletionModelMigrationService:
         start_time = datetime.now(timezone.utc)
         migration_id = uuid4()
 
-        self.logger.warning(
-            "MIGRATION_DEBUG [1/7] Starting migration",
+        self.logger.info(
+            "Starting model migration",
             extra={
                 "migration_id": str(migration_id),
                 "from_model_id": str(from_model_id),
@@ -175,8 +175,8 @@ class CompletionModelMigrationService:
                     f"Please contact your administrator to enable this model."
                 )
 
-            self.logger.warning(
-                "MIGRATION_DEBUG [2/7] Model validation passed",
+            self.logger.info(
+                "Model validation passed",
                 extra={
                     "from_model": from_model.name,
                     "to_model": to_model.name,
@@ -185,8 +185,8 @@ class CompletionModelMigrationService:
             )
 
         except ValidationException as ve:
-            self.logger.warning(
-                f"MIGRATION_DEBUG [FAIL] Validation failed: {ve}",
+            self.logger.info(
+                f"Migration validation rejected: {ve}",
                 extra={
                     "from_model_id": str(from_model_id),
                     "to_model_id": str(to_model_id),
@@ -211,8 +211,8 @@ class CompletionModelMigrationService:
         affected_count = await self._count_affected_entities(
             from_model_id, final_entity_types, user.tenant_id
         )
-        self.logger.warning(
-            f"MIGRATION_DEBUG [3/7] Affected entities counted: {affected_count}",
+        self.logger.info(
+            f"Affected entities counted: {affected_count}",
             extra={"migration_id": str(migration_id), "affected_count": affected_count},
         )
 
@@ -232,8 +232,8 @@ class CompletionModelMigrationService:
             affected_count=affected_count,
             started_at=start_time,
         )
-        self.logger.warning(
-            f"MIGRATION_DEBUG [4/7] History record created (migration_id={migration_id})",
+        self.logger.info(
+            f"Migration history record created (migration_id={migration_id})",
         )
 
         # Publish migration started event
@@ -253,8 +253,8 @@ class CompletionModelMigrationService:
             validation_result = await self._validate_migration_compatibility(
                 from_model_id, to_model_id, user.tenant_id
             )
-            self.logger.warning(
-                f"MIGRATION_DEBUG [5/7] Compatibility check: compatible={validation_result.compatible}, "
+            self.logger.info(
+                f"Migration compatibility check: compatible={validation_result.compatible}, "
                 f"warnings={validation_result.warnings}, confirm_migration={confirm_migration}",
                 extra={"migration_id": str(migration_id)},
             )
@@ -315,8 +315,8 @@ class CompletionModelMigrationService:
                 )
 
             # Step 2: Execute migration transactionally
-            self.logger.warning(
-                f"MIGRATION_DEBUG [6/7] Executing migration for entity_types={final_entity_types}",
+            self.logger.info(
+                f"Executing migration for entity_types={final_entity_types}",
                 extra={"migration_id": str(migration_id)},
             )
             result = await self._execute_migration_transactionally(
@@ -376,8 +376,8 @@ class CompletionModelMigrationService:
 
             duration = (datetime.now(timezone.utc) - start_time).total_seconds()
 
-            self.logger.warning(
-                f"MIGRATION_DEBUG [7/7] Migration completed: migrated_count={result['total']}, "
+            self.logger.info(
+                f"Migration completed: migrated_count={result['total']}, "
                 f"duration={duration:.2f}s, details={result}",
                 extra={
                     "migration_id": str(migration_id),

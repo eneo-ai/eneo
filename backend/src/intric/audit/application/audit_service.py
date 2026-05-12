@@ -337,9 +337,27 @@ class AuditService:
             "error_message": error_message,
         }
 
-        # Enqueue to ARQ
-        await job_manager.enqueue(
-            cast(Task, "log_audit_event"), job_id, cast(TaskParams, params)
-        )
+        # Enqueue to ARQ. Audit is best-effort: if Redis/ARQ is unreachable we
+        # log a warning but do NOT propagate the failure — a 500 on a
+        # successful mutation just because audit couldn't be enqueued would
+        # turn a partial degradation into a full outage.
+        try:
+            await job_manager.enqueue(
+                cast(Task, "log_audit_event"), job_id, cast(TaskParams, params)
+            )
+        except Exception as enqueue_exc:  # noqa: BLE001 — see comment above
+            logger.warning(
+                "Failed to enqueue audit event; mutation succeeded but audit "
+                "trail is missing this entry",
+                extra={
+                    "job_id": str(job_id),
+                    "action": action.value,
+                    "entity_type": entity_type.value,
+                    "entity_id": str(entity_id),
+                    "error_type": type(enqueue_exc).__name__,
+                    "error": str(enqueue_exc),
+                },
+            )
+            return None
 
         return job_id
