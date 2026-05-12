@@ -50,39 +50,82 @@ def _load_model_cost() -> dict[str, dict[str, Any]]:
     return getattr(litellm, "model_cost", {}) or {}
 
 
-def _lookup(model_cost: dict[str, dict[str, Any]], name: str) -> dict[str, Any] | None:
-    """Mirror the resolution logic from `/model-defaults/`: exact match first,
-    then `<provider>/<name>` for every prefix that appears in the cost map.
+def _lookup(
+    model_cost: dict[str, dict[str, Any]],
+    names: list[str | None],
+    provider_type: str | None,
+) -> dict[str, Any] | None:
+    """Resolve a row's cost entry from LiteLLM's ``model_cost`` map.
+
+    ``names`` is tried in order — typically ``[litellm_model_name, name]`` so an
+    operator override wins over the display name.
+
+    Resolution order:
+      1. If ``provider_type`` is known (tenant-specific model with a configured
+         provider), prefer ``{provider_type}/{name}`` — Azure-served ``gpt-4o``
+         must pick up ``azure/gpt-4o`` prices, not the bare ``gpt-4o`` entry.
+      2. Exact ``name`` match — LiteLLM lists many models (esp. OpenAI
+         embeddings) only by bare name.
+      3. For global models (``provider_type`` unknown), accept a prefixed
+         variant only when *exactly one* provider prefix matches the name.
+         Multiple matches (e.g. ``openai/gpt-4o`` AND ``azure/gpt-4o``) → skip,
+         because picking alphabetically silently writes wrong prices.
     """
-    if not name:
+    candidates = [n for n in names if n]
+    if not candidates:
         return None
-    if name in model_cost:
-        return model_cost[name]
-    prefixes: set[str] = set()
-    for key in model_cost:
-        if "/" in key:
-            prefixes.add(key.split("/")[0])
-    for prefix in sorted(prefixes):
-        candidate = f"{prefix}/{name}"
-        info = model_cost.get(candidate)
+
+    if provider_type:
+        for n in candidates:
+            info = model_cost.get(f"{provider_type}/{n}")
+            if info is not None:
+                return info
+
+    for n in candidates:
+        info = model_cost.get(n)
         if info is not None:
             return info
+
+    if provider_type is None:
+        prefixes = {key.split("/", 1)[0] for key in model_cost if "/" in key}
+        for n in candidates:
+            matching = [p for p in prefixes if f"{p}/{n}" in model_cost]
+            if len(matching) == 1:
+                return model_cost[f"{matching[0]}/{n}"]
     return None
 
 
-def _backfill_token_costs(connection: sa.Connection, table: str, model_cost: dict[str, Any]) -> int:
-    """Fill input/output_cost_per_token where NULL. Returns count updated."""
+def _backfill_token_costs(
+    connection: sa.Connection, table: str, model_cost: dict[str, Any]
+) -> tuple[int, int]:
+    """Fill input/output_cost_per_token where NULL.
+
+    Returns ``(updated, ambiguous)`` — ``ambiguous`` counts rows that had no
+    provider hint AND matched more than one provider prefix in LiteLLM, which
+    are left untouched so admins can disambiguate via "Lookup defaults" in the
+    UI rather than receive a silently-wrong price.
+    """
     rows = connection.execute(
         sa.text(
-            f"SELECT id, name FROM {table} "
-            "WHERE input_cost_per_token IS NULL OR output_cost_per_token IS NULL"
+            f"SELECT t.id, t.name, t.litellm_model_name, mp.provider_type "
+            f"FROM {table} t "
+            "LEFT JOIN model_providers mp ON mp.id = t.provider_id "
+            "WHERE t.input_cost_per_token IS NULL "
+            "   OR t.output_cost_per_token IS NULL"
         )
     ).mappings().all()
 
     updates = 0
+    ambiguous = 0
     for row in rows:
-        info = _lookup(model_cost, row["name"])
+        info = _lookup(
+            model_cost,
+            [row["litellm_model_name"], row["name"]],
+            row["provider_type"],
+        )
         if info is None:
+            if row["provider_type"] is None and _is_ambiguous(model_cost, row["name"]):
+                ambiguous += 1
             continue
         in_rate = info.get("input_cost_per_token")
         out_rate = info.get("output_cost_per_token")
@@ -98,21 +141,36 @@ def _backfill_token_costs(connection: sa.Connection, table: str, model_cost: dic
             {"id": row["id"], "in_rate": in_rate, "out_rate": out_rate},
         )
         updates += 1
-    return updates
+    return updates, ambiguous
 
 
-def _backfill_per_minute(connection: sa.Connection, model_cost: dict[str, Any]) -> int:
-    """Fill cost_per_minute (transcription) where NULL. Returns count updated."""
+def _backfill_per_minute(
+    connection: sa.Connection, model_cost: dict[str, Any]
+) -> tuple[int, int]:
+    """Fill cost_per_minute (transcription) where NULL.
+
+    Same return shape as ``_backfill_token_costs`` — see that docstring.
+    """
     rows = connection.execute(
         sa.text(
-            "SELECT id, name FROM transcription_models WHERE cost_per_minute IS NULL"
+            "SELECT t.id, t.name, t.model_name, mp.provider_type "
+            "FROM transcription_models t "
+            "LEFT JOIN model_providers mp ON mp.id = t.provider_id "
+            "WHERE t.cost_per_minute IS NULL"
         )
     ).mappings().all()
 
     updates = 0
+    ambiguous = 0
     for row in rows:
-        info = _lookup(model_cost, row["name"])
+        info = _lookup(
+            model_cost,
+            [row["model_name"], row["name"]],
+            row["provider_type"],
+        )
         if info is None:
+            if row["provider_type"] is None and _is_ambiguous(model_cost, row["name"]):
+                ambiguous += 1
             continue
         per_second = info.get("input_cost_per_second")
         if not isinstance(per_second, (int, float)):
@@ -125,7 +183,21 @@ def _backfill_per_minute(connection: sa.Connection, model_cost: dict[str, Any]) 
             {"id": row["id"], "rate": per_minute},
         )
         updates += 1
-    return updates
+    return updates, ambiguous
+
+
+def _is_ambiguous(model_cost: dict[str, Any], name: str | None) -> bool:
+    """True iff ``name`` appears under more than one provider prefix and is not
+    listed without prefix. Used only to count skipped rows for the progress
+    summary so operators know to disambiguate manually."""
+    if not name or name in model_cost:
+        return False
+    prefixes = {
+        key.split("/", 1)[0]
+        for key in model_cost
+        if "/" in key and key.split("/", 1)[1] == name
+    }
+    return len(prefixes) > 1
 
 
 def upgrade() -> None:
@@ -137,13 +209,20 @@ def upgrade() -> None:
         return
 
     bind = op.get_bind()
-    completion_n = _backfill_token_costs(bind, "completion_models", model_cost)
-    embedding_n = _backfill_token_costs(bind, "embedding_models", model_cost)
-    transcription_n = _backfill_per_minute(bind, model_cost)
+    completion_n, completion_amb = _backfill_token_costs(bind, "completion_models", model_cost)
+    embedding_n, embedding_amb = _backfill_token_costs(bind, "embedding_models", model_cost)
+    transcription_n, transcription_amb = _backfill_per_minute(bind, model_cost)
 
+    ambiguous_total = completion_amb + embedding_amb + transcription_amb
     print(  # noqa: T201 — surface progress in alembic output
         f"[backfill_model_costs] completion={completion_n} "
         f"embedding={embedding_n} transcription={transcription_n}"
+        + (
+            f" skipped_ambiguous={ambiguous_total} (multiple providers in"
+            " LiteLLM matched these names; set prices manually via the admin UI)"
+            if ambiguous_total
+            else ""
+        )
     )
 
 

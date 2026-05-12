@@ -53,10 +53,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Service-key sessions (user_id NULL, api_key_id set) can't be represented
+    # in the pre-migration schema where user_id is NOT NULL. Purge them BEFORE
+    # dropping api_key_id — otherwise the column is gone and there is no way
+    # to tell service-key sessions apart from corrupted user sessions when the
+    # SET NOT NULL below fails on the remaining NULLs.
+    op.execute("DELETE FROM sessions WHERE user_id IS NULL")
+    op.execute("ALTER TABLE sessions ALTER COLUMN user_id SET NOT NULL")
     op.drop_index("ix_sessions_api_key_id", table_name="sessions")
     op.drop_column("sessions", "api_key_id")
-    # Fail-fast: if service-key sessions exist, the operator must purge them
-    # before reverting; we don't synthesize fake user rows on rollback.
-    op.execute(
-        "ALTER TABLE sessions ALTER COLUMN user_id SET NOT NULL"
-    )
