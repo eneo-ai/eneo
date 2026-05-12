@@ -25,18 +25,22 @@ from typing import Any, TypedDict, cast
 from uuid import UUID
 
 import sqlalchemy as sa
-from dependency_injector import providers
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.ai_models.completion_models.completion_models_repo import (
     CompletionModelsRepository,
 )
-from intric.database.database import sessionmanager
 from intric.database.tables.ai_models_table import CompletionModels
 from intric.database.tables.questions_table import Questions
 from intric.main.container.container import Container
 from intric.worker.worker import Worker
+
+# Per-run batch cap. Keeps a single weekly invocation bounded even if the
+# table somehow accumulates thousands of orphans — the next run picks up
+# the rest. Tuned for "delete in a few minutes" rather than "drain in one
+# pass."
+_BATCH_LIMIT = 500
 
 logger = logging.getLogger(__name__)
 worker: Any = Worker()
@@ -49,7 +53,9 @@ class RemovableModel(TypedDict):
     migrated_to_model_id: UUID | None
 
 
-async def _find_removable_models(session: AsyncSession) -> list[RemovableModel]:
+async def _find_removable_models(
+    session: AsyncSession, limit: int = _BATCH_LIMIT
+) -> list[RemovableModel]:
     """
     Return completion models whose lifecycle has ended and which have no
     remaining historical or active references.
@@ -58,6 +64,10 @@ async def _find_removable_models(session: AsyncSession) -> list[RemovableModel]:
       - deleted_at IS NOT NULL OR migrated_to_model_id IS NOT NULL
       - no questions reference it
       - no other model references it via migrated_to_model_id
+
+    Capped at ``limit`` so a single weekly invocation can't lock the table
+    for an unbounded duration on first run after a backlog. Subsequent
+    weekly runs drain the rest.
     """
     # Subquery: count questions per model
     questions_count = (
@@ -87,7 +97,10 @@ async def _find_removable_models(session: AsyncSession) -> list[RemovableModel]:
             CompletionModels.deleted_at,
             CompletionModels.migrated_to_model_id,
         )
-        .outerjoin(questions_count, CompletionModels.id == questions_count.c.completion_model_id)
+        .outerjoin(
+            questions_count,
+            CompletionModels.id == questions_count.c.completion_model_id,
+        )
         .outerjoin(migration_refs, CompletionModels.id == migration_refs.c.target_id)
         .where(
             sa.or_(
@@ -97,6 +110,8 @@ async def _find_removable_models(session: AsyncSession) -> list[RemovableModel]:
             sa.func.coalesce(questions_count.c.cnt, 0) == 0,
             sa.func.coalesce(migration_refs.c.cnt, 0) == 0,
         )
+        .order_by(CompletionModels.deleted_at.asc().nulls_last())
+        .limit(limit)
     )
 
     result = await session.execute(stmt)
@@ -115,9 +130,7 @@ async def _find_removable_models(session: AsyncSession) -> list[RemovableModel]:
     return removable_models
 
 
-async def _has_active_entity_references(
-    session: AsyncSession, model_id: UUID
-) -> bool:
+async def _has_active_entity_references(session: AsyncSession, model_id: UUID) -> bool:
     """Check if any active configuration entities still reference this model."""
     repo = CompletionModelsRepository(session=session)
     return await repo.has_active_references(model_id)
@@ -141,12 +154,9 @@ async def _reconcile_deleted_template_references(
     replacement_value = str(replacement_model_id) if replacement_model_id else None
 
     for table in (AssistantTemplates, AppTemplates):
-        stmt = (
-            sa.select(table)
-            .where(
-                table.completion_model_id == model_id,
-                table.deleted_at.isnot(None),
-            )
+        stmt = sa.select(table).where(
+            table.completion_model_id == model_id,
+            table.deleted_at.isnot(None),
         )
         result = await session.execute(stmt)
         templates = cast(list[Any], result.scalars().all())
@@ -161,7 +171,7 @@ async def _reconcile_deleted_template_references(
                 }
 
 
-@worker.cron_job(hour=4, minute=0, weekday={6})  # Sunday 4 AM
+@worker.cron_job(hour=4, minute=0, weekday={6}, manages_own_session=True)  # Sunday 4 AM
 async def cleanup_orphaned_models(container: Container) -> dict[str, Any]:
     """
     Weekly lifecycle cleanup: hard-delete completion models that no longer
@@ -170,6 +180,12 @@ async def cleanup_orphaned_models(container: Container) -> dict[str, Any]:
     Models become eligible when they are either soft-deleted or marked as
     migrated away from. Questions remain historical blockers until retention
     removes them.
+
+    Uses ``manages_own_session=True`` because each candidate is processed in
+    its own transaction: a single failed delete (e.g. a RESTRICT FK fires
+    after the candidacy SELECT but before DELETE) must roll back only that
+    one row, not the whole run. A batch cap (``_BATCH_LIMIT``) keeps the
+    weekly invocation bounded.
     """
     start_time = datetime.now(timezone.utc)
 
@@ -183,76 +199,77 @@ async def cleanup_orphaned_models(container: Container) -> dict[str, Any]:
 
     logger.info("Starting weekly model lifecycle cleanup job")
 
-    async with sessionmanager.session() as session:
-        session_provider = cast(Any, container.session)
-        session_provider.override(providers.Object(session))
+    session = cast(AsyncSession, container.session())
+
+    # Step 1: Find lifecycle candidates (no questions, no incoming migration refs)
+    async with session.begin():
+        candidates = await _find_removable_models(session)
+
+    if not candidates:
+        logger.info("No orphaned lifecycle models to clean up")
+        end_time = datetime.now(timezone.utc)
+        results["end_time"] = end_time.isoformat()
+        results["duration_seconds"] = (end_time - start_time).total_seconds()
+        return results
+
+    logger.info(f"Found {len(candidates)} candidate models for cleanup")
+
+    # Step 2: Verify and delete each model individually
+    for model_info in candidates:
+        model_id = model_info["id"]
+        model_name = model_info["name"]
+
         try:
-            # Step 1: Find lifecycle candidates (no questions, no incoming migration refs)
             async with session.begin():
-                candidates = await _find_removable_models(session)
-
-            if not candidates:
-                logger.info("No orphaned lifecycle models to clean up")
-                end_time = datetime.now(timezone.utc)
-                results["end_time"] = end_time.isoformat()
-                results["duration_seconds"] = (end_time - start_time).total_seconds()
-                return results
-
-            logger.info(f"Found {len(candidates)} candidate models for cleanup")
-
-            # Step 2: Verify and delete each model individually
-            for model_info in candidates:
-                model_id = model_info["id"]
-                model_name = model_info["name"]
-
-                try:
-                    async with session.begin():
-                        # Double-check active entity references
-                        if await _has_active_entity_references(session, model_id):
-                            logger.info(
-                                f"Skipping model '{model_name}' ({model_id}): "
-                                f"still has active entity references"
-                            )
-                            results["skipped_models"].append(
-                                {"id": str(model_id), "name": model_name, "reason": "active_references"}
-                            )
-                            continue
-
-                        await _reconcile_deleted_template_references(
-                            session,
-                            model_id,
-                            model_info["migrated_to_model_id"],
-                        )
-
-                        # Hard-delete — RESTRICT FKs are the final safety net
-                        stmt = sa.delete(CompletionModels).where(CompletionModels.id == model_id)
-                        await session.execute(stmt)
-
-                        logger.info(f"Removed orphaned model '{model_name}' ({model_id})")
-                        results["removed_models"].append(
-                            {"id": str(model_id), "name": model_name}
-                        )
-
-                except IntegrityError as e:
-                    logger.warning(
-                        "Skipping lifecycle cleanup for model due to database restriction",
-                        extra={
-                            "model_id": str(model_id),
-                            "model_name": model_name,
-                            "error": str(e),
-                        },
+                # Double-check active entity references
+                if await _has_active_entity_references(session, model_id):
+                    logger.info(
+                        f"Skipping model '{model_name}' ({model_id}): "
+                        f"still has active entity references"
                     )
                     results["skipped_models"].append(
-                        {"id": str(model_id), "name": model_name, "reason": "db_restrict"}
+                        {
+                            "id": str(model_id),
+                            "name": model_name,
+                            "reason": "active_references",
+                        }
                     )
-                except Exception as e:
-                    error_msg = f"Failed to remove model '{model_name}' ({model_id}): {str(e)}"
-                    logger.error(error_msg, exc_info=True)
-                    results["errors"].append(error_msg)
-                    results["success"] = False
+                    continue
 
-        finally:
-            session_provider.reset_override()
+                await _reconcile_deleted_template_references(
+                    session,
+                    model_id,
+                    model_info["migrated_to_model_id"],
+                )
+
+                # Hard-delete — RESTRICT FKs are the final safety net
+                stmt = sa.delete(CompletionModels).where(
+                    CompletionModels.id == model_id
+                )
+                await session.execute(stmt)
+
+                logger.info(f"Removed orphaned model '{model_name}' ({model_id})")
+                results["removed_models"].append(
+                    {"id": str(model_id), "name": model_name}
+                )
+
+        except IntegrityError as e:
+            logger.warning(
+                "Skipping lifecycle cleanup for model due to database restriction",
+                extra={
+                    "model_id": str(model_id),
+                    "model_name": model_name,
+                    "error": str(e),
+                },
+            )
+            results["skipped_models"].append(
+                {"id": str(model_id), "name": model_name, "reason": "db_restrict"}
+            )
+        except Exception as e:
+            error_msg = f"Failed to remove model '{model_name}' ({model_id}): {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            results["errors"].append(error_msg)
+            results["success"] = False
 
     end_time = datetime.now(timezone.utc)
     duration = (end_time - start_time).total_seconds()

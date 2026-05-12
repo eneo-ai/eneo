@@ -20,6 +20,12 @@ from intric.completion_models.infrastructure.model_cleanup_worker import (
     cleanup_orphaned_models,
 )
 
+# `cleanup_orphaned_models` is the @worker.cron_job-wrapped callable, which
+# expects an arq `ctx` and would try to open a real sessionmaker. The
+# unit tests target the cleanup logic itself, not the cron wrapper, so we
+# reach past it via `__wrapped__` (set by functools.wraps in the decorator).
+_cleanup_fn = cleanup_orphaned_models.__wrapped__
+
 
 class _AsyncContextManager:
     def __init__(self, value=None):
@@ -76,7 +82,10 @@ class TestFindRemovableModels:
         stmt = session.execute.call_args.args[0]
         sql = " ".join(str(stmt).split())
 
-        assert "completion_models.deleted_at IS NOT NULL OR completion_models.migrated_to_model_id IS NOT NULL" in sql
+        assert (
+            "completion_models.deleted_at IS NOT NULL OR completion_models.migrated_to_model_id IS NOT NULL"
+            in sql
+        )
         assert "coalesce(anon_1.cnt, :coalesce_1) = :coalesce_2" in sql
         assert "coalesce(anon_2.cnt, :coalesce_3) = :coalesce_4" in sql
 
@@ -105,6 +114,17 @@ class TestActiveReferenceSemantics:
         repo.has_active_references.assert_awaited_once_with(model_id)
 
 
+def _make_container(session: _MockSession) -> SimpleNamespace:
+    """Stand-in container that returns ``session`` from ``.session()``.
+
+    Matches the new cleanup-worker contract: the cron wrapper hands the
+    job a configured container; the job calls ``container.session()`` to
+    get the session it then manages transactions on. The old override
+    dance with ``cast(Any, container.session).override(...)`` is gone, so
+    tests no longer need to monkeypatch ``sessionmanager``."""
+    return SimpleNamespace(session=lambda: session)
+
+
 class TestCleanupWorker:
     """Verify worker behavior around skips, deletes, and error handling."""
 
@@ -118,17 +138,8 @@ class TestCleanupWorker:
                 ]
             )
         )
-        container = SimpleNamespace(
-            session=SimpleNamespace(
-                override=MagicMock(),
-                reset_override=MagicMock(),
-            )
-        )
+        container = _make_container(mock_session)
 
-        monkeypatch.setattr(
-            "intric.completion_models.infrastructure.model_cleanup_worker.sessionmanager.session",
-            lambda: _AsyncContextManager(mock_session),
-        )
         monkeypatch.setattr(
             "intric.completion_models.infrastructure.model_cleanup_worker._find_removable_models",
             AsyncMock(
@@ -147,7 +158,7 @@ class TestCleanupWorker:
             AsyncMock(return_value=False),
         )
 
-        result = await cleanup_orphaned_models(container)
+        result = await _cleanup_fn(container)
 
         assert result["success"] is True
         assert result["errors"] == []
@@ -160,17 +171,8 @@ class TestCleanupWorker:
     async def test_active_references_are_skipped_without_delete(self, monkeypatch):
         model_id = uuid4()
         mock_session = _MockSession(execute=AsyncMock())
-        container = SimpleNamespace(
-            session=SimpleNamespace(
-                override=MagicMock(),
-                reset_override=MagicMock(),
-            )
-        )
+        container = _make_container(mock_session)
 
-        monkeypatch.setattr(
-            "intric.completion_models.infrastructure.model_cleanup_worker.sessionmanager.session",
-            lambda: _AsyncContextManager(mock_session),
-        )
         monkeypatch.setattr(
             "intric.completion_models.infrastructure.model_cleanup_worker._find_removable_models",
             AsyncMock(
@@ -189,7 +191,7 @@ class TestCleanupWorker:
             AsyncMock(return_value=True),
         )
 
-        result = await cleanup_orphaned_models(container)
+        result = await _cleanup_fn(container)
 
         assert result["success"] is True
         assert result["removed_models"] == []
@@ -202,6 +204,30 @@ class TestCleanupWorker:
             }
         ]
         mock_session.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_uses_container_provided_session(self, monkeypatch):
+        """Regression guard for the session-ownership refactor.
+
+        The job must consume the session from the container — opening a
+        new one or trying to override the container's session provider
+        was the fragile pattern we replaced. If a future refactor goes
+        back to that, this test catches it because the candidate query
+        runs on the container's session and nothing else."""
+        sentinel_session = _MockSession(execute=AsyncMock())
+        container = _make_container(sentinel_session)
+
+        find_mock = AsyncMock(return_value=[])
+        monkeypatch.setattr(
+            "intric.completion_models.infrastructure.model_cleanup_worker._find_removable_models",
+            find_mock,
+        )
+
+        result = await _cleanup_fn(container)
+
+        assert result["success"] is True
+        find_mock.assert_awaited_once()
+        assert find_mock.await_args.args[0] is sentinel_session
 
 
 class TestCleanupSafetyInvariants:
