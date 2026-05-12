@@ -5,6 +5,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { type Website } from "@intric/intric-js";
   import { Dialog, Button, Input, Select, Tooltip } from "@intric/ui";
+  import { IconPlus } from "@intric/icons/plus";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
   import { tick } from "svelte";
@@ -272,7 +273,10 @@
 <Dialog.Root bind:isOpen={showDialog}>
   {#if mode === "create"}
     <Dialog.Trigger asFragment let:trigger>
-      <Button variant="primary" is={trigger}>{m.connect_website()}</Button>
+      <Button variant="primary" is={trigger} label={m.connect_website()} class="whitespace-nowrap">
+        <IconPlus size="sm" />
+        <span class="hidden md:inline">{m.connect_website()}</span>
+      </Button>
     </Dialog.Trigger>
   {/if}
 

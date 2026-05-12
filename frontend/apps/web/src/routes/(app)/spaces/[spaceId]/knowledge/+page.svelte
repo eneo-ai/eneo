@@ -140,9 +140,21 @@
         </p>
       {:else if $selectedTab === "websites" && $currentSpace.hasPermission("create", "website")}
         {#if $selectedWebsiteIds.size > 0}
-          <Button variant="primary" on:click={bulkRecrawl} disabled={isBulkRecrawling}>
+          <Button
+            variant="primary"
+            on:click={bulkRecrawl}
+            disabled={isBulkRecrawling}
+            label={isBulkRecrawling
+              ? m.syncing()
+              : m.sync_selected({ count: $selectedWebsiteIds.size })}
+            class="whitespace-nowrap"
+          >
             <IconRefresh size="sm" />
-            {isBulkRecrawling ? m.syncing() : m.sync_selected({ count: $selectedWebsiteIds.size })}
+            <span class="hidden md:inline">
+              {isBulkRecrawling
+                ? m.syncing()
+                : m.sync_selected({ count: $selectedWebsiteIds.size })}
+            </span>
           </Button>
         {:else}
           <WebsiteEditor mode="create"></WebsiteEditor>

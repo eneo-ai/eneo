@@ -33,10 +33,16 @@
 <Dialog.Root bind:isOpen={showDialog}>
   <Dialog.Trigger let:trigger asFragment>
     <Tooltip text={isDisabled ? m.cant_sync_while_crawl_running() : undefined}>
-      <Button is={trigger} variant="primary" disabled={isDisabled}>
-        <IconRefresh></IconRefresh>
-        {m.sync_now()}</Button
+      <Button
+        is={trigger}
+        variant="primary"
+        disabled={isDisabled}
+        label={m.sync_now()}
+        class="whitespace-nowrap"
       >
+        <IconRefresh></IconRefresh>
+        <span class="hidden md:inline">{m.sync_now()}</span>
+      </Button>
     </Tooltip>
   </Dialog.Trigger>
   <Dialog.Content width="small">

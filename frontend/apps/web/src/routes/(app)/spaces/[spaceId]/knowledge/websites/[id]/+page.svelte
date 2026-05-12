@@ -2,6 +2,7 @@
   import { invalidate } from "$app/navigation";
   import { Page } from "$lib/components/layout";
   import CrawlRunsTable from "./CrawlRunsTable.svelte";
+  import CrawlOverview from "./CrawlOverview.svelte";
   import { onMount } from "svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import BlobTable from "../../collections/[collectionId]/BlobTable.svelte";
@@ -60,6 +61,7 @@
       {#if data.environment.integrationRequestFormUrl}
         <CrawlLimitations></CrawlLimitations>
       {/if}
+      <CrawlOverview runs={data.crawlRuns}></CrawlOverview>
       <CrawlRunsTable runs={data.crawlRuns} />
     </Page.Tab>
     <Page.Tab id="blobs">

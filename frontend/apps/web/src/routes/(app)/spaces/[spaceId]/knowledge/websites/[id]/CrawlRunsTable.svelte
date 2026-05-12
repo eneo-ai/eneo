@@ -4,66 +4,19 @@
   import { createRender } from "svelte-headless-table";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
-  import {
-    getCrawlOutcome,
-    getCrawlOutcomeLabel,
-    isDuplicateCrawlSkip,
-    isSourceRetentionOnly
-  } from "$lib/features/knowledge/crawlOutcomePresentation";
-
   import dayjs from "dayjs";
   import relativeTime from "dayjs/plugin/relativeTime";
   import utc from "dayjs/plugin/utc";
   import "dayjs/locale/sv";
   import "dayjs/locale/en";
   import CrawlResultCell from "./CrawlResultCell.svelte";
+  import CrawlStatusCell from "./CrawlStatusCell.svelte";
   dayjs.extend(relativeTime);
   dayjs.extend(utc);
 
   // Set dayjs locale based on paraglide locale
   // eslint-disable-next-line svelte/no-immutable-reactive-statements
   $: dayjs.locale(getLocale());
-
-  function isSkipped(crawl: CrawlRun): boolean {
-    return crawl.status?.toLowerCase() === "failed" && isDuplicateCrawlSkip(getCrawlOutcome(crawl));
-  }
-
-  function hasWarnings(crawl: CrawlRun): boolean {
-    return (
-      crawl.status?.toLowerCase() === "complete" &&
-      ((crawl.pages_failed ?? 0) > 0 || (crawl.files_failed ?? 0) > 0)
-    );
-  }
-
-  // Map crawl status to translated strings
-  function translateStatus(crawl: CrawlRun): string {
-    if (!crawl?.status) {
-      return m.no_status_found();
-    }
-
-    if (isSkipped(crawl)) {
-      return m.crawl_skipped();
-    }
-
-    switch (crawl.status?.toLowerCase()) {
-      case "complete": {
-        const outcome = getCrawlOutcome(crawl);
-        if (isSourceRetentionOnly(outcome)) {
-          return getCrawlOutcomeLabel(outcome, m.complete());
-        }
-        return hasWarnings(crawl) ? m.crawl_completed_with_warnings() : m.complete();
-      }
-      case "in progress":
-        return m.in_progress();
-      case "queued":
-        return m.queued();
-      case "failed":
-      case "not found":
-        return m.failed();
-      default:
-        return crawl.status ?? m.no_status_found();
-    }
-  }
 
   export let runs: CrawlRun[];
   const table = Table.createWithResource(runs);
@@ -84,9 +37,8 @@
       accessor: (item) => item,
       header: m.status(),
       cell: (item) => {
-        return createRender(Table.FormattedCell, {
-          value: translateStatus(item.value),
-          class: ""
+        return createRender(CrawlStatusCell, {
+          crawl: item.value
         });
       },
       plugins: {

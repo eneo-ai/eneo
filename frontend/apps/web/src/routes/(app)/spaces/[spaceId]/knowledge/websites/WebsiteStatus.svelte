@@ -1,6 +1,12 @@
+<!--
+    Copyright (c) 2024 Sundsvalls Kommun
+
+    Licensed under the MIT License.
+-->
+
 <script lang="ts">
   import type { WebsiteSparse } from "@intric/intric-js";
-  import { Label } from "@intric/ui";
+  import StatusBadge, { type StatusTone } from "$lib/components/StatusBadge.svelte";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import dayjs from "dayjs";
@@ -28,7 +34,11 @@
     return outcomeTooltip ? `${syncedOn}\n${outcomeTooltip}` : syncedOn;
   }
 
-  function statusInfo(): { label: string; color: Label.LabelColor; tooltip?: string } {
+  function statusInfo(website: WebsiteSparse): {
+    label: string;
+    tone: StatusTone;
+    tooltip?: string;
+  } {
     const outcome = getLatestCrawlOutcome(website);
     const isDuplicateSkip = isDuplicateCrawlSkip(outcome);
     const skipReason = website.latest_crawl?.result_location;
@@ -41,7 +51,7 @@
 
     if (website.latest_crawl?.status === "failed" && isDuplicateSkip) {
       return {
-        color: "gray",
+        tone: "neutral",
         label: m.sync_skipped(),
         tooltip: failureTooltip ?? m.crawl_skipped_duplicate()
       };
@@ -55,13 +65,12 @@
 
         if (isSourceRetentionOnly(outcome)) {
           return {
-            color: "green",
+            tone: "positive",
             label: getCrawlOutcomeLabel(outcome, label),
             tooltip: completedTooltip(completed, crawlOutcomeTooltip)
           };
         }
 
-        // If there are failures, show warning color and include failure info in tooltip
         if (hasFailures) {
           let failureText: string;
           if (pagesFailed > 0 && filesFailed > 0) {
@@ -76,49 +85,48 @@
           }
 
           return {
-            color: "yellow",
+            tone: "warning",
             label: m.synced_with_warnings(),
             tooltip: `${completedTooltip(completed, crawlOutcomeTooltip)} - ${failureText}`
           };
         }
 
         return {
-          color: dayjs().diff(completed, "days") < 10 ? "green" : "yellow",
+          tone: dayjs().diff(completed, "days") < 10 ? "positive" : "warning",
           label,
           tooltip: completedTooltip(completed, crawlOutcomeTooltip)
         };
       }
       case "in progress":
         return {
-          color: "yellow",
+          tone: "warning",
           label: m.sync_in_progress(),
           tooltip: m.started_on({
             date: dayjs(website.latest_crawl?.created_at).format("YYYY-MM-DD HH:mm")
           })
         };
       case "failed":
-        return {
-          color: "orange",
-          label: outcome ? getCrawlOutcomeLabel(outcome, m.sync_failed()) : m.sync_failed(),
-          tooltip: failureTooltip
-        };
       case "not found":
         return {
-          color: "orange",
+          tone: "negative",
           label: outcome ? getCrawlOutcomeLabel(outcome, m.sync_failed()) : m.sync_failed(),
           tooltip: failureTooltip
         };
       case "queued":
         return {
-          color: "blue",
+          tone: "info",
           label: m.queued()
         };
     }
     return {
-      color: "orange",
+      tone: "negative",
       label: "error"
     };
   }
+
+  $: status = statusInfo(website);
 </script>
 
-<Label.Single item={statusInfo()}></Label.Single>
+<StatusBadge tone={status.tone} tooltip={status.tooltip}>
+  {status.label}
+</StatusBadge>

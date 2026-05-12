@@ -184,7 +184,7 @@
   }
 </script>
 
-<Table.Root {viewModel} resourceName="website">
+<Table.Root {viewModel} resourceName={m.page_lowercase()}>
   {#if $embeddingModels.length > 1 || $currentSpace.embedding_models.length > 1 || $disabledModelInUse}
     {#each $embeddingModels as embeddingModel (embeddingModel.id)}
       <Table.Group
