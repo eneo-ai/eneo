@@ -162,33 +162,6 @@ class AuthService:
 
         return api_key
 
-    async def create_user_api_key_v2(
-        self, *, user_id: UUID, tenant_id: UUID
-    ) -> ApiKeyCreated:
-        """Mint a v2 personal API key for a user, no v1 row, no Legacy mirror."""
-        if self.api_key_v2_repo is None:
-            raise RuntimeError("api_key_v2_repo is required to mint v2 keys")
-
-        api_key = self._create_and_hash_api_key(prefix="sk")
-        await self.api_key_v2_repo.create(
-            tenant_id=tenant_id,
-            owner_user_id=user_id,
-            created_by_user_id=user_id,
-            scope_type=ApiKeyScopeType.TENANT.value,
-            scope_id=None,
-            permission=ApiKeyPermission.ADMIN.value,
-            key_type=ApiKeyType.SK.value,
-            key_hash=api_key.hashed_key,
-            hash_version=ApiKeyHashVersion.SHA256.value,
-            key_prefix=self._normalize_prefix(api_key.key, fallback="sk"),
-            key_suffix=api_key.truncated_key,
-            name="Personal API key",
-            description=None,
-            state=ApiKeyState.ACTIVE.value,
-        )
-
-        return api_key
-
     async def create_assistant_api_key(
         self,
         prefix: str,
