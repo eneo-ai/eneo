@@ -13,7 +13,7 @@ useful. Add the constraint at the DB layer so violations fail-loud
 instead of accumulating silently.
 
 Revision ID: 20260512_sessions_xor_check
-Revises: 20260512_merge_cost_and_api_key_heads
+Revises: 20260512_merge_heads
 Create Date: 2026-05-12 11:30:00
 """
 
@@ -21,7 +21,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "20260512_sessions_xor_check"
-down_revision = "20260512_merge_cost_and_api_key_heads"
+down_revision = "20260512_merge_heads"
 branch_labels = None
 depends_on = None
 
