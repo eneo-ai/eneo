@@ -1283,14 +1283,21 @@ async def delete_completion_model(
     async with session.begin():
         repo = CompletionModelsRepository(session=session)
         if force:
-            # Hard-delete: will fail with IntegrityError if model has
-            # question references (FK RESTRICT)
+            # Hard-delete: 20260402_lifecycle changed questions.completion_model_id
+            # from SET NULL → RESTRICT so historical attribution can't be silently
+            # erased. If any question references this model the DELETE will fail
+            # with IntegrityError; surface it as MODEL_IN_USE (400) so operators
+            # see a useful error instead of a 500.
             import sqlalchemy as sa
+            from sqlalchemy.exc import IntegrityError
 
             from intric.database.tables.ai_models_table import CompletionModels
 
             stmt = sa.delete(CompletionModels).where(CompletionModels.id == id)
-            await session.execute(stmt)
+            try:
+                await session.execute(stmt)
+            except IntegrityError as exc:
+                raise ModelInUseException() from exc
         else:
             if await repo.has_active_references(id):
                 raise ModelInUseException()
