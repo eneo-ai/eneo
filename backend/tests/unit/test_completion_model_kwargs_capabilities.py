@@ -253,6 +253,8 @@ def test_domain_model_normalizes_invalid_capabilities_before_public_assembly():
         base_url=None,
         litellm_model_name=None,
         model_kwargs_capabilities={"temperature": {"control": "dial"}},
+        input_cost_per_token=None,
+        output_cost_per_token=None,
         security_classification=None,
         tenant_id=uuid4(),
         provider_id=uuid4(),
