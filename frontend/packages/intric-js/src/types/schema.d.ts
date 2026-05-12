@@ -856,24 +856,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/settings/crawler": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Get Crawler Settings */
-    get: operations["get_current_tenant_crawler_settings_api_v1_settings_crawler_get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    /** Update Crawler Settings */
-    patch: operations["update_current_tenant_crawler_settings_api_v1_settings_crawler_patch"];
-    trace?: never;
-  };
   "/api/v1/settings/templates": {
     parameters: {
       query?: never;
@@ -1033,6 +1015,24 @@ export interface paths {
      *     - Change takes effect immediately
      */
     patch: operations["update_api_key_expiry_notifications_setting_api_v1_settings_api_key_expiry_notifications_patch"];
+    trace?: never;
+  };
+  "/api/v1/settings/crawler": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get crawler settings */
+    get: operations["get_current_tenant_crawler_settings_api_v1_settings_crawler_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Update crawler settings */
+    patch: operations["update_current_tenant_crawler_settings_api_v1_settings_crawler_patch"];
     trace?: never;
   };
   "/api/v1/assistants/": {
@@ -9288,6 +9288,95 @@ export interface components {
       questions: number;
     };
     /**
+     * CrawlOutcomeCode
+     * @enum {string}
+     */
+    CrawlOutcomeCode:
+      | "CRAWL_DUPLICATE_SKIPPED"
+      | "CRAWL_NO_PAGES_RETURNED"
+      | "CRAWL_SITEMAP_NO_PAGES"
+      | "CRAWL_TIMEOUT_NO_PAGES"
+      | "CRAWL_MAX_AGE_EXCEEDED"
+      | "CRAWL_SOURCE_RETENTION_ONLY"
+      | "CRAWL_ALL_UNCHANGED"
+      | "CRAWL_FILES_TOO_LARGE_ONLY"
+      | "CRAWL_PARTIAL_TIMEOUT"
+      | "CRAWL_SHUTDOWN_ERROR"
+      | "CRAWL_COMPLETED_WITH_PAGE_FAILURES"
+      | "EMBEDDING_CONFIG_MISSING"
+      | "UNKNOWN_CRAWL_ERROR";
+    /** CrawlOutcomePublic */
+    CrawlOutcomePublic: {
+      code: components["schemas"]["CrawlOutcomeCode"];
+      severity: components["schemas"]["CrawlOutcomeSeverity"];
+      /** Message Key */
+      message_key: string;
+      /** Detail */
+      detail?: string | null;
+      /** Affected Count */
+      affected_count?: number | null;
+      /** Samples */
+      samples?: string[];
+    };
+    /**
+     * CrawlOutcomeSeverity
+     * @enum {string}
+     */
+    CrawlOutcomeSeverity: "info" | "warning" | "error";
+    /** CrawlRunProcessingSummary */
+    CrawlRunProcessingSummary: {
+      /**
+       * Pages Fetched
+       * @default 0
+       */
+      pages_fetched?: number;
+      /**
+       * Files Downloaded
+       * @default 0
+       */
+      files_downloaded?: number;
+      /**
+       * Pages Indexed
+       * @default 0
+       */
+      pages_indexed?: number;
+      /**
+       * Files Indexed
+       * @default 0
+       */
+      files_indexed?: number;
+      /**
+       * Pages Hash Retained
+       * @default 0
+       */
+      pages_hash_retained?: number;
+      /**
+       * Files Hash Retained
+       * @default 0
+       */
+      files_hash_retained?: number;
+      /**
+       * Files Too Large Skipped
+       * @default 0
+       */
+      files_too_large_skipped?: number;
+      /**
+       * Pages Source Retained
+       * @default 0
+       */
+      pages_source_retained?: number;
+      /**
+       * Pages Failed
+       * @default 0
+       */
+      pages_failed?: number;
+      /**
+       * Files Failed
+       * @default 0
+       */
+      files_failed?: number;
+    };
+    /**
      * CrawlType
      * @enum {string}
      */
@@ -9336,37 +9425,31 @@ export interface components {
       thresholds: components["schemas"]["HealthThresholds"];
       debug?: components["schemas"]["DebugInfo"];
     };
-    /**
-     * CrawlerSettingsResponse
-     * @description Response model for crawler settings operations.
-     *
-     *     Returns current settings merged with environment defaults.
-     *     Tenant overrides are highlighted.
-     *
-     *     Example:
-     *         {
-     *             "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
-     *             "settings": {
-     *                 "crawl_max_length": 14400,
-     *                 "download_timeout": 90,
-     *                 "download_max_size": 10485760,
-     *                 "dns_timeout": 30,
-     *                 "retry_times": 2,
-     *                 "closespider_itemcount": 20000,
-     *                 "obey_robots": true,
-     *                 "autothrottle_enabled": true,
-     *                 "tenant_worker_concurrency_limit": 4,
-     *                 "crawl_stale_threshold_minutes": 30,
-     *                 "crawl_heartbeat_interval_seconds": 300,
-     *                 "crawl_feeder_enabled": false,
-     *                 "crawl_feeder_interval_seconds": 10,
-     *                 "crawl_feeder_batch_size": 10,
-     *                 "crawl_job_max_age_seconds": 1800
-     *             },
-     *             "overrides": ["download_timeout", "dns_timeout"],
-     *             "updated_at": "2025-10-22T10:00:00+00:00"
-     *         }
-     */
+    /** CrawlerSettingSpecPublic */
+    CrawlerSettingSpecPublic: {
+      /**
+       * Type
+       * @description Crawler setting value type
+       * @enum {string}
+       */
+      type: "int" | "bool";
+      /**
+       * Description
+       * @description Backend description of the setting
+       */
+      description: string;
+      /**
+       * Min
+       * @description Minimum allowed integer value
+       */
+      min?: number | null;
+      /**
+       * Max
+       * @description Maximum allowed integer value
+       */
+      max?: number | null;
+    };
+    /** CrawlerSettingsResponse */
     CrawlerSettingsResponse: {
       /**
        * Tenant Id
@@ -9374,37 +9457,11 @@ export interface components {
        * @description Tenant UUID
        */
       tenant_id: string;
-      /**
-       * Settings
-       * @description Current effective settings (tenant overrides + env defaults)
-       * @example {
-       *       "autothrottle_enabled": true,
-       *       "closespider_itemcount": 20000,
-       *       "crawl_feeder_batch_size": 10,
-       *       "crawl_feeder_enabled": false,
-       *       "crawl_feeder_interval_seconds": 10,
-       *       "crawl_heartbeat_interval_seconds": 300,
-       *       "crawl_job_max_age_seconds": 1800,
-       *       "crawl_max_length": 14400,
-       *       "crawl_stale_threshold_minutes": 30,
-       *       "dns_timeout": 30,
-       *       "download_max_size": 10485760,
-       *       "download_timeout": 90,
-       *       "obey_robots": true,
-       *       "retry_times": 2,
-       *       "tenant_worker_concurrency_limit": 4
-       *     }
-       */
-      settings: {
-        [key: string]: unknown;
-      };
+      /** @description Current effective crawler settings */
+      settings: components["schemas"]["EffectiveCrawlerSettings"];
       /**
        * Overrides
-       * @description List of setting keys that have tenant-specific overrides
-       * @example [
-       *       "download_timeout",
-       *       "dns_timeout"
-       *     ]
+       * @description Setting keys that have tenant-specific overrides
        */
       overrides: string[];
       /**
@@ -9412,141 +9469,159 @@ export interface components {
        * @description Timestamp of last settings update
        */
       updated_at?: string | null;
+      /**
+       * Editable Settings
+       * @description Setting keys editable through the tenant admin settings endpoint
+       */
+      editable_settings?: string[];
+      /**
+       * Specs
+       * @description Validation metadata for tenant-admin editable crawler settings
+       */
+      specs?: {
+        [key: string]: components["schemas"]["CrawlerSettingSpecPublic"];
+      };
     };
-    /**
-     * CrawlerSettingsUpdate
-     * @description Request model for updating tenant crawler settings.
-     *
-     *     All fields are optional - only provided fields will be updated.
-     *     Missing fields retain their previous values or fall back to environment defaults.
-     *
-     *     Field constraints are derived from CRAWLER_SETTING_SPECS (single source of truth).
-     *
-     *     Example - Full configuration:
-     *         {
-     *             "crawl_max_length": 14400,
-     *             "download_timeout": 90,
-     *             "download_max_size": 10485760,
-     *             "dns_timeout": 30,
-     *             "retry_times": 2,
-     *             "closespider_itemcount": 20000,
-     *             "obey_robots": true,
-     *             "autothrottle_enabled": true,
-     *             "tenant_worker_concurrency_limit": 4,
-     *             "crawl_stale_threshold_minutes": 30,
-     *             "crawl_heartbeat_interval_seconds": 300,
-     *             "crawl_feeder_enabled": false,
-     *             "crawl_feeder_interval_seconds": 10,
-     *             "crawl_feeder_batch_size": 10,
-     *             "crawl_job_max_age_seconds": 1800
-     *         }
-     *
-     *     Example - Partial update (adjust timeouts only):
-     *         {
-     *             "download_timeout": 120,
-     *             "dns_timeout": 45
-     *         }
-     */
-    CrawlerSettingsUpdate: {
+    /** CrawlerSettingsSelfServiceUpdate */
+    CrawlerSettingsSelfServiceUpdate: {
       /**
-       * Crawl Max Length
-       * @description Maximum crawl duration in seconds (1 min to 24 hours)
-       * @example 14400
+       * Crawl Sitemap Lastmod Skip Enabled
+       * @description Enable trusted sitemap lastmod values to retain unchanged URL pages without downloading them
        */
-      crawl_max_length?: number | null;
-      /**
-       * Download Timeout
-       * @description Per-request download timeout in seconds (10s to 5 min)
-       * @example 90
-       */
-      download_timeout?: number | null;
-      /**
-       * Download Max Size
-       * @description Maximum file size for crawler downloads in bytes (1MB to 1GB)
-       * @example 10485760
-       */
-      download_max_size?: number | null;
-      /**
-       * Dns Timeout
-       * @description DNS resolution timeout in seconds (5s to 2 min)
-       * @example 30
-       */
-      dns_timeout?: number | null;
-      /**
-       * Retry Times
-       * @description Number of retry attempts per request (0 to 10)
-       * @example 2
-       */
-      retry_times?: number | null;
-      /**
-       * Closespider Itemcount
-       * @description Maximum pages to crawl before stopping (100 to 100k)
-       * @example 20000
-       */
-      closespider_itemcount?: number | null;
+      crawl_sitemap_lastmod_skip_enabled?: boolean | null;
       /**
        * Obey Robots
        * @description Whether to respect robots.txt rules
-       * @example true
        */
       obey_robots?: boolean | null;
       /**
        * Autothrottle Enabled
        * @description Enable automatic request throttling based on server response times
-       * @example true
+       */
+      autothrottle_enabled?: boolean | null;
+      /**
+       * Download Max Size
+       * @description Maximum file size for crawler downloads in bytes (1MB to 1GB)
+       */
+      download_max_size?: number | null;
+      /**
+       * Download Timeout
+       * @description Per-request download timeout in seconds (10s to 5 min)
+       */
+      download_timeout?: number | null;
+      /**
+       * Dns Timeout
+       * @description DNS resolution timeout in seconds (5s to 2 min)
+       */
+      dns_timeout?: number | null;
+      /**
+       * Retry Times
+       * @description Number of retry attempts per request (0 to 10)
+       */
+      retry_times?: number | null;
+      /**
+       * Closespider Itemcount
+       * @description Maximum pages to crawl before stopping (100 to 100k)
+       */
+      closespider_itemcount?: number | null;
+    };
+    /** CrawlerSettingsUpdate */
+    CrawlerSettingsUpdate: {
+      /**
+       * Crawl Max Length
+       * @description Maximum crawl duration in seconds (1 min to 24 hours)
+       */
+      crawl_max_length?: number | null;
+      /**
+       * Download Timeout
+       * @description Per-request download timeout in seconds (10s to 5 min)
+       */
+      download_timeout?: number | null;
+      /**
+       * Download Max Size
+       * @description Maximum file size for crawler downloads in bytes (1MB to 1GB)
+       */
+      download_max_size?: number | null;
+      /**
+       * Dns Timeout
+       * @description DNS resolution timeout in seconds (5s to 2 min)
+       */
+      dns_timeout?: number | null;
+      /**
+       * Retry Times
+       * @description Number of retry attempts per request (0 to 10)
+       */
+      retry_times?: number | null;
+      /**
+       * Closespider Itemcount
+       * @description Maximum pages to crawl before stopping (100 to 100k)
+       */
+      closespider_itemcount?: number | null;
+      /**
+       * Obey Robots
+       * @description Whether to respect robots.txt rules
+       */
+      obey_robots?: boolean | null;
+      /**
+       * Autothrottle Enabled
+       * @description Enable automatic request throttling based on server response times
        */
       autothrottle_enabled?: boolean | null;
       /**
        * Tenant Worker Concurrency Limit
        * @description Maximum concurrent crawl jobs per tenant (0 = unlimited, 1 to 50)
-       * @example 4
        */
       tenant_worker_concurrency_limit?: number | null;
       /**
        * Crawl Stale Threshold Minutes
        * @description Minutes without activity before IN_PROGRESS job is considered stale (5 min to 24 hours)
-       * @example 30
        */
       crawl_stale_threshold_minutes?: number | null;
       /**
+       * Queued Stale Threshold Minutes
+       * @description Minutes before QUEUED job is considered orphaned and allows new crawl (1 to 60 min)
+       */
+      queued_stale_threshold_minutes?: number | null;
+      /**
        * Crawl Heartbeat Interval Seconds
        * @description Heartbeat interval to signal job is alive (30s to 1 hour)
-       * @example 300
        */
       crawl_heartbeat_interval_seconds?: number | null;
       /**
        * Crawl Feeder Enabled
        * @description Enable crawl feeder service for rate-limited job enqueueing
-       * @example false
        */
       crawl_feeder_enabled?: boolean | null;
       /**
        * Crawl Feeder Interval Seconds
        * @description Feeder check interval in seconds (5s to 5 min)
-       * @example 10
        */
       crawl_feeder_interval_seconds?: number | null;
       /**
        * Crawl Feeder Batch Size
        * @description Maximum jobs to enqueue per feeder cycle per tenant (1 to 100)
-       * @example 10
        */
       crawl_feeder_batch_size?: number | null;
       /**
        * Crawl Job Max Age Seconds
        * @description Maximum job retry age before permanent failure (5 min to 2 hours)
-       * @example 1800
        */
       crawl_job_max_age_seconds?: number | null;
-    };
-    /** CrawlerSettingsSelfServiceUpdate */
-    CrawlerSettingsSelfServiceUpdate: {
-      /** Crawl Sitemap Lastmod Skip Enabled */
+      /**
+       * Tenant Worker Semaphore Ttl Seconds
+       * @description Concurrency slot TTL in seconds - must be >= crawl_max_length (1h to 24h)
+       */
+      tenant_worker_semaphore_ttl_seconds?: number | null;
+      /**
+       * Crawl Page Batch Size
+       * @description Commit after every N pages during crawl (10 to 1000)
+       */
+      crawl_page_batch_size?: number | null;
+      /**
+       * Crawl Sitemap Lastmod Skip Enabled
+       * @description Enable trusted sitemap lastmod values to retain unchanged URL pages without downloading them
+       */
       crawl_sitemap_lastmod_skip_enabled?: boolean | null;
-      /** Obey Robots */
-      obey_robots?: boolean | null;
-      /** Autothrottle Enabled */
-      autothrottle_enabled?: boolean | null;
     };
     /** CreateGroupRequest */
     CreateGroupRequest: {
@@ -9923,17 +9998,7 @@ export interface components {
       /** Success */
       success: boolean;
     };
-    /**
-     * DeleteSettingsResponse
-     * @description Response model for deleting tenant crawler settings.
-     *
-     *     Example:
-     *         {
-     *             "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
-     *             "message": "Crawler settings reset to defaults",
-     *             "deleted_keys": ["download_timeout", "dns_timeout"]
-     *         }
-     */
+    /** DeleteSettingsResponse */
     DeleteSettingsResponse: {
       /**
        * Tenant Id
@@ -9951,6 +10016,104 @@ export interface components {
        * @description List of setting keys that were removed
        */
       deleted_keys: string[];
+    };
+    /** EffectiveCrawlerSettings */
+    EffectiveCrawlerSettings: {
+      /**
+       * Crawl Max Length
+       * @description Maximum crawl duration in seconds (1 min to 24 hours)
+       */
+      crawl_max_length: number;
+      /**
+       * Download Timeout
+       * @description Per-request download timeout in seconds (10s to 5 min)
+       */
+      download_timeout: number;
+      /**
+       * Download Max Size
+       * @description Maximum file size for crawler downloads in bytes (1MB to 1GB)
+       */
+      download_max_size: number;
+      /**
+       * Dns Timeout
+       * @description DNS resolution timeout in seconds (5s to 2 min)
+       */
+      dns_timeout: number;
+      /**
+       * Retry Times
+       * @description Number of retry attempts per request (0 to 10)
+       */
+      retry_times: number;
+      /**
+       * Closespider Itemcount
+       * @description Maximum pages to crawl before stopping (100 to 100k)
+       */
+      closespider_itemcount: number;
+      /**
+       * Obey Robots
+       * @description Whether to respect robots.txt rules
+       */
+      obey_robots: boolean;
+      /**
+       * Autothrottle Enabled
+       * @description Enable automatic request throttling based on server response times
+       */
+      autothrottle_enabled: boolean;
+      /**
+       * Tenant Worker Concurrency Limit
+       * @description Maximum concurrent crawl jobs per tenant (0 = unlimited, 1 to 50)
+       */
+      tenant_worker_concurrency_limit: number;
+      /**
+       * Crawl Stale Threshold Minutes
+       * @description Minutes without activity before IN_PROGRESS job is considered stale (5 min to 24 hours)
+       */
+      crawl_stale_threshold_minutes: number;
+      /**
+       * Queued Stale Threshold Minutes
+       * @description Minutes before QUEUED job is considered orphaned and allows new crawl (1 to 60 min)
+       */
+      queued_stale_threshold_minutes: number;
+      /**
+       * Crawl Heartbeat Interval Seconds
+       * @description Heartbeat interval to signal job is alive (30s to 1 hour)
+       */
+      crawl_heartbeat_interval_seconds: number;
+      /**
+       * Crawl Feeder Enabled
+       * @description Enable crawl feeder service for rate-limited job enqueueing
+       */
+      crawl_feeder_enabled: boolean;
+      /**
+       * Crawl Feeder Interval Seconds
+       * @description Feeder check interval in seconds (5s to 5 min)
+       */
+      crawl_feeder_interval_seconds: number;
+      /**
+       * Crawl Feeder Batch Size
+       * @description Maximum jobs to enqueue per feeder cycle per tenant (1 to 100)
+       */
+      crawl_feeder_batch_size: number;
+      /**
+       * Crawl Job Max Age Seconds
+       * @description Maximum job retry age before permanent failure (5 min to 2 hours)
+       */
+      crawl_job_max_age_seconds: number;
+      /**
+       * Tenant Worker Semaphore Ttl Seconds
+       * @description Concurrency slot TTL in seconds - must be >= crawl_max_length (1h to 24h)
+       */
+      tenant_worker_semaphore_ttl_seconds: number;
+      /**
+       * Crawl Page Batch Size
+       * @description Commit after every N pages during crawl (10 to 1000)
+       */
+      crawl_page_batch_size: number;
+      /**
+       * Crawl Sitemap Lastmod Skip Enabled
+       * @description Enable trusted sitemap lastmod values to retain unchanged URL pages without downloading them
+       */
+      crawl_sitemap_lastmod_skip_enabled: boolean;
     };
     /** EmbeddingModelCreate */
     EmbeddingModelCreate: {
@@ -16687,16 +16850,27 @@ export interface components {
       pages_failed?: number | null;
       /** Files Failed */
       files_failed?: number | null;
+      /** Pages Source Retained */
+      pages_source_retained?: number | null;
+      /** Pages Hash Retained */
+      pages_hash_retained?: number | null;
+      /** Files Hash Retained */
+      files_hash_retained?: number | null;
+      /** Files Too Large Skipped */
+      files_too_large_skipped?: number | null;
       /** Failure Summary */
       failure_summary?: {
         [key: string]: number;
       } | null;
+      outcome_code?: components["schemas"]["CrawlOutcomeCode"] | null;
       /** @default queued */
       status?: components["schemas"]["Status"] | null;
       /** Result Location */
       result_location?: string | null;
       /** Finished At */
       finished_at?: string | null;
+      processing_summary?: components["schemas"]["CrawlRunProcessingSummary"] | null;
+      outcome?: components["schemas"]["CrawlOutcomePublic"] | null;
     };
     /** CrawlRunPublic */
     intric__websites__presentation__website_models__CrawlRunPublic: {
@@ -16717,15 +16891,26 @@ export interface components {
       pages_failed: number | null;
       /** Files Failed */
       files_failed: number | null;
+      /** Pages Source Retained */
+      pages_source_retained?: number | null;
+      /** Pages Hash Retained */
+      pages_hash_retained?: number | null;
+      /** Files Hash Retained */
+      files_hash_retained?: number | null;
+      /** Files Too Large Skipped */
+      files_too_large_skipped?: number | null;
       /** Failure Summary */
       failure_summary?: {
         [key: string]: number;
       } | null;
+      outcome_code?: components["schemas"]["CrawlOutcomeCode"] | null;
       status: components["schemas"]["Status"];
       /** Result Location */
       result_location: string | null;
       /** Finished At */
       finished_at: string | null;
+      processing_summary?: components["schemas"]["CrawlRunProcessingSummary"] | null;
+      outcome?: components["schemas"]["CrawlOutcomePublic"] | null;
     };
     /** @enum {string} */
     IntricEventType:
@@ -19874,59 +20059,6 @@ export interface operations {
       };
     };
   };
-  get_current_tenant_crawler_settings_api_v1_settings_crawler_get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["CrawlerSettingsResponse"];
-        };
-      };
-    };
-  };
-  update_current_tenant_crawler_settings_api_v1_settings_crawler_patch: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["CrawlerSettingsSelfServiceUpdate"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["CrawlerSettingsResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
   get_models_api_v1_settings_models__get: {
     parameters: {
       query?: never;
@@ -20086,6 +20218,59 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_current_tenant_crawler_settings_api_v1_settings_crawler_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerSettingsResponse"];
+        };
+      };
+    };
+  };
+  update_current_tenant_crawler_settings_api_v1_settings_crawler_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CrawlerSettingsSelfServiceUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerSettingsResponse"];
         };
       };
       /** @description Validation Error */
