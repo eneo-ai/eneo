@@ -4,9 +4,15 @@
 
 from typing import TYPE_CHECKING, Optional
 
+from intric.completion_models.infrastructure.context_builder import (
+    build_files_string,
+    count_tokens,
+)
 from intric.completion_models.infrastructure.static_prompts import (
     SET_TITLE_OF_CONVERSATION_PROMPT,
 )
+from intric.conversations.conversation_models import PreflightResponse
+from intric.files.file_models import FileType
 from intric.main.exceptions import BadRequestException
 from intric.sessions.session import SessionUpdate
 
@@ -15,9 +21,11 @@ if TYPE_CHECKING:
 
     from intric.assistants.api.assistant_models import AssistantResponse
     from intric.assistants.assistant_service import AssistantService
+    from intric.completion_models.domain.completion_model import CompletionModel
     from intric.completion_models.infrastructure.completion_service import (
         CompletionService,
     )
+    from intric.files.file_service import FileService
     from intric.group_chat.application.group_chat_service import GroupChatService
     from intric.sessions.session import SessionInDB
     from intric.sessions.session_service import SessionService
@@ -37,6 +45,7 @@ class ConversationService:
         session_service: "SessionService",
         completion_service: "CompletionService",
         space_service: "SpaceService",
+        file_service: "FileService",
     ) -> None:
         super().__init__()
         self.assistant_service = assistant_service
@@ -44,6 +53,7 @@ class ConversationService:
         self.session_service = session_service
         self.completion_service = completion_service
         self.space_service = space_service
+        self.file_service = file_service
 
     async def ask_conversation(
         self,
@@ -150,6 +160,101 @@ class ConversationService:
                 raise ValueError(
                     "Either session_id, assistant_id, or group_chat_id must be provided"
                 )
+
+    async def preflight_tokens(
+        self,
+        question: str,
+        file_ids: "list[UUID]",
+        session_id: Optional["UUID"] = None,
+        assistant_id: Optional["UUID"] = None,
+        group_chat_id: Optional["UUID"] = None,
+    ) -> PreflightResponse:
+        """Count the tokens this request would add to context, without sending.
+
+        Returns the exact delta: the user's text plus the JSON-wrapped text-file
+        prefix that context_builder would prepend. Excludes knowledge/RAG and
+        web-search content because both are selected at request time and have
+        no stable cost to report up-front. Model name and context window are
+        echoed so the caller can compute percentage fill without a round-trip.
+        """
+        model = await self._resolve_completion_model(
+            session_id=session_id,
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
+        )
+
+        # count_tokens already returns 0 for empty input — no need to short-circuit.
+        input_tokens = count_tokens(question, model.name)
+
+        file_tokens = 0
+        if file_ids:
+            # User-scoped lookup matches the actual chat endpoint (assistant_service.ask
+            # uses get_files_by_ids), so preflight refuses files the user can't send.
+            files = await self.file_service.get_files_by_ids(file_ids=file_ids)
+            # Only text files reach the LLM via the input string; binary/image
+            # files use provider-specific token accounting we can't preview here.
+            text_files = [f for f in files if f.file_type == FileType.TEXT and f.text]
+            if text_files:
+                # Mirror context_builder.build_files_string: that wrapper text
+                # is what actually gets tokenized when the request runs.
+                file_tokens = count_tokens(build_files_string(text_files), model.name)
+
+        return PreflightResponse(
+            input_tokens=input_tokens,
+            file_tokens=file_tokens,
+            model_name=model.name,
+            context_window=model.token_limit,
+        )
+
+    async def _resolve_completion_model(
+        self,
+        session_id: Optional["UUID"],
+        assistant_id: Optional["UUID"],
+        group_chat_id: Optional["UUID"],
+    ) -> "CompletionModel":
+        """Resolve the completion model the next chat request would target.
+
+        Mirrors ask_conversation routing rules so the preflight count uses the
+        same tokenizer the actual request will. For group chats: first assistant,
+        matching GroupChatService._find_suitable_completion_model.
+
+        Raises BadRequestException for the same configurations that would fail
+        on actual send (no assistants in group chat, no completion model set).
+        """
+        if session_id:
+            session = await self.session_service.get_session_by_uuid(session_id)
+            assert session is not None
+            if session.group_chat_id:
+                model = await self._first_group_chat_model(session.group_chat_id)
+            else:
+                assert session.assistant is not None
+                assistant, _ = await self.assistant_service.get_assistant(
+                    session.assistant.id
+                )
+                model = assistant.completion_model
+        elif assistant_id:
+            assistant, _ = await self.assistant_service.get_assistant(assistant_id)
+            model = assistant.completion_model
+        elif group_chat_id:
+            model = await self._first_group_chat_model(group_chat_id)
+        else:
+            raise BadRequestException(
+                "Provide session_id, assistant_id, or group_chat_id."
+            )
+
+        if model is None:
+            raise BadRequestException(
+                "No completion model configured for this conversation."
+            )
+        return model
+
+    async def _first_group_chat_model(
+        self, group_chat_id: "UUID"
+    ) -> "CompletionModel | None":
+        group_chat = await self.group_chat_service.get_group_chat(group_chat_id)
+        if not group_chat.assistants:
+            raise BadRequestException("No assistants in the group chat")
+        return group_chat.assistants[0].assistant.completion_model
 
     async def set_title_of_conversation(
         self, session_id: "UUID"

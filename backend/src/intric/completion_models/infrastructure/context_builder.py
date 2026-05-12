@@ -89,7 +89,7 @@ class _InformationChunkLike(Protocol):
     content: str
 
 
-def _build_files_string(files: list[File]) -> str:
+def build_files_string(files: list[File]) -> str:
     if files:
         # Use json.dumps() to properly escape special characters in filenames and text
         # This prevents broken JSON if the content contains quotes or other special chars
@@ -348,7 +348,7 @@ class _Prompt:
         )
 
     def add_attachments(self, files: list[File]) -> None:
-        self.attachments = _build_files_string(files=files)
+        self.attachments = build_files_string(files=files)
 
     def get_tokens_of_knowledge(self) -> int:
         return self._knowledge_tokens
@@ -388,7 +388,7 @@ class ContextBuilder:
         if transcription_inputs is None:
             transcription_inputs = []
         if files:
-            files_string = _build_files_string(files)
+            files_string = build_files_string(files)
             input_str = f"{files_string}\n\n{input_str}"
 
         if transcription_inputs:
