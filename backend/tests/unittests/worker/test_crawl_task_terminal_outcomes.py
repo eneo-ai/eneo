@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
@@ -20,17 +21,23 @@ from intric.worker import crawl_tasks
 @dataclass
 class _FakeExecuteResult:
     rowcount: int = 1
+    rows: tuple[tuple[str | None, bytes | None, UUID | None], ...] = ()
 
     def scalar_one_or_none(self) -> object | None:
         return None
 
     def tuples(self) -> list[tuple[str | None, bytes | None, UUID | None]]:
-        return []
+        return list(self.rows)
 
 
 class _FakeBootstrapSession:
-    def __init__(self, website: SimpleNamespace):
+    def __init__(
+        self,
+        website: SimpleNamespace,
+        rows: tuple[tuple[str | None, bytes | None, UUID | None], ...] = (),
+    ):
         self._website = website
+        self._rows = rows
         self._execute_count = 0
 
     async def begin(self) -> None:
@@ -43,7 +50,7 @@ class _FakeBootstrapSession:
         self._execute_count += 1
         if self._execute_count == 1:
             return _FakeWebsiteResult(self._website)
-        return _FakeExecuteResult()
+        return _FakeExecuteResult(rows=self._rows)
 
 
 class _FakeWebsiteResult(_FakeExecuteResult):
@@ -105,20 +112,23 @@ class _FakeAuditService:
         self.metadata = metadata
 
 
-@dataclass(frozen=True)
+@dataclass
 class _FakeCrawler:
     is_partial: bool
     termination_reason: CrawlTerminationReason
+    source_retained_urls: frozenset[str] = frozenset()
+    captured_kwargs: dict[str, object] | None = None
 
     @asynccontextmanager
-    async def crawl(self, **_kwargs: object) -> AsyncIterator[Crawl]:
+    async def crawl(self, **kwargs: object) -> AsyncIterator[Crawl]:
+        self.captured_kwargs = kwargs
         yield Crawl(
             pages=(),
             files=(),
             is_partial=self.is_partial,
             termination_reason=self.termination_reason,
             pages_count=0,
-            source_retained_urls=frozenset(),
+            source_retained_urls=self.source_retained_urls,
         )
 
 
@@ -250,6 +260,7 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
         ),
     )
     operations: list[str] = []
+    recovery_sessions: list[_FakeRecoverySession] = []
 
     @asynccontextmanager
     async def session_scope() -> AsyncIterator[_FakeRecoverySession]:
@@ -270,7 +281,9 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
         **_kwargs: object,
     ):
         operations.append(operation_name)
-        return await operation(_FakeRecoverySession())
+        recovery_session = _FakeRecoverySession()
+        recovery_sessions.append(recovery_session)
+        return await operation(recovery_session)
 
     async def reset_tenant_retry_delay(**_kwargs: object) -> None:
         return None
@@ -314,6 +327,12 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
         "terminal_circuit_breaker_update",
         "terminal_fail_job",
     ]
+    emitted_sql = "\n".join(
+        str(stmt) for session in recovery_sessions for stmt in session.executed
+    )
+    assert "last_crawled_at" not in emitted_sql
+    assert "last_source_verified_at" not in emitted_sql
+    assert "websites.tenant_id" in emitted_sql
     assert audit_service.metadata is not None
     assert audit_service.metadata["crawl_stats"] == {
         "pages_crawled": 0,
@@ -334,6 +353,129 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
         assert "Invalid tenant crawler settings ignored; defaults used" in (
             warning_messages
         )
+
+
+@pytest.mark.asyncio
+async def test_sitemap_source_skip_cutoff_is_passed_to_crawler_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source_verified_at = datetime.fromisoformat("2026-05-12T08:00:00+00:00")
+    tenant = SimpleNamespace(
+        id=uuid4(),
+        slug="test",
+        crawler_settings={
+            "crawl_sitemap_lastmod_skip_enabled": True,
+            "crawl_heartbeat_interval_seconds": 60,
+        },
+    )
+    user = SimpleNamespace(id=uuid4())
+    embedding_model_id = uuid4()
+    retained_url = "https://example.com/stable"
+    website = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=tenant.id,
+        url="https://example.com",
+        last_crawled_at=None,
+        embedding_model=SimpleNamespace(
+            id=embedding_model_id,
+            name="text-embedding-3-small",
+            litellm_model_name="openai/text-embedding-3-small",
+            family=None,
+            max_input=8191,
+            max_batch_size=32,
+            dimensions=1536,
+            open_source=False,
+            provider_id=None,
+        ),
+        http_auth_username=None,
+        encrypted_auth_password=None,
+        user_id=user.id,
+        name="Example",
+        last_source_verified_at=source_verified_at,
+    )
+    crawler = _FakeCrawler(
+        is_partial=False,
+        termination_reason="completed",
+        source_retained_urls=frozenset({retained_url}),
+    )
+    audit_service = _FakeAuditService()
+    container = _FakeContainer(
+        tenant=tenant,
+        user=user,
+        audit_service=audit_service,
+        crawler=crawler,
+    )
+    operations: list[str] = []
+    recovery_sessions: list[_FakeRecoverySession] = []
+
+    @asynccontextmanager
+    async def session_scope() -> AsyncIterator[_FakeRecoverySession]:
+        yield _FakeRecoverySession()
+
+    async def primary_active_job_id(
+        _session: object,
+        *,
+        website_id: UUID,
+    ) -> None:
+        assert website_id == website.id
+        return None
+
+    async def execute_with_recovery(
+        *,
+        operation_name: str,
+        operation,
+        **_kwargs: object,
+    ):
+        operations.append(operation_name)
+        recovery_session = _FakeRecoverySession()
+        recovery_sessions.append(recovery_session)
+        return await operation(recovery_session)
+
+    async def reset_tenant_retry_delay(**_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
+    monkeypatch.setattr(
+        "intric.database.database.sessionmanager.create_session",
+        lambda: _FakeBootstrapSession(
+            website,
+            rows=((retained_url, b"hash", embedding_model_id),),
+        ),
+    )
+    monkeypatch.setattr(
+        crawl_tasks, "_get_primary_active_job_id", primary_active_job_id
+    )
+    monkeypatch.setattr(crawl_tasks, "execute_with_recovery", execute_with_recovery)
+    monkeypatch.setattr(
+        crawl_tasks, "reset_tenant_retry_delay", reset_tenant_retry_delay
+    )
+
+    result = await crawl_tasks.crawl_task(
+        job_id=uuid4(),
+        params=CrawlTask(
+            user_id=user.id,
+            website_id=website.id,
+            run_id=uuid4(),
+            url=website.url,
+            crawl_type=CrawlType.SITEMAP,
+        ),
+        container=container,
+    )
+
+    assert result
+    assert crawler.captured_kwargs is not None
+    assert crawler.captured_kwargs["sitemap_lastmod_skip_cutoff"] == (
+        source_verified_at
+    )
+    assert crawler.captured_kwargs["sitemap_lastmod_skip_allowed_urls"] == frozenset(
+        {retained_url}
+    )
+    assert "website_post_crawl_timestamps_update" in operations
+    emitted_sql = "\n".join(
+        str(stmt) for session in recovery_sessions for stmt in session.executed
+    )
+    assert "last_crawled_at" in emitted_sql
+    assert "last_source_verified_at" in emitted_sql
 
 
 @pytest.mark.asyncio

@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import UUID
 
 import redis.asyncio as aioredis
@@ -144,6 +144,11 @@ def _build_sitemap_lastmod_skip_urls(
     existing_blob_state_by_title: Mapping[str, ExistingBlobState],
     embedding_model_id: UUID | None,
 ) -> frozenset[str]:
+    """Return URL blobs eligible for source-skip before page download.
+
+    If the current embedding model is unavailable, existing URL blobs can still
+    be retained because source-skip does not create or refresh embeddings.
+    """
     return frozenset(
         title
         for title, blob_state in existing_blob_state_by_title.items()
@@ -171,19 +176,26 @@ def _should_enable_sitemap_lastmod_skip(
     )
 
 
-def _should_update_sitemap_source_verified_at(
+WebsiteTimestampField = Literal["last_crawled_at", "last_source_verified_at"]
+
+
+def _website_timestamp_fields_after_crawl(
     *,
     crawl_type: CrawlType,
     crawl_is_partial: bool,
     pages_failed: int,
     files_failed: int,
-) -> bool:
-    return (
+) -> tuple[WebsiteTimestampField, ...]:
+    """Return website timestamp fields advanced after a non-terminal crawl."""
+    if (
         crawl_type == CrawlType.SITEMAP
         and not crawl_is_partial
         and pages_failed == 0
         and files_failed == 0
-    )
+    ):
+        return ("last_crawled_at", "last_source_verified_at")
+
+    return ("last_crawled_at",)
 
 
 def _prune_http_cache_dir(cache_dir: Path, *, max_bytes: int) -> None:
@@ -1524,6 +1536,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         operation_name="terminal_fail_job",
                         operation=_do_fail_terminal_job,
                     )
+                    # Terminal zero-output crawls advance no website crawl
+                    # timestamps, so scheduled retries are not hidden.
                     setattr(task_manager, "_job_already_handled", True)
                     task_manager.success = False
                     return {
@@ -1818,19 +1832,18 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             )
             timings["update_size"] = time.time() - update_start
 
-            # Update last_crawled_at timestamp with recovery wrapper
-            # Why: Track crawl completion time independently from record updates
-            # Use database server time for timezone correctness
+            # Use database server time for post-crawl website timestamps.
             # NOTE: WebsitesTable already imported above for bootstrap phase
 
-            last_crawled_values = {"last_crawled_at": sa.func.now()}
-            if _should_update_sitemap_source_verified_at(
+            timestamp_fields = _website_timestamp_fields_after_crawl(
                 crawl_type=params.crawl_type,
                 crawl_is_partial=crawl_is_partial,
                 pages_failed=num_failed_pages,
                 files_failed=num_failed_files,
-            ):
-                last_crawled_values["last_source_verified_at"] = sa.func.now()
+            )
+            last_crawled_values = {
+                field: sa.func.now() for field in timestamp_fields
+            }
 
             last_crawled_stmt = (
                 sa.update(WebsitesTable)
@@ -1850,7 +1863,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 container=container,
                 session_holder=session_holder,
                 created_sessions=created_sessions,
-                operation_name="last_crawled_at_update",
+                operation_name="website_post_crawl_timestamps_update",
                 operation=_do_timestamp_update,
             )
 

@@ -16,6 +16,7 @@ from uuid import uuid4
 
 import pytest
 
+from intric.websites.domain.crawl_run import CrawlType
 from intric.worker.crawl_context import CrawlContext, EmbeddingModelSpec, PreparedPage
 
 
@@ -418,42 +419,44 @@ class TestCrawlTaskRetentionHelpers:
             tenant_crawler_settings=disabled_settings,
         )
 
-    def test_sitemap_source_verified_at_updates_only_after_complete_page_clean_sitemaps(
+    @pytest.mark.parametrize(
+        (
+            "crawl_type",
+            "crawl_is_partial",
+            "pages_failed",
+            "files_failed",
+            "expected_fields",
+        ),
+        [
+            (
+                CrawlType.SITEMAP,
+                False,
+                0,
+                0,
+                ("last_crawled_at", "last_source_verified_at"),
+            ),
+            (CrawlType.SITEMAP, True, 0, 0, ("last_crawled_at",)),
+            (CrawlType.SITEMAP, False, 1, 0, ("last_crawled_at",)),
+            (CrawlType.SITEMAP, False, 0, 1, ("last_crawled_at",)),
+            (CrawlType.CRAWL, False, 0, 0, ("last_crawled_at",)),
+        ],
+    )
+    def test_website_timestamp_fields_after_crawl_capture_lifecycle_contract(
         self,
+        crawl_type,
+        crawl_is_partial,
+        pages_failed,
+        files_failed,
+        expected_fields,
     ):
-        from intric.websites.domain.crawl_run import CrawlType
-        from intric.worker.crawl_tasks import _should_update_sitemap_source_verified_at
+        from intric.worker.crawl_tasks import _website_timestamp_fields_after_crawl
 
-        assert _should_update_sitemap_source_verified_at(
-            crawl_type=CrawlType.SITEMAP,
-            crawl_is_partial=False,
-            pages_failed=0,
-            files_failed=0,
-        )
-        assert not _should_update_sitemap_source_verified_at(
-            crawl_type=CrawlType.SITEMAP,
-            crawl_is_partial=True,
-            pages_failed=0,
-            files_failed=0,
-        )
-        assert not _should_update_sitemap_source_verified_at(
-            crawl_type=CrawlType.SITEMAP,
-            crawl_is_partial=False,
-            pages_failed=1,
-            files_failed=0,
-        )
-        assert not _should_update_sitemap_source_verified_at(
-            crawl_type=CrawlType.SITEMAP,
-            crawl_is_partial=False,
-            pages_failed=0,
-            files_failed=1,
-        )
-        assert not _should_update_sitemap_source_verified_at(
-            crawl_type=CrawlType.CRAWL,
-            crawl_is_partial=False,
-            pages_failed=0,
-            files_failed=0,
-        )
+        assert _website_timestamp_fields_after_crawl(
+            crawl_type=crawl_type,
+            crawl_is_partial=crawl_is_partial,
+            pages_failed=pages_failed,
+            files_failed=files_failed,
+        ) == expected_fields
 
 
 class TestEmbeddingSemaphore:
