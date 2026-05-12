@@ -366,10 +366,6 @@ class UserAdminView(UserPublicBase):
     user_groups: list[UserGroupRead]
 
 
-class UserCreatedAdminView(UserAdminView):
-    pass
-
-
 class UserUpdatePublic(BaseModel):
     email: Optional[EmailStr] = Field(
         default=None,

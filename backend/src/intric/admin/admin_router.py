@@ -66,7 +66,6 @@ from intric.tenants.tenant import TenantPublic
 from intric.users.user import (
     UserAddAdmin,
     UserAdminView,
-    UserCreatedAdminView,
     UserUpdatePublic,
 )
 
@@ -299,7 +298,7 @@ async def get_users(
 
 @router.post(
     "/users/",
-    response_model=UserCreatedAdminView,
+    response_model=UserAdminView,
     status_code=201,
     summary="Create new user in tenant",
     description="Creates a new user account within your tenant. The user will be created with the provided credentials and automatically associated with your organization. Personal API keys are no longer auto-provisioned; the user can create one via POST /api/v1/api-keys when needed.",
@@ -390,7 +389,7 @@ async def register_user(
         ),
     )
 
-    user_admin_view = UserCreatedAdminView(**user.model_dump())
+    user_admin_view = UserAdminView(**user.model_dump())
 
     return user_admin_view
 

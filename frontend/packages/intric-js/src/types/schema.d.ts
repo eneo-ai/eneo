@@ -15622,49 +15622,6 @@ export interface components {
       /** Permissions */
       readonly permissions: components["schemas"]["Permission"][];
     };
-    /** UserCreatedAdminView */
-    UserCreatedAdminView: {
-      /**
-       * Email
-       * Format: email
-       * @description Valid email address
-       * @example john.doe@municipality.se
-       */
-      email: string;
-      /**
-       * Username
-       * @description Unique username (optional, will use email prefix if not provided)
-       * @example john.doe
-       */
-      username?: string | null;
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /**
-       * Quota Used
-       * @default 0
-       */
-      quota_used?: number;
-      /** Used Tokens */
-      used_tokens: number;
-      /** Email Verified */
-      email_verified: boolean;
-      /** Quota Limit */
-      quota_limit: number | null;
-      /** Is Active */
-      is_active: boolean;
-      state: components["schemas"]["UserState"];
-      /** Roles */
-      roles: components["schemas"]["RolePublic"][];
-      /** User Groups */
-      user_groups: components["schemas"]["UserGroupRead"][];
-    };
     /**
      * UserDeletedListItem
      * @description User information for deleted users list operations
@@ -23192,7 +23149,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["UserCreatedAdminView"];
+          "application/json": components["schemas"]["UserAdminView"];
         };
       };
       /** @description Invalid input data or validation errors */
