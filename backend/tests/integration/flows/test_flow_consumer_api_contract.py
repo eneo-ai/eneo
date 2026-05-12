@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
@@ -56,6 +57,25 @@ async def _create_space(client, *, token: str) -> str:
     )
     assert response.status_code == 201, response.text
     return response.json()["id"]
+
+
+async def _create_flow_service_key(client, *, token: str) -> str:
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": f"flow-service-key-{uuid4().hex[:8]}",
+            "key_type": "sk_",
+            "permission": "write",
+            "scope_type": "tenant",
+            "ownership": "service",
+            "expires_at": expires_at,
+            "resource_permissions": {"flows": "write"},
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["secret"]
 
 
 async def _create_published_flow(
@@ -255,7 +275,7 @@ async def _open_first_step_review_checkpoint(
             review_mode="view",
             output_type="json",
             output_contract_json=output_contract,
-            requester_principal_type="user",
+            requester_principal_type=run.get("principal_type") or "user",
             requester_user_id=UUID(run["user_id"]) if run.get("user_id") else None,
         )
         session.add(checkpoint)
@@ -337,6 +357,15 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     )
     assert first_run_response.status_code == 201, first_run_response.text
     first_run = first_run_response.json()
+
+    immediate_poll_response = await client.get(
+        published_payload["runtime_paths"]["get_run_template"].replace(
+            "{run_id}", first_run["id"]
+        ),
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert immediate_poll_response.status_code == 200, immediate_poll_response.text
+    assert immediate_poll_response.json()["id"] == first_run["id"]
 
     replay_response = await client.post(
         f"/api/v1/flows/{flow_id}/runs/",
@@ -724,3 +753,169 @@ async def test_flow_consumer_golden_journey_uses_review_runtime_paths(
     resumed_payload = resume_response.json()
     assert resumed_payload["checkpoint"]["id"] == checkpoint_id
     assert resumed_payload["run"]["id"] == run["id"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_service_key_can_drive_human_review_runtime_paths(
+    client,
+    db_container,
+    admin_token,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "intric.flows.api.flow_router_common.dispatch_flow_run_after_commit",
+        _noop_dispatch_flow_run_after_commit,
+    )
+
+    output_contract = {
+        "type": "object",
+        "required": ["summary"],
+        "properties": {"summary": {"type": "string"}},
+        "additionalProperties": False,
+    }
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_flow(
+        client,
+        token=admin_token,
+        space_id=space_id,
+        review_output_contract=output_contract,
+    )
+    service_key = await _create_flow_service_key(client, token=admin_token)
+    other_service_key = await _create_flow_service_key(client, token=admin_token)
+    service_headers = {"X-API-Key": service_key}
+    other_service_headers = {"X-API-Key": other_service_key}
+
+    published_response = await client.get(
+        f"/api/v1/flows/{flow['id']}/published/",
+        headers=service_headers,
+    )
+    assert published_response.status_code == 200, published_response.text
+    runtime_paths = published_response.json()["runtime_paths"]
+    review_paths = runtime_paths["review_checkpoints"]
+
+    contract_response = await client.get(
+        runtime_paths["run_contract"],
+        headers=service_headers,
+    )
+    assert contract_response.status_code == 200, contract_response.text
+    contract = contract_response.json()
+    assert contract["steps_requiring_review"][0]["step_id"] == flow["steps"][0]["id"]
+
+    run_response = await client.post(
+        runtime_paths["create_run"],
+        json={
+            "expected_flow_version": flow["published_version"],
+            "input_payload_json": {"text": "hello from integration"},
+        },
+        headers={
+            **service_headers,
+            "Idempotency-Key": f"service-flow-run:{uuid4().hex}",
+        },
+    )
+    assert run_response.status_code == 201, run_response.text
+    run = run_response.json()
+    assert run["principal_type"] == "service_key"
+    assert run["user_id"] is None
+
+    immediate_poll_response = await client.get(
+        _runtime_path(runtime_paths["get_run_template"], run_id=run["id"]),
+        headers=service_headers,
+    )
+    assert immediate_poll_response.status_code == 200, immediate_poll_response.text
+    assert immediate_poll_response.json()["id"] == run["id"]
+
+    active_path = _runtime_path(review_paths["active_template"], run_id=run["id"])
+    active_before_checkpoint_response = await client.get(
+        active_path,
+        headers=service_headers,
+    )
+    assert active_before_checkpoint_response.status_code == 200
+    assert active_before_checkpoint_response.json() is None
+
+    checkpoint_id = await _open_first_step_review_checkpoint(
+        db_container=db_container,
+        run=run,
+        flow=flow,
+        output_contract=output_contract,
+        current_payload_json={
+            "text": '{"summary":"Original service-key result."}',
+            "structured": {"summary": "Original service-key result."},
+            "webhook_delivered": False,
+        },
+    )
+    active_response = await client.get(active_path, headers=service_headers)
+    assert active_response.status_code == 200, active_response.text
+    active_checkpoint = active_response.json()
+    assert active_checkpoint["id"] == checkpoint_id
+    assert active_checkpoint["requester_principal_type"] == "service_key"
+
+    other_key_active_response = await client.get(
+        active_path,
+        headers=other_service_headers,
+    )
+    assert other_key_active_response.status_code == 403, other_key_active_response.text
+    assert other_key_active_response.json()["code"] == "flow_run_access_denied"
+
+    edit_path = _runtime_path(
+        review_paths["edit_template"],
+        run_id=run["id"],
+        checkpoint_id=checkpoint_id,
+    )
+    edit_response = await client.patch(
+        edit_path,
+        json={
+            "expected_checkpoint_revision": active_checkpoint["revision"],
+            "current_payload_json": {
+                "text": '{"summary":"Reviewed by service integration."}',
+                "structured": {"summary": "Reviewed by service integration."},
+                "webhook_delivered": False,
+            },
+        },
+        headers=service_headers,
+    )
+    assert edit_response.status_code == 200, edit_response.text
+    edited_checkpoint = edit_response.json()
+    assert edited_checkpoint["decided_by_principal_type"] == "service_key"
+
+    approve_response = await client.post(
+        _runtime_path(
+            review_paths["approve_template"],
+            run_id=run["id"],
+            checkpoint_id=checkpoint_id,
+        ),
+        json={"expected_checkpoint_revision": edited_checkpoint["revision"]},
+        headers=service_headers,
+    )
+    assert approve_response.status_code == 200, approve_response.text
+    approved_checkpoint = approve_response.json()
+    assert approved_checkpoint["decided_by_principal_type"] == "service_key"
+
+    resume_response = await client.post(
+        _runtime_path(
+            review_paths["resume_template"],
+            run_id=run["id"],
+            checkpoint_id=checkpoint_id,
+        ),
+        json={"expected_checkpoint_revision": approved_checkpoint["revision"]},
+        headers={
+            **service_headers,
+            "Idempotency-Key": f"service-review-resume:{uuid4().hex}",
+        },
+    )
+    assert resume_response.status_code == 202, resume_response.text
+    resumed_payload = resume_response.json()
+    assert resumed_payload["checkpoint"]["id"] == checkpoint_id
+    assert resumed_payload["checkpoint"]["decided_by_principal_type"] == "service_key"
+    assert resumed_payload["run"]["id"] == run["id"]
+
+    rerun_response = await client.post(
+        f"/api/v1/flows/{flow['id']}/runs/{run['id']}/steps/{flow['steps'][0]['id']}/rerun/",
+        json={
+            "expected_run_revision": resumed_payload["run"]["revision"],
+            "reason": "Service-key rerun should remain unsupported",
+        },
+        headers=service_headers,
+    )
+    assert rerun_response.status_code == 403, rerun_response.text
+    assert rerun_response.json()["code"] == "flow_service_key_principal_not_supported"

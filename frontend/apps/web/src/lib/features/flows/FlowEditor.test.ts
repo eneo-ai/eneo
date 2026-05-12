@@ -75,8 +75,15 @@ describe("FlowEditor metadata commands", () => {
       wizard: { transcription_enabled: true },
       form_schema: {
         fields: [
-          { name: "titel", type: "text", required: true, order: 1 },
-          { name: "val", type: "select", required: false, order: 2, options: ["A"] }
+          { name: "titel", label: "titel", type: "text", required: true, order: 1 },
+          {
+            name: "val",
+            label: "val",
+            type: "select",
+            required: false,
+            order: 2,
+            options: ["A"]
+          }
         ]
       }
     });
@@ -344,6 +351,26 @@ describe("FlowEditor step mutation commands", () => {
       expect(update.steps[1]?.user_description).toBe("Updated");
       expect(update.steps[1]?.step_order).toBe(2);
       expect(hasUnsavedChanges).toBe(true);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("tracks review policy changes in the persisted step diff", () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1)] }),
+      intric: makeIntric()
+    });
+    try {
+      const [step] = get(editor.state.update).steps;
+
+      editor.replaceStepAtIndex(0, {
+        ...step,
+        review_policy: { mode: "edit" }
+      });
+
+      const currentChanges = get(editor.state.currentChanges);
+      expect(currentChanges.diff.steps?.[0]?.review_policy).toEqual({ mode: "edit" });
     } finally {
       editor.destroy();
     }

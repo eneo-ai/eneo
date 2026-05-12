@@ -232,7 +232,8 @@ class FlowRunContractPublic(BaseModel):
             "Published steps that can pause the run for human review. API consumers "
             "can use this before starting a run to decide whether their app needs "
             "review screens, then use the active checkpoint endpoint once the run "
-            "status becomes `awaiting_review`."
+            "status becomes `awaiting_review`. An empty list means this published "
+            "flow version will not pause for human-in-the-loop review."
         ),
     )
     aggregate_max_files: int | None = Field(

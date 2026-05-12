@@ -18,6 +18,7 @@ from intric.actors.actors.space_actor import SpaceRole
 from intric.assistants.api.assistant_models import AssistantUpdatePublic
 from intric.audit.domain.action_types import ActionType
 from intric.authentication.auth_dependencies import ScopeFilter
+from intric.authentication.principal_types import PrincipalType
 from intric.authentication.signed_urls import verify_signed_token
 from intric.files.file_models import FileType
 from intric.flows.api import flow_router_common as router_common_module
@@ -57,6 +58,7 @@ from intric.flows.api.flow_models import (
     FlowInputType,
     FlowRunContractPublic,
     FlowRunCreateRequest,
+    FlowRunReviewCheckpointResumeRequest,
     FlowRunStepRerunRequest,
     FlowStepCreateRequest,
     FlowUpdateRequest,
@@ -76,6 +78,7 @@ from intric.flows.api.flow_run_execution_router import (
     list_flow_runs_alias,
     redispatch_flow_run_alias,
     rerun_flow_run_step,
+    resume_flow_run_review_checkpoint,
 )
 from intric.flows.api.flow_run_steps_router import (
     generate_flow_run_artifact_signed_url,
@@ -92,15 +95,17 @@ from intric.flows.api.flow_upload_router import (
     upload_flow_file,
     upload_flow_runtime_file,
 )
-from intric.flows.enums import FlowRunRerunOperationStatus
+from intric.flows.enums import FlowRunRerunOperationStatus, FlowRunReviewCheckpointState
 from intric.flows.flow import (
     Flow,
     FlowRun,
+    FlowRunReviewCheckpoint,
     FlowRunStatus,
     FlowStep,
     FlowTemplateAsset,
     FlowVersion,
 )
+from intric.flows.flow_review_policy import FlowStepReviewMode
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.flows.http_transport.test_action import HttpTestResult
 from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
@@ -162,6 +167,37 @@ def _run(flow_id, tenant_id):
         output_payload_json=None,
         error_message=None,
         job_id=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _review_checkpoint(
+    *,
+    flow_id,
+    run_id,
+    tenant_id,
+    step_id,
+    revision: int = 2,
+) -> FlowRunReviewCheckpoint:
+    now = datetime.now(timezone.utc)
+    return FlowRunReviewCheckpoint(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        flow_id=flow_id,
+        flow_run_id=run_id,
+        step_id=step_id,
+        step_order=1,
+        attempt_no=1,
+        state=FlowRunReviewCheckpointState.RESUMED,
+        revision=revision,
+        original_payload_json={"text": "draft"},
+        current_payload_json={"text": "reviewed"},
+        step_label="Review step",
+        review_mode=FlowStepReviewMode.EDIT,
+        output_type="json",
+        requester_principal_type=PrincipalType.USER,
+        decided_by_principal_type=PrincipalType.USER,
         created_at=now,
         updated_at=now,
     )
@@ -333,6 +369,11 @@ def _enable_space_access(
     user_permissions=None,
 ):
     """Set up space_service + actor_manager mocks so space checks pass."""
+    if (
+        getattr(container.session.return_value, "_is_explicit_tx_test_session", False)
+        is not True
+    ):
+        _enable_explicit_transaction(container)
     space_service = AsyncMock()
     container.space_service.return_value = space_service
     actor = MagicMock()
@@ -351,6 +392,40 @@ def _enable_space_access(
             [Permission.FLOWS] if user_permissions is None else user_permissions
         )
     return actor
+
+
+class _RecordingAsyncTransaction:
+    def __init__(self, events: list[str] | None = None):
+        self.events = events
+
+    async def __aenter__(self):
+        if self.events is not None:
+            self.events.append("transaction_enter")
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        if self.events is not None:
+            self.events.append("transaction_exit")
+        return False
+
+
+def _enable_explicit_transaction(container, events: list[str] | None = None):
+    session = SimpleNamespace(
+        _is_explicit_tx_test_session=True,
+        begin=MagicMock(return_value=_RecordingAsyncTransaction(events)),
+    )
+    container.session.return_value = session
+    return session
+
+
+class _RecordingBackgroundTasks(BackgroundTasks):
+    def __init__(self, events: list[str]):
+        super().__init__()
+        self.events = events
+
+    def add_task(self, func, *args, **kwargs):
+        self.events.append("add_task")
+        return super().add_task(func, *args, **kwargs)
 
 
 def _request():
@@ -810,21 +885,28 @@ async def test_create_flow_run_schedules_background_dispatch():
     flow_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=user.tenant_id)
     flow_run_service.create_run.return_value = run
-    flow_run_service.build_dispatch_request = MagicMock(
-        return_value={
+    events: list[str] = []
+
+    def _build_dispatch_request(_run):
+        events.append("build_dispatch_request")
+        return {
             "run_id": run.id,
             "flow_id": flow_id,
             "tenant_id": user.tenant_id,
             "user_id": user.id,
         }
+
+    flow_run_service.build_dispatch_request = MagicMock(
+        side_effect=_build_dispatch_request
     )
     container.flow_run_service.return_value = flow_run_service
     container.flow_service.return_value = AsyncMock()
     container.audit_service.return_value = audit_service
     container.user.return_value = user
     _enable_space_access(container)
+    _enable_explicit_transaction(container, events)
 
-    background_tasks = BackgroundTasks()
+    background_tasks = _RecordingBackgroundTasks(events)
     run_in = FlowRunCreateRequest(input_payload_json={"case_id": "123"})
 
     response = await create_flow_run(
@@ -836,6 +918,12 @@ async def test_create_flow_run_schedules_background_dispatch():
     )
 
     assert response.id == run.id
+    assert events == [
+        "transaction_enter",
+        "build_dispatch_request",
+        "transaction_exit",
+        "add_task",
+    ]
     assert len(background_tasks.tasks) == 1
     scheduled = background_tasks.tasks[0]
     assert scheduled.func is dispatch_flow_run_after_commit
@@ -943,16 +1031,20 @@ async def test_rerun_flow_run_step_calls_service_and_schedules_recoverable_dispa
         update={"revision": 2, "status": FlowRunStatus.QUEUED}
     )
     rerun_result = _rerun_result(run, step_id, invalidated_step_ids=(step_id, uuid4()))
+    events: list[str] = []
     run_service = AsyncMock()
     run_service.rerun_step.return_value = rerun_result
-    run_service.build_dispatch_request = MagicMock(
-        return_value={
+
+    def _build_dispatch_request(_run):
+        events.append("build_dispatch_request")
+        return {
             "run_id": run.id,
             "flow_id": flow_id,
             "tenant_id": user.tenant_id,
             "user_id": user.id,
         }
-    )
+
+    run_service.build_dispatch_request = MagicMock(side_effect=_build_dispatch_request)
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_run_service.return_value = run_service
@@ -960,13 +1052,14 @@ async def test_rerun_flow_run_step_calls_service_and_schedules_recoverable_dispa
     container.user.return_value = user
     container.audit_service.return_value = AsyncMock()
     _enable_space_access(container, user_permissions=[Permission.FLOWS_MANAGE])
+    _enable_explicit_transaction(container, events)
     monkeypatch.setattr(
         router_common_module,
         "get_scope_filter",
         lambda _request: ScopeFilter(space_id=None),
     )
 
-    background_tasks = BackgroundTasks()
+    background_tasks = _RecordingBackgroundTasks(events)
     response = await rerun_flow_run_step(
         id=flow_id,
         run_id=run.id,
@@ -983,6 +1076,12 @@ async def test_rerun_flow_run_step_calls_service_and_schedules_recoverable_dispa
     )
 
     assert response.operation_id == rerun_result.operation.id
+    assert events == [
+        "transaction_enter",
+        "build_dispatch_request",
+        "transaction_exit",
+        "add_task",
+    ]
     assert response.run.id == run.id
     assert response.run.revision == 2
     assert response.rerun_step_id == step_id
@@ -1058,6 +1157,85 @@ async def test_rerun_flow_run_step_replay_does_not_schedule_dispatch(monkeypatch
     assert background_tasks.tasks == []
     run_service.build_dispatch_request.assert_not_called()
     container.audit_service.return_value.log_async.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resume_review_checkpoint_schedules_dispatch_after_commit(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    step_id = uuid4()
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
+        update={"status": FlowRunStatus.QUEUED}
+    )
+    checkpoint = _review_checkpoint(
+        flow_id=flow_id,
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        step_id=step_id,
+    )
+    events: list[str] = []
+
+    def _build_dispatch_request(_run):
+        events.append("build_dispatch_request")
+        return {
+            "run_id": run.id,
+            "flow_id": flow_id,
+            "tenant_id": user.tenant_id,
+            "user_id": user.id,
+        }
+
+    run_service = AsyncMock()
+    run_service.resume_review_checkpoint.return_value = SimpleNamespace(
+        checkpoint=checkpoint,
+        run=run,
+        accepted=True,
+    )
+    run_service.build_dispatch_request = MagicMock(side_effect=_build_dispatch_request)
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_run_service.return_value = run_service
+    container.flow_service.return_value = flow_service
+    container.user.return_value = user
+    _enable_space_access(container)
+    _enable_explicit_transaction(container, events)
+    monkeypatch.setattr(
+        router_common_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+
+    background_tasks = _RecordingBackgroundTasks(events)
+    response = await resume_flow_run_review_checkpoint(
+        id=flow_id,
+        run_id=run.id,
+        checkpoint_id=checkpoint.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        review_in=FlowRunReviewCheckpointResumeRequest(
+            expected_checkpoint_revision=checkpoint.revision
+        ),
+        background_tasks=background_tasks,
+        idempotency_key="resume-review-checkpoint",
+        container=container,
+    )
+
+    assert response.run.id == run.id
+    assert response.checkpoint.id == checkpoint.id
+    assert events == [
+        "transaction_enter",
+        "build_dispatch_request",
+        "transaction_exit",
+        "add_task",
+    ]
+    assert len(background_tasks.tasks) == 1
+    scheduled = background_tasks.tasks[0]
+    assert scheduled.func is dispatch_flow_run_recoverably_after_commit
+    assert scheduled.kwargs == {
+        "run_id": run.id,
+        "flow_id": flow_id,
+        "tenant_id": user.tenant_id,
+        "user_id": user.id,
+    }
 
 
 @pytest.mark.asyncio
@@ -1467,6 +1645,7 @@ async def test_create_flow_run_rejects_scope_mismatch(monkeypatch):
         tenant_id=uuid4(),
         permissions=[Permission.FLOWS],
     )
+    _enable_explicit_transaction(container)
 
     monkeypatch.setattr(
         router_common_module,
@@ -2150,6 +2329,7 @@ async def test_upload_flow_file_uses_flow_limit_override(monkeypatch):
     container.file_service.return_value = file_service
     container.user.return_value = user
     container.audit_service.return_value = AsyncMock()
+    _enable_explicit_transaction(container)
 
     monkeypatch.setattr(
         router_common_module,
@@ -2986,6 +3166,7 @@ async def test_flow_run_alias_control_endpoints_reject_scope_mismatch(monkeypatc
         permissions=[Permission.FLOWS],
     )
     container.audit_service.return_value = AsyncMock()
+    _enable_explicit_transaction(container)
 
     monkeypatch.setattr(
         router_common_module,

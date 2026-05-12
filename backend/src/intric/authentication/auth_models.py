@@ -148,8 +148,15 @@ class ResourcePermissions(BaseModel):
     flows: ResourcePermissionLevel | None = Field(
         default=None,
         description=(
-            "Explicit Flow access. Null means this key has no fine-grained Flow "
-            "grant; keys without resource_permissions use their top-level permission."
+            "Explicit Flow runtime access. `read` can inspect published flows, "
+            "runtime paths, run contracts, own run status, and active human-review "
+            "checkpoints. `write` can upload runtime inputs, create published-flow "
+            "runs, cancel own runs, and edit, approve, reject, or resume human-review "
+            "checkpoints for runs created by that same API key. `admin` satisfies "
+            "DELETE-level Flow resource checks, but service-key principals still "
+            "cannot use endpoints whose Flow policy requires a user principal. Null "
+            "means this key has no fine-grained Flow grant; keys without "
+            "resource_permissions use their top-level permission."
         ),
     )
     assistants: ResourcePermissionLevel = ResourcePermissionLevel.NONE
@@ -163,8 +170,11 @@ class ResourcePermissions(BaseModel):
     flow_evidence: ResourcePermissionLevel = Field(
         default=ResourcePermissionLevel.NONE,
         description=(
-            "Explicit Flow evidence access. Omitted or 'none' means this key has "
-            "no fine-grained evidence grant."
+            "Explicit Flow evidence access for trace/evidence inspection and export. "
+            "This is separate from `flows`: evidence access does not grant run "
+            "creation or human-review checkpoint edit, approve, reject, or resume "
+            "permissions. Omitted or 'none' means this key has no fine-grained "
+            "evidence grant."
         ),
     )
 

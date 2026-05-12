@@ -47,7 +47,14 @@ TAGS_METADATA = [
         "description": (
             "Flow authoring and runtime operations. Use these endpoints to create draft "
             "flows, manage flow-owned assistants, attach DOCX templates, inspect run "
-            "contracts, upload runtime input files, start runs, and fetch run outputs."
+            "contracts, upload runtime input files, start runs, fetch run outputs, and "
+            "drive human-review checkpoints from webapps or service-owned API-key "
+            "integrations when the key has Flow write access and owns the run. "
+            "For service-key webapps, start with `GET /flows/?space_id=...` or "
+            "`GET /flows/{id}/published/`, then follow the returned runtime paths and "
+            "`GET /flows/{id}/run-contract/`; `steps_requiring_review` tells clients "
+            "whether the published version can pause for human review. Draft authoring "
+            "endpoints require a user principal."
         ),
     },
     {

@@ -606,8 +606,32 @@ def test_openapi_run_contract_guides_consumer_forms_uploads_and_review(
     assert "generated file download" in final_output["output_type"]["description"]
     assert "input_payload_json" in form_field["name"]["description"]
     assert "review screens" in run_contract["steps_requiring_review"]["description"]
+    assert "empty list" in run_contract["steps_requiring_review"]["description"]
     assert "Review behavior" in review_step["review_mode"]["description"]
     assert "output contract" in review_step["output_contract"]["description"]
+
+
+def test_openapi_flow_step_review_policy_documents_authoring_contract(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    create_schema = schemas.get("FlowStepCreateRequest", {}).get("properties", {})
+    public_schema = schemas.get("FlowStepPublic", {}).get("properties", {})
+    review_policy_schema = schemas.get("FlowStepReviewPolicy", {}).get("properties", {})
+
+    create_description = str(create_schema["review_policy"].get("description", ""))
+    public_description = str(public_schema["review_policy"].get("description", ""))
+    mode_description = str(review_policy_schema["mode"].get("description", ""))
+
+    for description in (create_description, public_description):
+        assert "human-in-the-loop checkpoint" in description
+        assert "`view`" in description
+        assert "`edit`" in description
+        assert "downstream steps continue" in description
+        assert "outbound delivery output modes" in description
+
+    assert "`view` pauses the run" in mode_description
+    assert "replace the output used by downstream steps" in mode_description
 
 
 def test_openapi_runtime_paths_expose_review_checkpoint_templates(
@@ -633,6 +657,33 @@ def test_openapi_runtime_paths_expose_review_checkpoint_templates(
     assert "{checkpoint_id}" in review_properties["approve_template"]["description"]
     assert "{checkpoint_id}" in review_properties["reject_template"]["description"]
     assert "{checkpoint_id}" in review_properties["resume_template"]["description"]
+    assert "current_payload_json" in review_properties["edit_template"]["description"]
+    assert (
+        "expected_checkpoint_revision"
+        in review_properties["approve_template"]["description"]
+    )
+    assert (
+        "expected_checkpoint_revision"
+        in review_properties["resume_template"]["description"]
+    )
+    assert "upload_file" in runtime_paths["upload_flow_file"]["description"]
+    assert (
+        "step_inputs[step_id].file_ids"
+        in runtime_paths["upload_step_runtime_file_template"]["description"]
+    )
+    assert "committed before" in runtime_paths["create_run"]["description"]
+    assert "immediately poll" in runtime_paths["create_run"]["description"]
+    assert (
+        "resource_permissions.flow_evidence"
+        in runtime_paths["evidence_template"]["description"]
+    )
+    assert (
+        "POST template" in runtime_paths["artifact_signed_url_template"]["description"]
+    )
+    assert (
+        "SignedURLRequest"
+        in runtime_paths["artifact_signed_url_template"]["description"]
+    )
 
 
 def test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients(
@@ -653,20 +704,41 @@ def test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients(
         "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
         "post",
     )
+    rerun_operation = _get_operation(
+        openapi_spec,
+        "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/",
+        "post",
+    )
 
     active_description = active_operation.get("description", "")
     edit_description = edit_operation.get("description", "")
     resume_description = resume_operation.get("description", "")
+    rerun_description = rerun_operation.get("description", "")
 
     assert "status` is `awaiting_review`" in active_description
     assert "step_snapshot_available" in active_description
     assert "without reading the mutable flow draft" in active_description
+    assert "service-owned `sk_` key" in active_description
+    assert "resource_permissions.flows = write" in active_description
+    assert "rather than auto-approve" in active_description
+    assert "same key" in active_description
     assert "full corrected `current_payload_json`, not a patch" in edit_description
     assert "typed_io_contract_violation" in edit_description
     assert "payload_field" in edit_description
     assert "flow_review_stale_revision" in edit_description
+    assert "resource_permissions.flows = write" in edit_description
+    assert "committed before the response" in edit_description
+    assert "returned id or revision" in edit_description
     assert "202 Accepted" in resume_description
     assert "Idempotency-Key" in resume_description
+    assert "resource_permissions.flows = write" in resume_description
+    assert "committed before the response" in resume_description
+    assert "Service-key principals can edit and resume" in rerun_description
+    assert (
+        "rerun operations are still persisted against a human actor"
+        in rerun_description
+    )
+    assert "committed before the response" in rerun_description
 
     edit_400 = edit_operation["responses"]["400"]
     edit_400_text = str(edit_400)
@@ -1383,7 +1455,16 @@ def test_openapi_create_flow_run_documents_idempotency_contract(
         "Service-key principals may create published-flow runs in v1"
         in operation_description
     )
+    assert "service-owned `sk_` key" in operation_description
+    assert "steps_requiring_review" in operation_description
+    assert "resource_permissions.flows = write" in operation_description
+    assert "rather than auto-approve" in operation_description
+    assert "same key" in operation_description
     assert "matching run row is retained" in operation_description.lower()
+    assert (
+        "committed before this endpoint returns `201 Created`" in operation_description
+    )
+    assert "immediately poll" in operation_description
 
     conflict_response = operation.get("responses", {}).get("400", {})
     assert "flow_run_idempotency_conflict" in str(
@@ -1405,6 +1486,46 @@ def test_openapi_flow_run_forbidden_docs_list_current_codes(
 
     assert "insufficient_scope" in forbidden_description
     assert "flow_run_access_denied" in forbidden_description
+    assert "flow_service_key_principal_not_supported" in forbidden_description
+
+
+def test_openapi_flows_tag_guides_api_key_human_review(openapi_spec: dict) -> None:
+    tags = {tag.get("name"): tag for tag in openapi_spec.get("tags", [])}
+    description = str(tags["flows"].get("description", ""))
+
+    assert "human-review checkpoints" in description
+    assert "service-owned API-key integrations" in description
+    assert "GET /flows/{id}/published/" in description
+    assert "GET /flows/{id}/run-contract/" in description
+    assert "steps_requiring_review" in description
+
+
+def test_openapi_flow_authoring_docs_separate_draft_and_service_key_runtime(
+    openapi_spec: dict,
+) -> None:
+    list_description = str(
+        _get_operation(openapi_spec, "/api/v1/flows/", "get").get("description", "")
+    )
+    draft_description = str(
+        _get_operation(openapi_spec, "/api/v1/flows/{id}/", "get").get(
+            "description", ""
+        )
+    )
+    published_description = str(
+        _get_operation(openapi_spec, "/api/v1/flows/{id}/published/", "get").get(
+            "description", ""
+        )
+    )
+
+    assert "published-flow discovery" in list_description
+    assert "/published/" in list_description
+    assert "runtime paths" in list_description
+    assert "Service-key runtime clients should call" in draft_description
+    assert "/published/" in draft_description
+    assert "current draft definition" in draft_description
+    assert "external webapps" in published_description
+    assert "review checkpoints" in published_description
+    assert "artifact/evidence retrieval" in published_description
 
 
 def test_openapi_flow_runtime_visibility_docs_are_explicit(openapi_spec: dict) -> None:

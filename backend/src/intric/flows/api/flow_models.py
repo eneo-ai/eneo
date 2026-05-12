@@ -23,7 +23,11 @@ from intric.flows.enums import (
     FlowTemplateAssetStatus,
     RerunDependencyKind,
 )
-from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
+from intric.flows.flow_review_policy import (
+    FLOW_STEP_REVIEW_POLICY_DESCRIPTION,
+    FlowStepReviewMode,
+    FlowStepReviewPolicy,
+)
 from intric.flows.flow_run_contract_models import (
     FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE as FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE,
 )
@@ -367,7 +371,10 @@ class FlowStepCreateRequest(BaseModel):
     mcp_policy: FlowMcpPolicy
     input_config: dict[str, Any] | None = None
     output_config: dict[str, Any] | None = None
-    review_policy: FlowStepReviewPolicy | None = None
+    review_policy: FlowStepReviewPolicy | None = Field(
+        default=None,
+        description=FLOW_STEP_REVIEW_POLICY_DESCRIPTION,
+    )
 
     @field_validator("timeout_seconds", mode="before")
     @classmethod
@@ -464,7 +471,10 @@ class FlowStepPublic(BaseModel):
     mcp_policy: FlowMcpPolicy
     input_config: dict[str, Any] | None = None
     output_config: dict[str, Any] | None = None
-    review_policy: FlowStepReviewPolicy | None = None
+    review_policy: FlowStepReviewPolicy | None = Field(
+        default=None,
+        description=FLOW_STEP_REVIEW_POLICY_DESCRIPTION,
+    )
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -511,28 +521,33 @@ class FlowReviewCheckpointRuntimePathsPublic(BaseModel):
         description=(
             "PATCH template for submitting a full corrected checkpoint payload. "
             "Replace `{run_id}` and `{checkpoint_id}` with values returned by "
-            "create_run and active checkpoint polling."
+            "create_run and active checkpoint polling. Send "
+            "`expected_checkpoint_revision` plus the full corrected "
+            "`current_payload_json` field from the active checkpoint response."
         )
     )
     approve_template: str = Field(
         description=(
             "POST template for approving a checkpoint. Replace `{run_id}` and "
             "`{checkpoint_id}` with values returned by create_run and active "
-            "checkpoint polling."
+            "checkpoint polling, and send `expected_checkpoint_revision` from "
+            "the latest checkpoint response."
         )
     )
     reject_template: str = Field(
         description=(
             "POST template for rejecting a checkpoint. Replace `{run_id}` and "
             "`{checkpoint_id}` with values returned by create_run and active "
-            "checkpoint polling."
+            "checkpoint polling, then send `expected_checkpoint_revision` and a "
+            "rejection reason."
         )
     )
     resume_template: str = Field(
         description=(
             "POST template for resuming a run after checkpoint approval. Replace "
             "`{run_id}` and `{checkpoint_id}` with values returned by create_run "
-            "and active checkpoint polling."
+            "and active checkpoint polling, then send the approved checkpoint "
+            "`expected_checkpoint_revision`."
         )
     )
 
@@ -540,13 +555,53 @@ class FlowReviewCheckpointRuntimePathsPublic(BaseModel):
 class FlowRuntimePathsPublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    run_contract: str
-    input_policy: str
-    graph: str
-    upload_flow_file: str
-    upload_step_runtime_file_template: str
-    create_run: str
-    list_runs: str
+    run_contract: str = Field(
+        description=(
+            "GET path for the published run contract. Call this before creating a "
+            "run to discover required inputs, review checkpoints, final output "
+            "delivery, and the published version to pin."
+        )
+    )
+    input_policy: str = Field(
+        description=(
+            "GET path for the published input policy. Use this to inspect accepted "
+            "runtime input formats and upload constraints before submitting files."
+        )
+    )
+    graph: str = Field(
+        description=(
+            "GET path for the published flow graph. Add the optional `run_id` query "
+            "parameter after run creation to enrich the graph with runtime state."
+        )
+    )
+    upload_flow_file: str = Field(
+        description=(
+            "POST path for uploading flow-level runtime files before run creation. "
+            "Send `multipart/form-data` with the binary file in the `upload_file` "
+            "field; use the returned file id in the create-run payload."
+        )
+    )
+    upload_step_runtime_file_template: str = Field(
+        description=(
+            "POST template for uploading files for a specific runtime step. Replace "
+            "`{step_id}` with a step id from the run contract, then send "
+            "`multipart/form-data` with the binary file in the `upload_file` field. "
+            "Use the returned file id in `step_inputs[step_id].file_ids`."
+        )
+    )
+    create_run: str = Field(
+        description=(
+            "POST path for creating a run. The returned run id is committed before "
+            "`201 Created` is returned, so clients can immediately poll "
+            "`get_run_template`."
+        )
+    )
+    list_runs: str = Field(
+        description=(
+            "GET path for listing visible runs for this flow. Service keys list only "
+            "runs created by the same key."
+        )
+    )
     review_checkpoints: FlowReviewCheckpointRuntimePathsPublic = Field(
         description=(
             "Review checkpoint path templates for human-in-loop clients. These "
@@ -554,11 +609,38 @@ class FlowRuntimePathsPublic(BaseModel):
             "reject, and resume URLs before a run reaches awaiting_review."
         )
     )
-    get_graph_for_run_template: str
-    get_run_template: str
-    list_steps_template: str
-    evidence_template: str
-    artifact_signed_url_template: str
+    get_graph_for_run_template: str = Field(
+        description=(
+            "GET template for the run-enriched graph. Replace `{run_id}` with the "
+            "id returned by create_run."
+        )
+    )
+    get_run_template: str = Field(
+        description=(
+            "GET template for polling run status and top-level output. Replace "
+            "`{run_id}` with the id returned by create_run."
+        )
+    )
+    list_steps_template: str = Field(
+        description=(
+            "GET template for inspecting ordered step outputs and result files. "
+            "Replace `{run_id}` with the id returned by create_run."
+        )
+    )
+    evidence_template: str = Field(
+        description=(
+            "GET template for rich run evidence. Service keys need explicit "
+            "`resource_permissions.flow_evidence` and can inspect only their own "
+            "runs."
+        )
+    )
+    artifact_signed_url_template: str = Field(
+        description=(
+            "POST template for generating a signed artifact download URL. Replace "
+            "`{run_id}` and `{file_id}` with values from run or step result files "
+            "and send a SignedURLRequest body."
+        )
+    )
 
 
 class FlowRuntimePublic(BaseModel):

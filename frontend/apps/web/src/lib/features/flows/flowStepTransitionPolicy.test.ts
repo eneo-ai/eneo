@@ -134,4 +134,19 @@ describe("flow step transition policy", () => {
     expect(result.output_mode).toBe("transcribe_only");
     expect(result.output_config).toBeNull();
   });
+
+  it("clears review policy when switching to outbound output delivery", () => {
+    const result = applyOutputModeChange({
+      step: makeStep({
+        output_mode: "pass_through",
+        review_policy: { mode: "edit" }
+      }),
+      nextMode: "http_post",
+      runtimeInputConfig: makeRuntimeInputConfig(),
+      templateFillConfig: getTemplateFillOutputConfig(makeStep())
+    });
+
+    expect(result.output_mode).toBe("http_post");
+    expect(result.review_policy).toBeNull();
+  });
 });

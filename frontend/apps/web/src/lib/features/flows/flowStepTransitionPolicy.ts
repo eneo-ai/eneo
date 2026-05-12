@@ -14,6 +14,7 @@ import {
   createTemplateFillDraftConfig,
   type getTemplateFillOutputConfig
 } from "./templateFillConfig";
+import { sanitizeFlowStepReviewPolicy } from "./flowStepReviewPolicy";
 
 type StepInputSource = FlowStep["input_source"];
 type StepInputType = FlowStep["input_type"];
@@ -203,27 +204,31 @@ export function applyOutputModeChange({
           { ...runtimeInputConfig, enabled: true, required: true, input_format: "audio" }
         )
       : {};
-    return sanitizeStepCitationMode({
-      ...step,
-      ...audioPatch,
-      input_type: "audio",
-      input_source: "flow_input",
-      output_mode: "transcribe_only",
-      output_type: "text"
-    });
+    return sanitizeFlowStepReviewPolicy(
+      sanitizeStepCitationMode({
+        ...step,
+        ...audioPatch,
+        input_type: "audio",
+        input_source: "flow_input",
+        output_mode: "transcribe_only",
+        output_type: "text"
+      })
+    );
   }
 
   if (nextMode === "template_fill") {
-    return sanitizeStepCitationMode({
-      ...step,
-      output_mode: "template_fill",
-      output_type: "docx",
-      output_contract: null,
-      output_config: createTemplateFillDraftConfig(templateFillConfig)
-    });
+    return sanitizeFlowStepReviewPolicy(
+      sanitizeStepCitationMode({
+        ...step,
+        output_mode: "template_fill",
+        output_type: "docx",
+        output_contract: null,
+        output_config: createTemplateFillDraftConfig(templateFillConfig)
+      })
+    );
   }
 
-  return sanitizeStepCitationMode({ ...step, output_mode: nextMode });
+  return sanitizeFlowStepReviewPolicy(sanitizeStepCitationMode({ ...step, output_mode: nextMode }));
 }
 
 export function applyOutputTypeChange({
@@ -236,7 +241,9 @@ export function applyOutputTypeChange({
   const nextMode =
     step.output_mode === "template_fill" && nextType !== "docx" ? "pass_through" : step.output_mode;
 
-  return sanitizeStepCitationMode({ ...step, output_type: nextType, output_mode: nextMode });
+  return sanitizeFlowStepReviewPolicy(
+    sanitizeStepCitationMode({ ...step, output_type: nextType, output_mode: nextMode })
+  );
 }
 
 function withHttpDefaults(inputConfig: FlowStep["input_config"]): Record<string, unknown> {

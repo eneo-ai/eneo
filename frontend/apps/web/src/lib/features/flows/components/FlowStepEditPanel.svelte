@@ -55,6 +55,10 @@
     setFlowCitationMode,
     type FlowCitationMode
   } from "$lib/features/flows/flowCitationMode";
+  import {
+    buildFlowStepReviewPolicyPatch,
+    type FlowStepReviewModeChoice
+  } from "$lib/features/flows/flowStepReviewPolicy";
 
   // Extracted state management
   import { FlowStepAssistantState } from "./FlowStepAssistantState.svelte.ts";
@@ -88,6 +92,7 @@
   import FlowStepInputTemplateSection from "./FlowStepInputTemplateSection.svelte";
   import FlowStepTemplateFillSection from "./FlowStepTemplateFillSection.svelte";
   import FlowStepOutputSection from "./FlowStepOutputSection.svelte";
+  import FlowStepReviewSection from "./FlowStepReviewSection.svelte";
   import FlowStepSecuritySection from "./FlowStepSecuritySection.svelte";
   import FlowStepAdvancedSection from "./FlowStepAdvancedSection.svelte";
   import FlowStepDeleteSection from "./FlowStepDeleteSection.svelte";
@@ -431,6 +436,10 @@
   function handleCitationModeChange(nextCitationMode: FlowCitationMode) {
     if (!activeStep) return;
     updateStep("output_config", setFlowCitationMode(activeStep.output_config, nextCitationMode));
+  }
+
+  function handleReviewModeChange(nextReviewMode: FlowStepReviewModeChoice) {
+    updateStepPatch(buildFlowStepReviewPolicyPatch(nextReviewMode));
   }
 
   // ---------------------------------------------------------------------------
@@ -1087,6 +1096,12 @@
             onSwitchToTemplateFill={() => handleOutputModeChange("template_fill")}
           />
         {/if}
+
+        <FlowStepReviewSection
+          step={activeStep}
+          {isPublished}
+          onReviewModeChange={(detail) => handleReviewModeChange(detail.value)}
+        />
 
         <FlowStepSecuritySection
           step={activeStep}

@@ -56,13 +56,16 @@ _FLOW_DRAFT_OWNERSHIP_DESCRIPTION = (
 
 _FLOW_SERVICE_KEY_DISCOVERY_DESCRIPTION = (
     "Service-key principals may use this endpoint only for published-flow discovery in "
-    "their scoped space. Draft authoring and AI Builder still require a user principal."
+    "their scoped space. Service-key webapps should use the returned ids with "
+    "`GET /api/v1/flows/{id}/published/` and the runtime paths from that response; "
+    "draft authoring and AI Builder still require a user principal."
 )
 
 _FLOW_PUBLISHED_RUNTIME_DESCRIPTION = (
     "Return the runtime-safe published projection of a flow. "
     "This endpoint is intended for runtime consumers, including service-key principals, "
-    "and does not expose the current draft/current-definition authoring view."
+    "and does not expose the current draft/current-definition authoring view. Treat it "
+    "as the entry point for external webapps that already know a published flow id."
 )
 
 
@@ -242,7 +245,8 @@ async def list_flows(
     description=(
         "Return the full draft representation of a flow, including all configured steps "
         f"and metadata. {_FLOW_DRAFT_OWNERSHIP_DESCRIPTION} "
-        "This endpoint is user-principal-oriented and returns the current draft definition."
+        "This endpoint is user-principal-oriented and returns the current draft definition. "
+        "Service-key runtime clients should call `/api/v1/flows/{id}/published/` instead."
     ),
     responses={
         403: error_response(
@@ -294,8 +298,8 @@ async def get_flow(
     description=(
         f"{_FLOW_PUBLISHED_RUNTIME_DESCRIPTION} "
         "Use this endpoint when a client needs one published flow's metadata plus the "
-        "canonical runtime paths for contract discovery, run creation, polling, and "
-        "artifact/evidence retrieval."
+        "canonical runtime paths for contract discovery, file upload, run creation, "
+        "polling, review checkpoints, and artifact/evidence retrieval."
     ),
     responses={
         403: error_response(

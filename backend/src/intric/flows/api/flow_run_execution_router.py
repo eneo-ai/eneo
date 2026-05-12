@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Annotated
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import (
@@ -17,6 +19,7 @@ from fastapi import (
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.database.database import AsyncSession
 from intric.flows.api import flow_router_common as common
 from intric.flows.api.flow_api_common import audit_actor_kwargs, error_response
 from intric.flows.api.flow_assembler import FlowAssembler
@@ -38,7 +41,10 @@ from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
 from intric.main.models import GeneralError, OffsetPaginatedResponse
-from intric.server.dependencies.container import get_container
+from intric.server.dependencies.container import (
+    get_container,
+    get_container_for_explicit_transaction,
+)
 
 router = APIRouter()
 
@@ -59,8 +65,26 @@ _FLOW_RUN_IDEMPOTENCY_HEADER_DESCRIPTION = (
     "the returned run id as the durable polling handle."
 )
 
-_FLOW_RUN_CREATE_DESCRIPTION = """
+_FLOW_RUN_SERVICE_KEY_REVIEW_CLAUSE = (
+    "Service-key human-review clients should use a service-owned `sk_` key with "
+    "`resource_permissions.flows = write`; inspect `steps_requiring_review`, "
+    "then expect review checkpoints to pause at `awaiting_review` rather than "
+    "auto-approve, and use the same key to mutate only checkpoints for runs it "
+    "created."
+)
+
+_FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE = (
+    "Successful runtime mutations are committed before the response is returned, "
+    "so clients can immediately use the returned id or revision in the next "
+    "poll/edit/approve/resume request."
+)
+
+_FLOW_RUN_CREATE_DESCRIPTION = (
+    """
     Create a new run for a published flow.
+
+    The returned run id is committed before this endpoint returns `201 Created`, so clients can
+    immediately poll `GET /api/v1/flows/{id}/runs/{run_id}/` with the id from the response.
 
     Generic consumer sequence:
     1. Inspect `GET /api/v1/flows/{id}/run-contract/` to understand the published form fields,
@@ -79,7 +103,12 @@ _FLOW_RUN_CREATE_DESCRIPTION = """
 
     Service-key principals may create published-flow runs in v1. Draft ownership and AI Builder
     flows still require a user principal.
+
     """
+    + _FLOW_RUN_SERVICE_KEY_REVIEW_CLAUSE
+    + """
+    """
+)
 
 _FLOW_RUN_STATUS_DESCRIPTION = """
     Get one run for a flow using flow-first routing.
@@ -103,16 +132,23 @@ _FLOW_RUN_LIST_DESCRIPTION = """
     in their space, and service-key principals can list only their own runs.
     """
 
-_FLOW_RUN_CANCEL_DESCRIPTION = """
+_FLOW_RUN_CANCEL_DESCRIPTION = (
+    """
 Cancel a flow run if it is not already terminal.
 
 This is the canonical run control endpoint for flow consumers. Current runtime lifecycle control
 is policy-based: callers can cancel their own runs, tenant admins can cancel runs across the
 tenant, same-space admins and owners can cancel runs for flows in their space, and service-key
 principals can cancel only their own runs.
-    """
 
-_FLOW_RUN_STEP_RERUN_DESCRIPTION = """
+"""
+    + _FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE
+    + """
+    """
+)
+
+_FLOW_RUN_STEP_RERUN_DESCRIPTION = (
+    """
 Request a rerun for one completed step in an existing flow run.
 
 The endpoint returns `202 Accepted` for both a newly accepted rerun and an idempotent
@@ -124,9 +160,15 @@ Rerun is a run lifecycle mutation and currently requires a user principal with f
 management access. Service-key principals can edit and resume human-review checkpoints
 for their own runs, but rerun operations are still persisted against a human actor in
 this API version.
-    """
 
-_FLOW_RUN_REVIEW_ACTIVE_DESCRIPTION = """
+"""
+    + _FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE
+    + """
+    """
+)
+
+_FLOW_RUN_REVIEW_ACTIVE_DESCRIPTION = (
+    """
 Return the active human review checkpoint for a paused run.
 
 The endpoint returns `null` with `200 OK` when the run has no active checkpoint.
@@ -144,9 +186,15 @@ is `true`.
 
 Current visibility follows run-detail visibility: service-key principals can read only
 checkpoints for runs they own, while human callers follow the existing flow view policy.
-    """
 
-_FLOW_RUN_REVIEW_EDIT_DESCRIPTION = """
+"""
+    + _FLOW_RUN_SERVICE_KEY_REVIEW_CLAUSE
+    + """
+    """
+)
+
+_FLOW_RUN_REVIEW_EDIT_DESCRIPTION = (
+    """
 Edit the current payload for a human review checkpoint.
 
 The request uses `expected_checkpoint_revision` as the checkpoint compare token. On success,
@@ -161,9 +209,15 @@ checkpoint, step-result projection, or audit state is persisted. Contract failur
 with code `typed_io_contract_violation` and context fields `checkpoint_id`, `step_id`,
 `step_order`, and `payload_field`.
 
-Service-key principals may edit checkpoints only for runs they own. Human callers follow the
-same flow review permission policy used by the approve and reject endpoints.
+Service-key principals may edit checkpoints only for runs they own (key must have
+`resource_permissions.flows = write`). Human callers follow the same flow review permission
+policy used by the approve and reject endpoints.
+
+"""
+    + _FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE
+    + """
     """
+)
 
 _FLOW_RUN_REVIEW_EDIT_CONTRACT_ERROR_EXAMPLE: dict[str, object] = {
     "message": "Review checkpoint step 1 output: 'summary' is a required property",
@@ -188,38 +242,68 @@ _FLOW_RUN_REVIEW_EDIT_STALE_REVISION_ERROR_EXAMPLE: dict[str, object] = {
     },
 }
 
-_FLOW_RUN_REVIEW_APPROVE_DESCRIPTION = """
+_FLOW_RUN_REVIEW_APPROVE_DESCRIPTION = (
+    """
 Approve the current payload for a human review checkpoint.
 
 Approval advances the checkpoint revision. Resume is a separate command so clients can make
 the decision durable before dispatching more runtime work. Use the latest checkpoint `revision`;
 stale approvals return `400` with code `flow_review_stale_revision`.
 
-Service-key principals may approve checkpoints only for runs they own.
-    """
+Service-key principals may approve checkpoints only for runs they own (key must have
+`resource_permissions.flows = write`).
 
-_FLOW_RUN_REVIEW_REJECT_DESCRIPTION = """
+"""
+    + _FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE
+    + """
+    """
+)
+
+_FLOW_RUN_REVIEW_REJECT_DESCRIPTION = (
+    """
 Reject a human review checkpoint and cancel the run.
 
 The rejection reason is written to lifecycle audit metadata and the run is terminalized with
 `cancelled` status using the `review_rejected` lifecycle source.
 
-Service-key principals may reject checkpoints only for runs they own.
-    """
+Service-key principals may reject checkpoints only for runs they own (key must have
+`resource_permissions.flows = write`).
 
-_FLOW_RUN_REVIEW_RESUME_DESCRIPTION = """
+"""
+    + _FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE
+    + """
+    """
+)
+
+_FLOW_RUN_REVIEW_RESUME_DESCRIPTION = (
+    """
 Resume a run after an approved human review checkpoint.
 
 Use the `Idempotency-Key` header for retries. Replaying the same key returns the current
 checkpoint and run without dispatching another worker task. A successful response is
 `202 Accepted`: poll the run and step endpoints after this call to observe resumed execution.
 
-Service-key principals may resume approved checkpoints only for runs they own.
+Service-key principals may resume approved checkpoints only for runs they own (key must have
+`resource_permissions.flows = write`).
+
+"""
+    + _FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE
+    + """
     """
+)
 
 
 def _get_flow_run_service(container: Container) -> FlowRunService:
     return container.flow_run_service()
+
+
+@asynccontextmanager
+async def _commit_flow_runtime_write_before_response(
+    container: Container,
+) -> AsyncGenerator[None, None]:
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        yield
 
 
 def _result_files_by_run_id(
@@ -284,47 +368,51 @@ async def create_flow_run(
             description=_FLOW_RUN_IDEMPOTENCY_HEADER_DESCRIPTION,
         ),
     ] = None,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container_for_explicit_transaction(with_user=True)
+    ),
 ):
-    await common.enforce_flow_scope_for_request(
-        request,
-        container,
-        flow_id=id,
-        required_access=common.FlowApiAction.RUN,
-        allow_service_key_principals=True,
-        require_published_for_service_key=True,
-    )
     assembler = FlowAssembler()
-    run_service = _get_flow_run_service(container)
-    user = container.user()
-    actor_kwargs = audit_actor_kwargs(user)
-    run = await run_service.create_run(
-        flow_id=id,
-        input_payload_json=run_in.input_payload_json,
-        expected_flow_version=run_in.expected_flow_version,
-        step_inputs=(
-            {
-                step_id: step_input.model_dump(mode="python")
-                for step_id, step_input in run_in.step_inputs.items()
-            }
-            if run_in.step_inputs is not None
-            else None
-        ),
-        idempotency_key=idempotency_key,
-    )
+    async with _commit_flow_runtime_write_before_response(container):
+        await common.enforce_flow_scope_for_request(
+            request,
+            container,
+            flow_id=id,
+            required_access=common.FlowApiAction.RUN,
+            allow_service_key_principals=True,
+            require_published_for_service_key=True,
+        )
+        run_service = _get_flow_run_service(container)
+        user = container.user()
+        actor_kwargs = audit_actor_kwargs(user)
+        run = await run_service.create_run(
+            flow_id=id,
+            input_payload_json=run_in.input_payload_json,
+            expected_flow_version=run_in.expected_flow_version,
+            step_inputs=(
+                {
+                    step_id: step_input.model_dump(mode="python")
+                    for step_id, step_input in run_in.step_inputs.items()
+                }
+                if run_in.step_inputs is not None
+                else None
+            ),
+            idempotency_key=idempotency_key,
+        )
 
-    await container.audit_service().log_async(
-        tenant_id=user.tenant_id,
-        actor_id=actor_kwargs["actor_id"],
-        actor_type=actor_kwargs["actor_type"],
-        actor_api_key_id=actor_kwargs["actor_api_key_id"],
-        action=ActionType.FLOW_RUN_CREATED,
-        entity_type=EntityType.FLOW_RUN,
-        entity_id=run.id,
-        description=f"Created flow run for flow {id}",
-        metadata=AuditMetadata.standard(actor=user, target=run),
-    )
-    dispatch_request = run_service.build_dispatch_request(run)
+        await container.audit_service().log_async(
+            tenant_id=user.tenant_id,
+            actor_id=actor_kwargs["actor_id"],
+            actor_type=actor_kwargs["actor_type"],
+            actor_api_key_id=actor_kwargs["actor_api_key_id"],
+            action=ActionType.FLOW_RUN_CREATED,
+            entity_type=EntityType.FLOW_RUN,
+            entity_id=run.id,
+            description=f"Created flow run for flow {id}",
+            metadata=AuditMetadata.standard(actor=user, target=run),
+        )
+        dispatch_request = run_service.build_dispatch_request(run)
+
     background_tasks.add_task(
         common.dispatch_flow_run_after_commit,
         **dispatch_request,
@@ -547,22 +635,25 @@ async def edit_flow_run_review_checkpoint(
     ],
     request: Request,
     review_in: FlowRunReviewCheckpointEditRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container_for_explicit_transaction(with_user=True)
+    ),
 ):
-    await common.enforce_flow_scope_for_request(
-        request,
-        container,
-        flow_id=id,
-        required_access=common.FlowApiAction.REVIEW,
-        allow_service_key_principals=True,
-    )
-    checkpoint = await _get_flow_run_service(container).edit_review_checkpoint(
-        flow_id=id,
-        run_id=run_id,
-        checkpoint_id=checkpoint_id,
-        expected_checkpoint_revision=review_in.expected_checkpoint_revision,
-        current_payload_json=review_in.current_payload_json,
-    )
+    async with _commit_flow_runtime_write_before_response(container):
+        await common.enforce_flow_scope_for_request(
+            request,
+            container,
+            flow_id=id,
+            required_access=common.FlowApiAction.REVIEW,
+            allow_service_key_principals=True,
+        )
+        checkpoint = await _get_flow_run_service(container).edit_review_checkpoint(
+            flow_id=id,
+            run_id=run_id,
+            checkpoint_id=checkpoint_id,
+            expected_checkpoint_revision=review_in.expected_checkpoint_revision,
+            current_payload_json=review_in.current_payload_json,
+        )
     return FlowAssembler().to_review_checkpoint_public(checkpoint)
 
 
@@ -606,21 +697,24 @@ async def approve_flow_run_review_checkpoint(
     ],
     request: Request,
     review_in: FlowRunReviewCheckpointApproveRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container_for_explicit_transaction(with_user=True)
+    ),
 ):
-    await common.enforce_flow_scope_for_request(
-        request,
-        container,
-        flow_id=id,
-        required_access=common.FlowApiAction.REVIEW,
-        allow_service_key_principals=True,
-    )
-    checkpoint = await _get_flow_run_service(container).approve_review_checkpoint(
-        flow_id=id,
-        run_id=run_id,
-        checkpoint_id=checkpoint_id,
-        expected_checkpoint_revision=review_in.expected_checkpoint_revision,
-    )
+    async with _commit_flow_runtime_write_before_response(container):
+        await common.enforce_flow_scope_for_request(
+            request,
+            container,
+            flow_id=id,
+            required_access=common.FlowApiAction.REVIEW,
+            allow_service_key_principals=True,
+        )
+        checkpoint = await _get_flow_run_service(container).approve_review_checkpoint(
+            flow_id=id,
+            run_id=run_id,
+            checkpoint_id=checkpoint_id,
+            expected_checkpoint_revision=review_in.expected_checkpoint_revision,
+        )
     return FlowAssembler().to_review_checkpoint_public(checkpoint)
 
 
@@ -665,22 +759,25 @@ async def reject_flow_run_review_checkpoint(
     ],
     request: Request,
     review_in: FlowRunReviewCheckpointRejectRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container_for_explicit_transaction(with_user=True)
+    ),
 ):
-    await common.enforce_flow_scope_for_request(
-        request,
-        container,
-        flow_id=id,
-        required_access=common.FlowApiAction.REVIEW,
-        allow_service_key_principals=True,
-    )
-    checkpoint = await _get_flow_run_service(container).reject_review_checkpoint(
-        flow_id=id,
-        run_id=run_id,
-        checkpoint_id=checkpoint_id,
-        expected_checkpoint_revision=review_in.expected_checkpoint_revision,
-        reason=review_in.reason,
-    )
+    async with _commit_flow_runtime_write_before_response(container):
+        await common.enforce_flow_scope_for_request(
+            request,
+            container,
+            flow_id=id,
+            required_access=common.FlowApiAction.REVIEW,
+            allow_service_key_principals=True,
+        )
+        checkpoint = await _get_flow_run_service(container).reject_review_checkpoint(
+            flow_id=id,
+            run_id=run_id,
+            checkpoint_id=checkpoint_id,
+            expected_checkpoint_revision=review_in.expected_checkpoint_revision,
+            reason=review_in.reason,
+        )
     return FlowAssembler().to_review_checkpoint_public(checkpoint)
 
 
@@ -734,27 +831,33 @@ async def resume_flow_run_review_checkpoint(
             description="Required caller-supplied idempotency key for review resume retries.",
         ),
     ],
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container_for_explicit_transaction(with_user=True)
+    ),
 ):
-    await common.enforce_flow_scope_for_request(
-        request,
-        container,
-        flow_id=id,
-        required_access=common.FlowApiAction.RESUME,
-        allow_service_key_principals=True,
-    )
-    run_service = _get_flow_run_service(container)
-    result = await run_service.resume_review_checkpoint(
-        flow_id=id,
-        run_id=run_id,
-        checkpoint_id=checkpoint_id,
-        expected_checkpoint_revision=review_in.expected_checkpoint_revision,
-        idempotency_key=idempotency_key,
-    )
-    if result.accepted:
+    dispatch_request = None
+    async with _commit_flow_runtime_write_before_response(container):
+        await common.enforce_flow_scope_for_request(
+            request,
+            container,
+            flow_id=id,
+            required_access=common.FlowApiAction.RESUME,
+            allow_service_key_principals=True,
+        )
+        run_service = _get_flow_run_service(container)
+        result = await run_service.resume_review_checkpoint(
+            flow_id=id,
+            run_id=run_id,
+            checkpoint_id=checkpoint_id,
+            expected_checkpoint_revision=review_in.expected_checkpoint_revision,
+            idempotency_key=idempotency_key,
+        )
+        if result.accepted:
+            dispatch_request = run_service.build_dispatch_request(result.run)
+    if dispatch_request is not None:
         background_tasks.add_task(
             common.dispatch_flow_run_recoverably_after_commit,
-            **run_service.build_dispatch_request(result.run),
+            **dispatch_request,
         )
     return FlowAssembler().to_review_checkpoint_resume_response(
         checkpoint=result.checkpoint,
@@ -791,18 +894,21 @@ async def cancel_flow_run_alias(
     ],
     run_id: Annotated[UUID, Path(description="Identifier of the run to cancel.")],
     request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container_for_explicit_transaction(with_user=True)
+    ),
 ):
-    await common.enforce_flow_scope_for_request(
-        request,
-        container,
-        flow_id=id,
-        required_access=common.FlowApiAction.RUN,
-        allow_service_key_principals=True,
-    )
-    run_service = _get_flow_run_service(container)
-    await run_service.get_run(run_id=run_id, flow_id=id)
-    run = await run_service.cancel_run(run_id=run_id)
+    async with _commit_flow_runtime_write_before_response(container):
+        await common.enforce_flow_scope_for_request(
+            request,
+            container,
+            flow_id=id,
+            required_access=common.FlowApiAction.RUN,
+            allow_service_key_principals=True,
+        )
+        run_service = _get_flow_run_service(container)
+        await run_service.get_run(run_id=run_id, flow_id=id)
+        run = await run_service.cancel_run(run_id=run_id)
     return FlowAssembler().to_run_public(run)
 
 
@@ -848,35 +954,41 @@ async def rerun_flow_run_step(
     request: Request,
     rerun_in: FlowRunStepRerunRequest,
     background_tasks: BackgroundTasks,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container_for_explicit_transaction(with_user=True)
+    ),
 ):
-    await common.enforce_flow_scope_for_request(
-        request,
-        container,
-        flow_id=id,
-        required_access=common.FlowApiAction.RERUN,
-    )
-    run_service = _get_flow_run_service(container)
-    result = await run_service.rerun_step(
-        flow_id=id,
-        run_id=run_id,
-        rerun_step_id=step_id,
-        expected_run_revision=rerun_in.expected_run_revision,
-        reason=rerun_in.reason,
-        input_payload_json=rerun_in.input_payload_json,
-        step_inputs=(
-            {
-                input_step_id: step_input.model_dump(mode="python")
-                for input_step_id, step_input in rerun_in.step_inputs.items()
-            }
-            if rerun_in.step_inputs is not None
-            else None
-        ),
-    )
-    if result.created:
+    dispatch_request = None
+    async with _commit_flow_runtime_write_before_response(container):
+        await common.enforce_flow_scope_for_request(
+            request,
+            container,
+            flow_id=id,
+            required_access=common.FlowApiAction.RERUN,
+        )
+        run_service = _get_flow_run_service(container)
+        result = await run_service.rerun_step(
+            flow_id=id,
+            run_id=run_id,
+            rerun_step_id=step_id,
+            expected_run_revision=rerun_in.expected_run_revision,
+            reason=rerun_in.reason,
+            input_payload_json=rerun_in.input_payload_json,
+            step_inputs=(
+                {
+                    input_step_id: step_input.model_dump(mode="python")
+                    for input_step_id, step_input in rerun_in.step_inputs.items()
+                }
+                if rerun_in.step_inputs is not None
+                else None
+            ),
+        )
+        if result.created:
+            dispatch_request = run_service.build_dispatch_request(result.run)
+    if dispatch_request is not None:
         background_tasks.add_task(
             common.dispatch_flow_run_recoverably_after_commit,
-            **run_service.build_dispatch_request(result.run),
+            **dispatch_request,
         )
     return FlowAssembler().to_rerun_response(
         operation=result.operation,

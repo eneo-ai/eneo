@@ -118,6 +118,23 @@ def get_container(
     return _get_container
 
 
+def get_container_for_explicit_transaction(
+    *,
+    with_user: bool = False,
+    with_user_from_assistant_api_key: bool = False,
+) -> Callable[..., Awaitable[Container]]:
+    """Return a container whose endpoint owns the database transaction.
+
+    Use this for write endpoints whose response returns a durable handle or
+    revision that clients are expected to read in the next request.
+    """
+    return get_container(
+        with_user=with_user,
+        with_user_from_assistant_api_key=with_user_from_assistant_api_key,
+        with_transaction=False,
+    )
+
+
 def get_container_for_sysadmin() -> Callable[..., Awaitable[Container]]:
     """Get a container for sysadmin endpoints that manage their own transactions.
 

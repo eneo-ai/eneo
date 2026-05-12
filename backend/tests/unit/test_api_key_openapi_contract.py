@@ -62,3 +62,21 @@ def test_api_key_schema_fields(openapi_spec: dict):
     props = schemas["ApiKeyV2"].get("properties", {})
     for field in REQUIRED_SCHEMA_FIELDS:
         assert field in props, f"Missing ApiKeyV2.{field} in schema"
+
+
+def test_resource_permissions_document_flow_runtime_review_levels(openapi_spec: dict):
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    properties = schemas["ResourcePermissions"].get("properties", {})
+
+    flows_description = properties["flows"].get("description", "")
+    assert "published flows" in flows_description
+    assert "run contracts" in flows_description
+    assert "active human-review checkpoints" in flows_description
+    assert "create published-flow runs" in flows_description
+    assert "edit, approve, reject, or resume human-review checkpoints" in flows_description
+    assert "runs created by that same API key" in flows_description
+
+    evidence_description = properties["flow_evidence"].get("description", "")
+    assert "separate from `flows`" in evidence_description
+    assert "does not grant run creation" in evidence_description
+    assert "human-review checkpoint edit" in evidence_description

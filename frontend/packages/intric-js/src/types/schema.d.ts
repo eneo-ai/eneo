@@ -3716,7 +3716,7 @@ export interface paths {
     };
     /**
      * List Flows
-     * @description List flow definitions in a space with pagination-friendly sparse metadata. The `count` field in the paginated response reports the number of items returned in the current page, not the total number of matching flows across all pages. `has_more` reports whether another page exists after this offset window. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin. Service-key principals may use this endpoint only for published-flow discovery in their scoped space. Draft authoring and AI Builder still require a user principal.
+     * @description List flow definitions in a space with pagination-friendly sparse metadata. The `count` field in the paginated response reports the number of items returned in the current page, not the total number of matching flows across all pages. `has_more` reports whether another page exists after this offset window. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin. Service-key principals may use this endpoint only for published-flow discovery in their scoped space. Service-key webapps should use the returned ids with `GET /api/v1/flows/{id}/published/` and the runtime paths from that response; draft authoring and AI Builder still require a user principal.
      */
     get: operations["list_flows"];
     put?: never;
@@ -3740,7 +3740,7 @@ export interface paths {
     };
     /**
      * Get Flow
-     * @description Return the full draft representation of a flow, including all configured steps and metadata. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin. This endpoint is user-principal-oriented and returns the current draft definition.
+     * @description Return the full draft representation of a flow, including all configured steps and metadata. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin. This endpoint is user-principal-oriented and returns the current draft definition. Service-key runtime clients should call `/api/v1/flows/{id}/published/` instead.
      */
     get: operations["get_flow"];
     put?: never;
@@ -3768,7 +3768,7 @@ export interface paths {
     };
     /**
      * Get Published Flow Runtime View
-     * @description Return the runtime-safe published projection of a flow. This endpoint is intended for runtime consumers, including service-key principals, and does not expose the current draft/current-definition authoring view. Use this endpoint when a client needs one published flow's metadata plus the canonical runtime paths for contract discovery, run creation, polling, and artifact/evidence retrieval.
+     * @description Return the runtime-safe published projection of a flow. This endpoint is intended for runtime consumers, including service-key principals, and does not expose the current draft/current-definition authoring view. Treat it as the entry point for external webapps that already know a published flow id. Use this endpoint when a client needs one published flow's metadata plus the canonical runtime paths for contract discovery, file upload, run creation, polling, review checkpoints, and artifact/evidence retrieval.
      */
     get: operations["get_published_flow_runtime"];
     put?: never;
@@ -4096,6 +4096,9 @@ export interface paths {
      * Create flow run
      * @description Create a new run for a published flow.
      *
+     *         The returned run id is committed before this endpoint returns `201 Created`, so clients can
+     *         immediately poll `GET /api/v1/flows/{id}/runs/{run_id}/` with the id from the response.
+     *
      *         Generic consumer sequence:
      *         1. Inspect `GET /api/v1/flows/{id}/run-contract/` to understand the published form fields,
      *            required runtime step inputs, and version pinning requirements.
@@ -4113,6 +4116,8 @@ export interface paths {
      *
      *         Service-key principals may create published-flow runs in v1. Draft ownership and AI Builder
      *         flows still require a user principal.
+     *
+     *         Service-key human-review clients should use a service-owned `sk_` key with `resource_permissions.flows = write`; inspect `steps_requiring_review`, then expect review checkpoints to pause at `awaiting_review` rather than auto-approve, and use the same key to mutate only checkpoints for runs it created.
      */
     post: operations["create_flow_run"];
     delete?: never;
@@ -4172,6 +4177,8 @@ export interface paths {
      *
      *     Current visibility follows run-detail visibility: service-key principals can read only
      *     checkpoints for runs they own, while human callers follow the existing flow view policy.
+     *
+     *     Service-key human-review clients should use a service-owned `sk_` key with `resource_permissions.flows = write`; inspect `steps_requiring_review`, then expect review checkpoints to pause at `awaiting_review` rather than auto-approve, and use the same key to mutate only checkpoints for runs it created.
      */
     get: operations["get_active_flow_run_review_checkpoint"];
     put?: never;
@@ -4211,8 +4218,11 @@ export interface paths {
      *     with code `typed_io_contract_violation` and context fields `checkpoint_id`, `step_id`,
      *     `step_order`, and `payload_field`.
      *
-     *     Service-key principals may edit checkpoints only for runs they own. Human callers follow the
-     *     same flow review permission policy used by the approve and reject endpoints.
+     *     Service-key principals may edit checkpoints only for runs they own (key must have
+     *     `resource_permissions.flows = write`). Human callers follow the same flow review permission
+     *     policy used by the approve and reject endpoints.
+     *
+     *     Successful runtime mutations are committed before the response is returned, so clients can immediately use the returned id or revision in the next poll/edit/approve/resume request.
      */
     patch: operations["edit_flow_run_review_checkpoint"];
     trace?: never;
@@ -4234,7 +4244,10 @@ export interface paths {
      *     the decision durable before dispatching more runtime work. Use the latest checkpoint `revision`;
      *     stale approvals return `400` with code `flow_review_stale_revision`.
      *
-     *     Service-key principals may approve checkpoints only for runs they own.
+     *     Service-key principals may approve checkpoints only for runs they own (key must have
+     *     `resource_permissions.flows = write`).
+     *
+     *     Successful runtime mutations are committed before the response is returned, so clients can immediately use the returned id or revision in the next poll/edit/approve/resume request.
      */
     post: operations["approve_flow_run_review_checkpoint"];
     delete?: never;
@@ -4259,7 +4272,10 @@ export interface paths {
      *     The rejection reason is written to lifecycle audit metadata and the run is terminalized with
      *     `cancelled` status using the `review_rejected` lifecycle source.
      *
-     *     Service-key principals may reject checkpoints only for runs they own.
+     *     Service-key principals may reject checkpoints only for runs they own (key must have
+     *     `resource_permissions.flows = write`).
+     *
+     *     Successful runtime mutations are committed before the response is returned, so clients can immediately use the returned id or revision in the next poll/edit/approve/resume request.
      */
     post: operations["reject_flow_run_review_checkpoint"];
     delete?: never;
@@ -4285,7 +4301,10 @@ export interface paths {
      *     checkpoint and run without dispatching another worker task. A successful response is
      *     `202 Accepted`: poll the run and step endpoints after this call to observe resumed execution.
      *
-     *     Service-key principals may resume approved checkpoints only for runs they own.
+     *     Service-key principals may resume approved checkpoints only for runs they own (key must have
+     *     `resource_permissions.flows = write`).
+     *
+     *     Successful runtime mutations are committed before the response is returned, so clients can immediately use the returned id or revision in the next poll/edit/approve/resume request.
      */
     post: operations["resume_flow_run_review_checkpoint"];
     delete?: never;
@@ -4311,6 +4330,8 @@ export interface paths {
      *     is policy-based: callers can cancel their own runs, tenant admins can cancel runs across the
      *     tenant, same-space admins and owners can cancel runs for flows in their space, and service-key
      *     principals can cancel only their own runs.
+     *
+     *     Successful runtime mutations are committed before the response is returned, so clients can immediately use the returned id or revision in the next poll/edit/approve/resume request.
      */
     post: operations["cancel_flow_run_alias"];
     delete?: never;
@@ -4341,6 +4362,8 @@ export interface paths {
      *     management access. Service-key principals can edit and resume human-review checkpoints
      *     for their own runs, but rerun operations are still persisted against a human actor in
      *     this API version.
+     *
+     *     Successful runtime mutations are committed before the response is returned, so clients can immediately use the returned id or revision in the next poll/edit/approve/resume request.
      */
     post: operations["rerun_flow_run_step"];
     delete?: never;
@@ -12627,22 +12650,22 @@ export interface components {
       active_template: string;
       /**
        * Edit Template
-       * @description PATCH template for submitting a full corrected checkpoint payload. Replace `{run_id}` and `{checkpoint_id}` with values returned by create_run and active checkpoint polling.
+       * @description PATCH template for submitting a full corrected checkpoint payload. Replace `{run_id}` and `{checkpoint_id}` with values returned by create_run and active checkpoint polling. Send `expected_checkpoint_revision` plus the full corrected `current_payload_json` field from the active checkpoint response.
        */
       edit_template: string;
       /**
        * Approve Template
-       * @description POST template for approving a checkpoint. Replace `{run_id}` and `{checkpoint_id}` with values returned by create_run and active checkpoint polling.
+       * @description POST template for approving a checkpoint. Replace `{run_id}` and `{checkpoint_id}` with values returned by create_run and active checkpoint polling, and send `expected_checkpoint_revision` from the latest checkpoint response.
        */
       approve_template: string;
       /**
        * Reject Template
-       * @description POST template for rejecting a checkpoint. Replace `{run_id}` and `{checkpoint_id}` with values returned by create_run and active checkpoint polling.
+       * @description POST template for rejecting a checkpoint. Replace `{run_id}` and `{checkpoint_id}` with values returned by create_run and active checkpoint polling, then send `expected_checkpoint_revision` and a rejection reason.
        */
       reject_template: string;
       /**
        * Resume Template
-       * @description POST template for resuming a run after checkpoint approval. Replace `{run_id}` and `{checkpoint_id}` with values returned by create_run and active checkpoint polling.
+       * @description POST template for resuming a run after checkpoint approval. Replace `{run_id}` and `{checkpoint_id}` with values returned by create_run and active checkpoint polling, then send the approved checkpoint `expected_checkpoint_revision`.
        */
       resume_template: string;
     };
@@ -12754,7 +12777,7 @@ export interface components {
       steps_requiring_input?: components["schemas"]["FlowRuntimeInputContractPublic"][];
       /**
        * Steps Requiring Review
-       * @description Published steps that can pause the run for human review. API consumers can use this before starting a run to decide whether their app needs review screens, then use the active checkpoint endpoint once the run status becomes `awaiting_review`.
+       * @description Published steps that can pause the run for human review. API consumers can use this before starting a run to decide whether their app needs review screens, then use the active checkpoint endpoint once the run status becomes `awaiting_review`. An empty list means this published flow version will not pause for human-in-the-loop review.
        */
       steps_requiring_review?: components["schemas"]["FlowReviewStepContractPublic"][];
       /**
@@ -15042,31 +15065,67 @@ export interface components {
     FlowRuntimeInputFormat: "document" | "audio" | "file";
     /** FlowRuntimePathsPublic */
     FlowRuntimePathsPublic: {
-      /** Run Contract */
+      /**
+       * Run Contract
+       * @description GET path for the published run contract. Call this before creating a run to discover required inputs, review checkpoints, final output delivery, and the published version to pin.
+       */
       run_contract: string;
-      /** Input Policy */
+      /**
+       * Input Policy
+       * @description GET path for the published input policy. Use this to inspect accepted runtime input formats and upload constraints before submitting files.
+       */
       input_policy: string;
-      /** Graph */
+      /**
+       * Graph
+       * @description GET path for the published flow graph. Add the optional `run_id` query parameter after run creation to enrich the graph with runtime state.
+       */
       graph: string;
-      /** Upload Flow File */
+      /**
+       * Upload Flow File
+       * @description POST path for uploading flow-level runtime files before run creation. Send `multipart/form-data` with the binary file in the `upload_file` field; use the returned file id in the create-run payload.
+       */
       upload_flow_file: string;
-      /** Upload Step Runtime File Template */
+      /**
+       * Upload Step Runtime File Template
+       * @description POST template for uploading files for a specific runtime step. Replace `{step_id}` with a step id from the run contract, then send `multipart/form-data` with the binary file in the `upload_file` field. Use the returned file id in `step_inputs[step_id].file_ids`.
+       */
       upload_step_runtime_file_template: string;
-      /** Create Run */
+      /**
+       * Create Run
+       * @description POST path for creating a run. The returned run id is committed before `201 Created` is returned, so clients can immediately poll `get_run_template`.
+       */
       create_run: string;
-      /** List Runs */
+      /**
+       * List Runs
+       * @description GET path for listing visible runs for this flow. Service keys list only runs created by the same key.
+       */
       list_runs: string;
       /** @description Review checkpoint path templates for human-in-loop clients. These templates let web apps discover active checkpoint, edit, approve, reject, and resume URLs before a run reaches awaiting_review. */
       review_checkpoints: components["schemas"]["FlowReviewCheckpointRuntimePathsPublic"];
-      /** Get Graph For Run Template */
+      /**
+       * Get Graph For Run Template
+       * @description GET template for the run-enriched graph. Replace `{run_id}` with the id returned by create_run.
+       */
       get_graph_for_run_template: string;
-      /** Get Run Template */
+      /**
+       * Get Run Template
+       * @description GET template for polling run status and top-level output. Replace `{run_id}` with the id returned by create_run.
+       */
       get_run_template: string;
-      /** List Steps Template */
+      /**
+       * List Steps Template
+       * @description GET template for inspecting ordered step outputs and result files. Replace `{run_id}` with the id returned by create_run.
+       */
       list_steps_template: string;
-      /** Evidence Template */
+      /**
+       * Evidence Template
+       * @description GET template for rich run evidence. Service keys need explicit `resource_permissions.flow_evidence` and can inspect only their own runs.
+       */
       evidence_template: string;
-      /** Artifact Signed Url Template */
+      /**
+       * Artifact Signed Url Template
+       * @description POST template for generating a signed artifact download URL. Replace `{run_id}` and `{file_id}` with values from run or step result files and send a SignedURLRequest body.
+       */
       artifact_signed_url_template: string;
     };
     /** FlowRuntimePolicyPublic */
@@ -15393,6 +15452,7 @@ export interface components {
       output_config?: {
         [key: string]: unknown;
       } | null;
+      /** @description Optional human-in-the-loop checkpoint for this step. Set mode to `view` to pause after the step until a reviewer approves it, or `edit` to let the reviewer edit the step output before downstream steps continue. Use `null` or omit the field for no pause. Review policy cannot be combined with outbound delivery output modes. */
       review_policy?: components["schemas"]["FlowStepReviewPolicy"] | null;
     };
     /**
@@ -15452,6 +15512,7 @@ export interface components {
       output_config?: {
         [key: string]: unknown;
       } | null;
+      /** @description Optional human-in-the-loop checkpoint for this step. Set mode to `view` to pause after the step until a reviewer approves it, or `edit` to let the reviewer edit the step output before downstream steps continue. Use `null` or omit the field for no pause. Review policy cannot be combined with outbound delivery output modes. */
       review_policy?: components["schemas"]["FlowStepReviewPolicy"] | null;
       /** Created At */
       created_at?: string | null;
@@ -15470,6 +15531,7 @@ export interface components {
     FlowStepReviewMode: "view" | "edit";
     /** FlowStepReviewPolicy */
     FlowStepReviewPolicy: {
+      /** @description `view` pauses the run for approval of this step output. `edit` also lets the reviewer replace the output used by downstream steps. */
       mode: components["schemas"]["FlowStepReviewMode"];
     };
     /**
@@ -18752,7 +18814,7 @@ export interface components {
      *     same shape, but policy validation caps each resource at ``read``.
      */
     ResourcePermissions: {
-      /** @description Explicit Flow access. Null means this key has no fine-grained Flow grant; keys without resource_permissions use their top-level permission. */
+      /** @description Explicit Flow runtime access. `read` can inspect published flows, runtime paths, run contracts, own run status, and active human-review checkpoints. `write` can upload runtime inputs, create published-flow runs, cancel own runs, and edit, approve, reject, or resume human-review checkpoints for runs created by that same API key. `admin` satisfies DELETE-level Flow resource checks, but service-key principals still cannot use endpoints whose Flow policy requires a user principal. Null means this key has no fine-grained Flow grant; keys without resource_permissions use their top-level permission. */
       flows?: components["schemas"]["ResourcePermissionLevel"] | null;
       /** @default none */
       assistants?: components["schemas"]["ResourcePermissionLevel"];
@@ -18771,7 +18833,7 @@ export interface components {
       /** @default none */
       prompts?: components["schemas"]["ResourcePermissionLevel"];
       /**
-       * @description Explicit Flow evidence access. Omitted or 'none' means this key has no fine-grained evidence grant.
+       * @description Explicit Flow evidence access for trace/evidence inspection and export. This is separate from `flows`: evidence access does not grant run creation or human-review checkpoint edit, approve, reject, or resume permissions. Omitted or 'none' means this key has no fine-grained evidence grant.
        * @default none
        */
       flow_evidence?: components["schemas"]["ResourcePermissionLevel"];
