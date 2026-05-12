@@ -6,9 +6,9 @@ Create Date: 2026-04-03
 
 """
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "20260403_cleanup_history"
@@ -47,22 +47,33 @@ def upgrade() -> None:
           AND history.to_provider_type IS NULL
         """
     )
-    op.create_index(
-        "ix_completion_models_deleted_at",
-        "completion_models",
-        ["deleted_at"],
-        unique=False,
-    )
-    op.create_index(
-        "ix_completion_models_migrated_to_model_id",
-        "completion_models",
-        ["migrated_to_model_id"],
-        unique=False,
-    )
+    # Build the new indexes without holding a table-level lock — on a large
+    # `completion_models` table the default CREATE INDEX would block writes
+    # for the duration of the build. See 202604221200 for the same pattern,
+    # including notes on INVALID-index recovery if CONCURRENTLY fails
+    # mid-build (Alembic still marks the migration applied).
+    with op.get_context().autocommit_block():
+        op.execute(
+            """
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_completion_models_deleted_at
+            ON completion_models (deleted_at);
+            """
+        )
+        op.execute(
+            """
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_completion_models_migrated_to_model_id
+            ON completion_models (migrated_to_model_id);
+            """
+        )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_completion_models_migrated_to_model_id", table_name="completion_models")
-    op.drop_index("ix_completion_models_deleted_at", table_name="completion_models")
+    with op.get_context().autocommit_block():
+        op.execute(
+            "DROP INDEX CONCURRENTLY IF EXISTS ix_completion_models_migrated_to_model_id;"
+        )
+        op.execute(
+            "DROP INDEX CONCURRENTLY IF EXISTS ix_completion_models_deleted_at;"
+        )
     op.drop_column("completion_model_migration_history", "to_provider_type")
     op.drop_column("completion_model_migration_history", "from_provider_type")
