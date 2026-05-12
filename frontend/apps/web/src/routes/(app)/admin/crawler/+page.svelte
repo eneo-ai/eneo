@@ -7,6 +7,9 @@
 <script lang="ts">
   import { invalidate } from "$app/navigation";
   import { Button } from "$lib/components/ui/button/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
@@ -28,7 +31,7 @@
     type CrawlerSettingsUpdate
   } from "$lib/features/admin/crawlerSettings";
   import { m } from "$lib/paraglide/messages";
-  import { Gauge } from "lucide-svelte";
+  import { ShieldCheck, TriangleAlert } from "lucide-svelte";
 
   type CrawlerSettingsFormValue = boolean | number | string;
   type CrawlerSettingsFormValues = Record<CrawlerSettingsEditableKey, CrawlerSettingsFormValue>;
@@ -113,9 +116,14 @@
     return fieldTextByKey[key]?.() ?? key;
   }
 
-  function fieldDescription(field: { descriptionKey: string; warningKey?: string }) {
-    const description = fieldText(field.descriptionKey);
-    return field.warningKey ? `${description}\n${fieldText(field.warningKey)}` : description;
+  function rangeHint(field: CrawlerNumberField) {
+    const bounds = getCrawlerSettingDisplayBounds(field, crawlerSettings?.specs);
+    if (bounds.min === undefined || bounds.max === undefined) return null;
+    return m.crawler_setting_range({
+      min: bounds.min,
+      max: bounds.max,
+      unit: fieldText(field.unitKey)
+    });
   }
 
   function numericError(field: CrawlerNumberField) {
@@ -208,41 +216,82 @@
   </Page.Header>
   <Page.Main>
     <Settings.Page>
-      <Settings.Group title={m.crawler_optimizations()}>
-        {#each CRAWLER_SETTINGS_READ_ONLY_OPTIMIZATIONS as optimization (optimization.key)}
+      <p class="text-secondary -mt-4 mb-10 max-w-[64ch] pr-12 pl-2 text-[15px] leading-relaxed">
+        {m.crawler_settings_subtitle()}
+      </p>
+
+      <Card.Root class="mb-14" aria-labelledby="crawler-builtin-card-title">
+        <Card.Header>
+          <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+            <div class="flex min-w-0 flex-col gap-1">
+              <h2 id="crawler-builtin-card-title" class="text-base leading-snug font-semibold">
+                {m.crawler_builtin_card_title()}
+              </h2>
+              <Card.Description>{m.crawler_builtin_card_description()}</Card.Description>
+            </div>
+            <Badge variant="default" class="shrink-0">
+              {m.crawler_built_in_badge()}
+            </Badge>
+          </div>
+        </Card.Header>
+        <Card.Content class="flex flex-col gap-2 pt-0">
+          {#each CRAWLER_SETTINGS_READ_ONLY_OPTIMIZATIONS as optimization (optimization.key)}
+            <div class="flex items-start gap-3">
+              <ShieldCheck class="text-accent-default mt-0.5 size-5 shrink-0" aria-hidden="true" />
+              <div class="flex min-w-0 flex-col gap-1">
+                <h3 class="text-sm font-medium">{fieldText(optimization.titleKey)}</h3>
+                <p class="text-muted-foreground text-sm leading-relaxed">
+                  {fieldText(optimization.descriptionKey)}
+                </p>
+              </div>
+            </div>
+          {/each}
+        </Card.Content>
+      </Card.Root>
+
+      <Settings.Group title={m.crawler_controls()}>
+        <p class="text-secondary -mt-2 max-w-[64ch] pr-12 pl-2 text-sm leading-relaxed">
+          {m.crawler_controls_subtitle()}
+        </p>
+
+        {#each CRAWLER_SETTINGS_BOOLEAN_FIELDS as field (field.key)}
           <Settings.Row
-            title={fieldText(optimization.titleKey)}
-            description={fieldText(optimization.descriptionKey)}
+            title={fieldText(field.titleKey)}
+            description={fieldText(field.descriptionKey)}
           >
-            <div class="flex items-center justify-end pt-2">
-              <span
-                class="border-dimmer bg-secondary text-secondary inline-flex items-center gap-2 rounded-md border px-3 py-1 text-sm"
-              >
-                <Gauge class="h-4 w-4" />
-                {m.active()}
-              </span>
+            <div slot="description">
+              {#if field.warningKey}
+                <Alert.Root class="border-caution/35 bg-caution/8 dark:bg-caution/12 mt-2">
+                  <TriangleAlert class="text-caution" aria-hidden="true" />
+                  <Alert.Description class="text-caution">
+                    {fieldText(field.warningKey)}
+                  </Alert.Description>
+                </Alert.Root>
+              {/if}
+            </div>
+            <div class="flex items-center justify-end pt-1">
+              <Switch
+                checked={Boolean(formValues[field.key])}
+                onCheckedChange={(next) => void handleToggleCrawlerSetting(field.key, next)}
+                disabled={savingKey === field.key}
+                aria-label={fieldText(field.titleKey)}
+              />
             </div>
           </Settings.Row>
         {/each}
       </Settings.Group>
 
-      <Settings.Group title={m.crawler_controls()}>
-        {#each CRAWLER_SETTINGS_BOOLEAN_FIELDS as field (field.key)}
-          <Settings.Row title={fieldText(field.titleKey)} description={fieldDescription(field)}>
-            <Switch
-              checked={Boolean(formValues[field.key])}
-              onCheckedChange={(next) => void handleToggleCrawlerSetting(field.key, next)}
-              disabled={savingKey === field.key}
-              aria-label={fieldText(field.titleKey)}
-            />
-          </Settings.Row>
-        {/each}
-      </Settings.Group>
-
       <Settings.Group title={m.crawler_limits()}>
+        <p class="text-secondary -mt-2 max-w-[64ch] pr-12 pl-2 text-sm leading-relaxed">
+          {m.crawler_limits_subtitle()}
+        </p>
+
         {#each CRAWLER_SETTINGS_NUMBER_FIELDS as field (field.key)}
           {@const error = numericError(field)}
           {@const bounds = getCrawlerSettingDisplayBounds(field, crawlerSettings?.specs)}
+          {@const range = rangeHint(field)}
+          {@const isDirty = fieldIsDirty(field.key)}
+          {@const isSaving = savingKey === field.key}
           <Settings.Row
             title={fieldText(field.titleKey)}
             description={fieldText(field.descriptionKey)}
@@ -252,39 +301,45 @@
                 {fieldText(field.titleKey)}
               </Field.Label>
               <div class="flex flex-wrap items-start justify-end gap-2">
-                <InputGroup.Root class="w-44">
-                  <InputGroup.Input
-                    id={`crawler-setting-${field.key}`}
-                    type="number"
-                    value={formValues[field.key]}
-                    min={bounds.min}
-                    max={bounds.max}
-                    step={field.step}
-                    aria-invalid={Boolean(error)}
-                    disabled={savingKey === field.key}
-                    oninput={(event) => {
-                      formValues[field.key] = event.currentTarget.value;
-                    }}
-                  />
-                  <InputGroup.Addon align="inline-end">
-                    {fieldText(field.unitKey)}
-                  </InputGroup.Addon>
-                </InputGroup.Root>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={!fieldIsDirty(field.key) || savingKey === field.key}
-                  onclick={() => resetField(field.key)}
-                >
-                  {m.reset()}
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={!fieldIsDirty(field.key) || Boolean(error) || savingKey === field.key}
-                  onclick={() => void handleSaveNumberSetting(field)}
-                >
-                  {m.save()}
-                </Button>
+                <div class="flex flex-col items-end gap-1">
+                  <InputGroup.Root class="w-44">
+                    <InputGroup.Input
+                      id={`crawler-setting-${field.key}`}
+                      type="number"
+                      value={formValues[field.key]}
+                      min={bounds.min}
+                      max={bounds.max}
+                      step={field.step}
+                      aria-invalid={Boolean(error)}
+                      disabled={isSaving}
+                      oninput={(event) => {
+                        formValues[field.key] = event.currentTarget.value;
+                      }}
+                    />
+                    <InputGroup.Addon align="inline-end">
+                      {fieldText(field.unitKey)}
+                    </InputGroup.Addon>
+                  </InputGroup.Root>
+                  {#if range && !error}
+                    <span class="text-muted-foreground text-xs tabular-nums">
+                      {range}
+                    </span>
+                  {/if}
+                </div>
+                <div class="flex items-center gap-1.5">
+                  {#if isDirty && !isSaving}
+                    <Button variant="ghost" size="sm" onclick={() => resetField(field.key)}>
+                      {m.reset()}
+                    </Button>
+                  {/if}
+                  <Button
+                    size="sm"
+                    disabled={!isDirty || Boolean(error) || isSaving}
+                    onclick={() => void handleSaveNumberSetting(field)}
+                  >
+                    {isSaving ? m.crawler_saving() : m.save()}
+                  </Button>
+                </div>
               </div>
               {#if error}
                 <Field.Error class="text-right">{error}</Field.Error>
