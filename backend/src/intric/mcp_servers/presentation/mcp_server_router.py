@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Query
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.authentication.auth_dependencies import require_user_for_creation
 from intric.main.container.container import Container
 from intric.main.exceptions import BadRequestException
 from intric.main.models import NOT_PROVIDED, NotProvided, PaginatedResponse
@@ -258,6 +259,7 @@ async def get_mcp_server(
 async def create_mcp_server(
     data: MCPServerCreate,
     container: Container = _WITH_USER,
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     """Create a new MCP server in global catalog (admin only).
 

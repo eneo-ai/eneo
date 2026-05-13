@@ -1457,6 +1457,16 @@
                         </p>
                       {/if}
                     </div>
+                    {#if ownership === "service"}
+                      <div
+                        class="border-accent-default/30 bg-accent-dimmer/30 text-default rounded-lg border p-3 text-xs"
+                      >
+                        <span class="flex items-start gap-1.5">
+                          <Info class="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          <span>{m.api_keys_ownership_service_explainer()}</span>
+                        </span>
+                      </div>
+                    {/if}
                     {#if ownership === "service" && scopeType === "tenant" && (effectivePermission === "write" || effectivePermission === "admin")}
                       <div
                         class="border-warning-default/40 bg-warning-dimmer/40 text-warning-stronger dark:bg-warning-dimmer/20 rounded-lg border p-3 text-xs"
@@ -1464,16 +1474,6 @@
                         <span class="inline-flex items-center gap-1.5">
                           <AlertCircle class="h-3.5 w-3.5" />
                           {m.api_keys_ownership_service_guardrail_hint()}
-                        </span>
-                      </div>
-                    {/if}
-                    {#if ownership === "service"}
-                      <div
-                        class="border-label-default/30 bg-label-dimmer/40 text-secondary dark:bg-label-dimmer/20 rounded-lg border p-3 text-xs"
-                      >
-                        <span class="inline-flex items-start gap-1.5">
-                          <AlertCircle class="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
-                          <span>{m.api_keys_ownership_service_user_endpoints_hint()}</span>
                         </span>
                       </div>
                     {/if}

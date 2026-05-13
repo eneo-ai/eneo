@@ -11,8 +11,11 @@ from intric.assistants.api.assistant_models import AssistantPublic
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
-from intric.authentication.auth_dependencies import get_scope_filter, require_permission
-from intric.authentication.auth_models import is_service_api_key
+from intric.authentication.auth_dependencies import (
+    get_scope_filter,
+    require_permission,
+    require_user_for_creation,
+)
 from intric.collections.presentation.collection_models import CollectionPublic
 from intric.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
 from intric.integration.presentation.assemblers.integration_knowledge_assembler import (
@@ -87,25 +90,12 @@ async def forbid_org_space(
 async def create_space(
     create_space_req: CreateSpaceRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     space_creation_service = container.space_init_service()
     space_assembler = container.space_assembler()
     current_user = container.user()
 
-    # Service keys cannot create spaces: space_init_service creates a default
-    # assistant with `user_id = current_user.id`, but the service-key synthetic
-    # user has no row in `users`. That would violate `assistants_users_fkey`
-    # and surface as a 500. Reject with a clear 403 instead, matching the
-    # scope-intent of service keys (act on existing resources, not provision).
-    if is_service_api_key(current_user):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                "Service API keys cannot create shared spaces. "
-                "Create the space with a user account; the service key can "
-                "then operate on it via its scope."
-            ),
-        )
     validate_permission(current_user, Permission.SHARED_SPACES)
 
     # Create space
@@ -422,6 +412,7 @@ async def create_space_assistant(
     id: UUID,
     assistant_in: CreateSpaceAssistantRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.assistant_service()
     assembler = container.assistant_assembler()
@@ -470,6 +461,7 @@ async def create_group_chat(
     id: UUID,
     group_chat_in: GroupChatCreate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.group_chat_service()
     assembler = container.group_chat_assembler()
@@ -512,6 +504,7 @@ async def create_app(
     id: UUID,
     create_service_req: CreateSpaceAppRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     space_service = container.space_service()
     app_service = container.app_service()
@@ -552,6 +545,7 @@ async def create_space_services(
     id: UUID,
     service_in: CreateSpaceServiceRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service_service = container.service_service()
     assembler = container.space_assembler()
@@ -596,6 +590,7 @@ async def create_space_groups(
     id: UUID,
     group: CreateSpaceGroupsRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     svc = container.collection_crud_service()
     user = container.user()
@@ -676,6 +671,7 @@ async def create_space_websites(
     id: UUID,
     website: WebsiteCreate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.website_crud_service()
     user = container.user()

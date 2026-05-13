@@ -245,3 +245,94 @@ async def test_legacy_user_api_key_revoke_rejects_service_key(
     )
     assert resp.status_code == 403, resp.text
     assert _has_user_identity_required_code(resp.json()), resp.text
+
+
+# ---------------------------------------------------------------------------
+# 4. Creation gate — service keys cannot create new user-owned resources
+# ---------------------------------------------------------------------------
+
+
+def _has_creation_gate_code(payload: dict) -> bool:
+    detail = payload.get("detail")
+    if isinstance(detail, dict):
+        return detail.get("code") == "service_key_cannot_create_resources"
+    if isinstance(detail, str):
+        return "service_key_cannot_create_resources" in detail
+    return payload.get("code") == "service_key_cannot_create_resources"
+
+
+# (method, path, json_body) — UUIDs in paths are placeholders; the gate fires
+# before the handler resolves the resource, so 404s are pre-empted by the 403.
+_PLACEHOLDER_ID = "00000000-0000-0000-0000-000000000001"
+_CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
+    ("POST", "/api/v1/assistants/", {"name": "x", "space_id": _PLACEHOLDER_ID}),
+    ("POST", "/api/v1/spaces/", {"name": "x"}),
+    (
+        "POST",
+        f"/api/v1/spaces/{_PLACEHOLDER_ID}/applications/assistants/",
+        {"name": "x"},
+    ),
+    (
+        "POST",
+        f"/api/v1/spaces/{_PLACEHOLDER_ID}/applications/group-chats/",
+        {"name": "x"},
+    ),
+    (
+        "POST",
+        f"/api/v1/spaces/{_PLACEHOLDER_ID}/applications/apps/",
+        {"name": "x"},
+    ),
+    (
+        "POST",
+        f"/api/v1/spaces/{_PLACEHOLDER_ID}/applications/services/",
+        {"name": "x"},
+    ),
+    (
+        "POST",
+        f"/api/v1/spaces/{_PLACEHOLDER_ID}/knowledge/groups/",
+        {"name": "x"},
+    ),
+    (
+        "POST",
+        f"/api/v1/spaces/{_PLACEHOLDER_ID}/knowledge/websites/",
+        {"name": "x", "url": "https://example.com", "space_id": _PLACEHOLDER_ID},
+    ),
+    (
+        "POST",
+        "/api/v1/groups/",
+        {"name": "x", "embedding_model": {"id": _PLACEHOLDER_ID}},
+    ),
+    ("POST", f"/api/v1/groups/{_PLACEHOLDER_ID}/info-blobs/", {"info_blobs": []}),
+    ("POST", "/api/v1/roles/", {"name": "x", "permissions": []}),
+    ("POST", "/api/v1/mcp-servers/", {"name": "x", "url": "https://example.com"}),
+]
+
+
+@pytest.mark.parametrize("method,path,body", _CREATION_ENDPOINTS)
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_service_key_creation_endpoints_return_403_with_gate_code(
+    client, tenant_admin_service_secret, method, path, body
+):
+    """Every gated create endpoint returns 403 with the creation-gate code
+    when called by a service key, regardless of body validity."""
+    resp = await client.request(
+        method,
+        path,
+        json=body,
+        headers={"X-API-Key": tenant_admin_service_secret},
+    )
+    assert resp.status_code == 403, f"{method} {path}: {resp.status_code} {resp.text}"
+    assert _has_creation_gate_code(resp.json()), f"{method} {path}: {resp.text}"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_bearer_user_can_create_space(client, admin_token):
+    """Sanity check — the creation gate must NOT regress bearer auth."""
+    resp = await client.post(
+        "/api/v1/spaces/",
+        json={"name": f"control-space-{uuid4().hex[:8]}"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 201, resp.text

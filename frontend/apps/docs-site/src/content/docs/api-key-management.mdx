@@ -46,13 +46,22 @@ Service keys are designed for integrations, automated systems, and machine-to-ma
 
 When a service key is used, the system constructs a **synthetic user** instead of looking up a real one:
 
-- **Unique ID per key**: Generated from `uuid5(NAMESPACE_URL, "service-key:{key_id}")` so each service key gets its own synthetic identity for audit and quota tracking
+- **Unique ID per key**: The synthetic user's id is set to the API key's own UUID. The id never exists in the `users` table, but it gives audit logs, telemetry, and caches a stable per-key identifier that maps back to the key.
 - **Always active**: The synthetic user is always in `ACTIVE` state
 - **No real roles**: Space access is derived from the key's permission level, not from membership
 
 <Callout type="warning">
 Only tenant administrators can create service keys. Service keys with write or admin permission require either an **IP allowlist** or an **expiration date** as a guardrail against misuse, regardless of scope.
 </Callout>
+
+#### What service keys cannot do
+
+Service keys are automation principals, not service accounts. They can read, update, and delete resources within their scope, but they **cannot create new resources**. Endpoints that would insert a row keyed on `user_id` (assistants, apps, spaces, group chats, prompts, collections, websites, files, info blobs, roles, MCP servers, and the like) return `403` with `code: "service_key_cannot_create_resources"` when called by a service key. Resource creation belongs to humans; the service key can operate on the resource once it exists.
+
+Two related guardrails come from the same principle:
+
+- **Cannot use user-identity endpoints** (`/me`, legacy "my keys", info-blob updates): `403` with `code: "user_identity_required"`.
+- **Cannot manage other API keys**: API-key mutations require a session login; any API key, including a tenant-admin service key, is rejected.
 
 **Why service keys exist**: In production environments, integrations should not break when an employee leaves the organization. With user keys, deactivating a departing employee's account would silently break every integration that used their key. Service keys solve this by decoupling key validity from any individual user's lifecycle.
 
@@ -158,11 +167,11 @@ Scopes define the boundary of what a key can access, from broadest to narrowest:
 
 Permissions define what operations a key can perform within its scope:
 
-| Permission | Space Role | Can Do |
-|-----------|-----------|--------|
-| `read` | VIEWER | Read resources, list items |
-| `write` | EDITOR | Create, update resources |
-| `admin` | ADMIN | Delete resources, manage space settings |
+| Permission | Space Role | User keys can do | Service keys can do |
+|-----------|-----------|------------------|---------------------|
+| `read` | VIEWER | Read resources, list items | Same |
+| `write` | EDITOR | Create, update resources | Update existing resources (creation is gated) |
+| `admin` | ADMIN | Delete resources, manage space settings | Delete existing resources, manage settings (creation is gated) |
 
 ### How Service Keys Derive Space Roles
 

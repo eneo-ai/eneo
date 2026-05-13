@@ -225,11 +225,23 @@ export class PartialError extends Error {
    * @param {Headers} [headers] Response headers
    */
   constructor(stage, status, parsedResponse, headers) {
-    const detail = typeof parsedResponse?.detail === "string" ? parsedResponse.detail : undefined;
+    // Structured 4xx responses use `detail: {code, message}` (see
+    // require_user_for_creation / require_user_identity in the backend).
+    // Validation errors use `detail: [...]`. Fall back to string detail for
+    // older shapes.
+    const detailRaw = parsedResponse?.detail;
+    const detailObjectMessage =
+      detailRaw && typeof detailRaw === "object" && !Array.isArray(detailRaw)
+        ? detailRaw.message
+        : undefined;
+    const detailString = typeof detailRaw === "string" ? detailRaw : undefined;
     const message =
       status === 500
         ? "Upstream server error"
-        : (parsedResponse?.message ?? detail ?? "See details for more info.");
+        : (parsedResponse?.message ??
+          detailObjectMessage ??
+          detailString ??
+          "See details for more info.");
     super(message);
     /** @type {any | undefined} Server response parsed as JSON object (if possible). */
     this.detail = parsedResponse;

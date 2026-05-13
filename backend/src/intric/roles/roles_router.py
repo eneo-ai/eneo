@@ -8,7 +8,10 @@ from fastapi import APIRouter, Depends
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
-from intric.authentication.auth_dependencies import require_permission
+from intric.authentication.auth_dependencies import (
+    require_permission,
+    require_user_for_creation,
+)
 from intric.main.container.container import Container
 from intric.roles.permissions import Permission
 from intric.roles.role import (
@@ -82,6 +85,7 @@ async def get_role_by_id(
 async def create_role(
     role: RoleCreateRequest,
     container: _ContainerDep,
+    _user_for_creation: None = Depends(require_user_for_creation),
 ) -> RoleInDB:
     service = container.role_service()
     user = container.user()

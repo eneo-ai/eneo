@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.authentication.auth_dependencies import require_user_for_creation
 from intric.authentication.signed_urls import generate_signed_token, verify_signed_token
 from intric.files.file_models import (
     ContentDisposition,
@@ -40,6 +41,7 @@ router = APIRouter()
 async def upload_file(
     upload_file: UploadFile,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.file_service()
     current_user = container.user()

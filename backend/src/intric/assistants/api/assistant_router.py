@@ -27,6 +27,7 @@ from intric.authentication.api_key_router_helpers import (
 from intric.authentication.auth_dependencies import (
     get_scope_filter,
     require_resource_permission_for_method,
+    require_user_for_creation,
     require_user_identity,
 )
 from intric.authentication.auth_models import (
@@ -77,6 +78,7 @@ async def create_assistant(
     request: Request,
     assistant: AssistantCreatePublic,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     # Scope validation: scoped keys cannot create assistants outside their scope
     scope_filter = get_scope_filter(request)
