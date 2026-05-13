@@ -19,16 +19,14 @@
 
   const usage = $derived.by(() => buildFlowRunTokenUsageView(tokenUsage));
 
-  function formatCompact(value: number): string {
-    return formatFlowRunTokenCount(value, getLocale(), { compact: true });
-  }
+  const labelTitleId = "token-usage-label";
 
-  function formatFull(value: number): string {
+  function format(value: number): string {
     return formatFlowRunTokenCount(value, getLocale());
   }
 
   function badgeLabel(total: number): string {
-    return m.flow_run_tokens_badge({ count: formatCompact(total) });
+    return m.flow_run_tokens_badge({ count: format(total) });
   }
 </script>
 
@@ -40,12 +38,12 @@
           <button
             {...props}
             type="button"
-            class="focus-visible:ring-accent-default/30 rounded-full focus-visible:ring-2 focus-visible:outline-none"
+            class="ring-offset-background focus-visible:ring-accent-default/40 focus-visible:ring-offset-background rounded-full focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
             aria-label={m.flow_run_token_usage_title()}
           >
             <Badge
               variant="outline"
-              class="bg-secondary/60 text-muted hover:bg-secondary h-5 cursor-help px-1.5 text-[10.5px] font-medium tabular-nums transition-colors"
+              class="bg-secondary/60 text-muted hover:bg-secondary hover:text-primary cursor-help px-2 py-0.5 text-xs font-medium tabular-nums motion-safe:transition-colors motion-safe:duration-150"
             >
               {badgeLabel(usage.total)}
             </Badge>
@@ -54,39 +52,37 @@
       </Popover.Trigger>
       <Popover.Content align="start" class="w-72 gap-3">
         <Popover.Header>
-          <Popover.Title>{m.flow_run_token_usage_title()}</Popover.Title>
-          <Popover.Description class="text-xs leading-relaxed">
-            {m.flow_run_token_usage_description()}
-          </Popover.Description>
+          <Popover.Title id={labelTitleId}>{m.flow_run_token_usage_title()}</Popover.Title>
         </Popover.Header>
 
-        <dl class="grid grid-cols-[1fr_auto] gap-x-4 gap-y-2 text-xs">
-          <dt class="text-muted">{m.flow_run_tokens_total()}</dt>
-          <dd class="text-primary font-mono tabular-nums">{formatFull(usage.total)}</dd>
+        <dl
+          aria-labelledby={labelTitleId}
+          class="grid grid-cols-[1fr_auto] items-baseline gap-x-6 gap-y-2 text-sm"
+        >
+          <dt class="text-secondary">{m.flow_run_tokens_total()}</dt>
+          <dd class="text-primary font-semibold tabular-nums">{format(usage.total)}</dd>
 
-          <dt class="text-muted">{m.flow_run_tokens_input()}</dt>
-          <dd class="text-primary font-mono tabular-nums">{formatFull(usage.input)}</dd>
+          <dt class="text-muted text-xs">{m.flow_run_tokens_input()}</dt>
+          <dd class="text-secondary text-xs tabular-nums">{format(usage.input)}</dd>
 
-          <dt class="text-muted">{m.flow_run_tokens_output()}</dt>
-          <dd class="text-primary font-mono tabular-nums">{formatFull(usage.output)}</dd>
+          <dt class="text-muted text-xs">{m.flow_run_tokens_output()}</dt>
+          <dd class="text-secondary text-xs tabular-nums">{format(usage.output)}</dd>
         </dl>
 
-        <div
-          class="border-default bg-secondary/40 text-muted rounded-md border px-2.5 py-2 text-xs leading-relaxed"
-        >
+        <p class="border-default text-muted border-t pt-3 text-xs leading-relaxed">
           {m.flow_run_token_usage_provider_note()}
-        </div>
+        </p>
       </Popover.Content>
     </Popover.Root>
   {:else}
     <Badge
       variant="outline"
-      class="bg-secondary/60 text-muted h-5 shrink-0 px-1.5 text-[10.5px] font-medium tabular-nums"
+      class="bg-secondary/60 text-muted shrink-0 px-2 py-0.5 text-xs font-medium tabular-nums"
       aria-label={m.flow_run_token_usage_title()}
     >
       {badgeLabel(usage.total)}
     </Badge>
   {/if}
 {:else if emptyPlaceholder}
-  <span class="text-muted text-sm" aria-hidden="true">-</span>
+  <span class="text-muted text-xs tabular-nums" aria-label={m.flow_run_tokens_empty()}>—</span>
 {/if}

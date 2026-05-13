@@ -78,7 +78,7 @@
 
   const userMode = getFlowUserMode();
   const showAdvancedControls = $derived($userMode === "power_user");
-  const historyTableColumnCount = $derived(showAdvancedControls ? 6 : 5);
+  const historyTableColumnCount = 6;
   const historyModeDescription = $derived(
     showAdvancedControls ? m.flow_history_power_user_mode_desc() : m.flow_history_user_mode_desc()
   );
@@ -521,13 +521,11 @@
                   <span class="block px-4">{m.duration()}</span>
                 {/if}
               </Table.Head>
-              {#if showAdvancedControls}
-                <Table.Head
-                  class="text-muted hidden h-11 px-4 text-xs font-medium tracking-wide uppercase xl:table-cell"
-                >
-                  {m.flow_run_tokens()}
-                </Table.Head>
-              {/if}
+              <Table.Head
+                class="text-muted hidden h-11 px-4 text-xs font-medium tracking-wide uppercase lg:table-cell"
+              >
+                {m.flow_run_tokens()}
+              </Table.Head>
               <Table.Head
                 class="text-muted h-11 px-4 text-right text-xs font-medium tracking-wide uppercase"
               >
@@ -575,15 +573,13 @@
                     —
                   {/if}
                 </Table.Cell>
-                {#if showAdvancedControls}
-                  <!-- eslint-disable-next-line a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-                  <Table.Cell
-                    class="hidden px-4 py-3 align-middle xl:table-cell"
-                    onclick={(e: MouseEvent) => e.stopPropagation()}
-                  >
-                    <FlowRunTokenUsageBadge tokenUsage={run.token_usage} emptyPlaceholder />
-                  </Table.Cell>
-                {/if}
+                <!-- eslint-disable-next-line a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+                <Table.Cell
+                  class="hidden px-4 py-3 align-middle lg:table-cell"
+                  onclick={(e: MouseEvent) => e.stopPropagation()}
+                >
+                  <FlowRunTokenUsageBadge tokenUsage={run.token_usage} emptyPlaceholder />
+                </Table.Cell>
                 <!-- eslint-disable-next-line a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
                 <Table.Cell
                   class="px-2 py-2 text-right align-middle"
@@ -718,9 +714,7 @@
                   {new Date(run.created_at).toLocaleString()}
                 </p>
                 <div class="flex shrink-0 items-center gap-1.5">
-                  {#if showAdvancedControls}
-                    <FlowRunTokenUsageBadge tokenUsage={run.token_usage} interactive={false} />
-                  {/if}
+                  <FlowRunTokenUsageBadge tokenUsage={run.token_usage} interactive={false} />
                   {#if run.status === "completed" || run.status === "failed"}
                     <p class="text-muted text-xs tabular-nums">
                       {formatDuration(run.created_at, run.updated_at)}
