@@ -297,7 +297,9 @@ class SessionService:
                 tool_calls=tool_calls,
                 info_blob_chunks=info_blob_chunks,
                 generated_files=list(generated_files) if generated_files else None,
-                web_search_results=list(web_search_results) if web_search_results else None,
+                web_search_results=list(web_search_results)
+                if web_search_results
+                else None,
                 logging_details=logging_details,
             )
 
