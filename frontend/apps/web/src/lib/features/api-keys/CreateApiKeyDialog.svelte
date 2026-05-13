@@ -60,6 +60,7 @@
 
   let {
     mode = "create",
+    scope = "user",
     apiKey,
     open = $bindable(false),
     onCreated,
@@ -70,6 +71,7 @@
     triggerVariant = "primary"
   }: {
     mode?: DialogMode;
+    scope?: "user" | "admin";
     apiKey?: ApiKeyV2;
     open?: boolean;
     onCreated?: () => void;
@@ -772,7 +774,11 @@
     isSubmitting = true;
 
     try {
-      await intric.apiKeys.admin.update({ id: apiKey.id, update: updates });
+      if (scope === "admin") {
+        await intric.apiKeys.admin.update({ id: apiKey.id, update: updates });
+      } else {
+        await intric.apiKeys.update({ id: apiKey.id, update: updates });
+      }
       onChanged?.();
       showDialog = false;
     } catch (error: unknown) {

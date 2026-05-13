@@ -6,6 +6,7 @@
 
   let {
     mode = "create",
+    scope = "user",
     apiKey,
     open = $bindable(false),
     onCreated,
@@ -16,6 +17,7 @@
     triggerVariant = "primary"
   } = $props<{
     mode?: DialogMode;
+    scope?: "user" | "admin";
     apiKey?: ApiKeyV2;
     open?: boolean;
     onCreated?: () => void;
@@ -29,6 +31,7 @@
 
 <CreateApiKeyDialog
   {mode}
+  {scope}
   {apiKey}
   bind:open
   {onCreated}

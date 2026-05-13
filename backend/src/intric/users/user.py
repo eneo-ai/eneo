@@ -371,10 +371,6 @@ class UserAdminView(UserPublicBase):
     user_groups: list[UserGroupRead]
 
 
-class UserCreatedAdminView(UserAdminView):
-    api_key: ApiKey
-
-
 class UserUpdatePublic(BaseModel):
     email: Optional[EmailStr] = Field(
         default=None,

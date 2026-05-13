@@ -729,10 +729,6 @@ class UserService:
         settings_upsert = SettingsUpsert(user_id=user_in_db.id)
         await self.settings_repo.add(settings_upsert)
 
-        api_key = await self.auth_service.create_user_api_key_v2(
-            user_id=user_in_db.id, tenant_id=user_in_db.tenant_id
-        )
-
         access_token = AccessToken(
             access_token=self.auth_service.create_access_token_for_user(
                 user=user_in_db
@@ -740,7 +736,7 @@ class UserService:
             token_type="bearer",
         )
 
-        return user_in_db, access_token, api_key
+        return user_in_db, access_token
 
     async def _get_user_from_token(self, token: str):
         username = self.auth_service.get_username_from_token(

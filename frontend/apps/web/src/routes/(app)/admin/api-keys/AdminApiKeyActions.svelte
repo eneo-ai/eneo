@@ -26,5 +26,5 @@
   }}
 />
 
-<ApiKeyDialog mode="edit" {apiKey} bind:open={showEditDialog} {onChanged} />
+<ApiKeyDialog mode="edit" scope="admin" {apiKey} bind:open={showEditDialog} {onChanged} />
 <ApiKeyDialog mode="view" {apiKey} bind:open={showViewDialog} />
