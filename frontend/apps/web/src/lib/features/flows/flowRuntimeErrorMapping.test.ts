@@ -143,6 +143,9 @@ describe("classifyUploadError", () => {
   it("detects timeout errors", () => {
     expect(classifyUploadError("Upload timed out after 120s")).toBe("timeout");
     expect(classifyUploadError("Request timeout")).toBe("timeout");
+    expect(classifyUploadError("Upload did not start within 600s")).toBe("timeout");
+    expect(classifyUploadError("Upload stalled for 120s")).toBe("timeout");
+    expect(classifyUploadError("Server did not respond within 120s")).toBe("timeout");
   });
 
   it("detects file size errors", () => {

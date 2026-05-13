@@ -25,6 +25,14 @@ class FlowInputLimits:
     audio_max_files_per_run: int | None = DEFAULT_MAX_AUDIO_FILES_PER_RUN
 
 
+@dataclass(frozen=True)
+class FlowRuntimeUploadPolicy:
+    min_timeout_seconds: int = 120
+    seconds_per_mebibyte: int = 8
+    max_timeout_seconds: int = 600
+    idle_timeout_seconds: int = 120
+
+
 def _default_limits(defaults: Any | None = None) -> FlowInputLimits:
     source = defaults or get_settings()
     return FlowInputLimits(
@@ -221,6 +229,10 @@ def effective_flow_input_limit(*, input_type: str, limits: FlowInputLimits) -> i
     if input_type == "audio":
         return limits.audio_max_size_bytes
     return limits.file_max_size_bytes
+
+
+def effective_runtime_upload_policy() -> FlowRuntimeUploadPolicy:
+    return FlowRuntimeUploadPolicy()
 
 
 def effective_max_files_per_run(

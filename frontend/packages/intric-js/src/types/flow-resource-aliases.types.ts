@@ -12,9 +12,12 @@ import type {
   FlowRunResultFile,
   FlowRunStep,
   FlowRunStepInputs,
+  FlowRuntimeUploadPolicy,
   FlowStep,
   FlowTemplateAsset
 } from "@intric/intric-js";
+import { resolveFlowRuntimeUploadInitialTimeoutMs } from "@intric/intric-js";
+import type { FlowRuntimeUploadTimeoutEvent } from "@intric/intric-js";
 
 type FlowRunCreateRequest = components["schemas"]["FlowRunCreateRequest"];
 type FlowRunReviewCheckpointEvidence =
@@ -58,6 +61,12 @@ const validRunContract: FlowRunContract = {
   flow_id: flowId,
   published_flow_version: 3,
   form_fields: [{ name: "case_id", type: "text", required: true }],
+  runtime_upload_policy: {
+    min_timeout_seconds: 120,
+    seconds_per_mebibyte: 8,
+    max_timeout_seconds: 600,
+    idle_timeout_seconds: 120
+  },
   steps_requiring_input: [
     {
       step_id: stepId,
@@ -87,6 +96,19 @@ const validStepInputs: FlowRunStepInputs = {
     file_ids: ["00000000-0000-0000-0000-000000000701"]
   }
 };
+
+const validRuntimeUploadPolicy: FlowRuntimeUploadPolicy = {
+  min_timeout_seconds: 120,
+  seconds_per_mebibyte: 8,
+  max_timeout_seconds: 600,
+  idle_timeout_seconds: 120
+};
+resolveFlowRuntimeUploadInitialTimeoutMs(1024 * 1024, validRuntimeUploadPolicy);
+const validRuntimeUploadTimeoutEvent: FlowRuntimeUploadTimeoutEvent = {
+  reason: "stalled",
+  timeoutMs: 120_000
+};
+validRuntimeUploadTimeoutEvent.timeoutMs.toFixed();
 
 const validFlowRunResultFile: FlowRunResultFile = {
   flow_run_id: runId,

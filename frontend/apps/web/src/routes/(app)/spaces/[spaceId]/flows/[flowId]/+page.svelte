@@ -257,7 +257,7 @@
     if (stage === builderStage || stageNavigating) return;
     stageNavigating = true;
     try {
-      await flowEditor.flushAssistantSaves();
+      await flowEditor.flushSaves();
       builderStage = stage;
     } catch (e) {
       const msg = e instanceof IntricError ? e.getReadableMessage() : String(e);
@@ -353,7 +353,7 @@
           onclick={async () => {
             publishLoading = true;
             try {
-              await flowEditor.flushAssistantSaves();
+              await flowEditor.flushSaves();
               const published = await data.intric.flows.publish({ id: $resource.id });
               flowEditor.setResource(published);
             } catch (e) {
@@ -940,7 +940,7 @@
                   : undefined}
                 onSelectStep={async (stepId) => {
                   try {
-                    await flowEditor.flushAssistantSaves();
+                    await flowEditor.flushSaves();
                   } catch (error) {
                     const message =
                       error instanceof IntricError

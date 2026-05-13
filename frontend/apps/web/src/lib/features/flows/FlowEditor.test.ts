@@ -41,6 +41,7 @@ function makeIntric(
   overrides: {
     assistantGet?: (...args: unknown[]) => unknown;
     assistantUpdate?: (...args: unknown[]) => unknown;
+    flowUpdate?: (...args: unknown[]) => unknown;
   } = {}
 ): Intric {
   return {
@@ -48,7 +49,7 @@ function makeIntric(
       delete: vi.fn()
     },
     flows: {
-      update: vi.fn(),
+      update: overrides.flowUpdate ?? vi.fn(),
       assistants: {
         create: vi.fn(),
         get: overrides.assistantGet ?? vi.fn(),
@@ -605,6 +606,38 @@ describe("FlowEditor active step selection commands", () => {
       editor.selectStep("applied-step");
 
       expect(get(editor.state.activeStepId)).toBe("applied-step");
+    } finally {
+      editor.destroy();
+    }
+  });
+});
+
+describe("FlowEditor save flushing", () => {
+  it("persists pending flow step bindings before explicit navigation or publish actions continue", async () => {
+    const flowUpdate = vi.fn(async ({ flow, update }) => ({
+      ...(flow as Flow),
+      ...(update as Partial<Flow>)
+    }));
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
+      intric: makeIntric({ flowUpdate })
+    });
+    try {
+      const steps = get(editor.state.update).steps;
+
+      editor.replaceStepAtIndex(1, {
+        ...steps[1],
+        input_bindings: { question: "Granskade minnesanteckningar:\n{{step_1.output.text}}" }
+      });
+
+      await editor.flushFlowSaves();
+
+      expect(flowUpdate).toHaveBeenCalledTimes(1);
+      const [{ update }] = flowUpdate.mock.calls[0] as [{ update: { steps?: FlowStep[] } }];
+      expect(update.steps?.[1]?.input_bindings).toEqual({
+        question: "Granskade minnesanteckningar:\n{{step_1.output.text}}"
+      });
+      expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(false);
     } finally {
       editor.destroy();
     }

@@ -74,8 +74,38 @@ describe("flows templates endpoint", () => {
     await flows.steps.runtimeFiles.upload({ id: "flow-1", stepId: "step-1", file });
 
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/flow-1/steps/step-1/runtime-files/");
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/{id}/steps/{step_id}/runtime-files/");
     expect(fetch.mock.calls[0][1].method).toBe("post");
+    expect(fetch.mock.calls[0][1].params).toEqual({
+      path: { id: "flow-1", step_id: "step-1" }
+    });
+  });
+
+  it("tracks runtime upload progress through the XHR client when requested", async () => {
+    const fetch = vi.fn();
+    const xhr = vi.fn(async () => ({ id: "runtime-file-1" }));
+    const flows = initFlows({ fetch, xhr });
+    const file = new File(["doc"], "source.txt", { type: "text/plain" });
+    const onProgress = vi.fn();
+    const abortController = new AbortController();
+
+    await flows.steps.runtimeFiles.upload({
+      id: "flow-1",
+      stepId: "step-1",
+      file,
+      onProgress,
+      abortController
+    });
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(xhr).toHaveBeenCalledTimes(1);
+    expect(xhr.mock.calls[0][0]).toBe("/api/v1/flows/{id}/steps/{step_id}/runtime-files/");
+    expect(xhr.mock.calls[0][1].method).toBe("post");
+    expect(xhr.mock.calls[0][1].params).toEqual({
+      path: { id: "flow-1", step_id: "step-1" }
+    });
+    expect(xhr.mock.calls[0][2]).toEqual({ onProgress });
+    expect(xhr.mock.calls[0][3]).toBe(abortController);
   });
 
   it("generates artifact signed url from flow run route", async () => {

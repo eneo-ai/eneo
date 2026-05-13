@@ -11,7 +11,11 @@ from intric.audit.domain.entity_types import EntityType
 from intric.files.file_models import FilePublic
 from intric.flows.api import flow_router_common as common
 from intric.flows.api.flow_api_common import audit_actor_kwargs, error_response
-from intric.flows.api.flow_models import FlowInputPolicyPublic, FlowRunContractPublic
+from intric.flows.api.flow_models import (
+    FlowInputPolicyPublic,
+    FlowRunContractPublic,
+    default_runtime_upload_policy_public,
+)
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
 from intric.server.dependencies.container import get_container
@@ -55,6 +59,7 @@ Use this endpoint before rendering a run form to discover:
   yields a payload, generated file, or outbound HTTP delivery
 - structured form fields
 - step-specific runtime input requirements
+- runtime upload timeout policy for browser and API clients
 - steps that can pause for human review, including the output shape a review UI should render
 - aggregate file limits
 - published template readiness and capability state
@@ -62,6 +67,8 @@ Use this endpoint before rendering a run form to discover:
 Recommended consumer flow:
 1. Render `form_fields` as the run form.
 2. Upload files before run creation and attach each file id through `step_inputs[step_id].file_ids`.
+   For browser uploads, compute the initial timeout from the actual file size using
+   `runtime_upload_policy`, then keep the upload alive while progress events continue.
 3. Prebuild optional review screens from `steps_requiring_review`.
 4. Start the run with `expected_flow_version=published_flow_version`.
 5. When a run reaches `awaiting_review`, call the active checkpoint endpoint for the immutable
@@ -128,6 +135,7 @@ Use this endpoint before upload/run to discover:
 - which mimetypes are allowed
 - the effective max file size limit in bytes
 - max files per run (when constrained)
+- runtime upload timeout policy for browser and API clients
 - recommended run payload shape for API consumers
 
 Service-key principals may use this endpoint for published-flow runtime only.
@@ -175,6 +183,7 @@ async def get_flow_input_policy(
         accepted_mimetypes=policy.accepted_mimetypes,
         max_file_size_bytes=policy.max_file_size_bytes,
         max_files_per_run=policy.max_files_per_run,
+        runtime_upload_policy=default_runtime_upload_policy_public(),
         recommended_run_payload=policy.recommended_run_payload,
     )
 

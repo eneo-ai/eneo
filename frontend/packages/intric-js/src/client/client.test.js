@@ -69,4 +69,26 @@ describe("createClient path parameters", () => {
       "X-Request-Source": "frontend-test"
     });
   });
+
+  it("fails xhr requests before opening a pre-aborted upload", async () => {
+    const client = createClient({ baseUrl: "https://api.example.test", fetch: vi.fn() });
+    const abortController = new AbortController();
+    abortController.abort();
+
+    await expect(
+      client.xhr(
+        "/api/v1/files/",
+        {
+          method: "post",
+          requestBody: { "multipart/form-data": new FormData() }
+        },
+        {},
+        abortController
+      )
+    ).rejects.toMatchObject({
+      message: "Cancelled after receiving abort signal.",
+      stage: "CONNECTION",
+      status: 0
+    });
+  });
 });

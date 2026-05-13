@@ -195,6 +195,10 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
     assert contract.steps_requiring_input[0].required is True
     assert contract.steps_requiring_input[0].max_files == 2
     assert contract.steps_requiring_input[0].max_file_size_bytes == 12_000_000
+    assert contract.runtime_upload_policy.min_timeout_seconds == 120
+    assert contract.runtime_upload_policy.seconds_per_mebibyte == 8
+    assert contract.runtime_upload_policy.max_timeout_seconds == 600
+    assert contract.runtime_upload_policy.idle_timeout_seconds == 120
     assert (
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         in contract.steps_requiring_input[0].accepted_mimetypes

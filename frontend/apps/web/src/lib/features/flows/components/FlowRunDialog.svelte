@@ -5,9 +5,11 @@
     FlowRunContract,
     FlowRunContractStepInput,
     FlowRunContractTemplateReadiness,
+    FlowRuntimeUploadTimeoutEvent,
     Intric,
     UploadedFile
   } from "@intric/intric-js";
+  import { createFlowRuntimeUploadTimeoutController } from "@intric/intric-js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -115,7 +117,6 @@
   const recordingSessionsByStepId: Record<string, RecordingSession | null> = {};
   const recorderRefsByStepId: Record<string, RecorderImperativeRef | null> = {};
 
-  const FLOW_UPLOAD_TIMEOUT_MS = 120_000;
   const AUDIO_ACCEPT_FILTER = "audio/*,video/webm,video/mp4";
   const locale = (getLocale() === "en" ? "en" : "sv") as FlowLocale;
   const labels = getFlowRunDialogLabels(locale);
@@ -498,21 +499,38 @@
     }
   }
 
+  function getRuntimeUploadTimeoutMessage(
+    event: FlowRuntimeUploadTimeoutEvent,
+    fileName: string
+  ): string {
+    const seconds = String(Math.round(event.timeoutMs / 1000));
+    if (event.reason === "not_started") {
+      return m.flow_run_upload_timeout_not_started({ seconds, name: fileName });
+    }
+    if (event.reason === "server_not_responding") {
+      return m.flow_run_upload_timeout_server_not_responding({ seconds, name: fileName });
+    }
+    return m.flow_run_upload_timeout_stalled({ seconds, name: fileName });
+  }
+
   async function uploadRuntimeFileWithTimeout(
     step: FlowRunContractStepInput,
     file: File
   ): Promise<UploadedFile> {
     const controller = new AbortController();
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let handleProgress = (_event: ProgressEvent) => {};
+    let clearUploadTimeout = () => {};
     const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => {
-        controller.abort();
-        reject(
-          new Error(
-            `Upload timed out after ${Math.round(FLOW_UPLOAD_TIMEOUT_MS / 1000)}s for ${file.name}.`
-          )
-        );
-      }, FLOW_UPLOAD_TIMEOUT_MS);
+      const uploadTimeout = createFlowRuntimeUploadTimeoutController({
+        fileSizeBytes: file.size,
+        policy: runContract?.runtime_upload_policy,
+        abortController: controller,
+        onTimeout: (event) => {
+          reject(new Error(getRuntimeUploadTimeoutMessage(event, file.name)));
+        }
+      });
+      handleProgress = uploadTimeout.onProgress;
+      clearUploadTimeout = uploadTimeout.clear;
     });
 
     try {
@@ -520,11 +538,14 @@
         id: flow.id,
         stepId: step.step_id,
         file,
-        signal: controller.signal
+        abortController: controller,
+        onProgress: handleProgress
       });
+      // Keep the Promise.race loser from surfacing a secondary abort rejection.
+      uploadPromise.catch(() => {});
       return await Promise.race([uploadPromise, timeoutPromise]);
     } finally {
-      if (timeoutId) clearTimeout(timeoutId);
+      clearUploadTimeout();
     }
   }
 

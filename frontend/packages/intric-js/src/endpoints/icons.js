@@ -26,7 +26,6 @@ export function initIcons(client) {
         "/api/v1/icons/",
         {
           method: "post",
-          //@ts-expect-error Typing for multipart/formdata upload does currently not work correctly
           requestBody: { "multipart/form-data": formData }
         },
         {}

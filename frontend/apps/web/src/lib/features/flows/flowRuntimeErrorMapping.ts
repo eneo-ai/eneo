@@ -58,7 +58,14 @@ export function classifyUploadError(
   message: string
 ): "timeout" | "file_too_large" | "network" | "unknown" {
   const lower = message.toLowerCase();
-  if (lower.includes("timeout") || lower.includes("timed out")) return "timeout";
+  if (
+    lower.includes("timeout") ||
+    lower.includes("timed out") ||
+    lower.includes("did not start") ||
+    lower.includes("stalled") ||
+    lower.includes("server did not respond")
+  )
+    return "timeout";
   if (lower.includes("too large") || lower.includes("max") || lower.includes("storlek"))
     return "file_too_large";
   if (lower.includes("network") || lower.includes("fetch") || lower.includes("nät"))

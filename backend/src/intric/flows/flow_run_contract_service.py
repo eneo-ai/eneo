@@ -20,6 +20,7 @@ from intric.flows.flow_run_contract_models import (
     FlowRuntimeInputContractPublic,
     FlowTemplateReadinessPublic,
     FormFieldPublic,
+    default_runtime_upload_policy_public,
 )
 from intric.flows.published_definition import (
     PublishedFlowDefinition,
@@ -92,6 +93,7 @@ class FlowRunContractService:
             final_output=_build_final_output(steps),
             form_fields=_published_form_fields(published_definition),
             steps_requiring_input=_runtime_input_contracts(steps, limits),
+            runtime_upload_policy=default_runtime_upload_policy_public(),
             steps_requiring_review=_review_step_contracts(steps),
             aggregate_max_files=_aggregate_max_files(steps, limits),
             template_readiness=await self._template_readiness(

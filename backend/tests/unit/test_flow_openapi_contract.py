@@ -134,6 +134,7 @@ REQUIRED_SCHEMAS = {
     "FlowRunEvidenceResponse",
     "FlowFinalOutputContractPublic",
     "FlowOutputDelivery",
+    "FlowRuntimeUploadPolicyPublic",
     "FormFieldPublic",
     "FlowRuntimeInputContractPublic",
     "FlowReviewStepContractPublic",
@@ -596,12 +597,19 @@ def test_openapi_run_contract_guides_consumer_forms_uploads_and_review(
     )
     form_field = schemas.get("FormFieldPublic", {}).get("properties", {})
     review_step = schemas.get("FlowReviewStepContractPublic", {}).get("properties", {})
+    upload_policy = schemas.get("FlowRuntimeUploadPolicyPublic", {}).get(
+        "properties", {}
+    )
 
     assert "step_inputs[step_id].file_ids" in description
+    assert "actual file size" in description
+    assert "progress events continue" in description
     assert "terminal output type" in description
     assert "steps_requiring_review" in description
     assert "awaiting_review" in description
     assert "generated file download" in run_contract["final_output"]["description"]
+    assert "actual file size" in run_contract["runtime_upload_policy"]["description"]
+    assert "without progress" in run_contract["runtime_upload_policy"]["description"]
     assert "artifact" in final_output["delivery"]["description"]
     assert "generated file download" in final_output["output_type"]["description"]
     assert "input_payload_json" in form_field["name"]["description"]
@@ -609,6 +617,10 @@ def test_openapi_run_contract_guides_consumer_forms_uploads_and_review(
     assert "empty list" in run_contract["steps_requiring_review"]["description"]
     assert "Review behavior" in review_step["review_mode"]["description"]
     assert "output contract" in review_step["output_contract"]["description"]
+    assert "timeout" in upload_policy["min_timeout_seconds"]["description"].lower()
+    assert "actual file size" in upload_policy["seconds_per_mebibyte"]["description"]
+    assert "no-progress timeout" in upload_policy["max_timeout_seconds"]["description"]
+    assert "progress" in upload_policy["idle_timeout_seconds"]["description"]
 
 
 def test_openapi_flow_step_review_policy_documents_authoring_contract(
@@ -939,6 +951,7 @@ def test_openapi_flow_input_policy_schema_contains_consumer_hints(
     )
     properties = flow_input_policy.get("properties", {})
     assert "max_files_per_run" in properties
+    assert "runtime_upload_policy" in properties
     assert "recommended_run_payload" in properties
 
 
@@ -954,6 +967,12 @@ def test_openapi_flow_input_policy_example_matches_runtime_audio_defaults(
     assert isinstance(example, dict)
     assert example.get("input_type") == "audio"
     assert example.get("max_files_per_run") == 10
+    assert example.get("runtime_upload_policy") == {
+        "min_timeout_seconds": 120,
+        "seconds_per_mebibyte": 8,
+        "max_timeout_seconds": 600,
+        "idle_timeout_seconds": 120,
+    }
 
 
 def test_openapi_flow_input_policy_schema_exposes_enum_constraints(

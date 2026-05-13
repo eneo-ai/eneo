@@ -149,6 +149,7 @@ export type FlowTemplateAsset = components["schemas"]["FlowTemplateAssetPublic"]
 export type FlowRunContractStepInput = components["schemas"]["FlowRuntimeInputContractPublic"];
 export type FlowRunContractTemplateReadiness = components["schemas"]["FlowTemplateReadinessPublic"];
 export type FlowRunContract = components["schemas"]["FlowRunContractPublic"];
+export type FlowRuntimeUploadPolicy = components["schemas"]["FlowRuntimeUploadPolicyPublic"];
 export type AIBuilderAttachmentFile = components["schemas"]["FilePublic"];
 export type AIBuilderConversationMessage = components["schemas"]["ConversationMessage"];
 export type AIBuilderSessionResponse = components["schemas"]["SessionResponse"];

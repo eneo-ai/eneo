@@ -8,6 +8,7 @@ from intric.flows.flow_input_limits import (
     effective_flow_input_limit,
     effective_max_files_per_run,
     effective_runtime_max_files,
+    effective_runtime_upload_policy,
     resolve_flow_input_limits,
 )
 from intric.main.exceptions import BadRequestException
@@ -283,3 +284,12 @@ def test_effective_runtime_max_files_uses_stricter_step_or_tenant_limit() -> Non
         )
         == 3
     )
+
+
+def test_effective_runtime_upload_policy_exposes_client_timeout_formula() -> None:
+    policy = effective_runtime_upload_policy()
+
+    assert policy.min_timeout_seconds == 120
+    assert policy.seconds_per_mebibyte == 8
+    assert policy.max_timeout_seconds == 600
+    assert policy.idle_timeout_seconds == 120

@@ -12,6 +12,10 @@ from intric.flows.enums import (
     FlowRuntimeInputFormat,
     FlowTemplateAssetStatus,
 )
+from intric.flows.flow_input_limits import (
+    FlowRuntimeUploadPolicy,
+    effective_runtime_upload_policy,
+)
 from intric.flows.flow_review_policy import FlowStepReviewMode
 
 FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
@@ -47,6 +51,12 @@ FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
             "accepted_mimetypes": ["audio/wav", "audio/mpeg"],
         }
     ],
+    "runtime_upload_policy": {
+        "min_timeout_seconds": 120,
+        "seconds_per_mebibyte": 8,
+        "max_timeout_seconds": 600,
+        "idle_timeout_seconds": 120,
+    },
     "steps_requiring_review": [
         {
             "step_id": "00000000-0000-0000-0000-000000000103",
@@ -76,6 +86,52 @@ FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
         }
     ],
 }
+
+
+FLOW_RUNTIME_UPLOAD_POLICY_DESCRIPTION = (
+    "Client-side timeout policy for runtime file uploads. Consumers should "
+    "calculate each upload's initial timeout from the actual file size: "
+    "`clamp(min_timeout_seconds, max_timeout_seconds, "
+    "ceil(file_size_mib * seconds_per_mebibyte))`, then keep a progressing "
+    "upload alive until `idle_timeout_seconds` passes without progress."
+)
+
+
+class FlowRuntimeUploadPolicyPublic(BaseModel):
+    min_timeout_seconds: int = Field(
+        gt=0,
+        description="Minimum wall-clock timeout clients should allow for each runtime file upload.",
+    )
+    seconds_per_mebibyte: int = Field(
+        gt=0,
+        description=(
+            "Multiplier clients should apply to the actual file size when calculating "
+            "a per-file upload timeout."
+        ),
+    )
+    max_timeout_seconds: int = Field(
+        gt=0,
+        description="Cap on the initial no-progress timeout for each runtime file upload.",
+    )
+    idle_timeout_seconds: int = Field(
+        gt=0,
+        description="Timeout clients should allow after the latest upload progress event.",
+    )
+
+    @classmethod
+    def from_domain(
+        cls, policy: FlowRuntimeUploadPolicy
+    ) -> "FlowRuntimeUploadPolicyPublic":
+        return cls(
+            min_timeout_seconds=policy.min_timeout_seconds,
+            seconds_per_mebibyte=policy.seconds_per_mebibyte,
+            max_timeout_seconds=policy.max_timeout_seconds,
+            idle_timeout_seconds=policy.idle_timeout_seconds,
+        )
+
+
+def default_runtime_upload_policy_public() -> FlowRuntimeUploadPolicyPublic:
+    return FlowRuntimeUploadPolicyPublic.from_domain(effective_runtime_upload_policy())
 
 
 class FlowRuntimeInputContractPublic(BaseModel):
@@ -225,6 +281,10 @@ class FlowRunContractPublic(BaseModel):
     )
     steps_requiring_input: list[FlowRuntimeInputContractPublic] = Field(
         default_factory=lambda: cast(list[FlowRuntimeInputContractPublic], [])
+    )
+    runtime_upload_policy: FlowRuntimeUploadPolicyPublic = Field(
+        default_factory=default_runtime_upload_policy_public,
+        description=FLOW_RUNTIME_UPLOAD_POLICY_DESCRIPTION,
     )
     steps_requiring_review: list[FlowReviewStepContractPublic] = Field(
         default_factory=lambda: cast(list[FlowReviewStepContractPublic], []),

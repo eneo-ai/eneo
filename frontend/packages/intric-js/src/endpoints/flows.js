@@ -395,15 +395,36 @@ export function initFlows(client) {
     steps: {
       runtimeFiles: {
         /**
-         * Upload runtime files for a specific flow step.
-         * @param {{id: string, stepId: string, file: File, signal?: AbortSignal}} params
+         * Upload runtime files for a specific flow step. Pass onProgress to use
+         * XHR progress events and keep long browser uploads alive while bytes
+         * continue to transfer.
+         * @param {{id: string, stepId: string, file: File, signal?: AbortSignal, abortController?: AbortController, onProgress?: (ev: ProgressEvent) => void}} params
          * @throws {IntricError}
          */
-        upload: async ({ id, stepId, file, signal }) => {
+        upload: async ({ id, stepId, file, signal, abortController, onProgress }) => {
           const formData = new FormData();
           formData.append("upload_file", file);
-          return _fetch(`/api/v1/flows/${id}/steps/${stepId}/runtime-files/`, {
+          if (onProgress || abortController) {
+            const controller = abortController ?? new AbortController();
+            if (signal?.aborted) {
+              controller.abort();
+            } else {
+              signal?.addEventListener("abort", () => controller.abort(), { once: true });
+            }
+            return client.xhr(
+              "/api/v1/flows/{id}/steps/{step_id}/runtime-files/",
+              {
+                method: "post",
+                params: { path: { id, step_id: stepId } },
+                requestBody: { "multipart/form-data": formData }
+              },
+              { onProgress },
+              controller
+            );
+          }
+          return _fetch("/api/v1/flows/{id}/steps/{step_id}/runtime-files/", {
             method: "post",
+            params: { path: { id, step_id: stepId } },
             requestBody: { "multipart/form-data": formData },
             signal
           });

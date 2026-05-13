@@ -372,6 +372,42 @@ function createFlowEditor(data: FlowEditorInitData) {
     await assistantSaveManager.flush();
   }
 
+  async function flushFlowSaves(): Promise<void> {
+    clearAutoSaveTimer();
+
+    if (get(isPublished)) return;
+
+    const { hasUnsavedChanges } = get(editor.state.currentChanges);
+    if (!hasUnsavedChanges) {
+      if (get(saveStatus) !== "unsaved") saveStatus.set("saved");
+      return;
+    }
+
+    const steps = get(editor.state.update).steps ?? [];
+    const stepIssues = syncTypedIOValidation(steps);
+    if (
+      stepIssues.length > 0 ||
+      steps.some((s: FlowStep) => !s.assistant_id || s.assistant_id === "")
+    ) {
+      saveStatus.set("unsaved");
+      return;
+    }
+
+    saveStatus.set("saving");
+    await editor.saveChanges();
+
+    const stillUnsaved = get(editor.state.currentChanges).hasUnsavedChanges;
+    saveStatus.set(stillUnsaved ? "unsaved" : "saved");
+    if (stillUnsaved) {
+      throw new Error("Flow changes could not be saved before continuing.");
+    }
+  }
+
+  async function flushSaves(): Promise<void> {
+    await flushFlowSaves();
+    await flushAssistantSaves();
+  }
+
   // Unified save status combining flow + assistant saves
   const unifiedSaveStatus = derived([saveStatus, assistantSaveStatus], ([$flow, $assistant]) => {
     return getUnifiedFlowSaveStatus($flow, $assistant);
@@ -917,7 +953,9 @@ function createFlowEditor(data: FlowEditorInitData) {
   }
 
   function destroy() {
-    clearAutoSaveTimer();
+    void flushFlowSaves().catch(() => {
+      // Best-effort flush during teardown.
+    });
     void flushAssistantSaves().catch(() => {
       // Best-effort flush during teardown.
     });
@@ -957,7 +995,9 @@ function createFlowEditor(data: FlowEditorInitData) {
     applyStepsWithSafeOrderRemap,
     rewriteInputFieldVariableReferences,
     rewriteStepNameVariableReferences,
+    flushFlowSaves,
     flushAssistantSaves,
+    flushSaves,
     scheduleAutoSave,
     destroy
   });

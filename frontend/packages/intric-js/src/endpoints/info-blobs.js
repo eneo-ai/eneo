@@ -67,7 +67,6 @@ export function initInfoBlobs(client) {
         {
           method: "post",
           params: { path: { id: group_id } },
-          //@ts-expect-error Typing for multipart/formdata upload does currently not work correctly
           requestBody: { "multipart/form-data": formData }
         },
         {

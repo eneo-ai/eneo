@@ -18,12 +18,21 @@ export function xhr(
   abortController
 ) {
   return new Promise((resolve, reject) => {
+    const signal = abortController?.signal;
+    if (signal?.aborted) {
+      reject(new Error("Cancelled after receiving abort signal."));
+      return;
+    }
+
     const xhr = new XMLHttpRequest();
-    if (abortController) {
-      abortController.signal.onabort = () => {
+    let removeAbortListener = () => {};
+    if (signal) {
+      const abortRequest = () => {
         xhr.abort();
         reject(new Error("Cancelled after receiving abort signal."));
       };
+      signal.addEventListener("abort", abortRequest, { once: true });
+      removeAbortListener = () => signal.removeEventListener("abort", abortRequest);
     }
     xhr.open(method, url);
     Object.entries(headers).forEach(([name, value]) => {
@@ -33,15 +42,18 @@ export function xhr(
       onProgress?.(ev);
     };
     xhr.onerror = () => {
+      removeAbortListener();
       onError?.(xhr);
-      reject();
+      reject(new Error("Network request failed."));
     };
     xhr.ontimeout = () => {
+      removeAbortListener();
       onTimeout?.(xhr);
-      reject();
+      reject(new Error("Network request timed out."));
     };
     xhr.onload = () => {
       if (xhr.readyState === xhr.DONE) {
+        removeAbortListener();
         resolve(
           new Response(xhr.responseText, {
             status: xhr.status,

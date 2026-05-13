@@ -32,6 +32,9 @@ from intric.flows.flow_run_contract_models import (
     FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE as FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE,
 )
 from intric.flows.flow_run_contract_models import (
+    FLOW_RUNTIME_UPLOAD_POLICY_DESCRIPTION as FLOW_RUNTIME_UPLOAD_POLICY_DESCRIPTION,
+)
+from intric.flows.flow_run_contract_models import (
     FlowFinalOutputContractPublic as FlowFinalOutputContractPublic,
 )
 from intric.flows.flow_run_contract_models import (
@@ -47,10 +50,16 @@ from intric.flows.flow_run_contract_models import (
     FlowRuntimeInputContractPublic as FlowRuntimeInputContractPublic,
 )
 from intric.flows.flow_run_contract_models import (
+    FlowRuntimeUploadPolicyPublic as FlowRuntimeUploadPolicyPublic,
+)
+from intric.flows.flow_run_contract_models import (
     FlowTemplateReadinessPublic as FlowTemplateReadinessPublic,
 )
 from intric.flows.flow_run_contract_models import (
     FormFieldPublic as FormFieldPublic,
+)
+from intric.flows.flow_run_contract_models import (
+    default_runtime_upload_policy_public as default_runtime_upload_policy_public,
 )
 from intric.flows.flow_run_evidence_export_manifest import EvidenceExportManifest
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
@@ -962,6 +971,12 @@ class FlowInputPolicyPublic(BaseModel):
                 "accepted_mimetypes": ["audio/wav", "audio/mpeg"],
                 "max_file_size_bytes": 52428800,
                 "max_files_per_run": 10,
+                "runtime_upload_policy": {
+                    "min_timeout_seconds": 120,
+                    "seconds_per_mebibyte": 8,
+                    "max_timeout_seconds": 600,
+                    "idle_timeout_seconds": 120,
+                },
                 "recommended_run_payload": {
                     "step_inputs": {
                         "00000000-0000-0000-0000-000000000003": {
@@ -981,6 +996,10 @@ class FlowInputPolicyPublic(BaseModel):
     accepted_mimetypes: list[str] = Field(default_factory=list)
     max_file_size_bytes: int | None = None
     max_files_per_run: int | None = None
+    runtime_upload_policy: FlowRuntimeUploadPolicyPublic = Field(
+        default_factory=default_runtime_upload_policy_public,
+        description=FLOW_RUNTIME_UPLOAD_POLICY_DESCRIPTION,
+    )
     recommended_run_payload: dict[str, Any] | None = None
 
 

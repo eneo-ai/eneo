@@ -318,10 +318,14 @@
   function handleInput(e: Event) {
     const target = e.target as HTMLTextAreaElement;
     lastInputType = (e as InputEvent).inputType ?? "";
-    currentEditorValue = target.value;
-    onChange?.(target.value);
+    setEditorValue(target.value);
     updateAutocompleteState();
     autoResize();
+  }
+
+  function setEditorValue(nextValue: string) {
+    currentEditorValue = nextValue;
+    onChange?.(nextValue);
   }
 
   function findOpenTokenStart(text: string, cursorIndex: number): number | null {
@@ -423,7 +427,7 @@
     if (replaceFrom !== null) {
       const nextText =
         currentEditorValue.slice(0, replaceFrom) + token + currentEditorValue.slice(cursor);
-      currentEditorValue = nextText;
+      setEditorValue(nextText);
       commitNow(nextText);
       await tick();
       if (textareaEl) {
@@ -443,14 +447,14 @@
     const token = `{{${variableToken}}}`;
     if (!textareaEl) {
       const nextText = `${currentEditorValue}${token}`;
-      currentEditorValue = nextText;
+      setEditorValue(nextText);
       commitNow(nextText);
       return;
     }
     const start = textareaEl.selectionStart ?? currentEditorValue.length;
     const end = textareaEl.selectionEnd ?? currentEditorValue.length;
     const nextText = currentEditorValue.slice(0, start) + token + currentEditorValue.slice(end);
-    currentEditorValue = nextText;
+    setEditorValue(nextText);
     commitNow(nextText);
     await tick();
     if (textareaEl) {

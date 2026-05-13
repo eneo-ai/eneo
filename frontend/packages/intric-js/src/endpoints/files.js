@@ -49,7 +49,6 @@ export function initFiles(client) {
         "/api/v1/files/",
         {
           method: "post",
-          //@ts-expect-error Typing for multipart/formdata upload does currently not work correctly
           requestBody: { "multipart/form-data": formData }
         },
         {

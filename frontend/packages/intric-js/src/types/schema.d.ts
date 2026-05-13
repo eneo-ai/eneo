@@ -3968,6 +3968,7 @@ export interface paths {
      *       yields a payload, generated file, or outbound HTTP delivery
      *     - structured form fields
      *     - step-specific runtime input requirements
+     *     - runtime upload timeout policy for browser and API clients
      *     - steps that can pause for human review, including the output shape a review UI should render
      *     - aggregate file limits
      *     - published template readiness and capability state
@@ -3975,6 +3976,8 @@ export interface paths {
      *     Recommended consumer flow:
      *     1. Render `form_fields` as the run form.
      *     2. Upload files before run creation and attach each file id through `step_inputs[step_id].file_ids`.
+     *        For browser uploads, compute the initial timeout from the actual file size using
+     *        `runtime_upload_policy`, then keep the upload alive while progress events continue.
      *     3. Prebuild optional review screens from `steps_requiring_review`.
      *     4. Start the run with `expected_flow_version=published_flow_version`.
      *     5. When a run reaches `awaiting_review`, call the active checkpoint endpoint for the immutable
@@ -4007,6 +4010,7 @@ export interface paths {
      *     - which mimetypes are allowed
      *     - the effective max file size limit in bytes
      *     - max files per run (when constrained)
+     *     - runtime upload timeout policy for browser and API clients
      *     - recommended run payload shape for API consumers
      *
      *     Service-key principals may use this endpoint for published-flow runtime only.
@@ -12468,6 +12472,12 @@ export interface components {
      *             ]
      *           }
      *         }
+     *       },
+     *       "runtime_upload_policy": {
+     *         "idle_timeout_seconds": 120,
+     *         "max_timeout_seconds": 600,
+     *         "min_timeout_seconds": 120,
+     *         "seconds_per_mebibyte": 8
      *       }
      *     }
      */
@@ -12489,6 +12499,8 @@ export interface components {
       max_file_size_bytes?: number | null;
       /** Max Files Per Run */
       max_files_per_run?: number | null;
+      /** @description Client-side timeout policy for runtime file uploads. Consumers should calculate each upload's initial timeout from the actual file size: `clamp(min_timeout_seconds, max_timeout_seconds, ceil(file_size_mib * seconds_per_mebibyte))`, then keep a progressing upload alive until `idle_timeout_seconds` passes without progress. */
+      runtime_upload_policy?: components["schemas"]["FlowRuntimeUploadPolicyPublic"];
       /** Recommended Run Payload */
       recommended_run_payload?: {
         [key: string]: unknown;
@@ -12717,6 +12729,12 @@ export interface components {
      *         }
      *       ],
      *       "published_flow_version": 3,
+     *       "runtime_upload_policy": {
+     *         "idle_timeout_seconds": 120,
+     *         "max_timeout_seconds": 600,
+     *         "min_timeout_seconds": 120,
+     *         "seconds_per_mebibyte": 8
+     *       },
      *       "steps_requiring_input": [
      *         {
      *           "accepted_mimetypes": [
@@ -12775,6 +12793,8 @@ export interface components {
       form_fields?: components["schemas"]["FormFieldPublic"][];
       /** Steps Requiring Input */
       steps_requiring_input?: components["schemas"]["FlowRuntimeInputContractPublic"][];
+      /** @description Client-side timeout policy for runtime file uploads. Consumers should calculate each upload's initial timeout from the actual file size: `clamp(min_timeout_seconds, max_timeout_seconds, ceil(file_size_mib * seconds_per_mebibyte))`, then keep a progressing upload alive until `idle_timeout_seconds` passes without progress. */
+      runtime_upload_policy?: components["schemas"]["FlowRuntimeUploadPolicyPublic"];
       /**
        * Steps Requiring Review
        * @description Published steps that can pause the run for human review. API consumers can use this before starting a run to decide whether their app needs review screens, then use the active checkpoint endpoint once the run status becomes `awaiting_review`. An empty list means this published flow version will not pause for human-in-the-loop review.
@@ -14089,10 +14109,7 @@ export interface components {
       } | null;
       /** Result Files */
       result_files?: components["schemas"]["FlowRunStepResultFile"][];
-      /**
-       * Token Usage
-       * @description Aggregated provider-reported token usage for model attempts in this run. Null when the run has not produced token-metered model usage.
-       */
+      /** @description Aggregated provider-reported token usage for model attempts in this run. Null when the run has not produced token-metered model usage. */
       token_usage?: components["schemas"]["FlowRunTokenUsagePublic"] | null;
       /** Error Message */
       error_message?: string | null;
@@ -14108,24 +14125,6 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
-    };
-    /** FlowRunTokenUsagePublic */
-    FlowRunTokenUsagePublic: {
-      /**
-       * Num Tokens Input
-       * @description Provider-reported input tokens consumed by the run.
-       */
-      num_tokens_input: number;
-      /**
-       * Num Tokens Output
-       * @description Provider-reported output tokens consumed by the run.
-       */
-      num_tokens_output: number;
-      /**
-       * Num Tokens Total
-       * @description Total provider-reported tokens consumed by the run.
-       */
-      num_tokens_total: number;
     };
     /**
      * FlowRunRedispatchResponse
@@ -14972,6 +14971,24 @@ export interface components {
        */
       availability: "available" | "content_purged";
     };
+    /** FlowRunTokenUsagePublic */
+    FlowRunTokenUsagePublic: {
+      /**
+       * Num Tokens Input
+       * @description Provider-reported input tokens consumed by the run.
+       */
+      num_tokens_input: number;
+      /**
+       * Num Tokens Output
+       * @description Provider-reported output tokens consumed by the run.
+       */
+      num_tokens_output: number;
+      /**
+       * Num Tokens Total
+       * @description Total provider-reported tokens consumed by the run.
+       */
+      num_tokens_total: number;
+    };
     /** FlowRuntimeAuditOutboxSummary */
     FlowRuntimeAuditOutboxSummary: {
       /**
@@ -15282,6 +15299,29 @@ export interface components {
       oldest_stale_queued_age_seconds?: number | null;
       /** Oldest Stale Running Age Seconds */
       oldest_stale_running_age_seconds?: number | null;
+    };
+    /** FlowRuntimeUploadPolicyPublic */
+    FlowRuntimeUploadPolicyPublic: {
+      /**
+       * Min Timeout Seconds
+       * @description Minimum wall-clock timeout clients should allow for each runtime file upload.
+       */
+      min_timeout_seconds: number;
+      /**
+       * Seconds Per Mebibyte
+       * @description Multiplier clients should apply to the actual file size when calculating a per-file upload timeout.
+       */
+      seconds_per_mebibyte: number;
+      /**
+       * Max Timeout Seconds
+       * @description Cap on the initial no-progress timeout for each runtime file upload.
+       */
+      max_timeout_seconds: number;
+      /**
+       * Idle Timeout Seconds
+       * @description Timeout clients should allow after the latest upload progress event.
+       */
+      idle_timeout_seconds: number;
     };
     /**
      * FlowSparsePublic

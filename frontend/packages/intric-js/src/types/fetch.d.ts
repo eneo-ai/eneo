@@ -26,6 +26,16 @@ type IntricRequestBody<
   ? IntricEndpoints[Endpoint][Method]["requestBody"]["content"]
   : never;
 
+type IntricClientRequestBody<
+  Endpoint extends keyof IntricEndpoints,
+  Method extends keyof IntricEndpoints[Endpoint]
+> =
+  IntricRequestBody<Endpoint, Method> extends { "multipart/form-data": unknown }
+    ? Omit<IntricRequestBody<Endpoint, Method>, "multipart/form-data"> & {
+        "multipart/form-data": FormData;
+      }
+    : IntricRequestBody<Endpoint, Method>;
+
 export type JSONRequestBody<
   Method extends "post" | "patch",
   Endpoint extends keyof IntricEndpoints
@@ -64,7 +74,7 @@ type IntricFetchFunction = <
       : {
           method: Method;
           params?: never;
-          requestBody: IntricRequestBody<Endpoint, Method>;
+          requestBody: IntricClientRequestBody<Endpoint, Method>;
           signal?: AbortSignal;
           headers?: Record<string, string>;
         }
@@ -79,7 +89,7 @@ type IntricFetchFunction = <
       : {
           method: Method;
           params: IntricParams<Endpoint, Method>;
-          requestBody: IntricRequestBody<Endpoint, Method>;
+          requestBody: IntricClientRequestBody<Endpoint, Method>;
           signal?: AbortSignal;
           headers?: Record<string, string>;
         }
@@ -96,7 +106,7 @@ type IntricStreamFunction = <Endpoint extends IntricStreamingEndpoints>(
   endpoint: Endpoint,
   args: {
     params: IntricParams<Endpoint, "post">;
-    requestBody: IntricRequestBody<Endpoint, "post">;
+    requestBody: IntricClientRequestBody<Endpoint, "post">;
   },
   callbacks: {
     onOpen?: (response: Response) => Promise<void>;
@@ -121,7 +131,7 @@ type IntricXhrFunction = <
       : {
           method: Method;
           params?: never;
-          requestBody: IntricRequestBody<Endpoint, Method>;
+          requestBody: IntricClientRequestBody<Endpoint, Method>;
         }
     : IntricRequestBody<Endpoint, Method> extends never
       ? {
@@ -132,7 +142,7 @@ type IntricXhrFunction = <
       : {
           method: Method;
           params: IntricParams<Endpoint, Method>;
-          requestBody: IntricRequestBody<Endpoint, Method>;
+          requestBody: IntricClientRequestBody<Endpoint, Method>;
         },
   callbacks: { onProgress?: (ev: ProgressEvent) => void },
   abortController?: AbortController | undefined
