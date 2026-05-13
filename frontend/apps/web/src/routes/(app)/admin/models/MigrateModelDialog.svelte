@@ -113,6 +113,7 @@
   // still enabled on spaces (those just get repointed). Only security
   // blockers gate the action regardless of count.
   const hasResourceImpact = $derived(impactTotal > 0);
+  const shouldConfirmMigration = $derived(!hasWarnings || acknowledged || !hasResourceImpact);
   const canMigrate = $derived(
     !!targetModelId &&
       !hasSecurityBlocker &&
@@ -122,7 +123,7 @@
       !isValidating &&
       !validationError &&
       !sourceAlreadyMigrated &&
-      (!hasWarnings || acknowledged || !hasResourceImpact)
+      shouldConfirmMigration
   );
 
   // Track which target the current validation is for to discard stale responses.
@@ -244,8 +245,9 @@
       await intric.models.migrateCompletion({
         fromId: sourceModel.id,
         toId: targetModelId,
-        // If user acknowledged warnings, send confirmMigration=true
-        confirmMigration: acknowledged || !hasWarnings
+        // Match the UI gate: spaces-only warning cases are allowed without
+        // a manual acknowledgement because no resources are rebound.
+        confirmMigration: shouldConfirmMigration
       });
       toast.success(m.migration_success());
       bumpModelMigrationHistoryVersion();

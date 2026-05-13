@@ -1,7 +1,7 @@
 # MIT License
 
 import logging
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -27,7 +27,9 @@ from intric.completion_models.presentation.completion_model_models import (
 from intric.completion_models.presentation.completion_model_models import (
     PaginatedResponse as ModelUsagePaginatedResponse,
 )
+from intric.database.database import AsyncSession
 from intric.main.container.container import Container
+from intric.main.exceptions import ValidationException
 from intric.main.models import PaginatedResponse, is_provided
 from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
@@ -235,7 +237,9 @@ async def migrate_model_usage(
     model_id: UUID,
     migration_request: ModelMigrationRequest,
     user: Annotated[UserInDB, Depends(get_current_active_user)],
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: Annotated[
+        Container, Depends(get_container(with_user=True, with_transaction=False))
+    ],
 ) -> MigrationResult:
     """Migrate all usage from one model to another.
 
@@ -246,47 +250,64 @@ async def migrate_model_usage(
     """
     validate_permission(user, Permission.ADMIN)
 
+    session = cast(AsyncSession, container.session())
     migration_service = container.completion_model_migration_service()
-    result = await migration_service.migrate_model_usage(
-        from_model_id=model_id,
-        to_model_id=migration_request.to_model_id,
-        entity_types=migration_request.entity_types,
-        user=user,
-        confirm_migration=migration_request.confirm_migration,
-    )
+    migration_error: ValidationException | None = None
+    result: MigrationResult | None = None
+
+    async with session.begin():
+        try:
+            result = await migration_service.migrate_model_usage(
+                from_model_id=model_id,
+                to_model_id=migration_request.to_model_id,
+                entity_types=migration_request.entity_types,
+                user=user,
+                confirm_migration=migration_request.confirm_migration,
+            )
+        except ValidationException as exc:
+            # The service records validation/security/database failures in
+            # migration_history before raising. Catch inside the transaction so
+            # that failure record commits, then re-raise after the block exits.
+            migration_error = exc
+
+    if migration_error is not None:
+        raise migration_error
+
+    assert result is not None
 
     # Audit happens after the service returns so it captures the actual
     # migrated/failed counts. A failed audit must not break the user-facing
     # response — the migration already committed.
     try:
-        audit_service = container.audit_service()
-        completion_model_repo = container.completion_model_repo2()
-        from_model = await completion_model_repo.one(model_id=model_id)
-        await audit_service.log_async(
-            tenant_id=user.tenant_id,
-            actor_id=user.id,
-            action=ActionType.COMPLETION_MODEL_MIGRATED,
-            entity_type=EntityType.COMPLETION_MODEL,
-            entity_id=model_id,
-            description=(
-                f"Migrated model usage from {from_model.name} to "
-                f"{migration_request.to_model_id} "
-                f"({result.migrated_count} entities)"
-            ),
-            metadata=AuditMetadata.standard(
-                actor=user,
-                target=from_model,
-                changes={
-                    "from_model_id": str(model_id),
-                    "to_model_id": str(migration_request.to_model_id),
-                    "migrated_count": result.migrated_count,
-                    "failed_count": result.failed_count,
-                    "duration": result.duration,
-                    "details": result.details,
-                    "warnings": result.warnings,
-                },
-            ),
-        )
+        async with session.begin():
+            audit_service = container.audit_service()
+            completion_model_repo = container.completion_model_repo2()
+            from_model = await completion_model_repo.one(model_id=model_id)
+            await audit_service.log_async(
+                tenant_id=user.tenant_id,
+                actor_id=user.id,
+                action=ActionType.COMPLETION_MODEL_MIGRATED,
+                entity_type=EntityType.COMPLETION_MODEL,
+                entity_id=model_id,
+                description=(
+                    f"Migrated model usage from {from_model.name} to "
+                    f"{migration_request.to_model_id} "
+                    f"({result.migrated_count} entities)"
+                ),
+                metadata=AuditMetadata.standard(
+                    actor=user,
+                    target=from_model,
+                    changes={
+                        "from_model_id": str(model_id),
+                        "to_model_id": str(migration_request.to_model_id),
+                        "migrated_count": result.migrated_count,
+                        "failed_count": result.failed_count,
+                        "duration": result.duration,
+                        "details": result.details,
+                        "warnings": result.warnings,
+                    },
+                ),
+            )
     except Exception as audit_err:
         logger.warning("Failed to create audit log for migration: %s", audit_err)
 

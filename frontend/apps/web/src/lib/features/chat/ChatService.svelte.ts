@@ -183,6 +183,7 @@ export class ChatService {
   }
 
   #clearPreflight() {
+    this.#preflightGen += 1;
     if (this.#preflightDebounce) {
       clearTimeout(this.#preflightDebounce);
       this.#preflightDebounce = null;
@@ -202,8 +203,7 @@ export class ChatService {
     }
 
     if (!question && fileIds.length === 0) {
-      this.pendingInputTokens = 0;
-      this.pendingFileTokens = 0;
+      this.#clearPreflight();
       return;
     }
 
