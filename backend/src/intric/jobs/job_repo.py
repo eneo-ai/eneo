@@ -103,6 +103,7 @@ class JobRepository:
             .values(
                 status=Status.FAILED,
                 result_location=error_message,
+                finished_at=datetime.now(timezone.utc),
                 updated_at=sa.func.now(),
             )
         )

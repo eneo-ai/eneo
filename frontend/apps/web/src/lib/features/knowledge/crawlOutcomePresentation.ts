@@ -221,6 +221,25 @@ export function getCrawlOutcomeLabel(outcome: CrawlOutcome, fallback: string): s
   return outcomeLabels[outcome.message_key]?.() ?? outcome.detail ?? fallback;
 }
 
+export function getCrawlRunFailureDetail(crawl: CrawlRun): string | undefined {
+  const status = crawl.status?.toLowerCase();
+  if (status !== "failed" && status !== "not found") {
+    return undefined;
+  }
+
+  const outcome = getCrawlOutcome(crawl);
+  const detail = normalizeDiagnosticDetail(outcome?.detail ?? crawl.result_location);
+  if (detail) {
+    return detail;
+  }
+
+  if (!outcome || outcome.code === "UNKNOWN_CRAWL_ERROR") {
+    return m.crawl_missing_failure_detail();
+  }
+
+  return undefined;
+}
+
 export function getSourceRetainedLabel(count: number): string {
   return m.source_retained_pages({ count });
 }
@@ -261,6 +280,11 @@ export function getFailureSummaryTooltip(
 
 function positiveCount(count: number | null | undefined): number {
   return typeof count === "number" && count > 0 ? count : 0;
+}
+
+function normalizeDiagnosticDetail(detail: string | null | undefined): string | undefined {
+  const trimmed = detail?.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function indexedCount(total: number, hashRetained: number, failed: number): number {

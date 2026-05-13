@@ -658,7 +658,7 @@ async def test_sitemap_source_skip_kwargs_stay_empty_when_not_allowed(
 
 
 @pytest.mark.asyncio
-async def test_record_crawl_run_outcome_code_preserves_precise_existing_outcome(
+async def test_record_crawl_task_exception_fails_job_with_detail_and_outcome(
     monkeypatch: pytest.MonkeyPatch,
 ):
     fake_session = _FakeOutcomeSession()
@@ -669,10 +669,18 @@ async def test_record_crawl_run_outcome_code_preserves_precise_existing_outcome(
 
     monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
 
-    await crawl_tasks._record_crawl_run_outcome_code(
+    await crawl_tasks._record_crawl_task_exception(
+        job_id=uuid4(),
         run_id=uuid4(),
-        outcome_code=CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR,
+        exc=RuntimeError("crawler crashed before parsing output"),
     )
 
-    assert len(fake_session.statements) == 1
-    assert "outcome_code IS NULL" in str(fake_session.statements[0])
+    assert len(fake_session.statements) == 2
+    job_update = _compiled_params(fake_session.statements[0])
+    crawl_run_update = _compiled_params(fake_session.statements[1])
+    assert job_update["status"] == "failed"
+    assert job_update["result_location"] == "crawler crashed before parsing output"
+    assert job_update["finished_at"] is not None
+    assert (
+        crawl_run_update["outcome_code"] == CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR.value
+    )

@@ -367,21 +367,56 @@ async def _update_website_circuit_breaker(
     await sess.execute(backoff_stmt)
 
 
-async def _record_crawl_run_outcome_code(
+def _crawl_task_exception_outcome(exc: BaseException) -> CrawlOutcomeCode:
+    if isinstance(exc, CrawlShutdownError):
+        return CrawlOutcomeCode.CRAWL_SHUTDOWN_ERROR
+    return CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
+
+
+def _crawl_task_exception_message(exc: BaseException) -> str:
+    message = str(exc).strip()
+    if not message:
+        message = f"{type(exc).__name__} while running crawl"
+    return message[:512]
+
+
+async def _record_crawl_task_exception(
     *,
+    job_id: UUID,
     run_id: UUID,
-    outcome_code: CrawlOutcomeCode,
+    exc: BaseException,
 ) -> None:
+    from intric.database.tables.job_table import Jobs
     from intric.database.tables.websites_table import CrawlRuns
+    from intric.main.models import Status as JobStatus
+
+    outcome_code = _crawl_task_exception_outcome(exc)
+    error_message = _crawl_task_exception_message(exc)
+    now = datetime.now(timezone.utc)
 
     async with Container.session_scope() as session:
-        stmt = (
+        job_stmt = (
+            sa.update(Jobs)
+            .where(Jobs.id == job_id)
+            .where(
+                Jobs.status.in_([JobStatus.QUEUED.value, JobStatus.IN_PROGRESS.value])
+            )
+            .values(
+                status=JobStatus.FAILED.value,
+                finished_at=now,
+                updated_at=now,
+                result_location=error_message,
+            )
+        )
+        await session.execute(job_stmt)
+
+        crawl_run_stmt = (
             sa.update(CrawlRuns)
             .where(CrawlRuns.id == run_id)
             .where(CrawlRuns.outcome_code.is_(None))
             .values(outcome_code=outcome_code.value)
         )
-        await session.execute(stmt)
+        await session.execute(crawl_run_stmt)
 
 
 async def queue_website_crawls(container: Container):
@@ -1022,7 +1057,17 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             return {"status": "resurrection_prevented", "job_id": str(job_id)}
 
         # Job successfully transitioned to IN_PROGRESS, pass flag to skip redundant update
-        async with task_manager.set_status_on_exception(status_already_set=True):
+        async def _on_crawl_task_exception(exc: BaseException) -> None:
+            await _record_crawl_task_exception(
+                job_id=job_id,
+                run_id=params.run_id,
+                exc=exc,
+            )
+
+        async with task_manager.set_status_on_exception(
+            status_already_set=True,
+            on_exception=_on_crawl_task_exception,
+        ):
             # Initialize timing tracking for performance analysis
             timings = {
                 "fetch_existing_titles": 0.0,
@@ -2156,17 +2201,18 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             # Signal task_manager to skip its complete_job() call
             # Why: We've already completed the job with a fresh session above,
-            # task_manager's job_service has stale session references
+            # and crawl_task intentionally runs TaskManager without job_service.
             setattr(task_manager, "_job_already_handled", True)
 
         return task_manager.successful()
     except Retry:
         raise
-    except CrawlShutdownError:
+    except CrawlShutdownError as exc:
         try:
-            await _record_crawl_run_outcome_code(
+            await _record_crawl_task_exception(
+                job_id=job_id,
                 run_id=params.run_id,
-                outcome_code=CrawlOutcomeCode.CRAWL_SHUTDOWN_ERROR,
+                exc=exc,
             )
         except Exception as outcome_exc:
             logger.warning(
@@ -2174,16 +2220,17 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 extra={
                     "job_id": str(job_id),
                     "run_id": str(params.run_id),
-                    "outcome_code": CrawlOutcomeCode.CRAWL_SHUTDOWN_ERROR.value,
+                    "outcome_code": _crawl_task_exception_outcome(exc).value,
                     "error": str(outcome_exc),
                 },
             )
         raise
-    except Exception:
+    except Exception as exc:
         try:
-            await _record_crawl_run_outcome_code(
+            await _record_crawl_task_exception(
+                job_id=job_id,
                 run_id=params.run_id,
-                outcome_code=CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR,
+                exc=exc,
             )
         except Exception as outcome_exc:
             logger.warning(
@@ -2191,7 +2238,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 extra={
                     "job_id": str(job_id),
                     "run_id": str(params.run_id),
-                    "outcome_code": CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR.value,
+                    "outcome_code": _crawl_task_exception_outcome(exc).value,
                     "error": str(outcome_exc),
                 },
             )

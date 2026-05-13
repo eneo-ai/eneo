@@ -5,6 +5,7 @@ import {
   getCrawlOutcome,
   getCrawlOutcomeLabel,
   getCrawlOutcomeTooltip,
+  getCrawlRunFailureDetail,
   getCrawlRunCountBreakdown,
   getCrawlRunResultLabels,
   getFailureSummaryTooltip,
@@ -84,6 +85,39 @@ test("unknown outcome message key falls back to detail", () => {
       "fallback"
     )
   ).toBe("Future crawl outcome");
+});
+
+test("failed crawl exposes stored diagnostic detail", () => {
+  const outcome: CrawlOutcome = {
+    code: "UNKNOWN_CRAWL_ERROR",
+    severity: "error",
+    message_key: "crawl_outcome_unknown_error",
+    detail: "Crawler stopped before collecting pages"
+  };
+  const crawl = {
+    status: "failed",
+    result_location: "Preempted: Job was stale",
+    outcome
+  } as unknown as CrawlRun;
+
+  expect(getCrawlOutcomeLabel(outcome, "fallback")).toBe("Crawl failed");
+  expect(getCrawlRunFailureDetail(crawl)).toBe("Crawler stopped before collecting pages");
+});
+
+test("failed crawl without stored detail explains the diagnostic gap", () => {
+  const crawl = {
+    status: "failed",
+    result_location: null,
+    outcome: {
+      code: "UNKNOWN_CRAWL_ERROR",
+      severity: "error",
+      message_key: "crawl_outcome_unknown_error"
+    }
+  } as unknown as CrawlRun;
+
+  expect(getCrawlRunFailureDetail(crawl)).toBe(
+    "No technical error detail was stored for this crawl run."
+  );
 });
 
 test("missing outcome has no tooltip", () => {

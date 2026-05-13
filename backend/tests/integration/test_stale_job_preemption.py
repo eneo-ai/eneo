@@ -611,6 +611,7 @@ class TestJobRepoMarkJobFailedIfRunning:
             assert rows_affected == 1, "Should affect 1 row"
             assert job.status == Status.FAILED, "Job should be FAILED"
             assert job.result_location == "Preempted: stale job"
+            assert job.finished_at is not None
 
     async def test_marks_in_progress_job_as_failed(self, db_container, admin_user):
         """mark_job_failed_if_running() should fail IN_PROGRESS jobs."""
@@ -643,6 +644,7 @@ class TestJobRepoMarkJobFailedIfRunning:
             assert rows_affected == 1, "Should affect 1 row"
             assert job.status == Status.FAILED, "Job should be FAILED"
             assert job.result_location == "Worker crashed"
+            assert job.finished_at is not None
 
     async def test_does_not_affect_completed_job(self, db_container, admin_user):
         """mark_job_failed_if_running() should not touch COMPLETE jobs."""

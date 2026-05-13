@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 from uuid import UUID
 
 from intric.jobs.job_service import JobService
@@ -87,14 +87,38 @@ class TaskManager:
                 ).model_dump_json(),
             )
 
+    async def _notify_exception_handler(
+        self,
+        exc: BaseException,
+        on_exception: Callable[[BaseException], Awaitable[None]] | None,
+    ) -> None:
+        if on_exception is None:
+            return
+
+        try:
+            await on_exception(exc)
+        except Exception:
+            logger.exception(
+                "Worker exception handler failed",
+                extra={"job_id": str(self.job_id)},
+            )
+
     @asynccontextmanager
-    async def set_status_on_exception(self, *, status_already_set: bool = False):
+    async def set_status_on_exception(
+        self,
+        *,
+        status_already_set: bool = False,
+        on_exception: Callable[[BaseException], Awaitable[None]] | None = None,
+    ):
         """Context manager that handles job status updates and exception handling.
 
         Args:
             status_already_set: If True, skip the initial IN_PROGRESS status update.
                 Used when mark_job_started() has already atomically set the status
                 to prevent worker resurrection race condition.
+            on_exception: Optional domain-specific reporter invoked before the
+                generic failed-job handling. Crawl tasks use this to persist
+                crawl-run outcome details while TaskManager owns exception flow.
         """
         import asyncio
 
@@ -103,9 +127,10 @@ class TaskManager:
 
         try:
             yield
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as exc:
             # CancelledError inherits from BaseException (not Exception) in Python 3.8+
             # Must handle explicitly to mark job as failed when worker shuts down
+            await self._notify_exception_handler(exc, on_exception)
             logger.warning(
                 "Job cancelled (worker shutdown or timeout)",
                 extra={"job_id": str(self.job_id)},
@@ -114,6 +139,7 @@ class TaskManager:
             self.success = False
             raise  # Re-raise to let ARQ know the job was cancelled
         except Exception as exc:
+            await self._notify_exception_handler(exc, on_exception)
             logger.exception("Error on worker:")
             message = str(exc).strip()
             # Avoid storing excessively long error messages on the job record

@@ -12,6 +12,7 @@
     getCrawlOutcome,
     getCrawlOutcomeLabel,
     getCrawlOutcomeTooltip,
+    getCrawlRunFailureDetail,
     getCrawlRunResultLabels
   } from "$lib/features/knowledge/crawlOutcomePresentation";
   import {
@@ -28,6 +29,7 @@
   $: resultLabels = getCrawlRunResultLabels(crawl);
   $: outcome = getCrawlOutcome(crawl);
   $: nonCompleteStatus = getCrawlRunStatus(crawl);
+  $: failureDetail = getCrawlRunFailureDetail(crawl);
 </script>
 
 <div
@@ -47,8 +49,18 @@
       </StatusBadge>
     {/if}
   {:else}
-    <StatusBadge tone={nonCompleteStatus.tone} tooltip={nonCompleteStatus.tooltip}>
-      {nonCompleteStatus.label}
-    </StatusBadge>
+    <div class="flex max-w-full min-w-0 flex-col items-start gap-1">
+      <StatusBadge tone={nonCompleteStatus.tone} tooltip={nonCompleteStatus.tooltip}>
+        {nonCompleteStatus.label}
+      </StatusBadge>
+      {#if failureDetail}
+        <span
+          class="text-negative-stronger/80 max-w-[58rem] text-xs leading-snug break-words whitespace-normal"
+          title={failureDetail}
+        >
+          {failureDetail}
+        </span>
+      {/if}
+    </div>
   {/if}
 </div>

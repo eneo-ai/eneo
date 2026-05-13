@@ -4,11 +4,20 @@ Tests the 5-phase orphan job cleanup with transaction-safe slot release.
 Following TDD approach - tests define expected behavior before implementation.
 """
 
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+
+
+def _compiled_params(stmt: object) -> dict[str, object]:
+    compile_stmt = getattr(stmt, "compile", None)
+    assert callable(compile_stmt)
+    params = compile_stmt().params
+    assert isinstance(params, Mapping)
+    return dict(params)
 
 
 class TestWatchdogRequeue:
@@ -324,6 +333,7 @@ class TestWatchdogPhase3FailLongRunning:
     @pytest.mark.asyncio
     async def test_identifies_long_running_in_progress_jobs(self):
         """Should identify IN_PROGRESS jobs exceeding timeout."""
+        from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
         from intric.worker.feeder.watchdog import OrphanWatchdog
 
         redis_mock = MagicMock()
@@ -348,6 +358,63 @@ class TestWatchdogPhase3FailLongRunning:
 
         assert len(result.failed_job_ids) == 1
         assert len(result.slots_to_release) == 1
+        emitted_sql = "\n".join(
+            str(call.args[0]) for call in session_mock.execute.call_args_list
+        )
+        assert "finished_at" in emitted_sql
+        assert "result_location" in emitted_sql
+        crawl_run_update_params = _compiled_params(
+            session_mock.execute.call_args_list[2].args[0]
+        )
+        assert (
+            crawl_run_update_params["outcome_code"]
+            == CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED.value
+        )
+
+
+class TestWatchdogPhase35FailStalledStartup:
+    """Tests for Phase 3.5: fail IN_PROGRESS crawls that never made progress."""
+
+    @pytest.mark.asyncio
+    async def test_marks_stalled_startup_job_with_failure_detail_and_outcome(self):
+        from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
+        from intric.worker.feeder.watchdog import OrphanWatchdog
+
+        redis_mock = MagicMock()
+        settings_mock = MagicMock()
+        settings_mock.crawl_heartbeat_interval_seconds = 300
+        settings_mock.crawl_heartbeat_max_failures = 3
+
+        watchdog = OrphanWatchdog(redis_mock, settings_mock)
+
+        stalled_job = MagicMock()
+        stalled_job.job_id = uuid4()
+        stalled_job.tenant_id = uuid4()
+        stalled_job.crawl_run_id = uuid4()
+
+        session_mock = MagicMock()
+        session_mock.execute = AsyncMock(
+            return_value=MagicMock(fetchall=lambda: [stalled_job])
+        )
+
+        result = await watchdog._fail_stalled_startup_jobs(
+            session_mock, now=datetime.now(timezone.utc)
+        )
+
+        assert result.failed_job_ids == [stalled_job.job_id]
+        assert len(result.slots_to_release) == 1
+        emitted_sql = "\n".join(
+            str(call.args[0]) for call in session_mock.execute.call_args_list
+        )
+        assert "finished_at" in emitted_sql
+        assert "result_location" in emitted_sql
+        crawl_run_update_params = _compiled_params(
+            session_mock.execute.call_args_list[2].args[0]
+        )
+        assert (
+            crawl_run_update_params["outcome_code"]
+            == CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES.value
+        )
 
 
 class TestWatchdogSlotRelease:

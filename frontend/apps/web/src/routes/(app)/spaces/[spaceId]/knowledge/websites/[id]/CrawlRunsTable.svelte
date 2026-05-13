@@ -79,6 +79,8 @@
         if (item.value.finished_at) {
           const finished = dayjs(item.value.finished_at);
           value = started.to(finished, true);
+        } else if (item.value.status?.toLowerCase() === "failed") {
+          value = m.crawl_finished_time_missing();
         }
 
         return createRender(Table.FormattedCell, {

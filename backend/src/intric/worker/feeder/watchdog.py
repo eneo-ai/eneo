@@ -743,6 +743,7 @@ class OrphanWatchdog:
         from intric.database.tables.job_table import Jobs
         from intric.database.tables.websites_table import CrawlRuns
         from intric.main.models import Status
+        from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 
         # Use heartbeat-aligned threshold: 3 × heartbeat_interval = ~15 minutes
         # This aligns with crawl_heartbeat_max_failures × crawl_heartbeat_interval_seconds
@@ -792,13 +793,32 @@ class OrphanWatchdog:
             )
 
             # Mark as FAILED
+            failure_message = (
+                "Crawl stalled before collecting pages: no crawler heartbeat "
+                f"for {startup_timeout_seconds} seconds"
+            )
             fail_stmt = (
                 update(Jobs)
                 .where(Jobs.id.in_(stalled_job_ids))
-                .values(status=Status.FAILED, updated_at=now)
+                .values(
+                    status=Status.FAILED,
+                    updated_at=now,
+                    finished_at=now,
+                    result_location=failure_message,
+                )
                 .execution_options(synchronize_session=False)
             )
             await session.execute(fail_stmt)
+
+            crawl_run_ids = [row.crawl_run_id for row in stalled_jobs]
+            crawl_run_stmt = (
+                update(CrawlRuns)
+                .where(CrawlRuns.id.in_(crawl_run_ids))
+                .where(CrawlRuns.outcome_code.is_(None))
+                .values(outcome_code=CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES.value)
+                .execution_options(synchronize_session=False)
+            )
+            await session.execute(crawl_run_stmt)
 
             # Track for slot release (IN_PROGRESS jobs definitely had a slot)
             for row in stalled_jobs:
@@ -857,15 +877,35 @@ class OrphanWatchdog:
 
         if stale_jobs:
             stale_job_ids = [row.job_id for row in stale_jobs]
+            from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
+
+            failure_message = (
+                "Crawl exceeded the maximum runtime "
+                f"of {timeout_hours} hours and was stopped"
+            )
 
             # Mark as FAILED
             fail_stmt = (
                 update(Jobs)
                 .where(Jobs.id.in_(stale_job_ids))
-                .values(status=Status.FAILED, updated_at=now)
+                .values(
+                    status=Status.FAILED,
+                    updated_at=now,
+                    finished_at=now,
+                    result_location=failure_message,
+                )
                 .execution_options(synchronize_session=False)
             )
             await session.execute(fail_stmt)
+
+            crawl_run_stmt = (
+                update(CrawlRuns)
+                .where(CrawlRuns.job_id.in_(stale_job_ids))
+                .where(CrawlRuns.outcome_code.is_(None))
+                .values(outcome_code=CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED.value)
+                .execution_options(synchronize_session=False)
+            )
+            await session.execute(crawl_run_stmt)
 
             # Track for slot release (IN_PROGRESS jobs definitely had a slot)
             for row in stale_jobs:
