@@ -375,8 +375,17 @@ class AssistantService:
             # Create the prompt if the prompt contains text
             # Update the description if the prompt contains description
             if prompt.text:
+                # Attribute the prompt to the assistant's owner, not the
+                # caller. Keeps service-key edits FK-safe (synthetic id has
+                # no `users` row) and makes admin edits to others'
+                # assistants attribute correctly.
+                prompt_owner_id = (
+                    assistant.user.id if assistant.user is not None else self.user.id
+                )
                 prompt_obj = await self.prompt_service.create_prompt(
-                    prompt.text, prompt.description
+                    prompt.text,
+                    prompt.description,
+                    owner_user_id=prompt_owner_id,
                 )
 
         completion_model = None
