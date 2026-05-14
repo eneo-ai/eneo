@@ -61,6 +61,7 @@ Use this endpoint before rendering a run form to discover:
 - step-specific runtime input requirements
 - runtime upload timeout policy for browser and API clients
 - steps that can pause for human review, including the output shape a review UI should render
+  and the effective `expires_after_seconds` review window
 - aggregate file limits
 - published template readiness and capability state
 
@@ -69,7 +70,8 @@ Recommended consumer flow:
 2. Upload files before run creation and attach each file id through `step_inputs[step_id].file_ids`.
    For browser uploads, compute the initial timeout from the actual file size using
    `runtime_upload_policy`, then keep the upload alive while progress events continue.
-3. Prebuild optional review screens from `steps_requiring_review`.
+3. Prebuild optional review screens from `steps_requiring_review`; use
+   `expires_after_seconds` to show the review deadline once the checkpoint opens.
 4. Start the run with `expected_flow_version=published_flow_version`.
 5. When a run reaches `awaiting_review`, call the active checkpoint endpoint for the immutable
    step snapshot and editable payload.

@@ -64,6 +64,8 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+FLOW_SETTINGS_INVALID_PAYLOAD_CODE = "flow_settings_invalid_payload"
+
 
 class SettingService:
     def __init__(
@@ -236,7 +238,8 @@ class SettingService:
         patch = payload.model_dump(exclude_unset=True)
         if not patch:
             raise BadRequestException(
-                "At least one flow input limit field must be provided."
+                "At least one flow input limit field must be provided.",
+                code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
             )
         previous = await self.get_flow_input_limits()
         remove_keys = {key for key, value in patch.items() if value is None}
@@ -289,7 +292,8 @@ class SettingService:
         patch = payload.model_dump(exclude_unset=True)
         if not patch:
             raise BadRequestException(
-                "At least one flow document render limit field must be provided."
+                "At least one flow document render limit field must be provided.",
+                code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
             )
         previous = await self.get_flow_document_render_limits()
         tenant = await self._get_tenant_for_flow_settings()
@@ -338,7 +342,8 @@ class SettingService:
         patch = payload.model_dump(exclude_unset=True)
         if not patch:
             raise BadRequestException(
-                "At least one flow runtime policy field must be provided."
+                "At least one flow runtime policy field must be provided.",
+                code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
             )
         previous = await self.get_flow_runtime_policy()
         tenant = await self._get_tenant_for_flow_settings()
@@ -428,7 +433,8 @@ class SettingService:
         patch = payload.model_dump(exclude_unset=True)
         if not patch:
             raise BadRequestException(
-                "At least one flow evidence policy field must be provided."
+                "At least one flow evidence policy field must be provided.",
+                code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
             )
         tenant = await self._get_tenant_for_flow_settings()
         next_flow_settings = apply_flow_evidence_policy_patch(
@@ -467,7 +473,8 @@ class SettingService:
         patch = payload.model_dump(exclude_unset=True)
         if not patch:
             raise BadRequestException(
-                "At least one flow retention policy field must be provided."
+                "At least one flow retention policy field must be provided.",
+                code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
             )
         tenant = await self._get_tenant_for_flow_settings()
         next_flow_settings = apply_flow_retention_policy_patch(

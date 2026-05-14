@@ -10,6 +10,7 @@ import pytest
 from intric.flows.api.flow_models import FlowOutputDelivery
 from intric.flows.flow import Flow, FlowStep
 from intric.flows.flow_input_limits import FlowInputLimits
+from intric.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
 from intric.flows.flow_run_contract_service import FlowRunContractService
 from intric.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
@@ -408,6 +409,7 @@ async def test_get_run_contract_returns_review_steps() -> None:
     assert review_contract.review_mode == "edit"
     assert review_contract.output_type == "json"
     assert review_contract.output_contract == review_step.output_contract
+    assert review_contract.expires_after_seconds == FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
 
 
 @pytest.mark.asyncio

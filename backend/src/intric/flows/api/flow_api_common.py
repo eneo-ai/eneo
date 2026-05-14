@@ -49,11 +49,31 @@ class AuditActorKwargs(TypedDict):
 def error_response(
     *,
     description: str,
-    message: str,
-    intric_error_code: ErrorCodes,
+    message: str | None = None,
+    intric_error_code: ErrorCodes | None = None,
     code: str | None = None,
     context: dict[str, object] | None = None,
+    examples: dict[str, dict[str, object]] | None = None,
 ) -> dict[str, Any]:
+    if examples is not None:
+        if (
+            message is not None
+            or intric_error_code is not None
+            or code is not None
+            or context is not None
+        ):
+            raise ValueError(
+                "examples mode must not pass single error example fields"
+            )
+        return {
+            "model": GeneralError,
+            "description": description,
+            "content": {"application/json": {"examples": examples}},
+        }
+    if message is None or intric_error_code is None:
+        raise ValueError(
+            "message and intric_error_code are required for single error examples"
+        )
     example: dict[str, Any] = {
         "message": message,
         "intric_error_code": int(intric_error_code),

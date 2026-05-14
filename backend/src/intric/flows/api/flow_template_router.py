@@ -36,7 +36,12 @@ def _get_flow_template_asset_service(container: Container) -> FlowTemplateAssetS
     status_code=status.HTTP_200_OK,
     operation_id="list_flow_template_files",
     summary="List Flow Templates",
-    description="List template assets attached to a flow draft for template-fill steps.",
+    description=(
+        "List DOCX template assets attached to the current flow draft. Use this "
+        "authoring endpoint when building template-fill configuration screens: the "
+        "response identifies which stored templates can be selected, inspected, or "
+        "downloaded. These files are reusable draft assets, not per-run runtime uploads."
+    ),
     responses={
         403: error_response(
             description="Caller lacks permission or API key scope to list template assets for this flow.",
@@ -78,7 +83,12 @@ async def list_flow_template_files(
     status_code=status.HTTP_200_OK,
     operation_id="inspect_flow_template",
     summary="Inspect DOCX template placeholders for a flow",
-    description="Scan an uploaded DOCX template and return placeholders discovered in the document body, tables, headers, and footers.",
+    description=(
+        "Scan one stored DOCX template asset and return placeholders discovered in "
+        "the document body, tables, headers, and footers. Use the returned names to "
+        "map template-fill output fields before publishing. Inspection is read-only: "
+        "it does not mutate the template file or the flow draft."
+    ),
     responses={
         400: error_response(
             description="The selected file is not a valid DOCX template or is not safe to inspect.",
@@ -219,7 +229,12 @@ async def upload_flow_template_file(
     status_code=status.HTTP_200_OK,
     operation_id="generate_flow_template_signed_url",
     summary="Generate Template Download URL",
-    description="Generate a temporary signed download URL for a stored flow template asset.",
+    description=(
+        "Generate a temporary signed download URL for a stored flow template asset. "
+        "Use this authoring endpoint to preview or download the reusable DOCX template "
+        "that belongs to the draft flow. It is separate from run artifact downloads; "
+        "run-generated files use the artifact signed-url endpoint under `/runs/{run_id}`."
+    ),
     responses={
         403: error_response(
             description="Caller lacks permission or API key scope to access this flow template asset.",

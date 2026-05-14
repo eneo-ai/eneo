@@ -408,6 +408,51 @@ def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
     } == {"flow_worker_stalled"}
 
 
+def test_reconcile_review_expiry_task_processes_all_tenants(monkeypatch):
+    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tenant_one = SimpleNamespace(id=uuid4())
+    tenant_two = SimpleNamespace(id=uuid4())
+    tenant_repo = MagicMock()
+    tenant_repo.get_all_tenants = AsyncMock(return_value=[tenant_one, tenant_two])
+    reconciler = MagicMock()
+    reconciler.reconcile_next_expired_checkpoint = AsyncMock(
+        side_effect=[1, 1, 0, 1, 0]
+    )
+
+    class _Container:
+        def __init__(self, session=None):
+            self._tenant_repo = tenant_repo
+
+        def tenant_repo(self):
+            return self._tenant_repo
+
+        def flow_review_expiry_reconciler(self):
+            return reconciler
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return _fake_flow_task_session()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(tasks_module, "Container", _Container)
+    monkeypatch.setattr(
+        tasks_module.sessionmanager, "session", lambda: _SessionContext()
+    )
+
+    result = asyncio.run(
+        tasks_module._reconcile_expired_review_checkpoints_all_tenants()
+    )
+
+    assert result == {"status": "ok", "reconciled": 3}
+    assert reconciler.reconcile_next_expired_checkpoint.await_count == 5
+    assert {
+        call.kwargs["tenant_id"]
+        for call in reconciler.reconcile_next_expired_checkpoint.await_args_list
+    } == {tenant_one.id, tenant_two.id}
+
+
 def test_redispatch_stale_queued_task_processes_all_tenants(monkeypatch):
     """Beat-driven redispatch claims stuck QUEUED runs and dispatches them.
 

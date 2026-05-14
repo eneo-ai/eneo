@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.database.tables.flow_tables import (
     FlowRunAuditOutbox,
+    FlowRunReviewCheckpoints,
     FlowRuns,
     FlowStepAttempts,
     FlowStepResults,
@@ -23,10 +24,14 @@ from intric.flows.application.flow_run_recovery_policy import (
     flow_stale_running_unhealthy_after_seconds,
 )
 from intric.flows.enums import (
+    RECONCILABLE_REVIEW_CHECKPOINT_STATES,
     TERMINAL_FLOW_RUN_STATUSES,
     FlowRunStatus,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
+)
+from intric.flows.flow_review_expiry_policy import (
+    FLOW_REVIEW_EXPIRY_UNHEALTHY_AFTER_SECONDS,
 )
 
 TERMINAL_INTEGRITY_LOOKBACK_HOURS = 24
@@ -43,6 +48,8 @@ class FlowRuntimeHealthFlag(str, Enum):
     STALE_QUEUED_RUNS = "STALE_QUEUED_RUNS"
     STALE_RUNNING_RUNS = "STALE_RUNNING_RUNS"
     STALE_RUNNING_RECONCILER_LAG = "STALE_RUNNING_RECONCILER_LAG"
+    EXPIRED_REVIEW_CHECKPOINTS = "EXPIRED_REVIEW_CHECKPOINTS"
+    REVIEW_EXPIRY_RECONCILER_LAG = "REVIEW_EXPIRY_RECONCILER_LAG"
     TERMINAL_RUNS_WITH_OPEN_ATTEMPTS = "TERMINAL_RUNS_WITH_OPEN_ATTEMPTS"
     TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS = "TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS"
     AUDIT_OUTBOX_DELIVERY_BACKLOG = "AUDIT_OUTBOX_DELIVERY_BACKLOG"
@@ -59,6 +66,7 @@ class FlowRuntimeHealthPolicy:
     stale_queued_after_seconds: int
     stale_running_after_seconds: int
     stale_running_unhealthy_after_seconds: int
+    review_expiry_unhealthy_after_seconds: int
     terminal_integrity_lookback: timedelta
     audit_outbox_backlog_grace_seconds: int
 
@@ -72,6 +80,8 @@ class FlowRuntimeHealthSnapshot:
     stale_running_count: int = 0
     oldest_stale_queued_updated_at: datetime | None = None
     oldest_stale_running_updated_at: datetime | None = None
+    expired_review_checkpoint_count: int = 0
+    oldest_expired_review_checkpoint_expires_at: datetime | None = None
     terminal_runs_with_open_attempts_count: int = 0
     oldest_terminal_run_with_open_attempts_updated_at: datetime | None = None
     terminal_runs_with_active_step_results_count: int = 0
@@ -100,6 +110,11 @@ class FlowRuntimeRunSummary(BaseModel):
     oldest_stale_running_age_seconds: int | None = None
 
 
+class FlowRuntimeReviewSummary(BaseModel):
+    expired_checkpoint_count: int = 0
+    oldest_expired_checkpoint_age_seconds: int | None = None
+
+
 class FlowRuntimeDataIntegrity(BaseModel):
     terminal_runs_with_open_attempts_count: int = 0
     oldest_terminal_run_with_open_attempts_age_seconds: int | None = None
@@ -119,6 +134,7 @@ class FlowRuntimeHealthThresholds(BaseModel):
     stale_queued_after_seconds: int
     stale_running_after_seconds: int
     stale_running_unhealthy_after_seconds: int
+    review_expiry_unhealthy_after_seconds: int
     terminal_integrity_lookback_hours: int
     audit_outbox_backlog_grace_seconds: int
 
@@ -132,6 +148,7 @@ class FlowRuntimeHealthResponse(BaseModel):
     response_timestamp_utc: datetime
     probe: FlowRuntimeProbe
     runs: FlowRuntimeRunSummary = Field(default_factory=FlowRuntimeRunSummary)
+    review: FlowRuntimeReviewSummary = Field(default_factory=FlowRuntimeReviewSummary)
     data_integrity: FlowRuntimeDataIntegrity = Field(
         default_factory=FlowRuntimeDataIntegrity
     )
@@ -151,6 +168,9 @@ def build_flow_runtime_health_policy(
         ),
         stale_running_unhealthy_after_seconds=flow_stale_running_unhealthy_after_seconds(
             task_timeout_seconds=task_timeout_seconds
+        ),
+        review_expiry_unhealthy_after_seconds=(
+            FLOW_REVIEW_EXPIRY_UNHEALTHY_AFTER_SECONDS
         ),
         terminal_integrity_lookback=timedelta(hours=TERMINAL_INTEGRITY_LOOKBACK_HOURS),
         audit_outbox_backlog_grace_seconds=FLOW_AUDIT_OUTBOX_BACKLOG_GRACE_SECONDS,
@@ -181,6 +201,10 @@ async def load_flow_runtime_health_snapshot(
         status=FlowRunStatus.RUNNING,
         stale_before=stale_running_before,
     )
+    expired_review_checkpoints = await _load_expired_review_checkpoint_summary(
+        session=session,
+        expires_before=now,
+    )
     terminal_open_attempts = await _load_terminal_runs_with_open_attempts_summary(
         session=session,
         updated_after=terminal_integrity_after,
@@ -204,6 +228,10 @@ async def load_flow_runtime_health_snapshot(
         stale_running_count=stale_running.count,
         oldest_stale_queued_updated_at=stale_queued.oldest_updated_at,
         oldest_stale_running_updated_at=stale_running.oldest_updated_at,
+        expired_review_checkpoint_count=expired_review_checkpoints.count,
+        oldest_expired_review_checkpoint_expires_at=(
+            expired_review_checkpoints.oldest_expires_at
+        ),
         terminal_runs_with_open_attempts_count=terminal_open_attempts.count,
         oldest_terminal_run_with_open_attempts_updated_at=(
             terminal_open_attempts.oldest_updated_at
@@ -233,6 +261,10 @@ def classify_flow_runtime_health(
 ) -> FlowRuntimeHealthResponse:
     stale_queued_age = _age_seconds(now, snapshot.oldest_stale_queued_updated_at)
     stale_running_age = _age_seconds(now, snapshot.oldest_stale_running_updated_at)
+    expired_review_checkpoint_age = _age_seconds(
+        now,
+        snapshot.oldest_expired_review_checkpoint_expires_at,
+    )
     open_attempt_age = _age_seconds(
         now, snapshot.oldest_terminal_run_with_open_attempts_updated_at
     )
@@ -251,6 +283,7 @@ def classify_flow_runtime_health(
     status_flags = _flow_runtime_health_flags(
         snapshot=snapshot,
         stale_running_age_seconds=stale_running_age,
+        expired_review_checkpoint_age_seconds=expired_review_checkpoint_age,
         policy=policy,
     )
     status = _flow_runtime_health_status(
@@ -272,6 +305,10 @@ def classify_flow_runtime_health(
             stale_running_count=snapshot.stale_running_count,
             oldest_stale_queued_age_seconds=stale_queued_age,
             oldest_stale_running_age_seconds=stale_running_age,
+        ),
+        review=FlowRuntimeReviewSummary(
+            expired_checkpoint_count=snapshot.expired_review_checkpoint_count,
+            oldest_expired_checkpoint_age_seconds=expired_review_checkpoint_age,
         ),
         data_integrity=FlowRuntimeDataIntegrity(
             terminal_runs_with_open_attempts_count=(
@@ -297,6 +334,9 @@ def classify_flow_runtime_health(
             stale_running_after_seconds=policy.stale_running_after_seconds,
             stale_running_unhealthy_after_seconds=(
                 policy.stale_running_unhealthy_after_seconds
+            ),
+            review_expiry_unhealthy_after_seconds=(
+                policy.review_expiry_unhealthy_after_seconds
             ),
             terminal_integrity_lookback_hours=TERMINAL_INTEGRITY_LOOKBACK_HOURS,
             audit_outbox_backlog_grace_seconds=(
@@ -329,6 +369,12 @@ def flow_runtime_health_probe_failure_response(
 class _RunSummary:
     count: int
     oldest_updated_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class _ReviewCheckpointExpirySummary:
+    count: int
+    oldest_expires_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -409,6 +455,39 @@ async def _load_terminal_runs_with_open_attempts_summary(
     return _RunSummary(
         count=int(count or 0),
         oldest_updated_at=_normalize_datetime(oldest_updated_at),
+    )
+
+
+async def _load_expired_review_checkpoint_summary(
+    *,
+    session: AsyncSession,
+    expires_before: datetime,
+) -> _ReviewCheckpointExpirySummary:
+    reconcilable_states = tuple(
+        state.value for state in RECONCILABLE_REVIEW_CHECKPOINT_STATES
+    )
+    count, oldest_expires_at = (
+        await session.execute(
+            sa.select(
+                sa.func.count(FlowRunReviewCheckpoints.id),
+                sa.func.min(FlowRunReviewCheckpoints.expires_at),
+            )
+            .select_from(FlowRunReviewCheckpoints)
+            .join(
+                FlowRuns,
+                sa.and_(
+                    FlowRuns.id == FlowRunReviewCheckpoints.flow_run_id,
+                    FlowRuns.tenant_id == FlowRunReviewCheckpoints.tenant_id,
+                ),
+            )
+            .where(FlowRunReviewCheckpoints.state.in_(reconcilable_states))
+            .where(FlowRunReviewCheckpoints.expires_at <= expires_before)
+            .where(FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value)
+        )
+    ).one()
+    return _ReviewCheckpointExpirySummary(
+        count=int(count or 0),
+        oldest_expires_at=_normalize_datetime(oldest_expires_at),
     )
 
 
@@ -493,6 +572,7 @@ def _flow_runtime_health_flags(
     *,
     snapshot: FlowRuntimeHealthSnapshot,
     stale_running_age_seconds: int | None,
+    expired_review_checkpoint_age_seconds: int | None,
     policy: FlowRuntimeHealthPolicy,
 ) -> list[FlowRuntimeHealthFlag]:
     flags: list[FlowRuntimeHealthFlag] = []
@@ -506,6 +586,15 @@ def _flow_runtime_health_flags(
             flags.append(FlowRuntimeHealthFlag.STALE_RUNNING_RECONCILER_LAG)
         else:
             flags.append(FlowRuntimeHealthFlag.STALE_RUNNING_RUNS)
+    if snapshot.expired_review_checkpoint_count > 0:
+        if (
+            expired_review_checkpoint_age_seconds is not None
+            and expired_review_checkpoint_age_seconds
+            > policy.review_expiry_unhealthy_after_seconds
+        ):
+            flags.append(FlowRuntimeHealthFlag.REVIEW_EXPIRY_RECONCILER_LAG)
+        else:
+            flags.append(FlowRuntimeHealthFlag.EXPIRED_REVIEW_CHECKPOINTS)
     if snapshot.terminal_runs_with_open_attempts_count > 0:
         flags.append(FlowRuntimeHealthFlag.TERMINAL_RUNS_WITH_OPEN_ATTEMPTS)
     if snapshot.terminal_runs_with_active_step_results_count > 0:
@@ -526,6 +615,7 @@ def _flow_runtime_health_status(
         return FlowRuntimeHealthStatus.UNKNOWN
     unhealthy_flags = {
         FlowRuntimeHealthFlag.STALE_RUNNING_RECONCILER_LAG,
+        FlowRuntimeHealthFlag.REVIEW_EXPIRY_RECONCILER_LAG,
         FlowRuntimeHealthFlag.TERMINAL_RUNS_WITH_OPEN_ATTEMPTS,
         FlowRuntimeHealthFlag.TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS,
         FlowRuntimeHealthFlag.AUDIT_OUTBOX_DEAD_LETTERS,
@@ -540,8 +630,8 @@ def _flow_runtime_health_status(
 def _flow_runtime_status_reason(*, status: FlowRuntimeHealthStatus) -> str:
     return {
         FlowRuntimeHealthStatus.HEALTHY: "Flow runtime DB signals are healthy.",
-        FlowRuntimeHealthStatus.DEGRADED: "Flow runtime has recoverable stale run or audit outbox signals.",
-        FlowRuntimeHealthStatus.UNHEALTHY: "Flow runtime has stale reconciliation lag, terminal-run integrity issues, or audit dead letters.",
+        FlowRuntimeHealthStatus.DEGRADED: "Flow runtime has recoverable stale run, review checkpoint, or audit outbox signals.",
+        FlowRuntimeHealthStatus.UNHEALTHY: "Flow runtime has stale reconciliation lag, review expiry lag, terminal-run integrity issues, or audit dead letters.",
         FlowRuntimeHealthStatus.UNKNOWN: "Flow runtime DB signals could not be read.",
     }[status]
 

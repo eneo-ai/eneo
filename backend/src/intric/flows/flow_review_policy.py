@@ -6,6 +6,11 @@ from enum import Enum
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from intric.flows.enums import FlowOutputMode, flow_output_mode_has_outbound_delivery
+from intric.flows.flow_review_expiry_policy import (
+    FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
+    FLOW_REVIEW_EXPIRY_MAX_SECONDS,
+    FLOW_REVIEW_EXPIRY_MIN_SECONDS,
+)
 from intric.main.exceptions import BadRequestException
 
 FLOW_REVIEW_POLICY_INVALID = "flow_review_policy_invalid"
@@ -34,6 +39,16 @@ class FlowStepReviewPolicy(BaseModel):
             "`view` pauses the run for approval of this step output. `edit` "
             "also lets the reviewer replace the output used by downstream steps."
         )
+    )
+    expires_after_seconds: int | None = Field(
+        default=None,
+        ge=FLOW_REVIEW_EXPIRY_MIN_SECONDS,
+        le=FLOW_REVIEW_EXPIRY_MAX_SECONDS,
+        description=(
+            "How long the unresolved review checkpoint may wait before it expires. "
+            "Null inherits the platform default "
+            f"({FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS // 86_400} days)."
+        ),
     )
 
 

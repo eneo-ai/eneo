@@ -8,6 +8,10 @@ from intric.flows.api.flow_assembler import FlowAssembler
 from intric.flows.api.flow_models import FlowStepCreateRequest
 from intric.flows.enums import FlowOutputMode, flow_output_mode_has_outbound_delivery
 from intric.flows.flow import FlowStep
+from intric.flows.flow_review_expiry_policy import (
+    FLOW_REVIEW_EXPIRY_MAX_SECONDS,
+    FLOW_REVIEW_EXPIRY_MIN_SECONDS,
+)
 from intric.flows.flow_review_policy import (
     FLOW_REVIEW_POLICY_INVALID,
     FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED,
@@ -20,19 +24,30 @@ from intric.main.exceptions import BadRequestException
 
 def test_parse_flow_step_review_policy_accepts_view_and_edit_modes() -> None:
     view_policy = parse_flow_step_review_policy(
-        raw_policy={"mode": "view"},
+        raw_policy={
+            "mode": "view",
+            "expires_after_seconds": FLOW_REVIEW_EXPIRY_MIN_SECONDS,
+        },
         output_mode=FlowOutputMode.PASS_THROUGH,
     )
     edit_policy = parse_flow_step_review_policy(
-        raw_policy={"mode": "edit"},
+        raw_policy={
+            "mode": "edit",
+            "expires_after_seconds": FLOW_REVIEW_EXPIRY_MAX_SECONDS,
+        },
         output_mode=FlowOutputMode.TEMPLATE_FILL,
     )
 
     assert view_policy is not None
     assert view_policy.mode == FlowStepReviewMode.VIEW
-    assert view_policy.model_dump(mode="json") == {"mode": "view"}
+    assert view_policy.expires_after_seconds == FLOW_REVIEW_EXPIRY_MIN_SECONDS
+    assert view_policy.model_dump(mode="json") == {
+        "mode": "view",
+        "expires_after_seconds": FLOW_REVIEW_EXPIRY_MIN_SECONDS,
+    }
     assert edit_policy is not None
     assert edit_policy.mode == FlowStepReviewMode.EDIT
+    assert edit_policy.expires_after_seconds == FLOW_REVIEW_EXPIRY_MAX_SECONDS
 
 
 @pytest.mark.parametrize("output_mode", list(FlowOutputMode))
@@ -45,7 +60,10 @@ def test_parse_flow_step_review_policy_allows_absent_policy_for_every_mode(
 
 
 def test_parse_flow_step_review_policy_accepts_canonical_policy_object() -> None:
-    policy = FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW)
+    policy = FlowStepReviewPolicy(
+        mode=FlowStepReviewMode.VIEW,
+        expires_after_seconds=FLOW_REVIEW_EXPIRY_MIN_SECONDS,
+    )
 
     parsed = parse_flow_step_review_policy(
         raw_policy=policy,
@@ -63,6 +81,37 @@ def test_parse_flow_step_review_policy_rejects_invalid_shape() -> None:
         )
 
     assert exc_info.value.code == FLOW_REVIEW_POLICY_INVALID
+
+
+@pytest.mark.parametrize(
+    "expires_after_seconds",
+    [FLOW_REVIEW_EXPIRY_MIN_SECONDS - 1, FLOW_REVIEW_EXPIRY_MAX_SECONDS + 1],
+)
+def test_parse_flow_step_review_policy_rejects_expiry_outside_bounds(
+    expires_after_seconds: int,
+) -> None:
+    with pytest.raises(BadRequestException) as exc_info:
+        parse_flow_step_review_policy(
+            raw_policy={
+                "mode": "view",
+                "expires_after_seconds": expires_after_seconds,
+            },
+            output_mode=FlowOutputMode.PASS_THROUGH,
+        )
+
+    assert exc_info.value.code == FLOW_REVIEW_POLICY_INVALID
+
+
+def test_parse_flow_step_review_policy_defaults_expiry_to_inherit() -> None:
+    policy = parse_flow_step_review_policy(
+        raw_policy={"mode": "view"},
+        output_mode=FlowOutputMode.PASS_THROUGH,
+    )
+
+    assert policy == FlowStepReviewPolicy(
+        mode=FlowStepReviewMode.VIEW,
+        expires_after_seconds=None,
+    )
 
 
 def test_parse_flow_step_review_policy_reports_outbound_mode_before_shape() -> None:

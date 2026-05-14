@@ -96,6 +96,7 @@ CATEGORY_MAPPINGS = {
     ActionType.FLOW_RUN_REVIEW_CHECKPOINT_REJECTED.value: "user_actions",
     ActionType.FLOW_RUN_REVIEW_CHECKPOINT_RESUMED.value: "user_actions",
     ActionType.FLOW_RUN_REVIEW_CHECKPOINT_CANCELLED.value: "user_actions",
+    ActionType.FLOW_RUN_REVIEW_CHECKPOINT_EXPIRED.value: "user_actions",
     ActionType.AI_BUILDER_SESSION_CREATED.value: "user_actions",
     ActionType.AI_BUILDER_PLAN_PROPOSED.value: "user_actions",
     ActionType.AI_BUILDER_PLAN_APPROVED.value: "user_actions",

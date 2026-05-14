@@ -291,6 +291,8 @@ FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE: dict[str, Any] = {
     "rejected_at": None,
     "resumed_at": None,
     "cancelled_at": None,
+    "expires_at": "2026-03-31T10:05:30Z",
+    "expired_at": None,
     "created_at": "2026-03-17T10:05:30Z",
     "updated_at": "2026-03-17T10:05:30Z",
 }
@@ -298,9 +300,9 @@ FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE: dict[str, Any] = {
 FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE: dict[str, Any] = {
     **FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE,
     "state": "resumed",
-    "revision": 3,
+    "revision": 4,
     "decision": "approved",
-    "current_payload_json": {"text": "Reviewed answer."},
+    "current_payload_json": {"text": "Edited answer."},
     "resume_key_present": True,
     "edited_at": "2026-03-17T10:06:30Z",
     "approved_at": "2026-03-17T10:07:30Z",
@@ -312,8 +314,12 @@ FLOW_RUN_REVIEW_CHECKPOINT_EDIT_REQUEST_EXAMPLE: dict[str, Any] = {
     "current_payload_json": {"text": "Edited answer."},
 }
 
-FLOW_RUN_REVIEW_CHECKPOINT_DECISION_REQUEST_EXAMPLE: dict[str, Any] = {
+FLOW_RUN_REVIEW_CHECKPOINT_APPROVE_REQUEST_EXAMPLE: dict[str, Any] = {
     "expected_checkpoint_revision": 2,
+}
+
+FLOW_RUN_REVIEW_CHECKPOINT_RESUME_REQUEST_EXAMPLE: dict[str, Any] = {
+    "expected_checkpoint_revision": 3,
 }
 
 FLOW_RUN_REVIEW_CHECKPOINT_REJECT_REQUEST_EXAMPLE: dict[str, Any] = {
@@ -321,11 +327,35 @@ FLOW_RUN_REVIEW_CHECKPOINT_REJECT_REQUEST_EXAMPLE: dict[str, Any] = {
     "reason": "The draft cannot be used for this case.",
 }
 
+FLOW_RUN_REVIEW_CHECKPOINT_EDITED_RESPONSE_EXAMPLE: dict[str, Any] = {
+    **FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE,
+    "state": "edited",
+    "revision": 2,
+    "current_payload_json": {"text": "Edited answer."},
+    "decided_by_user_id": "00000000-0000-0000-0000-000000000030",
+    "decided_by_principal_type": "user",
+    "edited_at": "2026-03-17T10:06:30Z",
+}
+
+FLOW_RUN_REVIEW_CHECKPOINT_APPROVED_RESPONSE_EXAMPLE: dict[str, Any] = {
+    **FLOW_RUN_REVIEW_CHECKPOINT_EDITED_RESPONSE_EXAMPLE,
+    "state": "approved",
+    "revision": 3,
+    "approved_at": "2026-03-17T10:07:30Z",
+}
+
+FLOW_RUN_REVIEW_CHECKPOINT_REJECTED_RESPONSE_EXAMPLE: dict[str, Any] = {
+    **FLOW_RUN_REVIEW_CHECKPOINT_EDITED_RESPONSE_EXAMPLE,
+    "state": "rejected",
+    "revision": 3,
+    "rejected_at": "2026-03-17T10:07:30Z",
+}
+
 FLOW_RUN_REVIEW_CHECKPOINT_RESUME_RESPONSE_EXAMPLE: dict[str, Any] = {
     "checkpoint": {
-        **FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE,
+        **FLOW_RUN_REVIEW_CHECKPOINT_APPROVED_RESPONSE_EXAMPLE,
         "state": "resumed",
-        "revision": 3,
+        "revision": 4,
         "resumed_at": "2026-03-17T10:08:00Z",
     },
     "run": {
@@ -343,6 +373,52 @@ GRAPH_RESPONSE_EXAMPLE: dict[str, Any] = {
     "edges": [
         {"source": "step-1", "target": "step-2"},
     ],
+}
+
+PAGINATED_FLOW_SPARSE_RESPONSE_EXAMPLE: dict[str, Any] = {
+    "items": [FLOW_SPARSE_PUBLIC_EXAMPLE],
+    "has_more": False,
+    "count": 1,
+}
+
+PAGINATED_FLOW_RUN_RESPONSE_EXAMPLE: dict[str, Any] = {
+    "items": [FLOW_RUN_PUBLIC_EXAMPLE],
+    "has_more": False,
+    "count": 1,
+}
+
+HTTP_TEST_REQUEST_EXAMPLE: dict[str, Any] = {
+    "direction": "output",
+    "method": "POST",
+    "config": {
+        "url": "https://webhook.example.com/eneo/flow-output",
+        "auth": {"mode": "none"},
+        "timeout_seconds": 10,
+        "body": {
+            "mode": "json_template",
+            "template": '{"event":"flow.test","status":"ok"}',
+        },
+        "custom_headers": [
+            {"name": "X-Eneo-Test", "value": "true", "secret": False}
+        ],
+        "response_format": "json",
+    },
+    "test_variables": {},
+}
+
+HTTP_TEST_RESPONSE_EXAMPLE: dict[str, Any] = {
+    "success": True,
+    "status_code": 200,
+    "duration_ms": 128.4,
+    "response_preview": '{"ok":true}',
+    "request_preview": {
+        "method": "POST",
+        "url": "https://webhook.example.com/eneo/flow-output",
+        "headers": {"X-Eneo-Test": "true"},
+        "body_preview": '{"event":"flow.test","status":"ok"}',
+    },
+    "error_code": None,
+    "error_message": None,
 }
 
 
@@ -868,6 +944,27 @@ class FlowRunReviewCheckpointPublic(BaseModel):
     rejected_at: datetime | None = None
     resumed_at: datetime | None = None
     cancelled_at: datetime | None = None
+    expires_at: datetime | None = Field(
+        default=None,
+        description=(
+            "Review submission deadline for this unresolved review checkpoint. "
+            "Mutating the checkpoint after this timestamp returns `400` with code "
+            "`flow_review_expired`; the active-checkpoint endpoint may briefly show "
+            "the checkpoint until the background reconciler cancels the run. "
+            "Approved checkpoints can still be resumed after this timestamp because "
+            "the human decision was already persisted. Null only for legacy "
+            "checkpoints created before review expiry was persisted."
+        ),
+    )
+    expired_at: datetime | None = Field(
+        default=None,
+        description=(
+            "Set when the platform terminalized this unresolved checkpoint because "
+            "the review deadline passed. Null while the checkpoint is still active, "
+            "approved, rejected, cancelled for another reason, or from legacy data "
+            "without persisted expiry state."
+        ),
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -897,7 +994,7 @@ class FlowRunReviewCheckpointApproveRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         json_schema_extra={
-            "example": FLOW_RUN_REVIEW_CHECKPOINT_DECISION_REQUEST_EXAMPLE
+            "example": FLOW_RUN_REVIEW_CHECKPOINT_APPROVE_REQUEST_EXAMPLE
         },
     )
 
@@ -926,18 +1023,19 @@ class FlowRunReviewCheckpointRejectRequest(BaseModel):
         ),
     )
     reason: str = Field(
-        min_length=1,
-        max_length=1024,
-        description="Human-readable rejection reason stored with the run audit trail.",
+        description=(
+            "Human-readable rejection reason stored with the run audit trail. "
+            "Blank reasons return `400` with code `flow_review_reject_reason_required`; "
+            "reasons longer than 1024 characters return `400` with code "
+            "`flow_review_reject_reason_too_long`."
+        ),
     )
 
 
 class FlowRunReviewCheckpointResumeRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
-        json_schema_extra={
-            "example": FLOW_RUN_REVIEW_CHECKPOINT_DECISION_REQUEST_EXAMPLE
-        },
+        json_schema_extra={"example": FLOW_RUN_REVIEW_CHECKPOINT_RESUME_REQUEST_EXAMPLE},
     )
 
     expected_checkpoint_revision: int = Field(
@@ -1125,6 +1223,8 @@ class GraphResponse(BaseModel):
 
 
 class HttpTestRequest(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"example": HTTP_TEST_REQUEST_EXAMPLE})
+
     config: dict[str, Any]
     direction: Literal["input", "output"] = "output"
     method: str = "POST"
@@ -1132,6 +1232,8 @@ class HttpTestRequest(BaseModel):
 
 
 class HttpTestResponse(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"example": HTTP_TEST_RESPONSE_EXAMPLE})
+
     success: bool
     status_code: int | None = None
     duration_ms: float = 0.0
@@ -1685,6 +1787,8 @@ class FlowRunReviewCheckpointEvidencePublic(BaseModel):
     rejected_at: datetime | None = None
     resumed_at: datetime | None = None
     cancelled_at: datetime | None = None
+    expires_at: datetime | None = None
+    expired_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

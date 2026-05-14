@@ -16,6 +16,7 @@ from intric.flows.api.flow_definition_access import (
     require_flow_edit_access,
 )
 from intric.flows.api.flow_models import (
+    PAGINATED_FLOW_SPARSE_RESPONSE_EXAMPLE,
     FlowCreateRequest,
     FlowPublic,
     FlowRuntimePublic,
@@ -181,6 +182,18 @@ async def create_flow(
         f"{_FLOW_DRAFT_OWNERSHIP_DESCRIPTION} {_FLOW_SERVICE_KEY_DISCOVERY_DESCRIPTION}"
     ),
     responses={
+        200: {
+            "description": (
+                "Sparse flow page. `items` contains the returned page only; "
+                "`count` is the number of returned items and `has_more` tells "
+                "clients whether to request the next offset window."
+            ),
+            "content": {
+                "application/json": {
+                    "example": PAGINATED_FLOW_SPARSE_RESPONSE_EXAMPLE,
+                }
+            },
+        },
         403: error_response(
             description=_FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",

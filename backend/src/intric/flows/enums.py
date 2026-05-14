@@ -167,6 +167,8 @@ class FlowRunLifecycleSource(str, Enum):
     REVIEW_CHECKPOINT_REJECTED = "review_checkpoint_rejected"
     REVIEW_CHECKPOINT_RESUMED = "review_checkpoint_resumed"
     REVIEW_CHECKPOINT_CANCELLED = "review_checkpoint_cancelled"
+    REVIEW_EXPIRED = "review_expired"
+    REVIEW_CHECKPOINT_EXPIRED = "review_checkpoint_expired"
 
 
 class FlowRunReviewCheckpointState(str, Enum):
@@ -176,6 +178,7 @@ class FlowRunReviewCheckpointState(str, Enum):
     REJECTED = "rejected"
     RESUMED = "resumed"
     CANCELLED = FlowRunStatus.CANCELLED.value
+    EXPIRED = "expired"
 
 
 ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES = frozenset(
@@ -183,6 +186,12 @@ ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES = frozenset(
         FlowRunReviewCheckpointState.AWAITING_REVIEW,
         FlowRunReviewCheckpointState.EDITED,
         FlowRunReviewCheckpointState.APPROVED,
+    }
+)
+RECONCILABLE_REVIEW_CHECKPOINT_STATES = frozenset(
+    {
+        FlowRunReviewCheckpointState.AWAITING_REVIEW,
+        FlowRunReviewCheckpointState.EDITED,
     }
 )
 

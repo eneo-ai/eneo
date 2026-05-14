@@ -370,6 +370,29 @@ async def _reconcile_stale_running_runs_all_tenants(
     return {"status": "ok", "reconciled": reconciled}
 
 
+async def _reconcile_expired_review_checkpoints_all_tenants(
+    *, limit: int = 100
+) -> dict[str, int | str]:
+    reconciled = 0
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(session=providers.Object(session))
+        tenant_repo = container.tenant_repo()
+        async with session.begin():
+            tenants = await tenant_repo.get_all_tenants()
+        for tenant in tenants:
+            for _ in range(limit):
+                async with session.begin():
+                    reconciler = container.flow_review_expiry_reconciler()
+                    did_reconcile = await reconciler.reconcile_next_expired_checkpoint(
+                        tenant_id=tenant.id,
+                    )
+                if did_reconcile == 0:
+                    break
+                reconciled += did_reconcile
+    return {"status": "ok", "reconciled": reconciled}
+
+
 async def _redispatch_stale_queued_runs_all_tenants(
     *, limit: int = 100
 ) -> dict[str, int | str]:
@@ -481,6 +504,18 @@ def reconcile_stale_running_runs() -> dict[str, int | str]:
     loop = _get_flow_task_loop()
     future = asyncio.run_coroutine_threadsafe(
         _reconcile_stale_running_runs_all_tenants(),
+        loop,
+    )
+    return future.result(timeout=30)
+
+
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+    name="flows.reconcile_review_expiry",
+)
+def reconcile_expired_review_checkpoints() -> dict[str, int | str]:
+    loop = _get_flow_task_loop()
+    future = asyncio.run_coroutine_threadsafe(
+        _reconcile_expired_review_checkpoints_all_tenants(),
         loop,
     )
     return future.result(timeout=30)

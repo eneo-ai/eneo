@@ -99,6 +99,7 @@ class ActionType(str, Enum):
     FLOW_RUN_REVIEW_CHECKPOINT_REJECTED = "flow_run_review_checkpoint_rejected"
     FLOW_RUN_REVIEW_CHECKPOINT_RESUMED = "flow_run_review_checkpoint_resumed"
     FLOW_RUN_REVIEW_CHECKPOINT_CANCELLED = "flow_run_review_checkpoint_cancelled"
+    FLOW_RUN_REVIEW_CHECKPOINT_EXPIRED = "flow_run_review_checkpoint_expired"
 
     # AI Builder Actions
     AI_BUILDER_SESSION_CREATED = "ai_builder_session_created"

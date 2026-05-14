@@ -3633,6 +3633,33 @@ async def test_reject_review_checkpoint_requires_reason(user):
 
 
 @pytest.mark.asyncio
+async def test_reject_review_checkpoint_rejects_too_long_reason(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        max_concurrent_runs=5,
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.reject_review_checkpoint(
+            flow_id=uuid4(),
+            run_id=uuid4(),
+            checkpoint_id=uuid4(),
+            expected_checkpoint_revision=1,
+            reason="x" * 1025,
+        )
+
+    assert exc_info.value.code == "flow_review_reject_reason_too_long"
+    assert exc_info.value.context == {"max_length": 1024}
+    flow_run_repo.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_reject_review_checkpoint_terminalizes_run_with_review_source(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()

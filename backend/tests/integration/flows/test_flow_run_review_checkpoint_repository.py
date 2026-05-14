@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
@@ -12,6 +13,7 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.entity_types import EntityType
 from intric.authentication.principal_types import PrincipalType
+from intric.database.database import sessionmanager
 from intric.database.tables.flow_tables import (
     FlowRunAuditOutbox,
     FlowRunReviewCheckpoints,
@@ -27,6 +29,9 @@ from intric.flows import (
     FlowStep,
     FlowVersionRepository,
 )
+from intric.flows.application.flow_review_expiry_reconciliation import (
+    FlowReviewExpiryReconciler,
+)
 from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from intric.flows.enums import (
     FlowOutputType,
@@ -35,9 +40,14 @@ from intric.flows.enums import (
     FlowRunStatus,
     FlowStepResultStatus,
 )
+from intric.flows.flow_review_expiry_policy import (
+    FLOW_REVIEW_EXPIRED,
+    FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
+)
 from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.principal import FlowPrincipal
+from intric.flows.runtime import tasks as flow_runtime_tasks
 from intric.main.exceptions import BadRequestException
 
 
@@ -246,6 +256,35 @@ async def _complete_reviewed_step_result(
             current_attempt_no=1,
             output_payload_json=output_payload_json or {"answer": "draft"},
         )
+    )
+
+
+def _expiry_seconds(checkpoint: FlowRunReviewCheckpoint) -> float:
+    assert checkpoint.expires_at is not None
+    return (checkpoint.expires_at - checkpoint.created_at).total_seconds()
+
+
+async def _expire_checkpoint_clock(
+    *,
+    session: AsyncSession,
+    checkpoint_id: UUID,
+) -> None:
+    await session.execute(
+        sa.update(FlowRunReviewCheckpoints)
+        .where(FlowRunReviewCheckpoints.id == checkpoint_id)
+        .values(expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+    )
+
+
+def _review_run_service(
+    *,
+    session: AsyncSession,
+    admin_user,
+) -> FlowReviewExpiryReconciler:
+    run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+    return FlowReviewExpiryReconciler(
+        flow_run_repo=run_repo,
+        flow_run_terminalizer=FlowRunTerminalizer(run_repo, run_repo.audit_outbox_repo),
     )
 
 
@@ -581,6 +620,11 @@ async def test_open_review_checkpoint_transitions_run_and_writes_outbox(
     assert opened.checkpoint.review_mode == FlowStepReviewMode.VIEW
     assert opened.checkpoint.output_type == FlowOutputType.JSON
     assert opened.checkpoint.output_contract_json == {"type": "object"}
+    assert _expiry_seconds(opened.checkpoint) == pytest.approx(
+        FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
+        abs=2,
+    )
+    assert opened.checkpoint.expired_at is None
     assert outbox_values == (
         opened.checkpoint.id,
         opened.checkpoint.revision,
@@ -643,6 +687,57 @@ async def test_open_review_checkpoint_replays_existing_attempt_without_second_ou
     assert replayed.checkpoint.id == opened.checkpoint.id
     assert replayed.audit_outbox_id is None
     assert outbox_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_review_checkpoint_custom_expiry_is_not_extended_by_edit(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_review_checkpoint_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        await repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        await _complete_reviewed_step_result(session=session, scenario=scenario)
+
+        opened = await repo.open_review_checkpoint_for_completed_step(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=scenario.step_ids[0],
+            step_order=1,
+            attempt_no=1,
+            requester_principal=FlowPrincipal.from_user(admin_user),
+            next_step_ids=(scenario.step_ids[1],),
+            review_expires_after_seconds=120,
+        )
+        edited = await repo.edit_review_checkpoint_payload(
+            checkpoint_id=opened.checkpoint.id,
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            expected_revision=opened.checkpoint.revision,
+            current_payload_json={"answer": "edited without extending review window"},
+            principal=FlowPrincipal.from_user(admin_user),
+        )
+
+    assert _expiry_seconds(opened.checkpoint) == pytest.approx(120, abs=2)
+    assert edited.expires_at == opened.checkpoint.expires_at
+    assert edited.expired_at is None
 
 
 @pytest.mark.asyncio
@@ -1127,6 +1222,389 @@ async def test_awaiting_review_run_cancels_active_checkpoint_by_terminalizer(
         "flow_run_review_checkpoint_cancelled",
     ]
     assert terminal_outbox_action == "flow_run_cancelled"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_reconcile_expired_review_checkpoint_cancels_run_with_audit_trail(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_review_checkpoint_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        await repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        await _complete_reviewed_step_result(session=session, scenario=scenario)
+        opened = await repo.open_review_checkpoint_for_completed_step(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=scenario.step_ids[0],
+            step_order=1,
+            attempt_no=1,
+            requester_principal=FlowPrincipal.from_user(admin_user),
+            next_step_ids=(scenario.step_ids[1],),
+        )
+        await _expire_checkpoint_clock(
+            session=session,
+            checkpoint_id=opened.checkpoint.id,
+        )
+
+        reconciled = await _review_run_service(
+            session=session,
+            admin_user=admin_user,
+        ).reconcile_next_expired_checkpoint(tenant_id=scenario.tenant_id)
+
+        checkpoint_row = await session.scalar(
+            sa.select(FlowRunReviewCheckpoints).where(
+                FlowRunReviewCheckpoints.id == opened.checkpoint.id
+            )
+        )
+        run_row = await session.scalar(
+            sa.select(FlowRuns).where(FlowRuns.id == scenario.flow_run_id)
+        )
+        checkpoint_outbox_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowRunAuditOutbox)
+                    .where(
+                        FlowRunAuditOutbox.review_checkpoint_id == opened.checkpoint.id
+                    )
+                    .order_by(FlowRunAuditOutbox.checkpoint_revision.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        terminal_outbox_row = await session.scalar(
+            sa.select(FlowRunAuditOutbox).where(
+                FlowRunAuditOutbox.flow_run_id == scenario.flow_run_id,
+                FlowRunAuditOutbox.review_checkpoint_id.is_(None),
+            )
+        )
+        checkpoint_state = checkpoint_row.state if checkpoint_row is not None else None
+        checkpoint_expired_at = (
+            checkpoint_row.expired_at if checkpoint_row is not None else None
+        )
+        run_status = run_row.status if run_row is not None else None
+        run_error_message = run_row.error_message if run_row is not None else None
+        checkpoint_outbox_actions = [row.action for row in checkpoint_outbox_rows]
+        terminal_outbox_action = (
+            terminal_outbox_row.action if terminal_outbox_row is not None else None
+        )
+        terminal_outbox_source = (
+            terminal_outbox_row.source if terminal_outbox_row is not None else None
+        )
+        terminal_outbox_error_code = (
+            terminal_outbox_row.error_code if terminal_outbox_row is not None else None
+        )
+        with pytest.raises(BadRequestException) as expired_exc_info:
+            await repo.edit_review_checkpoint_payload(
+                checkpoint_id=opened.checkpoint.id,
+                tenant_id=scenario.tenant_id,
+                flow_id=scenario.flow_id,
+                flow_run_id=scenario.flow_run_id,
+                expected_revision=opened.checkpoint.revision,
+                current_payload_json={"answer": "already expired"},
+                principal=FlowPrincipal.from_user(admin_user),
+            )
+        expired_error_context = expired_exc_info.value.context
+
+    assert reconciled == 1
+    assert checkpoint_state == FlowRunReviewCheckpointState.EXPIRED.value
+    assert checkpoint_expired_at is not None
+    assert run_status == FlowRunStatus.CANCELLED.value
+    assert run_error_message is not None
+    assert run_error_message.startswith(f"{FLOW_REVIEW_EXPIRED}:")
+    assert checkpoint_outbox_actions == [
+        "flow_run_review_checkpoint_opened",
+        "flow_run_review_checkpoint_expired",
+    ]
+    assert terminal_outbox_action == "flow_run_cancelled"
+    assert terminal_outbox_source == FlowRunLifecycleSource.REVIEW_EXPIRED.value
+    assert terminal_outbox_error_code == FLOW_REVIEW_EXPIRED
+    assert expired_exc_info.value.code == FLOW_REVIEW_EXPIRED
+    assert expired_error_context is not None
+    assert expired_error_context["checkpoint_id"] == str(opened.checkpoint.id)
+    assert expired_error_context["state"] == FlowRunReviewCheckpointState.EXPIRED.value
+    assert "expires_at" in expired_error_context
+    assert "expired_at" in expired_error_context
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_review_expiry_task_commits_checkpoint_and_run_from_fresh_session(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_review_checkpoint_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        await repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        await _complete_reviewed_step_result(session=session, scenario=scenario)
+        opened = await repo.open_review_checkpoint_for_completed_step(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=scenario.step_ids[0],
+            step_order=1,
+            attempt_no=1,
+            requester_principal=FlowPrincipal.from_user(admin_user),
+            next_step_ids=(scenario.step_ids[1],),
+        )
+        await _expire_checkpoint_clock(
+            session=session,
+            checkpoint_id=opened.checkpoint.id,
+        )
+        checkpoint_id = opened.checkpoint.id
+        flow_run_id = scenario.flow_run_id
+
+    result = await flow_runtime_tasks._reconcile_expired_review_checkpoints_all_tenants(
+        limit=10
+    )
+
+    async with sessionmanager.session() as verify_session, verify_session.begin():
+        checkpoint_row = (
+            await verify_session.execute(
+                sa.select(
+                    FlowRunReviewCheckpoints.state,
+                    FlowRunReviewCheckpoints.expired_at,
+                ).where(FlowRunReviewCheckpoints.id == checkpoint_id)
+            )
+        ).one_or_none()
+        run_status = await verify_session.scalar(
+            sa.select(FlowRuns.status).where(FlowRuns.id == flow_run_id)
+        )
+        terminal_outbox_row = (
+            await verify_session.execute(
+                sa.select(
+                    FlowRunAuditOutbox.error_code,
+                ).where(
+                    FlowRunAuditOutbox.flow_run_id == flow_run_id,
+                    FlowRunAuditOutbox.review_checkpoint_id.is_(None),
+                    FlowRunAuditOutbox.source
+                    == FlowRunLifecycleSource.REVIEW_EXPIRED.value,
+                )
+            )
+        ).one_or_none()
+
+    assert result == {"status": "ok", "reconciled": 1}
+    assert checkpoint_row is not None
+    assert checkpoint_row.state == FlowRunReviewCheckpointState.EXPIRED.value
+    assert checkpoint_row.expired_at is not None
+    assert run_status == FlowRunStatus.CANCELLED.value
+    assert terminal_outbox_row is not None
+    assert terminal_outbox_row.error_code == FLOW_REVIEW_EXPIRED
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_reconcile_expired_review_checkpoint_ignores_approved_checkpoint(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_review_checkpoint_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        await repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        await _complete_reviewed_step_result(session=session, scenario=scenario)
+        opened = await repo.open_review_checkpoint_for_completed_step(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=scenario.step_ids[0],
+            step_order=1,
+            attempt_no=1,
+            requester_principal=FlowPrincipal.from_user(admin_user),
+            next_step_ids=(scenario.step_ids[1],),
+        )
+        approved = await repo.approve_review_checkpoint(
+            checkpoint_id=opened.checkpoint.id,
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            expected_revision=opened.checkpoint.revision,
+            principal=FlowPrincipal.from_user(admin_user),
+        )
+        await _expire_checkpoint_clock(
+            session=session,
+            checkpoint_id=opened.checkpoint.id,
+        )
+
+        reconciled = await _review_run_service(
+            session=session,
+            admin_user=admin_user,
+        ).reconcile_next_expired_checkpoint(tenant_id=scenario.tenant_id)
+
+        run_row = await session.scalar(
+            sa.select(FlowRuns).where(FlowRuns.id == scenario.flow_run_id)
+        )
+        run_status = run_row.status if run_row is not None else None
+
+    assert approved.state == FlowRunReviewCheckpointState.APPROVED
+    assert reconciled == 0
+    assert run_status == FlowRunStatus.AWAITING_REVIEW.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_approved_review_checkpoint_can_resume_after_expiry_time(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_review_checkpoint_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        await repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        await _complete_reviewed_step_result(session=session, scenario=scenario)
+        opened = await repo.open_review_checkpoint_for_completed_step(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=scenario.step_ids[0],
+            step_order=1,
+            attempt_no=1,
+            requester_principal=FlowPrincipal.from_user(admin_user),
+            next_step_ids=(scenario.step_ids[1],),
+        )
+        approved = await repo.approve_review_checkpoint(
+            checkpoint_id=opened.checkpoint.id,
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            expected_revision=opened.checkpoint.revision,
+            principal=FlowPrincipal.from_user(admin_user),
+        )
+        await _expire_checkpoint_clock(
+            session=session,
+            checkpoint_id=opened.checkpoint.id,
+        )
+
+        result = await repo.resume_review_checkpoint(
+            checkpoint_id=opened.checkpoint.id,
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            expected_revision=approved.revision,
+            resume_idempotency_key=f"resume-{uuid4()}",
+            principal=FlowPrincipal.from_user(admin_user),
+        )
+
+    assert result.accepted is True
+    assert result.checkpoint.state == FlowRunReviewCheckpointState.RESUMED
+    assert result.run.status == FlowRunStatus.QUEUED
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_review_checkpoint_edit_after_expiry_returns_expired_error(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_review_checkpoint_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        await repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        await _complete_reviewed_step_result(session=session, scenario=scenario)
+        opened = await repo.open_review_checkpoint_for_completed_step(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=scenario.step_ids[0],
+            step_order=1,
+            attempt_no=1,
+            requester_principal=FlowPrincipal.from_user(admin_user),
+            next_step_ids=(scenario.step_ids[1],),
+        )
+        await _expire_checkpoint_clock(
+            session=session,
+            checkpoint_id=opened.checkpoint.id,
+        )
+
+        with pytest.raises(BadRequestException) as exc_info:
+            await repo.edit_review_checkpoint_payload(
+                checkpoint_id=opened.checkpoint.id,
+                tenant_id=scenario.tenant_id,
+                flow_id=scenario.flow_id,
+                flow_run_id=scenario.flow_run_id,
+                expected_revision=opened.checkpoint.revision,
+                current_payload_json={"answer": "too late"},
+                principal=FlowPrincipal.from_user(admin_user),
+            )
+
+    assert exc_info.value.code == FLOW_REVIEW_EXPIRED
+    assert exc_info.value.context is not None
+    assert exc_info.value.context["checkpoint_id"] == str(opened.checkpoint.id)
+    assert (
+        exc_info.value.context["state"]
+        == FlowRunReviewCheckpointState.AWAITING_REVIEW.value
+    )
+    assert isinstance(exc_info.value.context["expires_at"], str)
 
 
 @pytest.mark.asyncio

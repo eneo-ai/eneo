@@ -12,6 +12,7 @@ from intric.flows.flow_input_limits import (
     effective_flow_input_limit,
     effective_runtime_max_files,
 )
+from intric.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
 from intric.flows.flow_run_contract_models import (
     FlowFinalOutputContractPublic,
     FlowOutputDelivery,
@@ -308,6 +309,11 @@ def _review_step_contracts(
             label=step.user_description,
             review_mode=step.review_policy.mode,
             output_type=FlowOutputType(step.output_type),
+            expires_after_seconds=(
+                step.review_policy.expires_after_seconds
+                if step.review_policy.expires_after_seconds is not None
+                else FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
+            ),
             output_contract=step.output_contract,
         )
         for step in steps

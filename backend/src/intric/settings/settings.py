@@ -1,7 +1,8 @@
 from dataclasses import asdict
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.config import JsonDict
 
 from intric.ai_models.completion_models.completion_model import CompletionModelPublic
 from intric.ai_models.embedding_models.embedding_model import EmbeddingModelPublicLegacy
@@ -51,7 +52,82 @@ class ToggleSettingUpdate(BaseModel):
     enabled: bool
 
 
+FLOW_INPUT_LIMITS_PUBLIC_EXAMPLE: JsonDict = {
+    "file_max_size_bytes": 52428800,
+    "audio_max_size_bytes": 104857600,
+    "max_files_per_run": 20,
+    "audio_max_files_per_run": 5,
+}
+
+FLOW_INPUT_LIMITS_UPDATE_EXAMPLE: JsonDict = {
+    "file_max_size_bytes": 52428800,
+    "audio_max_size_bytes": None,
+    "max_files_per_run": 20,
+    "audio_max_files_per_run": None,
+}
+
+FLOW_DOCUMENT_RENDER_LIMITS_EXAMPLE: JsonDict = {
+    "max_source_chars": 500000,
+    "max_blocks": 2000,
+    "max_text_chars": 500000,
+    "max_table_rows": 5000,
+    "max_table_columns": 50,
+    "max_table_cells": 50000,
+    "max_cell_chars": 20000,
+    "max_list_items": 5000,
+    "max_structured_nodes": 10000,
+    "max_structured_depth": 32,
+    "max_object_fields": 200,
+}
+
+FLOW_DOCUMENT_RENDER_LIMITS_UPDATE_EXAMPLE: JsonDict = {
+    "max_source_chars": 500000,
+    "max_blocks": None,
+    "max_table_rows": 5000,
+}
+
+FLOW_RUNTIME_POLICY_EXAMPLE: JsonDict = {
+    "default_step_timeout_seconds": 900,
+    "max_step_timeout_seconds": 1800,
+    "hard_ceiling_seconds": 3600,
+}
+
+FLOW_RUNTIME_POLICY_UPDATE_EXAMPLE: JsonDict = {
+    "default_step_timeout_seconds": 900,
+    "max_step_timeout_seconds": None,
+}
+
+FLOW_EVIDENCE_POLICY_EXAMPLE: JsonDict = {
+    "allow_sensitive_flow_exports": False,
+    "allow_space_admin_raw_export_class3": False,
+    "allow_run_owner_raw_export_class3": False,
+    "allow_service_key_raw_export_class3": False,
+}
+
+FLOW_EVIDENCE_POLICY_UPDATE_EXAMPLE: JsonDict = {
+    "allow_sensitive_flow_exports": False,
+    "allow_space_admin_raw_export_class3": True,
+}
+
+FLOW_RETENTION_POLICY_EXAMPLE: JsonDict = {
+    "shared_default_days": 30,
+    "source_audio_days": 14,
+    "transcript_text_days": 30,
+    "generated_artifact_days": 30,
+    "run_debug_evidence_days": 7,
+}
+
+FLOW_RETENTION_POLICY_UPDATE_EXAMPLE: JsonDict = {
+    "source_audio_days": 14,
+    "run_debug_evidence_days": None,
+}
+
+
 class FlowInputLimitsPublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_INPUT_LIMITS_PUBLIC_EXAMPLE}
+    )
+
     file_max_size_bytes: int = Field(
         ge=FLOW_INPUT_MIN_LIMIT_BYTES,
         le=FLOW_INPUT_MAX_LIMIT_BYTES,
@@ -75,6 +151,10 @@ class FlowInputLimitsPublic(BaseModel):
 
 
 class FlowInputLimitsUpdate(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_INPUT_LIMITS_UPDATE_EXAMPLE}
+    )
+
     file_max_size_bytes: int | None = Field(
         default=None,
         ge=FLOW_INPUT_MIN_LIMIT_BYTES,
@@ -102,6 +182,10 @@ class FlowInputLimitsUpdate(BaseModel):
 
 
 class FlowDocumentRenderLimitsPublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_DOCUMENT_RENDER_LIMITS_EXAMPLE}
+    )
+
     max_source_chars: int = Field(
         ge=1, le=FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_source_chars
     )
@@ -148,6 +232,10 @@ class FlowDocumentRenderLimitsPublic(BaseModel):
 
 
 class FlowDocumentRenderLimitsUpdate(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_DOCUMENT_RENDER_LIMITS_UPDATE_EXAMPLE}
+    )
+
     max_source_chars: int | None = Field(
         default=None,
         ge=1,
@@ -206,6 +294,10 @@ class FlowDocumentRenderLimitsUpdate(BaseModel):
 
 
 class FlowRuntimePolicyPublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_RUNTIME_POLICY_EXAMPLE}
+    )
+
     default_step_timeout_seconds: int = Field(ge=1)
     max_step_timeout_seconds: int = Field(ge=1)
     hard_ceiling_seconds: int = Field(
@@ -215,6 +307,10 @@ class FlowRuntimePolicyPublic(BaseModel):
 
 
 class FlowRuntimePolicyUpdate(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_RUNTIME_POLICY_UPDATE_EXAMPLE}
+    )
+
     default_step_timeout_seconds: int | None = Field(
         default=None,
         ge=1,
@@ -240,6 +336,10 @@ class AIBuilderBudgetSettingsUpdate(BaseModel):
 
 
 class FlowEvidencePolicyPublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_EVIDENCE_POLICY_EXAMPLE}
+    )
+
     allow_sensitive_flow_exports: bool = False
     allow_space_admin_raw_export_class3: bool = False
     allow_run_owner_raw_export_class3: bool = False
@@ -247,6 +347,10 @@ class FlowEvidencePolicyPublic(BaseModel):
 
 
 class FlowEvidencePolicyUpdate(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_EVIDENCE_POLICY_UPDATE_EXAMPLE}
+    )
+
     allow_sensitive_flow_exports: bool | None = None
     allow_space_admin_raw_export_class3: bool | None = None
     allow_run_owner_raw_export_class3: bool | None = None
@@ -254,6 +358,10 @@ class FlowEvidencePolicyUpdate(BaseModel):
 
 
 class FlowRetentionPolicyPublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_RETENTION_POLICY_EXAMPLE}
+    )
+
     shared_default_days: int | None = None
     source_audio_days: int | None = None
     transcript_text_days: int | None = None
@@ -262,6 +370,10 @@ class FlowRetentionPolicyPublic(BaseModel):
 
 
 class FlowRetentionPolicyUpdate(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_RETENTION_POLICY_UPDATE_EXAMPLE}
+    )
+
     shared_default_days: int | None = None
     source_audio_days: int | None = None
     transcript_text_days: int | None = None

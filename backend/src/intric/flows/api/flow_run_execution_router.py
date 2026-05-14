@@ -24,6 +24,11 @@ from intric.flows.api import flow_router_common as common
 from intric.flows.api.flow_api_common import audit_actor_kwargs, error_response
 from intric.flows.api.flow_assembler import FlowAssembler
 from intric.flows.api.flow_models import (
+    FLOW_RUN_REVIEW_CHECKPOINT_APPROVED_RESPONSE_EXAMPLE,
+    FLOW_RUN_REVIEW_CHECKPOINT_EDITED_RESPONSE_EXAMPLE,
+    FLOW_RUN_REVIEW_CHECKPOINT_REJECTED_RESPONSE_EXAMPLE,
+    FLOW_RUN_REVIEW_CHECKPOINT_RESUME_RESPONSE_EXAMPLE,
+    PAGINATED_FLOW_RUN_RESPONSE_EXAMPLE,
     FlowRunCreateRequest,
     FlowRunPublic,
     FlowRunRedispatchResponse,
@@ -184,6 +189,12 @@ Consumer sequence for human-in-the-loop apps:
 It may be `null` for unstructured text/document steps even when `step_snapshot_available`
 is `true`.
 
+Treat `expires_at` as the review submission deadline. Edit, approve, or reject requests
+after this timestamp return `400` with code `flow_review_expired`; this endpoint may
+briefly show the checkpoint until the background reconciler marks the run cancelled.
+When approval happens before `expires_at`, resume remains valid after the deadline because
+the human decision is already persisted.
+
 Current visibility follows run-detail visibility: service-key principals can read only
 checkpoints for runs they own, while human callers follow the existing flow view policy.
 
@@ -209,6 +220,9 @@ checkpoint, step-result projection, or audit state is persisted. Contract failur
 with code `typed_io_contract_violation` and context fields `checkpoint_id`, `step_id`,
 `step_order`, and `payload_field`.
 
+The edit must be submitted before the checkpoint `expires_at` deadline. Late edits return
+`400` with code `flow_review_expired`.
+
 Service-key principals may edit checkpoints only for runs they own (key must have
 `resource_permissions.flows = write`). Human callers follow the same flow review permission
 policy used by the approve and reject endpoints.
@@ -231,14 +245,63 @@ _FLOW_RUN_REVIEW_EDIT_CONTRACT_ERROR_EXAMPLE: dict[str, object] = {
     },
 }
 
-_FLOW_RUN_REVIEW_EDIT_STALE_REVISION_ERROR_EXAMPLE: dict[str, object] = {
-    "message": "Review checkpoint was edited by another client. Refetch before editing.",
+_FLOW_RUN_REVIEW_STALE_REVISION_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Review checkpoint revision is stale.",
     "intric_error_code": int(ErrorCodes.BAD_REQUEST),
     "code": "flow_review_stale_revision",
     "context": {
         "checkpoint_id": "7f4f6d62-0e2b-4682-9fa4-f046c3df1b15",
-        "expected_revision": 2,
-        "actual_revision": 3,
+        "expected_checkpoint_revision": 2,
+        "current_checkpoint_revision": 3,
+    },
+}
+
+_FLOW_RUN_REVIEW_EXPIRED_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Review checkpoint has expired.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": "flow_review_expired",
+    "context": {
+        "checkpoint_id": "7f4f6d62-0e2b-4682-9fa4-f046c3df1b15",
+        "state": "awaiting_review",
+        "expires_at": "2026-05-14T09:30:00Z",
+    },
+}
+
+_FLOW_RUN_REVIEW_REJECT_REASON_REQUIRED_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Review rejection reason is required.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": "flow_review_reject_reason_required",
+}
+
+_FLOW_RUN_REVIEW_REJECT_REASON_TOO_LONG_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Review rejection reason must be at most 1024 characters.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": "flow_review_reject_reason_too_long",
+    "context": {"max_length": 1024},
+}
+
+_FLOW_RUN_REVIEW_STALE_AND_EXPIRED_ERROR_EXAMPLES: dict[
+    str, dict[str, object]
+] = {
+    "flow_review_stale_revision": {
+        "summary": "Checkpoint revision changed before this request.",
+        "value": _FLOW_RUN_REVIEW_STALE_REVISION_ERROR_EXAMPLE,
+    },
+    "flow_review_expired": {
+        "summary": "Checkpoint expired before review completion.",
+        "value": _FLOW_RUN_REVIEW_EXPIRED_ERROR_EXAMPLE,
+    },
+}
+
+_FLOW_RUN_REVIEW_REJECT_ERROR_EXAMPLES: dict[str, dict[str, object]] = {
+    **_FLOW_RUN_REVIEW_STALE_AND_EXPIRED_ERROR_EXAMPLES,
+    "flow_review_reject_reason_required": {
+        "summary": "Reject request did not include a non-empty reason.",
+        "value": _FLOW_RUN_REVIEW_REJECT_REASON_REQUIRED_ERROR_EXAMPLE,
+    },
+    "flow_review_reject_reason_too_long": {
+        "summary": "Reject reason exceeded the accepted length.",
+        "value": _FLOW_RUN_REVIEW_REJECT_REASON_TOO_LONG_ERROR_EXAMPLE,
     },
 }
 
@@ -249,6 +312,9 @@ Approve the current payload for a human review checkpoint.
 Approval advances the checkpoint revision. Resume is a separate command so clients can make
 the decision durable before dispatching more runtime work. Use the latest checkpoint `revision`;
 stale approvals return `400` with code `flow_review_stale_revision`.
+
+The approval must be submitted before the checkpoint `expires_at` deadline. After approval
+is persisted, resume remains valid even if the original deadline has passed.
 
 Service-key principals may approve checkpoints only for runs they own (key must have
 `resource_permissions.flows = write`).
@@ -266,6 +332,9 @@ Reject a human review checkpoint and cancel the run.
 The rejection reason is written to lifecycle audit metadata and the run is terminalized with
 `cancelled` status using the `review_rejected` lifecycle source.
 
+The rejection must be submitted before the checkpoint `expires_at` deadline. Late rejections
+return `400` with code `flow_review_expired`.
+
 Service-key principals may reject checkpoints only for runs they own (key must have
 `resource_permissions.flows = write`).
 
@@ -282,6 +351,10 @@ Resume a run after an approved human review checkpoint.
 Use the `Idempotency-Key` header for retries. Replaying the same key returns the current
 checkpoint and run without dispatching another worker task. A successful response is
 `202 Accepted`: poll the run and step endpoints after this call to observe resumed execution.
+
+Resume uses the approved checkpoint revision. It can run after the original `expires_at`
+deadline only when approval was already persisted before expiry; already expired checkpoints
+return `400` with code `flow_review_expired`.
 
 Service-key principals may resume approved checkpoints only for runs they own (key must have
 `resource_permissions.flows = write`).
@@ -428,6 +501,18 @@ async def create_flow_run(
     summary="List flow runs (flow-first)",
     description=_FLOW_RUN_LIST_DESCRIPTION,
     responses={
+        200: {
+            "description": (
+                "Flow run page. `items` contains the returned page only; "
+                "`count` is the number of returned runs and `has_more` tells "
+                "clients whether to request the next offset window."
+            ),
+            "content": {
+                "application/json": {
+                    "example": PAGINATED_FLOW_RUN_RESPONSE_EXAMPLE,
+                }
+            },
+        },
         403: error_response(
             description=_FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
@@ -475,9 +560,7 @@ async def list_flow_runs_alias(
     result_files_by_run_id = _result_files_by_run_id(
         await run_service.list_result_files_for_runs(runs=page_items)
     )
-    token_usage_by_run_id = await run_service.list_token_usage_for_runs(
-        runs=page_items
-    )
+    token_usage_by_run_id = await run_service.list_token_usage_for_runs(runs=page_items)
     return {
         "count": len(page_items),
         "items": [
@@ -596,18 +679,30 @@ async def get_active_flow_run_review_checkpoint(
     summary="Edit flow run review checkpoint",
     description=_FLOW_RUN_REVIEW_EDIT_DESCRIPTION,
     responses={
+        200: {
+            "description": (
+                "Checkpoint edited. Use the returned `revision` for the next "
+                "approve, reject, or edit request. If you later approve it, use "
+                "the post-approval revision for resume."
+            ),
+            "content": {
+                "application/json": {
+                    "example": FLOW_RUN_REVIEW_CHECKPOINT_EDITED_RESPONSE_EXAMPLE,
+                }
+            },
+        },
         400: {
             "model": GeneralError,
             "description": (
                 "Review edit failed. Representative machine-readable codes include "
                 "typed_io_contract_violation, flow_review_stale_revision, "
-                "flow_review_not_active, and flow_review_step_result_not_found. "
+                "flow_review_expired, flow_review_not_active, and "
+                "flow_review_step_result_not_found. "
                 "Contract validation errors include context.checkpoint_id, "
                 "context.step_id, context.step_order, and context.payload_field."
             ),
             "content": {
                 "application/json": {
-                    "example": _FLOW_RUN_REVIEW_EDIT_CONTRACT_ERROR_EXAMPLE,
                     "examples": {
                         "typed_io_contract_violation": {
                             "summary": "Edited payload violates the step output contract.",
@@ -615,7 +710,11 @@ async def get_active_flow_run_review_checkpoint(
                         },
                         "flow_review_stale_revision": {
                             "summary": "Checkpoint revision changed before edit.",
-                            "value": _FLOW_RUN_REVIEW_EDIT_STALE_REVISION_ERROR_EXAMPLE,
+                            "value": _FLOW_RUN_REVIEW_STALE_REVISION_ERROR_EXAMPLE,
+                        },
+                        "flow_review_expired": {
+                            "summary": "Checkpoint expired before review completion.",
+                            "value": _FLOW_RUN_REVIEW_EXPIRED_ERROR_EXAMPLE,
                         },
                     },
                 }
@@ -674,14 +773,26 @@ async def edit_flow_run_review_checkpoint(
     summary="Approve flow run review checkpoint",
     description=_FLOW_RUN_REVIEW_APPROVE_DESCRIPTION,
     responses={
+        200: {
+            "description": (
+                "Checkpoint approved. Use the returned `revision` when calling "
+                "the resume endpoint. The example shows an edit-before-approve "
+                "path; direct approval without an edit normally returns `edited_at` "
+                "as null and revision 2."
+            ),
+            "content": {
+                "application/json": {
+                    "example": FLOW_RUN_REVIEW_CHECKPOINT_APPROVED_RESPONSE_EXAMPLE,
+                }
+            },
+        },
         400: error_response(
             description=(
                 "Review approval failed. Representative machine-readable codes include "
-                "flow_review_stale_revision and flow_review_not_active."
+                "flow_review_stale_revision, flow_review_expired, and "
+                "flow_review_not_active."
             ),
-            message="Review checkpoint revision is stale.",
-            intric_error_code=ErrorCodes.BAD_REQUEST,
-            code="flow_review_stale_revision",
+            examples=_FLOW_RUN_REVIEW_STALE_AND_EXPIRED_ERROR_EXAMPLES,
         ),
         403: error_response(
             description=_FLOW_RUN_FORBIDDEN_DESCRIPTION,
@@ -735,15 +846,26 @@ async def approve_flow_run_review_checkpoint(
     summary="Reject flow run review checkpoint",
     description=_FLOW_RUN_REVIEW_REJECT_DESCRIPTION,
     responses={
+        200: {
+            "description": (
+                "Checkpoint rejected and the run cancelled. The returned checkpoint "
+                "is terminal and cannot be resumed. The example shows an "
+                "edit-before-reject path; direct rejection without an edit normally "
+                "returns `edited_at` as null and revision 2."
+            ),
+            "content": {
+                "application/json": {
+                    "example": FLOW_RUN_REVIEW_CHECKPOINT_REJECTED_RESPONSE_EXAMPLE,
+                }
+            },
+        },
         400: error_response(
             description=(
                 "Review rejection failed. Representative machine-readable codes include "
-                "flow_review_stale_revision, flow_review_not_active, "
+                "flow_review_stale_revision, flow_review_expired, flow_review_not_active, "
                 "flow_review_reject_reason_required, and flow_review_reject_reason_too_long."
             ),
-            message="Review rejection reason is required.",
-            intric_error_code=ErrorCodes.BAD_REQUEST,
-            code="flow_review_reject_reason_required",
+            examples=_FLOW_RUN_REVIEW_REJECT_ERROR_EXAMPLES,
         ),
         403: error_response(
             description=_FLOW_RUN_FORBIDDEN_DESCRIPTION,
@@ -798,16 +920,26 @@ async def reject_flow_run_review_checkpoint(
     summary="Resume flow run review checkpoint",
     description=_FLOW_RUN_REVIEW_RESUME_DESCRIPTION,
     responses={
+        202: {
+            "description": (
+                "Resume accepted. Poll the returned run until it reaches a terminal "
+                "status, and use the returned checkpoint revision for idempotent "
+                "retry reconciliation."
+            ),
+            "content": {
+                "application/json": {
+                    "example": FLOW_RUN_REVIEW_CHECKPOINT_RESUME_RESPONSE_EXAMPLE,
+                }
+            },
+        },
         400: error_response(
             description=(
                 "Review resume failed. Representative machine-readable codes include "
                 "flow_review_idempotency_key_required, flow_review_stale_revision, "
-                "flow_review_not_approved, flow_review_already_resumed, "
+                "flow_review_expired, flow_review_not_approved, flow_review_already_resumed, "
                 "flow_review_rejected, and flow_review_cancelled."
             ),
-            message="Review resume requires an Idempotency-Key header.",
-            intric_error_code=ErrorCodes.BAD_REQUEST,
-            code="flow_review_idempotency_key_required",
+            examples=_FLOW_RUN_REVIEW_STALE_AND_EXPIRED_ERROR_EXAMPLES,
         ),
         403: error_response(
             description=_FLOW_RUN_FORBIDDEN_DESCRIPTION,

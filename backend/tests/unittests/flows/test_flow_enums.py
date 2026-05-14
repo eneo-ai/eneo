@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from intric.database.tables.flow_tables import (
+    FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES,
     FLOW_RUN_STATUS_VALUES,
     FLOW_STEP_ATTEMPT_STATUS_VALUES,
     FLOW_STEP_INPUT_SOURCE_VALUES,
@@ -16,7 +17,12 @@ from intric.database.tables.flow_tables import (
     FLOW_STEP_RESULT_STATUS_VALUES,
     FLOW_TEMPLATE_ASSET_STATUS_VALUES,
 )
-from intric.flows.ai_builder.ai_builder_models import AssistantSpec, InputSource, InputType, StepSpec
+from intric.flows.ai_builder.ai_builder_models import (
+    AssistantSpec,
+    InputSource,
+    InputType,
+    StepSpec,
+)
 from intric.flows.api.flow_models import (
     FlowInputSource,
     FlowInputType,
@@ -25,6 +31,8 @@ from intric.flows.api.flow_models import (
     FlowOutputType,
 )
 from intric.flows.enums import (
+    RECONCILABLE_REVIEW_CHECKPOINT_STATES,
+    FlowRunReviewCheckpointState,
     FlowRunStatus,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
@@ -34,15 +42,30 @@ from intric.flows.flow import FlowStep
 
 
 def test_shared_flow_enums_match_current_table_constants() -> None:
-    assert tuple(item.value for item in FlowInputSource) == FLOW_STEP_INPUT_SOURCE_VALUES
+    assert (
+        tuple(item.value for item in FlowInputSource) == FLOW_STEP_INPUT_SOURCE_VALUES
+    )
     assert tuple(item.value for item in FlowInputType) == FLOW_STEP_INPUT_TYPE_VALUES
     assert tuple(item.value for item in FlowOutputMode) == FLOW_STEP_OUTPUT_MODE_VALUES
     assert tuple(item.value for item in FlowOutputType) == FLOW_STEP_OUTPUT_TYPE_VALUES
     assert tuple(item.value for item in FlowMcpPolicy) == FLOW_STEP_MCP_POLICY_VALUES
     assert tuple(item.value for item in FlowRunStatus) == FLOW_RUN_STATUS_VALUES
-    assert tuple(item.value for item in FlowStepResultStatus) == FLOW_STEP_RESULT_STATUS_VALUES
-    assert tuple(item.value for item in FlowStepAttemptStatus) == FLOW_STEP_ATTEMPT_STATUS_VALUES
-    assert tuple(item.value for item in FlowTemplateAssetStatus) == FLOW_TEMPLATE_ASSET_STATUS_VALUES
+    assert (
+        tuple(item.value for item in FlowRunReviewCheckpointState)
+        == FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES
+    )
+    assert (
+        tuple(item.value for item in FlowStepResultStatus)
+        == FLOW_STEP_RESULT_STATUS_VALUES
+    )
+    assert (
+        tuple(item.value for item in FlowStepAttemptStatus)
+        == FLOW_STEP_ATTEMPT_STATUS_VALUES
+    )
+    assert (
+        tuple(item.value for item in FlowTemplateAssetStatus)
+        == FLOW_TEMPLATE_ASSET_STATUS_VALUES
+    )
 
 
 def test_flow_and_ai_builder_enums_are_exported_from_shared_module() -> None:
@@ -53,6 +76,19 @@ def test_flow_and_ai_builder_enums_are_exported_from_shared_module() -> None:
     assert FlowMcpPolicy.__module__ == "intric.flows.enums"
     assert InputSource.__module__ == "intric.flows.enums"
     assert InputType.__module__ == "intric.flows.enums"
+
+
+def test_review_expiry_reconciles_only_unresolved_review_states() -> None:
+    assert RECONCILABLE_REVIEW_CHECKPOINT_STATES == frozenset(
+        {
+            FlowRunReviewCheckpointState.AWAITING_REVIEW,
+            FlowRunReviewCheckpointState.EDITED,
+        }
+    )
+    assert FlowRunReviewCheckpointState.APPROVED not in (
+        RECONCILABLE_REVIEW_CHECKPOINT_STATES
+    )
+    assert FlowRunReviewCheckpointState.EXPIRED.value == "expired"
 
 
 def test_flow_step_round_trips_string_fields_as_shared_enums() -> None:

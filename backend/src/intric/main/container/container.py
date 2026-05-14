@@ -104,6 +104,9 @@ from intric.flows import (
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_service import AIBuilderService
+from intric.flows.application.flow_review_expiry_reconciliation import (
+    FlowReviewExpiryReconciler,
+)
 from intric.flows.application.flow_run_audit_outbox_delivery import (
     FlowRunAuditOutboxDeliveryService,
 )
@@ -718,6 +721,11 @@ class Container(containers.DeclarativeContainer):
         FlowRunTerminalizer,
         flow_run_repo=flow_run_repo,
         audit_outbox_repo=flow_run_audit_outbox_repo,
+    )
+    flow_review_expiry_reconciler = providers.Factory(
+        FlowReviewExpiryReconciler,
+        flow_run_repo=flow_run_repo,
+        flow_run_terminalizer=flow_run_terminalizer,
     )
     flow_celery_app = providers.Object(flow_celery_app)
     flow_execution_backend = providers.Factory(

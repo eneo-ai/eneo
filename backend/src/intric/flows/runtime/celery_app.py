@@ -17,6 +17,9 @@ from intric.flows.application.flow_run_recovery_policy import (
     FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
     FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS,
 )
+from intric.flows.flow_review_expiry_policy import (
+    FLOW_REVIEW_EXPIRY_RECONCILE_INTERVAL_SECONDS,
+)
 from intric.main.aiohttp_client import aiohttp_client
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
@@ -34,6 +37,7 @@ def create_flow_celery_app() -> Celery:
         task_routes={
             "flows.execute": {"queue": settings.flow_celery_queue},
             "flows.reconcile_running": {"queue": settings.flow_celery_queue},
+            "flows.reconcile_review_expiry": {"queue": settings.flow_celery_queue},
             "flows.redispatch_stale_queued": {"queue": settings.flow_celery_queue},
             "flows.deliver_audit_outbox": {"queue": settings.flow_celery_queue},
         },
@@ -50,6 +54,10 @@ def create_flow_celery_app() -> Celery:
             "redispatch-stale-queued": {
                 "task": "flows.redispatch_stale_queued",
                 "schedule": float(FLOW_QUEUED_REDISPATCH_AFTER_SECONDS),
+            },
+            "reconcile-review-expiry": {
+                "task": "flows.reconcile_review_expiry",
+                "schedule": float(FLOW_REVIEW_EXPIRY_RECONCILE_INTERVAL_SECONDS),
             },
             "deliver-flow-audit-outbox": {
                 "task": "flows.deliver_audit_outbox",

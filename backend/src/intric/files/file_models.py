@@ -3,6 +3,7 @@ from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic.config import JsonDict
 
 from intric.authentication.principal_types import PrincipalType
 from intric.main.models import InDB
@@ -18,6 +19,24 @@ class FileType(str, Enum):
     IMAGE = "image"
     AUDIO = "audio"
     DOCUMENT = "document"
+
+
+FILE_PUBLIC_EXAMPLE: JsonDict = {
+    "id": "00000000-0000-0000-0000-000000000701",
+    "name": "review-audio.mp3",
+    "mimetype": "audio/mpeg",
+    "size": 1843200,
+    "created_at": "2026-03-17T10:04:00Z",
+    "updated_at": "2026-03-17T10:04:00Z",
+}
+
+SIGNED_URL_RESPONSE_EXAMPLE: JsonDict = {
+    "url": (
+        "https://api.example.com/api/v1/files/"
+        "00000000-0000-0000-0000-000000000701/download/?token=signed-token"
+    ),
+    "expires_at": 1773742500,
+}
 
 
 class FileBase(BaseModel):
@@ -63,6 +82,11 @@ class File(InDB, FileCreate):
 
 
 class FilePublic(InDB):
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={"example": FILE_PUBLIC_EXAMPLE},
+    )
+
     name: str
     mimetype: str
     size: int
@@ -100,5 +124,7 @@ class SignedURLRequest(BaseModel):
 
 
 class SignedURLResponse(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"example": SIGNED_URL_RESPONSE_EXAMPLE})
+
     url: str
     expires_at: int  # Unix timestamp when the URL will expire

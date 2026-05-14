@@ -349,6 +349,8 @@ class FlowRunReviewCheckpoint(BaseModel):
     rejected_at: datetime | None = None
     resumed_at: datetime | None = None
     cancelled_at: datetime | None = None
+    expires_at: datetime | None = None
+    expired_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

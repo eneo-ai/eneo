@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Sequence, TypedDict, cast
+from datetime import datetime, timedelta, timezone
+from typing import Any, Literal, Sequence, TypedDict, cast
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
@@ -42,6 +42,7 @@ from intric.flows.enums import (
     ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES,
     ACTIVE_FLOW_RUN_STATUSES,
     CANCELLABLE_FLOW_RUN_STATUSES,
+    RECONCILABLE_REVIEW_CHECKPOINT_STATES,
     TERMINAL_FLOW_RUN_STATUSES,
     FlowOutputType,
     FlowRunLifecycleSource,
@@ -50,6 +51,11 @@ from intric.flows.enums import (
     FlowRunReviewCheckpointState,
 )
 from intric.flows.flow_factory import FlowFactory
+from intric.flows.flow_review_expiry_policy import (
+    FLOW_REVIEW_EXPIRED,
+    FLOW_REVIEW_EXPIRED_TERMINAL_MESSAGE,
+    FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
+)
 from intric.flows.flow_review_policy import FlowStepReviewMode
 from intric.flows.flow_run_provenance import (
     AttemptStartProvenance,
@@ -134,15 +140,30 @@ _ACTIVE_RERUN_OPERATION_STATUSES = (
 _ACTIVE_REVIEW_CHECKPOINT_STATES = tuple(
     state.value for state in ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES
 )
+_RECONCILABLE_REVIEW_CHECKPOINT_STATES = tuple(
+    state.value for state in RECONCILABLE_REVIEW_CHECKPOINT_STATES
+)
 _CANCELLABLE_RUN_STATUSES = tuple(
     status.value for status in CANCELLABLE_FLOW_RUN_STATUSES
 )
-_REVIEW_CHECKPOINT_TIMESTAMP_BY_STATE = {
+_ReviewCheckpointTimestampColumn = Literal[
+    "edited_at",
+    "approved_at",
+    "rejected_at",
+    "resumed_at",
+    "cancelled_at",
+    "expired_at",
+]
+_REVIEW_CHECKPOINT_TIMESTAMP_BY_STATE: dict[
+    FlowRunReviewCheckpointState,
+    _ReviewCheckpointTimestampColumn,
+] = {
     FlowRunReviewCheckpointState.EDITED: "edited_at",
     FlowRunReviewCheckpointState.APPROVED: "approved_at",
     FlowRunReviewCheckpointState.REJECTED: "rejected_at",
     FlowRunReviewCheckpointState.RESUMED: "resumed_at",
     FlowRunReviewCheckpointState.CANCELLED: "cancelled_at",
+    FlowRunReviewCheckpointState.EXPIRED: "expired_at",
 }
 
 
@@ -303,7 +324,16 @@ class FlowRunRepository:
         output_type: FlowOutputType | None = None,
         output_contract_json: JsonObject | None = None,
         next_step_ids: Sequence[UUID] | None = None,
+        review_expires_after_seconds: int | None = None,
     ) -> FlowRunReviewCheckpoint:
+        effective_expires_after_seconds = (
+            review_expires_after_seconds
+            if review_expires_after_seconds is not None
+            else FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
+        )
+        expires_at = datetime.now(timezone.utc) + timedelta(
+            seconds=effective_expires_after_seconds
+        )
         next_step_ids_json = (
             [str(next_step_id) for next_step_id in next_step_ids]
             if next_step_ids is not None
@@ -330,6 +360,7 @@ class FlowRunRepository:
                 requester_principal_type=requester_principal_type.value,
                 requester_user_id=requester_user_id,
                 next_step_ids_json=next_step_ids_json,
+                expires_at=expires_at,
             )
             .on_conflict_do_nothing(
                 constraint="uq_flow_run_review_checkpoints_run_step_attempt",
@@ -363,6 +394,7 @@ class FlowRunRepository:
         review_mode: FlowStepReviewMode | None = None,
         output_type: FlowOutputType | None = None,
         output_contract_json: JsonObject | None = None,
+        review_expires_after_seconds: int | None = None,
     ) -> FlowRunReviewCheckpointOpenResult:
         """Open a checkpoint for a step the caller resolved from the published run graph.
 
@@ -446,6 +478,7 @@ class FlowRunRepository:
             requester_principal_type=requester_principal.principal_type,
             requester_user_id=requester_principal.principal_user_id,
             next_step_ids=next_step_ids,
+            review_expires_after_seconds=review_expires_after_seconds,
         )
         updated_run_row = await self.session.scalar(
             sa.update(FlowRuns)
@@ -533,6 +566,7 @@ class FlowRunRepository:
             flow_id=flow_id,
             flow_run_id=flow_run_id,
         )
+        self._require_review_checkpoint_not_expired(checkpoint_row)
         self._require_review_run_waiting(run_row)
         self._require_review_checkpoint_revision(
             checkpoint_row=checkpoint_row,
@@ -567,6 +601,7 @@ class FlowRunRepository:
             flow_id=flow_id,
             flow_run_id=flow_run_id,
         )
+        self._require_review_checkpoint_not_expired(checkpoint_row)
         self._require_review_run_waiting(run_row)
         self._require_review_checkpoint_revision(
             checkpoint_row=checkpoint_row,
@@ -630,6 +665,7 @@ class FlowRunRepository:
             flow_id=flow_id,
             flow_run_id=flow_run_id,
         )
+        self._require_review_checkpoint_not_expired(checkpoint_row)
         self._require_review_run_waiting(run_row)
         self._require_review_checkpoint_revision(
             checkpoint_row=checkpoint_row,
@@ -678,6 +714,7 @@ class FlowRunRepository:
             flow_id=flow_id,
             flow_run_id=flow_run_id,
         )
+        self._require_review_checkpoint_not_expired(checkpoint_row)
         self._require_review_run_waiting(run_row)
         self._require_review_checkpoint_revision(
             checkpoint_row=checkpoint_row,
@@ -728,6 +765,7 @@ class FlowRunRepository:
             flow_id=flow_id,
             flow_run_id=flow_run_id,
         )
+        self._require_review_checkpoint_not_expired(checkpoint_row)
         if checkpoint_row.state == FlowRunReviewCheckpointState.RESUMED.value:
             if checkpoint_row.resume_idempotency_key == resume_idempotency_key:
                 return FlowRunReviewCheckpointResumeResult(
@@ -828,6 +866,97 @@ class FlowRunRepository:
         )
         return checkpoint
 
+    async def list_expired_review_checkpoints(
+        self,
+        *,
+        tenant_id: UUID,
+        expires_before: datetime,
+        limit: int = 100,
+    ) -> list[FlowRunReviewCheckpoint]:
+        rows = (
+            (
+                await self.session.execute(
+                    sa.select(FlowRunReviewCheckpoints)
+                    .join(
+                        FlowRuns,
+                        sa.and_(
+                            FlowRuns.id == FlowRunReviewCheckpoints.flow_run_id,
+                            FlowRuns.tenant_id == FlowRunReviewCheckpoints.tenant_id,
+                        ),
+                    )
+                    .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+                    .where(FlowRunReviewCheckpoints.expires_at.is_not(None))
+                    .where(FlowRunReviewCheckpoints.expires_at <= expires_before)
+                    .where(
+                        FlowRunReviewCheckpoints.state.in_(
+                            _RECONCILABLE_REVIEW_CHECKPOINT_STATES
+                        )
+                    )
+                    .where(FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value)
+                    .order_by(
+                        FlowRunReviewCheckpoints.expires_at.asc(),
+                        FlowRunReviewCheckpoints.id.asc(),
+                    )
+                    .limit(limit)
+                    .with_for_update(skip_locked=True)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [self.factory.from_flow_run_review_checkpoint_db(row) for row in rows]
+
+    async def expire_review_checkpoint_for_reconciliation(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        expires_before: datetime,
+    ) -> FlowRunReviewCheckpoint | None:
+        now_utc = datetime.now(timezone.utc)
+        checkpoint_row = await self.session.scalar(
+            sa.update(FlowRunReviewCheckpoints)
+            .where(FlowRunReviewCheckpoints.id == checkpoint_id)
+            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+            .where(FlowRunReviewCheckpoints.expires_at.is_not(None))
+            .where(FlowRunReviewCheckpoints.expires_at <= expires_before)
+            .where(
+                FlowRunReviewCheckpoints.state.in_(
+                    _RECONCILABLE_REVIEW_CHECKPOINT_STATES
+                )
+            )
+            .where(FlowRunReviewCheckpoints.flow_run_id == FlowRuns.id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value)
+            .values(
+                state=FlowRunReviewCheckpointState.EXPIRED.value,
+                revision=FlowRunReviewCheckpoints.revision + 1,
+                expired_at=now_utc,
+            )
+            .returning(FlowRunReviewCheckpoints)
+        )
+        if checkpoint_row is None:
+            return None
+        run_revision = await self.session.scalar(
+            sa.select(FlowRuns.revision)
+            .where(FlowRuns.id == checkpoint_row.flow_run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+        )
+        if run_revision is None:
+            raise NotFoundException("Flow run not found.")
+        checkpoint = self.factory.from_flow_run_review_checkpoint_db(checkpoint_row)
+        await self._insert_review_checkpoint_transition_outbox(
+            checkpoint=checkpoint,
+            run_revision=int(run_revision),
+            principal=None,
+            action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_EXPIRED,
+            source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_EXPIRED,
+            target_state=FlowRunReviewCheckpointState.EXPIRED,
+            error_code=FLOW_REVIEW_EXPIRED,
+            error_message=FLOW_REVIEW_EXPIRED_TERMINAL_MESSAGE,
+        )
+        return checkpoint
+
     async def _load_review_checkpoint_and_run_rows_for_update(
         self,
         *,
@@ -869,6 +998,58 @@ class FlowRunRepository:
             code="flow_review_not_active",
             context={"status": run_row.status},
         )
+
+    @staticmethod
+    def _require_review_checkpoint_not_expired(
+        checkpoint_row: FlowRunReviewCheckpoints,
+    ) -> None:
+        if checkpoint_row.state == FlowRunReviewCheckpointState.EXPIRED.value:
+            raise BadRequestException(
+                "Review checkpoint has expired.",
+                code=FLOW_REVIEW_EXPIRED,
+                context=FlowRunRepository._review_checkpoint_expired_context(
+                    checkpoint_row=checkpoint_row,
+                ),
+            )
+        if checkpoint_row.state not in _RECONCILABLE_REVIEW_CHECKPOINT_STATES:
+            return
+        if checkpoint_row.expires_at is None:
+            return
+        expires_at = checkpoint_row.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at > datetime.now(timezone.utc):
+            return
+        raise BadRequestException(
+            "Review checkpoint has expired.",
+            code=FLOW_REVIEW_EXPIRED,
+            context=FlowRunRepository._review_checkpoint_expired_context(
+                checkpoint_row=checkpoint_row,
+                expires_at=expires_at,
+            ),
+        )
+
+    @staticmethod
+    def _review_checkpoint_expired_context(
+        *,
+        checkpoint_row: FlowRunReviewCheckpoints,
+        expires_at: datetime | None = None,
+    ) -> dict[str, object]:
+        context: dict[str, object] = {
+            "checkpoint_id": str(checkpoint_row.id),
+            "state": checkpoint_row.state,
+        }
+        expires_at_value = expires_at or checkpoint_row.expires_at
+        if expires_at_value is not None:
+            if expires_at_value.tzinfo is None:
+                expires_at_value = expires_at_value.replace(tzinfo=timezone.utc)
+            context["expires_at"] = expires_at_value.isoformat()
+        if checkpoint_row.expired_at is not None:
+            expired_at = checkpoint_row.expired_at
+            if expired_at.tzinfo is None:
+                expired_at = expired_at.replace(tzinfo=timezone.utc)
+            context["expired_at"] = expired_at.isoformat()
+        return context
 
     @staticmethod
     def _require_review_checkpoint_revision(
@@ -918,6 +1099,14 @@ class FlowRunRepository:
             raise BadRequestException(
                 "Review checkpoint was cancelled.",
                 code="flow_review_cancelled",
+            )
+        if state == FlowRunReviewCheckpointState.EXPIRED.value:
+            raise BadRequestException(
+                "Review checkpoint has expired.",
+                code=FLOW_REVIEW_EXPIRED,
+                context=FlowRunRepository._review_checkpoint_expired_context(
+                    checkpoint_row=checkpoint_row,
+                ),
             )
         if state == FlowRunReviewCheckpointState.RESUMED.value:
             raise BadRequestException(

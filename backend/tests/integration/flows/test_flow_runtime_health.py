@@ -6,7 +6,11 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from intric.database.tables.flow_tables import FlowRunAuditOutbox, FlowRuns
+from intric.database.tables.flow_tables import (
+    FlowRunAuditOutbox,
+    FlowRunReviewCheckpoints,
+    FlowRuns,
+)
 from intric.flows.domain.flow import Flow, FlowStep
 from intric.flows.enums import FlowRunStatus
 from intric.flows.flow_factory import FlowFactory
@@ -28,6 +32,7 @@ def _policy() -> FlowRuntimeHealthPolicy:
         stale_queued_after_seconds=30,
         stale_running_after_seconds=60,
         stale_running_unhealthy_after_seconds=120,
+        review_expiry_unhealthy_after_seconds=120,
         terminal_integrity_lookback=timedelta(hours=24),
         audit_outbox_backlog_grace_seconds=300,
     )
@@ -281,6 +286,28 @@ async def test_flow_runtime_health_snapshot_reports_stale_runs_and_open_terminal
             .values(status=FlowRunStatus.AWAITING_REVIEW.value)
         )
         await session.execute(
+            sa.insert(FlowRunReviewCheckpoints).values(
+                tenant_id=admin_user.tenant_id,
+                flow_id=flow.id,
+                flow_run_id=awaiting_review.id,
+                step_id=flow.steps[0].id,
+                step_order=1,
+                attempt_no=1,
+                state="awaiting_review",
+                revision=1,
+                schema_version=1,
+                original_payload_json={"text": "Needs review"},
+                current_payload_json={"text": "Needs review"},
+                review_mode="view",
+                output_type="text",
+                requester_user_id=admin_user.id,
+                requester_principal_type="user",
+                next_step_ids_json=[],
+                expires_at=now
+                - timedelta(seconds=policy.review_expiry_unhealthy_after_seconds + 5),
+            )
+        )
+        await session.execute(
             sa.update(FlowRuns)
             .where(FlowRuns.id == terminal_with_open_attempt.id)
             .values(
@@ -311,9 +338,12 @@ async def test_flow_runtime_health_snapshot_reports_stale_runs_and_open_terminal
     assert response.status_flags == [
         FlowRuntimeHealthFlag.STALE_QUEUED_RUNS,
         FlowRuntimeHealthFlag.STALE_RUNNING_RECONCILER_LAG,
+        FlowRuntimeHealthFlag.REVIEW_EXPIRY_RECONCILER_LAG,
         FlowRuntimeHealthFlag.TERMINAL_RUNS_WITH_OPEN_ATTEMPTS,
         FlowRuntimeHealthFlag.TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS,
     ]
+    assert response.review.expired_checkpoint_count == 1
+    assert response.review.oldest_expired_checkpoint_age_seconds == 125
     assert response.data_integrity.terminal_runs_with_open_attempts_count == 1
     assert response.data_integrity.terminal_runs_with_active_step_results_count == 1
 

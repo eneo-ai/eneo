@@ -19,6 +19,7 @@ def _policy() -> FlowRuntimeHealthPolicy:
         stale_queued_after_seconds=30,
         stale_running_after_seconds=120,
         stale_running_unhealthy_after_seconds=240,
+        review_expiry_unhealthy_after_seconds=120,
         terminal_integrity_lookback=timedelta(hours=24),
         audit_outbox_backlog_grace_seconds=300,
     )
@@ -87,6 +88,42 @@ def test_stale_running_runs_become_unhealthy_after_reconciler_grace_expires() ->
     assert response.status == FlowRuntimeHealthStatus.UNHEALTHY
     assert response.status_flags == [FlowRuntimeHealthFlag.STALE_RUNNING_RECONCILER_LAG]
     assert response.runs.oldest_stale_running_age_seconds == 300
+
+
+def test_expired_review_checkpoints_degrade_before_reconciler_grace_expires() -> None:
+    response = _classify(
+        FlowRuntimeHealthSnapshot(
+            awaiting_review_count=1,
+            expired_review_checkpoint_count=1,
+            oldest_expired_review_checkpoint_expires_at=datetime(
+                2026, 5, 2, 11, 59, 30, tzinfo=timezone.utc
+            ),
+        )
+    )
+
+    assert response.status == FlowRuntimeHealthStatus.DEGRADED
+    assert response.status_flags == [FlowRuntimeHealthFlag.EXPIRED_REVIEW_CHECKPOINTS]
+    assert response.review.expired_checkpoint_count == 1
+    assert response.review.oldest_expired_checkpoint_age_seconds == 30
+
+
+def test_expired_review_checkpoints_become_unhealthy_after_reconciler_grace_expires() -> (
+    None
+):
+    response = _classify(
+        FlowRuntimeHealthSnapshot(
+            awaiting_review_count=1,
+            expired_review_checkpoint_count=1,
+            oldest_expired_review_checkpoint_expires_at=datetime(
+                2026, 5, 2, 11, 57, 30, tzinfo=timezone.utc
+            ),
+        )
+    )
+
+    assert response.status == FlowRuntimeHealthStatus.UNHEALTHY
+    assert response.status_flags == [FlowRuntimeHealthFlag.REVIEW_EXPIRY_RECONCILER_LAG]
+    assert response.review.expired_checkpoint_count == 1
+    assert response.review.oldest_expired_checkpoint_age_seconds == 150
 
 
 def test_terminal_run_open_work_is_unhealthy() -> None:

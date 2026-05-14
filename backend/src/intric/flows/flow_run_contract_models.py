@@ -16,6 +16,7 @@ from intric.flows.flow_input_limits import (
     FlowRuntimeUploadPolicy,
     effective_runtime_upload_policy,
 )
+from intric.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
 from intric.flows.flow_review_policy import FlowStepReviewMode
 
 FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
@@ -64,6 +65,7 @@ FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
             "label": "Review transcription",
             "review_mode": "edit",
             "output_type": "json",
+            "expires_after_seconds": FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
             "output_contract": {
                 "type": "object",
                 "properties": {"transcription": {"type": "string"}},
@@ -158,6 +160,15 @@ class FlowReviewStepContractPublic(BaseModel):
     )
     output_type: FlowOutputType = Field(
         description="Published output type of the step that can pause for review.",
+    )
+    expires_after_seconds: int = Field(
+        default=FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
+        description=(
+            "Effective review window in seconds, starting when this checkpoint "
+            "opens. This value is already resolved from the step policy and the "
+            "platform default, so clients can prepare review deadlines before the "
+            "run reaches awaiting_review."
+        ),
     )
     output_contract: dict[str, Any] | None = Field(
         default=None,

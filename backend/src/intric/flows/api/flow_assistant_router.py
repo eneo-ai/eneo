@@ -23,6 +23,35 @@ from intric.server.dependencies.container import get_container
 
 router = APIRouter()
 
+_FLOW_ASSISTANT_PUBLIC_EXAMPLE: dict[str, object] = {
+    "id": "00000000-0000-0000-0000-000000000201",
+    "name": "Flow Step Assistant",
+    "space_id": "00000000-0000-0000-0000-000000000020",
+    "completion_model_kwargs": {},
+    "logging_enabled": False,
+    "attachments": [],
+    "allowed_attachments": {
+        "accepted_file_types": [],
+        "limit": {"max_files": 0, "max_size": 0},
+    },
+    "groups": [],
+    "websites": [],
+    "integration_knowledge_list": [],
+    "mcp_servers": [],
+    "mcp_tools": [],
+    "published": False,
+    "user": {
+        "id": "00000000-0000-0000-0000-000000000030",
+        "email": "flow-builder@example.com",
+        "username": "Flow Builder",
+    },
+    "tools": {"assistants": []},
+    "type": "assistant",
+    "description": "Summarizes extracted contract fields into a reviewer-ready note.",
+    "insight_enabled": False,
+    "metadata_json": {"origin": "flow_managed"},
+}
+
 
 def _get_flow_service(container: Container) -> FlowService:
     return container.flow_service()
@@ -59,8 +88,22 @@ async def _require_flow_assistant_access(
     status_code=status.HTTP_201_CREATED,
     operation_id="create_flow_assistant",
     summary="Create Flow Assistant",
-    description="Create a flow-managed assistant that can be attached to steps in the specified flow.",
+    description=(
+        "Create a flow-managed assistant owned by the specified draft flow. Use this "
+        "authoring endpoint when a flow editor needs a dedicated assistant for one or "
+        "more steps instead of reusing an existing assistant. The created assistant is "
+        "returned with the caller's effective permissions and can then be referenced by "
+        "step `assistant_id` values in flow create/update payloads."
+    ),
     responses={
+        201: {
+            "description": (
+                "Flow-managed assistant created and returned with effective permissions."
+            ),
+            "content": {
+                "application/json": {"example": _FLOW_ASSISTANT_PUBLIC_EXAMPLE}
+            },
+        },
         403: error_response(
             description="Caller lacks permission or API key scope to manage assistants for this flow.",
             message="API key space scope does not match requested flow.",
@@ -120,8 +163,21 @@ async def create_flow_assistant(
     status_code=status.HTTP_200_OK,
     operation_id="get_flow_assistant",
     summary="Get Flow Assistant",
-    description="Return a single flow-managed assistant and its effective permissions for the caller.",
+    description=(
+        "Return one flow-managed assistant that belongs to the specified flow, together "
+        "with effective permissions for the caller. Use this endpoint before rendering "
+        "an assistant-edit screen so the UI does not accidentally edit a global or "
+        "unrelated assistant. The assistant id must be one owned by this flow."
+    ),
     responses={
+        200: {
+            "description": (
+                "Flow-managed assistant returned with effective caller permissions."
+            ),
+            "content": {
+                "application/json": {"example": _FLOW_ASSISTANT_PUBLIC_EXAMPLE}
+            },
+        },
         403: error_response(
             description="Caller lacks permission or API key scope to access assistants for this flow.",
             message="API key space scope does not match requested flow.",
@@ -166,8 +222,21 @@ async def get_flow_assistant(
     status_code=status.HTTP_200_OK,
     operation_id="update_flow_assistant",
     summary="Update Flow Assistant",
-    description="Update a flow-managed assistant that belongs to the specified flow.",
+    description=(
+        "Update a flow-managed assistant that belongs to the specified draft flow. "
+        "Only fields accepted by `AssistantUpdatePublic` are applied; omitted fields "
+        "are left unchanged. Use this endpoint for assistant details that should travel "
+        "with the flow authoring experience, not for updating unrelated shared assistants."
+    ),
     responses={
+        200: {
+            "description": (
+                "Flow-managed assistant updated and returned with effective permissions."
+            ),
+            "content": {
+                "application/json": {"example": _FLOW_ASSISTANT_PUBLIC_EXAMPLE}
+            },
+        },
         403: error_response(
             description="Caller lacks permission or API key scope to update assistants for this flow.",
             message="API key space scope does not match requested flow.",
@@ -229,7 +298,12 @@ async def update_flow_assistant(
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="delete_flow_assistant",
     summary="Delete Flow Assistant",
-    description="Delete a flow-managed assistant from the specified flow.",
+    description=(
+        "Delete a flow-managed assistant from the specified draft flow. The assistant id "
+        "must belong to this flow; deleting it removes the flow-owned assistant resource "
+        "and writes an audit event. Clients should remove or replace step references to "
+        "the assistant before publishing a draft that no longer has this assistant."
+    ),
     responses={
         403: error_response(
             description="Caller lacks permission or API key scope to delete assistants for this flow.",

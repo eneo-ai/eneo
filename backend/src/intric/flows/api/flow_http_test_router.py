@@ -30,8 +30,21 @@ logger = logging.getLogger(__name__)
     status_code=status.HTTP_200_OK,
     operation_id="test_flow_http",
     summary="Test HTTP Connection",
-    description="Send a test HTTP request using the provided config snapshot. Does not persist anything.",
+    description=(
+        "Send a test HTTP request using the submitted authored config snapshot and "
+        "return a typed preview of the attempted request and response. This endpoint "
+        "does not persist the config or publish the flow; it is for authoring UIs that "
+        "need to validate URL, auth, timeout, headers, body mode, and SSRF guard behavior "
+        "before saving an HTTP input or output step."
+    ),
     responses={
+        200: {
+            "description": (
+                "HTTP test result. `success=false` is still returned with 200 when "
+                "the submitted config is syntactically valid but the target request "
+                "fails, times out, or returns an error status."
+            ),
+        },
         403: error_response(
             description="Caller lacks permission to edit this flow.",
             message="Insufficient permissions.",

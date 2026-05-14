@@ -1,10 +1,26 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 from fastapi.routing import APIRoute
+from jsonschema import Draft202012Validator
+from referencing import Registry, Resource
+from referencing.jsonschema import DRAFT202012
 
 from intric.flows.enums import RerunDependencyKind
 from intric.server.main import get_application
+from intric.settings.setting_service import FLOW_SETTINGS_INVALID_PAYLOAD_CODE
+
+FLOW_SETTINGS_PATH_PREFIX = "/api/v1/settings/flow-"
+
+
+def _is_non_ai_builder_flow_related_path(path: str) -> bool:
+    if path.startswith("/api/v1/flows/ai-builder"):
+        return False
+    return path.startswith("/api/v1/flows") or path.startswith(
+        FLOW_SETTINGS_PATH_PREFIX
+    )
 
 
 @pytest.fixture(scope="module")
@@ -20,7 +36,7 @@ def flow_route_operations() -> dict[tuple[str, str], str]:
     for route in app.routes:
         if not isinstance(route, APIRoute):
             continue
-        if not route.path.startswith("/api/v1/flows"):
+        if not _is_non_ai_builder_flow_related_path(route.path):
             continue
         for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
             operations[(route.path, method.lower())] = route.operation_id or ""
@@ -72,6 +88,114 @@ def _get_operation(openapi_spec: dict, path: str, method: str) -> dict:
     return openapi_spec.get("paths", {}).get(path, {}).get(method, {})
 
 
+def _iter_non_ai_builder_flow_operations(
+    openapi_spec: dict,
+) -> Iterator[tuple[str, str, dict]]:
+    for path, methods in openapi_spec.get("paths", {}).items():
+        if not _is_non_ai_builder_flow_related_path(path):
+            continue
+        for method, operation in methods.items():
+            if method not in {"delete", "get", "patch", "post", "put"}:
+                continue
+            if isinstance(operation, dict):
+                yield path, method, operation
+
+
+def _schema_has_example(openapi_spec: dict, schema: dict, *, depth: int = 0) -> bool:
+    if depth > 6:
+        return False
+    resolved = _resolve_component_ref(openapi_spec, schema)
+    if "example" in resolved or "examples" in resolved:
+        return True
+    items = resolved.get("items")
+    if isinstance(items, dict) and _schema_has_example(
+        openapi_spec, items, depth=depth + 1
+    ):
+        return True
+    for composition_key in ("anyOf", "oneOf", "allOf"):
+        options = resolved.get(composition_key, [])
+        if not isinstance(options, list):
+            continue
+        for option in options:
+            if isinstance(option, dict) and _schema_has_example(
+                openapi_spec, option, depth=depth + 1
+            ):
+                return True
+    return False
+
+
+def _content_has_example(openapi_spec: dict, content: dict) -> bool:
+    for media_object in content.values():
+        if not isinstance(media_object, dict):
+            continue
+        if media_object.get("example") or media_object.get("examples"):
+            return True
+        schema = media_object.get("schema")
+        if isinstance(schema, dict) and _schema_has_example(openapi_spec, schema):
+            return True
+    return False
+
+
+def _iter_explicit_openapi_examples(
+    content: dict,
+) -> Iterator[tuple[str, dict, object]]:
+    for media_type, media_object in content.items():
+        if not isinstance(media_object, dict):
+            continue
+        schema = media_object.get("schema")
+        if not isinstance(schema, dict):
+            continue
+        if "example" in media_object:
+            yield f"{media_type}.example", schema, media_object["example"]
+        examples = media_object.get("examples", {})
+        if not isinstance(examples, dict):
+            continue
+        for example_name, example_object in examples.items():
+            if not isinstance(example_object, dict) or "value" not in example_object:
+                continue
+            yield (
+                f"{media_type}.examples.{example_name}",
+                schema,
+                example_object["value"],
+            )
+
+
+def _openapi_registry(openapi_spec: dict) -> Registry:
+    return Registry().with_resource(
+        "urn:openapi",
+        Resource.from_contents(openapi_spec, default_specification=DRAFT202012),
+    )
+
+
+def _with_absolute_openapi_refs(value: object) -> object:
+    if isinstance(value, dict):
+        rewritten: dict[object, object] = {}
+        for key, item in value.items():
+            if key == "$ref" and isinstance(item, str) and item.startswith("#/"):
+                rewritten[key] = f"urn:openapi{item}"
+            else:
+                rewritten[key] = _with_absolute_openapi_refs(item)
+        return rewritten
+    if isinstance(value, list):
+        return [_with_absolute_openapi_refs(item) for item in value]
+    return value
+
+
+def _validate_openapi_example(
+    *,
+    openapi_spec: dict,
+    schema: dict,
+    example: object,
+) -> list[str]:
+    rewritten_schema = _with_absolute_openapi_refs(schema)
+    assert isinstance(rewritten_schema, dict)
+    validator = Draft202012Validator(
+        rewritten_schema,
+        registry=_openapi_registry(openapi_spec),
+    )
+    return [error.message for error in validator.iter_errors(example)]
+
+
 def _find_parameter(operation: dict, *, name: str, location: str) -> dict:
     for parameter in operation.get("parameters", []):
         if not isinstance(parameter, dict):
@@ -113,6 +237,10 @@ REQUIRED_PATHS: dict[str, set[str]] = {
     "/api/v1/flows/{id}/runs/{run_id}/steps/": {"get"},
     "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/": {"post"},
     "/api/v1/settings/flow-input-limits": {"get", "patch"},
+    "/api/v1/settings/flow-document-render-limits": {"get", "patch"},
+    "/api/v1/settings/flow-runtime-policy": {"get", "patch"},
+    "/api/v1/settings/flow-evidence-policy": {"get", "patch"},
+    "/api/v1/settings/flow-retention-policy": {"get", "patch"},
 }
 
 REQUIRED_SCHEMAS = {
@@ -216,6 +344,28 @@ REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
         "post",
     ): "generate_flow_run_artifact_signed_url",
     ("/api/v1/flows/{id}/graph/", "get"): "get_flow_graph",
+    ("/api/v1/settings/flow-input-limits", "get"): "get_flow_input_limits",
+    ("/api/v1/settings/flow-input-limits", "patch"): "update_flow_input_limits",
+    (
+        "/api/v1/settings/flow-document-render-limits",
+        "get",
+    ): "get_flow_document_render_limits",
+    (
+        "/api/v1/settings/flow-document-render-limits",
+        "patch",
+    ): "update_flow_document_render_limits",
+    ("/api/v1/settings/flow-runtime-policy", "get"): "get_flow_runtime_policy",
+    ("/api/v1/settings/flow-runtime-policy", "patch"): "update_flow_runtime_policy",
+    ("/api/v1/settings/flow-evidence-policy", "get"): "get_flow_evidence_policy",
+    (
+        "/api/v1/settings/flow-evidence-policy",
+        "patch",
+    ): "update_flow_evidence_policy",
+    ("/api/v1/settings/flow-retention-policy", "get"): "get_flow_retention_policy",
+    (
+        "/api/v1/settings/flow-retention-policy",
+        "patch",
+    ): "update_flow_retention_policy",
 }
 
 REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
@@ -301,8 +451,62 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
     ): {"403", "404", "410", "422"},
     (
         "/api/v1/settings/flow-input-limits",
+        "get",
+    ): {"403"},
+    (
+        "/api/v1/settings/flow-input-limits",
         "patch",
     ): {"400", "403", "422"},
+    (
+        "/api/v1/settings/flow-document-render-limits",
+        "get",
+    ): {"403"},
+    (
+        "/api/v1/settings/flow-document-render-limits",
+        "patch",
+    ): {"400", "403", "422"},
+    (
+        "/api/v1/settings/flow-runtime-policy",
+        "get",
+    ): {"403"},
+    (
+        "/api/v1/settings/flow-runtime-policy",
+        "patch",
+    ): {"400", "403", "422"},
+    (
+        "/api/v1/settings/flow-evidence-policy",
+        "get",
+    ): {"403"},
+    (
+        "/api/v1/settings/flow-evidence-policy",
+        "patch",
+    ): {"400", "403", "422"},
+    (
+        "/api/v1/settings/flow-retention-policy",
+        "get",
+    ): {"403"},
+    (
+        "/api/v1/settings/flow-retention-policy",
+        "patch",
+    ): {"400", "403", "422"},
+}
+
+FLOW_SETTINGS_INVALID_PAYLOAD_MESSAGES: dict[str, str] = {
+    "/api/v1/settings/flow-input-limits": (
+        "At least one flow input limit field must be provided."
+    ),
+    "/api/v1/settings/flow-document-render-limits": (
+        "At least one flow document render limit field must be provided."
+    ),
+    "/api/v1/settings/flow-runtime-policy": (
+        "At least one flow runtime policy field must be provided."
+    ),
+    "/api/v1/settings/flow-evidence-policy": (
+        "At least one flow evidence policy field must be provided."
+    ),
+    "/api/v1/settings/flow-retention-policy": (
+        "At least one flow retention policy field must be provided."
+    ),
 }
 
 REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
@@ -386,6 +590,19 @@ REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
         "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/",
         "post",
     ): {"403", "404", "410"},
+    ("/api/v1/settings/flow-input-limits", "get"): {"403"},
+    ("/api/v1/settings/flow-input-limits", "patch"): {"400", "403"},
+    ("/api/v1/settings/flow-document-render-limits", "get"): {"403"},
+    (
+        "/api/v1/settings/flow-document-render-limits",
+        "patch",
+    ): {"400", "403"},
+    ("/api/v1/settings/flow-runtime-policy", "get"): {"403"},
+    ("/api/v1/settings/flow-runtime-policy", "patch"): {"400", "403"},
+    ("/api/v1/settings/flow-evidence-policy", "get"): {"403"},
+    ("/api/v1/settings/flow-evidence-policy", "patch"): {"400", "403"},
+    ("/api/v1/settings/flow-retention-policy", "get"): {"403"},
+    ("/api/v1/settings/flow-retention-policy", "patch"): {"400", "403"},
 }
 
 
@@ -440,6 +657,187 @@ def test_openapi_flow_consumer_operations_have_docs(openapi_spec: dict) -> None:
             assert isinstance(description, str) and description.strip(), (
                 f"{method.upper()} {path} is missing description"
             )
+
+
+def test_openapi_all_flow_operations_have_reviewable_dx_docs(
+    openapi_spec: dict,
+) -> None:
+    short_descriptions: list[str] = []
+    for path, method, operation in _iter_non_ai_builder_flow_operations(openapi_spec):
+        description = str(operation.get("description") or "").strip()
+        if len(description) < 150:
+            short_descriptions.append(
+                f"{method.upper()} {path} ({operation.get('operationId')})"
+            )
+
+    assert short_descriptions == []
+
+
+def test_openapi_all_flow_request_bodies_have_examples(
+    openapi_spec: dict,
+) -> None:
+    missing_examples: list[str] = []
+    for path, method, operation in _iter_non_ai_builder_flow_operations(openapi_spec):
+        request_body = operation.get("requestBody", {})
+        if not isinstance(request_body, dict):
+            continue
+        content = request_body.get("content", {})
+        if not isinstance(content, dict) or "application/json" not in content:
+            continue
+        json_content = {"application/json": content["application/json"]}
+        if not _content_has_example(openapi_spec, json_content):
+            missing_examples.append(
+                f"{method.upper()} {path} ({operation.get('operationId')})"
+            )
+
+    assert missing_examples == []
+
+
+def test_openapi_flow_error_examples_follow_openapi_media_object_rules(
+    openapi_spec: dict,
+) -> None:
+    invalid_media_objects: list[str] = []
+    for path, method, operation in _iter_non_ai_builder_flow_operations(openapi_spec):
+        for status_code, response in operation.get("responses", {}).items():
+            if not isinstance(response, dict):
+                continue
+            content = response.get("content", {})
+            if not isinstance(content, dict):
+                continue
+            for media_type, media_object in content.items():
+                if not isinstance(media_object, dict):
+                    continue
+                if "example" in media_object and "examples" in media_object:
+                    invalid_media_objects.append(
+                        f"{method.upper()} {path} {status_code} {media_type}"
+                    )
+
+    assert invalid_media_objects == []
+
+
+def test_openapi_flow_settings_invalid_payload_examples_match_runtime_code(
+    openapi_spec: dict,
+) -> None:
+    paths = openapi_spec.get("paths", {})
+    for path, expected_message in FLOW_SETTINGS_INVALID_PAYLOAD_MESSAGES.items():
+        response = paths[path]["patch"]["responses"]["400"]
+        media_object = response["content"]["application/json"]
+        example = media_object["example"]
+        assert example["message"] == expected_message
+        assert example["code"] == FLOW_SETTINGS_INVALID_PAYLOAD_CODE
+
+
+def test_openapi_all_flow_success_responses_have_examples(
+    openapi_spec: dict,
+) -> None:
+    missing_examples: list[str] = []
+    for path, method, operation in _iter_non_ai_builder_flow_operations(openapi_spec):
+        for status_code, response in operation.get("responses", {}).items():
+            if not str(status_code).startswith("2"):
+                continue
+            if not isinstance(response, dict):
+                continue
+            content = response.get("content", {})
+            if not isinstance(content, dict) or not content:
+                continue
+            if not _content_has_example(openapi_spec, content):
+                missing_examples.append(
+                    f"{method.upper()} {path} {status_code} "
+                    f"({operation.get('operationId')})"
+                )
+
+    assert missing_examples == []
+
+
+def test_openapi_all_flow_error_responses_have_examples(
+    openapi_spec: dict,
+) -> None:
+    missing_examples: list[str] = []
+    for path, method, operation in _iter_non_ai_builder_flow_operations(openapi_spec):
+        for status_code, response in operation.get("responses", {}).items():
+            if str(status_code).startswith("2") or str(status_code) == "422":
+                continue
+            if not isinstance(response, dict):
+                continue
+            content = response.get("content", {})
+            if not isinstance(content, dict) or not content:
+                continue
+            if not _content_has_example(openapi_spec, content):
+                missing_examples.append(
+                    f"{method.upper()} {path} {status_code} "
+                    f"({operation.get('operationId')})"
+                )
+
+    assert missing_examples == []
+
+
+def test_openapi_flow_explicit_examples_validate_against_schemas(
+    openapi_spec: dict,
+) -> None:
+    failures: list[str] = []
+    for path, method, operation in _iter_non_ai_builder_flow_operations(openapi_spec):
+        request_body = operation.get("requestBody", {})
+        if isinstance(request_body, dict):
+            for example_name, schema, example in _iter_explicit_openapi_examples(
+                request_body.get("content", {})
+            ):
+                errors = sorted(
+                    _validate_openapi_example(
+                        openapi_spec=openapi_spec,
+                        schema=schema,
+                        example=example,
+                    )
+                )
+                failures.extend(
+                    f"{method.upper()} {path} request {example_name}: {message}"
+                    for message in errors
+                )
+
+        for status_code, response in operation.get("responses", {}).items():
+            if not isinstance(response, dict):
+                continue
+            for example_name, schema, example in _iter_explicit_openapi_examples(
+                response.get("content", {})
+            ):
+                errors = sorted(
+                    _validate_openapi_example(
+                        openapi_spec=openapi_spec,
+                        schema=schema,
+                        example=example,
+                    )
+                )
+                failures.extend(
+                    f"{method.upper()} {path} response {status_code} "
+                    f"{example_name}: {message}"
+                    for message in errors
+                )
+
+    assert failures == []
+
+
+def test_openapi_flow_schema_examples_validate_against_schemas(
+    openapi_spec: dict,
+) -> None:
+    failures: list[str] = []
+    for schema_name, schema in openapi_spec.get("components", {}).get(
+        "schemas", {}
+    ).items():
+        if not isinstance(schema_name, str) or not schema_name.startswith("Flow"):
+            continue
+        if not isinstance(schema, dict):
+            continue
+        if "example" not in schema:
+            continue
+        errors = sorted(
+            _validate_openapi_example(
+                openapi_spec=openapi_spec,
+                schema=schema,
+                example=schema["example"],
+            )
+        )
+        failures.extend(f"{schema_name}: {message}" for message in errors)
+
+    assert failures == []
 
 
 def test_openapi_flow_run_control_paths_include_flow_and_run_ids(
@@ -556,6 +954,8 @@ def test_openapi_flow_review_checkpoint_schema_is_public_contract(
         "rejected_at",
         "resumed_at",
         "cancelled_at",
+        "expires_at",
+        "expired_at",
         "created_at",
         "updated_at",
     } <= set(properties)
@@ -574,11 +974,15 @@ def test_openapi_flow_review_checkpoint_schema_documents_consumer_snapshot(
 
     snapshot_available = properties.get("step_snapshot_available", {})
     output_contract = properties.get("output_contract", {})
+    expires_at = properties.get("expires_at", {})
     assert snapshot_available.get("type") == "boolean"
     assert "external review UIs" in snapshot_available.get("description", "")
     assert "legacy checkpoints" in snapshot_available.get("description", "")
     assert "step_snapshot_available" in output_contract.get("description", "")
     assert "output contract" in output_contract.get("description", "").lower()
+    assert "submission deadline" in expires_at.get("description", "")
+    assert "background reconciler" in expires_at.get("description", "")
+    assert "Approved checkpoints" in expires_at.get("description", "")
 
 
 def test_openapi_run_contract_guides_consumer_forms_uploads_and_review(
@@ -606,6 +1010,7 @@ def test_openapi_run_contract_guides_consumer_forms_uploads_and_review(
     assert "progress events continue" in description
     assert "terminal output type" in description
     assert "steps_requiring_review" in description
+    assert "expires_after_seconds" in description
     assert "awaiting_review" in description
     assert "generated file download" in run_contract["final_output"]["description"]
     assert "actual file size" in run_contract["runtime_upload_policy"]["description"]
@@ -617,6 +1022,13 @@ def test_openapi_run_contract_guides_consumer_forms_uploads_and_review(
     assert "empty list" in run_contract["steps_requiring_review"]["description"]
     assert "Review behavior" in review_step["review_mode"]["description"]
     assert "output contract" in review_step["output_contract"]["description"]
+    assert "expires_after_seconds" in review_step
+    assert "Effective review window" in review_step["expires_after_seconds"][
+        "description"
+    ]
+    assert "before the run reaches awaiting_review" in review_step[
+        "expires_after_seconds"
+    ]["description"]
     assert "timeout" in upload_policy["min_timeout_seconds"]["description"].lower()
     assert "actual file size" in upload_policy["seconds_per_mebibyte"]["description"]
     assert "no-progress timeout" in upload_policy["max_timeout_seconds"]["description"]
@@ -634,6 +1046,9 @@ def test_openapi_flow_step_review_policy_documents_authoring_contract(
     create_description = str(create_schema["review_policy"].get("description", ""))
     public_description = str(public_schema["review_policy"].get("description", ""))
     mode_description = str(review_policy_schema["mode"].get("description", ""))
+    expiry_description = str(
+        review_policy_schema["expires_after_seconds"].get("description", "")
+    )
 
     for description in (create_description, public_description):
         assert "human-in-the-loop checkpoint" in description
@@ -644,6 +1059,7 @@ def test_openapi_flow_step_review_policy_documents_authoring_contract(
 
     assert "`view` pauses the run" in mode_description
     assert "replace the output used by downstream steps" in mode_description
+    assert "14 days" in expiry_description
 
 
 def test_openapi_runtime_paths_expose_review_checkpoint_templates(
@@ -716,6 +1132,16 @@ def test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients(
         "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
         "post",
     )
+    approve_operation = _get_operation(
+        openapi_spec,
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
+        "post",
+    )
+    reject_operation = _get_operation(
+        openapi_spec,
+        "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
+        "post",
+    )
     rerun_operation = _get_operation(
         openapi_spec,
         "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/",
@@ -724,6 +1150,8 @@ def test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients(
 
     active_description = active_operation.get("description", "")
     edit_description = edit_operation.get("description", "")
+    approve_description = approve_operation.get("description", "")
+    reject_description = reject_operation.get("description", "")
     resume_description = resume_operation.get("description", "")
     rerun_description = rerun_operation.get("description", "")
 
@@ -734,15 +1162,24 @@ def test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients(
     assert "resource_permissions.flows = write" in active_description
     assert "rather than auto-approve" in active_description
     assert "same key" in active_description
+    assert "submission deadline" in active_description
+    assert "flow_review_expired" in active_description
+    assert "background reconciler" in active_description
+    assert "approval happens before `expires_at`" in active_description
     assert "full corrected `current_payload_json`, not a patch" in edit_description
     assert "typed_io_contract_violation" in edit_description
     assert "payload_field" in edit_description
     assert "flow_review_stale_revision" in edit_description
     assert "resource_permissions.flows = write" in edit_description
+    assert "before the checkpoint `expires_at` deadline" in edit_description
     assert "committed before the response" in edit_description
     assert "returned id or revision" in edit_description
+    assert "resume remains valid" in approve_description
+    assert "before the checkpoint `expires_at` deadline" in reject_description
     assert "202 Accepted" in resume_description
     assert "Idempotency-Key" in resume_description
+    assert "approved checkpoint revision" in resume_description
+    assert "after the original `expires_at`" in resume_description
     assert "resource_permissions.flows = write" in resume_description
     assert "committed before the response" in resume_description
     assert "Service-key principals can edit and resume" in rerun_description
@@ -761,6 +1198,7 @@ def test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients(
     assert {
         "typed_io_contract_violation",
         "flow_review_stale_revision",
+        "flow_review_expired",
     } <= set(edit_400_examples)
     assert (
         edit_400_examples["typed_io_contract_violation"]["value"]["code"]
@@ -771,9 +1209,63 @@ def test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients(
         == "flow_review_stale_revision"
     )
     assert (
-        "actual_revision"
+        "current_checkpoint_revision"
         in edit_400_examples["flow_review_stale_revision"]["value"]["context"]
     )
+    expired_context = edit_400_examples["flow_review_expired"]["value"]["context"]
+    assert "checkpoint_id" in expired_context
+    assert expired_context["state"] == "awaiting_review"
+    assert "expires_at" in expired_context
+
+    edit_200_example = edit_operation["responses"]["200"]["content"][
+        "application/json"
+    ]["example"]
+    assert edit_200_example["state"] == "edited"
+    assert edit_200_example["revision"] == 2
+    assert edit_200_example["edited_at"] is not None
+    assert edit_200_example["current_payload_json"] == {"text": "Edited answer."}
+
+    approve_200_example = approve_operation["responses"]["200"]["content"][
+        "application/json"
+    ]["example"]
+    assert approve_200_example["state"] == "approved"
+    assert approve_200_example["revision"] == 3
+    assert approve_200_example["approved_at"] is not None
+
+    reject_200_example = reject_operation["responses"]["200"]["content"][
+        "application/json"
+    ]["example"]
+    assert reject_200_example["state"] == "rejected"
+    assert reject_200_example["revision"] == 3
+    assert reject_200_example["rejected_at"] is not None
+
+    resume_request_example = (
+        openapi_spec.get("components", {})
+        .get("schemas", {})
+        .get("FlowRunReviewCheckpointResumeRequest", {})
+        .get("example", {})
+    )
+    resume_202_example = resume_operation["responses"]["202"]["content"][
+        "application/json"
+    ]["example"]
+    assert resume_request_example["expected_checkpoint_revision"] == 3
+    assert resume_202_example["checkpoint"]["state"] == "resumed"
+    assert resume_202_example["checkpoint"]["revision"] == 4
+    assert resume_202_example["checkpoint"]["approved_at"] is not None
+    assert resume_202_example["checkpoint"]["resumed_at"] is not None
+    assert resume_202_example["run"]["status"] == "queued"
+
+    for operation in (
+        approve_operation,
+        reject_operation,
+        resume_operation,
+    ):
+        examples = operation["responses"]["400"]["content"]["application/json"][
+            "examples"
+        ]
+        assert examples["flow_review_expired"]["value"]["code"] == (
+            "flow_review_expired"
+        )
 
 
 def test_openapi_active_review_checkpoint_response_is_nullable(
@@ -1374,15 +1866,26 @@ def test_openapi_flow_error_responses_include_general_error_examples(
         for status_code in status_codes:
             response = responses.get(status_code, {})
             app_json = response.get("content", {}).get("application/json", {})
-            example = app_json.get("example", {})
-            assert isinstance(example, dict), (
+            examples: list[object] = []
+            if "example" in app_json:
+                examples.append(app_json["example"])
+            for example_object in app_json.get("examples", {}).values():
+                if isinstance(example_object, dict) and "value" in example_object:
+                    examples.append(example_object["value"])
+
+            assert examples, (
                 f"{method.upper()} {path} {status_code} must include JSON example"
             )
-            assert (
-                isinstance(example.get("message"), str) and example["message"].strip()
-            )
-            assert "intric_error_code" in example
-            assert isinstance(example.get("code"), str) and example["code"].strip()
+            for example in examples:
+                assert isinstance(example, dict), (
+                    f"{method.upper()} {path} {status_code} example must be an object"
+                )
+                assert (
+                    isinstance(example.get("message"), str)
+                    and example["message"].strip()
+                )
+                assert "intric_error_code" in example
+                assert isinstance(example.get("code"), str) and example["code"].strip()
 
 
 def test_openapi_general_error_schema_guides_client_control_flow(

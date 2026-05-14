@@ -25,6 +25,8 @@ from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
 from intric.flows.enums import (
+    ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES,
+    RECONCILABLE_REVIEW_CHECKPOINT_STATES,
     FlowInputSource,
     FlowInputType,
     FlowMcpPolicy,
@@ -58,10 +60,15 @@ FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES = tuple(
     item.value for item in FlowRunReviewCheckpointState
 )
 FLOW_STEP_REVIEW_MODE_VALUES = tuple(item.value for item in FlowStepReviewMode)
-FLOW_RUN_ACTIVE_REVIEW_CHECKPOINT_STATE_VALUES = (
-    FlowRunReviewCheckpointState.AWAITING_REVIEW.value,
-    FlowRunReviewCheckpointState.EDITED.value,
-    FlowRunReviewCheckpointState.APPROVED.value,
+FLOW_RUN_ACTIVE_REVIEW_CHECKPOINT_STATE_VALUES = tuple(
+    state.value
+    for state in FlowRunReviewCheckpointState
+    if state in ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES
+)
+FLOW_RUN_RECONCILABLE_REVIEW_CHECKPOINT_STATE_VALUES = tuple(
+    state.value
+    for state in FlowRunReviewCheckpointState
+    if state in RECONCILABLE_REVIEW_CHECKPOINT_STATES
 )
 FLOW_RUN_AUDIT_TARGET_STATUS_VALUES = tuple(
     dict.fromkeys(
@@ -1010,6 +1017,14 @@ class FlowRunReviewCheckpoints(BasePublic):
         sa.DateTime(timezone=True),
         nullable=True,
     )
+    expires_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=True,
+    )
+    expired_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=True,
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -1087,6 +1102,12 @@ class FlowRunReviewCheckpoints(BasePublic):
             "ix_flow_run_review_checkpoints_tenant_created_at",
             "tenant_id",
             "created_at",
+        ),
+        Index(
+            "ix_flow_run_review_checkpoints_tenant_expires_at_reconcilable",
+            "tenant_id",
+            "expires_at",
+            postgresql_where=sa.text("state IN ('awaiting_review', 'edited')"),
         ),
     )
 

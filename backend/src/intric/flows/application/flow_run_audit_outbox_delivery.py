@@ -201,6 +201,9 @@ def _audit_description(*, action: ActionType, source: str) -> str:
         ActionType.FLOW_RUN_REVIEW_CHECKPOINT_CANCELLED: (
             "Flow run review checkpoint cancelled"
         ),
+        ActionType.FLOW_RUN_REVIEW_CHECKPOINT_EXPIRED: (
+            "Flow run review checkpoint expired"
+        ),
     }.get(action)
     if label is None:
         raise ValueError(f"Unsupported Flow audit outbox action: {action.value}")

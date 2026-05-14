@@ -1430,6 +1430,11 @@ class FlowRunExecutor:
                 review_mode=step.review_policy.mode if step.review_policy else None,
                 output_type=FlowOutputType(step.output_type),
                 output_contract_json=step.output_contract,
+                review_expires_after_seconds=(
+                    step.review_policy.expires_after_seconds
+                    if step.review_policy is not None
+                    else None
+                ),
             )
         except FlowReviewCheckpointRunNotRunningError:
             await self._rollback()
