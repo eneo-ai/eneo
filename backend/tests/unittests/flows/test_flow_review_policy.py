@@ -17,6 +17,7 @@ from intric.flows.flow_review_policy import (
     FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED,
     FlowStepReviewMode,
     FlowStepReviewPolicy,
+    dump_flow_step_review_policy,
     parse_flow_step_review_policy,
 )
 from intric.main.exceptions import BadRequestException
@@ -102,9 +103,18 @@ def test_parse_flow_step_review_policy_rejects_expiry_outside_bounds(
     assert exc_info.value.code == FLOW_REVIEW_POLICY_INVALID
 
 
-def test_parse_flow_step_review_policy_defaults_expiry_to_inherit() -> None:
+@pytest.mark.parametrize(
+    "raw_policy",
+    [
+        {"mode": "view"},
+        {"mode": "view", "expires_after_seconds": None},
+    ],
+)
+def test_parse_flow_step_review_policy_defaults_expiry_to_inherit(
+    raw_policy: dict[str, object],
+) -> None:
     policy = parse_flow_step_review_policy(
-        raw_policy={"mode": "view"},
+        raw_policy=raw_policy,
         output_mode=FlowOutputMode.PASS_THROUGH,
     )
 
@@ -112,6 +122,20 @@ def test_parse_flow_step_review_policy_defaults_expiry_to_inherit() -> None:
         mode=FlowStepReviewMode.VIEW,
         expires_after_seconds=None,
     )
+
+
+def test_dump_flow_step_review_policy_omits_inherited_expiry() -> None:
+    default_policy = FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW)
+    explicit_policy = FlowStepReviewPolicy(
+        mode=FlowStepReviewMode.EDIT,
+        expires_after_seconds=FLOW_REVIEW_EXPIRY_MIN_SECONDS,
+    )
+
+    assert dump_flow_step_review_policy(default_policy) == {"mode": "view"}
+    assert dump_flow_step_review_policy(explicit_policy) == {
+        "mode": "edit",
+        "expires_after_seconds": FLOW_REVIEW_EXPIRY_MIN_SECONDS,
+    }
 
 
 def test_parse_flow_step_review_policy_reports_outbound_mode_before_shape() -> None:

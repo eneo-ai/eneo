@@ -3,10 +3,14 @@
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { onMount } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
+  import { getLocale } from "$lib/paraglide/runtime";
   import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
 
   let {
@@ -30,9 +34,16 @@
   let draftPayloadText = $state("{}");
   let rejectReason = $state("");
   let activeAction: ReviewAction | null = $state(null);
+  let nowMs = $state(Date.now());
 
+  const deadlineHasPassed = $derived(checkpoint ? hasDeadlinePassed(checkpoint, nowMs) : false);
+  const reviewDecisionExpired = $derived(
+    deadlineHasPassed && (checkpoint?.state === "awaiting_review" || checkpoint?.state === "edited")
+  );
+  const checkpointExpired = $derived(checkpoint?.state === "expired");
   const canEdit = $derived(
-    checkpoint?.state === "awaiting_review" || checkpoint?.state === "edited"
+    !reviewDecisionExpired &&
+      (checkpoint?.state === "awaiting_review" || checkpoint?.state === "edited")
   );
   const canApprove = $derived(canEdit);
   const canReject = $derived(canEdit);
@@ -40,9 +51,42 @@
   const checkpointStateLabel = $derived(
     checkpoint ? getCheckpointStateLabel(checkpoint.state) : null
   );
+  const deadlineDisplay = $derived(formatReviewDeadline(checkpoint?.expires_at));
+  const deadlineBadgeVariant = $derived(
+    reviewDecisionExpired || checkpointExpired ? ("destructive" as const) : ("outline" as const)
+  );
+  const stateBadgeVariant = $derived(
+    reviewDecisionExpired || checkpointExpired ? ("destructive" as const) : ("secondary" as const)
+  );
 
   function renderJson(payload: Record<string, unknown> | null | undefined): string {
     return JSON.stringify(payload ?? {}, null, 2);
+  }
+
+  function parseTimestampMs(value: string | null | undefined): number | null {
+    if (!value) return null;
+    const timestampMs = new Date(value).getTime();
+    return Number.isNaN(timestampMs) ? null : timestampMs;
+  }
+
+  function hasDeadlinePassed(
+    currentCheckpoint: FlowRunReviewCheckpoint,
+    currentTimeMs: number
+  ): boolean {
+    if (currentCheckpoint.state === "expired" || currentCheckpoint.expired_at) return true;
+
+    const expiresAtMs = parseTimestampMs(currentCheckpoint.expires_at);
+    return expiresAtMs !== null && currentTimeMs >= expiresAtMs;
+  }
+
+  function formatReviewDeadline(value: string | null | undefined): string | null {
+    const timestampMs = parseTimestampMs(value);
+    if (timestampMs === null) return null;
+
+    return new Intl.DateTimeFormat(getLocale(), {
+      dateStyle: "medium",
+      timeStyle: "short"
+    }).format(new Date(timestampMs));
   }
 
   function applyCheckpoint(nextCheckpoint: FlowRunReviewCheckpoint | null) {
@@ -94,6 +138,8 @@
         return m.flow_run_review_state_resumed();
       case "cancelled":
         return m.flow_run_review_state_cancelled();
+      case "expired":
+        return m.flow_run_review_state_expired();
     }
   }
 
@@ -195,6 +241,11 @@
 
   onMount(() => {
     void loadCheckpoint();
+    const timer = window.setInterval(() => {
+      nowMs = Date.now();
+    }, 30000);
+
+    return () => window.clearInterval(timer);
   });
 </script>
 
@@ -225,11 +276,31 @@
           {m.flow_run_review_checkpoint_step({ step: checkpoint.step_order })}
         </p>
       </div>
-      <span
-        class="bg-accent-dimmer text-accent-stronger inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium"
-      >
-        {checkpointStateLabel}
-      </span>
+      <div class="flex flex-wrap items-center justify-end gap-2">
+        {#if deadlineDisplay}
+          <Tooltip.Provider delayDuration={150}>
+            <Tooltip.Root>
+              <Tooltip.Trigger>
+                {#snippet child({ props })}
+                  <Badge
+                    {...props}
+                    variant={deadlineBadgeVariant}
+                    class="h-6 max-w-full shrink-0 tabular-nums"
+                  >
+                    {m.flow_run_review_deadline_timestamp({ value: deadlineDisplay })}
+                  </Badge>
+                {/snippet}
+              </Tooltip.Trigger>
+              <Tooltip.Content class="max-w-72">
+                {m.flow_run_review_deadline_help()}
+              </Tooltip.Content>
+            </Tooltip.Root>
+          </Tooltip.Provider>
+        {/if}
+        <Badge variant={stateBadgeVariant} class="h-6 shrink-0">
+          {checkpointStateLabel}
+        </Badge>
+      </div>
     </div>
 
     {#if actionError}
@@ -238,44 +309,69 @@
       </Alert.Root>
     {/if}
 
-    <div class="grid gap-4 lg:grid-cols-2">
-      <div class="flex flex-col gap-2">
-        <label class="text-primary text-xs font-medium" for="flow-review-current-payload">
+    {#if reviewDecisionExpired || checkpointExpired}
+      <Alert.Root variant="destructive">
+        <Alert.Title>{m.flow_run_review_deadline()}</Alert.Title>
+        <Alert.Description>{m.flow_run_review_deadline_expired()}</Alert.Description>
+      </Alert.Root>
+    {:else if checkpoint.state === "approved" && deadlineHasPassed}
+      <Alert.Root>
+        <Alert.Title>{m.flow_run_review_deadline()}</Alert.Title>
+        <Alert.Description>{m.flow_run_review_deadline_approved()}</Alert.Description>
+      </Alert.Root>
+    {/if}
+
+    <Field.Group class="grid gap-4 lg:grid-cols-2">
+      <Field.Field>
+        <Field.Label class="text-primary text-xs font-medium" for="flow-review-current-payload">
           {m.flow_run_review_current_payload()}
-        </label>
+        </Field.Label>
         <Textarea
           id="flow-review-current-payload"
           bind:value={draftPayloadText}
           disabled={!canEdit || activeAction !== null}
-          class="min-h-56 font-mono text-xs leading-relaxed"
+          aria-invalid={reviewDecisionExpired || checkpointExpired}
+          class="min-h-72 resize-y font-mono text-xs leading-relaxed lg:min-h-80"
           spellcheck={false}
         />
-      </div>
-      <div class="flex flex-col gap-2">
-        <p class="text-primary text-xs font-medium">{m.flow_run_review_original_payload()}</p>
+      </Field.Field>
+      <Field.Field>
+        <Field.Label class="text-primary text-xs font-medium">
+          {m.flow_run_review_original_payload()}
+        </Field.Label>
         <pre
-          class="border-default bg-hover-dimmer min-h-56 overflow-auto rounded-lg border p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">{renderJson(
+          class="border-default bg-hover-dimmer min-h-72 overflow-auto rounded-lg border p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap lg:min-h-80">{renderJson(
             checkpoint.original_payload_json
           )}</pre>
-      </div>
-    </div>
+      </Field.Field>
+    </Field.Group>
 
-    <div class="flex flex-col gap-2">
-      <label class="text-primary text-xs font-medium" for="flow-review-reject-reason">
+    <Field.Field data-invalid={reviewDecisionExpired ? "true" : undefined}>
+      <Field.Label class="text-primary text-xs font-medium" for="flow-review-reject-reason">
         {m.flow_run_review_reject_reason()}
-      </label>
+      </Field.Label>
       <Textarea
         id="flow-review-reject-reason"
         bind:value={rejectReason}
         disabled={!canReject || activeAction !== null}
-        class="min-h-20 text-sm"
+        aria-invalid={reviewDecisionExpired || checkpointExpired}
+        maxlength={1024}
+        class="min-h-24 resize-y text-sm"
       />
-    </div>
+      {#if deadlineDisplay}
+        <Field.Description class="text-xs">
+          {m.flow_run_review_deadline_help()}
+        </Field.Description>
+      {/if}
+    </Field.Field>
 
-    <div class="flex flex-wrap items-center justify-end gap-2">
+    <div
+      class="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end"
+    >
       <Button
         variant="outline"
         size="sm"
+        class="min-h-10 sm:min-h-8"
         disabled={!canEdit || activeAction !== null}
         onclick={() => void saveEdit()}
       >
@@ -284,6 +380,7 @@
       <Button
         variant="outline"
         size="sm"
+        class="min-h-10 sm:min-h-8"
         disabled={!canApprove || activeAction !== null}
         onclick={() => void approveCheckpoint()}
       >
@@ -292,6 +389,7 @@
       <Button
         variant="destructive"
         size="sm"
+        class="min-h-10 sm:min-h-8"
         disabled={!canReject || activeAction !== null || rejectReason.trim().length === 0}
         onclick={() => void rejectCheckpoint()}
       >
@@ -299,6 +397,7 @@
       </Button>
       <Button
         size="sm"
+        class="min-h-10 sm:min-h-8"
         disabled={!canResume || activeAction !== null}
         onclick={() => void resumeCheckpoint()}
       >

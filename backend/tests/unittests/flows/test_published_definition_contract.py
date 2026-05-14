@@ -8,6 +8,7 @@ import pytest
 from intric.flows.assistant_execution_snapshot import stable_hash
 from intric.flows.flow_metadata import FlowFormFieldType, serialize_flow_metadata
 from intric.flows.flow_review_policy import (
+    FLOW_REVIEW_POLICY_INVALID,
     FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED,
     FlowStepReviewMode,
 )
@@ -157,6 +158,80 @@ def test_parser_round_trips_step_review_policy() -> None:
 
     assert runtime_steps[0].review_policy is not None
     assert runtime_steps[0].review_policy.mode == FlowStepReviewMode.EDIT
+
+
+def test_parser_accepts_published_review_policy_with_explicit_null_expiry() -> None:
+    definition = build_published_definition_json(
+        flow_id=uuid4(),
+        name="Flow",
+        description=None,
+        metadata_json=None,
+        steps=[
+            {
+                **_step(order=1),
+                "review_policy": {"mode": "view", "expires_after_seconds": None},
+            }
+        ],
+    )
+
+    runtime_steps = parse_published_runtime_steps(definition)
+
+    assert runtime_steps[0].review_policy is not None
+    assert runtime_steps[0].review_policy.expires_after_seconds is None
+
+
+def test_parser_reports_invalid_review_policy_with_step_context() -> None:
+    definition = build_published_definition_json(
+        flow_id=uuid4(),
+        name="Flow",
+        description=None,
+        metadata_json=None,
+        steps=[
+            {
+                **_step(order=1),
+                "user_description": "Draft review",
+                "review_policy": {"mode": "approve"},
+            }
+        ],
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        parse_published_runtime_steps(definition)
+
+    assert exc_info.value.code == FLOW_REVIEW_POLICY_INVALID
+    assert str(exc_info.value).startswith("Step 1 (Draft review):")
+    assert exc_info.value.context == {
+        "step_order": 1,
+        "step_description": "Draft review",
+    }
+
+
+def test_parser_reports_other_step_errors_with_step_context() -> None:
+    definition = build_published_definition_json(
+        flow_id=uuid4(),
+        name="Flow",
+        description=None,
+        metadata_json=None,
+        steps=[
+            {
+                **_step(order=1),
+                "user_description": "Invalid mode",
+                "output_mode": "unsupported",
+            }
+        ],
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        parse_published_runtime_steps(definition)
+
+    assert (
+        str(exc_info.value)
+        == "Step 1 (Invalid mode): Unsupported output mode 'unsupported'."
+    )
+    assert exc_info.value.context == {
+        "step_order": 1,
+        "step_description": "Invalid mode",
+    }
 
 
 @pytest.mark.parametrize(

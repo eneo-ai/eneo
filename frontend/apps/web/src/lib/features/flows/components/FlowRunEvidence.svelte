@@ -25,6 +25,7 @@
   import FlowRunEvidenceSummary from "./FlowRunEvidenceSummary.svelte";
   import FlowRunEvidenceStepCard from "./FlowRunEvidenceStepCard.svelte";
   import type { FlowRunProgressSnapshot } from "./flowRunProgress";
+  import { getReviewPolicyErrorStepsFromDefinitionSnapshot } from "$lib/features/flows/flowRuntimeErrorMapping";
 
   let {
     runId,
@@ -72,6 +73,12 @@
   let resultFilesByStepOrder: Record<number, FlowRunResultFile[]> = $derived.by(() =>
     groupResultFilesByStepOrder(evidence?.result_files ?? [])
   );
+  let reviewPolicyDefinitionSteps = $derived.by(() => {
+    const definitionSteps = evidence?.definition_snapshot?.steps;
+    return getReviewPolicyErrorStepsFromDefinitionSnapshot(
+      Array.isArray(definitionSteps) ? definitionSteps : []
+    );
+  });
 
   onMount(async () => {
     try {
@@ -318,6 +325,7 @@
         templateProvenance={getTemplateProvenanceSummary(result.output_payload_json)}
         stepRag={getStepRag(result.step_order)}
         stepAttempts={getStepAttempts(result.step_order)}
+        {reviewPolicyDefinitionSteps}
         {copiedKey}
         expanded={expandedSteps.includes(result.step_order)}
         panelId={getStepPanelId(result.step_order)}

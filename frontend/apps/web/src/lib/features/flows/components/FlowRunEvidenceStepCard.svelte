@@ -6,13 +6,17 @@
   import { Markdown } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
   import { Badge } from "$lib/components/ui/badge/index.js";
-  import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import FlowRunKnowledgeTrace from "./FlowRunKnowledgeTrace.svelte";
   import FlowJsonViewer from "./FlowJsonViewer.svelte";
+  import FlowRunErrorAlert from "./FlowRunErrorAlert.svelte";
   import FlowRunResultFileButton from "./FlowRunResultFileButton.svelte";
   import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
+  import {
+    isReviewPolicyRunErrorRelevantForStep,
+    type FlowReviewPolicyErrorStep
+  } from "$lib/features/flows/flowRuntimeErrorMapping";
   import type {
     RuntimeInputSummary,
     TemplateProvenanceSummary
@@ -39,6 +43,7 @@
     templateProvenance,
     stepRag,
     stepAttempts,
+    reviewPolicyDefinitionSteps = [],
     copiedKey,
     expanded,
     panelId,
@@ -61,6 +66,7 @@
     templateProvenance: TemplateProvenanceSummary | null;
     stepRag: Record<string, unknown> | null;
     stepAttempts: Record<string, unknown>[];
+    reviewPolicyDefinitionSteps?: readonly FlowReviewPolicyErrorStep[];
     copiedKey: string | null;
     expanded: boolean;
     panelId: string;
@@ -78,6 +84,17 @@
       filesCount: number | undefined
     ) => string;
   } = $props();
+
+  const stepReviewPolicy = $derived(stepDef?.review_policy ?? null);
+  const shouldShowStepError = $derived(
+    result.error_message
+      ? isReviewPolicyRunErrorRelevantForStep(
+          result.error_message,
+          result.step_order,
+          stepReviewPolicy
+        )
+      : false
+  );
 
   let inputOpen = $state(false);
   const hasResultFiles = $derived(resultFiles.length > 0);
@@ -380,14 +397,13 @@
           </div>
         {/if}
 
-        {#if result.error_message}
-          <Alert.Root variant="destructive">
-            <Alert.Title class="text-xs font-semibold">{m.flow_run_error()}</Alert.Title>
-            <Alert.Description>
-              <pre
-                class="mt-1 max-h-60 overflow-auto font-mono text-xs break-words whitespace-pre-wrap">{result.error_message}</pre>
-            </Alert.Description>
-          </Alert.Root>
+        {#if result.error_message && shouldShowStepError}
+          <FlowRunErrorAlert
+            message={result.error_message}
+            steps={reviewPolicyDefinitionSteps.filter(
+              (step) => step.step_order === result.step_order
+            )}
+          />
         {/if}
       </Card.Content>
     </div>

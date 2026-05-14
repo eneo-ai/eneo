@@ -57,6 +57,8 @@ function buildCheckpoint(
     rejected_at: null,
     resumed_at: state === "resumed" ? "2026-03-17T10:08:00Z" : null,
     cancelled_at: null,
+    expires_at: "2099-03-17T10:35:00Z",
+    expired_at: state === "expired" ? "2026-03-17T10:35:00Z" : null,
     created_at: "2026-03-17T10:05:00Z",
     updated_at: "2026-03-17T10:05:00Z"
   };
@@ -170,6 +172,37 @@ describe("FlowRunReviewCheckpointPanel", () => {
     });
   });
 
+  it("shows expired review errors from the shared Flow API error contract", async () => {
+    const expiredError = new IntricError(
+      "Review checkpoint has expired.",
+      "RESPONSE",
+      400,
+      9007,
+      {
+        code: "flow_review_expired",
+        context: {
+          checkpoint_id: "checkpoint-1",
+          state: "awaiting_review",
+          expires_at: "2026-03-17T10:35:00Z"
+        }
+      },
+      { endpoint: "POST@/review-checkpoints/checkpoint-1/approve" }
+    );
+    const approve = vi.fn(async () => {
+      throw expiredError;
+    });
+    const eneo = buildEneo({ activeCheckpoint: buildCheckpoint("awaiting_review", 1), approve });
+
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric }
+    });
+
+    await screen.findByText(m.flow_run_review_state_awaiting_review());
+    await fireEvent.click(screen.getByRole("button", { name: m.approve() }));
+
+    await screen.findByText(m.flow_error_flow_review_expired());
+  });
+
   it("shows typed contract edit errors from the shared Flow API error contract", async () => {
     const contractError = new IntricError(
       "backend readable fallback",
@@ -270,6 +303,98 @@ describe("FlowRunReviewCheckpointPanel", () => {
       idempotencyKey: "flow-review-resume:checkpoint-1:2"
     });
     expect(onChanged).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows the review deadline and blocks decision actions after it passes", async () => {
+    const expiredCheckpoint = {
+      ...buildCheckpoint("awaiting_review", 1),
+      expires_at: "2000-01-01T10:00:00Z"
+    };
+    const edit = vi.fn();
+    const approve = vi.fn();
+    const reject = vi.fn();
+    const eneo = buildEneo({ activeCheckpoint: expiredCheckpoint, edit, approve, reject });
+
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric }
+    });
+
+    await screen.findByText(m.flow_run_review_deadline_expired());
+
+    expect(
+      (screen.getByRole("button", { name: m.flow_run_review_save_edit() }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true);
+    expect((screen.getByRole("button", { name: m.approve() }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+    expect((screen.getByRole("button", { name: m.reject() }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+
+    expect(edit).not.toHaveBeenCalled();
+    expect(approve).not.toHaveBeenCalled();
+    expect(reject).not.toHaveBeenCalled();
+  });
+
+  it("shows backend-expired checkpoints as expired and non-editable", async () => {
+    const eneo = buildEneo({ activeCheckpoint: buildCheckpoint("expired", 2) });
+
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric }
+    });
+
+    await screen.findByText(m.flow_run_review_state_expired());
+    await screen.findByText(m.flow_run_review_deadline_expired());
+
+    expect(
+      (screen.getByRole("button", { name: m.flow_run_review_save_edit() }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true);
+    expect((screen.getByRole("button", { name: m.approve() }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+    expect((screen.getByRole("button", { name: m.reject() }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+  });
+
+  it("does not show deadline help when the checkpoint has no deadline", async () => {
+    const checkpointWithoutDeadline = {
+      ...buildCheckpoint("awaiting_review", 1),
+      expires_at: null
+    };
+    const eneo = buildEneo({ activeCheckpoint: checkpointWithoutDeadline });
+
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric }
+    });
+
+    await screen.findByText(m.flow_run_review_state_awaiting_review());
+
+    expect(screen.queryByText(m.flow_run_review_deadline_help())).toBeNull();
+  });
+
+  it("allows resume after an approved checkpoint even when the original deadline has passed", async () => {
+    const approvedCheckpoint = {
+      ...buildCheckpoint("approved", 2),
+      expires_at: "2000-01-01T10:00:00Z"
+    };
+    const resumedCheckpoint = buildCheckpoint("resumed", 3);
+    const resume = vi.fn(async () => ({
+      checkpoint: resumedCheckpoint,
+      run: buildRun("queued")
+    }));
+    const eneo = buildEneo({ activeCheckpoint: approvedCheckpoint, resume });
+
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Intric }
+    });
+
+    await screen.findByText(m.flow_run_review_deadline_approved());
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_run_review_resume() }));
+
+    await waitFor(() => expect(resume).toHaveBeenCalledTimes(1));
   });
 
   it("requires and trims the reviewer reject reason", async () => {

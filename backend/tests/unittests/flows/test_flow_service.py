@@ -12,6 +12,7 @@ from intric.assistants.assistant import Assistant, AssistantOrigin
 from intric.flows.application.flow_service import FlowService
 from intric.flows.assistant_execution_snapshot import stable_hash
 from intric.flows.flow import Flow, FlowStep, FlowVersion
+from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from intric.main.exceptions import BadRequestException, NotFoundException
 from intric.main.models import NOT_PROVIDED
 
@@ -357,6 +358,43 @@ async def test_publish_flow_uses_normalized_metadata_in_snapshot(user):
     assert version_repo.create.await_args.kwargs["definition_checksum"] == stable_hash(
         definition
     )
+
+
+@pytest.mark.asyncio
+async def test_publish_flow_omits_default_review_expiry_from_definition(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    flow_id = uuid4()
+    review_step = _step(step_order=1).model_copy(
+        update={
+            "review_policy": FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW),
+        }
+    )
+    flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Review Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[review_step],
+    )
+    flow_repo.get.return_value = flow
+    version_repo.get_latest.return_value = None
+    flow_repo.update.return_value = flow.model_copy(update={"published_version": 1})
+
+    await service.publish_flow(flow_id=flow_id)
+
+    definition = version_repo.create.await_args.kwargs["definition_json"]
+    assert definition["steps"][0]["review_policy"] == {"mode": "view"}
 
 
 @pytest.mark.asyncio

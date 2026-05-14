@@ -865,9 +865,9 @@ export interface paths {
     };
     /**
      * Get flow input limits
-     * @description Return the tenant's effective upload limits for flow runtime inputs.
+     * @description Return the tenant's effective upload limits for Flow runtime inputs. Authoring and runtime clients use these values indirectly through the run-contract and upload endpoints; admin UIs use this endpoint to inspect the tenant-level policy that constrains audio, document, image, and generic file uploads before a run is created.
      */
-    get: operations["get_flow_input_limits_api_v1_settings_flow_input_limits_get"];
+    get: operations["get_flow_input_limits"];
     put?: never;
     post?: never;
     delete?: never;
@@ -875,9 +875,9 @@ export interface paths {
     head?: never;
     /**
      * Update flow input limits
-     * @description Update tenant-level upload limits used by flow runtime input endpoints. Omit a field to leave it unchanged. Send null to remove that tenant override and fall back to the default policy. Send a positive integer to set a tenant override.
+     * @description Update tenant-level upload limits used by flow runtime input endpoints. Omit a field to leave it unchanged. Send null to remove that tenant override and fall back to the default policy. Send a positive integer to set a tenant override. The returned payload is the resolved effective policy after the update, so API consumers can immediately refresh upload forms and progress timeout calculations.
      */
-    patch: operations["update_flow_input_limits_api_v1_settings_flow_input_limits_patch"];
+    patch: operations["update_flow_input_limits"];
     trace?: never;
   };
   "/api/v1/settings/flow-document-render-limits": {
@@ -889,9 +889,9 @@ export interface paths {
     };
     /**
      * Get flow document render limits
-     * @description Return tenant-level guardrails for generated flow PDF/DOCX outputs.
+     * @description Return tenant-level guardrails for generated Flow PDF/DOCX outputs. These limits protect document-rendering workers from oversized text, tables, lists, and deeply nested structured output. Admin UIs should show these values as runtime safety ceilings, not as prompt or upload limits.
      */
-    get: operations["get_flow_document_render_limits_api_v1_settings_flow_document_render_limits_get"];
+    get: operations["get_flow_document_render_limits"];
     put?: never;
     post?: never;
     delete?: never;
@@ -899,9 +899,9 @@ export interface paths {
     head?: never;
     /**
      * Update flow document render limits
-     * @description Update tenant-level guardrails for generated flow PDF/DOCX outputs. Omit a field to leave it unchanged. Send null to remove the tenant override and fall back to the product default.
+     * @description Update tenant-level guardrails for generated flow PDF/DOCX outputs. Omit a field to leave it unchanged. Send null to remove the tenant override and fall back to the product default. The response returns the resolved effective limits that document-generation steps will enforce for future runs.
      */
-    patch: operations["update_flow_document_render_limits_api_v1_settings_flow_document_render_limits_patch"];
+    patch: operations["update_flow_document_render_limits"];
     trace?: never;
   };
   "/api/v1/settings/flow-runtime-policy": {
@@ -913,9 +913,9 @@ export interface paths {
     };
     /**
      * Get flow runtime policy
-     * @description Return tenant-level per-step LLM runtime timeout policy for flow executions.
+     * @description Return tenant-level per-step LLM runtime timeout policy for Flow executions. This controls backend worker timeouts for individual steps; it is separate from browser upload timeouts, document-rendering limits, and human-review expiry windows.
      */
-    get: operations["get_flow_runtime_policy_api_v1_settings_flow_runtime_policy_get"];
+    get: operations["get_flow_runtime_policy"];
     put?: never;
     post?: never;
     delete?: never;
@@ -923,9 +923,9 @@ export interface paths {
     head?: never;
     /**
      * Update flow runtime policy
-     * @description Update tenant-level per-step LLM timeout policy for flow executions. Omit a field to leave it unchanged. Send null to remove the tenant override and fall back to the deployment default.
+     * @description Update tenant-level per-step LLM timeout policy for flow executions. Omit a field to leave it unchanged. Send null to remove the tenant override and fall back to the deployment default. The returned policy is the resolved effective timeout policy used by future Flow step executions.
      */
-    patch: operations["update_flow_runtime_policy_api_v1_settings_flow_runtime_policy_patch"];
+    patch: operations["update_flow_runtime_policy"];
     trace?: never;
   };
   "/api/v1/settings/flow-evidence-policy": {
@@ -937,9 +937,9 @@ export interface paths {
     };
     /**
      * Get flow evidence policy
-     * @description Return the tenant's effective flow evidence export policy, including classification-3 raw export defaults.
+     * @description Return the tenant's effective Flow evidence export policy, including classification-3 raw-export defaults. This endpoint is for tenant admin UIs that need to explain whether raw evidence exports are allowed for space admins, run owners, or service-key principals.
      */
-    get: operations["get_flow_evidence_policy_api_v1_settings_flow_evidence_policy_get"];
+    get: operations["get_flow_evidence_policy"];
     put?: never;
     post?: never;
     delete?: never;
@@ -947,9 +947,9 @@ export interface paths {
     head?: never;
     /**
      * Update flow evidence policy
-     * @description Update tenant-level policy flags that control raw evidence export behavior for classification-3 spaces.
+     * @description Update tenant-level policy flags that control raw Flow evidence export behavior for classification-3 spaces. Omitted fields are left unchanged; boolean values explicitly enable or disable the corresponding raw-export capability for future evidence export requests.
      */
-    patch: operations["update_flow_evidence_policy_api_v1_settings_flow_evidence_policy_patch"];
+    patch: operations["update_flow_evidence_policy"];
     trace?: never;
   };
   "/api/v1/settings/flow-retention-policy": {
@@ -961,9 +961,9 @@ export interface paths {
     };
     /**
      * Get flow retention policy
-     * @description Return the tenant's effective layered flow retention policy defaults and class-specific overrides.
+     * @description Return the tenant's effective layered Flow retention policy defaults and class-specific overrides. Use this admin endpoint to show how long source audio, transcript text, generated artifacts, and run debug evidence are retained before cleanup policies can remove them.
      */
-    get: operations["get_flow_retention_policy_api_v1_settings_flow_retention_policy_get"];
+    get: operations["get_flow_retention_policy"];
     put?: never;
     post?: never;
     delete?: never;
@@ -971,9 +971,9 @@ export interface paths {
     head?: never;
     /**
      * Update flow retention policy
-     * @description Update tenant-level layered flow retention defaults and class-specific overrides used by Flow runtime data classes.
+     * @description Update tenant-level layered Flow retention defaults and class-specific overrides used by runtime cleanup. Omitted fields are left unchanged; send an integer day count to set an override or null to remove one where the field supports falling back to the broader default.
      */
-    patch: operations["update_flow_retention_policy_api_v1_settings_flow_retention_policy_patch"];
+    patch: operations["update_flow_retention_policy"];
     trace?: never;
   };
   "/api/v1/settings/ai-builder-budget": {
@@ -3828,7 +3828,7 @@ export interface paths {
     };
     /**
      * List Flow Templates
-     * @description List template assets attached to a flow draft for template-fill steps.
+     * @description List DOCX template assets attached to the current flow draft. Use this authoring endpoint when building template-fill configuration screens: the response identifies which stored templates can be selected, inspected, or downloaded. These files are reusable draft assets, not per-run runtime uploads.
      */
     get: operations["list_flow_template_files"];
     put?: never;
@@ -3852,7 +3852,7 @@ export interface paths {
     };
     /**
      * Inspect DOCX template placeholders for a flow
-     * @description Scan an uploaded DOCX template and return placeholders discovered in the document body, tables, headers, and footers.
+     * @description Scan one stored DOCX template asset and return placeholders discovered in the document body, tables, headers, and footers. Use the returned names to map template-fill output fields before publishing. Inspection is read-only: it does not mutate the template file or the flow draft.
      */
     get: operations["inspect_flow_template"];
     put?: never;
@@ -3874,7 +3874,7 @@ export interface paths {
     put?: never;
     /**
      * Generate Template Download URL
-     * @description Generate a temporary signed download URL for a stored flow template asset.
+     * @description Generate a temporary signed download URL for a stored flow template asset. Use this authoring endpoint to preview or download the reusable DOCX template that belongs to the draft flow. It is separate from run artifact downloads; run-generated files use the artifact signed-url endpoint under `/runs/{run_id}`.
      */
     post: operations["generate_flow_template_signed_url"];
     delete?: never;
@@ -3894,7 +3894,7 @@ export interface paths {
     put?: never;
     /**
      * Test HTTP Connection
-     * @description Send a test HTTP request using the provided config snapshot. Does not persist anything.
+     * @description Send a test HTTP request using the submitted authored config snapshot and return a typed preview of the attempted request and response. This endpoint does not persist the config or publish the flow; it is for authoring UIs that need to validate URL, auth, timeout, headers, body mode, and SSRF guard behavior before saving an HTTP input or output step.
      */
     post: operations["test_flow_http"];
     delete?: never;
@@ -3914,7 +3914,7 @@ export interface paths {
     put?: never;
     /**
      * Create Flow Assistant
-     * @description Create a flow-managed assistant that can be attached to steps in the specified flow.
+     * @description Create a flow-managed assistant owned by the specified draft flow. Use this authoring endpoint when a flow editor needs a dedicated assistant for one or more steps instead of reusing an existing assistant. The created assistant is returned with the caller's effective permissions and can then be referenced by step `assistant_id` values in flow create/update payloads.
      */
     post: operations["create_flow_assistant"];
     delete?: never;
@@ -3932,21 +3932,21 @@ export interface paths {
     };
     /**
      * Get Flow Assistant
-     * @description Return a single flow-managed assistant and its effective permissions for the caller.
+     * @description Return one flow-managed assistant that belongs to the specified flow, together with effective permissions for the caller. Use this endpoint before rendering an assistant-edit screen so the UI does not accidentally edit a global or unrelated assistant. The assistant id must be one owned by this flow.
      */
     get: operations["get_flow_assistant"];
     put?: never;
     post?: never;
     /**
      * Delete Flow Assistant
-     * @description Delete a flow-managed assistant from the specified flow.
+     * @description Delete a flow-managed assistant from the specified draft flow. The assistant id must belong to this flow; deleting it removes the flow-owned assistant resource and writes an audit event. Clients should remove or replace step references to the assistant before publishing a draft that no longer has this assistant.
      */
     delete: operations["delete_flow_assistant"];
     options?: never;
     head?: never;
     /**
      * Update Flow Assistant
-     * @description Update a flow-managed assistant that belongs to the specified flow.
+     * @description Update a flow-managed assistant that belongs to the specified draft flow. Only fields accepted by `AssistantUpdatePublic` are applied; omitted fields are left unchanged. Use this endpoint for assistant details that should travel with the flow authoring experience, not for updating unrelated shared assistants.
      */
     patch: operations["update_flow_assistant"];
     trace?: never;
@@ -3970,6 +3970,7 @@ export interface paths {
      *     - step-specific runtime input requirements
      *     - runtime upload timeout policy for browser and API clients
      *     - steps that can pause for human review, including the output shape a review UI should render
+     *       and the effective `expires_after_seconds` review window
      *     - aggregate file limits
      *     - published template readiness and capability state
      *
@@ -3978,7 +3979,8 @@ export interface paths {
      *     2. Upload files before run creation and attach each file id through `step_inputs[step_id].file_ids`.
      *        For browser uploads, compute the initial timeout from the actual file size using
      *        `runtime_upload_policy`, then keep the upload alive while progress events continue.
-     *     3. Prebuild optional review screens from `steps_requiring_review`.
+     *     3. Prebuild optional review screens from `steps_requiring_review`; use
+     *        `expires_after_seconds` to show the review deadline once the checkpoint opens.
      *     4. Start the run with `expected_flow_version=published_flow_version`.
      *     5. When a run reaches `awaiting_review`, call the active checkpoint endpoint for the immutable
      *        step snapshot and editable payload.
@@ -4179,6 +4181,12 @@ export interface paths {
      *     It may be `null` for unstructured text/document steps even when `step_snapshot_available`
      *     is `true`.
      *
+     *     Treat `expires_at` as the review submission deadline. Edit, approve, or reject requests
+     *     after this timestamp return `400` with code `flow_review_expired`; this endpoint may
+     *     briefly show the checkpoint until the background reconciler marks the run cancelled.
+     *     When approval happens before `expires_at`, resume remains valid after the deadline because
+     *     the human decision is already persisted.
+     *
      *     Current visibility follows run-detail visibility: service-key principals can read only
      *     checkpoints for runs they own, while human callers follow the existing flow view policy.
      *
@@ -4222,6 +4230,9 @@ export interface paths {
      *     with code `typed_io_contract_violation` and context fields `checkpoint_id`, `step_id`,
      *     `step_order`, and `payload_field`.
      *
+     *     The edit must be submitted before the checkpoint `expires_at` deadline. Late edits return
+     *     `400` with code `flow_review_expired`.
+     *
      *     Service-key principals may edit checkpoints only for runs they own (key must have
      *     `resource_permissions.flows = write`). Human callers follow the same flow review permission
      *     policy used by the approve and reject endpoints.
@@ -4247,6 +4258,9 @@ export interface paths {
      *     Approval advances the checkpoint revision. Resume is a separate command so clients can make
      *     the decision durable before dispatching more runtime work. Use the latest checkpoint `revision`;
      *     stale approvals return `400` with code `flow_review_stale_revision`.
+     *
+     *     The approval must be submitted before the checkpoint `expires_at` deadline. After approval
+     *     is persisted, resume remains valid even if the original deadline has passed.
      *
      *     Service-key principals may approve checkpoints only for runs they own (key must have
      *     `resource_permissions.flows = write`).
@@ -4276,6 +4290,9 @@ export interface paths {
      *     The rejection reason is written to lifecycle audit metadata and the run is terminalized with
      *     `cancelled` status using the `review_rejected` lifecycle source.
      *
+     *     The rejection must be submitted before the checkpoint `expires_at` deadline. Late rejections
+     *     return `400` with code `flow_review_expired`.
+     *
      *     Service-key principals may reject checkpoints only for runs they own (key must have
      *     `resource_permissions.flows = write`).
      *
@@ -4304,6 +4321,10 @@ export interface paths {
      *     Use the `Idempotency-Key` header for retries. Replaying the same key returns the current
      *     checkpoint and run without dispatching another worker task. A successful response is
      *     `202 Accepted`: poll the run and step endpoints after this call to observe resumed execution.
+     *
+     *     Resume uses the approved checkpoint revision. It can run after the original `expires_at`
+     *     deadline only when approval was already persisted before expiry; already expired checkpoints
+     *     return `400` with code `flow_review_expired`.
      *
      *     Service-key principals may resume approved checkpoints only for runs they own (key must have
      *     `resource_permissions.flows = write`).
@@ -8229,6 +8250,7 @@ export interface components {
       | "flow_run_review_checkpoint_rejected"
       | "flow_run_review_checkpoint_resumed"
       | "flow_run_review_checkpoint_cancelled"
+      | "flow_run_review_checkpoint_expired"
       | "ai_builder_session_created"
       | "ai_builder_plan_proposed"
       | "ai_builder_plan_approved"
@@ -11941,7 +11963,7 @@ export interface components {
       /** Any Resumed */
       any_resumed: boolean;
       /** Active Checkpoint Id */
-      active_checkpoint_id: string | null;
+      active_checkpoint_id?: string | null;
       /** Active Checkpoint Conflict */
       active_checkpoint_conflict: boolean;
     };
@@ -12197,7 +12219,17 @@ export interface components {
        */
       status?: string;
     };
-    /** FilePublic */
+    /**
+     * FilePublic
+     * @example {
+     *       "created_at": "2026-03-17T10:04:00Z",
+     *       "id": "00000000-0000-0000-0000-000000000701",
+     *       "mimetype": "audio/mpeg",
+     *       "name": "review-audio.mp3",
+     *       "size": 1843200,
+     *       "updated_at": "2026-03-17T10:04:00Z"
+     *     }
+     */
     FilePublic: {
       /** Created At */
       created_at?: string | null;
@@ -12278,7 +12310,22 @@ export interface components {
       /** Data Retention Days */
       data_retention_days?: number | null;
     };
-    /** FlowDocumentRenderLimitsPublic */
+    /**
+     * FlowDocumentRenderLimitsPublic
+     * @example {
+     *       "max_blocks": 2000,
+     *       "max_cell_chars": 20000,
+     *       "max_list_items": 5000,
+     *       "max_object_fields": 200,
+     *       "max_source_chars": 500000,
+     *       "max_structured_depth": 32,
+     *       "max_structured_nodes": 10000,
+     *       "max_table_cells": 50000,
+     *       "max_table_columns": 50,
+     *       "max_table_rows": 5000,
+     *       "max_text_chars": 500000
+     *     }
+     */
     FlowDocumentRenderLimitsPublic: {
       /** Max Source Chars */
       max_source_chars: number;
@@ -12303,7 +12350,13 @@ export interface components {
       /** Max Object Fields */
       max_object_fields: number;
     };
-    /** FlowDocumentRenderLimitsUpdate */
+    /**
+     * FlowDocumentRenderLimitsUpdate
+     * @example {
+     *       "max_source_chars": 500000,
+     *       "max_table_rows": 5000
+     *     }
+     */
     FlowDocumentRenderLimitsUpdate: {
       /** Max Source Chars */
       max_source_chars?: number | null;
@@ -12345,7 +12398,15 @@ export interface components {
       /** Form Fields */
       form_fields?: components["schemas"]["FormFieldSpec"][] | null;
     };
-    /** FlowEvidencePolicyPublic */
+    /**
+     * FlowEvidencePolicyPublic
+     * @example {
+     *       "allow_run_owner_raw_export_class3": false,
+     *       "allow_sensitive_flow_exports": false,
+     *       "allow_service_key_raw_export_class3": false,
+     *       "allow_space_admin_raw_export_class3": false
+     *     }
+     */
     FlowEvidencePolicyPublic: {
       /**
        * Allow Sensitive Flow Exports
@@ -12368,7 +12429,13 @@ export interface components {
        */
       allow_service_key_raw_export_class3?: boolean;
     };
-    /** FlowEvidencePolicyUpdate */
+    /**
+     * FlowEvidencePolicyUpdate
+     * @example {
+     *       "allow_sensitive_flow_exports": false,
+     *       "allow_space_admin_raw_export_class3": true
+     *     }
+     */
     FlowEvidencePolicyUpdate: {
       /** Allow Sensitive Flow Exports */
       allow_sensitive_flow_exports?: boolean | null;
@@ -12411,7 +12478,15 @@ export interface components {
         [key: string]: unknown;
       } | null;
     };
-    /** FlowInputLimitsPublic */
+    /**
+     * FlowInputLimitsPublic
+     * @example {
+     *       "audio_max_files_per_run": 5,
+     *       "audio_max_size_bytes": 104857600,
+     *       "file_max_size_bytes": 52428800,
+     *       "max_files_per_run": 20
+     *     }
+     */
     FlowInputLimitsPublic: {
       /** File Max Size Bytes */
       file_max_size_bytes: number;
@@ -12428,7 +12503,13 @@ export interface components {
        */
       audio_max_files_per_run: number | null;
     };
-    /** FlowInputLimitsUpdate */
+    /**
+     * FlowInputLimitsUpdate
+     * @example {
+     *       "file_max_size_bytes": 52428800,
+     *       "max_files_per_run": 20
+     *     }
+     */
     FlowInputLimitsUpdate: {
       /**
        * File Max Size Bytes
@@ -12627,7 +12708,16 @@ export interface components {
       /** Steps */
       steps: components["schemas"]["FlowStepPublic"][];
     };
-    /** FlowRetentionPolicyPublic */
+    /**
+     * FlowRetentionPolicyPublic
+     * @example {
+     *       "generated_artifact_days": 30,
+     *       "run_debug_evidence_days": 7,
+     *       "shared_default_days": 30,
+     *       "source_audio_days": 14,
+     *       "transcript_text_days": 30
+     *     }
+     */
     FlowRetentionPolicyPublic: {
       /** Shared Default Days */
       shared_default_days?: number | null;
@@ -12640,7 +12730,12 @@ export interface components {
       /** Run Debug Evidence Days */
       run_debug_evidence_days?: number | null;
     };
-    /** FlowRetentionPolicyUpdate */
+    /**
+     * FlowRetentionPolicyUpdate
+     * @example {
+     *       "source_audio_days": 14
+     *     }
+     */
     FlowRetentionPolicyUpdate: {
       /** Shared Default Days */
       shared_default_days?: number | null;
@@ -12700,6 +12795,12 @@ export interface components {
       /** @description Published output type of the step that can pause for review. */
       output_type: components["schemas"]["FlowOutputType"];
       /**
+       * Expires After Seconds
+       * @description Effective review window in seconds, starting when this checkpoint opens. This value is already resolved from the step policy and the platform default, so clients can prepare review deadlines before the run reaches awaiting_review.
+       * @default 1209600
+       */
+      expires_after_seconds?: number;
+      /**
        * Output Contract
        * @description Published output contract for the step, when one is configured. This is useful for prebuilding review forms before the run starts.
        */
@@ -12753,6 +12854,7 @@ export interface components {
      *       ],
      *       "steps_requiring_review": [
      *         {
+     *           "expires_after_seconds": 1209600,
      *           "label": "Review transcription",
      *           "output_contract": {
      *             "properties": {
@@ -13378,10 +13480,11 @@ export interface components {
      *             "attempt_no": 1,
      *             "created_at": "2026-03-17T10:05:30Z",
      *             "current_payload_json": {
-     *               "text": "Reviewed answer."
+     *               "text": "Edited answer."
      *             },
      *             "decision": "approved",
      *             "edited_at": "2026-03-17T10:06:30Z",
+     *             "expires_at": "2026-03-31T10:05:30Z",
      *             "flow_id": "00000000-0000-0000-0000-000000000001",
      *             "flow_run_id": "00000000-0000-0000-0000-000000000301",
      *             "id": "00000000-0000-0000-0000-000000000901",
@@ -13405,7 +13508,7 @@ export interface components {
      *             "resume_key_present": true,
      *             "resumed_at": "2026-03-17T10:08:00Z",
      *             "review_mode": "edit",
-     *             "revision": 3,
+     *             "revision": 4,
      *             "schema_version": 1,
      *             "state": "resumed",
      *             "step_id": "00000000-0000-0000-0000-000000000101",
@@ -13929,10 +14032,11 @@ export interface components {
      *           "attempt_no": 1,
      *           "created_at": "2026-03-17T10:05:30Z",
      *           "current_payload_json": {
-     *             "text": "Reviewed answer."
+     *             "text": "Edited answer."
      *           },
      *           "decision": "approved",
      *           "edited_at": "2026-03-17T10:06:30Z",
+     *           "expires_at": "2026-03-31T10:05:30Z",
      *           "flow_id": "00000000-0000-0000-0000-000000000001",
      *           "flow_run_id": "00000000-0000-0000-0000-000000000301",
      *           "id": "00000000-0000-0000-0000-000000000901",
@@ -13956,7 +14060,7 @@ export interface components {
      *           "resume_key_present": true,
      *           "resumed_at": "2026-03-17T10:08:00Z",
      *           "review_mode": "edit",
-     *           "revision": 3,
+     *           "revision": 4,
      *           "schema_version": 1,
      *           "state": "resumed",
      *           "step_id": "00000000-0000-0000-0000-000000000101",
@@ -14343,10 +14447,11 @@ export interface components {
      *       "attempt_no": 1,
      *       "created_at": "2026-03-17T10:05:30Z",
      *       "current_payload_json": {
-     *         "text": "Reviewed answer."
+     *         "text": "Edited answer."
      *       },
      *       "decision": "approved",
      *       "edited_at": "2026-03-17T10:06:30Z",
+     *       "expires_at": "2026-03-31T10:05:30Z",
      *       "flow_id": "00000000-0000-0000-0000-000000000001",
      *       "flow_run_id": "00000000-0000-0000-0000-000000000301",
      *       "id": "00000000-0000-0000-0000-000000000901",
@@ -14370,7 +14475,7 @@ export interface components {
      *       "resume_key_present": true,
      *       "resumed_at": "2026-03-17T10:08:00Z",
      *       "review_mode": "edit",
-     *       "revision": 3,
+     *       "revision": 4,
      *       "schema_version": 1,
      *       "state": "resumed",
      *       "step_id": "00000000-0000-0000-0000-000000000101",
@@ -14468,6 +14573,10 @@ export interface components {
       resumed_at?: string | null;
       /** Cancelled At */
       cancelled_at?: string | null;
+      /** Expires At */
+      expires_at?: string | null;
+      /** Expired At */
+      expired_at?: string | null;
       /**
        * Created At
        * Format: date-time
@@ -14487,6 +14596,7 @@ export interface components {
      *       "current_payload_json": {
      *         "text": "Draft answer."
      *       },
+     *       "expires_at": "2026-03-31T10:05:30Z",
      *       "flow_id": "00000000-0000-0000-0000-000000000001",
      *       "flow_run_id": "00000000-0000-0000-0000-000000000301",
      *       "id": "00000000-0000-0000-0000-000000000901",
@@ -14603,6 +14713,16 @@ export interface components {
       /** Cancelled At */
       cancelled_at?: string | null;
       /**
+       * Expires At
+       * @description Review submission deadline for this unresolved review checkpoint. Mutating the checkpoint after this timestamp returns `400` with code `flow_review_expired`; the active-checkpoint endpoint may briefly show the checkpoint until the background reconciler cancels the run. Approved checkpoints can still be resumed after this timestamp because the human decision was already persisted. Null only for legacy checkpoints created before review expiry was persisted.
+       */
+      expires_at?: string | null;
+      /**
+       * Expired At
+       * @description Set when the platform terminalized this unresolved checkpoint because the review deadline passed. Null while the checkpoint is still active, approved, rejected, cancelled for another reason, or from legacy data without persisted expiry state.
+       */
+      expired_at?: string | null;
+      /**
        * Created At
        * Format: date-time
        */
@@ -14628,14 +14748,14 @@ export interface components {
       expected_checkpoint_revision: number;
       /**
        * Reason
-       * @description Human-readable rejection reason stored with the run audit trail.
+       * @description Human-readable rejection reason stored with the run audit trail. Blank reasons return `400` with code `flow_review_reject_reason_required`; reasons longer than 1024 characters return `400` with code `flow_review_reject_reason_too_long`.
        */
       reason: string;
     };
     /**
      * FlowRunReviewCheckpointResumeRequest
      * @example {
-     *       "expected_checkpoint_revision": 2
+     *       "expected_checkpoint_revision": 3
      *     }
      */
     FlowRunReviewCheckpointResumeRequest: {
@@ -14649,11 +14769,16 @@ export interface components {
      * FlowRunReviewCheckpointResumeResponse
      * @example {
      *       "checkpoint": {
+     *         "approved_at": "2026-03-17T10:07:30Z",
      *         "attempt_no": 1,
      *         "created_at": "2026-03-17T10:05:30Z",
      *         "current_payload_json": {
-     *           "text": "Draft answer."
+     *           "text": "Edited answer."
      *         },
+     *         "decided_by_principal_type": "user",
+     *         "decided_by_user_id": "00000000-0000-0000-0000-000000000030",
+     *         "edited_at": "2026-03-17T10:06:30Z",
+     *         "expires_at": "2026-03-31T10:05:30Z",
      *         "flow_id": "00000000-0000-0000-0000-000000000001",
      *         "flow_run_id": "00000000-0000-0000-0000-000000000301",
      *         "id": "00000000-0000-0000-0000-000000000901",
@@ -14676,7 +14801,7 @@ export interface components {
      *         "requester_user_id": "00000000-0000-0000-0000-000000000030",
      *         "resumed_at": "2026-03-17T10:08:00Z",
      *         "review_mode": "edit",
-     *         "revision": 3,
+     *         "revision": 4,
      *         "schema_version": 1,
      *         "state": "resumed",
      *         "step_id": "00000000-0000-0000-0000-000000000101",
@@ -14719,7 +14844,8 @@ export interface components {
       | "approved"
       | "rejected"
       | "resumed"
-      | "cancelled";
+      | "cancelled"
+      | "expired";
     /**
      * FlowRunStatus
      * @enum {string}
@@ -15036,6 +15162,8 @@ export interface components {
       | "STALE_QUEUED_RUNS"
       | "STALE_RUNNING_RUNS"
       | "STALE_RUNNING_RECONCILER_LAG"
+      | "EXPIRED_REVIEW_CHECKPOINTS"
+      | "REVIEW_EXPIRY_RECONCILER_LAG"
       | "TERMINAL_RUNS_WITH_OPEN_ATTEMPTS"
       | "TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS"
       | "AUDIT_OUTBOX_DELIVERY_BACKLOG"
@@ -15054,6 +15182,7 @@ export interface components {
       response_timestamp_utc: string;
       probe: components["schemas"]["FlowRuntimeProbe"];
       runs?: components["schemas"]["FlowRuntimeRunSummary"];
+      review?: components["schemas"]["FlowRuntimeReviewSummary"];
       data_integrity?: components["schemas"]["FlowRuntimeDataIntegrity"];
       audit_outbox?: components["schemas"]["FlowRuntimeAuditOutboxSummary"];
       thresholds: components["schemas"]["FlowRuntimeHealthThresholds"];
@@ -15071,6 +15200,8 @@ export interface components {
       stale_running_after_seconds: number;
       /** Stale Running Unhealthy After Seconds */
       stale_running_unhealthy_after_seconds: number;
+      /** Review Expiry Unhealthy After Seconds */
+      review_expiry_unhealthy_after_seconds: number;
       /** Terminal Integrity Lookback Hours */
       terminal_integrity_lookback_hours: number;
       /** Audit Outbox Backlog Grace Seconds */
@@ -15169,7 +15300,14 @@ export interface components {
        */
       artifact_signed_url_template: string;
     };
-    /** FlowRuntimePolicyPublic */
+    /**
+     * FlowRuntimePolicyPublic
+     * @example {
+     *       "default_step_timeout_seconds": 900,
+     *       "hard_ceiling_seconds": 3600,
+     *       "max_step_timeout_seconds": 1800
+     *     }
+     */
     FlowRuntimePolicyPublic: {
       /** Default Step Timeout Seconds */
       default_step_timeout_seconds: number;
@@ -15181,7 +15319,12 @@ export interface components {
        */
       hard_ceiling_seconds: number;
     };
-    /** FlowRuntimePolicyUpdate */
+    /**
+     * FlowRuntimePolicyUpdate
+     * @example {
+     *       "default_step_timeout_seconds": 900
+     *     }
+     */
     FlowRuntimePolicyUpdate: {
       /**
        * Default Step Timeout Seconds
@@ -15267,6 +15410,16 @@ export interface components {
       /** Updated At */
       updated_at?: string | null;
       runtime_paths: components["schemas"]["FlowRuntimePathsPublic"];
+    };
+    /** FlowRuntimeReviewSummary */
+    FlowRuntimeReviewSummary: {
+      /**
+       * Expired Checkpoint Count
+       * @default 0
+       */
+      expired_checkpoint_count?: number;
+      /** Oldest Expired Checkpoint Age Seconds */
+      oldest_expired_checkpoint_age_seconds?: number | null;
     };
     /** FlowRuntimeRunSummary */
     FlowRuntimeRunSummary: {
@@ -15597,6 +15750,11 @@ export interface components {
     FlowStepReviewPolicy: {
       /** @description `view` pauses the run for approval of this step output. `edit` also lets the reviewer replace the output used by downstream steps. */
       mode: components["schemas"]["FlowStepReviewMode"];
+      /**
+       * Expires After Seconds
+       * @description How long the unresolved review checkpoint may wait before it expires. Null inherits the platform default (14 days).
+       */
+      expires_after_seconds?: number | null;
     };
     /**
      * FlowTemplateAssetPublic
@@ -16201,7 +16359,33 @@ export interface components {
       /** Heartbeat Ttl Expected Seconds */
       heartbeat_ttl_expected_seconds: number;
     };
-    /** HttpTestRequest */
+    /**
+     * HttpTestRequest
+     * @example {
+     *       "config": {
+     *         "auth": {
+     *           "mode": "none"
+     *         },
+     *         "body": {
+     *           "mode": "json_template",
+     *           "template": "{\"event\":\"flow.test\",\"status\":\"ok\"}"
+     *         },
+     *         "custom_headers": [
+     *           {
+     *             "name": "X-Eneo-Test",
+     *             "secret": false,
+     *             "value": "true"
+     *           }
+     *         ],
+     *         "response_format": "json",
+     *         "timeout_seconds": 10,
+     *         "url": "https://webhook.example.com/eneo/flow-output"
+     *       },
+     *       "direction": "output",
+     *       "method": "POST",
+     *       "test_variables": {}
+     *     }
+     */
     HttpTestRequest: {
       /** Config */
       config: {
@@ -16223,7 +16407,23 @@ export interface components {
         [key: string]: unknown;
       } | null;
     };
-    /** HttpTestResponse */
+    /**
+     * HttpTestResponse
+     * @example {
+     *       "duration_ms": 128.4,
+     *       "request_preview": {
+     *         "body_preview": "{\"event\":\"flow.test\",\"status\":\"ok\"}",
+     *         "headers": {
+     *           "X-Eneo-Test": "true"
+     *         },
+     *         "method": "POST",
+     *         "url": "https://webhook.example.com/eneo/flow-output"
+     *       },
+     *       "response_preview": "{\"ok\":true}",
+     *       "status_code": 200,
+     *       "success": true
+     *     }
+     */
     HttpTestResponse: {
       /** Success */
       success: boolean;
@@ -19975,7 +20175,13 @@ export interface components {
       /** @default attachment */
       content_disposition?: components["schemas"]["ContentDisposition"];
     };
-    /** SignedURLResponse */
+    /**
+     * SignedURLResponse
+     * @example {
+     *       "expires_at": 1773742500,
+     *       "url": "https://api.example.com/api/v1/files/00000000-0000-0000-0000-000000000701/download/?token=signed-token"
+     *     }
+     */
     SignedURLResponse: {
       /** Url */
       url: string;
@@ -25967,7 +26173,7 @@ export interface operations {
       };
     };
   };
-  get_flow_input_limits_api_v1_settings_flow_input_limits_get: {
+  get_flow_input_limits: {
     parameters: {
       query?: never;
       header?: never;
@@ -25985,9 +26191,25 @@ export interface operations {
           "application/json": components["schemas"]["FlowInputLimitsPublic"];
         };
       };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_tenant_permission"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
-  update_flow_input_limits_api_v1_settings_flow_input_limits_patch: {
+  update_flow_input_limits: {
     parameters: {
       query?: never;
       header?: never;
@@ -26014,14 +26236,32 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          /**
+           * @example {
+           *       "message": "At least one flow input limit field must be provided.",
+           *       "intric_error_code": 9007,
+           *       "code": "flow_settings_invalid_payload"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
-      /** @description Caller lacks permission to update tenant settings. */
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
       403: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_tenant_permission"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -26034,7 +26274,7 @@ export interface operations {
       };
     };
   };
-  get_flow_document_render_limits_api_v1_settings_flow_document_render_limits_get: {
+  get_flow_document_render_limits: {
     parameters: {
       query?: never;
       header?: never;
@@ -26052,9 +26292,25 @@ export interface operations {
           "application/json": components["schemas"]["FlowDocumentRenderLimitsPublic"];
         };
       };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_tenant_permission"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
-  update_flow_document_render_limits_api_v1_settings_flow_document_render_limits_patch: {
+  update_flow_document_render_limits: {
     parameters: {
       query?: never;
       header?: never;
@@ -26081,14 +26337,32 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          /**
+           * @example {
+           *       "message": "At least one flow document render limit field must be provided.",
+           *       "intric_error_code": 9007,
+           *       "code": "flow_settings_invalid_payload"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
-      /** @description Caller lacks permission to update tenant settings. */
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
       403: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_tenant_permission"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -26101,7 +26375,7 @@ export interface operations {
       };
     };
   };
-  get_flow_runtime_policy_api_v1_settings_flow_runtime_policy_get: {
+  get_flow_runtime_policy: {
     parameters: {
       query?: never;
       header?: never;
@@ -26119,9 +26393,25 @@ export interface operations {
           "application/json": components["schemas"]["FlowRuntimePolicyPublic"];
         };
       };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_tenant_permission"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
-  update_flow_runtime_policy_api_v1_settings_flow_runtime_policy_patch: {
+  update_flow_runtime_policy: {
     parameters: {
       query?: never;
       header?: never;
@@ -26148,14 +26438,32 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          /**
+           * @example {
+           *       "message": "At least one flow runtime policy field must be provided.",
+           *       "intric_error_code": 9007,
+           *       "code": "flow_settings_invalid_payload"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
-      /** @description Caller lacks permission to update tenant settings. */
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
       403: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_tenant_permission"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -26168,7 +26476,7 @@ export interface operations {
       };
     };
   };
-  get_flow_evidence_policy_api_v1_settings_flow_evidence_policy_get: {
+  get_flow_evidence_policy: {
     parameters: {
       query?: never;
       header?: never;
@@ -26186,9 +26494,25 @@ export interface operations {
           "application/json": components["schemas"]["FlowEvidencePolicyPublic"];
         };
       };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_tenant_permission"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
-  update_flow_evidence_policy_api_v1_settings_flow_evidence_policy_patch: {
+  update_flow_evidence_policy: {
     parameters: {
       query?: never;
       header?: never;
@@ -26210,6 +26534,38 @@ export interface operations {
           "application/json": components["schemas"]["FlowEvidencePolicyPublic"];
         };
       };
+      /** @description Invalid flow evidence policy payload. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "At least one flow evidence policy field must be provided.",
+           *       "intric_error_code": 9007,
+           *       "code": "flow_settings_invalid_payload"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_tenant_permission"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -26221,7 +26577,7 @@ export interface operations {
       };
     };
   };
-  get_flow_retention_policy_api_v1_settings_flow_retention_policy_get: {
+  get_flow_retention_policy: {
     parameters: {
       query?: never;
       header?: never;
@@ -26239,9 +26595,25 @@ export interface operations {
           "application/json": components["schemas"]["FlowRetentionPolicyPublic"];
         };
       };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_tenant_permission"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
-  update_flow_retention_policy_api_v1_settings_flow_retention_policy_patch: {
+  update_flow_retention_policy: {
     parameters: {
       query?: never;
       header?: never;
@@ -26261,6 +26633,38 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FlowRetentionPolicyPublic"];
+        };
+      };
+      /** @description Invalid flow retention policy payload. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "At least one flow retention policy field must be provided.",
+           *       "intric_error_code": 9007,
+           *       "code": "flow_settings_invalid_payload"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_tenant_permission"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -26869,7 +27273,17 @@ export interface operations {
                 /** Provider Name */
                 provider_name?: string | null;
               };
-              /** FilePublic */
+              /**
+               * FilePublic
+               * @example {
+               *       "created_at": "2026-03-17T10:04:00Z",
+               *       "id": "00000000-0000-0000-0000-000000000701",
+               *       "mimetype": "audio/mpeg",
+               *       "name": "review-audio.mp3",
+               *       "size": 1843200,
+               *       "updated_at": "2026-03-17T10:04:00Z"
+               *     }
+               */
               FilePublic: {
                 /** Created At */
                 created_at?: string | null;
@@ -27218,7 +27632,17 @@ export interface operations {
                 /** Provider Name */
                 provider_name?: string | null;
               };
-              /** FilePublic */
+              /**
+               * FilePublic
+               * @example {
+               *       "created_at": "2026-03-17T10:04:00Z",
+               *       "id": "00000000-0000-0000-0000-000000000701",
+               *       "mimetype": "audio/mpeg",
+               *       "name": "review-audio.mp3",
+               *       "size": 1843200,
+               *       "updated_at": "2026-03-17T10:04:00Z"
+               *     }
+               */
               FilePublic: {
                 /** Created At */
                 created_at?: string | null;
@@ -28267,7 +28691,17 @@ export interface operations {
                 /** Generated Files */
                 generated_files: components["schemas"]["FilePublic"][];
                 $defs: {
-                  /** FilePublic */
+                  /**
+                   * FilePublic
+                   * @example {
+                   *       "created_at": "2026-03-17T10:04:00Z",
+                   *       "id": "00000000-0000-0000-0000-000000000701",
+                   *       "mimetype": "audio/mpeg",
+                   *       "name": "review-audio.mp3",
+                   *       "size": 1843200,
+                   *       "updated_at": "2026-03-17T10:04:00Z"
+                   *     }
+                   */
                   FilePublic: {
                     /** Created At */
                     created_at?: string | null;
@@ -28311,7 +28745,17 @@ export interface operations {
                 /** Web Search References */
                 web_search_references: components["schemas"]["WebSearchResultPublic"][];
                 $defs: {
-                  /** FilePublic */
+                  /**
+                   * FilePublic
+                   * @example {
+                   *       "created_at": "2026-03-17T10:04:00Z",
+                   *       "id": "00000000-0000-0000-0000-000000000701",
+                   *       "mimetype": "audio/mpeg",
+                   *       "name": "review-audio.mp3",
+                   *       "size": 1843200,
+                   *       "updated_at": "2026-03-17T10:04:00Z"
+                   *     }
+                   */
                   FilePublic: {
                     /** Created At */
                     created_at?: string | null;
@@ -34738,12 +35182,36 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Sparse flow page. `items` contains the returned page only; `count` is the number of returned items and `has_more` tells clients whether to request the next offset window. */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "items": [
+           *         {
+           *           "id": "00000000-0000-0000-0000-000000000001",
+           *           "tenant_id": "00000000-0000-0000-0000-000000000010",
+           *           "space_id": "00000000-0000-0000-0000-000000000020",
+           *           "name": "Employee Review Summary",
+           *           "description": "Transcribe a review conversation and return a PDF summary.",
+           *           "created_by_user_id": "00000000-0000-0000-0000-000000000030",
+           *           "owner_user_id": "00000000-0000-0000-0000-000000000030",
+           *           "published_version": 3,
+           *           "metadata_json": {
+           *             "category": "hr"
+           *           },
+           *           "data_retention_days": 30,
+           *           "created_at": "2026-03-17T09:30:00Z",
+           *           "updated_at": "2026-03-17T10:00:00Z"
+           *         }
+           *       ],
+           *       "has_more": false,
+           *       "count": 1
+           *     }
+           */
           "application/json": components["schemas"]["OffsetPaginatedResponse_FlowSparsePublic_"];
         };
       };
@@ -35658,7 +36126,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description HTTP test result. `success=false` is still returned with 200 when the submitted config is syntactically valid but the target request fails, times out, or returns an error status. */
       200: {
         headers: {
           [name: string]: unknown;
@@ -35713,12 +36181,49 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Flow-managed assistant created and returned with effective permissions. */
       201: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "id": "00000000-0000-0000-0000-000000000201",
+           *       "name": "Flow Step Assistant",
+           *       "space_id": "00000000-0000-0000-0000-000000000020",
+           *       "completion_model_kwargs": {},
+           *       "logging_enabled": false,
+           *       "attachments": [],
+           *       "allowed_attachments": {
+           *         "accepted_file_types": [],
+           *         "limit": {
+           *           "max_files": 0,
+           *           "max_size": 0
+           *         }
+           *       },
+           *       "groups": [],
+           *       "websites": [],
+           *       "integration_knowledge_list": [],
+           *       "mcp_servers": [],
+           *       "mcp_tools": [],
+           *       "published": false,
+           *       "user": {
+           *         "id": "00000000-0000-0000-0000-000000000030",
+           *         "email": "flow-builder@example.com",
+           *         "username": "Flow Builder"
+           *       },
+           *       "tools": {
+           *         "assistants": []
+           *       },
+           *       "type": "assistant",
+           *       "description": "Summarizes extracted contract fields into a reviewer-ready note.",
+           *       "insight_enabled": false,
+           *       "metadata_json": {
+           *         "origin": "flow_managed"
+           *       }
+           *     }
+           */
           "application/json": components["schemas"]["AssistantPublic"];
         };
       };
@@ -35782,12 +36287,49 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Flow-managed assistant returned with effective caller permissions. */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "id": "00000000-0000-0000-0000-000000000201",
+           *       "name": "Flow Step Assistant",
+           *       "space_id": "00000000-0000-0000-0000-000000000020",
+           *       "completion_model_kwargs": {},
+           *       "logging_enabled": false,
+           *       "attachments": [],
+           *       "allowed_attachments": {
+           *         "accepted_file_types": [],
+           *         "limit": {
+           *           "max_files": 0,
+           *           "max_size": 0
+           *         }
+           *       },
+           *       "groups": [],
+           *       "websites": [],
+           *       "integration_knowledge_list": [],
+           *       "mcp_servers": [],
+           *       "mcp_tools": [],
+           *       "published": false,
+           *       "user": {
+           *         "id": "00000000-0000-0000-0000-000000000030",
+           *         "email": "flow-builder@example.com",
+           *         "username": "Flow Builder"
+           *       },
+           *       "tools": {
+           *         "assistants": []
+           *       },
+           *       "type": "assistant",
+           *       "description": "Summarizes extracted contract fields into a reviewer-ready note.",
+           *       "insight_enabled": false,
+           *       "metadata_json": {
+           *         "origin": "flow_managed"
+           *       }
+           *     }
+           */
           "application/json": components["schemas"]["AssistantPublic"];
         };
       };
@@ -35922,12 +36464,49 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Flow-managed assistant updated and returned with effective permissions. */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "id": "00000000-0000-0000-0000-000000000201",
+           *       "name": "Flow Step Assistant",
+           *       "space_id": "00000000-0000-0000-0000-000000000020",
+           *       "completion_model_kwargs": {},
+           *       "logging_enabled": false,
+           *       "attachments": [],
+           *       "allowed_attachments": {
+           *         "accepted_file_types": [],
+           *         "limit": {
+           *           "max_files": 0,
+           *           "max_size": 0
+           *         }
+           *       },
+           *       "groups": [],
+           *       "websites": [],
+           *       "integration_knowledge_list": [],
+           *       "mcp_servers": [],
+           *       "mcp_tools": [],
+           *       "published": false,
+           *       "user": {
+           *         "id": "00000000-0000-0000-0000-000000000030",
+           *         "email": "flow-builder@example.com",
+           *         "username": "Flow Builder"
+           *       },
+           *       "tools": {
+           *         "assistants": []
+           *       },
+           *       "type": "assistant",
+           *       "description": "Summarizes extracted contract fields into a reviewer-ready note.",
+           *       "insight_enabled": false,
+           *       "metadata_json": {
+           *         "origin": "flow_managed"
+           *       }
+           *     }
+           */
           "application/json": components["schemas"]["AssistantPublic"];
         };
       };
@@ -36384,12 +36963,37 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Flow run page. `items` contains the returned page only; `count` is the number of returned runs and `has_more` tells clients whether to request the next offset window. */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "items": [
+           *         {
+           *           "id": "00000000-0000-0000-0000-000000000301",
+           *           "flow_id": "00000000-0000-0000-0000-000000000001",
+           *           "flow_version": 3,
+           *           "user_id": "00000000-0000-0000-0000-000000000030",
+           *           "tenant_id": "00000000-0000-0000-0000-000000000010",
+           *           "trace_id": "00000000-0000-0000-0000-000000000302",
+           *           "revision": 1,
+           *           "status": "queued",
+           *           "input_payload_json": {
+           *             "employee_name": "Alex Example"
+           *           },
+           *           "result_files": [],
+           *           "job_id": "00000000-0000-0000-0000-000000000401",
+           *           "created_at": "2026-03-17T10:05:00Z",
+           *           "updated_at": "2026-03-17T10:05:00Z"
+           *         }
+           *       ],
+           *       "has_more": false,
+           *       "count": 1
+           *     }
+           */
           "application/json": components["schemas"]["OffsetPaginatedResponse_FlowRunPublic_"];
         };
       };
@@ -36687,34 +37291,64 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Checkpoint edited. Use the returned `revision` for the next approve, reject, or edit request. If you later approve it, use the post-approval revision for resume. */
       200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowRunReviewCheckpointPublic"];
-        };
-      };
-      /** @description Review edit failed. Representative machine-readable codes include typed_io_contract_violation, flow_review_stale_revision, flow_review_not_active, and flow_review_step_result_not_found. Contract validation errors include context.checkpoint_id, context.step_id, context.step_order, and context.payload_field. */
-      400: {
         headers: {
           [name: string]: unknown;
         };
         content: {
           /**
            * @example {
-           *       "message": "Review checkpoint step 1 output: 'summary' is a required property",
-           *       "intric_error_code": 9007,
-           *       "code": "typed_io_contract_violation",
-           *       "context": {
-           *         "checkpoint_id": "7f4f6d62-0e2b-4682-9fa4-f046c3df1b15",
-           *         "step_id": "3a6610d2-8b8b-4837-b260-8e66d2155405",
-           *         "step_order": 1,
-           *         "payload_field": "structured"
-           *       }
+           *       "id": "00000000-0000-0000-0000-000000000901",
+           *       "tenant_id": "00000000-0000-0000-0000-000000000010",
+           *       "flow_id": "00000000-0000-0000-0000-000000000001",
+           *       "flow_run_id": "00000000-0000-0000-0000-000000000301",
+           *       "step_id": "00000000-0000-0000-0000-000000000101",
+           *       "step_order": 1,
+           *       "attempt_no": 1,
+           *       "state": "edited",
+           *       "revision": 2,
+           *       "schema_version": 1,
+           *       "original_payload_json": {
+           *         "text": "Draft answer."
+           *       },
+           *       "current_payload_json": {
+           *         "text": "Edited answer."
+           *       },
+           *       "step_label": "Review draft answer",
+           *       "review_mode": "edit",
+           *       "output_type": "json",
+           *       "step_snapshot_available": true,
+           *       "output_contract": {
+           *         "type": "object",
+           *         "properties": {
+           *           "text": {
+           *             "type": "string"
+           *           }
+           *         }
+           *       },
+           *       "next_step_ids": [
+           *         "00000000-0000-0000-0000-000000000102"
+           *       ],
+           *       "requester_user_id": "00000000-0000-0000-0000-000000000030",
+           *       "requester_principal_type": "user",
+           *       "decided_by_user_id": "00000000-0000-0000-0000-000000000030",
+           *       "decided_by_principal_type": "user",
+           *       "edited_at": "2026-03-17T10:06:30Z",
+           *       "expires_at": "2026-03-31T10:05:30Z",
+           *       "created_at": "2026-03-17T10:05:30Z",
+           *       "updated_at": "2026-03-17T10:05:30Z"
            *     }
            */
+          "application/json": components["schemas"]["FlowRunReviewCheckpointPublic"];
+        };
+      };
+      /** @description Review edit failed. Representative machine-readable codes include typed_io_contract_violation, flow_review_stale_revision, flow_review_expired, flow_review_not_active, and flow_review_step_result_not_found. Contract validation errors include context.checkpoint_id, context.step_id, context.step_order, and context.payload_field. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
@@ -36784,28 +37418,65 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Checkpoint approved. Use the returned `revision` when calling the resume endpoint. The example shows an edit-before-approve path; direct approval without an edit normally returns `edited_at` as null and revision 2. */
       200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowRunReviewCheckpointPublic"];
-        };
-      };
-      /** @description Review approval failed. Representative machine-readable codes include flow_review_stale_revision and flow_review_not_active. */
-      400: {
         headers: {
           [name: string]: unknown;
         };
         content: {
           /**
            * @example {
-           *       "message": "Review checkpoint revision is stale.",
-           *       "intric_error_code": 9007,
-           *       "code": "flow_review_stale_revision"
+           *       "id": "00000000-0000-0000-0000-000000000901",
+           *       "tenant_id": "00000000-0000-0000-0000-000000000010",
+           *       "flow_id": "00000000-0000-0000-0000-000000000001",
+           *       "flow_run_id": "00000000-0000-0000-0000-000000000301",
+           *       "step_id": "00000000-0000-0000-0000-000000000101",
+           *       "step_order": 1,
+           *       "attempt_no": 1,
+           *       "state": "approved",
+           *       "revision": 3,
+           *       "schema_version": 1,
+           *       "original_payload_json": {
+           *         "text": "Draft answer."
+           *       },
+           *       "current_payload_json": {
+           *         "text": "Edited answer."
+           *       },
+           *       "step_label": "Review draft answer",
+           *       "review_mode": "edit",
+           *       "output_type": "json",
+           *       "step_snapshot_available": true,
+           *       "output_contract": {
+           *         "type": "object",
+           *         "properties": {
+           *           "text": {
+           *             "type": "string"
+           *           }
+           *         }
+           *       },
+           *       "next_step_ids": [
+           *         "00000000-0000-0000-0000-000000000102"
+           *       ],
+           *       "requester_user_id": "00000000-0000-0000-0000-000000000030",
+           *       "requester_principal_type": "user",
+           *       "decided_by_user_id": "00000000-0000-0000-0000-000000000030",
+           *       "decided_by_principal_type": "user",
+           *       "edited_at": "2026-03-17T10:06:30Z",
+           *       "approved_at": "2026-03-17T10:07:30Z",
+           *       "expires_at": "2026-03-31T10:05:30Z",
+           *       "created_at": "2026-03-17T10:05:30Z",
+           *       "updated_at": "2026-03-17T10:05:30Z"
            *     }
            */
+          "application/json": components["schemas"]["FlowRunReviewCheckpointPublic"];
+        };
+      };
+      /** @description Review approval failed. Representative machine-readable codes include flow_review_stale_revision, flow_review_expired, and flow_review_not_active. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
@@ -36875,28 +37546,65 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Checkpoint rejected and the run cancelled. The returned checkpoint is terminal and cannot be resumed. The example shows an edit-before-reject path; direct rejection without an edit normally returns `edited_at` as null and revision 2. */
       200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowRunReviewCheckpointPublic"];
-        };
-      };
-      /** @description Review rejection failed. Representative machine-readable codes include flow_review_stale_revision, flow_review_not_active, flow_review_reject_reason_required, and flow_review_reject_reason_too_long. */
-      400: {
         headers: {
           [name: string]: unknown;
         };
         content: {
           /**
            * @example {
-           *       "message": "Review rejection reason is required.",
-           *       "intric_error_code": 9007,
-           *       "code": "flow_review_reject_reason_required"
+           *       "id": "00000000-0000-0000-0000-000000000901",
+           *       "tenant_id": "00000000-0000-0000-0000-000000000010",
+           *       "flow_id": "00000000-0000-0000-0000-000000000001",
+           *       "flow_run_id": "00000000-0000-0000-0000-000000000301",
+           *       "step_id": "00000000-0000-0000-0000-000000000101",
+           *       "step_order": 1,
+           *       "attempt_no": 1,
+           *       "state": "rejected",
+           *       "revision": 3,
+           *       "schema_version": 1,
+           *       "original_payload_json": {
+           *         "text": "Draft answer."
+           *       },
+           *       "current_payload_json": {
+           *         "text": "Edited answer."
+           *       },
+           *       "step_label": "Review draft answer",
+           *       "review_mode": "edit",
+           *       "output_type": "json",
+           *       "step_snapshot_available": true,
+           *       "output_contract": {
+           *         "type": "object",
+           *         "properties": {
+           *           "text": {
+           *             "type": "string"
+           *           }
+           *         }
+           *       },
+           *       "next_step_ids": [
+           *         "00000000-0000-0000-0000-000000000102"
+           *       ],
+           *       "requester_user_id": "00000000-0000-0000-0000-000000000030",
+           *       "requester_principal_type": "user",
+           *       "decided_by_user_id": "00000000-0000-0000-0000-000000000030",
+           *       "decided_by_principal_type": "user",
+           *       "edited_at": "2026-03-17T10:06:30Z",
+           *       "rejected_at": "2026-03-17T10:07:30Z",
+           *       "expires_at": "2026-03-31T10:05:30Z",
+           *       "created_at": "2026-03-17T10:05:30Z",
+           *       "updated_at": "2026-03-17T10:05:30Z"
            *     }
            */
+          "application/json": components["schemas"]["FlowRunReviewCheckpointPublic"];
+        };
+      };
+      /** @description Review rejection failed. Representative machine-readable codes include flow_review_stale_revision, flow_review_expired, flow_review_not_active, flow_review_reject_reason_required, and flow_review_reject_reason_too_long. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
@@ -36969,28 +37677,85 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description Resume accepted. Poll the returned run until it reaches a terminal status, and use the returned checkpoint revision for idempotent retry reconciliation. */
       202: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowRunReviewCheckpointResumeResponse"];
-        };
-      };
-      /** @description Review resume failed. Representative machine-readable codes include flow_review_idempotency_key_required, flow_review_stale_revision, flow_review_not_approved, flow_review_already_resumed, flow_review_rejected, and flow_review_cancelled. */
-      400: {
         headers: {
           [name: string]: unknown;
         };
         content: {
           /**
            * @example {
-           *       "message": "Review resume requires an Idempotency-Key header.",
-           *       "intric_error_code": 9007,
-           *       "code": "flow_review_idempotency_key_required"
+           *       "checkpoint": {
+           *         "id": "00000000-0000-0000-0000-000000000901",
+           *         "tenant_id": "00000000-0000-0000-0000-000000000010",
+           *         "flow_id": "00000000-0000-0000-0000-000000000001",
+           *         "flow_run_id": "00000000-0000-0000-0000-000000000301",
+           *         "step_id": "00000000-0000-0000-0000-000000000101",
+           *         "step_order": 1,
+           *         "attempt_no": 1,
+           *         "state": "resumed",
+           *         "revision": 4,
+           *         "schema_version": 1,
+           *         "original_payload_json": {
+           *           "text": "Draft answer."
+           *         },
+           *         "current_payload_json": {
+           *           "text": "Edited answer."
+           *         },
+           *         "step_label": "Review draft answer",
+           *         "review_mode": "edit",
+           *         "output_type": "json",
+           *         "step_snapshot_available": true,
+           *         "output_contract": {
+           *           "type": "object",
+           *           "properties": {
+           *             "text": {
+           *               "type": "string"
+           *             }
+           *           }
+           *         },
+           *         "next_step_ids": [
+           *           "00000000-0000-0000-0000-000000000102"
+           *         ],
+           *         "requester_user_id": "00000000-0000-0000-0000-000000000030",
+           *         "requester_principal_type": "user",
+           *         "decided_by_user_id": "00000000-0000-0000-0000-000000000030",
+           *         "decided_by_principal_type": "user",
+           *         "edited_at": "2026-03-17T10:06:30Z",
+           *         "approved_at": "2026-03-17T10:07:30Z",
+           *         "resumed_at": "2026-03-17T10:08:00Z",
+           *         "expires_at": "2026-03-31T10:05:30Z",
+           *         "created_at": "2026-03-17T10:05:30Z",
+           *         "updated_at": "2026-03-17T10:05:30Z"
+           *       },
+           *       "run": {
+           *         "id": "00000000-0000-0000-0000-000000000301",
+           *         "flow_id": "00000000-0000-0000-0000-000000000001",
+           *         "flow_version": 3,
+           *         "user_id": "00000000-0000-0000-0000-000000000030",
+           *         "tenant_id": "00000000-0000-0000-0000-000000000010",
+           *         "trace_id": "00000000-0000-0000-0000-000000000302",
+           *         "revision": 2,
+           *         "status": "queued",
+           *         "input_payload_json": {
+           *           "employee_name": "Alex Example"
+           *         },
+           *         "result_files": [],
+           *         "job_id": "00000000-0000-0000-0000-000000000401",
+           *         "created_at": "2026-03-17T10:05:00Z",
+           *         "updated_at": "2026-03-17T10:05:00Z"
+           *       }
            *     }
            */
+          "application/json": components["schemas"]["FlowRunReviewCheckpointResumeResponse"];
+        };
+      };
+      /** @description Review resume failed. Representative machine-readable codes include flow_review_idempotency_key_required, flow_review_stale_revision, flow_review_expired, flow_review_not_approved, flow_review_already_resumed, flow_review_rejected, and flow_review_cancelled. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
           "application/json": components["schemas"]["GeneralError"];
         };
       };

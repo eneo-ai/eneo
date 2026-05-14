@@ -32,7 +32,7 @@ from intric.database.tables.users_table import Users
 from intric.flows.domain.flow import Flow, FlowSparse, FlowStep, FlowStepResult
 from intric.flows.enums import ACTIVE_FLOW_RUN_STATUSES, FlowStepResultStatus
 from intric.flows.flow_factory import FlowFactory
-from intric.flows.flow_review_policy import FlowStepReviewPolicy
+from intric.flows.flow_review_policy import dump_flow_step_review_policy
 from intric.flows.flow_run_step_result_file import FlowStepResultFileReference
 from intric.main.exceptions import BadRequestException, NotFoundException
 
@@ -42,14 +42,6 @@ class AssistantScopeRow:
     id: UUID
     origin: str | None
     managing_flow_id: UUID | None
-
-
-def _review_policy_to_json(
-    review_policy: FlowStepReviewPolicy | None,
-) -> dict[str, Any] | None:
-    if review_policy is None:
-        return None
-    return review_policy.model_dump(mode="json")
 
 
 _ACTIVE_FLOW_RUN_STATUS_VALUES = tuple(
@@ -99,7 +91,7 @@ class FlowRepository:
             "mcp_policy": step.mcp_policy,
             "input_config": step.input_config,
             "output_config": step.output_config,
-            "review_policy": _review_policy_to_json(step.review_policy),
+            "review_policy": dump_flow_step_review_policy(step.review_policy),
         }
 
     async def create(self, flow: Flow, tenant_id: UUID) -> Flow:

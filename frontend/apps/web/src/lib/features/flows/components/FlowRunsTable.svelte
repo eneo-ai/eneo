@@ -36,6 +36,7 @@
     isFlowRunActive,
     isFlowRunAwaitingReview,
     isFlowRunCancellable,
+    shouldPollFlowRunStatus,
     type FlowRunStatus,
     type FlowRunStatusFilter
   } from "./flowRunStatusSets";
@@ -44,6 +45,7 @@
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import type { FlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
   import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
+  import FlowRunErrorAlert from "./FlowRunErrorAlert.svelte";
 
   let {
     flow,
@@ -247,21 +249,21 @@
   });
 
   let pollTimeout: ReturnType<typeof setTimeout> | null = null;
-  let hasActiveRuns = $derived(runs.some((r) => isFlowRunActive(r.status)));
+  let hasRunsToPoll = $derived(runs.some((r) => shouldPollFlowRunStatus(r.status)));
 
   $effect(() => {
-    if (hasActiveRuns && !pollTimeout && visible) {
+    if (hasRunsToPoll && !pollTimeout && visible) {
       const scheduleNextPoll = () => {
         pollTimeout = setTimeout(async () => {
           await loadRuns();
           pollTimeout = null;
-          if (hasActiveRuns && visible) {
+          if (hasRunsToPoll && visible) {
             scheduleNextPoll();
           }
         }, 5000);
       };
       scheduleNextPoll();
-    } else if ((!hasActiveRuns || !visible) && pollTimeout) {
+    } else if ((!hasRunsToPoll || !visible) && pollTimeout) {
       clearTimeout(pollTimeout);
       pollTimeout = null;
     }
@@ -359,6 +361,10 @@
     return resultFiles.find((file) => file.availability === "available") ?? resultFiles[0] ?? null;
   }
 </script>
+
+{#snippet failedRunAlert(errorMessage: string)}
+  <FlowRunErrorAlert message={errorMessage} steps={flow.steps} />
+{/snippet}
 
 <section class="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-3 py-4 sm:px-6 sm:py-6">
   <header>
@@ -639,13 +645,7 @@
               {#if run.status === "failed" && run.error_message}
                 <Table.Row class="border-default hover:bg-transparent">
                   <Table.Cell colspan={historyTableColumnCount} class="px-4 py-2">
-                    <Alert.Root variant="destructive">
-                      <Alert.Title class="text-xs font-semibold">{m.flow_run_error()}</Alert.Title>
-                      <Alert.Description class="text-xs">
-                        <span>{m.flow_run_error_desc()}</span>
-                        <span class="mt-1 block break-words opacity-80">{run.error_message}</span>
-                      </Alert.Description>
-                    </Alert.Root>
+                    {@render failedRunAlert(run.error_message)}
                   </Table.Cell>
                 </Table.Row>
               {/if}
@@ -729,13 +729,7 @@
             </button>
             {#if run.status === "failed" && run.error_message}
               <div class="border-default border-t px-3 py-3">
-                <Alert.Root variant="destructive">
-                  <Alert.Title class="text-xs font-semibold">{m.flow_run_error()}</Alert.Title>
-                  <Alert.Description class="text-xs">
-                    <span>{m.flow_run_error_desc()}</span>
-                    <span class="mt-1 block break-words opacity-80">{run.error_message}</span>
-                  </Alert.Description>
-                </Alert.Root>
+                {@render failedRunAlert(run.error_message)}
               </div>
             {/if}
             {#if isFlowRunCancellable(run.status)}

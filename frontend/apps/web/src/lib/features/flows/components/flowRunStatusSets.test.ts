@@ -6,12 +6,14 @@ import {
   isFlowRunActive,
   isFlowRunAwaitingReview,
   isFlowRunCancellable,
-  isFlowRunTerminal
+  isFlowRunTerminal,
+  shouldPollFlowRunStatus
 } from "./flowRunStatusSets";
 
 describe("flowRunStatusSets", () => {
-  test("keeps awaiting review outside active and terminal sets", () => {
+  test("keeps awaiting review outside active and terminal sets while still polling it", () => {
     expect(isFlowRunActive("awaiting_review")).toBe(false);
+    expect(shouldPollFlowRunStatus("awaiting_review")).toBe(true);
     expect(isFlowRunTerminal("awaiting_review")).toBe(false);
     expect(isFlowRunCancellable("awaiting_review")).toBe(true);
     expect(isFlowRunAwaitingReview("awaiting_review")).toBe(true);
@@ -21,6 +23,10 @@ describe("flowRunStatusSets", () => {
     expect(isFlowRunActive("queued")).toBe(true);
     expect(isFlowRunActive("running")).toBe(true);
     expect(isFlowRunActive("completed")).toBe(false);
+
+    expect(shouldPollFlowRunStatus("queued")).toBe(true);
+    expect(shouldPollFlowRunStatus("running")).toBe(true);
+    expect(shouldPollFlowRunStatus("completed")).toBe(false);
 
     expect(isFlowRunTerminal("completed")).toBe(true);
     expect(isFlowRunTerminal("failed")).toBe(true);

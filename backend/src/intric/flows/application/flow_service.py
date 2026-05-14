@@ -16,6 +16,7 @@ from intric.flows.flow_metadata import (
     normalize_flow_metadata_for_write,
     normalize_persisted_flow_metadata,
 )
+from intric.flows.flow_review_policy import dump_flow_step_review_policy
 from intric.flows.flow_security_classification import (
     evaluate_step_security_classification,
 )
@@ -755,11 +756,7 @@ class FlowService:
             "assistant_snapshot": assistant_snapshot,
             "input_config": step.input_config,
             "output_config": output_config,
-            "review_policy": (
-                step.review_policy.model_dump(mode="json")
-                if step.review_policy is not None
-                else None
-            ),
+            "review_policy": dump_flow_step_review_policy(step.review_policy),
         }
 
     def _ensure_flow_is_mutable(self, flow: Flow) -> None:

@@ -8,7 +8,6 @@
   import { cubicOut } from "svelte/easing";
   import { browser } from "$app/environment";
   import { Badge } from "$lib/components/ui/badge/index.js";
-  import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -16,6 +15,7 @@
   import { formatFlowRunStepDuration } from "./flowRunProgress";
   import FlowRunResultFileButton from "./FlowRunResultFileButton.svelte";
   import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
+  import FlowRunErrorAlert from "./FlowRunErrorAlert.svelte";
 
   let {
     step,
@@ -135,13 +135,7 @@
     <div id={panelId} transition:slide={{ duration: 180, easing: cubicOut }}>
       <Card.Content class="border-default flex min-w-0 flex-col gap-3 border-t px-4 py-3">
         {#if step.errorMessage}
-          <Alert.Root variant="destructive">
-            <Alert.Title class="text-xs font-semibold">{m.flow_run_error()}</Alert.Title>
-            <Alert.Description>
-              <pre
-                class="mt-1 max-h-60 overflow-auto font-mono text-xs break-words whitespace-pre-wrap">{step.errorMessage}</pre>
-            </Alert.Description>
-          </Alert.Root>
+          <FlowRunErrorAlert message={step.errorMessage} />
         {/if}
 
         {#if hasOutput}

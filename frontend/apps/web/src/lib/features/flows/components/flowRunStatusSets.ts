@@ -16,6 +16,11 @@ const ACTIVE_FLOW_RUN_STATUS_VALUES = [
   "queued",
   "running"
 ] as const satisfies readonly FlowRunStatus[];
+const POLLING_FLOW_RUN_STATUS_VALUES = [
+  "queued",
+  "running",
+  "awaiting_review"
+] as const satisfies readonly FlowRunStatus[];
 const TERMINAL_FLOW_RUN_STATUS_VALUES = [
   "completed",
   "failed",
@@ -28,6 +33,7 @@ const CANCELLABLE_FLOW_RUN_STATUS_VALUES = [
 ] as const satisfies readonly FlowRunStatus[];
 
 const ACTIVE_FLOW_RUN_STATUSES: ReadonlySet<string> = new Set(ACTIVE_FLOW_RUN_STATUS_VALUES);
+const POLLING_FLOW_RUN_STATUSES: ReadonlySet<string> = new Set(POLLING_FLOW_RUN_STATUS_VALUES);
 const TERMINAL_FLOW_RUN_STATUSES: ReadonlySet<string> = new Set(TERMINAL_FLOW_RUN_STATUS_VALUES);
 const CANCELLABLE_FLOW_RUN_STATUSES: ReadonlySet<string> = new Set(
   CANCELLABLE_FLOW_RUN_STATUS_VALUES
@@ -35,6 +41,10 @@ const CANCELLABLE_FLOW_RUN_STATUSES: ReadonlySet<string> = new Set(
 
 export function isFlowRunActive(status: string): boolean {
   return ACTIVE_FLOW_RUN_STATUSES.has(status);
+}
+
+export function shouldPollFlowRunStatus(status: string): boolean {
+  return POLLING_FLOW_RUN_STATUSES.has(status);
 }
 
 export function isFlowRunTerminal(status: string): boolean {

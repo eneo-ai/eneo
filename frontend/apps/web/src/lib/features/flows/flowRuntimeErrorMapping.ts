@@ -8,6 +8,7 @@ export const FLOW_API_ERROR_CODES = [
   "typed_io_contract_violation",
   "flow_published_form_schema_invalid",
   "flow_review_stale_revision",
+  "flow_review_expired",
   "flow_review_not_active",
   "flow_review_step_result_not_found",
   "flow_review_checkpoint_not_found",
@@ -38,12 +39,26 @@ export type FlowApiErrorContext = {
   step_id?: string;
   step_order?: number;
   payload_field?: string;
+  state?: string;
+  expires_at?: string;
+  expired_at?: string;
 };
 
 export type FlowApiErrorDescriptor = {
   code: FlowApiErrorCode;
   messageKey: FlowApiErrorMessageKey;
   context: FlowApiErrorContext;
+};
+
+export type FlowReviewPolicyErrorStep = {
+  step_order: number;
+  user_description?: string | null;
+  review_policy?: unknown | null;
+};
+
+export type FlowReviewPolicyAffectedStep = {
+  step_order: number;
+  user_description: string | null;
 };
 
 const FLOW_API_ERROR_CODE_SET = new Set<string>(FLOW_API_ERROR_CODES);
@@ -120,6 +135,15 @@ function extractFlowApiErrorContext(value: unknown): FlowApiErrorContext {
   const payloadField = readOptionalString(value.payload_field);
   if (payloadField) context.payload_field = payloadField;
 
+  const state = readOptionalString(value.state);
+  if (state) context.state = state;
+
+  const expiresAt = readOptionalString(value.expires_at);
+  if (expiresAt) context.expires_at = expiresAt;
+
+  const expiredAt = readOptionalString(value.expired_at);
+  if (expiredAt) context.expired_at = expiredAt;
+
   return context;
 }
 
@@ -141,6 +165,79 @@ function responseContext(error: IntricError): FlowApiErrorContext {
 
 function messageKeyForCode(code: FlowApiErrorCode): FlowApiErrorMessageKey {
   return `flow_error_${code}`;
+}
+
+export function isReviewPolicyInvalidRunError(message: string | null | undefined): boolean {
+  return message?.includes("review_policy is invalid") === true;
+}
+
+export function reviewPolicyRunErrorStepOrder(message: string): number | null {
+  const match = /^Step\s+(\d+)(?:\s|\(|:)/.exec(message);
+  if (!match) return null;
+
+  const stepOrder = Number(match[1]);
+  return Number.isFinite(stepOrder) ? stepOrder : null;
+}
+
+export function getReviewPolicyAffectedStepsFromRunError(
+  message: string,
+  steps: readonly FlowReviewPolicyErrorStep[]
+): FlowReviewPolicyAffectedStep[] {
+  if (!isReviewPolicyInvalidRunError(message)) return [];
+
+  const stepOrder = reviewPolicyRunErrorStepOrder(message);
+  if (stepOrder !== null) {
+    const step = steps.find((candidate) => candidate.step_order === stepOrder);
+    return [
+      {
+        step_order: stepOrder,
+        user_description: step?.user_description?.trim() || null
+      }
+    ];
+  }
+
+  return steps
+    .filter((step) => step.review_policy != null)
+    .map((step) => ({
+      step_order: step.step_order,
+      user_description: step.user_description?.trim() || null
+    }));
+}
+
+export function isReviewPolicyRunErrorStepExact(message: string): boolean {
+  return reviewPolicyRunErrorStepOrder(message) !== null;
+}
+
+export function isReviewPolicyRunErrorRelevantForStep(
+  message: string,
+  stepOrder: number,
+  reviewPolicy: unknown | null | undefined
+): boolean {
+  if (!isReviewPolicyInvalidRunError(message)) return true;
+
+  const affectedStepOrder = reviewPolicyRunErrorStepOrder(message);
+  if (affectedStepOrder !== null) return affectedStepOrder === stepOrder;
+
+  return reviewPolicy != null;
+}
+
+export function getReviewPolicyErrorStepsFromDefinitionSnapshot(
+  steps: readonly unknown[]
+): FlowReviewPolicyErrorStep[] {
+  return steps.flatMap((step): FlowReviewPolicyErrorStep[] => {
+    if (!isObject(step)) return [];
+
+    const stepOrder = readOptionalNumber(step.step_order);
+    if (stepOrder === undefined) return [];
+
+    return [
+      {
+        step_order: stepOrder,
+        user_description: readOptionalString(step.user_description) ?? null,
+        review_policy: step.review_policy ?? null
+      }
+    ];
+  });
 }
 
 export function extractFlowApiError(error: unknown): {

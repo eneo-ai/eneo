@@ -7,7 +7,13 @@ import {
   classifyUploadError,
   getUploadErrorHint,
   friendlyMimeNames,
-  FLOW_API_ERROR_CODES
+  FLOW_API_ERROR_CODES,
+  getReviewPolicyAffectedStepsFromRunError,
+  getReviewPolicyErrorStepsFromDefinitionSnapshot,
+  isReviewPolicyInvalidRunError,
+  isReviewPolicyRunErrorRelevantForStep,
+  isReviewPolicyRunErrorStepExact,
+  reviewPolicyRunErrorStepOrder
 } from "./flowRuntimeErrorMapping";
 
 describe("flowRuntimeErrorMapping", () => {
@@ -54,6 +60,36 @@ describe("flowRuntimeErrorMapping", () => {
         step_id: "step-1",
         step_order: 1,
         payload_field: "structured"
+      }
+    });
+  });
+
+  it("describes expired review errors with deadline context", () => {
+    const error = new IntricError(
+      "Review checkpoint has expired.",
+      "RESPONSE",
+      400,
+      0,
+      {
+        code: "flow_review_expired",
+        context: {
+          checkpoint_id: "checkpoint-1",
+          state: "awaiting_review",
+          expires_at: "2026-05-14T09:30:00Z",
+          expired_at: "2026-05-14T09:31:00Z"
+        }
+      },
+      { endpoint: "POST@test" }
+    );
+
+    expect(describeFlowApiError(error)).toEqual({
+      code: "flow_review_expired",
+      messageKey: "flow_error_flow_review_expired",
+      context: {
+        checkpoint_id: "checkpoint-1",
+        state: "awaiting_review",
+        expires_at: "2026-05-14T09:30:00Z",
+        expired_at: "2026-05-14T09:31:00Z"
       }
     });
   });
@@ -136,6 +172,134 @@ describe("flowRuntimeErrorMapping", () => {
       messageKey: "flow_error_flow_published_form_schema_invalid"
     });
     expect(getFlowRuntimeErrorMessage(error, "fallback")).not.toBe("fallback");
+  });
+});
+
+describe("review policy run error helpers", () => {
+  const reviewSteps = [
+    {
+      step_order: 1,
+      user_description: "Draft review",
+      review_policy: { mode: "view" }
+    },
+    {
+      step_order: 10,
+      user_description: "Final review",
+      review_policy: { mode: "edit" }
+    },
+    {
+      step_order: 11,
+      user_description: "No review",
+      review_policy: null
+    }
+  ];
+
+  it.each([
+    ["Step 1: review_policy is invalid.", 1],
+    ["Step 1 (Draft review): review_policy is invalid.", 1],
+    ["Step 10: review_policy is invalid.", 10]
+  ])("extracts the backend step prefix from %s", (message, expected) => {
+    expect(reviewPolicyRunErrorStepOrder(message)).toBe(expected);
+  });
+
+  it.each(["Step abc: review_policy is invalid.", "This step is invalid."])(
+    "returns null when the message has no numeric backend step prefix",
+    (message) => {
+      expect(reviewPolicyRunErrorStepOrder(message)).toBeNull();
+    }
+  );
+
+  it("detects the review policy invalid run error token", () => {
+    expect(isReviewPolicyInvalidRunError("Step 1: review_policy is invalid.")).toBe(true);
+    expect(isReviewPolicyInvalidRunError("This step is invalid.")).toBe(false);
+  });
+
+  it("returns the exact affected step when the backend message carries a step order", () => {
+    expect(
+      getReviewPolicyAffectedStepsFromRunError(
+        "Step 10 (Final review): review_policy is invalid.",
+        reviewSteps
+      )
+    ).toEqual([{ step_order: 10, user_description: "Final review" }]);
+  });
+
+  it("preserves the backend step order when the current flow draft cannot label it", () => {
+    expect(
+      getReviewPolicyAffectedStepsFromRunError("Step 3: review_policy is invalid.", reviewSteps)
+    ).toEqual([{ step_order: 3, user_description: null }]);
+  });
+
+  it("falls back to all current review steps for old generic review policy errors", () => {
+    expect(
+      getReviewPolicyAffectedStepsFromRunError(
+        "Some failure (review_policy is invalid)",
+        reviewSteps
+      )
+    ).toEqual([
+      { step_order: 1, user_description: "Draft review" },
+      { step_order: 10, user_description: "Final review" }
+    ]);
+  });
+
+  it("returns no affected steps for unrelated errors", () => {
+    expect(getReviewPolicyAffectedStepsFromRunError("This step is invalid.", reviewSteps)).toEqual(
+      []
+    );
+  });
+
+  it("marks exact review policy run errors separately from candidate fallback errors", () => {
+    expect(isReviewPolicyRunErrorStepExact("Step 10: review_policy is invalid.")).toBe(true);
+    expect(isReviewPolicyRunErrorStepExact("Some failure (review_policy is invalid)")).toBe(false);
+  });
+
+  it("keeps generic review policy errors on review steps only", () => {
+    expect(
+      isReviewPolicyRunErrorRelevantForStep("Some failure (review_policy is invalid)", 1, {
+        mode: "view"
+      })
+    ).toBe(true);
+    expect(
+      isReviewPolicyRunErrorRelevantForStep("Some failure (review_policy is invalid)", 2, null)
+    ).toBe(false);
+  });
+
+  it("keeps exact review policy errors on the backend-reported step only", () => {
+    expect(
+      isReviewPolicyRunErrorRelevantForStep("Step 10: review_policy is invalid.", 10, null)
+    ).toBe(true);
+    expect(
+      isReviewPolicyRunErrorRelevantForStep("Step 10: review_policy is invalid.", 1, {
+        mode: "view"
+      })
+    ).toBe(false);
+  });
+
+  it("keeps unrelated errors visible for any step", () => {
+    expect(isReviewPolicyRunErrorRelevantForStep("Provider timeout.", 1, null)).toBe(true);
+  });
+
+  it("reads review policy step metadata from a definition snapshot", () => {
+    expect(
+      getReviewPolicyErrorStepsFromDefinitionSnapshot([
+        {
+          step_order: 1,
+          user_description: "Draft review",
+          review_policy: { mode: "view" }
+        },
+        {
+          step_order: "invalid",
+          user_description: "Invalid order",
+          review_policy: { mode: "edit" }
+        },
+        null
+      ])
+    ).toEqual([
+      {
+        step_order: 1,
+        user_description: "Draft review",
+        review_policy: { mode: "view" }
+      }
+    ]);
   });
 });
 
