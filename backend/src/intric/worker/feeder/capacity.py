@@ -229,7 +229,7 @@ class CapacityManager:
         Raises:
             Exception: If Redis operation fails - caller MUST handle and release slot.
         """
-        key = f"job:{job_id}:slot_preacquired"
+        key = LuaScripts.preacquired_slot_key(job_id)
         ttl = self.get_slot_ttl(tenant_settings)
         await self._redis.set(key, str(tenant_id), ex=ttl)
 
@@ -239,7 +239,7 @@ class CapacityManager:
         Args:
             job_id: The job identifier.
         """
-        key = f"job:{job_id}:slot_preacquired"
+        key = LuaScripts.preacquired_slot_key(job_id)
         try:
             await self._redis.delete(key)
         except Exception:
@@ -254,7 +254,7 @@ class CapacityManager:
         Returns:
             Tenant UUID if flag exists, None otherwise.
         """
-        key = f"job:{job_id}:slot_preacquired"
+        key = LuaScripts.preacquired_slot_key(job_id)
         try:
             value = await self._redis.get(key)
             if value:
@@ -356,7 +356,7 @@ class CapacityManager:
             True if slot was released, False if no flag found or error.
         """
         try:
-            flag_key = f"job:{job_id}:slot_preacquired"
+            flag_key = LuaScripts.preacquired_slot_key(job_id)
             flag_value = await self._redis.get(flag_key)
 
             if not flag_value:

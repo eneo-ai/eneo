@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T059
+active_task: T060
 
 tasks:
   - id: T001
@@ -2581,7 +2581,7 @@ tasks:
   - id: T059
     type: worker
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Consolidate the pre-acquired crawl slot Redis key into one canonical helper without changing slot acquire, release, feeder, or capacity semantics."
     inputs:
@@ -2596,12 +2596,16 @@ tasks:
       - "backend/src/intric/worker/redis/lua_scripts.py"
       - "backend/src/intric/worker/crawl/slot_acquire.py"
       - "backend/src/intric/worker/crawl/slot_release.py"
+      - "backend/src/intric/worker/crawl/heartbeat.py"
       - "backend/src/intric/worker/feeder/capacity.py"
+      - "backend/src/intric/worker/feeder/watchdog.py"
       - "backend/src/intric/worker/crawl_feeder.py"
+      - "backend/tests/unittests/worker/test_lua_ttl_fix.py"
       - "backend/tests/unittests/worker/test_crawl_slot_acquire.py"
-      - "backend/tests/unittests/worker/test_slot_release.py"
+      - "backend/tests/unittests/worker/test_crawl_slot_release.py"
       - "backend/tests/unittests/worker/test_tenant_concurrency.py"
-      - "backend/tests/unittests/worker/test_crawl_feeder.py"
+      - "backend/tests/unittests/worker/feeder/test_capacity.py"
+      - "backend/tests/unittests/worker/feeder/test_watchdog.py"
       - "docs/crawler-reliability-robustness-transparency-plan.md"
       - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
     constraints:
@@ -2614,29 +2618,78 @@ tasks:
       - "No remaining duplicated raw `job:{job_id}:slot_preacquired` format strings outside tests that assert the contract."
       - "Behavior tests remain green."
     verify:
-      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_slot_release.py tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_crawl_feeder.py -q"
-      - "cd backend && uv run ruff check src/intric/worker/redis/lua_scripts.py src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/slot_release.py src/intric/worker/feeder/capacity.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_slot_release.py tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_crawl_feeder.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/redis/lua_scripts.py src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/slot_release.py src/intric/worker/feeder/capacity.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_slot_release.py tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_crawl_feeder.py"
+      - "cd backend && uv run pytest tests/unittests/worker/test_lua_ttl_fix.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_slot_release.py tests/unittests/worker/feeder/test_capacity.py tests/unittests/worker/feeder/test_watchdog.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/redis/lua_scripts.py src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/slot_release.py src/intric/worker/crawl/heartbeat.py src/intric/worker/feeder/capacity.py src/intric/worker/feeder/watchdog.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_lua_ttl_fix.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_slot_release.py tests/unittests/worker/feeder/test_capacity.py tests/unittests/worker/feeder/test_watchdog.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/redis/lua_scripts.py src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/slot_release.py src/intric/worker/crawl/heartbeat.py src/intric/worker/feeder/capacity.py src/intric/worker/feeder/watchdog.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_lua_ttl_fix.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_slot_release.py tests/unittests/worker/feeder/test_capacity.py tests/unittests/worker/feeder/test_watchdog.py"
       - "cd backend && rg \"job:\\{job_id\\}:slot_preacquired|slot_preacquired\" src/intric/worker tests/unittests/worker"
     stop_if:
       - "Need to change acquire/release/capacity semantics."
       - "Need to change Redis Lua scripts beyond adding a key-construction helper."
       - "Need files outside allowed_files."
       - "Verification fails twice for the same reason."
+    receipt:
+      result: done
+      summary: "Added `LuaScripts.preacquired_slot_key(...)` as the canonical Redis key helper for crawl job pre-acquired slot flags. Reused it in slot acquire, slot release, capacity, feeder rollback, heartbeat TTL refresh, and watchdog cleanup. After the change, the raw key format exists only in the helper and its contract test."
+      changed_files:
+        - "backend/src/intric/worker/redis/lua_scripts.py"
+        - "backend/src/intric/worker/crawl/slot_acquire.py"
+        - "backend/src/intric/worker/crawl/slot_release.py"
+        - "backend/src/intric/worker/crawl/heartbeat.py"
+        - "backend/src/intric/worker/feeder/capacity.py"
+        - "backend/src/intric/worker/feeder/watchdog.py"
+        - "backend/src/intric/worker/crawl_feeder.py"
+        - "backend/tests/unittests/worker/test_lua_ttl_fix.py"
+        - "backend/tests/unittests/worker/test_crawl_slot_acquire.py"
+        - "backend/tests/unittests/worker/test_crawl_slot_release.py"
+        - "backend/tests/unittests/worker/feeder/test_capacity.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_lua_ttl_fix.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_slot_release.py tests/unittests/worker/feeder/test_capacity.py tests/unittests/worker/feeder/test_watchdog.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/redis/lua_scripts.py src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/slot_release.py src/intric/worker/crawl/heartbeat.py src/intric/worker/feeder/capacity.py src/intric/worker/feeder/watchdog.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_lua_ttl_fix.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_slot_release.py tests/unittests/worker/feeder/test_capacity.py tests/unittests/worker/feeder/test_watchdog.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/redis/lua_scripts.py src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/slot_release.py src/intric/worker/crawl/heartbeat.py src/intric/worker/feeder/capacity.py src/intric/worker/feeder/watchdog.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_lua_ttl_fix.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_slot_release.py tests/unittests/worker/feeder/test_capacity.py tests/unittests/worker/feeder/test_watchdog.py"
+        - "cd backend && rg -n \"job:\\{[^\\n]*slot_preacquired\" src/intric/worker tests/unittests/worker"
+      notes:
+        - "The key-string search now returns only `LuaScripts.preacquired_slot_key(...)` and `test_preacquired_slot_key_is_canonical_job_flag_key`."
+      spawned_tasks:
+        - T060
+  - id: T060
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next highest-ROI implementation tranche after slot acquire/key ownership: phase typing, WorkerAdapter, or admin/operator visibility."
+    inputs:
+      - "T058 receipt"
+      - "T059 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl"
+      - "backend/src/intric/worker/crawl_feeder.py"
+      - "backend/src/intric/worker/feeder"
+      - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte"
+    constraints:
+      - "Do not implement in this judge task."
+      - "Prefer the smallest slice that improves maintainability/reliability/transparency without broad queue-runtime rewrites."
+      - "Keep Step 9/Celery evaluation out of scope."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Decision: next worker tranche."
+      - "Why it is higher ROI than the alternatives."
+      - "Allowed files."
+      - "TDD red-test story."
+      - "Verification commands."
+      - "Stop conditions."
     receipt: null
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T058
+    task: T059
     commands:
-      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
-      - "cd backend && uv run ruff check src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
-      - "cd backend && ! rg \"limiter\\.acquire\\(\" src/intric/worker/crawl_tasks.py"
-      - "cd backend && ! rg \"redis_client\\.eval\\(LuaScripts\\.RELEASE_SLOT\" src/intric/worker/crawl_tasks.py"
-      - "cd backend && ! rg \"job:\\{job_id\\}:slot_preacquired\" src/intric/worker/crawl_tasks.py"
-      - "cd backend && ! rg \"tenant:\\{tenant\\.id\\}:active_jobs\" src/intric/worker/crawl_tasks.py"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-reliability-t058-slot-acquire-implementation --title 'T058 slot acquire extraction implementation review' --phase verification --require-green --required-min-score 8 ..."
-    note: "T058 extracted slot acquire into a typed boundary, added edge-case tests from Claude P2 feedback, and passed focused pytest/ruff/Pyright plus stop-grep checks."
+      - "cd backend && uv run pytest tests/unittests/worker/test_lua_ttl_fix.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_slot_release.py tests/unittests/worker/feeder/test_capacity.py tests/unittests/worker/feeder/test_watchdog.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/redis/lua_scripts.py src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/slot_release.py src/intric/worker/crawl/heartbeat.py src/intric/worker/feeder/capacity.py src/intric/worker/feeder/watchdog.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_lua_ttl_fix.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_slot_release.py tests/unittests/worker/feeder/test_capacity.py tests/unittests/worker/feeder/test_watchdog.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/redis/lua_scripts.py src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/slot_release.py src/intric/worker/crawl/heartbeat.py src/intric/worker/feeder/capacity.py src/intric/worker/feeder/watchdog.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_lua_ttl_fix.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_slot_release.py tests/unittests/worker/feeder/test_capacity.py tests/unittests/worker/feeder/test_watchdog.py"
+      - "cd backend && rg -n \"job:\\{[^\\n]*slot_preacquired\" src/intric/worker tests/unittests/worker"
+    note: "T059 consolidated the pre-acquired crawl slot Redis key helper and kept targeted tests, ruff, and Pyright green."

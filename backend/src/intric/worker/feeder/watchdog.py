@@ -1079,7 +1079,7 @@ class OrphanWatchdog:
         ttl = self._settings.tenant_worker_semaphore_ttl_seconds
 
         for slot in slots:
-            flag_key = f"job:{slot.job_id}:slot_preacquired"
+            flag_key = LuaScripts.preacquired_slot_key(slot.job_id)
             try:
                 # IN_PROGRESS jobs definitely had a slot - always release
                 # QUEUED jobs might not have acquired a slot - check flag first

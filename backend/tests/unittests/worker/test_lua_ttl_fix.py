@@ -21,8 +21,17 @@ NOTE: This uses Redis's eval() method for Lua scripts - NOT Python's eval().
 Redis eval is the standard way to run atomic Lua scripts on Redis server.
 """
 
-import pytest
 from uuid import uuid4
+
+import pytest
+
+from intric.worker.redis.lua_scripts import LuaScripts
+
+
+def test_preacquired_slot_key_is_canonical_job_flag_key():
+    job_id = uuid4()
+
+    assert LuaScripts.preacquired_slot_key(job_id) == f"job:{job_id}:slot_preacquired"
 
 
 class FakeRedis:

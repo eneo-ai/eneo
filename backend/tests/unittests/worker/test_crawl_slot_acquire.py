@@ -8,6 +8,7 @@ from intric.worker.crawl.slot_acquire import (
     CrawlSlotAcquireRequest,
     acquire_crawl_slot,
 )
+from intric.worker.redis.lua_scripts import LuaScripts
 from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
 
 
@@ -104,7 +105,7 @@ async def test_absent_preacquired_state_is_retried_from_redis_before_normal_acqu
     assert result.acquired is True
     assert result.path == CrawlSlotAcquirePath.PREACQUIRED_REUSED
     assert result.preacquired_tenant_id == tenant_id
-    redis_client.get.assert_awaited_once_with(f"job:{job_id}:slot_preacquired")
+    redis_client.get.assert_awaited_once_with(LuaScripts.preacquired_slot_key(job_id))
     limiter.acquire.assert_not_awaited()
 
 

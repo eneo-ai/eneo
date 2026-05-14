@@ -172,6 +172,11 @@ class LuaScripts:
         return f"tenant:{tenant_id}:active_jobs"
 
     @staticmethod
+    def preacquired_slot_key(job_id: UUID) -> str:
+        """Generate the Redis key for the crawl job pre-acquired slot flag."""
+        return f"job:{job_id}:slot_preacquired"
+
+    @staticmethod
     async def acquire_slot(
         redis: "Redis",
         tenant_id: UUID,

@@ -29,6 +29,7 @@ from intric.worker.feeder.capacity import CapacityManager
 from intric.worker.feeder.election import LeaderElection
 from intric.worker.feeder.queues import JobEnqueuer, PendingQueue
 from intric.worker.feeder.watchdog import OrphanWatchdog
+from intric.worker.redis.lua_scripts import LuaScripts
 
 logger = get_logger(__name__)
 
@@ -261,7 +262,9 @@ class CrawlFeeder:
             else:
                 # Enqueue failed - rollback: delete flag and release slot
                 try:
-                    await redis_client_any.delete(f"job:{job_id}:slot_preacquired")
+                    await redis_client_any.delete(
+                        LuaScripts.preacquired_slot_key(job_id)
+                    )
                 except Exception as flag_exc:
                     logger.debug(
                         "Failed to delete slot_preacquired flag during rollback",

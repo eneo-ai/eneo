@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 
 from intric.worker.crawl import CrawlSlotReleasePath
+from intric.worker.redis.lua_scripts import LuaScripts
 
 
 @pytest.mark.asyncio
@@ -42,7 +43,7 @@ async def test_normal_release_uses_limiter_resets_backoff_and_deletes_flag():
     assert result.path == CrawlSlotReleasePath.NORMAL
     redis_client.eval.assert_awaited_once()
     redis_client.delete.assert_any_await(f"tenant:{tenant_id}:limiter_backoff")
-    redis_client.delete.assert_any_await(f"job:{job_id}:slot_preacquired")
+    redis_client.delete.assert_any_await(LuaScripts.preacquired_slot_key(job_id))
 
 
 @pytest.mark.asyncio
@@ -82,7 +83,9 @@ async def test_preacquired_fallback_releases_with_lua_and_deletes_flag():
         tenant_id,
         settings.tenant_worker_semaphore_ttl_seconds,
     )
-    redis_client.delete.assert_awaited_once_with(f"job:{job_id}:slot_preacquired")
+    redis_client.delete.assert_awaited_once_with(
+        LuaScripts.preacquired_slot_key(job_id)
+    )
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,8 @@ import time
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
+from intric.worker.redis.lua_scripts import LuaScripts
+
 if TYPE_CHECKING:
     from redis.asyncio import Redis
 
@@ -143,8 +145,8 @@ class HeartbeatMonitor:
         if not self._redis_client or not self._tenant:
             return
 
-        concurrency_key = f"tenant:{self._tenant.id}:active_jobs"
-        flag_key = f"job:{self._job_id}:slot_preacquired"
+        concurrency_key = LuaScripts.slot_key(self._tenant.id)
+        flag_key = LuaScripts.preacquired_slot_key(self._job_id)
 
         try:
             pipe = self._redis_client.pipeline(transaction=True)

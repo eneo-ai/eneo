@@ -51,6 +51,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Step 5 cleanup tranche: extract stale cleanup calculation and delete-callback execution into typed `worker/crawl/cleanup.py` boundaries.
 - [x] Active-crawl duplicate-guard index tranche: add task-scoped PostgreSQL lookup indexes, make the duplicate-guard query explicitly crawl-only, and cover pre/post planner behavior with a migration-isolation regression test.
 - [x] Step 5 slot-acquire tranche: extract pre-acquired crawl slot discovery/reuse/mismatch handling into typed `worker/crawl/slot_acquire.py` boundaries while keeping ARQ retry and busy-wait policy in `crawl_tasks.py`.
+- [x] Redis slot-key ownership tranche: consolidate the pre-acquired crawl slot Redis key behind one canonical helper reused by acquire, release, feeder, capacity, heartbeat, and watchdog code.
 
 ## Non-Negotiable Principles
 

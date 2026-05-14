@@ -8,6 +8,8 @@ from uuid import uuid4
 
 import pytest
 
+from intric.worker.redis.lua_scripts import LuaScripts
+
 
 @pytest.fixture
 def mock_settings():
@@ -460,7 +462,7 @@ class TestMarkSlotPreacquired:
             await manager.mark_slot_preacquired(job_id, tenant_id)
 
             redis_mock.set.assert_called_once_with(
-                f"job:{job_id}:slot_preacquired",
+                LuaScripts.preacquired_slot_key(job_id),
                 str(tenant_id),
                 ex=300,
             )
@@ -500,7 +502,9 @@ class TestClearPreacquiredFlag:
         manager = CapacityManager(redis_mock)
         await manager.clear_preacquired_flag(job_id)
 
-        redis_mock.delete.assert_called_once_with(f"job:{job_id}:slot_preacquired")
+        redis_mock.delete.assert_called_once_with(
+            LuaScripts.preacquired_slot_key(job_id)
+        )
 
     @pytest.mark.asyncio
     async def test_swallows_redis_error(self):

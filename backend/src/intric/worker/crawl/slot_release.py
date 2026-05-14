@@ -47,7 +47,7 @@ async def _delete_preacquired_flag(
         return
 
     try:
-        await redis_client.delete(f"job:{job_id}:slot_preacquired")
+        await redis_client.delete(LuaScripts.preacquired_slot_key(job_id))
     except Exception as exc:
         logger.debug(
             "Failed to delete crawl pre-acquired slot flag",

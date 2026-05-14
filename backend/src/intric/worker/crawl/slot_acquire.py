@@ -38,10 +38,6 @@ class CrawlSlotAcquireResult:
     preacquired_tenant_id: UUID | None
 
 
-def _slot_preacquired_key(job_id: UUID) -> str:
-    return f"job:{job_id}:slot_preacquired"
-
-
 async def _read_preacquired_tenant_id(
     *,
     redis_client: aioredis.Redis | None,
@@ -51,7 +47,7 @@ async def _read_preacquired_tenant_id(
         return None
 
     try:
-        raw_tenant_id = await redis_client.get(_slot_preacquired_key(job_id))
+        raw_tenant_id = await redis_client.get(LuaScripts.preacquired_slot_key(job_id))
     except Exception as exc:
         logger.warning(
             "Failed to check pre-acquired crawl slot",
