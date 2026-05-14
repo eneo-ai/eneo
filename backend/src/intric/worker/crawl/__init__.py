@@ -51,6 +51,12 @@ from intric.worker.crawl.recovery import (
     reset_tenant_retry_delay,
     update_job_retry_stats,
 )
+from intric.worker.crawl.slot_acquire import (
+    CrawlSlotAcquirePath,
+    CrawlSlotAcquireRequest,
+    CrawlSlotAcquireResult,
+    acquire_crawl_slot,
+)
 from intric.worker.crawl.slot_release import (
     CrawlSlotReleasePath,
     CrawlSlotReleaseRequest,
@@ -119,6 +125,10 @@ __all__ = [
     "is_invalid_transaction_error_msg",
     "recover_session",
     # Slot release
+    "CrawlSlotAcquirePath",
+    "CrawlSlotAcquireRequest",
+    "CrawlSlotAcquireResult",
+    "acquire_crawl_slot",
     "CrawlSlotReleasePath",
     "CrawlSlotReleaseRequest",
     "CrawlSlotReleaseResult",

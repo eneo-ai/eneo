@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T057
+active_task: T059
 
 tasks:
   - id: T001
@@ -2473,7 +2473,7 @@ tasks:
   - id: T057
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose and scope the next smallest slot-acquire extraction tranche now that the active-crawl duplicate guard lookup is indexed."
     inputs:
@@ -2493,17 +2493,150 @@ tasks:
       - "Allowed files for the worker tranche."
       - "Verification commands."
       - "Stop conditions."
+    receipt:
+      result: done
+      summary: "Claude green-lit the next tranche as acquire-only extraction: add a typed `worker/crawl/slot_acquire.py` boundary mirroring slot release, collapse duplicated pre-acquired flag reads, replace raw Lua release with `LuaScripts.release_slot(...)`, and keep busy-wait/Retry/max-age policy in `crawl_tasks.py`."
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t057-slot-acquire-extraction-scope-20260514T231640Z.md"
+        min_score: 8
+      spawned_tasks:
+        - T058
+  - id: T058
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Extract crawl slot acquire logic into a typed `worker/crawl/slot_acquire.py` boundary without moving busy-wait or ARQ retry policy."
+    inputs:
+      - "T057 receipt"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl/slot_release.py"
+      - "backend/src/intric/worker/redis/lua_scripts.py"
+    allowed_files:
+      - "backend/src/intric/worker/crawl/slot_acquire.py"
+      - "backend/src/intric/worker/crawl/__init__.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_slot_acquire.py"
+      - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Use TDD: add slot acquire behavior tests before implementation."
+      - "Do not move busy-wait, Retry, CrawlMaxAgeExceededError, update_job_retry_stats, or max-age policy into the helper."
+      - "Do not change LuaScripts, TenantConcurrencyLimiter, CapacityManager, or slot_release.py semantics."
+      - "No Any, cast, type ignore, factories, protocols, or registries."
+      - "Preserve pre-acquired slot cleanup when tenant injection fails."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Typed CrawlSlotAcquireRequest/Result/Path boundary."
+      - "Duplicate pre-acquired flag reads removed from crawl_tasks.py."
+      - "Raw Redis Lua release call removed from crawl_tasks.py."
+      - "Busy-wait and retry policy remains in crawl_tasks.py."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "! rg \"limiter\\.acquire\\(\" backend/src/intric/worker/crawl_tasks.py"
+      - "! rg \"redis_client\\.eval\\(LuaScripts\\.RELEASE_SLOT\" backend/src/intric/worker/crawl_tasks.py"
+      - "! rg \"job:\\{job_id\\}:slot_preacquired\" backend/src/intric/worker/crawl_tasks.py"
+      - "! rg \"tenant:\\{tenant\\.id\\}:active_jobs\" backend/src/intric/worker/crawl_tasks.py"
+    stop_if:
+      - "Need to lift Retry or CrawlMaxAgeExceededError into the helper."
+      - "Need to absorb update_job_retry_stats, max-age checks, or Retry(defer=...) scheduling."
+      - "Need to add Any, cast, or type ignore."
+      - "Need to change LuaScripts, TenantConcurrencyLimiter, CapacityManager, or slot_release.py semantics."
+      - "Tenant-id mismatch release failure remains silent instead of structured logging."
+      - "crawl_tasks.py LOC does not decrease materially."
+      - "Touch .devcontainer files."
+    receipt:
+      result: done
+      summary: "Extracted crawl slot acquire behavior into `worker/crawl/slot_acquire.py` with typed request/result/path values. `crawl_tasks.py` no longer reads the pre-acquired slot key directly, calls `limiter.acquire(...)`, or performs raw Redis Lua release during slot acquire. Busy-wait, retry, max-age, and final slot-release policy stayed in `crawl_tasks.py` and the existing slot-release reactor."
+      changed_files:
+        - "backend/src/intric/worker/crawl/slot_acquire.py"
+        - "backend/src/intric/worker/crawl/__init__.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_slot_acquire.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "cd backend && ! rg \"limiter\\.acquire\\(\" src/intric/worker/crawl_tasks.py"
+        - "cd backend && ! rg \"redis_client\\.eval\\(LuaScripts\\.RELEASE_SLOT\" src/intric/worker/crawl_tasks.py"
+        - "cd backend && ! rg \"job:\\{job_id\\}:slot_preacquired\" src/intric/worker/crawl_tasks.py"
+        - "cd backend && ! rg \"tenant:\\{tenant\\.id\\}:active_jobs\" src/intric/worker/crawl_tasks.py"
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t058-slot-acquire-extraction-implementation-review-20260514T232636Z.md"
+        min_score: 8
+      notes:
+        - "Added the non-blocking Claude P2 edge tests for Redis get failures, invalid pre-acquired tenant IDs, TTL refresh failures, and mismatch release followed by limit reached."
+        - "Claude's remaining maintainability note is to consolidate the duplicated `slot_preacquired` Redis key string in a follow-up task."
+      spawned_tasks:
+        - T059
+  - id: T059
+    type: worker
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Consolidate the pre-acquired crawl slot Redis key into one canonical helper without changing slot acquire, release, feeder, or capacity semantics."
+    inputs:
+      - "T058 receipt"
+      - ".codex/artifacts/claude-peer-loop-t058-slot-acquire-extraction-implementation-review-20260514T232636Z.md"
+      - "backend/src/intric/worker/crawl/slot_acquire.py"
+      - "backend/src/intric/worker/crawl/slot_release.py"
+      - "backend/src/intric/worker/feeder/capacity.py"
+      - "backend/src/intric/worker/crawl_feeder.py"
+      - "backend/src/intric/worker/redis/lua_scripts.py"
+    allowed_files:
+      - "backend/src/intric/worker/redis/lua_scripts.py"
+      - "backend/src/intric/worker/crawl/slot_acquire.py"
+      - "backend/src/intric/worker/crawl/slot_release.py"
+      - "backend/src/intric/worker/feeder/capacity.py"
+      - "backend/src/intric/worker/crawl_feeder.py"
+      - "backend/tests/unittests/worker/test_crawl_slot_acquire.py"
+      - "backend/tests/unittests/worker/test_slot_release.py"
+      - "backend/tests/unittests/worker/test_tenant_concurrency.py"
+      - "backend/tests/unittests/worker/test_crawl_feeder.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Use TDD: add a focused test for the canonical key helper before production changes."
+      - "Only consolidate key construction; do not change Redis TTL, release, acquire, feeder, capacity, Retry, or watchdog semantics."
+      - "No Any, cast, type ignore, factories, protocols, registries, or broad worker adapter work."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "One canonical `slot_preacquired` key helper reused by slot acquire, slot release, feeder, and capacity code."
+      - "No remaining duplicated raw `job:{job_id}:slot_preacquired` format strings outside tests that assert the contract."
+      - "Behavior tests remain green."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_slot_release.py tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_crawl_feeder.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/redis/lua_scripts.py src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/slot_release.py src/intric/worker/feeder/capacity.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_slot_release.py tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_crawl_feeder.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/redis/lua_scripts.py src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/slot_release.py src/intric/worker/feeder/capacity.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_slot_release.py tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_crawl_feeder.py"
+      - "cd backend && rg \"job:\\{job_id\\}:slot_preacquired|slot_preacquired\" src/intric/worker tests/unittests/worker"
+    stop_if:
+      - "Need to change acquire/release/capacity semantics."
+      - "Need to change Redis Lua scripts beyond adding a key-construction helper."
+      - "Need files outside allowed_files."
+      - "Verification fails twice for the same reason."
     receipt: null
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T056
+    task: T058
     commands:
-      - "cd backend && uv run pytest -m migration_isolation tests/integration/migrations/test_idx_active_crawl_lookup.py -q"
-      - "cd backend && uv run ruff check alembic/versions/202605142300_idx_active_crawl_lookup.py tests/integration/migrations/test_idx_active_crawl_lookup.py src/intric/worker/crawl_tasks.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json"
-      - "cd backend && uv run pytest tests/unittests -q"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-reliability-t056-active-crawl-indexes --title 'T056 active crawl lookup index implementation review-iteration-2' --phase verification --iteration 2 --require-green --required-min-score 8 ..."
-    note: "T056 full backend validation and Claude green artifact completed after the active-crawl lookup index revision."
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && ! rg \"limiter\\.acquire\\(\" src/intric/worker/crawl_tasks.py"
+      - "cd backend && ! rg \"redis_client\\.eval\\(LuaScripts\\.RELEASE_SLOT\" src/intric/worker/crawl_tasks.py"
+      - "cd backend && ! rg \"job:\\{job_id\\}:slot_preacquired\" src/intric/worker/crawl_tasks.py"
+      - "cd backend && ! rg \"tenant:\\{tenant\\.id\\}:active_jobs\" src/intric/worker/crawl_tasks.py"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-reliability-t058-slot-acquire-implementation --title 'T058 slot acquire extraction implementation review' --phase verification --require-green --required-min-score 8 ..."
+    note: "T058 extracted slot acquire into a typed boundary, added edge-case tests from Claude P2 feedback, and passed focused pytest/ruff/Pyright plus stop-grep checks."

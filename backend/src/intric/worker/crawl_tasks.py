@@ -35,6 +35,7 @@ from intric.websites.domain.crawl_run import CrawlType
 from intric.worker.crawl import (
     CrawlAuditPayload,
     CrawlRunTerminalUpdate,
+    CrawlSlotAcquireRequest,
     CrawlSlotReleaseRequest,
     ExistingBlobState,
     HeartbeatFailedPageProcessingAbort,
@@ -44,6 +45,7 @@ from intric.worker.crawl import (
     PreemptedPageProcessingAbort,
     SessionHolder,
     TerminalEvent,
+    acquire_crawl_slot,
     bootstrap_crawl,
     cleanup_stale_blobs,
     commit_terminal,
@@ -61,7 +63,6 @@ from intric.worker.crawl.persistence import CrawlPageData
 from intric.worker.crawl_context import EmbeddingModelSpec
 from intric.worker.feeder.election import LeaderElection
 from intric.worker.feeder.queues import CrawlPendingJobData, PendingQueue
-from intric.worker.redis.lua_scripts import LuaScripts
 from intric.worker.task_manager import TaskManager
 
 logger = get_logger(__name__)
@@ -588,28 +589,27 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
     # This allows session recovery to update the reference mid-processing
     session_holder: SessionHolder = {"session": None, "uploader": None}
 
-    # CRITICAL: Check for pre-acquired slot BEFORE tenant injection
-    # Why: If feeder acquired a slot but tenant injection fails, we must still release
-    # This read is safe even without tenant context
     try:
-        _early_redis = container.redis_client()
-        preacquired_key = f"job:{job_id}:slot_preacquired"
-        preacquired_value = await _early_redis.get(preacquired_key)
-        if preacquired_value:
-            # Store tenant_id for guaranteed cleanup in finally block
-            preacquired_tenant_id = UUID(preacquired_value.decode())
-            # NOTE: Do NOT delete flag here - keep it for entire crawl lifecycle
-            # Why: Heartbeat refreshes flag TTL, watchdog uses flag for crash recovery
-            # Flag will be deleted in finally block after slot release
-            logger.debug(
-                "Pre-acquired slot detected, will ensure release",
-                extra={"job_id": str(job_id), "tenant_id": str(preacquired_tenant_id)},
-            )
+        redis_client = container.redis_client()
     except Exception as exc:
         logger.warning(
-            "Failed to check pre-acquired slot early",
+            "Failed to resolve Redis before tenant injection",
             extra={"job_id": str(job_id), "error": str(exc)},
         )
+
+    # Read the feeder pre-acquire flag before tenant injection so the finally
+    # release path can still repair capacity if tenant resolution fails.
+    slot_acquire = await acquire_crawl_slot(
+        CrawlSlotAcquireRequest(
+            job_id=job_id,
+            tenant_id=None,
+            preacquired_tenant_id=None,
+            semaphore_ttl_seconds=settings.tenant_worker_semaphore_ttl_seconds,
+        ),
+        limiter=None,
+        redis_client=redis_client,
+    )
+    preacquired_tenant_id = slot_acquire.preacquired_tenant_id
 
     try:
         tenant = container.tenant()
@@ -630,96 +630,23 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
     if tenant:
         limiter = container.tenant_concurrency_limiter()
-        try:
-            redis_client = container.redis_client()
-        except Exception:  # pragma: no cover - container guard
-            redis_client = None
-
-        # FALLBACK: If early check failed (transient Redis error), retry now
-        # Why: Early check runs before tenant injection. If it failed, the flag
-        # is still in Redis and we'd double-acquire without this retry.
-        if preacquired_tenant_id is None and redis_client:
-            try:
-                preacquired_key = f"job:{job_id}:slot_preacquired"
-                preacquired_value = await redis_client.get(preacquired_key)
-                if preacquired_value:
-                    preacquired_tenant_id = UUID(preacquired_value.decode())
-                    # NOTE: Do NOT delete flag here - keep it for entire crawl lifecycle
-                    # Flag will be deleted in finally block after slot release
-                    logger.debug(
-                        "Pre-acquired slot detected on retry (early check failed)",
-                        extra={
-                            "job_id": str(job_id),
-                            "tenant_id": str(preacquired_tenant_id),
-                        },
-                    )
-            except Exception:
-                pass  # Best effort - will acquire normally if this fails too
-
-        # Check if we already detected a pre-acquired slot in early check
-        # The early check happens BEFORE tenant injection to ensure cleanup even if injection fails
-        if preacquired_tenant_id is not None:
-            if preacquired_tenant_id == tenant.id:
-                # Normal case: feeder pre-acquired slot for this tenant
-                acquired = True
-                logger.debug(
-                    "Slot pre-acquired by feeder, skipping limiter.acquire()",
-                    extra={"job_id": str(job_id), "tenant_id": str(tenant.id)},
-                )
-                # Refresh semaphore TTL - we now own this slot
-                # Why: Normal acquire() refreshes TTL via Lua script. When we skip acquire,
-                # we must manually refresh to prevent semaphore expiry during long queue times.
-                if redis_client:
-                    try:
-                        semaphore_ttl = get_crawler_setting(
-                            "tenant_worker_semaphore_ttl_seconds",
-                            tenant_crawler_settings,
-                            default=settings.tenant_worker_semaphore_ttl_seconds,
-                        )
-                        concurrency_key = f"tenant:{tenant.id}:active_jobs"
-                        await redis_client.expire(concurrency_key, semaphore_ttl)
-                    except Exception:
-                        pass  # Best effort - slot is still valid
-            else:
-                # EDGE CASE: Feeder and worker disagree on tenant_id
-                # This should never happen in normal operation but we handle it defensively
-                logger.error(
-                    "Tenant ID mismatch between feeder and worker",
-                    extra={
-                        "job_id": str(job_id),
-                        "feeder_tenant_id": str(preacquired_tenant_id),
-                        "worker_tenant_id": str(tenant.id),
-                        "action": "releasing_feeder_slot_and_acquiring_new",
-                    },
-                )
-                # Release the mismatched slot to prevent leak
-                if redis_client:
-                    try:
-                        # Use per-tenant TTL if available
-                        semaphore_ttl = get_crawler_setting(
-                            "tenant_worker_semaphore_ttl_seconds",
-                            tenant_crawler_settings,
-                            default=settings.tenant_worker_semaphore_ttl_seconds,
-                        )
-                        release_key = f"tenant:{preacquired_tenant_id}:active_jobs"
-                        await cast(
-                            Any,
-                            redis_client.eval(
-                                LuaScripts.RELEASE_SLOT,
-                                1,
-                                release_key,
-                                str(semaphore_ttl),
-                            ),
-                        )
-                    except Exception:
-                        pass  # Best effort
-                # Clear preacquired_tenant_id so finally block doesn't double-release
-                preacquired_tenant_id = None
-                # Acquire slot for the correct tenant
-                acquired = await limiter.acquire(tenant.id)
-        else:
-            # No pre-acquired slot, acquire normally
-            acquired = await limiter.acquire(tenant.id)
+        semaphore_ttl = get_crawler_setting(
+            "tenant_worker_semaphore_ttl_seconds",
+            tenant_crawler_settings,
+            default=settings.tenant_worker_semaphore_ttl_seconds,
+        )
+        slot_acquire = await acquire_crawl_slot(
+            CrawlSlotAcquireRequest(
+                job_id=job_id,
+                tenant_id=tenant.id,
+                preacquired_tenant_id=preacquired_tenant_id,
+                semaphore_ttl_seconds=semaphore_ttl,
+            ),
+            limiter=limiter,
+            redis_client=redis_client,
+        )
+        acquired = slot_acquire.acquired
+        preacquired_tenant_id = slot_acquire.preacquired_tenant_id
 
         if not acquired:
             # Enforce max age limit with exponential backoff to prevent infinite retry loops.

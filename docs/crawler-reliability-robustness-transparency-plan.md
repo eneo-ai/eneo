@@ -50,6 +50,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Step 5 file-processing tranche: extract downloaded-file hash retention, changed-file callback processing, per-file failure isolation, and cleanup bookkeeping into typed `worker/crawl/file_processing.py` boundaries.
 - [x] Step 5 cleanup tranche: extract stale cleanup calculation and delete-callback execution into typed `worker/crawl/cleanup.py` boundaries.
 - [x] Active-crawl duplicate-guard index tranche: add task-scoped PostgreSQL lookup indexes, make the duplicate-guard query explicitly crawl-only, and cover pre/post planner behavior with a migration-isolation regression test.
+- [x] Step 5 slot-acquire tranche: extract pre-acquired crawl slot discovery/reuse/mismatch handling into typed `worker/crawl/slot_acquire.py` boundaries while keeping ARQ retry and busy-wait policy in `crawl_tasks.py`.
 
 ## Non-Negotiable Principles
 
@@ -68,7 +69,7 @@ The current branch already improved skip-unchanged behavior, source-retained cou
 
 Important current friction:
 
-- `backend/src/intric/worker/crawl_tasks.py` is still too large at 1,832 lines, but bootstrap, page iteration, file processing, cleanup, audit, circuit breaker, website timestamps, slot release, terminal commits, and cleanup policy are now extracted behind typed boundaries.
+- `backend/src/intric/worker/crawl_tasks.py` is still too large at 1,757 lines, but bootstrap, page iteration, file processing, cleanup, audit, circuit breaker, website timestamps, slot acquire/release, terminal commits, and cleanup policy are now extracted behind typed boundaries.
 - `backend/src/intric/worker/crawl_tasks.py` now uses a public `TaskManager.acknowledge_terminal_commit(...)` seam. Duplicate crawl skips, zero-output crawls, exception/shutdown outcomes, normal/partial completion, max-age busy-wait abandonment, and pending-queue enqueue failure rollback go through `commit_terminal(...)`. Remaining terminal write ownership is now concentrated in watchdog cleanup.
 - `_get_primary_active_job_id(...)` now filters explicitly to crawl jobs and is backed by reversible PostgreSQL indexes on active crawl jobs and crawl-run website/job lookups. The migration test proves the duplicate-guard lookup changes from a crawl-run sequential scan before the migration to planner-visible index usage after it.
 - `backend/src/intric/worker/crawl_feeder.py` owns custom scheduling, Redis queues, leader election, tenant capacity, and pre-acquired slot protocol.
@@ -584,6 +585,7 @@ Work:
 - [x] Extract page processing into `process_pages(...)` with typed success/abort output and behavior tests.
 - [x] Extract downloaded-file processing into `process_files(...)` with typed output and behavior tests for retention, changed-file processing, per-file failures, missing embedding model diagnostics, and cleanup bookkeeping.
 - [x] Extract stale cleanup into `cleanup_stale_blobs(...)` with typed output and behavior tests for cleanup policy, ordered stale titles, empty cleanup, delete-callback failures, and report/action consistency.
+- [x] Extract crawl slot acquire behavior into `acquire_crawl_slot(...)` with typed output and behavior tests for normal acquire, limit reached, pre-acquired reuse, tenant-injection discovery, tenant mismatch release, Redis read failures, invalid Redis state, TTL refresh failures, and mismatch release followed by limit reached.
 - [ ] Each phase returns a typed output and does not write terminal state directly.
 - [ ] Keep Scrapy-specific behavior in `crawler.py` and `CrawlDiagnostics`.
 - [ ] Keep persistence retention behavior in `persist_batch()`.
