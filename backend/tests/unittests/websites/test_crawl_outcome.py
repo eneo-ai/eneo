@@ -1,3 +1,10 @@
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
+
 from intric.main.models import Status
 from intric.websites.crawl_dependencies import crawl_models
 from intric.websites.crawl_dependencies.crawl_models import (
@@ -7,11 +14,157 @@ from intric.websites.crawl_dependencies.crawl_models import (
     derive_crawl_outcome_code,
     derive_crawl_processing_summary,
 )
+from intric.websites.domain import crawl_outcome
 from intric.websites.domain.crawl_outcome import (
     CrawlOutcomeCode,
     FailureReason,
     classify_crawl_outcome,
+    parse_crawl_outcome_code_lenient,
+    parse_crawl_outcome_code_strict,
+    parse_failure_summary_lenient,
+    parse_failure_summary_strict,
+    serialize_failure_summary_for_storage,
 )
+from intric.websites.presentation.website_models import (
+    CrawlRunPublic as WebsiteCrawlRunPublic,
+)
+
+
+def test_write_side_outcome_parser_rejects_unknown_values():
+    with pytest.raises(ValueError, match="UNKNOWN_NEW_OUTCOME"):
+        parse_crawl_outcome_code_strict("UNKNOWN_NEW_OUTCOME")
+
+
+def test_historical_outcome_parser_keeps_safe_unknown_fallback():
+    assert (
+        parse_crawl_outcome_code_lenient("UNKNOWN_LEGACY_OUTCOME")
+        == CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
+    )
+
+
+def test_historical_failure_summary_parser_drops_unknown_keys_and_reports_them():
+    dropped_keys: list[str] = []
+
+    parsed = parse_failure_summary_lenient(
+        {
+            FailureReason.EMPTY_CONTENT.value: 3,
+            "UNKNOWN_LEGACY_BUCKET": 1,
+        },
+        on_unknown_key=dropped_keys.append,
+    )
+
+    assert parsed == {FailureReason.EMPTY_CONTENT: 3}
+    assert dropped_keys == ["UNKNOWN_LEGACY_BUCKET"]
+
+
+def test_historical_failure_summary_unknown_key_emits_observability(monkeypatch):
+    class CapturingLogger:
+        def __init__(self):
+            self.extra: dict[str, object] | None = None
+
+        def info(self, _message: str, *, extra: dict[str, object]) -> None:
+            self.extra = extra
+
+    logger = CapturingLogger()
+    monkeypatch.setattr(crawl_outcome, "logger", logger)
+
+    outcome = derive_crawl_outcome(
+        status=Status.COMPLETE,
+        result_location=None,
+        failure_summary={
+            FailureReason.DB_ERROR.value: 1,
+            "UNKNOWN_LEGACY_BUCKET": 1,
+        },
+        pages_failed=1,
+        files_failed=0,
+        pages_source_retained=None,
+    )
+
+    assert outcome is not None
+    assert outcome.code == CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
+    assert logger.extra == {
+        "metric_name": "crawler.failure_summary.legacy_key_dropped",
+        "metric_value": 1,
+        "failure_reason": "UNKNOWN_LEGACY_BUCKET",
+    }
+
+
+def test_write_side_failure_summary_parser_rejects_unknown_keys():
+    with pytest.raises(ValueError, match="UNKNOWN_NEW_BUCKET"):
+        parse_failure_summary_strict({"UNKNOWN_NEW_BUCKET": 1})
+
+
+def test_write_side_failure_summary_parser_accepts_enum_keys_and_string_aliases():
+    parsed_from_enum_keys = parse_failure_summary_strict(
+        {FailureReason.EMPTY_CONTENT: 3}
+    )
+    parsed_from_string_aliases = parse_failure_summary_strict(
+        {FailureReason.MISSING_PROVIDER.value: 2}
+    )
+
+    assert parsed_from_enum_keys == {FailureReason.EMPTY_CONTENT: 3}
+    assert parsed_from_string_aliases == {FailureReason.MISSING_PROVIDER: 2}
+
+
+def test_failure_summary_storage_serialization_keeps_existing_json_shape():
+    summary = parse_failure_summary_strict(
+        {
+            FailureReason.DB_ERROR: 2,
+            FailureReason.MISSING_PROVIDER: 1,
+        }
+    )
+
+    assert serialize_failure_summary_for_storage(summary) == {
+        "DB_ERROR": 2,
+        "MISSING_PROVIDER": 1,
+    }
+
+
+def test_crawl_run_public_serializes_failure_summary_with_string_keys():
+    public_run = WebsiteCrawlRunPublic(
+        id=uuid4(),
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        pages_crawled=2,
+        files_downloaded=0,
+        pages_failed=2,
+        files_failed=0,
+        pages_source_retained=0,
+        pages_hash_retained=0,
+        files_hash_retained=0,
+        files_too_large_skipped=0,
+        failure_summary={FailureReason.DB_ERROR: 2},
+        outcome_code=CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES,
+        status=Status.COMPLETE,
+        result_location=None,
+        finished_at=datetime.now(timezone.utc),
+    )
+
+    dumped = public_run.model_dump(mode="json")
+
+    assert dumped["failure_summary"] == {"DB_ERROR": 2}
+
+
+def test_crawl_outcome_public_parity_fixture():
+    fixture_path = Path(__file__).parents[2] / "fixtures" / "crawl_outcome_parity.json"
+    cases = json.loads(fixture_path.read_text())
+
+    for case in cases:
+        input_data = case["input"]
+        if "processing_summary" in input_data:
+            input_data = {
+                **input_data,
+                "processing_summary": crawl_models.CrawlRunProcessingSummary(
+                    **input_data["processing_summary"]
+                ),
+            }
+        outcome = derive_crawl_outcome(**input_data)
+        if outcome is None:
+            actual = None
+        else:
+            actual = outcome.model_dump(mode="json")
+
+        assert actual == case["expected"], case["name"]
 
 
 def test_stored_duplicate_crawl_skip_is_info_outcome_without_string_parsing():
@@ -29,6 +182,70 @@ def test_stored_duplicate_crawl_skip_is_info_outcome_without_string_parsing():
     assert outcome.code == CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED
     assert outcome.severity == CrawlOutcomeSeverity.INFO
     assert outcome.message_key == "crawl_outcome_duplicate_skipped"
+
+
+def test_stored_outcome_code_does_not_call_legacy_fallback(monkeypatch):
+    def fail_legacy_fallback(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("stored outcome_code must not use legacy fallback")
+
+    monkeypatch.setattr(
+        crawl_models,
+        "derive_outcome_from_legacy_columns",
+        fail_legacy_fallback,
+    )
+
+    outcome = derive_crawl_outcome(
+        status=Status.FAILED,
+        result_location="Crawl failed for https://example.com: no pages returned",
+        failure_summary=None,
+        pages_failed=None,
+        files_failed=None,
+        pages_source_retained=None,
+        outcome_code=CrawlOutcomeCode.CRAWL_SITEMAP_NO_PAGES,
+    )
+
+    assert outcome is not None
+    assert outcome.code == CrawlOutcomeCode.CRAWL_SITEMAP_NO_PAGES
+
+
+def test_unknown_stored_outcome_code_does_not_call_legacy_fallback(monkeypatch):
+    def fail_legacy_fallback(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("stored outcome_code must not use legacy fallback")
+
+    monkeypatch.setattr(
+        crawl_models,
+        "derive_outcome_from_legacy_columns",
+        fail_legacy_fallback,
+    )
+
+    outcome = derive_crawl_outcome(
+        status=Status.FAILED,
+        result_location="worker exited unexpectedly",
+        failure_summary=None,
+        pages_failed=None,
+        files_failed=None,
+        pages_source_retained=None,
+        outcome_code="FUTURE_OUTCOME",
+    )
+
+    assert outcome is not None
+    assert outcome.code == CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
+    assert outcome.detail == "worker exited unexpectedly"
+
+
+def test_legacy_unknown_failure_preserves_detail_without_specific_outcome():
+    outcome = derive_crawl_outcome(
+        status=Status.FAILED,
+        result_location="worker exited unexpectedly",
+        failure_summary=None,
+        pages_failed=None,
+        files_failed=None,
+        pages_source_retained=None,
+    )
+
+    assert outcome is not None
+    assert outcome.code == CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
+    assert outcome.detail == "worker exited unexpectedly"
 
 
 def test_legacy_duplicate_crawl_skip_string_still_derives_outcome():
@@ -253,6 +470,40 @@ def test_stored_max_age_outcome_has_specific_error_message():
     assert outcome.code == CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED
     assert outcome.severity == CrawlOutcomeSeverity.ERROR
     assert outcome.message_key == "crawl_outcome_max_age_exceeded"
+
+
+def test_stored_runtime_timeout_outcome_has_specific_error_message():
+    outcome = derive_crawl_outcome(
+        status=Status.FAILED,
+        result_location="Crawl exceeded the maximum runtime of 12 hours and was stopped",
+        failure_summary=None,
+        pages_failed=None,
+        files_failed=None,
+        pages_source_retained=None,
+        outcome_code=CrawlOutcomeCode.CRAWL_RUNTIME_TIMEOUT,
+    )
+
+    assert outcome is not None
+    assert outcome.code == CrawlOutcomeCode.CRAWL_RUNTIME_TIMEOUT
+    assert outcome.severity == CrawlOutcomeSeverity.ERROR
+    assert outcome.message_key == "crawl_outcome_runtime_timeout"
+
+
+def test_stored_queue_enqueue_failure_outcome_has_specific_error_message():
+    outcome = derive_crawl_outcome(
+        status=Status.FAILED,
+        result_location="Failed to add crawl to pending queue: Redis unavailable",
+        failure_summary=None,
+        pages_failed=None,
+        files_failed=None,
+        pages_source_retained=None,
+        outcome_code=CrawlOutcomeCode.CRAWL_QUEUE_ENQUEUE_FAILED,
+    )
+
+    assert outcome is not None
+    assert outcome.code == CrawlOutcomeCode.CRAWL_QUEUE_ENQUEUE_FAILED
+    assert outcome.severity == CrawlOutcomeSeverity.ERROR
+    assert outcome.message_key == "crawl_outcome_queue_enqueue_failed"
 
 
 def test_stored_source_retention_outcome_is_informational():

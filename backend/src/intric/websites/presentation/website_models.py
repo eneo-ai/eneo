@@ -26,7 +26,7 @@ from intric.websites.crawl_dependencies.crawl_models import (
     derive_crawl_outcome,
     derive_crawl_processing_summary,
 )
-from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
+from intric.websites.domain.crawl_outcome import CrawlOutcomeCode, FailureReason
 from intric.websites.domain.crawl_run import CrawlRun, CrawlType
 from intric.websites.domain.website import UpdateInterval, Website
 
@@ -83,7 +83,7 @@ class CrawlRunPublic(BaseResponse):
     pages_hash_retained: Optional[int] = None
     files_hash_retained: Optional[int] = None
     files_too_large_skipped: Optional[int] = None
-    failure_summary: Optional[dict[str, int]] = None
+    failure_summary: Optional[dict[FailureReason, int]] = None
     outcome_code: Optional[CrawlOutcomeCode] = None
     status: Status
     result_location: Optional[str]

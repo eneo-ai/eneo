@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import TYPE_CHECKING, Optional, Union, cast, overload
+from typing import TYPE_CHECKING, Final, Optional, Union, cast, overload
 
 from typing_extensions import override
 
@@ -32,6 +32,9 @@ class UpdateInterval(str, Enum):
     DAILY = "daily"
     EVERY_OTHER_DAY = "every_other_day"
     WEEKLY = "weekly"
+
+
+WEBSITE_AUTO_DISABLE_FAILURE_THRESHOLD: Final[int] = 10
 
 
 class Website(Entity):
@@ -88,7 +91,7 @@ class Website(Entity):
         """
         return (
             self.update_interval == UpdateInterval.NEVER
-            and self.consecutive_failures >= 10
+            and self.consecutive_failures >= WEBSITE_AUTO_DISABLE_FAILURE_THRESHOLD
         )
 
     def set_http_auth(self, username: str, password: str) -> "Website":
@@ -313,7 +316,7 @@ class Website(Entity):
             self.update_interval = update_interval
             # Reset circuit breaker when user manually changes schedule
             # Why: User action indicates intent to retry, regardless of past failures
-            if self.consecutive_failures >= 10:
+            if self.consecutive_failures >= WEBSITE_AUTO_DISABLE_FAILURE_THRESHOLD:
                 self.consecutive_failures = 0
                 self.next_retry_at = None
 

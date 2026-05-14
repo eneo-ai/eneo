@@ -32,7 +32,6 @@ from intric.main.config import Settings
 from intric.main.models import Status
 from intric.worker.feeder.watchdog import OrphanWatchdog
 
-
 # ============================================================================
 # Helper Functions
 # ============================================================================
@@ -104,6 +103,7 @@ async def clean_redis(redis_client: aioredis.Redis):
 async def test_embedding_model_id(db_container):
     """Get the fixture embedding model ID for tests."""
     from sqlalchemy import select
+
     from intric.database.tables.ai_models_table import EmbeddingModels
 
     async with db_container() as container:
@@ -660,9 +660,11 @@ class TestPhase0ZombieCounterReconciliation:
         - After cleanup: Redis counter = 0 or deleted
         - Expired job marked FAILED
         """
+        from sqlalchemy import select
+
         from intric.database.tables.job_table import Jobs
         from intric.database.tables.websites_table import CrawlRuns
-        from sqlalchemy import select
+        from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 
         # Setup Redis with zombie counter
         slot_key = f"tenant:{test_tenant.id}:active_jobs"
@@ -719,6 +721,14 @@ class TestPhase0ZombieCounterReconciliation:
             updated_job = result.scalar_one()
             assert updated_job.status == Status.FAILED, (
                 "Expired job should be marked FAILED"
+            )
+            crawl_run_result = await session.execute(
+                select(CrawlRuns).where(CrawlRuns.job_id == job_id)
+            )
+            updated_crawl_run = crawl_run_result.scalar_one()
+            assert (
+                updated_crawl_run.outcome_code
+                == CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED.value
             )
 
         # Verify counter is 0 or deleted after Phase 0 reconciliation + Phase 1 slot release

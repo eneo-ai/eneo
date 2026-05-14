@@ -7,7 +7,10 @@ from intric.base.base_entity import Entity
 from intric.main.models import Status
 from intric.websites.domain.crawl_outcome import (
     CrawlOutcomeCode,
-    parse_crawl_outcome_code,
+    FailureReason,
+    parse_crawl_outcome_code_lenient,
+    parse_failure_summary_lenient,
+    report_legacy_failure_summary_key_dropped,
 )
 
 if TYPE_CHECKING:
@@ -44,7 +47,7 @@ class CrawlRun(Entity):
         result_location: Optional[str],
         finished_at: Optional["datetime"],
         job_id: Optional["UUID"],
-        failure_summary: Optional[dict[str, int]] = None,
+        failure_summary: Optional[dict[FailureReason, int]] = None,
         outcome_code: Optional[CrawlOutcomeCode] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
@@ -148,8 +151,11 @@ class CrawlRun(Entity):
             status=Status(job.status) if job else Status.QUEUED,
             result_location=job.result_location if job else None,
             finished_at=job.finished_at if job else None,
-            failure_summary=record.failure_summary,
-            outcome_code=parse_crawl_outcome_code(record.outcome_code),
+            failure_summary=parse_failure_summary_lenient(
+                record.failure_summary,
+                on_unknown_key=report_legacy_failure_summary_key_dropped,
+            ),
+            outcome_code=parse_crawl_outcome_code_lenient(record.outcome_code),
         )
 
     def update(

@@ -1,11 +1,9 @@
 """Integration tests for CrawlFeeder distributed system failure modes.
 
-Tests critical failure scenarios identified by GPT-5 and Gemini-3-pro-preview:
-- Zombie Leader: Lock expires mid-processing when tenant loop takes >30s
-- Enqueue-State Lag: active_jobs lags behind actual enqueued jobs
-- Crash-Before-LREM: Fragile ARQ exception string matching
-
-These tests catch real production bugs, not just verify happy paths.
+These tests cover production failure modes around leader election, enqueue
+capacity, and pending-queue idempotency. Duplicate enqueue handling follows
+ARQ's `_job_id` contract: an existing job returns `None` from `enqueue_job`,
+which is surfaced as `JobManager.enqueue(...) is False`.
 """
 
 import json
@@ -15,9 +13,63 @@ from uuid import uuid4
 import pytest
 import redis.asyncio as aioredis
 
+from intric.tenants.crawler_settings_helper import TenantCrawlerSettings
+from intric.worker.crawl_feeder import CrawlFeeder
 from intric.worker.feeder.capacity import CapacityManager
 from intric.worker.feeder.election import LeaderElection
-from intric.worker.feeder.queues import JobEnqueuer, PendingQueue
+from intric.worker.feeder.queues import CrawlPendingJobData, PendingQueue
+
+
+def _pending_job_data(job_id: str) -> CrawlPendingJobData:
+    return {
+        "job_id": job_id,
+        "user_id": str(uuid4()),
+        "website_id": str(uuid4()),
+        "run_id": str(uuid4()),
+        "url": "https://example.com/test",
+        "download_files": False,
+        "crawl_type": "crawl",
+    }
+
+
+async def _active_slot_count(redis_client: aioredis.Redis, tenant_id) -> int:
+    value = await redis_client.get(f"tenant:{tenant_id}:active_jobs")
+    return int(value.decode()) if value else 0
+
+
+async def _pending_count(redis_client: aioredis.Redis, tenant_id) -> int:
+    return await redis_client.llen(f"tenant:{tenant_id}:crawl_pending")
+
+
+async def _push_pending_job(
+    redis_client: aioredis.Redis,
+    tenant_id,
+    job_data: CrawlPendingJobData,
+) -> bytes:
+    raw_bytes = json.dumps(job_data, default=str, sort_keys=True).encode()
+    await redis_client.rpush(f"tenant:{tenant_id}:crawl_pending", raw_bytes)
+    return raw_bytes
+
+
+async def _run_one_feeder_cycle(
+    redis_client: aioredis.Redis,
+    test_settings,
+    tenant_id,
+) -> None:
+    feeder = CrawlFeeder()
+    capacity_manager = CapacityManager(redis_client, test_settings)
+    # CrawlFeeder has no public one-cycle constructor yet; WorkerAdapter should
+    # replace this private test wiring with explicit dependency injection.
+    feeder._capacity_manager = capacity_manager
+    feeder._pending_queue = PendingQueue(redis_client)
+
+    tenant_settings = TenantCrawlerSettings.from_overrides(None)
+    with patch.object(
+        capacity_manager,
+        "get_tenant_settings",
+        new=AsyncMock(return_value=tenant_settings),
+    ):
+        await feeder._process_tenant_queue(tenant_id, redis_client)
 
 
 @pytest.mark.integration
@@ -180,142 +232,140 @@ class TestEnqueueStateLag:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-class TestCrashBeforeLremRecovery:
-    """Tests for idempotent recovery when crash occurs after enqueue but before LREM.
+class TestFeederEnqueueBranches:
+    """Integration coverage for each feeder enqueue branch."""
 
-    Risk: If feeder crashes after enqueueing to ARQ but before removing from
-    pending queue (LREM), the job stays in pending. On restart, feeder tries
-    to enqueue again. ARQ rejects with "duplicate job_id" error.
-
-    The code handles this by checking error message strings - which is fragile.
-    """
-
-    async def test_duplicate_job_id_treated_as_success(
-        self, redis_client: aioredis.Redis
+    async def test_new_enqueue_keeps_slot_and_removes_pending(
+        self,
+        redis_client: aioredis.Redis,
+        test_settings,
     ):
-        """Verify duplicate job_id error is treated as success for LREM.
-
-        This catches the fragile string matching bug where:
-        1. Feeder enqueues job to ARQ
-        2. Feeder crashes before LREM
-        3. Feeder restarts, tries to enqueue same job
-        4. ARQ returns "job_id already exists" error
-        5. Code must treat this as SUCCESS so LREM proceeds
-        """
         tenant_id = uuid4()
         job_id = uuid4()
+        await redis_client.delete(
+            f"tenant:{tenant_id}:active_jobs",
+            f"tenant:{tenant_id}:crawl_pending",
+            f"job:{job_id}:slot_preacquired",
+        )
+        await _push_pending_job(redis_client, tenant_id, _pending_job_data(str(job_id)))
 
-        # Create job data
-        job_data = {
-            "job_id": str(job_id),
-            "user_id": str(uuid4()),
-            "website_id": str(uuid4()),
-            "run_id": str(uuid4()),
-            "url": "https://example.com/test",
-            "download_files": False,
-            "crawl_type": "crawl",
-        }
-
-        job_enqueuer = JobEnqueuer()
-
-        # Mock job_manager.enqueue to raise duplicate error
         with patch("intric.worker.feeder.queues.job_manager") as mock_job_manager:
-            mock_job_manager.enqueue = AsyncMock(
-                side_effect=Exception("job_id already exists in queue")
-            )
+            mock_job_manager.enqueue = AsyncMock(return_value=True)
+            await _run_one_feeder_cycle(redis_client, test_settings, tenant_id)
 
-            # This should return True (success) despite the exception
-            success, is_duplicate, returned_job_id = await job_enqueuer.enqueue(
-                job_data, tenant_id
-            )
+        assert await _pending_count(redis_client, tenant_id) == 0
+        assert await _active_slot_count(redis_client, tenant_id) == 1
+        assert (
+            await redis_client.get(f"job:{job_id}:slot_preacquired")
+            == str(tenant_id).encode()
+        )
 
-        assert success is True, "Duplicate job_id error should be treated as success"
-        assert is_duplicate is True, "Should be marked as duplicate"
-        assert returned_job_id == job_id, "Should return the job_id"
+        await redis_client.delete(
+            f"tenant:{tenant_id}:active_jobs",
+            f"tenant:{tenant_id}:crawl_pending",
+            f"job:{job_id}:slot_preacquired",
+        )
 
-    async def test_real_error_not_treated_as_success(
-        self, redis_client: aioredis.Redis
+    async def test_duplicate_enqueue_releases_redundant_slot_and_removes_pending(
+        self,
+        redis_client: aioredis.Redis,
+        test_settings,
     ):
-        """Verify real errors are NOT treated as success.
-
-        Only duplicate job_id errors should be treated as success.
-        Other errors (network, validation, etc.) should return False.
-        """
         tenant_id = uuid4()
         job_id = uuid4()
+        await redis_client.delete(
+            f"tenant:{tenant_id}:active_jobs",
+            f"tenant:{tenant_id}:crawl_pending",
+            f"job:{job_id}:slot_preacquired",
+        )
 
-        job_data = {
-            "job_id": str(job_id),
-            "user_id": str(uuid4()),
-            "website_id": str(uuid4()),
-            "run_id": str(uuid4()),
-            "url": "https://example.com/test",
-            "download_files": False,
-            "crawl_type": "crawl",
-        }
+        capacity_manager = CapacityManager(redis_client, test_settings)
+        assert await capacity_manager.try_acquire_slot(tenant_id)
+        await capacity_manager.mark_slot_preacquired(job_id, tenant_id)
+        original_slot_count = await _active_slot_count(redis_client, tenant_id)
 
-        job_enqueuer = JobEnqueuer()
+        await _push_pending_job(redis_client, tenant_id, _pending_job_data(str(job_id)))
 
-        # Mock job_manager.enqueue to raise a REAL error
+        with patch("intric.worker.feeder.queues.job_manager") as mock_job_manager:
+            mock_job_manager.enqueue = AsyncMock(return_value=False)
+            await _run_one_feeder_cycle(redis_client, test_settings, tenant_id)
+
+        assert await _pending_count(redis_client, tenant_id) == 0
+        assert await _active_slot_count(redis_client, tenant_id) == original_slot_count
+        assert (
+            await redis_client.get(f"job:{job_id}:slot_preacquired")
+            == str(tenant_id).encode()
+        )
+
+        await redis_client.delete(
+            f"tenant:{tenant_id}:active_jobs",
+            f"tenant:{tenant_id}:crawl_pending",
+            f"job:{job_id}:slot_preacquired",
+        )
+
+    async def test_enqueue_failure_releases_slot_clears_flag_and_keeps_pending(
+        self,
+        redis_client: aioredis.Redis,
+        test_settings,
+    ):
+        tenant_id = uuid4()
+        job_id = uuid4()
+        await redis_client.delete(
+            f"tenant:{tenant_id}:active_jobs",
+            f"tenant:{tenant_id}:crawl_pending",
+            f"job:{job_id}:slot_preacquired",
+        )
+        await _push_pending_job(redis_client, tenant_id, _pending_job_data(str(job_id)))
+
         with patch("intric.worker.feeder.queues.job_manager") as mock_job_manager:
             mock_job_manager.enqueue = AsyncMock(
                 side_effect=Exception("Redis connection timeout")
             )
+            await _run_one_feeder_cycle(redis_client, test_settings, tenant_id)
 
-            # This should return False (failure) for real errors
-            success, is_duplicate, returned_job_id = await job_enqueuer.enqueue(
-                job_data, tenant_id
-            )
+        assert await _pending_count(redis_client, tenant_id) == 1
+        assert await _active_slot_count(redis_client, tenant_id) == 0
+        assert await redis_client.get(f"job:{job_id}:slot_preacquired") is None
 
-        assert success is False, "Real errors should NOT be treated as success"
-        assert is_duplicate is False, "Should not be marked as duplicate"
+        await redis_client.delete(
+            f"tenant:{tenant_id}:active_jobs",
+            f"tenant:{tenant_id}:crawl_pending",
+            f"job:{job_id}:slot_preacquired",
+        )
 
-    async def test_various_duplicate_error_messages(self, redis_client: aioredis.Redis):
-        """Test various forms of duplicate job error messages are handled.
-
-        ARQ or other queue systems might phrase the error differently.
-        The code checks for specific patterns: 'already exists', 'duplicate', 'job exists'.
-        Note: We intentionally DON'T match broad patterns like just 'job_id' to avoid
-        false positives on validation errors like 'invalid job_id format'.
-        """
+    async def test_invalid_job_id_moves_to_dlq_without_acquiring_slot(
+        self,
+        redis_client: aioredis.Redis,
+        test_settings,
+    ):
         tenant_id = uuid4()
+        queue_key = f"tenant:{tenant_id}:crawl_pending"
+        dlq_key = f"tenant:{tenant_id}:crawl_pending:dlq"
+        await redis_client.delete(
+            f"tenant:{tenant_id}:active_jobs",
+            queue_key,
+            dlq_key,
+        )
+        await _push_pending_job(
+            redis_client,
+            tenant_id,
+            _pending_job_data("not-a-uuid"),
+        )
 
-        duplicate_error_messages = [
-            "job already exists in queue",
-            "Job with this ID already exists",
-            "duplicate job detected",
-            "Duplicate entry detected",
-            "job exists in ARQ",
-        ]
+        with patch("intric.worker.feeder.queues.job_manager") as mock_job_manager:
+            mock_job_manager.enqueue = AsyncMock(return_value=True)
+            await _run_one_feeder_cycle(redis_client, test_settings, tenant_id)
 
-        for error_msg in duplicate_error_messages:
-            job_id = uuid4()
-            job_data = {
-                "job_id": str(job_id),
-                "user_id": str(uuid4()),
-                "website_id": str(uuid4()),
-                "run_id": str(uuid4()),
-                "url": "https://example.com/test",
-                "download_files": False,
-                "crawl_type": "crawl",
-            }
+        assert await _pending_count(redis_client, tenant_id) == 0
+        assert await redis_client.llen(dlq_key) == 1
+        assert await _active_slot_count(redis_client, tenant_id) == 0
+        mock_job_manager.enqueue.assert_not_awaited()
 
-            job_enqueuer = JobEnqueuer()
-
-            # Mock job_manager.enqueue
-            with patch("intric.worker.feeder.queues.job_manager") as mock_job_manager:
-                mock_job_manager.enqueue = AsyncMock(side_effect=Exception(error_msg))
-
-                success, is_duplicate, _ = await job_enqueuer.enqueue(
-                    job_data, tenant_id
-                )
-
-            assert success is True, (
-                f"Error '{error_msg}' should be treated as duplicate"
-            )
-            assert is_duplicate is True, (
-                f"Error '{error_msg}' should be marked as duplicate"
-            )
+        await redis_client.delete(
+            f"tenant:{tenant_id}:active_jobs",
+            queue_key,
+            dlq_key,
+        )
 
 
 @pytest.mark.integration

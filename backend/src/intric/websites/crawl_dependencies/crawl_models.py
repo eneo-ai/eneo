@@ -1,9 +1,17 @@
+from collections.abc import Mapping
 from datetime import datetime
 from enum import Enum
 from typing import Literal, Optional, Self
 from uuid import UUID
 
-from pydantic import AliasChoices, AliasPath, BaseModel, Field, model_validator
+from pydantic import (
+    AliasChoices,
+    AliasPath,
+    BaseModel,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from intric.jobs.task_models import TaskParams
 from intric.main.logging import get_logger
@@ -11,7 +19,14 @@ from intric.main.models import InDB, Status
 from intric.websites.domain.crawl_outcome import (
     CrawlOutcomeCode,
     FailureReason,
-    parse_crawl_outcome_code,
+    FailureSummaryInput,
+    parse_crawl_outcome_code_lenient,
+    parse_failure_summary_lenient,
+    report_legacy_failure_summary_key_dropped,
+)
+from intric.websites.domain.crawl_outcome_legacy_fallback import (
+    LegacyCrawlOutcomeInput,
+    derive_outcome_from_legacy_columns,
 )
 from intric.websites.domain.crawl_run import CrawlType
 
@@ -35,8 +50,19 @@ class CrawlRunBase(BaseModel):
     pages_hash_retained: Optional[int] = None
     files_hash_retained: Optional[int] = None
     files_too_large_skipped: Optional[int] = None
-    failure_summary: Optional[dict[str, int]] = None
+    failure_summary: Optional[dict[FailureReason, int]] = None
     outcome_code: Optional["CrawlOutcomeCode"] = None
+
+    @field_validator("failure_summary", mode="before")
+    @classmethod
+    def parse_failure_summary(
+        cls,
+        value: dict[str, int] | dict[FailureReason, int] | None,
+    ) -> dict[FailureReason, int] | None:
+        return parse_failure_summary_lenient(
+            value,
+            on_unknown_key=report_legacy_failure_summary_key_dropped,
+        )
 
 
 class CrawlRunProcessingSummary(BaseModel):
@@ -140,7 +166,7 @@ def derive_crawl_outcome(
     *,
     status: Status | str | None,
     result_location: str | None,
-    failure_summary: dict[str, int] | None,
+    failure_summary: FailureSummaryInput | None,
     pages_failed: int | None,
     files_failed: int | None,
     pages_source_retained: int | None,
@@ -150,13 +176,17 @@ def derive_crawl_outcome(
     processing_summary: CrawlRunProcessingSummary | None = None,
     outcome_code: CrawlOutcomeCode | str | None = None,
 ) -> CrawlOutcomePublic | None:
+    typed_failure_summary = parse_failure_summary_lenient(
+        failure_summary,
+        on_unknown_key=report_legacy_failure_summary_key_dropped,
+    )
     resolved_code = (
-        parse_crawl_outcome_code(outcome_code)
+        parse_crawl_outcome_code_lenient(outcome_code)
         if outcome_code is not None
         else derive_crawl_outcome_code(
             status=status,
             result_location=result_location,
-            failure_summary=failure_summary,
+            failure_summary=typed_failure_summary,
             pages_failed=pages_failed,
             files_failed=files_failed,
             pages_hash_retained=pages_hash_retained,
@@ -171,7 +201,7 @@ def derive_crawl_outcome(
     return _crawl_outcome_from_code(
         code=resolved_code,
         result_location=result_location,
-        failure_summary=failure_summary,
+        failure_summary=typed_failure_summary,
         pages_failed=pages_failed,
         files_failed=files_failed,
         pages_source_retained=pages_source_retained,
@@ -186,7 +216,7 @@ def derive_crawl_outcome_code(
     *,
     status: Status | str | None,
     result_location: str | None,
-    failure_summary: dict[str, int] | None,
+    failure_summary: FailureSummaryInput | None,
     pages_failed: int | None,
     files_failed: int | None,
     pages_hash_retained: int | None = None,
@@ -194,80 +224,35 @@ def derive_crawl_outcome_code(
     files_too_large_skipped: int | None = None,
     processing_summary: CrawlRunProcessingSummary | None = None,
 ) -> CrawlOutcomeCode | None:
-    # Read-side fallback for historical rows without stored outcome_code. Keep
-    # shared outcome rules aligned with the worker-time classifier in crawl_outcome.py.
-    status_value = status.value if isinstance(status, Status) else status
-    detail = result_location.strip() if result_location else None
-    detail_lower = detail.lower() if detail else ""
-    affected_count = (pages_failed or 0) + (files_failed or 0)
-    hash_retained_count = (pages_hash_retained or 0) + (files_hash_retained or 0)
+    typed_failure_summary = parse_failure_summary_lenient(
+        failure_summary,
+        on_unknown_key=report_legacy_failure_summary_key_dropped,
+    )
     too_large_count = files_too_large_skipped or 0
-    indexed_count = 0
+    indexed_count: int | None = None
     if processing_summary is not None:
-        hash_retained_count = (
-            processing_summary.pages_hash_retained
-            + processing_summary.files_hash_retained
-        )
         indexed_count = (
             processing_summary.pages_indexed + processing_summary.files_indexed
         )
         too_large_count = processing_summary.files_too_large_skipped
 
-    # Legacy rows only stored crawl outcomes in result_location text. New writes
-    # should set outcome_code and use these branches only as a read fallback.
-    if status_value == Status.FAILED.value and detail_lower.startswith(
-        "skipped duplicate crawl"
-    ):
-        _log_legacy_outcome_fallback_used(CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED)
-        return CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED
-
-    if failure_summary:
-        if (
-            FailureReason.NO_EMBEDDING_MODEL.value in failure_summary
-            or FailureReason.MISSING_PROVIDER.value in failure_summary
-        ):
-            _log_legacy_outcome_fallback_used(CrawlOutcomeCode.EMBEDDING_CONFIG_MISSING)
-            return CrawlOutcomeCode.EMBEDDING_CONFIG_MISSING
-
-        _log_legacy_outcome_fallback_used(
-            CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
+    fallback = derive_outcome_from_legacy_columns(
+        LegacyCrawlOutcomeInput(
+            status=status,
+            result_location=result_location,
+            failure_summary=typed_failure_summary,
+            pages_failed=pages_failed,
+            files_failed=files_failed,
+            pages_hash_retained=pages_hash_retained,
+            files_hash_retained=files_hash_retained,
+            files_too_large_skipped=too_large_count,
+            indexed_count=indexed_count,
         )
-        return CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
+    )
+    if fallback.metric_code is not None:
+        _log_legacy_outcome_fallback_used(fallback.metric_code)
 
-    if status_value == Status.FAILED.value or status_value == Status.NOT_FOUND.value:
-        if "no pages returned" in detail_lower:
-            _log_legacy_outcome_fallback_used(CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED)
-            return CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED
-
-        if "timeout" in detail_lower or "timed out" in detail_lower:
-            _log_legacy_outcome_fallback_used(CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES)
-            return CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES
-
-        _log_legacy_outcome_fallback_used(CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR)
-        return CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
-
-    if (
-        status_value == Status.COMPLETE.value
-        and too_large_count > 0
-        and indexed_count == 0
-    ):
-        return CrawlOutcomeCode.CRAWL_FILES_TOO_LARGE_ONLY
-
-    if affected_count > 0:
-        _log_legacy_outcome_fallback_used(
-            CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
-        )
-        return CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
-
-    if (
-        status_value == Status.COMPLETE.value
-        and processing_summary is not None
-        and hash_retained_count > 0
-        and indexed_count == 0
-    ):
-        return CrawlOutcomeCode.CRAWL_ALL_UNCHANGED
-
-    return None
+    return fallback.outcome_code
 
 
 def _log_legacy_outcome_fallback_used(code: CrawlOutcomeCode) -> None:
@@ -285,7 +270,7 @@ def _crawl_outcome_from_code(
     *,
     code: CrawlOutcomeCode,
     result_location: str | None,
-    failure_summary: dict[str, int] | None,
+    failure_summary: Mapping[FailureReason, int] | None,
     pages_failed: int | None,
     files_failed: int | None,
     pages_source_retained: int | None,
@@ -374,6 +359,22 @@ def _crawl_outcome_from_code(
             code=code,
             severity=CrawlOutcomeSeverity.ERROR,
             message_key="crawl_outcome_max_age_exceeded",
+            detail=detail,
+        )
+
+    if code == CrawlOutcomeCode.CRAWL_RUNTIME_TIMEOUT:
+        return CrawlOutcomePublic(
+            code=code,
+            severity=CrawlOutcomeSeverity.ERROR,
+            message_key="crawl_outcome_runtime_timeout",
+            detail=detail,
+        )
+
+    if code == CrawlOutcomeCode.CRAWL_QUEUE_ENQUEUE_FAILED:
+        return CrawlOutcomePublic(
+            code=code,
+            severity=CrawlOutcomeSeverity.ERROR,
+            message_key="crawl_outcome_queue_enqueue_failed",
             detail=detail,
         )
 

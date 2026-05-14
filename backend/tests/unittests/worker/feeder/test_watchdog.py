@@ -4,6 +4,7 @@ Tests the 5-phase orphan job cleanup with transaction-safe slot release.
 Following TDD approach - tests define expected behavior before implementation.
 """
 
+import json
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -18,6 +19,27 @@ def _compiled_params(stmt: object) -> dict[str, object]:
     params = compile_stmt().params
     assert isinstance(params, Mapping)
     return dict(params)
+
+
+def _compiled_where_clause(stmt: object) -> str:
+    compile_stmt = getattr(stmt, "compile", None)
+    assert callable(compile_stmt)
+    sql = str(compile_stmt())
+    _, where_clause = sql.split("WHERE", maxsplit=1)
+    return where_clause
+
+
+def _executed_statement_params_containing(
+    session_mock: MagicMock,
+    param_name: str,
+) -> dict[str, object]:
+    """Return the first executed SQL statement carrying the expected parameter."""
+    for call in session_mock.execute.call_args_list:
+        params = _compiled_params(call.args[0])
+        if param_name in params:
+            return params
+
+    raise AssertionError(f"No executed statement contained parameter {param_name!r}")
 
 
 class TestWatchdogRequeue:
@@ -346,7 +368,19 @@ class TestWatchdogPhase3FailLongRunning:
         # Long-running job: in progress for 30 hours
         long_running_job = MagicMock()
         long_running_job.job_id = uuid4()
+        long_running_job.status = "in progress"
+        long_running_job.crawl_run_id = uuid4()
+        long_running_job.website_id = uuid4()
         long_running_job.tenant_id = uuid4()
+        long_running_job.finished_at = None
+        long_running_job.pages_crawled = 1
+        long_running_job.files_downloaded = 0
+        long_running_job.pages_failed = 0
+        long_running_job.files_failed = 0
+        long_running_job.pages_source_retained = 0
+        long_running_job.pages_hash_retained = 0
+        long_running_job.files_hash_retained = 0
+        long_running_job.files_too_large_skipped = 0
         long_running_job.updated_at = now - timedelta(hours=30)
 
         session_mock = MagicMock()
@@ -363,13 +397,91 @@ class TestWatchdogPhase3FailLongRunning:
         )
         assert "finished_at" in emitted_sql
         assert "result_location" in emitted_sql
-        crawl_run_update_params = _compiled_params(
-            session_mock.execute.call_args_list[2].args[0]
+        crawl_run_update_params = _executed_statement_params_containing(
+            session_mock, "outcome_code"
         )
         assert (
             crawl_run_update_params["outcome_code"]
-            == CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED.value
+            == CrawlOutcomeCode.CRAWL_RUNTIME_TIMEOUT.value
         )
+
+    @pytest.mark.asyncio
+    async def test_records_lifecycle_observation_without_changing_selection(self):
+        from intric.worker.feeder.watchdog import OrphanWatchdog
+
+        redis_mock = MagicMock()
+        settings_mock = MagicMock()
+        settings_mock.orphan_crawl_run_timeout_hours = 24
+
+        watchdog = OrphanWatchdog(redis_mock, settings_mock)
+
+        now = datetime.now(timezone.utc)
+        long_running_job = MagicMock()
+        long_running_job.job_id = uuid4()
+        long_running_job.status = "in progress"
+        long_running_job.crawl_run_id = uuid4()
+        long_running_job.website_id = uuid4()
+        long_running_job.tenant_id = uuid4()
+        long_running_job.finished_at = None
+        long_running_job.pages_crawled = 7
+        long_running_job.files_downloaded = 0
+        long_running_job.pages_failed = 0
+        long_running_job.files_failed = 0
+        long_running_job.pages_source_retained = 0
+        long_running_job.pages_hash_retained = 0
+        long_running_job.files_hash_retained = 0
+        long_running_job.files_too_large_skipped = 0
+
+        session_mock = MagicMock()
+        session_mock.execute = AsyncMock(
+            return_value=MagicMock(fetchall=lambda: [long_running_job])
+        )
+
+        result = await watchdog._fail_long_running_jobs(session_mock, now=now)
+
+        assert result.failed_job_ids == [long_running_job.job_id]
+        assert result.lifecycle_observed.running_with_progress == 1
+        where_clause = _compiled_where_clause(
+            session_mock.execute.call_args_list[0].args[0]
+        )
+        assert "crawl_runs.pages_crawled IS NULL" not in where_clause
+        assert "crawl_runs.pages_crawled =" not in where_clause
+
+    @pytest.mark.asyncio
+    async def test_records_terminal_lifecycle_observation_for_finished_row(self):
+        from intric.worker.feeder.watchdog import OrphanWatchdog
+
+        redis_mock = MagicMock()
+        settings_mock = MagicMock()
+        settings_mock.orphan_crawl_run_timeout_hours = 24
+
+        watchdog = OrphanWatchdog(redis_mock, settings_mock)
+
+        now = datetime.now(timezone.utc)
+        long_running_job = MagicMock()
+        long_running_job.job_id = uuid4()
+        long_running_job.status = "in progress"
+        long_running_job.crawl_run_id = uuid4()
+        long_running_job.website_id = uuid4()
+        long_running_job.tenant_id = uuid4()
+        long_running_job.finished_at = now
+        long_running_job.pages_crawled = 7
+        long_running_job.files_downloaded = 0
+        long_running_job.pages_failed = 0
+        long_running_job.files_failed = 0
+        long_running_job.pages_source_retained = 0
+        long_running_job.pages_hash_retained = 0
+        long_running_job.files_hash_retained = 0
+        long_running_job.files_too_large_skipped = 0
+
+        session_mock = MagicMock()
+        session_mock.execute = AsyncMock(
+            return_value=MagicMock(fetchall=lambda: [long_running_job])
+        )
+
+        result = await watchdog._fail_long_running_jobs(session_mock, now=now)
+
+        assert result.lifecycle_observed.terminal == 1
 
 
 class TestWatchdogPhase35FailStalledStartup:
@@ -389,8 +501,19 @@ class TestWatchdogPhase35FailStalledStartup:
 
         stalled_job = MagicMock()
         stalled_job.job_id = uuid4()
+        stalled_job.status = "in progress"
         stalled_job.tenant_id = uuid4()
         stalled_job.crawl_run_id = uuid4()
+        stalled_job.website_id = uuid4()
+        stalled_job.finished_at = None
+        stalled_job.pages_crawled = 0
+        stalled_job.files_downloaded = 0
+        stalled_job.pages_failed = 0
+        stalled_job.files_failed = 0
+        stalled_job.pages_source_retained = 0
+        stalled_job.pages_hash_retained = 0
+        stalled_job.files_hash_retained = 0
+        stalled_job.files_too_large_skipped = 0
 
         session_mock = MagicMock()
         session_mock.execute = AsyncMock(
@@ -408,13 +531,96 @@ class TestWatchdogPhase35FailStalledStartup:
         )
         assert "finished_at" in emitted_sql
         assert "result_location" in emitted_sql
-        crawl_run_update_params = _compiled_params(
-            session_mock.execute.call_args_list[2].args[0]
+        crawl_run_update_params = _executed_statement_params_containing(
+            session_mock, "outcome_code"
         )
         assert (
             crawl_run_update_params["outcome_code"]
             == CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES.value
         )
+
+    @pytest.mark.asyncio
+    async def test_records_lifecycle_observation_without_changing_selection(self):
+        from intric.worker.feeder.watchdog import OrphanWatchdog
+
+        redis_mock = MagicMock()
+        settings_mock = MagicMock()
+        settings_mock.crawl_heartbeat_interval_seconds = 300
+        settings_mock.crawl_heartbeat_max_failures = 3
+
+        watchdog = OrphanWatchdog(redis_mock, settings_mock)
+
+        stalled_job = MagicMock()
+        stalled_job.job_id = uuid4()
+        stalled_job.status = "in progress"
+        stalled_job.crawl_run_id = uuid4()
+        stalled_job.website_id = uuid4()
+        stalled_job.tenant_id = uuid4()
+        stalled_job.finished_at = None
+        stalled_job.pages_crawled = 0
+        stalled_job.files_downloaded = 1
+        stalled_job.pages_failed = 0
+        stalled_job.files_failed = 0
+        stalled_job.pages_source_retained = 0
+        stalled_job.pages_hash_retained = 0
+        stalled_job.files_hash_retained = 0
+        stalled_job.files_too_large_skipped = 0
+
+        session_mock = MagicMock()
+        session_mock.execute = AsyncMock(
+            return_value=MagicMock(fetchall=lambda: [stalled_job])
+        )
+
+        result = await watchdog._fail_stalled_startup_jobs(
+            session_mock, now=datetime.now(timezone.utc)
+        )
+
+        assert result.failed_job_ids == [stalled_job.job_id]
+        assert result.lifecycle_observed.running_with_progress == 1
+        where_clause = _compiled_where_clause(
+            session_mock.execute.call_args_list[0].args[0]
+        )
+        assert "crawl_runs.pages_crawled IS NULL" in where_clause
+        assert "crawl_runs.pages_crawled =" in where_clause
+        assert "crawl_runs.files_" not in where_clause
+
+    @pytest.mark.asyncio
+    async def test_records_no_progress_lifecycle_observation(self):
+        from intric.worker.feeder.watchdog import OrphanWatchdog
+
+        redis_mock = MagicMock()
+        settings_mock = MagicMock()
+        settings_mock.crawl_heartbeat_interval_seconds = 300
+        settings_mock.crawl_heartbeat_max_failures = 3
+
+        watchdog = OrphanWatchdog(redis_mock, settings_mock)
+
+        stalled_job = MagicMock()
+        stalled_job.job_id = uuid4()
+        stalled_job.status = "in progress"
+        stalled_job.crawl_run_id = uuid4()
+        stalled_job.website_id = uuid4()
+        stalled_job.tenant_id = uuid4()
+        stalled_job.finished_at = None
+        stalled_job.pages_crawled = 0
+        stalled_job.files_downloaded = 0
+        stalled_job.pages_failed = 0
+        stalled_job.files_failed = 0
+        stalled_job.pages_source_retained = 0
+        stalled_job.pages_hash_retained = 0
+        stalled_job.files_hash_retained = 0
+        stalled_job.files_too_large_skipped = 0
+
+        session_mock = MagicMock()
+        session_mock.execute = AsyncMock(
+            return_value=MagicMock(fetchall=lambda: [stalled_job])
+        )
+
+        result = await watchdog._fail_stalled_startup_jobs(
+            session_mock, now=datetime.now(timezone.utc)
+        )
+
+        assert result.lifecycle_observed.running_no_progress == 1
 
 
 class TestWatchdogSlotRelease:
@@ -633,3 +839,94 @@ class TestWatchdogOrchestration:
 
         # Slot release should have happened after commit
         assert slot_release_after_commit is True
+
+    @pytest.mark.asyncio
+    async def test_run_cleanup_merges_watchdog_lifecycle_observations(self):
+        from intric.worker.feeder.watchdog import (
+            OrphanWatchdog,
+            Phase1Result,
+            Phase2Result,
+            Phase3_5Result,
+            Phase3Result,
+            WatchdogLifecycleCounts,
+        )
+
+        redis_mock = MagicMock()
+        redis_mock.scan_iter = AsyncMock(return_value=[])
+        redis_mock.set = AsyncMock()
+
+        settings_mock = MagicMock()
+        settings_mock.crawl_job_max_age_seconds = 7200
+        settings_mock.orphan_crawl_run_timeout_hours = 24
+        settings_mock.tenant_worker_semaphore_ttl_seconds = 300
+        settings_mock.crawl_feeder_interval_seconds = 10
+
+        watchdog = OrphanWatchdog(redis_mock, settings_mock)
+        watchdog._run_phase0_reconciliation = AsyncMock(
+            return_value={"reconciled_count": 0}
+        )
+        watchdog._kill_expired_jobs = AsyncMock(return_value=Phase1Result())
+        watchdog._rescue_stuck_jobs = AsyncMock(return_value=Phase2Result())
+        watchdog._fail_stalled_startup_jobs = AsyncMock(
+            return_value=Phase3_5Result(
+                lifecycle_observed=WatchdogLifecycleCounts(running_no_progress=2)
+            )
+        )
+        watchdog._fail_long_running_jobs = AsyncMock(
+            return_value=Phase3Result(
+                lifecycle_observed=WatchdogLifecycleCounts(running_with_progress=3)
+            )
+        )
+        watchdog._release_slots_safe = AsyncMock(return_value=0)
+
+        with patch("intric.database.database.sessionmanager") as mock_sm:
+            mock_session = MagicMock()
+            mock_session.begin = MagicMock(
+                return_value=AsyncMock(
+                    __aenter__=AsyncMock(return_value=None),
+                    __aexit__=AsyncMock(return_value=None),
+                )
+            )
+            mock_sm.session = MagicMock(
+                return_value=AsyncMock(
+                    __aenter__=AsyncMock(return_value=mock_session),
+                    __aexit__=AsyncMock(return_value=None),
+                )
+            )
+
+            metrics = await watchdog.run_cleanup()
+
+        assert metrics.lifecycle_observed.running_no_progress == 2
+        assert metrics.lifecycle_observed.running_with_progress == 3
+
+    @pytest.mark.asyncio
+    async def test_metrics_snapshot_includes_lifecycle_observations(self):
+        from intric.worker.feeder.watchdog import (
+            CleanupMetrics,
+            OrphanWatchdog,
+            WatchdogLifecycleCounts,
+        )
+
+        redis_mock = MagicMock()
+        redis_mock.set = AsyncMock()
+
+        settings_mock = MagicMock()
+        settings_mock.crawl_feeder_interval_seconds = 10
+
+        watchdog = OrphanWatchdog(redis_mock, settings_mock)
+        metrics = CleanupMetrics(
+            lifecycle_observed=WatchdogLifecycleCounts(
+                running_no_progress=2,
+                running_with_progress=3,
+            )
+        )
+
+        await watchdog._write_metrics_snapshot(metrics)
+
+        payload = json.loads(redis_mock.set.call_args.args[1])
+        assert payload["lifecycle_observed"] == {
+            "queued": 0,
+            "running_no_progress": 2,
+            "running_with_progress": 3,
+            "terminal": 0,
+        }

@@ -1,9 +1,12 @@
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from enum import Enum
 from typing import Literal
 
+from intric.main.logging import get_logger
+
 CrawlOutcomeCrawlType = Literal["crawl", "sitemap"]
 CrawlTerminationReason = Literal["completed", "timeout"]
+logger = get_logger(__name__)
 
 
 class FailureReason(str, Enum):
@@ -23,6 +26,8 @@ class CrawlOutcomeCode(str, Enum):
     CRAWL_SITEMAP_NO_PAGES = "CRAWL_SITEMAP_NO_PAGES"
     CRAWL_TIMEOUT_NO_PAGES = "CRAWL_TIMEOUT_NO_PAGES"
     CRAWL_MAX_AGE_EXCEEDED = "CRAWL_MAX_AGE_EXCEEDED"
+    CRAWL_RUNTIME_TIMEOUT = "CRAWL_RUNTIME_TIMEOUT"
+    CRAWL_QUEUE_ENQUEUE_FAILED = "CRAWL_QUEUE_ENQUEUE_FAILED"
     CRAWL_SOURCE_RETENTION_ONLY = "CRAWL_SOURCE_RETENTION_ONLY"
     CRAWL_ALL_UNCHANGED = "CRAWL_ALL_UNCHANGED"
     CRAWL_FILES_TOO_LARGE_ONLY = "CRAWL_FILES_TOO_LARGE_ONLY"
@@ -33,7 +38,70 @@ class CrawlOutcomeCode(str, Enum):
     UNKNOWN_CRAWL_ERROR = "UNKNOWN_CRAWL_ERROR"
 
 
-def parse_crawl_outcome_code(
+FailureSummaryInput = Mapping[FailureReason, int] | Mapping[str, int]
+
+
+def report_legacy_failure_summary_key_dropped(key: str) -> None:
+    logger.info(
+        "Dropped unknown crawl failure summary key",
+        extra={
+            "metric_name": "crawler.failure_summary.legacy_key_dropped",
+            "metric_value": 1,
+            "failure_reason": key,
+        },
+    )
+
+
+def parse_failure_summary_lenient(
+    value: FailureSummaryInput | None,
+    *,
+    on_unknown_key: Callable[[str], None] | None = None,
+) -> dict[FailureReason, int] | None:
+    if not value:
+        return None
+
+    parsed: dict[FailureReason, int] = {}
+    for key, count in value.items():
+        try:
+            reason = key if isinstance(key, FailureReason) else FailureReason(key)
+        except ValueError:
+            if on_unknown_key is not None:
+                on_unknown_key(str(key))
+            continue
+
+        parsed[reason] = parsed.get(reason, 0) + count
+
+    return parsed or None
+
+
+def parse_failure_summary_strict(
+    value: FailureSummaryInput | None,
+) -> dict[FailureReason, int] | None:
+    if not value:
+        return None
+
+    parsed: dict[FailureReason, int] = {}
+    for key, count in value.items():
+        try:
+            reason = key if isinstance(key, FailureReason) else FailureReason(key)
+        except ValueError as exc:
+            raise ValueError(f"Unknown crawl failure reason: {key}") from exc
+
+        parsed[reason] = parsed.get(reason, 0) + count
+
+    return parsed
+
+
+def serialize_failure_summary_for_storage(
+    value: Mapping[FailureReason, int] | None,
+) -> dict[str, int] | None:
+    parsed = parse_failure_summary_strict(value)
+    if parsed is None:
+        return None
+    return {reason.value: count for reason, count in parsed.items()}
+
+
+def parse_crawl_outcome_code_lenient(
     value: str | CrawlOutcomeCode | None,
 ) -> CrawlOutcomeCode | None:
     if value is None or isinstance(value, CrawlOutcomeCode):
@@ -43,6 +111,18 @@ def parse_crawl_outcome_code(
         return CrawlOutcomeCode(value)
     except ValueError:
         return CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
+
+
+def parse_crawl_outcome_code_strict(
+    value: str | CrawlOutcomeCode,
+) -> CrawlOutcomeCode:
+    if isinstance(value, CrawlOutcomeCode):
+        return value
+
+    try:
+        return CrawlOutcomeCode(value)
+    except ValueError as exc:
+        raise ValueError(f"Unknown crawl outcome code: {value}") from exc
 
 
 def classify_crawl_outcome(
@@ -56,15 +136,16 @@ def classify_crawl_outcome(
     pages_hash_retained: int = 0,
     files_hash_retained: int = 0,
     files_too_large_skipped: int = 0,
-    failure_summary: Mapping[str, int] | None,
+    failure_summary: FailureSummaryInput | None,
     pages_failed: int | None,
     files_failed: int | None,
 ) -> CrawlOutcomeCode | None:
     # Worker-time classifier for newly written crawl runs. Keep shared outcome
     # rules aligned with the read-side legacy fallback in crawl_models.py.
+    typed_failure_summary = parse_failure_summary_strict(failure_summary)
     has_output = pages_count > 0 or files_count > 0 or source_retained_count > 0
     has_failures = _has_failures(
-        failure_summary=failure_summary,
+        failure_summary=typed_failure_summary,
         pages_failed=pages_failed,
         files_failed=files_failed,
     )
@@ -96,8 +177,8 @@ def classify_crawl_outcome(
     ):
         return CrawlOutcomeCode.CRAWL_ALL_UNCHANGED
 
-    if failure_summary:
-        if _has_embedding_config_failure(failure_summary):
+    if typed_failure_summary:
+        if _has_embedding_config_failure(typed_failure_summary):
             return CrawlOutcomeCode.EMBEDDING_CONFIG_MISSING
         return CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
 
@@ -109,15 +190,15 @@ def classify_crawl_outcome(
 
 def _has_failures(
     *,
-    failure_summary: Mapping[str, int] | None,
+    failure_summary: Mapping[FailureReason, int] | None,
     pages_failed: int | None,
     files_failed: int | None,
 ) -> bool:
     return bool(failure_summary) or (pages_failed or 0) + (files_failed or 0) > 0
 
 
-def _has_embedding_config_failure(failure_summary: Mapping[str, int]) -> bool:
+def _has_embedding_config_failure(failure_summary: Mapping[FailureReason, int]) -> bool:
     return (
-        FailureReason.NO_EMBEDDING_MODEL.value in failure_summary
-        or FailureReason.MISSING_PROVIDER.value in failure_summary
+        FailureReason.NO_EMBEDDING_MODEL in failure_summary
+        or FailureReason.MISSING_PROVIDER in failure_summary
     )

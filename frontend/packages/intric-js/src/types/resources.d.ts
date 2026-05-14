@@ -56,7 +56,12 @@ export type CurrentUser = components["schemas"]["UserPublic"];
 export type Role = components["schemas"]["RolePublic"];
 export type Permission = components["schemas"]["Permission"];
 export type ResourcePermission = components["schemas"]["ResourcePermission"];
-export type CrawlRun = components["schemas"]["CrawlRunPublic"];
+export type CrawlRun =
+  components["schemas"]["intric__websites__presentation__website_models__CrawlRunPublic"];
+export type CrawlOutcome = components["schemas"]["CrawlOutcomePublic"];
+export type CrawlOutcomeCode = components["schemas"]["CrawlOutcomeCode"];
+export type CrawlOutcomeSeverity = components["schemas"]["CrawlOutcomeSeverity"];
+export type CrawlRunProcessingSummary = components["schemas"]["CrawlRunProcessingSummary"];
 export type Limits = components["schemas"]["Limits"];
 export type UploadedFile = components["schemas"]["FilePublic"];
 export type Website = components["schemas"]["WebsitePublic"];
@@ -113,7 +118,9 @@ export type CrawlerSettingsUpdate = Partial<
     | "closespider_itemcount"
   >
 >;
-export type WebsiteSparse = components["schemas"]["WebsiteSparse"];
+// OpenAPI exposes website list/detail responses as WebsitePublic; the backend WebsiteSparse
+// Pydantic model is not returned to frontend clients.
+export type WebsiteSparse = components["schemas"]["WebsitePublic"];
 export type Space = components["schemas"]["SpacePublic"];
 export type SpaceSparse = components["schemas"]["SpaceSparse"];
 export type Dashboard = components["schemas"]["Dashboard"];

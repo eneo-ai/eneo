@@ -1,0 +1,440 @@
+[
+  {
+    "name": "duplicate_skipped_stored",
+    "input": {
+      "status": "failed",
+      "result_location": "active job 123",
+      "failure_summary": null,
+      "pages_failed": null,
+      "files_failed": null,
+      "pages_source_retained": null,
+      "outcome_code": "CRAWL_DUPLICATE_SKIPPED"
+    },
+    "expected": {
+      "code": "CRAWL_DUPLICATE_SKIPPED",
+      "severity": "info",
+      "message_key": "crawl_outcome_duplicate_skipped",
+      "detail": "active job 123",
+      "affected_count": null,
+      "samples": []
+    }
+  },
+  {
+    "name": "duplicate_skipped_legacy",
+    "input": {
+      "status": "failed",
+      "result_location": "Skipped duplicate crawl: active job 123",
+      "failure_summary": null,
+      "pages_failed": null,
+      "files_failed": null,
+      "pages_source_retained": null
+    },
+    "expected": {
+      "code": "CRAWL_DUPLICATE_SKIPPED",
+      "severity": "info",
+      "message_key": "crawl_outcome_duplicate_skipped",
+      "detail": "Skipped duplicate crawl: active job 123",
+      "affected_count": null,
+      "samples": []
+    }
+  },
+  {
+    "name": "crawl_no_pages_legacy",
+    "input": {
+      "status": "failed",
+      "result_location": "Crawl failed for https://example.com: no pages returned",
+      "failure_summary": null,
+      "pages_failed": null,
+      "files_failed": null,
+      "pages_source_retained": null
+    },
+    "expected": {
+      "code": "CRAWL_NO_PAGES_RETURNED",
+      "severity": "error",
+      "message_key": "crawl_outcome_no_pages_returned",
+      "detail": "Crawl failed for https://example.com: no pages returned",
+      "affected_count": null,
+      "samples": []
+    }
+  },
+  {
+    "name": "not_found_no_pages_legacy",
+    "input": {
+      "status": "not found",
+      "result_location": "Crawl failed for https://example.com: no pages returned",
+      "failure_summary": null,
+      "pages_failed": null,
+      "files_failed": null,
+      "pages_source_retained": null
+    },
+    "expected": {
+      "code": "CRAWL_NO_PAGES_RETURNED",
+      "severity": "error",
+      "message_key": "crawl_outcome_no_pages_returned",
+      "detail": "Crawl failed for https://example.com: no pages returned",
+      "affected_count": null,
+      "samples": []
+    }
+  },
+  {
+    "name": "failed_failure_summary_takes_precedence_over_result_location",
+    "input": {
+      "status": "failed",
+      "result_location": "Crawl failed for https://example.com: no pages returned",
+      "failure_summary": {
+        "MISSING_PROVIDER": 1
+      },
+      "pages_failed": 1,
+      "files_failed": 0,
+      "pages_source_retained": null
+    },
+    "expected": {
+      "code": "EMBEDDING_CONFIG_MISSING",
+      "severity": "warning",
+      "message_key": "crawl_outcome_embedding_config_missing",
+      "detail": null,
+      "affected_count": 1,
+      "samples": []
+    }
+  },
+  {
+    "name": "legacy_unknown_failure_summary_key_is_dropped",
+    "input": {
+      "status": "complete",
+      "result_location": null,
+      "failure_summary": {
+        "UNKNOWN_LEGACY_BUCKET": 1
+      },
+      "pages_failed": 0,
+      "files_failed": 0,
+      "pages_source_retained": null
+    },
+    "expected": null
+  },
+  {
+    "name": "sitemap_no_pages_stored",
+    "input": {
+      "status": "failed",
+      "result_location": "Sitemap returned no page items",
+      "failure_summary": null,
+      "pages_failed": null,
+      "files_failed": null,
+      "pages_source_retained": null,
+      "outcome_code": "CRAWL_SITEMAP_NO_PAGES"
+    },
+    "expected": {
+      "code": "CRAWL_SITEMAP_NO_PAGES",
+      "severity": "error",
+      "message_key": "crawl_outcome_sitemap_no_pages",
+      "detail": "Sitemap returned no page items",
+      "affected_count": null,
+      "samples": []
+    }
+  },
+  {
+    "name": "timeout_no_pages_legacy",
+    "input": {
+      "status": "failed",
+      "result_location": "Crawl timed out before collecting pages",
+      "failure_summary": null,
+      "pages_failed": null,
+      "files_failed": null,
+      "pages_source_retained": null
+    },
+    "expected": {
+      "code": "CRAWL_TIMEOUT_NO_PAGES",
+      "severity": "error",
+      "message_key": "crawl_outcome_timeout_no_pages",
+      "detail": "Crawl timed out before collecting pages",
+      "affected_count": null,
+      "samples": []
+    }
+  },
+  {
+    "name": "max_age_exceeded_stored",
+    "input": {
+      "status": "failed",
+      "result_location": "crawl waited past the configured maximum age",
+      "failure_summary": null,
+      "pages_failed": null,
+      "files_failed": null,
+      "pages_source_retained": null,
+      "outcome_code": "CRAWL_MAX_AGE_EXCEEDED"
+    },
+    "expected": {
+      "code": "CRAWL_MAX_AGE_EXCEEDED",
+      "severity": "error",
+      "message_key": "crawl_outcome_max_age_exceeded",
+      "detail": "crawl waited past the configured maximum age",
+      "affected_count": null,
+      "samples": []
+    }
+  },
+  {
+    "name": "queue_enqueue_failed_stored",
+    "input": {
+      "status": "failed",
+      "result_location": "Failed to add crawl to pending queue: Redis unavailable",
+      "failure_summary": null,
+      "pages_failed": null,
+      "files_failed": null,
+      "pages_source_retained": null,
+      "outcome_code": "CRAWL_QUEUE_ENQUEUE_FAILED"
+    },
+    "expected": {
+      "code": "CRAWL_QUEUE_ENQUEUE_FAILED",
+      "severity": "error",
+      "message_key": "crawl_outcome_queue_enqueue_failed",
+      "detail": "Failed to add crawl to pending queue: Redis unavailable",
+      "affected_count": null,
+      "samples": []
+    }
+  },
+  {
+    "name": "runtime_timeout_stored",
+    "input": {
+      "status": "failed",
+      "result_location": "Crawl exceeded the maximum runtime of 12 hours and was stopped",
+      "failure_summary": null,
+      "pages_failed": null,
+      "files_failed": null,
+      "pages_source_retained": null,
+      "outcome_code": "CRAWL_RUNTIME_TIMEOUT"
+    },
+    "expected": {
+      "code": "CRAWL_RUNTIME_TIMEOUT",
+      "severity": "error",
+      "message_key": "crawl_outcome_runtime_timeout",
+      "detail": "Crawl exceeded the maximum runtime of 12 hours and was stopped",
+      "affected_count": null,
+      "samples": []
+    }
+  },
+  {
+    "name": "source_retention_only_stored",
+    "input": {
+      "status": "complete",
+      "result_location": null,
+      "failure_summary": null,
+      "pages_failed": 0,
+      "files_failed": 0,
+      "pages_source_retained": 42,
+      "outcome_code": "CRAWL_SOURCE_RETENTION_ONLY"
+    },
+    "expected": {
+      "code": "CRAWL_SOURCE_RETENTION_ONLY",
+      "severity": "info",
+      "message_key": "crawl_outcome_source_retention_only",
+      "detail": null,
+      "affected_count": 42,
+      "samples": []
+    }
+  },
+  {
+    "name": "all_unchanged_from_summary",
+    "input": {
+      "status": "complete",
+      "result_location": null,
+      "failure_summary": null,
+      "pages_failed": 0,
+      "files_failed": 0,
+      "pages_source_retained": 0,
+      "pages_hash_retained": 3,
+      "files_hash_retained": 1,
+      "files_too_large_skipped": 0,
+      "processing_summary": {
+        "pages_fetched": 3,
+        "files_downloaded": 1,
+        "pages_indexed": 0,
+        "files_indexed": 0,
+        "pages_hash_retained": 3,
+        "files_hash_retained": 1,
+        "files_too_large_skipped": 0,
+        "pages_source_retained": 0,
+        "pages_failed": 0,
+        "files_failed": 0
+      }
+    },
+    "expected": {
+      "code": "CRAWL_ALL_UNCHANGED",
+      "severity": "info",
+      "message_key": "crawl_outcome_all_unchanged",
+      "detail": null,
+      "affected_count": 4,
+      "samples": []
+    }
+  },
+  {
+    "name": "files_too_large_only_from_summary",
+    "input": {
+      "status": "complete",
+      "result_location": null,
+      "failure_summary": null,
+      "pages_failed": 0,
+      "files_failed": 0,
+      "pages_source_retained": 0,
+      "pages_hash_retained": 0,
+      "files_hash_retained": 0,
+      "files_too_large_skipped": 3,
+      "processing_summary": {
+        "pages_fetched": 0,
+        "files_downloaded": 0,
+        "pages_indexed": 0,
+        "files_indexed": 0,
+        "pages_hash_retained": 0,
+        "files_hash_retained": 0,
+        "files_too_large_skipped": 3,
+        "pages_source_retained": 0,
+        "pages_failed": 0,
+        "files_failed": 0
+      }
+    },
+    "expected": {
+      "code": "CRAWL_FILES_TOO_LARGE_ONLY",
+      "severity": "warning",
+      "message_key": "crawl_outcome_files_too_large_only",
+      "detail": null,
+      "affected_count": 3,
+      "samples": []
+    }
+  },
+  {
+    "name": "partial_timeout_stored",
+    "input": {
+      "status": "complete",
+      "result_location": "Timed out after partial output",
+      "failure_summary": null,
+      "pages_failed": 0,
+      "files_failed": 0,
+      "pages_source_retained": 12,
+      "outcome_code": "CRAWL_PARTIAL_TIMEOUT"
+    },
+    "expected": {
+      "code": "CRAWL_PARTIAL_TIMEOUT",
+      "severity": "warning",
+      "message_key": "crawl_outcome_partial_timeout",
+      "detail": "Timed out after partial output",
+      "affected_count": null,
+      "samples": []
+    }
+  },
+  {
+    "name": "shutdown_error_stored",
+    "input": {
+      "status": "failed",
+      "result_location": "Scrapy reactor did not stop cleanly",
+      "failure_summary": null,
+      "pages_failed": 0,
+      "files_failed": 0,
+      "pages_source_retained": 0,
+      "outcome_code": "CRAWL_SHUTDOWN_ERROR"
+    },
+    "expected": {
+      "code": "CRAWL_SHUTDOWN_ERROR",
+      "severity": "error",
+      "message_key": "crawl_outcome_shutdown_error",
+      "detail": "Scrapy reactor did not stop cleanly",
+      "affected_count": null,
+      "samples": []
+    }
+  },
+  {
+    "name": "completed_with_page_failures_from_summary",
+    "input": {
+      "status": "complete",
+      "result_location": null,
+      "failure_summary": {
+        "DB_ERROR": 2
+      },
+      "pages_failed": 2,
+      "files_failed": 0,
+      "pages_source_retained": 100
+    },
+    "expected": {
+      "code": "CRAWL_COMPLETED_WITH_PAGE_FAILURES",
+      "severity": "warning",
+      "message_key": "crawl_outcome_page_failures",
+      "detail": null,
+      "affected_count": 2,
+      "samples": []
+    }
+  },
+  {
+    "name": "completed_failed_counts_without_summary",
+    "input": {
+      "status": "complete",
+      "result_location": null,
+      "failure_summary": null,
+      "pages_failed": 2,
+      "files_failed": 0,
+      "pages_source_retained": 100
+    },
+    "expected": {
+      "code": "CRAWL_COMPLETED_WITH_PAGE_FAILURES",
+      "severity": "warning",
+      "message_key": "crawl_outcome_page_failures",
+      "detail": null,
+      "affected_count": 2,
+      "samples": []
+    }
+  },
+  {
+    "name": "embedding_config_missing_from_summary",
+    "input": {
+      "status": "complete",
+      "result_location": null,
+      "failure_summary": {
+        "NO_EMBEDDING_MODEL": 2
+      },
+      "pages_failed": 2,
+      "files_failed": 0,
+      "pages_source_retained": 0
+    },
+    "expected": {
+      "code": "EMBEDDING_CONFIG_MISSING",
+      "severity": "warning",
+      "message_key": "crawl_outcome_embedding_config_missing",
+      "detail": null,
+      "affected_count": 2,
+      "samples": []
+    }
+  },
+  {
+    "name": "historical_unknown_fallback",
+    "input": {
+      "status": "failed",
+      "result_location": "legacy failure without a known phrase",
+      "failure_summary": null,
+      "pages_failed": null,
+      "files_failed": null,
+      "pages_source_retained": null
+    },
+    "expected": {
+      "code": "UNKNOWN_CRAWL_ERROR",
+      "severity": "error",
+      "message_key": "crawl_outcome_unknown_error",
+      "detail": "legacy failure without a known phrase",
+      "affected_count": null,
+      "samples": []
+    }
+  },
+  {
+    "name": "historical_unknown_with_failed_counts_stays_legacy_fallback",
+    "input": {
+      "status": "failed",
+      "result_location": "worker exited unexpectedly",
+      "failure_summary": null,
+      "pages_failed": 2,
+      "files_failed": 0,
+      "pages_source_retained": null
+    },
+    "expected": {
+      "code": "UNKNOWN_CRAWL_ERROR",
+      "severity": "error",
+      "message_key": "crawl_outcome_unknown_error",
+      "detail": "worker exited unexpectedly",
+      "affected_count": 2,
+      "samples": []
+    }
+  }
+]

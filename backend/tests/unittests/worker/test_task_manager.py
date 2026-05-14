@@ -2,6 +2,7 @@ from uuid import uuid4
 
 import pytest
 
+from intric.main.models import Status
 from intric.worker.task_manager import TaskManager
 from tests.fixtures import TEST_USER
 
@@ -33,4 +34,23 @@ async def test_status_context_reports_exception_before_marking_failed(
 
     assert events == ["on_exception", "fail_job"]
     assert failed_messages == ["crawler crashed"]
+    assert manager.successful() is False
+
+
+@pytest.mark.asyncio
+async def test_terminal_acknowledgement_suppresses_default_complete_publish(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    published_statuses: list[Status] = []
+
+    async def publish_status(*, status: Status) -> None:
+        published_statuses.append(status)
+
+    manager = TaskManager(user=TEST_USER, job_id=uuid4(), job_service=None)
+    monkeypatch.setattr(manager, "_publish_status", publish_status)
+
+    async with manager.set_status_on_exception(status_already_set=True):
+        manager.acknowledge_terminal_commit(successful=False)
+
+    assert published_statuses == []
     assert manager.successful() is False

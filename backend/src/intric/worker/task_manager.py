@@ -32,8 +32,8 @@ class TaskManager:
         resource_id: UUID | None = None,
     ):
         super().__init__()
-        # job_service is optional for crawl_task which handles its own job status
-        # via execute_with_recovery() and sets _job_already_handled=True.
+        # job_service is optional for crawl_task, which commits terminal job state
+        # through crawler-owned recovery sessions and then acknowledges that here.
         # All other tasks (upload, transcription) provide job_service via container.
         self.user = user
         self.job_id = job_id
@@ -45,8 +45,7 @@ class TaskManager:
         self._result_location: str | None = None
         self._cleanup_func: Callable[[], None] | None = None
         self.additional_data: dict[str, Any] | None = None
-        # Flag for crawl_task to skip complete_job/fail_job (it handles them itself)
-        self._job_already_handled = False
+        self._terminal_commit_acknowledged = False
 
     @property
     def result_location(self) -> str | None:
@@ -147,14 +146,22 @@ class TaskManager:
             await self.fail_job(truncated_message)
             self.success = False
         else:
-            await self.complete_job()
-            self.success = True
+            if self._terminal_commit_acknowledged:
+                if self.success is None:
+                    self.success = True
+            else:
+                await self.complete_job()
+                self.success = True
         finally:
             if self._cleanup_func is not None:
                 self._cleanup_func()
 
     def successful(self) -> bool | None:
         return self.success
+
+    def acknowledge_terminal_commit(self, *, successful: bool) -> None:
+        self._terminal_commit_acknowledged = True
+        self.success = successful
 
     async def set_status(self, status: Status):
         self._log_status(status)
@@ -163,7 +170,7 @@ class TaskManager:
             await self.job_service.set_status(self.job_id, status)
 
     async def complete_job(self):
-        if self._job_already_handled:
+        if self._terminal_commit_acknowledged:
             return
         await self._publish_status(status=Status.COMPLETE)
         if self.job_service is not None:
@@ -176,7 +183,7 @@ class TaskManager:
                 )
 
     async def fail_job(self, message: str | None = None):
-        if self._job_already_handled:
+        if self._terminal_commit_acknowledged:
             return
         await self._publish_status(status=Status.FAILED)
 

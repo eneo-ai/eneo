@@ -202,34 +202,30 @@ class TestSessionLifecycle:
 
     def test_session_close_location_documented(self):
         """
-        Verify that bootstrap_session.close() is called BEFORE the crawl loop.
+        Verify bootstrap DB work is scoped before the crawl loop.
 
-        This is a documentation test - verifies the code structure.
-        The bootstrap session is closed before "Session-per-batch page processing"
-        to return the connection to the pool before the long-running crawl begins.
+        Bootstrap now lives in bootstrap_crawl(), which owns the short-lived
+        session scope. crawl_task() must finish that phase before entering the
+        long-running Scrapy crawl context.
         """
         import inspect
 
         from intric.worker import crawl_tasks
+        from intric.worker.crawl.bootstrap import bootstrap_crawl
 
-        source = inspect.getsource(crawl_tasks.crawl_task)
+        crawl_task_source = inspect.getsource(crawl_tasks.crawl_task)
+        bootstrap_source = inspect.getsource(bootstrap_crawl)
 
-        # The bootstrap session close should appear before session-per-batch section
-        assert "await bootstrap_session.close()" in source, (
-            "bootstrap_session.close() should be present in crawl_task"
+        bootstrap_call = crawl_task_source.find("bootstrap_crawl(")
+        scrapy_crawl = crawl_task_source.find("async with crawler.crawl(")
+
+        assert bootstrap_call != -1, "crawl_task should call bootstrap_crawl"
+        assert scrapy_crawl != -1, "crawl_task should enter the Scrapy crawl context"
+        assert bootstrap_call < scrapy_crawl, (
+            "bootstrap_crawl should complete before the long-running crawl starts"
         )
 
-        # Verify bootstrap session close happens BEFORE the session-per-batch section
-        # (This ensures DB connection is returned to pool before long-running crawl)
-        session_per_batch_comment = source.find("Session-per-batch page processing")
-        bootstrap_session_close = source.find("await bootstrap_session.close()")
-
-        assert session_per_batch_comment != -1, "Session-per-batch section should exist"
-        assert bootstrap_session_close != -1, "bootstrap_session.close() should exist"
-        assert bootstrap_session_close < session_per_batch_comment, (
-            "bootstrap_session.close() should be BEFORE session-per-batch section "
-            "(connection returned to pool before crawl starts)"
-        )
+        assert "async with session_scope() as session" in bootstrap_source
 
 
 class TestEmbeddingAPIFailures:
@@ -343,18 +339,20 @@ class TestZombieJobPrevention:
 
     def test_preemption_handling_in_crawl_task(self):
         """
-        crawl_task should handle JobPreemptedError from HeartbeatMonitor
-        and return preempted_during_crawl status.
+        Page processing should handle HeartbeatMonitor preemption and crawl_task
+        should preserve the legacy preempted_during_crawl return status.
         """
         import inspect
 
         from intric.worker import crawl_tasks
+        from intric.worker.crawl.page_processing import process_pages
 
-        source = inspect.getsource(crawl_tasks.crawl_task)
+        crawl_task_source = inspect.getsource(crawl_tasks.crawl_task)
+        process_pages_source = inspect.getsource(process_pages)
 
-        # Verify crawl_task handles preemption from HeartbeatMonitor
-        assert "JobPreemptedError" in source
-        assert "preempted_during_crawl" in source
+        assert "JobPreemptedError" in process_pages_source
+        assert "PreemptedPageProcessingAbort" in crawl_task_source
+        assert "preempted_during_crawl" in crawl_task_source
 
 
 class TestCrawlContextSecurity:

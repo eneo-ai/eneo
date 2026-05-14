@@ -124,52 +124,6 @@ class TestEnqueueGapSlotLeak:
         # Cleanup
         await redis_client.delete(slot_key)
 
-    async def test_enqueue_duplicate_keeps_slot_but_removes_from_pending(
-        self, redis_client: aioredis.Redis, test_settings
-    ):
-        """When ARQ returns 'already exists', slot stays but job leaves pending queue.
-
-        This is the idempotency case - the job IS running, so keeping the slot
-        is correct. The pending queue entry should be removed.
-        """
-        tenant_id = uuid4()
-        job_id = uuid4()
-
-        slot_key = LuaScripts.slot_key(tenant_id)
-        await redis_client.delete(slot_key)
-
-        # Pre-acquire slot
-        capacity_mgr = CapacityManager(redis_client, test_settings)
-        await capacity_mgr.try_acquire_slot(tenant_id)
-
-        detector = SlotLeakDetector(redis_client, tenant_id)
-        initial = await detector.snapshot()
-        assert initial == 1, "Should have 1 slot acquired"
-
-        # Simulate duplicate detection via JobEnqueuer pattern matching
-        from intric.worker.feeder.queues import JobEnqueuer
-
-        enqueuer = JobEnqueuer()
-
-        # Create a duplicate error
-        dup_error = RuntimeError("Job already exists in queue")
-        result, is_duplicate, returned_job_id = enqueuer._handle_enqueue_error(
-            exc=dup_error,
-            job_id=job_id,
-            job_data={"url": "https://example.com"},
-            tenant_id=tenant_id,
-        )
-
-        # Duplicate should return success=True (idempotency) and is_duplicate=True
-        assert result is True, "Duplicate detection should return success=True"
-        assert is_duplicate is True, "Should be marked as duplicate"
-
-        # Slot should NOT be released for duplicates
-        await detector.assert_no_leak(initial, "Duplicate should not release slot")
-
-        # Cleanup
-        await redis_client.delete(slot_key)
-
 
 # =============================================================================
 # TEST 2: EMERGENCY RELEASE PATH

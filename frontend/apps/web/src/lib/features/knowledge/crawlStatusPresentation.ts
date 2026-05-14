@@ -12,6 +12,7 @@ import {
   getCrawlOutcome,
   getCrawlOutcomeLabel,
   getCrawlOutcomeTooltip,
+  getCrawlRunFailureTooltip,
   isDuplicateCrawlSkip,
   isSourceRetentionOnly
 } from "$lib/features/knowledge/crawlOutcomePresentation";
@@ -63,13 +64,14 @@ export function getCrawlRunStatus(
 
   const outcome = getCrawlOutcome(crawl);
   const outcomeTooltip = getCrawlOutcomeTooltip(outcome, m.crawl_failed());
+  const failureTooltip = getCrawlRunFailureTooltip(crawl, m.crawl_failed());
   const isDuplicateSkip = isDuplicateCrawlSkip(outcome);
 
   if (crawl.status === "failed" && isDuplicateSkip) {
     return {
       tone: "neutral",
       label: m.crawl_skipped(),
-      tooltip: outcomeTooltip ?? crawl.result_location ?? m.crawl_skipped_duplicate()
+      tooltip: failureTooltip ?? m.crawl_skipped_duplicate()
     };
   }
 
@@ -105,7 +107,7 @@ export function getCrawlRunStatus(
       return {
         tone: "negative",
         label: compact ? m.failed() : verboseLabel,
-        tooltip: outcomeTooltip ?? crawl.result_location ?? verboseLabel
+        tooltip: failureTooltip ?? verboseLabel
       };
     }
   }

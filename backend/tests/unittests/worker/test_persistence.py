@@ -16,7 +16,6 @@ from uuid import uuid4
 
 import pytest
 
-from intric.websites.domain.crawl_run import CrawlType
 from intric.worker.crawl_context import CrawlContext, EmbeddingModelSpec, PreparedPage
 
 
@@ -146,7 +145,7 @@ class TestPersistenceModuleSemantics:
 
 class TestCrawlTaskRetentionHelpers:
     def test_existing_blob_lookup_keeps_page_and_file_blob_state(self):
-        from intric.worker.crawl_tasks import _build_existing_blob_lookup
+        from intric.worker.crawl import build_existing_blob_lookup
 
         page_model_id = uuid4()
         file_model_id = uuid4()
@@ -157,13 +156,13 @@ class TestCrawlTaskRetentionHelpers:
             (None, b"ignored", uuid4()),
         ]
 
-        titles, state_by_title = _build_existing_blob_lookup(rows)
+        titles, state_by_title = build_existing_blob_lookup(rows)
 
-        assert titles == [
+        assert titles == (
             "https://example.com/page",
             "manual.pdf",
             "missing-hash",
-        ]
+        )
         assert state_by_title["https://example.com/page"].content_hash == b"page-hash"
         assert state_by_title["https://example.com/page"].embedding_model_id == (
             page_model_id
@@ -171,43 +170,6 @@ class TestCrawlTaskRetentionHelpers:
         assert state_by_title["manual.pdf"].content_hash == b"file-hash"
         assert state_by_title["manual.pdf"].embedding_model_id == file_model_id
         assert "missing-hash" not in state_by_title
-
-    def test_compute_stale_titles_separates_kept_failed_and_deleted_titles(self):
-        from intric.worker.crawl_tasks import _compute_stale_titles
-
-        stale_titles = _compute_stale_titles(
-            existing_titles=[
-                "https://example.com/deleted",
-                "https://example.com/retained",
-                "https://example.com/source-retained",
-                "https://example.com/persisted",
-                "https://example.com/failed",
-            ],
-            must_keep_titles={
-                "https://example.com/retained",
-                "https://example.com/source-retained",
-                "https://example.com/persisted",
-            },
-            failed_titles={"https://example.com/failed"},
-            crawl_is_partial=False,
-        )
-
-        assert stale_titles == ["https://example.com/deleted"]
-
-    def test_compute_stale_titles_skips_cleanup_for_partial_crawl(self):
-        from intric.worker.crawl_tasks import _compute_stale_titles
-
-        stale_titles = _compute_stale_titles(
-            existing_titles=[
-                "https://example.com/source-retained-before-timeout",
-                "https://example.com/not-yet-seen-before-timeout",
-            ],
-            must_keep_titles={"https://example.com/source-retained-before-timeout"},
-            failed_titles=set(),
-            crawl_is_partial=True,
-        )
-
-        assert stale_titles == []
 
     def test_build_sitemap_lastmod_skip_urls_only_includes_current_url_blobs(self):
         from intric.worker.crawl.persistence import ExistingBlobState
@@ -418,45 +380,6 @@ class TestCrawlTaskRetentionHelpers:
             website_last_source_verified_at=last_source_verified_at,
             tenant_crawler_settings=disabled_settings,
         )
-
-    @pytest.mark.parametrize(
-        (
-            "crawl_type",
-            "crawl_is_partial",
-            "pages_failed",
-            "files_failed",
-            "expected_fields",
-        ),
-        [
-            (
-                CrawlType.SITEMAP,
-                False,
-                0,
-                0,
-                ("last_crawled_at", "last_source_verified_at"),
-            ),
-            (CrawlType.SITEMAP, True, 0, 0, ("last_crawled_at",)),
-            (CrawlType.SITEMAP, False, 1, 0, ("last_crawled_at",)),
-            (CrawlType.SITEMAP, False, 0, 1, ("last_crawled_at",)),
-            (CrawlType.CRAWL, False, 0, 0, ("last_crawled_at",)),
-        ],
-    )
-    def test_website_timestamp_fields_after_crawl_capture_lifecycle_contract(
-        self,
-        crawl_type,
-        crawl_is_partial,
-        pages_failed,
-        files_failed,
-        expected_fields,
-    ):
-        from intric.worker.crawl_tasks import _website_timestamp_fields_after_crawl
-
-        assert _website_timestamp_fields_after_crawl(
-            crawl_type=crawl_type,
-            crawl_is_partial=crawl_is_partial,
-            pages_failed=pages_failed,
-            files_failed=files_failed,
-        ) == expected_fields
 
 
 class TestEmbeddingSemaphore:

@@ -1,12 +1,11 @@
-import hashlib
 import random
 import socket
 import time
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
-from datetime import datetime, timedelta, timezone
+from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 from uuid import UUID
 
 import redis.asyncio as aioredis
@@ -16,7 +15,6 @@ from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.crawler.crawler import CrawlDiagnostics, CrawlShutdownError
-from intric.database.tables.model_providers_table import ModelProviders
 from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
@@ -25,27 +23,42 @@ from intric.tenants.crawler_settings_helper import (
     get_crawler_setting,
 )
 from intric.websites.crawl_dependencies.crawl_models import CrawlTask
+from intric.websites.domain.crawl_cleanup_policy import cleanup_policy_for_outcome
 from intric.websites.domain.crawl_outcome import (
     CrawlOutcomeCode,
     CrawlOutcomeCrawlType,
     CrawlTerminationReason,
+    FailureReason,
     classify_crawl_outcome,
 )
 from intric.websites.domain.crawl_run import CrawlType
 from intric.worker.crawl import (
+    CrawlAuditPayload,
+    CrawlRunTerminalUpdate,
+    CrawlSlotReleaseRequest,
     ExistingBlobState,
-    HeartbeatFailedError,
+    HeartbeatFailedPageProcessingAbort,
     HeartbeatMonitor,
-    JobPreemptedError,
+    PageProcessingSuccess,
+    PersistBatchResult,
+    PreemptedPageProcessingAbort,
     SessionHolder,
+    TerminalEvent,
+    bootstrap_crawl,
+    cleanup_stale_blobs,
+    commit_terminal,
     execute_with_recovery,
     persist_batch,
-    reset_tenant_retry_delay,
+    process_files,
+    process_pages,
+    record_crawl_audit,
+    release_crawl_slot_after_task,
+    update_crawl_circuit_breaker,
     update_job_retry_stats,
+    update_website_timestamps_after_crawl,
 )
 from intric.worker.crawl.persistence import CrawlPageData
-from intric.worker.crawl_context import CrawlContext, EmbeddingModelSpec
-from intric.worker.feeder.capacity import CapacityManager
+from intric.worker.crawl_context import EmbeddingModelSpec
 from intric.worker.feeder.election import LeaderElection
 from intric.worker.feeder.queues import CrawlPendingJobData, PendingQueue
 from intric.worker.redis.lua_scripts import LuaScripts
@@ -67,6 +80,10 @@ _TERMINAL_ZERO_OUTPUT_MESSAGES: dict[CrawlOutcomeCode, str] = {
 }
 
 
+class CrawlMaxAgeExceededError(RuntimeError):
+    pass
+
+
 async def _get_primary_active_job_id(
     session: AsyncSession,
     *,
@@ -79,6 +96,7 @@ async def _get_primary_active_job_id(
     """
     from intric.database.tables.job_table import Jobs
     from intric.database.tables.websites_table import CrawlRuns as CrawlRunsTable
+    from intric.jobs.job_models import Task
     from intric.main.models import Status
 
     active_statuses = [Status.QUEUED.value, Status.IN_PROGRESS.value]
@@ -86,52 +104,12 @@ async def _get_primary_active_job_id(
         sa.select(Jobs.id)
         .join(CrawlRunsTable, CrawlRunsTable.job_id == Jobs.id)
         .where(CrawlRunsTable.website_id == website_id)
+        .where(Jobs.task == Task.CRAWL.value)
         .where(Jobs.status.in_(active_statuses))
         .order_by(Jobs.created_at.asc())
         .limit(1)
     )
     return await session.scalar(stmt)
-
-
-def _build_existing_blob_lookup(
-    rows: Iterable[tuple[str | None, bytes | None, UUID | None]],
-) -> tuple[list[str], dict[str, ExistingBlobState]]:
-    existing_titles: list[str] = []
-    existing_blob_state_by_title: dict[str, ExistingBlobState] = {}
-
-    for title, content_hash, embedding_model_id in rows:
-        if title is None:
-            continue
-
-        existing_titles.append(title)
-        if content_hash is None:
-            continue
-
-        existing_blob_state_by_title[title] = ExistingBlobState(
-            content_hash=content_hash,
-            embedding_model_id=embedding_model_id,
-        )
-
-    return existing_titles, existing_blob_state_by_title
-
-
-def _compute_stale_titles(
-    *,
-    existing_titles: Iterable[str],
-    must_keep_titles: set[str],
-    failed_titles: set[str],
-    crawl_is_partial: bool,
-) -> list[str]:
-    if crawl_is_partial:
-        # Partial crawls have an incomplete source frontier; absence from
-        # must_keep_titles is not proof that a blob was removed at the source.
-        return []
-
-    return [
-        title
-        for title in existing_titles
-        if title not in must_keep_titles and title not in failed_titles
-    ]
 
 
 def _build_http_cache_dir(*, root_dir: Path, tenant_id: UUID, website_id: UUID) -> Path:
@@ -177,28 +155,6 @@ def _should_enable_sitemap_lastmod_skip(
             tenant_crawler_settings,
         )
     )
-
-
-WebsiteTimestampField = Literal["last_crawled_at", "last_source_verified_at"]
-
-
-def _website_timestamp_fields_after_crawl(
-    *,
-    crawl_type: CrawlType,
-    crawl_is_partial: bool,
-    pages_failed: int,
-    files_failed: int,
-) -> tuple[WebsiteTimestampField, ...]:
-    """Return website timestamp fields advanced after a non-terminal crawl."""
-    if (
-        crawl_type == CrawlType.SITEMAP
-        and not crawl_is_partial
-        and pages_failed == 0
-        and files_failed == 0
-    ):
-        return ("last_crawled_at", "last_source_verified_at")
-
-    return ("last_crawled_at",)
 
 
 def _prune_http_cache_dir(cache_dir: Path, *, max_bytes: int) -> None:
@@ -285,91 +241,11 @@ def _terminal_zero_output_message(
     return f"{base_message}: {diagnostic_detail}"
 
 
-async def _update_website_circuit_breaker(
-    sess: AsyncSession,
-    *,
-    website_id: UUID,
-    tenant_id: UUID,
-    website_url: str,
-    crawl_successful: bool,
-) -> None:
-    from intric.database.tables.websites_table import Websites as WebsitesTable
-
-    if crawl_successful:
-        logger.info(
-            f"Crawl successful, resetting circuit breaker for website {website_id}"
-        )
-        reset_stmt = (
-            sa.update(WebsitesTable)
-            .where(WebsitesTable.id == website_id)
-            .where(WebsitesTable.tenant_id == tenant_id)
-            .values(consecutive_failures=0, next_retry_at=None)
-        )
-        await sess.execute(reset_stmt)
-        return
-
-    current_failures_stmt = (
-        sa.select(WebsitesTable.consecutive_failures)
-        .where(WebsitesTable.id == website_id)
-        .where(WebsitesTable.tenant_id == tenant_id)
-    )
-    current_failures: int = (await sess.scalar(current_failures_stmt)) or 0
-    new_failures = current_failures + 1
-
-    max_failures_before_disable = 10
-    if new_failures >= max_failures_before_disable:
-        from intric.websites.domain.website import UpdateInterval
-
-        logger.error(
-            f"Website {website_id} auto-disabled after {new_failures} consecutive failures. "
-            "User action required to re-enable.",
-            extra={
-                "website_id": str(website_id),
-                "url": website_url,
-                "consecutive_failures": new_failures,
-            },
-        )
-        disable_stmt = (
-            sa.update(WebsitesTable)
-            .where(WebsitesTable.id == website_id)
-            .where(WebsitesTable.tenant_id == tenant_id)
-            .values(
-                consecutive_failures=new_failures,
-                update_interval=UpdateInterval.NEVER,
-                next_retry_at=None,
-            )
-        )
-        await sess.execute(disable_stmt)
-        return
-
-    backoff_hours = min(2 ** (new_failures - 1), 24)
-    next_retry = datetime.now(timezone.utc) + timedelta(hours=backoff_hours)
-    logger.warning(
-        f"Crawl failed for website {website_id}. "
-        f"Failure {new_failures}/{max_failures_before_disable}, "
-        f"backoff {backoff_hours}h until {next_retry.isoformat()}",
-        extra={
-            "website_id": str(website_id),
-            "consecutive_failures": new_failures,
-            "backoff_hours": backoff_hours,
-            "next_retry_at": next_retry.isoformat(),
-        },
-    )
-    backoff_stmt = (
-        sa.update(WebsitesTable)
-        .where(WebsitesTable.id == website_id)
-        .where(WebsitesTable.tenant_id == tenant_id)
-        .values(
-            consecutive_failures=new_failures,
-            next_retry_at=next_retry,
-        )
-    )
-    await sess.execute(backoff_stmt)
-
-
 def _crawl_task_exception_outcome(exc: BaseException) -> CrawlOutcomeCode:
     if isinstance(exc, CrawlShutdownError):
         return CrawlOutcomeCode.CRAWL_SHUTDOWN_ERROR
+    if isinstance(exc, CrawlMaxAgeExceededError):
+        return CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED
     return CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
 
 
@@ -380,14 +256,19 @@ def _crawl_task_exception_message(exc: BaseException) -> str:
     return message[:512]
 
 
+def _crawl_queue_enqueue_failure_message(exc: BaseException) -> str:
+    message = str(exc).strip()
+    if not message:
+        message = type(exc).__name__
+    return f"Failed to add crawl to pending queue: {message}"[:512]
+
+
 async def _record_crawl_task_exception(
     *,
     job_id: UUID,
     run_id: UUID,
     exc: BaseException,
 ) -> None:
-    from intric.database.tables.job_table import Jobs
-    from intric.database.tables.websites_table import CrawlRuns
     from intric.main.models import Status as JobStatus
 
     outcome_code = _crawl_task_exception_outcome(exc)
@@ -395,28 +276,18 @@ async def _record_crawl_task_exception(
     now = datetime.now(timezone.utc)
 
     async with Container.session_scope() as session:
-        job_stmt = (
-            sa.update(Jobs)
-            .where(Jobs.id == job_id)
-            .where(
-                Jobs.status.in_([JobStatus.QUEUED.value, JobStatus.IN_PROGRESS.value])
-            )
-            .values(
-                status=JobStatus.FAILED.value,
+        await commit_terminal(
+            session,
+            TerminalEvent(
+                crawl_run_id=run_id,
+                job_id=job_id,
+                job_status=JobStatus.FAILED,
+                outcome_code=outcome_code,
                 finished_at=now,
-                updated_at=now,
                 result_location=error_message,
-            )
+                only_set_crawl_outcome_if_missing=True,
+            ),
         )
-        await session.execute(job_stmt)
-
-        crawl_run_stmt = (
-            sa.update(CrawlRuns)
-            .where(CrawlRuns.id == run_id)
-            .where(CrawlRuns.outcome_code.is_(None))
-            .values(outcome_code=outcome_code.value)
-        )
-        await session.execute(crawl_run_stmt)
 
 
 async def queue_website_crawls(container: Container):
@@ -582,9 +453,7 @@ async def queue_website_crawls(container: Container):
                             "crawl_type": website.crawl_type.value,
                         }
 
-                        # Step 5: Add to pending queue with orphaning protection
-                        # If Redis push fails, mark DB records as FAILED
-                        # Why: Prevents orphaned crawl_run/job records that never execute
+                        # Step 5: Add to pending queue with orphaning protection.
                         try:
                             pending_queue = PendingQueue(redis_client)
                             if not await pending_queue.add(
@@ -603,16 +472,25 @@ async def queue_website_crawls(container: Container):
                                 },
                             )
                         except Exception as redis_exc:
-                            # Redis push failed, rollback by marking DB records as FAILED
-                            # Why: Prevents silent data loss and orphaned records
+                            failure_message = _crawl_queue_enqueue_failure_message(
+                                redis_exc
+                            )
+                            # Redis push failed; commit one terminal event so the UI
+                            # has a typed reason and no orphaned job remains.
                             try:
-                                from intric.main.models import Status
-
-                                job_in_db.status = Status.FAILED
-                                await job_repo.update_job(job_in_db)  # type: ignore[call-overload]
-
-                                crawl_run.status = Status.FAILED
-                                await crawl_run_repo.update(crawl_run)
+                                await commit_terminal(
+                                    website_session,
+                                    TerminalEvent(
+                                        crawl_run_id=crawl_run.id,
+                                        job_id=job_in_db.id,
+                                        job_status=Status.FAILED,
+                                        outcome_code=(
+                                            CrawlOutcomeCode.CRAWL_QUEUE_ENQUEUE_FAILED
+                                        ),
+                                        finished_at=datetime.now(timezone.utc),
+                                        result_location=failure_message,
+                                    ),
+                                )
                             except Exception as update_exc:
                                 logger.warning(
                                     "Failed to rollback DB records after Redis error",
@@ -624,7 +502,7 @@ async def queue_website_crawls(container: Container):
 
                             failed_crawls += 1
                             logger.error(
-                                f"Failed to add to pending queue: {redis_exc}",
+                                failure_message,
                                 extra={
                                     "website_id": str(website.id),
                                     "url": website.url,
@@ -684,7 +562,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
     # With sessionless container (session=None), this fails type validation.
     #
     # This is safe because:
-    # 1. crawl_task sets _job_already_handled=True, skipping complete_job/fail_job
+    # 1. crawl_task acknowledges crawler-owned terminal commits on TaskManager
     # 2. Status updates use execute_with_recovery() with its own sessions
     # 3. fail_job() has fallback to direct SQL when job_service is None
     #    (ensures jobs are marked failed even when exceptions occur early)
@@ -864,24 +742,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             # Check if max job age exceeded (ONLY age check for busy signals)
             if job_age > max_age_seconds:
-                # Update crawl_run status before abandoning to prevent orphaned DB records
-                # NOTE: Uses session_scope() for short-lived DB operation (~50ms)
-                try:
-                    async with Container.session_scope():
-                        crawl_run_repo = container.crawl_run_repo()
-                        crawl_run = await crawl_run_repo.one(params.run_id)
-                        from intric.main.models import Status
-
-                        crawl_run.status = Status.FAILED
-                        crawl_run.update(
-                            outcome_code=CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED
-                        )
-                        await crawl_run_repo.update(crawl_run)
-                except Exception as update_exc:
-                    logger.warning(
-                        "Failed to update crawl_run status on terminal",
-                        extra={"run_id": str(params.run_id), "error": str(update_exc)},
-                    )
+                failure_message = (
+                    f"Crawl job {job_id} abandoned after {job_age:.0f}s "
+                    f"(max: {max_age_seconds}s) - still waiting for concurrency slot"
+                )
 
                 # Cleanup Redis counters to prevent memory leak
                 if redis_client:
@@ -908,10 +772,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         "metric_value": 1,
                     },
                 )
-                raise RuntimeError(
-                    f"Crawl job {job_id} abandoned after {job_age:.0f}s "
-                    f"(max: {max_age_seconds}s) - still waiting for concurrency slot"
-                )
+                raise CrawlMaxAgeExceededError(failure_message)
 
             # Calculate shorter backoff for busy signals (we're just waiting for a slot, not a failure)
             # Use random jitter to prevent thundering herd when slots open up
@@ -953,36 +814,23 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
 
                 if primary_job_id and primary_job_id != job_id:
-                    from intric.database.tables.job_table import Jobs
-                    from intric.database.tables.websites_table import CrawlRuns
                     from intric.main.models import Status
 
                     skip_message = (
                         f"Skipped duplicate crawl; active job {primary_job_id}"
                     )
-                    stmt = (
-                        sa.update(Jobs)
-                        .where(Jobs.id == job_id)
-                        .where(
-                            Jobs.status.in_(
-                                [Status.QUEUED.value, Status.IN_PROGRESS.value]
-                            )
-                        )
-                        .values(
-                            status=Status.FAILED.value,
+                    result = await commit_terminal(
+                        session,
+                        TerminalEvent(
+                            crawl_run_id=params.run_id,
+                            job_id=job_id,
+                            job_status=Status.FAILED,
+                            outcome_code=CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED,
                             finished_at=datetime.now(timezone.utc),
                             result_location=skip_message,
-                        )
+                        ),
                     )
-                    result = await session.execute(stmt)
-                    await session.execute(
-                        sa.update(CrawlRuns)
-                        .where(CrawlRuns.id == params.run_id)
-                        .values(
-                            outcome_code=CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED.value
-                        )
-                    )
-                    if result.rowcount == 0:
+                    if result.job_rows_updated == 0:
                         logger.debug(
                             "Duplicate crawl skip ignored; job status already changed",
                             extra={
@@ -1003,7 +851,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         "metric_value": 1,
                     },
                 )
-                setattr(task_manager, "_job_already_handled", True)
+                task_manager.acknowledge_terminal_commit(successful=True)
                 return {
                     "status": "duplicate_skipped",
                     "job_id": str(job_id),
@@ -1089,228 +937,39 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             session_holder["session"] = None
             session_holder["uploader"] = uploader
 
-            # BOOTSTRAP PHASE: Short-lived session for initial queries (~50-100ms)
-            # Extract all needed data as primitives BEFORE the long crawl so the
-            # session returns to pool immediately. This prevents holding a connection
-            # for 5-30 minutes during the actual crawl operation.
-            from intric.database.database import sessionmanager
-            from intric.database.tables.info_blobs_table import InfoBlobs
-            from intric.database.tables.websites_table import Websites as WebsitesTable
-
-            # These will be populated by bootstrap
-            crawl_context: CrawlContext
-            existing_titles: list[str] = []
-            existing_blob_state_by_title: dict[str, ExistingBlobState] = {}
-            website_url: str = ""  # For logging after session closes
-            website_last_source_verified_at: datetime | None = None
-
             start = time.time()
-            # Bootstrap phase: Short-lived session for extracting ORM → DTO
-            # All data is converted to EmbeddingModelSpec/CrawlContext DTOs before session closes,
-            # preventing DetachedInstanceError when embedding APIs are called later.
-            bootstrap_session = sessionmanager.create_session()
-            try:
-                await bootstrap_session.begin()
-                # Get website with eager loading of embedding_model
-                from sqlalchemy.orm import selectinload
+            if tenant is None:
+                raise RuntimeError("Crawler tenant context is required")
 
-                from intric.database.tables.websites_table import Websites
-
-                website_stmt = (
-                    sa.select(Websites)
-                    .where(Websites.id == params.website_id)
-                    .options(selectinload(Websites.embedding_model))
-                )
-                result = await bootstrap_session.execute(website_stmt)
-                website_row = result.scalar_one_or_none()
-
-                if website_row is None:
-                    raise Exception(f"Website {params.website_id} not found")
-
-                website: Any = website_row
-                website_url = website_row.url  # Save for logging after session closes
-                website_last_source_verified_at = website_row.last_source_verified_at
-
-                # CRITICAL: Verify tenant isolation
-                current_tenant = container.tenant()
-                if website_row.tenant_id != current_tenant.id:
-                    logger.error(
-                        "Tenant isolation violation detected",
-                        extra={
-                            "website_id": str(params.website_id),
-                            "website_tenant_id": str(website_row.tenant_id),
-                            "container_tenant_id": str(current_tenant.id),
-                        },
+            bootstrap_result = await bootstrap_crawl(
+                session_scope=Container.session_scope,
+                website_id=params.website_id,
+                tenant=tenant,
+                user=container.user(),
+                tenant_crawler_settings=tenant_crawler_settings,
+                settings=settings,
+                http_auth_password_decrypter=lambda encrypted_password: (
+                    container.http_auth_encryption_service().decrypt_password(
+                        encrypted_password
                     )
-                    raise Exception(
-                        f"Tenant isolation violation: website {params.website_id} "
-                        f"belongs to tenant {website_row.tenant_id}, not {current_tenant.id}"
-                    )
+                ),
+            )
 
-                # Extract HTTP auth credentials if present
-                # NOTE: Using ORM columns directly (http_auth_username, encrypted_auth_password)
-                # because we're working with the raw Websites table, not the domain model
-                http_user: str | None = None
-                http_pass: str | None = None
-                has_auth_in_db = bool(
-                    website_row.http_auth_username
-                    and website_row.encrypted_auth_password
-                )
+            crawl_context = bootstrap_result.crawl_context
+            embedding_model_spec = bootstrap_result.embedding_model
+            existing_titles = bootstrap_result.existing_titles
+            existing_blob_state_by_title = bootstrap_result.existing_blob_state_by_title
+            website_url = bootstrap_result.website_url
+            website_name = bootstrap_result.website_name
+            website_owner_id = bootstrap_result.website_owner_id
+            website_last_source_verified_at = (
+                bootstrap_result.website_last_source_verified_at
+            )
 
-                if has_auth_in_db:
-                    # Decrypt the password using HttpAuthEncryptionService (NOT encryption_service)
-                    # HttpAuthEncryptionService uses its own Fernet encryption format
-                    # while encryption_service expects 'enc:' prefix format
-                    try:
-                        http_auth_encryption = container.http_auth_encryption_service()
-                        http_user = website_row.http_auth_username
-                        encrypted_auth_password = website_row.encrypted_auth_password
-                        assert encrypted_auth_password is not None
-                        http_pass = http_auth_encryption.decrypt_password(
-                            encrypted_auth_password
-                        )
-                        logger.info(
-                            "HTTP auth configured for website",
-                            extra={
-                                "website_id": str(params.website_id),
-                                "tenant_id": str(website_row.tenant_id),
-                            },
-                        )
-                    except Exception as decrypt_err:
-                        logger.error(
-                            "Cannot crawl website: HTTP auth decryption failed. "
-                            "Check encryption_key setting is correct.",
-                            extra={
-                                "website_id": str(params.website_id),
-                                "tenant_id": str(website_row.tenant_id),
-                                "error": str(decrypt_err),
-                            },
-                        )
-                        raise Exception(
-                            f"HTTP auth decryption failed for website {params.website_id}. "
-                            "Check encryption_key configuration."
-                        )
-
-                # Extract embedding model into EmbeddingModelSpec DTO
-                # This extracts ALL primitives from ORM while session is active,
-                # preventing DetachedInstanceError when session closes.
-                # Provider credentials are pre-resolved here so that embedding
-                # calls in Phase 1 (sessionless) don't need a DB lookup.
-                orm_embedding_model = website_row.embedding_model
-                embedding_model_spec: EmbeddingModelSpec | None = None
-                if orm_embedding_model:
-                    family_str: str | None = orm_embedding_model.family or None
-
-                    # Pre-resolve provider data while session is active
-                    provider_type = None
-                    provider_credentials = None
-                    provider_config = None
-                    if orm_embedding_model.provider_id:
-                        provider_result = await bootstrap_session.execute(
-                            sa.select(ModelProviders).where(
-                                ModelProviders.id == orm_embedding_model.provider_id
-                            )
-                        )
-                        provider_db = provider_result.scalar_one_or_none()
-                        if provider_db and provider_db.is_active:
-                            provider_type = provider_db.provider_type
-                            provider_credentials = provider_db.credentials
-                            provider_config = provider_db.config
-                        elif provider_db and not provider_db.is_active:
-                            logger.warning(
-                                "Embedding model provider is inactive",
-                                extra={
-                                    "model_name": orm_embedding_model.name,
-                                    "provider_id": str(orm_embedding_model.provider_id),
-                                },
-                            )
-
-                    # Compute litellm_model_name: prefer provider-derived name,
-                    # fall back to value stored on the model
-                    litellm_model_name = orm_embedding_model.litellm_model_name
-                    if provider_type:
-                        litellm_model_name = (
-                            f"{provider_type}/{orm_embedding_model.name}"
-                        )
-
-                    assert orm_embedding_model.max_input is not None
-
-                    embedding_model_spec = EmbeddingModelSpec(
-                        id=orm_embedding_model.id,
-                        name=orm_embedding_model.name,
-                        litellm_model_name=litellm_model_name,
-                        family=family_str,
-                        max_input=orm_embedding_model.max_input,
-                        max_batch_size=orm_embedding_model.max_batch_size,
-                        dimensions=orm_embedding_model.dimensions,
-                        open_source=orm_embedding_model.open_source,
-                        provider_id=orm_embedding_model.provider_id,
-                        provider_type=provider_type,
-                        provider_credentials=provider_credentials,
-                        provider_config=provider_config,
-                    )
-
-                # Build CrawlContext DTO from ORM objects
-                # Extract ALL fields as primitives to avoid DetachedInstanceError
-                crawl_context = CrawlContext(
-                    website_id=website.id,
-                    tenant_id=website.tenant_id,
-                    tenant_slug=tenant.slug if tenant else None,
-                    user_id=container.user().id,
-                    # Embedding model - use EmbeddingModelSpec DTO (already extracted)
-                    embedding_model_id=embedding_model_spec.id
-                    if embedding_model_spec
-                    else None,
-                    embedding_model_name=embedding_model_spec.name
-                    if embedding_model_spec
-                    else None,
-                    embedding_model_open_source=embedding_model_spec.open_source
-                    if embedding_model_spec
-                    else False,
-                    embedding_model_family=(
-                        embedding_model_spec.family
-                        if embedding_model_spec and embedding_model_spec.family
-                        else None
-                    ),
-                    embedding_model_dimensions=(
-                        embedding_model_spec.dimensions
-                        if embedding_model_spec
-                        else None
-                    ),
-                    # HTTP Auth - primitives only
-                    http_auth_user=http_user,
-                    http_auth_pass=http_pass,
-                    # Batch settings from tenant config with defaults
-                    batch_size=get_crawler_setting(
-                        "crawl_page_batch_size",
-                        tenant_crawler_settings,
-                        default=settings.crawl_page_batch_size,
-                    ),
-                )
-
-                # Fetch existing blob state for stale detection and hash retention.
-                stmt = sa.select(
-                    InfoBlobs.title,
-                    InfoBlobs.content_hash,
-                    InfoBlobs.embedding_model_id,
-                ).where(
-                    InfoBlobs.website_id == params.website_id,
-                    InfoBlobs.tenant_id == crawl_context.tenant_id,
-                )
-                blob_result = await bootstrap_session.execute(stmt)
-                existing_titles, existing_blob_state_by_title = (
-                    _build_existing_blob_lookup(blob_result.tuples())
-                )
-
-            finally:
-                # Always close the bootstrap session to return connection to pool
-                await bootstrap_session.close()
-
-            # Session returned to pool HERE - bootstrap complete (~50-100ms)
             timings["fetch_existing_titles"] = time.time() - start
 
             logger.info(
-                "Bootstrap phase complete - session returned to pool",
+                "Crawl bootstrap phase complete",
                 extra={
                     "website_id": str(params.website_id),
                     "tenant_id": str(crawl_context.tenant_id),
@@ -1337,8 +996,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             num_files_too_large_skipped = 0
 
             # Aggregate failure reasons across all batches
-            # Maps FailureReason codes to counts for final storage in failure_summary
-            failure_counts: dict[str, int] = defaultdict(int)
+            failure_counts: dict[FailureReason, int] = defaultdict(int)
 
             # Use set for O(1) membership tests
             must_keep_titles: set[str] = set()
@@ -1478,10 +1136,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 if terminal_failure_message is not None:
                     assert crawl_output_outcome_code is not None
                     terminal_outcome_code = crawl_output_outcome_code
-                    from intric.audit.domain.action_types import ActionType
-                    from intric.audit.domain.entity_types import EntityType
-                    from intric.database.tables.job_table import Jobs
-                    from intric.database.tables.websites_table import CrawlRuns
                     from intric.main.models import Status as JobStatus
 
                     logger.warning(
@@ -1497,39 +1151,46 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         },
                     )
 
-                    async def _do_terminal_crawl_run_update(
+                    terminal_finished_at = datetime.now(timezone.utc)
+
+                    async def _do_terminal_zero_output_commit(
                         sess: AsyncSession,
                     ) -> None:
-                        stmt = (
-                            sa.update(CrawlRuns)
-                            .where(CrawlRuns.id == params.run_id)
-                            .values(
-                                pages_crawled=0,
-                                files_downloaded=0,
-                                pages_failed=0,
-                                files_failed=0,
-                                pages_source_retained=0,
-                                pages_hash_retained=0,
-                                files_hash_retained=0,
-                                files_too_large_skipped=num_files_too_large_skipped,
-                                failure_summary=None,
-                                outcome_code=terminal_outcome_code.value,
-                            )
+                        await commit_terminal(
+                            sess,
+                            TerminalEvent(
+                                crawl_run_id=params.run_id,
+                                job_id=job_id,
+                                job_status=JobStatus.FAILED,
+                                outcome_code=terminal_outcome_code,
+                                finished_at=terminal_finished_at,
+                                result_location=terminal_failure_message,
+                                crawl_run_update=CrawlRunTerminalUpdate(
+                                    pages_crawled=0,
+                                    files_downloaded=0,
+                                    pages_failed=0,
+                                    files_failed=0,
+                                    pages_source_retained=0,
+                                    pages_hash_retained=0,
+                                    files_hash_retained=0,
+                                    files_too_large_skipped=num_files_too_large_skipped,
+                                    failure_summary=None,
+                                ),
+                            ),
                         )
-                        await sess.execute(stmt)
 
                     await execute_with_recovery(
                         container=container,
                         session_holder=session_holder,
                         created_sessions=created_sessions,
-                        operation_name="terminal_crawl_run_update",
-                        operation=_do_terminal_crawl_run_update,
+                        operation_name="terminal_zero_output_commit",
+                        operation=_do_terminal_zero_output_commit,
                     )
 
                     async def _do_terminal_circuit_breaker_update(
                         sess: AsyncSession,
                     ) -> None:
-                        await _update_website_circuit_breaker(
+                        await update_crawl_circuit_breaker(
                             sess,
                             website_id=params.website_id,
                             tenant_id=crawl_context.tenant_id,
@@ -1545,74 +1206,31 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         operation=_do_terminal_circuit_breaker_update,
                     )
 
-                    audit_service = container.audit_service()
-                    actor_id = (
-                        website.user_id
-                        if hasattr(website, "user_id") and website.user_id
-                        else current_tenant.id
-                    )
-                    await audit_service.log_async(
-                        tenant_id=current_tenant.id,
-                        actor_id=actor_id,
-                        action=ActionType.WEBSITE_CRAWLED,
-                        entity_type=EntityType.WEBSITE,
-                        entity_id=params.website_id,
-                        description=f"Website crawled: {website.url} - Failed",
-                        metadata={
-                            "target": {
-                                "website_id": str(params.website_id),
-                                "url": website.url,
-                                "name": getattr(website, "name", website.url),
-                            },
-                            "crawl_stats": {
-                                "pages_crawled": 0,
-                                "pages_failed": 0,
-                                "pages_hash_retained": 0,
-                                "pages_source_retained": 0,
-                                "files_downloaded": 0,
-                                "files_failed": 0,
-                                "files_hash_retained": 0,
-                                "files_too_large_skipped": (
-                                    num_files_too_large_skipped
-                                ),
-                                "blobs_deleted": 0,
-                                "successful": False,
-                                "outcome_code": terminal_outcome_code.value,
-                            },
-                        },
+                    await record_crawl_audit(
+                        container.audit_service(),
+                        CrawlAuditPayload(
+                            tenant_id=crawl_context.tenant_id,
+                            website_id=params.website_id,
+                            website_url=website_url,
+                            website_name=website_name,
+                            website_owner_id=website_owner_id,
+                            pages_crawled=0,
+                            pages_failed=0,
+                            pages_hash_retained=0,
+                            pages_source_retained=0,
+                            files_downloaded=0,
+                            files_failed=0,
+                            files_hash_retained=0,
+                            files_too_large_skipped=num_files_too_large_skipped,
+                            blobs_deleted=0,
+                            successful=False,
+                            outcome_code=terminal_outcome_code,
+                        ),
                     )
 
-                    async def _do_fail_terminal_job(sess: AsyncSession) -> None:
-                        stmt = (
-                            sa.update(Jobs)
-                            .where(Jobs.id == job_id)
-                            .where(
-                                Jobs.status.in_(
-                                    [
-                                        JobStatus.QUEUED.value,
-                                        JobStatus.IN_PROGRESS.value,
-                                    ]
-                                )
-                            )
-                            .values(
-                                status=JobStatus.FAILED.value,
-                                finished_at=datetime.now(timezone.utc),
-                                result_location=terminal_failure_message,
-                            )
-                        )
-                        await sess.execute(stmt)
-
-                    await execute_with_recovery(
-                        container=container,
-                        session_holder=session_holder,
-                        created_sessions=created_sessions,
-                        operation_name="terminal_fail_job",
-                        operation=_do_fail_terminal_job,
-                    )
                     # Terminal zero-output crawls advance no website crawl
                     # timestamps, so scheduled retries are not hidden.
-                    setattr(task_manager, "_job_already_handled", True)
-                    task_manager.success = False
+                    task_manager.acknowledge_terminal_commit(successful=False)
                     return {
                         "status": "failed",
                         "outcome_code": terminal_outcome_code.value,
@@ -1635,8 +1253,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 # Measure page processing time
                 process_start = time.time()
                 if crawl.source_retained_urls:
-                    must_keep_titles.update(crawl.source_retained_urls)
-                    num_source_retained_pages = crawl.source_retained_count
                     logger.warning(
                         "Retained sitemap URLs without fetching due to lastmod",
                         extra={
@@ -1652,226 +1268,184 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         },
                     )
 
-                # Session-per-batch page processing (NO main session held)
-                # Bootstrap already returned session to pool. All DB operations
-                # use session_scope() or persist_batch() which manage their own sessions.
-                # NOTE: embedding_model was extracted during bootstrap phase
-
-                # Page buffer for batching (primitives only, NO ORM objects!)
-                page_buffer: list[CrawlPageData] = []
-
-                for page in crawl.pages:
-                    num_pages += 1
-
-                    # Heartbeat: touches DB, refreshes Redis TTL, checks preemption
-                    try:
-                        await heartbeat_monitor.tick()
-                    except HeartbeatFailedError as e:
-                        return {
-                            "status": "heartbeat_failed",
-                            "pages_crawled": num_pages,
-                            "consecutive_failures": e.consecutive_failures,
-                        }
-                    except JobPreemptedError:
-                        logger.warning(
-                            "Detected job preemption during heartbeat",
-                            extra={
-                                "job_id": str(job_id),
-                                "website_id": str(params.website_id),
-                                "pages_processed": num_pages,
-                            },
-                        )
-                        return {
-                            "status": "preempted_during_crawl",
-                            "pages_crawled": num_pages,
-                        }
-
-                    # Buffer page as dict (primitives only!)
-                    page_buffer.append(
-                        {
-                            "url": page.url,
-                            "content": page.content,
-                        }
-                    )
-
-                    # Flush when buffer is full
-                    if len(page_buffer) >= crawl_context.batch_size:
-                        batch_result = await persist_batch(
-                            page_buffer=page_buffer,
-                            ctx=crawl_context,
-                            embedding_model=embedding_model_spec,
-                            container=container,
-                            existing_blob_state_by_title=existing_blob_state_by_title,
-                        )
-                        must_keep_titles.update(batch_result.cleanup_protected_titles)
-                        # Aggregate failure reasons and track failed URLs
-                        for reason, urls in batch_result.failures_by_reason.items():
-                            failure_counts[reason.value] += len(urls)
-                            failed_titles.update(urls)
-                        num_failed_pages += batch_result.failed_count
-                        num_hash_retained_pages += batch_result.retained_count
-                        page_buffer.clear()
-
-                        logger.debug(
-                            f"Flushed batch of {crawl_context.batch_size} pages",
-                            extra={
-                                "job_id": str(job_id),
-                                "persisted": batch_result.persisted_count,
-                                "retained": batch_result.retained_count,
-                                "failed": batch_result.failed_count,
-                                "total_pages": num_pages,
-                            },
-                        )
-
-                # Final flush for remaining pages
-                if page_buffer:
-                    batch_result = await persist_batch(
+                async def _persist_pages(
+                    page_buffer: list[CrawlPageData],
+                ) -> PersistBatchResult:
+                    return await persist_batch(
                         page_buffer=page_buffer,
                         ctx=crawl_context,
                         embedding_model=embedding_model_spec,
                         container=container,
                         existing_blob_state_by_title=existing_blob_state_by_title,
                     )
-                    must_keep_titles.update(batch_result.cleanup_protected_titles)
-                    # Aggregate failure reasons and track failed URLs
-                    for reason, urls in batch_result.failures_by_reason.items():
-                        failure_counts[reason.value] += len(urls)
-                        failed_titles.update(urls)
-                    num_failed_pages += batch_result.failed_count
-                    num_hash_retained_pages += batch_result.retained_count
 
-                    logger.debug(
-                        f"Final flush of {len(page_buffer)} pages",
+                page_processing_result = await process_pages(
+                    pages=crawl.pages,
+                    source_retained_urls=crawl.source_retained_urls,
+                    batch_size=crawl_context.batch_size,
+                    heartbeat_tick=heartbeat_monitor.tick,
+                    persist_pages=_persist_pages,
+                )
+
+                if isinstance(
+                    page_processing_result, HeartbeatFailedPageProcessingAbort
+                ):
+                    return {
+                        "status": "heartbeat_failed",
+                        "pages_crawled": page_processing_result.pages_crawled,
+                        "consecutive_failures": (
+                            page_processing_result.consecutive_failures
+                        ),
+                    }
+
+                if isinstance(page_processing_result, PreemptedPageProcessingAbort):
+                    logger.warning(
+                        "Detected job preemption during heartbeat",
                         extra={
                             "job_id": str(job_id),
-                            "persisted": batch_result.persisted_count,
-                            "retained": batch_result.retained_count,
-                            "failed": batch_result.failed_count,
-                            "total_pages": num_pages,
+                            "website_id": str(params.website_id),
+                            "pages_processed": page_processing_result.pages_crawled,
                         },
                     )
+                    return {
+                        "status": "preempted_during_crawl",
+                        "pages_crawled": page_processing_result.pages_crawled,
+                    }
+
+                assert isinstance(page_processing_result, PageProcessingSuccess)
+                num_pages = page_processing_result.pages_crawled
+                num_failed_pages = page_processing_result.pages_failed
+                num_hash_retained_pages = page_processing_result.pages_hash_retained
+                num_source_retained_pages = page_processing_result.pages_source_retained
+                must_keep_titles.update(page_processing_result.cleanup_protected_titles)
+                failed_titles.update(page_processing_result.failed_titles)
+                for reason, count in page_processing_result.failure_counts.items():
+                    failure_counts[reason] += count
+
+                logger.debug(
+                    "Processed crawl pages",
+                    extra={
+                        "job_id": str(job_id),
+                        "pages_crawled": num_pages,
+                        "pages_persisted": page_processing_result.pages_persisted,
+                        "pages_retained": num_hash_retained_pages,
+                        "pages_failed": num_failed_pages,
+                    },
+                )
 
                 timings["process_pages"] = time.time() - process_start
 
-                # Measure file processing time
                 file_start = time.time()
-                # Process downloaded files with content hash checking
-                # Uses session-per-file pattern: each file gets its own short-lived session
-                for file in crawl.files or []:
-                    num_files += 1
-                    filename = file.stem
-                    try:
-                        # Hash raw bytes directly (no HTML normalization for files)
-                        file_bytes = file.read_bytes()
-                        new_file_hash = hashlib.sha256(file_bytes).digest()
 
-                        existing_file_state = existing_blob_state_by_title.get(filename)
-
-                        if (
-                            existing_file_state is not None
-                            and existing_file_state.is_current_for(
-                                content_hash=new_file_hash,
-                                embedding_model_id=crawl_context.embedding_model_id,
+                async def _process_changed_file(
+                    file: Path,
+                    filename: str,
+                    content_hash: bytes,
+                ) -> None:
+                    async def _process_single_file(sess: AsyncSession) -> None:
+                        session_provider = cast(Any, container.session)
+                        session_provider.override(providers.Object(sess))
+                        file_uploader = container.text_processor()
+                        embedding_model_repo = container.embedding_model_repo2()
+                        embedding_model_id = crawl_context.embedding_model_id
+                        if embedding_model_id is None:
+                            raise RuntimeError(
+                                "Changed-file processing requires an embedding model"
                             )
-                        ):
-                            # File unchanged - skip processing
-                            num_hash_retained_files += 1
-                            must_keep_titles.add(filename)
-                            logger.debug(
-                                f"Skipping unchanged file: {filename}",
-                                extra={
-                                    "website_id": str(params.website_id),
-                                    "file_name": filename,
-                                },
-                            )
-                            continue
-
-                        # File changed or new - process with session-per-file pattern
-                        # Each file gets its own short-lived session (~50-300ms)
-                        async def _process_single_file(sess: AsyncSession) -> None:
-                            # Get fresh text processor with this session
-                            session_provider = cast(Any, container.session)
-                            session_provider.override(providers.Object(sess))
-                            file_uploader = container.text_processor()
-                            embedding_model_repo = container.embedding_model_repo2()
-                            embedding_model_id = crawl_context.embedding_model_id
-                            assert embedding_model_id is not None
-                            file_embedding_model = await embedding_model_repo.one(
-                                embedding_model_id
-                            )
-                            await file_uploader.process_file(
-                                filepath=file,
-                                filename=filename,
-                                website_id=params.website_id,
-                                embedding_model=file_embedding_model,
-                                content_hash=new_file_hash,
-                            )
-
-                        await execute_with_recovery(
-                            container=container,
-                            session_holder=session_holder,
-                            created_sessions=created_sessions,
-                            operation_name=f"process_file_{filename}",
-                            operation=_process_single_file,
+                        file_embedding_model = await embedding_model_repo.one(
+                            embedding_model_id
                         )
-                        must_keep_titles.add(filename)
-
-                    except Exception:
-                        logger.exception(
-                            "Exception while uploading file",
-                            extra={
-                                "website_id": str(params.website_id),
-                                "tenant_id": str(crawl_context.tenant_id),
-                                "crawled_filename": filename,
-                                "embedding_model": crawl_context.embedding_model_name,
-                            },
+                        await file_uploader.process_file(
+                            filepath=file,
+                            filename=filename,
+                            website_id=params.website_id,
+                            embedding_model=file_embedding_model,
+                            content_hash=content_hash,
                         )
-                        num_failed_files += 1
-                        failed_titles.add(filename)
+
+                    await execute_with_recovery(
+                        container=container,
+                        session_holder=session_holder,
+                        created_sessions=created_sessions,
+                        operation_name=f"process_file_{filename}",
+                        operation=_process_single_file,
+                    )
+
+                def _record_file_processing_error(
+                    _file: Path,
+                    filename: str,
+                    exc: Exception,
+                ) -> None:
+                    logger.error(
+                        "Exception while uploading file",
+                        extra={
+                            "website_id": str(params.website_id),
+                            "tenant_id": str(crawl_context.tenant_id),
+                            "crawled_filename": filename,
+                            "embedding_model": crawl_context.embedding_model_name,
+                        },
+                        exc_info=exc,
+                    )
+
+                file_processing_result = await process_files(
+                    files=crawl.files,
+                    existing_blob_state_by_title=existing_blob_state_by_title,
+                    embedding_model_id=crawl_context.embedding_model_id,
+                    process_changed_file=_process_changed_file,
+                    record_file_processing_error=_record_file_processing_error,
+                )
+                num_files = file_processing_result.files_downloaded
+                num_failed_files = file_processing_result.files_failed
+                num_hash_retained_files = file_processing_result.files_hash_retained
+                must_keep_titles.update(file_processing_result.cleanup_protected_titles)
+                failed_titles.update(file_processing_result.failed_titles)
                 timings["process_files"] = time.time() - file_start
 
             # Cleanup phase: delete stale blobs (batch for performance)
             cleanup_start = time.time()
             # Exclude failed_titles - their original data was preserved by transaction rollback
-            stale_titles = _compute_stale_titles(
-                existing_titles=existing_titles,
-                must_keep_titles=must_keep_titles,
-                failed_titles=failed_titles,
-                crawl_is_partial=crawl_is_partial,
-            )
+            # Crawler-level outcome is the cleanup signal; final outcome classification
+            # happens after cleanup and includes persistence/file processing failures.
+            cleanup_policy = cleanup_policy_for_outcome(crawl_output_outcome_code)
 
-            # Batch delete using session-per-operation pattern
-            if stale_titles:
+            async def _delete_stale_titles(titles: Sequence[str]) -> int:
+                titles_to_delete = list(titles)
 
                 async def _do_stale_blob_cleanup(sess: AsyncSession) -> int:
-                    # Get fresh repo with this session
                     session_provider = cast(Any, container.session)
                     session_provider.override(providers.Object(sess))
                     cleanup_repo = container.info_blob_repo()
                     return await cleanup_repo.batch_delete_by_titles_and_website(
-                        titles=stale_titles,
+                        titles=titles_to_delete,
                         website_id=params.website_id,
                         tenant_id=crawl_context.tenant_id,
                     )
 
-                num_deleted_blobs = await execute_with_recovery(
+                return await execute_with_recovery(
                     container=container,
                     session_holder=session_holder,
                     created_sessions=created_sessions,
                     operation_name="stale_blob_cleanup",
                     operation=_do_stale_blob_cleanup,
                 )
-                if num_deleted_blobs > 0:
-                    logger.info(
-                        f"Batch deleted {num_deleted_blobs} stale blobs",
-                        extra={
-                            "website_id": str(params.website_id),
-                            "num_stale": len(stale_titles),
-                            "num_deleted": num_deleted_blobs,
-                        },
-                    )
-            else:
-                num_deleted_blobs = 0
+
+            cleanup_result = await cleanup_stale_blobs(
+                existing_titles=existing_titles,
+                must_keep_titles=must_keep_titles,
+                failed_titles=failed_titles,
+                cleanup_policy=cleanup_policy,
+                delete_stale_titles=_delete_stale_titles,
+            )
+            num_deleted_blobs = cleanup_result.deleted_count
+            if num_deleted_blobs > 0:
+                logger.info(
+                    f"Batch deleted {num_deleted_blobs} stale blobs",
+                    extra={
+                        "website_id": str(params.website_id),
+                        "num_stale": len(cleanup_result.stale_titles),
+                        "num_deleted": num_deleted_blobs,
+                    },
+                )
             timings["cleanup_deleted"] = time.time() - cleanup_start
 
             # Measure website size update with recovery wrapper
@@ -1882,6 +1456,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 # NOTE: Use crawl_context primitives, NOT detached ORM website object
                 from intric.database.tables.info_blobs_table import (
                     InfoBlobs as InfoBlobsTable,
+                )
+                from intric.database.tables.websites_table import (
+                    Websites as WebsitesTable,
                 )
 
                 update_size_stmt = (
@@ -1905,30 +1482,16 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             )
             timings["update_size"] = time.time() - update_start
 
-            # Use database server time for post-crawl website timestamps.
-            # NOTE: WebsitesTable already imported above for bootstrap phase
-
-            timestamp_fields = _website_timestamp_fields_after_crawl(
-                crawl_type=params.crawl_type,
-                crawl_is_partial=crawl_is_partial,
-                pages_failed=num_failed_pages,
-                files_failed=num_failed_files,
-            )
-            last_crawled_values = {field: sa.func.now() for field in timestamp_fields}
-
-            last_crawled_stmt = (
-                sa.update(WebsitesTable)
-                .where(WebsitesTable.id == params.website_id)
-                .where(
-                    WebsitesTable.tenant_id == crawl_context.tenant_id
-                )  # Tenant isolation
-                .values(**last_crawled_values)
-            )
-
             async def _do_timestamp_update(sess: AsyncSession) -> None:
-                # Session provided by execute_with_recovery (session-per-operation pattern)
-                # No need for transaction check - execute_with_recovery handles it
-                await sess.execute(last_crawled_stmt)
+                await update_website_timestamps_after_crawl(
+                    sess,
+                    website_id=params.website_id,
+                    tenant_id=crawl_context.tenant_id,
+                    crawl_type=params.crawl_type,
+                    crawl_is_partial=crawl_is_partial,
+                    pages_failed=num_failed_pages,
+                    files_failed=num_failed_files,
+                )
 
             await execute_with_recovery(
                 container=container,
@@ -2046,11 +1609,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 # the crawl_run or website stats since a new crawl should handle that
                 return {"status": "preempted", "pages_crawled": num_pages}
 
-            # Update crawl run with recovery wrapper
-            from intric.database.tables.websites_table import CrawlRuns
-
-            # Convert failure_counts defaultdict to regular dict for JSONB storage
-            # Only store if there are any failures
             failure_summary = dict(failure_counts) if failure_counts else None
             crawl_run_outcome_code = classify_crawl_outcome(
                 crawl_type=_crawl_type_for_outcome(params.crawl_type),
@@ -2067,35 +1625,51 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 files_failed=num_failed_files,
             )
 
-            async def _do_crawl_run_update(sess: AsyncSession) -> None:
-                # Session provided by execute_with_recovery (session-per-operation pattern)
-                stmt = (
-                    sa.update(CrawlRuns)
-                    .where(CrawlRuns.id == params.run_id)
-                    .values(
-                        pages_crawled=num_pages,
-                        files_downloaded=num_files,
-                        pages_failed=num_failed_pages,
-                        files_failed=num_failed_files,
-                        pages_source_retained=num_source_retained_pages,
-                        pages_hash_retained=num_hash_retained_pages,
-                        files_hash_retained=num_hash_retained_files,
-                        files_too_large_skipped=num_files_too_large_skipped,
-                        failure_summary=failure_summary,
-                        outcome_code=crawl_run_outcome_code.value
-                        if crawl_run_outcome_code is not None
-                        else None,
-                    )
+            task_manager.result_location = (
+                f"/api/v1/websites/{params.website_id}/info-blobs/"
+            )
+            terminal_finished_at = datetime.now(timezone.utc)
+
+            async def _do_terminal_completion_commit(sess: AsyncSession) -> None:
+                from intric.main.models import Status as JobStatus
+
+                await commit_terminal(
+                    sess,
+                    TerminalEvent(
+                        crawl_run_id=params.run_id,
+                        job_id=job_id,
+                        job_status=JobStatus.COMPLETE,
+                        outcome_code=crawl_run_outcome_code,
+                        finished_at=terminal_finished_at,
+                        result_location=task_manager.result_location,
+                        crawl_run_update=CrawlRunTerminalUpdate(
+                            pages_crawled=num_pages,
+                            files_downloaded=num_files,
+                            pages_failed=num_failed_pages,
+                            files_failed=num_failed_files,
+                            pages_source_retained=num_source_retained_pages,
+                            pages_hash_retained=num_hash_retained_pages,
+                            files_hash_retained=num_hash_retained_files,
+                            files_too_large_skipped=num_files_too_large_skipped,
+                            failure_summary=failure_summary,
+                        ),
+                    ),
                 )
-                await sess.execute(stmt)
+
+                logger.debug(
+                    "Job completed via terminal commit",
+                    extra={"job_id": str(job_id)},
+                )
 
             await execute_with_recovery(
                 container=container,
                 session_holder=session_holder,
                 created_sessions=created_sessions,
-                operation_name="crawl_run_update",
-                operation=_do_crawl_run_update,
+                operation_name="terminal_completion_commit",
+                operation=_do_terminal_completion_commit,
             )
+
+            task_manager.acknowledge_terminal_commit(successful=True)
 
             # Circuit breaker: Update failure tracking and exponential backoff
 
@@ -2106,7 +1680,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             crawl_successful = total_items > 0 and total_failed < total_items
 
             async def _do_circuit_breaker_update(sess: AsyncSession) -> None:
-                await _update_website_circuit_breaker(
+                await update_crawl_circuit_breaker(
                     sess,
                     website_id=params.website_id,
                     tenant_id=crawl_context.tenant_id,
@@ -2122,87 +1696,27 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 operation=_do_circuit_breaker_update,
             )
 
-            # Audit logging for website crawl
-            from intric.audit.domain.action_types import ActionType
-            from intric.audit.domain.entity_types import EntityType
-
-            audit_service = container.audit_service()
-
-            # Determine actor (crawl is typically triggered by a user or system)
-            # Use website owner or system actor
-            actor_id = (
-                website.user_id
-                if hasattr(website, "user_id") and website.user_id
-                else current_tenant.id
+            await record_crawl_audit(
+                container.audit_service(),
+                CrawlAuditPayload(
+                    tenant_id=crawl_context.tenant_id,
+                    website_id=params.website_id,
+                    website_url=website_url,
+                    website_name=website_name,
+                    website_owner_id=website_owner_id,
+                    pages_crawled=num_pages,
+                    pages_failed=num_failed_pages,
+                    pages_hash_retained=num_hash_retained_pages,
+                    pages_source_retained=num_source_retained_pages,
+                    files_downloaded=num_files,
+                    files_failed=num_failed_files,
+                    files_hash_retained=num_hash_retained_files,
+                    files_too_large_skipped=num_files_too_large_skipped,
+                    blobs_deleted=num_deleted_blobs,
+                    successful=crawl_successful,
+                    outcome_code=crawl_run_outcome_code,
+                ),
             )
-
-            await audit_service.log_async(
-                tenant_id=current_tenant.id,
-                actor_id=actor_id,
-                action=ActionType.WEBSITE_CRAWLED,
-                entity_type=EntityType.WEBSITE,
-                entity_id=params.website_id,
-                description=f"Website crawled: {website.url} - {'Success' if crawl_successful else 'Failed'}",
-                metadata={
-                    "target": {
-                        "website_id": str(params.website_id),
-                        "url": website.url,
-                        "name": getattr(website, "name", website.url),
-                    },
-                    "crawl_stats": {
-                        "pages_crawled": num_pages,
-                        "pages_failed": num_failed_pages,
-                        "pages_hash_retained": num_hash_retained_pages,
-                        "pages_source_retained": num_source_retained_pages,
-                        "files_downloaded": num_files,
-                        "files_failed": num_failed_files,
-                        "files_hash_retained": num_hash_retained_files,
-                        "files_too_large_skipped": num_files_too_large_skipped,
-                        "blobs_deleted": num_deleted_blobs,
-                        "successful": crawl_successful,
-                    },
-                },
-            )
-
-            task_manager.result_location = (
-                f"/api/v1/websites/{params.website_id}/info-blobs/"
-            )
-
-            # Complete job with session-per-operation pattern
-            async def _do_complete_job(sess: AsyncSession) -> None:
-                """Complete the job with session provided by execute_with_recovery."""
-                from intric.database.tables.job_table import Jobs
-                from intric.main.models import Status
-
-                stmt = (
-                    sa.update(Jobs)
-                    .where(Jobs.id == job_id)
-                    .values(
-                        status=Status.COMPLETE.value,
-                        finished_at=datetime.now(timezone.utc),
-                        result_location=task_manager.result_location,
-                    )
-                )
-                await sess.execute(stmt)
-                # No explicit commit - execute_with_recovery handles it
-
-                logger.debug(
-                    "Job completed via session-per-operation pattern",
-                    extra={"job_id": str(job_id)},
-                )
-
-            await execute_with_recovery(
-                container=container,
-                session_holder=session_holder,
-                created_sessions=created_sessions,
-                operation_name="complete_job",
-                operation=_do_complete_job,
-            )
-
-            # Signal task_manager to skip its complete_job() call
-            # Why: We've already completed the job with a fresh session above,
-            # and crawl_task intentionally runs TaskManager without job_service.
-            setattr(task_manager, "_job_already_handled", True)
 
         return task_manager.successful()
     except Retry:
@@ -2244,95 +1758,44 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             )
         raise
     finally:
-        # Primary path: normal release when everything worked
-        if limiter is not None and tenant is not None and acquired:
-            await limiter.release(tenant.id)
-            await reset_tenant_retry_delay(
-                tenant_id=tenant.id, redis_client=redis_client
-            )
-            # Delete pre-acquired flag after slot release
-            # Why: Flag must persist during crawl for heartbeat TTL refresh and watchdog crash recovery
-            # Deleting here (not earlier) ensures flag exists for entire crawl lifecycle
-            if redis_client and job_id:
-                try:
-                    await redis_client.delete(f"job:{job_id}:slot_preacquired")
-                except Exception:
-                    pass  # Best effort cleanup
-        # Fallback path: release pre-acquired slot if tenant injection failed
-        # This ensures we don't leak slots when the worker fails early
-        elif preacquired_tenant_id is not None and not acquired:
-            # Feeder acquired slot but we never set acquired=True
-            # Must release directly via Redis to prevent leak
-            logger.warning(
-                "Releasing pre-acquired slot due to early failure",
-                extra={
-                    "job_id": str(job_id),
-                    "tenant_id": str(preacquired_tenant_id),
-                    "reason": "tenant_injection_failed"
-                    if tenant is None
-                    else "acquired_not_set",
-                },
-            )
+        terminal_redis_client = redis_client
+        if terminal_redis_client is None:
             try:
-                # Try to get redis client if we don't have one
-                _fallback_redis = redis_client
-                if _fallback_redis is None:
-                    try:
-                        _fallback_redis = container.redis_client()
-                    except Exception:
-                        pass
-                if _fallback_redis is not None:
-                    release_key = f"tenant:{preacquired_tenant_id}:active_jobs"
-                    # Redis eval executes Lua script atomically (not Python eval)
-                    await cast(
-                        Any,
-                        _fallback_redis.eval(
-                            LuaScripts.RELEASE_SLOT,
-                            1,
-                            release_key,
-                            str(settings.tenant_worker_semaphore_ttl_seconds),
-                        ),
-                    )
-                    # Delete pre-acquired flag after fallback slot release
-                    if job_id:
-                        try:
-                            await _fallback_redis.delete(
-                                f"job:{job_id}:slot_preacquired"
-                            )
-                        except Exception:
-                            pass  # Best effort cleanup
-            except Exception as release_exc:
-                logger.error(
-                    "Failed to release pre-acquired slot in fallback",
-                    extra={
-                        "job_id": str(job_id),
-                        "tenant_id": str(preacquired_tenant_id),
-                        "error": str(release_exc),
-                    },
+                terminal_redis_client = container.redis_client()
+            except Exception as redis_exc:
+                logger.debug(
+                    "Could not resolve Redis client for crawl task terminal cleanup",
+                    extra={"job_id": str(job_id), "error": str(redis_exc)},
                 )
-        # Third fallback: emergency flag read when both paths unavailable
-        # Trigger: Both early Redis check AND tenant injection failed, leaving
-        # tenant=None and preacquired_tenant_id=None, which skips both paths above.
-        # This prevents slot leak until TTL in dual-failure scenarios.
-        # Safety: Watchdog deletes flag when releasing, so if flag exists, slot needs release.
-        elif (
-            tenant is None and preacquired_tenant_id is None and not acquired and job_id
-        ):
-            # Get redis client with fallback to container
-            _emergency_redis = redis_client
-            if _emergency_redis is None:
-                try:
-                    _emergency_redis = container.redis_client()
-                except Exception:
-                    pass
-            if _emergency_redis is not None:
-                capacity_mgr = CapacityManager(_emergency_redis, settings)
-                await capacity_mgr.emergency_release_slot(job_id)
+
+        slot_release = await release_crawl_slot_after_task(
+            CrawlSlotReleaseRequest(
+                job_id=job_id,
+                tenant_id=tenant.id if tenant is not None else None,
+                preacquired_tenant_id=preacquired_tenant_id,
+                acquired=acquired,
+            ),
+            limiter=limiter,
+            redis_client=terminal_redis_client,
+            settings=settings,
+        )
+        logger.debug(
+            "Crawl slot terminal release completed",
+            extra={
+                "job_id": str(job_id),
+                "tenant_id": str(tenant.id) if tenant is not None else None,
+                "preacquired_tenant_id": str(preacquired_tenant_id)
+                if preacquired_tenant_id is not None
+                else None,
+                "slot_release_path": slot_release.path.value,
+                "slot_released": slot_release.released,
+            },
+        )
 
         # Cleanup Redis retry counters to prevent memory leak
-        if redis_client and job_id:
+        if terminal_redis_client and job_id:
             try:
-                await redis_client.delete(
+                await terminal_redis_client.delete(
                     f"job:{job_id}:start_time", f"job:{job_id}:retry_count"
                 )
             except Exception:

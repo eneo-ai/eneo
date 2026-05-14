@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 from uuid import UUID
 
 from typing_extensions import TypedDict
@@ -31,6 +31,11 @@ from typing_extensions import TypedDict
 from intric.jobs.job_models import Task
 from intric.main.config import Settings
 from intric.main.logging import get_logger
+from intric.main.models import Status
+from intric.websites.domain.crawl_lifecycle import (
+    CrawlLifecycle,
+    derive_crawl_lifecycle_from_counters,
+)
 from intric.worker.redis.lua_scripts import LuaScripts
 
 if TYPE_CHECKING:
@@ -69,6 +74,72 @@ def _job_requeue_list() -> list[dict[str, UUID]]:
     return []
 
 
+class _WatchdogLifecycleRow(Protocol):
+    job_id: UUID
+    status: str
+    crawl_run_id: UUID
+    website_id: UUID
+    tenant_id: UUID
+    finished_at: datetime | None
+    pages_crawled: int | None
+    files_downloaded: int | None
+    pages_failed: int | None
+    files_failed: int | None
+    pages_source_retained: int | None
+    pages_hash_retained: int | None
+    files_hash_retained: int | None
+    files_too_large_skipped: int | None
+
+
+@dataclass
+class WatchdogLifecycleCounts:
+    """Lifecycle counts observed by watchdog cleanup without changing decisions."""
+
+    queued: int = 0
+    running_no_progress: int = 0
+    running_with_progress: int = 0
+    terminal: int = 0
+
+    def observe(self, lifecycle: CrawlLifecycle) -> None:
+        match lifecycle:
+            case CrawlLifecycle.QUEUED:
+                self.queued += 1
+            case CrawlLifecycle.RUNNING_NO_PROGRESS:
+                self.running_no_progress += 1
+            case CrawlLifecycle.RUNNING_WITH_PROGRESS:
+                self.running_with_progress += 1
+            case CrawlLifecycle.TERMINAL:
+                self.terminal += 1
+            case _:
+                raise AssertionError(f"Unknown crawl lifecycle: {lifecycle!r}")
+
+    def merge(self, other: "WatchdogLifecycleCounts") -> None:
+        self.queued += other.queued
+        self.running_no_progress += other.running_no_progress
+        self.running_with_progress += other.running_with_progress
+        self.terminal += other.terminal
+
+
+def _watchdog_lifecycle_counts() -> WatchdogLifecycleCounts:
+    return WatchdogLifecycleCounts()
+
+
+def _derive_watchdog_lifecycle(row: object) -> CrawlLifecycle:
+    lifecycle_row = cast(_WatchdogLifecycleRow, row)
+    return derive_crawl_lifecycle_from_counters(
+        status=Status(lifecycle_row.status),
+        finished_at=lifecycle_row.finished_at,
+        pages_crawled=lifecycle_row.pages_crawled,
+        files_downloaded=lifecycle_row.files_downloaded,
+        pages_failed=lifecycle_row.pages_failed,
+        files_failed=lifecycle_row.files_failed,
+        pages_source_retained=lifecycle_row.pages_source_retained,
+        pages_hash_retained=lifecycle_row.pages_hash_retained,
+        files_hash_retained=lifecycle_row.files_hash_retained,
+        files_too_large_skipped=lifecycle_row.files_too_large_skipped,
+    )
+
+
 @dataclass
 class Phase1Result:
     """Result of Phase 1: Kill expired jobs."""
@@ -92,6 +163,9 @@ class Phase3Result:
 
     failed_job_ids: list[UUID] = field(default_factory=_uuid_list)
     slots_to_release: list[SlotReleaseJob] = field(default_factory=_slot_release_list)
+    lifecycle_observed: WatchdogLifecycleCounts = field(
+        default_factory=_watchdog_lifecycle_counts
+    )
 
 
 @dataclass
@@ -108,6 +182,9 @@ class Phase3_5Result:
 
     failed_job_ids: list[UUID] = field(default_factory=_uuid_list)
     slots_to_release: list[SlotReleaseJob] = field(default_factory=_slot_release_list)
+    lifecycle_observed: WatchdogLifecycleCounts = field(
+        default_factory=_watchdog_lifecycle_counts
+    )
 
 
 @dataclass
@@ -120,6 +197,9 @@ class CleanupMetrics:
     early_zombies_failed: int = 0  # Phase 3.5: stalled startup jobs
     long_running_failed: int = 0
     slots_released: int = 0
+    lifecycle_observed: WatchdogLifecycleCounts = field(
+        default_factory=_watchdog_lifecycle_counts
+    )
 
 
 class Phase0ReconciliationResult(TypedDict):
@@ -181,11 +261,13 @@ class OrphanWatchdog:
                     session, now=now
                 )
                 metrics.early_zombies_failed = len(phase3_5_result.failed_job_ids)
+                metrics.lifecycle_observed.merge(phase3_5_result.lifecycle_observed)
                 slots_to_release.extend(phase3_5_result.slots_to_release)
 
                 # Phase 3: Fail long-running IN_PROGRESS jobs (with progress)
                 phase3_result = await self._fail_long_running_jobs(session, now=now)
                 metrics.long_running_failed = len(phase3_result.failed_job_ids)
+                metrics.lifecycle_observed.merge(phase3_result.lifecycle_observed)
                 slots_to_release.extend(phase3_result.slots_to_release)
 
                 # Transaction auto-commits on exit
@@ -419,6 +501,8 @@ class OrphanWatchdog:
         from intric.database.tables.job_table import Jobs
         from intric.database.tables.websites_table import CrawlRuns
         from intric.main.models import Status
+        from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
+        from intric.worker.crawl import TerminalBatchEvent, commit_terminal_batch
 
         max_age_seconds = self._settings.crawl_job_max_age_seconds or 7200
         max_age_cutoff = now - timedelta(seconds=max_age_seconds)
@@ -438,7 +522,11 @@ class OrphanWatchdog:
 
         # Get expired jobs WITH CrawlRuns (need tenant_id for slot release)
         expired_with_tenant_query = (
-            select(Jobs.id.label("job_id"), CrawlRuns.tenant_id)
+            select(
+                Jobs.id.label("job_id"),
+                CrawlRuns.id.label("crawl_run_id"),
+                CrawlRuns.tenant_id,
+            )
             .select_from(Jobs)
             .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
             .where(
@@ -454,8 +542,10 @@ class OrphanWatchdog:
 
         # Track jobs for slot release
         jobs_with_crawlrun: set[UUID] = set()
+        crawl_run_ids_with_expired_jobs: list[UUID] = []
         for row in expired_rows:
             result.expired_job_ids.append(row.job_id)
+            crawl_run_ids_with_expired_jobs.append(row.crawl_run_id)
             result.slots_to_release.append(
                 SlotReleaseJob(job_id=row.job_id, tenant_id=row.tenant_id)
             )
@@ -464,22 +554,49 @@ class OrphanWatchdog:
         # Identify orphaned jobs (no CrawlRun)
         result.orphaned_job_ids = list(all_expired_ids - jobs_with_crawlrun)
 
-        # Mark all expired jobs as FAILED
-        if all_expired_ids:
+        if result.expired_job_ids:
+            await commit_terminal_batch(
+                session,
+                TerminalBatchEvent(
+                    crawl_run_ids=tuple(crawl_run_ids_with_expired_jobs),
+                    job_ids=tuple(result.expired_job_ids),
+                    job_status=Status.FAILED,
+                    outcome_code=CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED,
+                    finished_at=now,
+                    result_location=(
+                        "Crawl stayed queued past the configured maximum age "
+                        "and was stopped"
+                    ),
+                    allowed_current_job_statuses=(Status.QUEUED,),
+                    only_set_crawl_outcome_if_missing=True,
+                ),
+            )
+
+        if result.orphaned_job_ids:
+            # Orphaned job rows have no CrawlRun, so they cannot be represented as
+            # TerminalBatchEvent. Keep this cleanup explicit and Job-only.
             kill_stmt = (
                 update(Jobs)
                 .where(
                     and_(
                         Jobs.task == Task.CRAWL.value,
                         Jobs.status == Status.QUEUED,
-                        Jobs.created_at < max_age_cutoff,
+                        Jobs.id.in_(result.orphaned_job_ids),
                     )
                 )
-                .values(status=Status.FAILED, updated_at=now)
+                .values(
+                    status=Status.FAILED,
+                    updated_at=now,
+                    finished_at=now,
+                    result_location=(
+                        "Expired queued crawl job had no crawl run and was stopped"
+                    ),
+                )
                 .execution_options(synchronize_session=False)
             )
             await session.execute(kill_stmt)
 
+        if all_expired_ids:
             # Log Phase 1 metrics for observability
             logger.info(
                 "Phase 1: Killed expired QUEUED jobs",
@@ -738,12 +855,13 @@ class OrphanWatchdog:
         Returns:
             Phase3_5Result with jobs to release slots for.
         """
-        from sqlalchemy import and_, or_, select, update
+        from sqlalchemy import and_, or_, select
 
         from intric.database.tables.job_table import Jobs
         from intric.database.tables.websites_table import CrawlRuns
         from intric.main.models import Status
         from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
+        from intric.worker.crawl import TerminalBatchEvent, commit_terminal_batch
 
         # Use heartbeat-aligned threshold: 3 × heartbeat_interval = ~15 minutes
         # This aligns with crawl_heartbeat_max_failures × crawl_heartbeat_interval_seconds
@@ -760,8 +878,19 @@ class OrphanWatchdog:
         query = (
             select(
                 Jobs.id.label("job_id"),
+                Jobs.status.label("status"),
+                Jobs.finished_at.label("finished_at"),
                 CrawlRuns.tenant_id,
                 CrawlRuns.id.label("crawl_run_id"),
+                CrawlRuns.website_id,
+                CrawlRuns.pages_crawled,
+                CrawlRuns.files_downloaded,
+                CrawlRuns.pages_failed,
+                CrawlRuns.files_failed,
+                CrawlRuns.pages_source_retained,
+                CrawlRuns.pages_hash_retained,
+                CrawlRuns.files_hash_retained,
+                CrawlRuns.files_too_large_skipped,
             )
             .select_from(Jobs)
             .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
@@ -781,47 +910,12 @@ class OrphanWatchdog:
         stalled_jobs = query_result.fetchall()
 
         if stalled_jobs:
-            stalled_job_ids = [row.job_id for row in stalled_jobs]
-
-            logger.info(
-                "Phase 3.5: Found stalled startup jobs (early zombies)",
-                extra={
-                    "count": len(stalled_job_ids),
-                    "startup_timeout_seconds": startup_timeout_seconds,
-                    "job_ids": [str(jid) for jid in stalled_job_ids[:5]],  # Log first 5
-                },
-            )
-
-            # Mark as FAILED
-            failure_message = (
-                "Crawl stalled before collecting pages: no crawler heartbeat "
-                f"for {startup_timeout_seconds} seconds"
-            )
-            fail_stmt = (
-                update(Jobs)
-                .where(Jobs.id.in_(stalled_job_ids))
-                .values(
-                    status=Status.FAILED,
-                    updated_at=now,
-                    finished_at=now,
-                    result_location=failure_message,
-                )
-                .execution_options(synchronize_session=False)
-            )
-            await session.execute(fail_stmt)
-
-            crawl_run_ids = [row.crawl_run_id for row in stalled_jobs]
-            crawl_run_stmt = (
-                update(CrawlRuns)
-                .where(CrawlRuns.id.in_(crawl_run_ids))
-                .where(CrawlRuns.outcome_code.is_(None))
-                .values(outcome_code=CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES.value)
-                .execution_options(synchronize_session=False)
-            )
-            await session.execute(crawl_run_stmt)
-
-            # Track for slot release (IN_PROGRESS jobs definitely had a slot)
+            stalled_job_ids: list[UUID] = []
+            crawl_run_ids: list[UUID] = []
             for row in stalled_jobs:
+                stalled_job_ids.append(row.job_id)
+                crawl_run_ids.append(row.crawl_run_id)
+                result.lifecycle_observed.observe(_derive_watchdog_lifecycle(row))
                 result.failed_job_ids.append(row.job_id)
                 result.slots_to_release.append(
                     SlotReleaseJob(
@@ -830,6 +924,34 @@ class OrphanWatchdog:
                         was_in_progress=True,
                     )
                 )
+
+            logger.info(
+                "Phase 3.5: Found stalled startup jobs (early zombies)",
+                extra={
+                    "count": len(stalled_job_ids),
+                    "startup_timeout_seconds": startup_timeout_seconds,
+                    "job_ids": [str(jid) for jid in stalled_job_ids[:5]],  # Log first 5
+                    "lifecycle_observed": asdict(result.lifecycle_observed),
+                },
+            )
+
+            failure_message = (
+                "Crawl stalled before collecting pages: no crawler heartbeat "
+                f"for {startup_timeout_seconds} seconds"
+            )
+            await commit_terminal_batch(
+                session,
+                TerminalBatchEvent(
+                    crawl_run_ids=tuple(crawl_run_ids),
+                    job_ids=tuple(stalled_job_ids),
+                    job_status=Status.FAILED,
+                    outcome_code=CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES,
+                    finished_at=now,
+                    result_location=failure_message,
+                    allowed_current_job_statuses=(Status.IN_PROGRESS,),
+                    only_set_crawl_outcome_if_missing=True,
+                ),
+            )
 
         return result
 
@@ -848,11 +970,13 @@ class OrphanWatchdog:
         Returns:
             Phase3Result with jobs to release slots for.
         """
-        from sqlalchemy import and_, select, update
+        from sqlalchemy import and_, select
 
         from intric.database.tables.job_table import Jobs
         from intric.database.tables.websites_table import CrawlRuns
         from intric.main.models import Status
+        from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
+        from intric.worker.crawl import TerminalBatchEvent, commit_terminal_batch
 
         timeout_hours = self._settings.orphan_crawl_run_timeout_hours
         timeout_cutoff = now - timedelta(hours=timeout_hours)
@@ -861,7 +985,22 @@ class OrphanWatchdog:
 
         # Find long-running jobs
         query = (
-            select(Jobs.id.label("job_id"), CrawlRuns.tenant_id)
+            select(
+                Jobs.id.label("job_id"),
+                Jobs.status.label("status"),
+                Jobs.finished_at.label("finished_at"),
+                CrawlRuns.id.label("crawl_run_id"),
+                CrawlRuns.tenant_id,
+                CrawlRuns.website_id,
+                CrawlRuns.pages_crawled,
+                CrawlRuns.files_downloaded,
+                CrawlRuns.pages_failed,
+                CrawlRuns.files_failed,
+                CrawlRuns.pages_source_retained,
+                CrawlRuns.pages_hash_retained,
+                CrawlRuns.files_hash_retained,
+                CrawlRuns.files_too_large_skipped,
+            )
             .select_from(Jobs)
             .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
             .where(
@@ -876,39 +1015,12 @@ class OrphanWatchdog:
         stale_jobs = query_result.fetchall()
 
         if stale_jobs:
-            stale_job_ids = [row.job_id for row in stale_jobs]
-            from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
-
-            failure_message = (
-                "Crawl exceeded the maximum runtime "
-                f"of {timeout_hours} hours and was stopped"
-            )
-
-            # Mark as FAILED
-            fail_stmt = (
-                update(Jobs)
-                .where(Jobs.id.in_(stale_job_ids))
-                .values(
-                    status=Status.FAILED,
-                    updated_at=now,
-                    finished_at=now,
-                    result_location=failure_message,
-                )
-                .execution_options(synchronize_session=False)
-            )
-            await session.execute(fail_stmt)
-
-            crawl_run_stmt = (
-                update(CrawlRuns)
-                .where(CrawlRuns.job_id.in_(stale_job_ids))
-                .where(CrawlRuns.outcome_code.is_(None))
-                .values(outcome_code=CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED.value)
-                .execution_options(synchronize_session=False)
-            )
-            await session.execute(crawl_run_stmt)
-
-            # Track for slot release (IN_PROGRESS jobs definitely had a slot)
+            stale_job_ids: list[UUID] = []
+            crawl_run_ids: list[UUID] = []
             for row in stale_jobs:
+                stale_job_ids.append(row.job_id)
+                crawl_run_ids.append(row.crawl_run_id)
+                result.lifecycle_observed.observe(_derive_watchdog_lifecycle(row))
                 result.failed_job_ids.append(row.job_id)
                 result.slots_to_release.append(
                     SlotReleaseJob(
@@ -917,6 +1029,34 @@ class OrphanWatchdog:
                         was_in_progress=True,
                     )
                 )
+
+            logger.info(
+                "Phase 3: Found long-running crawl jobs",
+                extra={
+                    "count": len(stale_job_ids),
+                    "timeout_hours": timeout_hours,
+                    "job_ids": [str(jid) for jid in stale_job_ids[:5]],
+                    "lifecycle_observed": asdict(result.lifecycle_observed),
+                },
+            )
+
+            failure_message = (
+                "Crawl exceeded the maximum runtime "
+                f"of {timeout_hours} hours and was stopped"
+            )
+            await commit_terminal_batch(
+                session,
+                TerminalBatchEvent(
+                    crawl_run_ids=tuple(crawl_run_ids),
+                    job_ids=tuple(stale_job_ids),
+                    job_status=Status.FAILED,
+                    outcome_code=CrawlOutcomeCode.CRAWL_RUNTIME_TIMEOUT,
+                    finished_at=now,
+                    result_location=failure_message,
+                    allowed_current_job_statuses=(Status.IN_PROGRESS,),
+                    only_set_crawl_outcome_if_missing=True,
+                ),
+            )
 
         return result
 
@@ -1008,6 +1148,7 @@ class OrphanWatchdog:
                     "early_zombies_failed": metrics.early_zombies_failed,
                     "long_running_failed": metrics.long_running_failed,
                     "slots_released": metrics.slots_released,
+                    "lifecycle_observed": asdict(metrics.lifecycle_observed),
                 },
             )
 

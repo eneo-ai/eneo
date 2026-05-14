@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, cast
 from uuid import UUID
 
@@ -60,6 +60,7 @@ from intric.server.dependencies.container import (
 )
 from intric.server.dependencies.get_repository import get_repository
 from intric.server.protocol import responses
+from intric.sysadmin.sysadmin_models import CrawlerBaselineResponse
 from intric.sysadmin.sysadmin_service import SysAdminService
 from intric.tenants.tenant import (
     TenantBase,
@@ -67,6 +68,7 @@ from intric.tenants.tenant import (
     TenantWithMaskedCredentials,
 )
 from intric.users.user import UserAddSuperAdmin, UserCreated, UserInDB, UserUpdatePublic
+from intric.websites.domain.crawl_run_repo import CrawlRunRepository
 from intric.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direct
 
 logger = get_logger(__name__)
@@ -452,6 +454,34 @@ async def crawl_all_weekly_websites(
     sysadmin_service = SysAdminService()
 
     return await sysadmin_service.run_crawl_on_weekly_websites()
+
+
+@router.get(
+    "/crawler/baseline",
+    response_model=CrawlerBaselineResponse,
+    summary="Get crawler reliability baseline metrics",
+)
+async def get_crawler_baseline(
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+    days: Annotated[int, Query(ge=1, le=30)] = 7,
+    tenant_id: Annotated[UUID | None, Query()] = None,
+    until: Annotated[datetime | None, Query()] = None,
+) -> CrawlerBaselineResponse:
+    until_at = until or datetime.now(timezone.utc)
+    if until_at.tzinfo is None:
+        until_at = until_at.replace(tzinfo=timezone.utc)
+    since = until_at - timedelta(days=days)
+
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        repo = CrawlRunRepository(session=session)
+        metrics = await repo.aggregate_baseline(
+            since=since,
+            until=until_at,
+            window_days=days,
+            tenant_id=tenant_id,
+        )
+    return CrawlerBaselineResponse.from_domain(metrics)
 
 
 def _mask_actor_label() -> str:

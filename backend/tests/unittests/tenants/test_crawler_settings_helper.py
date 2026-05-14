@@ -10,6 +10,7 @@ import pytest
 
 from intric.tenants.crawler_settings_helper import (
     CRAWLER_SETTING_SPECS,
+    CrawlerSettingSpec,
     TenantCrawlerSettings,
     get_all_crawler_settings,
     get_crawler_setting,
@@ -20,25 +21,29 @@ from intric.tenants.crawler_settings_helper import (
 class TestCrawlerSettingSpecs:
     """Tests for CRAWLER_SETTING_SPECS structure."""
 
+    def test_specs_are_typed_value_objects(self):
+        for name, spec in CRAWLER_SETTING_SPECS.items():
+            assert isinstance(spec, CrawlerSettingSpec), name
+
     def test_all_settings_have_required_fields(self):
         """Every setting spec has type field at minimum."""
         for name, spec in CRAWLER_SETTING_SPECS.items():
-            assert "type" in spec, f"{name} missing 'type' field"
-            assert "description" in spec, f"{name} missing 'description' field"
+            assert spec.value_type in (int, bool), f"{name} missing value type"
+            assert spec.description, f"{name} missing description"
 
     def test_integer_settings_have_ranges(self):
         """Integer settings should have min/max constraints."""
         for name, spec in CRAWLER_SETTING_SPECS.items():
-            if spec["type"] == int:
-                assert "min" in spec, f"{name} missing 'min' field"
-                assert "max" in spec, f"{name} missing 'max' field"
-                assert spec["min"] <= spec["max"], f"{name} min > max"
+            if spec.value_type == int:
+                assert spec.min is not None, f"{name} missing min"
+                assert spec.max is not None, f"{name} missing max"
+                assert spec.min <= spec.max, f"{name} min > max"
 
     def test_all_settings_have_default_source(self):
         """Every setting must have either 'default' or 'env_attr'."""
         for name, spec in CRAWLER_SETTING_SPECS.items():
-            has_default = "default" in spec
-            has_env_attr = "env_attr" in spec
+            has_default = spec.default is not None
+            has_env_attr = spec.env_attr is not None
             assert has_default or has_env_attr, f"{name} needs 'default' or 'env_attr'"
 
     def test_expected_settings_count(self):
@@ -120,6 +125,9 @@ class TestGetCrawlerSetting:
             mock_settings.crawl_feeder_interval_seconds = 10
             mock_settings.crawl_feeder_batch_size = 10
             mock_settings.crawl_job_max_age_seconds = 1800
+            mock_settings.tenant_worker_semaphore_ttl_seconds = 18000
+            mock_settings.crawl_page_batch_size = 100
+            mock_settings.crawl_sitemap_lastmod_skip_enabled = False
             mock.return_value = mock_settings
 
             for setting in CRAWLER_SETTING_SPECS.keys():

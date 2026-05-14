@@ -17,55 +17,55 @@ class EffectiveCrawlerSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     crawl_max_length: int = Field(
-        ..., description=_SPECS["crawl_max_length"]["description"]
+        ..., description=_SPECS["crawl_max_length"].description
     )
     download_timeout: int = Field(
-        ..., description=_SPECS["download_timeout"]["description"]
+        ..., description=_SPECS["download_timeout"].description
     )
     download_max_size: int = Field(
-        ..., description=_SPECS["download_max_size"]["description"]
+        ..., description=_SPECS["download_max_size"].description
     )
-    dns_timeout: int = Field(..., description=_SPECS["dns_timeout"]["description"])
-    retry_times: int = Field(..., description=_SPECS["retry_times"]["description"])
+    dns_timeout: int = Field(..., description=_SPECS["dns_timeout"].description)
+    retry_times: int = Field(..., description=_SPECS["retry_times"].description)
     closespider_itemcount: int = Field(
-        ..., description=_SPECS["closespider_itemcount"]["description"]
+        ..., description=_SPECS["closespider_itemcount"].description
     )
-    obey_robots: bool = Field(..., description=_SPECS["obey_robots"]["description"])
+    obey_robots: bool = Field(..., description=_SPECS["obey_robots"].description)
     autothrottle_enabled: bool = Field(
-        ..., description=_SPECS["autothrottle_enabled"]["description"]
+        ..., description=_SPECS["autothrottle_enabled"].description
     )
     tenant_worker_concurrency_limit: int = Field(
-        ..., description=_SPECS["tenant_worker_concurrency_limit"]["description"]
+        ..., description=_SPECS["tenant_worker_concurrency_limit"].description
     )
     crawl_stale_threshold_minutes: int = Field(
-        ..., description=_SPECS["crawl_stale_threshold_minutes"]["description"]
+        ..., description=_SPECS["crawl_stale_threshold_minutes"].description
     )
     queued_stale_threshold_minutes: int = Field(
-        ..., description=_SPECS["queued_stale_threshold_minutes"]["description"]
+        ..., description=_SPECS["queued_stale_threshold_minutes"].description
     )
     crawl_heartbeat_interval_seconds: int = Field(
-        ..., description=_SPECS["crawl_heartbeat_interval_seconds"]["description"]
+        ..., description=_SPECS["crawl_heartbeat_interval_seconds"].description
     )
     crawl_feeder_enabled: bool = Field(
-        ..., description=_SPECS["crawl_feeder_enabled"]["description"]
+        ..., description=_SPECS["crawl_feeder_enabled"].description
     )
     crawl_feeder_interval_seconds: int = Field(
-        ..., description=_SPECS["crawl_feeder_interval_seconds"]["description"]
+        ..., description=_SPECS["crawl_feeder_interval_seconds"].description
     )
     crawl_feeder_batch_size: int = Field(
-        ..., description=_SPECS["crawl_feeder_batch_size"]["description"]
+        ..., description=_SPECS["crawl_feeder_batch_size"].description
     )
     crawl_job_max_age_seconds: int = Field(
-        ..., description=_SPECS["crawl_job_max_age_seconds"]["description"]
+        ..., description=_SPECS["crawl_job_max_age_seconds"].description
     )
     tenant_worker_semaphore_ttl_seconds: int = Field(
-        ..., description=_SPECS["tenant_worker_semaphore_ttl_seconds"]["description"]
+        ..., description=_SPECS["tenant_worker_semaphore_ttl_seconds"].description
     )
     crawl_page_batch_size: int = Field(
-        ..., description=_SPECS["crawl_page_batch_size"]["description"]
+        ..., description=_SPECS["crawl_page_batch_size"].description
     )
     crawl_sitemap_lastmod_skip_enabled: bool = Field(
-        ..., description=_SPECS["crawl_sitemap_lastmod_skip_enabled"]["description"]
+        ..., description=_SPECS["crawl_sitemap_lastmod_skip_enabled"].description
     )
 
 
@@ -74,109 +74,109 @@ class CrawlerSettingsUpdate(BaseModel):
 
     crawl_max_length: int | None = Field(
         None,
-        ge=_SPECS["crawl_max_length"]["min"],
-        le=_SPECS["crawl_max_length"]["max"],
-        description=_SPECS["crawl_max_length"]["description"],
+        ge=_SPECS["crawl_max_length"].min,
+        le=_SPECS["crawl_max_length"].max,
+        description=_SPECS["crawl_max_length"].description,
     )
     download_timeout: int | None = Field(
         None,
-        ge=_SPECS["download_timeout"]["min"],
-        le=_SPECS["download_timeout"]["max"],
-        description=_SPECS["download_timeout"]["description"],
+        ge=_SPECS["download_timeout"].min,
+        le=_SPECS["download_timeout"].max,
+        description=_SPECS["download_timeout"].description,
     )
     download_max_size: int | None = Field(
         None,
-        ge=_SPECS["download_max_size"]["min"],
-        le=_SPECS["download_max_size"]["max"],
-        description=_SPECS["download_max_size"]["description"],
+        ge=_SPECS["download_max_size"].min,
+        le=_SPECS["download_max_size"].max,
+        description=_SPECS["download_max_size"].description,
     )
     dns_timeout: int | None = Field(
         None,
-        ge=_SPECS["dns_timeout"]["min"],
-        le=_SPECS["dns_timeout"]["max"],
-        description=_SPECS["dns_timeout"]["description"],
+        ge=_SPECS["dns_timeout"].min,
+        le=_SPECS["dns_timeout"].max,
+        description=_SPECS["dns_timeout"].description,
     )
     retry_times: int | None = Field(
         None,
-        ge=_SPECS["retry_times"]["min"],
-        le=_SPECS["retry_times"]["max"],
-        description=_SPECS["retry_times"]["description"],
+        ge=_SPECS["retry_times"].min,
+        le=_SPECS["retry_times"].max,
+        description=_SPECS["retry_times"].description,
     )
     closespider_itemcount: int | None = Field(
         None,
-        ge=_SPECS["closespider_itemcount"]["min"],
-        le=_SPECS["closespider_itemcount"]["max"],
-        description=_SPECS["closespider_itemcount"]["description"],
+        ge=_SPECS["closespider_itemcount"].min,
+        le=_SPECS["closespider_itemcount"].max,
+        description=_SPECS["closespider_itemcount"].description,
     )
     obey_robots: bool | None = Field(
         None,
-        description=_SPECS["obey_robots"]["description"],
+        description=_SPECS["obey_robots"].description,
     )
     autothrottle_enabled: bool | None = Field(
         None,
-        description=_SPECS["autothrottle_enabled"]["description"],
+        description=_SPECS["autothrottle_enabled"].description,
     )
     tenant_worker_concurrency_limit: int | None = Field(
         None,
-        ge=_SPECS["tenant_worker_concurrency_limit"]["min"],
-        le=_SPECS["tenant_worker_concurrency_limit"]["max"],
-        description=_SPECS["tenant_worker_concurrency_limit"]["description"],
+        ge=_SPECS["tenant_worker_concurrency_limit"].min,
+        le=_SPECS["tenant_worker_concurrency_limit"].max,
+        description=_SPECS["tenant_worker_concurrency_limit"].description,
     )
     crawl_stale_threshold_minutes: int | None = Field(
         None,
-        ge=_SPECS["crawl_stale_threshold_minutes"]["min"],
-        le=_SPECS["crawl_stale_threshold_minutes"]["max"],
-        description=_SPECS["crawl_stale_threshold_minutes"]["description"],
+        ge=_SPECS["crawl_stale_threshold_minutes"].min,
+        le=_SPECS["crawl_stale_threshold_minutes"].max,
+        description=_SPECS["crawl_stale_threshold_minutes"].description,
     )
     queued_stale_threshold_minutes: int | None = Field(
         None,
-        ge=_SPECS["queued_stale_threshold_minutes"]["min"],
-        le=_SPECS["queued_stale_threshold_minutes"]["max"],
-        description=_SPECS["queued_stale_threshold_minutes"]["description"],
+        ge=_SPECS["queued_stale_threshold_minutes"].min,
+        le=_SPECS["queued_stale_threshold_minutes"].max,
+        description=_SPECS["queued_stale_threshold_minutes"].description,
     )
     crawl_heartbeat_interval_seconds: int | None = Field(
         None,
-        ge=_SPECS["crawl_heartbeat_interval_seconds"]["min"],
-        le=_SPECS["crawl_heartbeat_interval_seconds"]["max"],
-        description=_SPECS["crawl_heartbeat_interval_seconds"]["description"],
+        ge=_SPECS["crawl_heartbeat_interval_seconds"].min,
+        le=_SPECS["crawl_heartbeat_interval_seconds"].max,
+        description=_SPECS["crawl_heartbeat_interval_seconds"].description,
     )
     crawl_feeder_enabled: bool | None = Field(
         None,
-        description=_SPECS["crawl_feeder_enabled"]["description"],
+        description=_SPECS["crawl_feeder_enabled"].description,
     )
     crawl_feeder_interval_seconds: int | None = Field(
         None,
-        ge=_SPECS["crawl_feeder_interval_seconds"]["min"],
-        le=_SPECS["crawl_feeder_interval_seconds"]["max"],
-        description=_SPECS["crawl_feeder_interval_seconds"]["description"],
+        ge=_SPECS["crawl_feeder_interval_seconds"].min,
+        le=_SPECS["crawl_feeder_interval_seconds"].max,
+        description=_SPECS["crawl_feeder_interval_seconds"].description,
     )
     crawl_feeder_batch_size: int | None = Field(
         None,
-        ge=_SPECS["crawl_feeder_batch_size"]["min"],
-        le=_SPECS["crawl_feeder_batch_size"]["max"],
-        description=_SPECS["crawl_feeder_batch_size"]["description"],
+        ge=_SPECS["crawl_feeder_batch_size"].min,
+        le=_SPECS["crawl_feeder_batch_size"].max,
+        description=_SPECS["crawl_feeder_batch_size"].description,
     )
     crawl_job_max_age_seconds: int | None = Field(
         None,
-        ge=_SPECS["crawl_job_max_age_seconds"]["min"],
-        le=_SPECS["crawl_job_max_age_seconds"]["max"],
-        description=_SPECS["crawl_job_max_age_seconds"]["description"],
+        ge=_SPECS["crawl_job_max_age_seconds"].min,
+        le=_SPECS["crawl_job_max_age_seconds"].max,
+        description=_SPECS["crawl_job_max_age_seconds"].description,
     )
     tenant_worker_semaphore_ttl_seconds: int | None = Field(
         None,
-        ge=_SPECS["tenant_worker_semaphore_ttl_seconds"]["min"],
-        le=_SPECS["tenant_worker_semaphore_ttl_seconds"]["max"],
-        description=_SPECS["tenant_worker_semaphore_ttl_seconds"]["description"],
+        ge=_SPECS["tenant_worker_semaphore_ttl_seconds"].min,
+        le=_SPECS["tenant_worker_semaphore_ttl_seconds"].max,
+        description=_SPECS["tenant_worker_semaphore_ttl_seconds"].description,
     )
     crawl_page_batch_size: int | None = Field(
         None,
-        ge=_SPECS["crawl_page_batch_size"]["min"],
-        le=_SPECS["crawl_page_batch_size"]["max"],
-        description=_SPECS["crawl_page_batch_size"]["description"],
+        ge=_SPECS["crawl_page_batch_size"].min,
+        le=_SPECS["crawl_page_batch_size"].max,
+        description=_SPECS["crawl_page_batch_size"].description,
     )
     crawl_sitemap_lastmod_skip_enabled: bool | None = Field(
         None,
-        description=_SPECS["crawl_sitemap_lastmod_skip_enabled"]["description"],
+        description=_SPECS["crawl_sitemap_lastmod_skip_enabled"].description,
     )
 
 
@@ -185,45 +185,45 @@ class CrawlerSettingsSelfServiceUpdate(BaseModel):
 
     crawl_sitemap_lastmod_skip_enabled: bool | None = Field(
         None,
-        description=_SPECS["crawl_sitemap_lastmod_skip_enabled"]["description"],
+        description=_SPECS["crawl_sitemap_lastmod_skip_enabled"].description,
     )
     obey_robots: bool | None = Field(
         None,
-        description=_SPECS["obey_robots"]["description"],
+        description=_SPECS["obey_robots"].description,
     )
     autothrottle_enabled: bool | None = Field(
         None,
-        description=_SPECS["autothrottle_enabled"]["description"],
+        description=_SPECS["autothrottle_enabled"].description,
     )
     download_max_size: int | None = Field(
         None,
-        ge=_SPECS["download_max_size"]["min"],
-        le=_SPECS["download_max_size"]["max"],
-        description=_SPECS["download_max_size"]["description"],
+        ge=_SPECS["download_max_size"].min,
+        le=_SPECS["download_max_size"].max,
+        description=_SPECS["download_max_size"].description,
     )
     download_timeout: int | None = Field(
         None,
-        ge=_SPECS["download_timeout"]["min"],
-        le=_SPECS["download_timeout"]["max"],
-        description=_SPECS["download_timeout"]["description"],
+        ge=_SPECS["download_timeout"].min,
+        le=_SPECS["download_timeout"].max,
+        description=_SPECS["download_timeout"].description,
     )
     dns_timeout: int | None = Field(
         None,
-        ge=_SPECS["dns_timeout"]["min"],
-        le=_SPECS["dns_timeout"]["max"],
-        description=_SPECS["dns_timeout"]["description"],
+        ge=_SPECS["dns_timeout"].min,
+        le=_SPECS["dns_timeout"].max,
+        description=_SPECS["dns_timeout"].description,
     )
     retry_times: int | None = Field(
         None,
-        ge=_SPECS["retry_times"]["min"],
-        le=_SPECS["retry_times"]["max"],
-        description=_SPECS["retry_times"]["description"],
+        ge=_SPECS["retry_times"].min,
+        le=_SPECS["retry_times"].max,
+        description=_SPECS["retry_times"].description,
     )
     closespider_itemcount: int | None = Field(
         None,
-        ge=_SPECS["closespider_itemcount"]["min"],
-        le=_SPECS["closespider_itemcount"]["max"],
-        description=_SPECS["closespider_itemcount"]["description"],
+        ge=_SPECS["closespider_itemcount"].min,
+        le=_SPECS["closespider_itemcount"].max,
+        description=_SPECS["closespider_itemcount"].description,
     )
 
 

@@ -9,16 +9,18 @@ It defines types, validation ranges, defaults, and descriptions.
 All consumers (tenant.py validator, router Pydantic model) should import from here.
 """
 
+import logging
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Literal, TypeVar, cast, get_args, overload
+from typing import Literal, TypeVar, get_args, overload
 from uuid import UUID
 
 from intric.main.config import get_settings
 
 T = TypeVar("T")
 CrawlerSettingValue = int | bool
+CrawlerSettingValueType = type[int] | type[bool]
 
 # Setting names grouped by their declared spec type. Keep in sync with
 # CRAWLER_SETTING_SPECS below.
@@ -53,134 +55,145 @@ CrawlerSetting = IntCrawlerSetting | BoolCrawlerSetting
 # This ensures the flag doesn't expire before watchdog can kill stale jobs
 TTL_MAX_AGE_BUFFER_SECONDS = 300
 
+
+@dataclass(frozen=True, slots=True)
+class CrawlerSettingSpec:
+    value_type: CrawlerSettingValueType
+    description: str
+    min: int | None = None
+    max: int | None = None
+    default: CrawlerSettingValue | None = None
+    env_attr: str | None = None
+
+
 # Single source of truth for all crawler settings
 # Used by: get_crawler_setting(), get_all_crawler_settings(), tenant.py validator, router
-CRAWLER_SETTING_SPECS: dict[str, dict[str, Any]] = {
-    "crawl_max_length": {
-        "type": int,
-        "min": 60,
-        "max": 86400,
-        "env_attr": "crawl_max_length",
-        "description": "Maximum crawl duration in seconds (1 min to 24 hours)",
-    },
-    "download_timeout": {
-        "type": int,
-        "min": 10,
-        "max": 300,
-        "default": 90,
-        "description": "Per-request download timeout in seconds (10s to 5 min)",
-    },
-    "download_max_size": {
-        "type": int,
-        "min": 1048576,
-        "max": 1073741824,
-        "env_attr": "download_max_size",
-        "description": "Maximum file size for crawler downloads in bytes (1MB to 1GB)",
-    },
-    "dns_timeout": {
-        "type": int,
-        "min": 5,
-        "max": 120,
-        "default": 30,
-        "description": "DNS resolution timeout in seconds (5s to 2 min)",
-    },
-    "retry_times": {
-        "type": int,
-        "min": 0,
-        "max": 10,
-        "default": 2,
-        "description": "Number of retry attempts per request (0 to 10)",
-    },
-    "closespider_itemcount": {
-        "type": int,
-        "min": 100,
-        "max": 100000,
-        "env_attr": "closespider_itemcount",
-        "description": "Maximum pages to crawl before stopping (100 to 100k)",
-    },
-    "obey_robots": {
-        "type": bool,
-        "env_attr": "obey_robots",
-        "description": "Whether to respect robots.txt rules",
-    },
-    "autothrottle_enabled": {
-        "type": bool,
-        "env_attr": "autothrottle_enabled",
-        "description": "Enable automatic request throttling based on server response times",
-    },
-    "tenant_worker_concurrency_limit": {
-        "type": int,
-        "min": 0,
-        "max": 50,
-        "env_attr": "tenant_worker_concurrency_limit",
-        "description": "Maximum concurrent crawl jobs per tenant (0 = unlimited, 1 to 50)",
-    },
-    "crawl_stale_threshold_minutes": {
-        "type": int,
-        "min": 5,
-        "max": 1440,
-        "env_attr": "crawl_stale_threshold_minutes",
-        "description": "Minutes without activity before IN_PROGRESS job is considered stale (5 min to 24 hours)",
-    },
-    "queued_stale_threshold_minutes": {
-        "type": int,
-        "min": 1,
-        "max": 60,
-        "default": 5,
-        "description": "Minutes before QUEUED job is considered orphaned and allows new crawl (1 to 60 min)",
-    },
-    "crawl_heartbeat_interval_seconds": {
-        "type": int,
-        "min": 30,
-        "max": 3600,
-        "env_attr": "crawl_heartbeat_interval_seconds",
-        "description": "Heartbeat interval to signal job is alive (30s to 1 hour)",
-    },
-    "crawl_feeder_enabled": {
-        "type": bool,
-        "env_attr": "crawl_feeder_enabled",
-        "description": "Enable crawl feeder service for rate-limited job enqueueing",
-    },
-    "crawl_feeder_interval_seconds": {
-        "type": int,
-        "min": 5,
-        "max": 300,
-        "env_attr": "crawl_feeder_interval_seconds",
-        "description": "Feeder check interval in seconds (5s to 5 min)",
-    },
-    "crawl_feeder_batch_size": {
-        "type": int,
-        "min": 1,
-        "max": 100,
-        "env_attr": "crawl_feeder_batch_size",
-        "description": "Maximum jobs to enqueue per feeder cycle per tenant (1 to 100)",
-    },
-    "crawl_job_max_age_seconds": {
-        "type": int,
-        "min": 300,
-        "max": 7200,
-        "env_attr": "crawl_job_max_age_seconds",
-        "description": "Maximum job retry age before permanent failure (5 min to 2 hours)",
-    },
-    "tenant_worker_semaphore_ttl_seconds": {
-        "type": int,
-        "min": 3600,  # 1 hour minimum
-        "max": 86400,  # 24 hours maximum
-        "env_attr": "tenant_worker_semaphore_ttl_seconds",
-        "description": "Concurrency slot TTL in seconds - must be >= crawl_max_length (1h to 24h)",
-    },
-    "crawl_page_batch_size": {
-        "type": int,
-        "min": 10,
-        "max": 1000,
-        "env_attr": "crawl_page_batch_size",
-        "description": "Commit after every N pages during crawl (10 to 1000)",
-    },
-    "crawl_sitemap_lastmod_skip_enabled": {
-        "type": bool,
-        "env_attr": "crawl_sitemap_lastmod_skip_enabled",
-        "description": "Enable trusted sitemap lastmod values to retain unchanged URL pages without downloading them",
-    },
+CRAWLER_SETTING_SPECS: dict[str, CrawlerSettingSpec] = {
+    "crawl_max_length": CrawlerSettingSpec(
+        value_type=int,
+        min=60,
+        max=86400,
+        env_attr="crawl_max_length",
+        description="Maximum crawl duration in seconds (1 min to 24 hours)",
+    ),
+    "download_timeout": CrawlerSettingSpec(
+        value_type=int,
+        min=10,
+        max=300,
+        default=90,
+        description="Per-request download timeout in seconds (10s to 5 min)",
+    ),
+    "download_max_size": CrawlerSettingSpec(
+        value_type=int,
+        min=1048576,
+        max=1073741824,
+        env_attr="download_max_size",
+        description="Maximum file size for crawler downloads in bytes (1MB to 1GB)",
+    ),
+    "dns_timeout": CrawlerSettingSpec(
+        value_type=int,
+        min=5,
+        max=120,
+        default=30,
+        description="DNS resolution timeout in seconds (5s to 2 min)",
+    ),
+    "retry_times": CrawlerSettingSpec(
+        value_type=int,
+        min=0,
+        max=10,
+        default=2,
+        description="Number of retry attempts per request (0 to 10)",
+    ),
+    "closespider_itemcount": CrawlerSettingSpec(
+        value_type=int,
+        min=100,
+        max=100000,
+        env_attr="closespider_itemcount",
+        description="Maximum pages to crawl before stopping (100 to 100k)",
+    ),
+    "obey_robots": CrawlerSettingSpec(
+        value_type=bool,
+        env_attr="obey_robots",
+        description="Whether to respect robots.txt rules",
+    ),
+    "autothrottle_enabled": CrawlerSettingSpec(
+        value_type=bool,
+        env_attr="autothrottle_enabled",
+        description="Enable automatic request throttling based on server response times",
+    ),
+    "tenant_worker_concurrency_limit": CrawlerSettingSpec(
+        value_type=int,
+        min=0,
+        max=50,
+        env_attr="tenant_worker_concurrency_limit",
+        description="Maximum concurrent crawl jobs per tenant (0 = unlimited, 1 to 50)",
+    ),
+    "crawl_stale_threshold_minutes": CrawlerSettingSpec(
+        value_type=int,
+        min=5,
+        max=1440,
+        env_attr="crawl_stale_threshold_minutes",
+        description="Minutes without activity before IN_PROGRESS job is considered stale (5 min to 24 hours)",
+    ),
+    "queued_stale_threshold_minutes": CrawlerSettingSpec(
+        value_type=int,
+        min=1,
+        max=60,
+        default=5,
+        description="Minutes before QUEUED job is considered orphaned and allows new crawl (1 to 60 min)",
+    ),
+    "crawl_heartbeat_interval_seconds": CrawlerSettingSpec(
+        value_type=int,
+        min=30,
+        max=3600,
+        env_attr="crawl_heartbeat_interval_seconds",
+        description="Heartbeat interval to signal job is alive (30s to 1 hour)",
+    ),
+    "crawl_feeder_enabled": CrawlerSettingSpec(
+        value_type=bool,
+        env_attr="crawl_feeder_enabled",
+        description="Enable crawl feeder service for rate-limited job enqueueing",
+    ),
+    "crawl_feeder_interval_seconds": CrawlerSettingSpec(
+        value_type=int,
+        min=5,
+        max=300,
+        env_attr="crawl_feeder_interval_seconds",
+        description="Feeder check interval in seconds (5s to 5 min)",
+    ),
+    "crawl_feeder_batch_size": CrawlerSettingSpec(
+        value_type=int,
+        min=1,
+        max=100,
+        env_attr="crawl_feeder_batch_size",
+        description="Maximum jobs to enqueue per feeder cycle per tenant (1 to 100)",
+    ),
+    "crawl_job_max_age_seconds": CrawlerSettingSpec(
+        value_type=int,
+        min=300,
+        max=7200,
+        env_attr="crawl_job_max_age_seconds",
+        description="Maximum job retry age before permanent failure (5 min to 2 hours)",
+    ),
+    "tenant_worker_semaphore_ttl_seconds": CrawlerSettingSpec(
+        value_type=int,
+        min=3600,
+        max=86400,
+        env_attr="tenant_worker_semaphore_ttl_seconds",
+        description="Concurrency slot TTL in seconds - must be >= crawl_max_length (1h to 24h)",
+    ),
+    "crawl_page_batch_size": CrawlerSettingSpec(
+        value_type=int,
+        min=10,
+        max=1000,
+        env_attr="crawl_page_batch_size",
+        description="Commit after every N pages during crawl (10 to 1000)",
+    ),
+    "crawl_sitemap_lastmod_skip_enabled": CrawlerSettingSpec(
+        value_type=bool,
+        env_attr="crawl_sitemap_lastmod_skip_enabled",
+        description="Enable trusted sitemap lastmod values to retain unchanged URL pages without downloading them",
+    ),
 }
 
 
@@ -215,13 +228,13 @@ def get_crawler_setting_specs(
     for setting_name in names:
         spec = CRAWLER_SETTING_SPECS[setting_name]
         public_spec: dict[str, object] = {
-            "type": "bool" if spec["type"] is bool else "int",
-            "description": str(spec["description"]),
+            "type": "bool" if spec.value_type is bool else "int",
+            "description": spec.description,
         }
-        if "min" in spec:
-            public_spec["min"] = int(spec["min"])
-        if "max" in spec:
-            public_spec["max"] = int(spec["max"])
+        if spec.min is not None:
+            public_spec["min"] = spec.min
+        if spec.max is not None:
+            public_spec["max"] = spec.max
         specs[setting_name] = public_spec
 
     return specs
@@ -247,7 +260,7 @@ class TenantCrawlerSettings:
 
     def warn_invalid_overrides(
         self,
-        logger: Any,
+        logger: logging.Logger,
         *,
         tenant_id: UUID | str,
         website_id: UUID | str | None = None,
@@ -304,35 +317,60 @@ class TenantCrawlerSettings:
         )
 
 
-def _get_setting_default(setting_name: str, spec: dict[str, Any]) -> Any:
-    """Get the default value for a setting from env or hardcoded default."""
-    # If spec has hardcoded default, use it
-    if "default" in spec:
-        return spec["default"]
+def _get_setting_default(
+    setting_name: str,
+    spec: CrawlerSettingSpec,
+) -> CrawlerSettingValue:
+    if spec.default is not None:
+        return spec.default
 
-    # Otherwise, get from environment Settings
-    if "env_attr" in spec:
+    if spec.env_attr is not None:
         settings = get_settings()
-        return getattr(settings, spec["env_attr"])
+        value = _coerce_setting_value(
+            expected_type=spec.value_type,
+            value=getattr(settings, spec.env_attr),
+        )
+        if value is not None:
+            return value
+        raise TypeError(f"Default for {setting_name} must be int or bool")
 
     raise KeyError(f"Setting {setting_name} has no default or env_attr defined")
 
 
-def _is_valid_setting_type(*, expected_type: type, value: object) -> bool:
+def _is_valid_setting_type(
+    *,
+    expected_type: CrawlerSettingValueType,
+    value: object,
+) -> bool:
+    return _coerce_setting_value(expected_type=expected_type, value=value) is not None
+
+
+def _coerce_setting_value(
+    *,
+    expected_type: CrawlerSettingValueType,
+    value: object,
+) -> CrawlerSettingValue | None:
     if expected_type is int:
-        return isinstance(value, int) and not isinstance(value, bool)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        return None
     if expected_type is bool:
-        return isinstance(value, bool)
-    return isinstance(value, expected_type)
+        if isinstance(value, bool):
+            return value
+        return None
+    return None
 
 
 def _default_crawler_setting_values() -> dict[str, CrawlerSettingValue]:
     values: dict[str, CrawlerSettingValue] = {}
     for setting_name, spec in CRAWLER_SETTING_SPECS.items():
         default_value = _get_setting_default(setting_name, spec)
-        if not _is_valid_setting_type(expected_type=spec["type"], value=default_value):
+        if not _is_valid_setting_type(
+            expected_type=spec.value_type,
+            value=default_value,
+        ):
             raise TypeError(f"Default for {setting_name} must be int or bool")
-        values[setting_name] = cast(CrawlerSettingValue, default_value)
+        values[setting_name] = default_value
 
     return values
 
@@ -440,7 +478,7 @@ def get_all_crawler_settings(
     return TenantCrawlerSettings.from_overrides(tenant_crawler_settings).as_dict()
 
 
-def validate_crawler_setting(key: str, value: Any) -> list[str]:
+def validate_crawler_setting(key: str, value: object) -> list[str]:
     """
     Validate a single crawler setting against specs.
 
@@ -461,7 +499,7 @@ def validate_crawler_setting(key: str, value: Any) -> list[str]:
         return errors
 
     spec = CRAWLER_SETTING_SPECS[key]
-    expected_type = spec["type"]
+    expected_type = spec.value_type
 
     if not _is_valid_setting_type(expected_type=expected_type, value=value):
         errors.append(
@@ -470,15 +508,15 @@ def validate_crawler_setting(key: str, value: Any) -> list[str]:
         )
         return errors
 
-    # Range validation for integers
-    if expected_type == int:
-        min_val = spec.get("min")
-        max_val = spec.get("max")
+    if expected_type is int and isinstance(value, int) and not isinstance(value, bool):
+        int_value = value
+        min_val = spec.min
+        max_val = spec.max
         if min_val is not None and max_val is not None:
-            if value < min_val or value > max_val:
+            if int_value < min_val or int_value > max_val:
                 errors.append(
                     f"Setting {key} must be between {min_val} and {max_val}, "
-                    f"got {value}"
+                    f"got {int_value}"
                 )
 
     return errors

@@ -15,6 +15,7 @@
   import {
     getCrawlOutcomeLabel,
     getCrawlOutcomeTooltip,
+    getCrawlRunFailureTooltip,
     getLatestCrawlOutcome,
     isDuplicateCrawlSkip,
     isSourceRetentionOnly
@@ -41,9 +42,9 @@
   } {
     const outcome = getLatestCrawlOutcome(website);
     const isDuplicateSkip = isDuplicateCrawlSkip(outcome);
-    const skipReason = website.latest_crawl?.result_location;
-    const failureTooltip =
-      getCrawlOutcomeTooltip(outcome, m.sync_failed()) ?? skipReason ?? undefined;
+    const failureTooltip = website.latest_crawl
+      ? getCrawlRunFailureTooltip(website.latest_crawl, m.sync_failed())
+      : undefined;
 
     const pagesFailed = website.latest_crawl?.pages_failed ?? 0;
     const filesFailed = website.latest_crawl?.files_failed ?? 0;

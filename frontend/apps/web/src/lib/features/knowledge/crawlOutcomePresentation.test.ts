@@ -6,6 +6,7 @@ import {
   getCrawlOutcomeLabel,
   getCrawlOutcomeTooltip,
   getCrawlRunFailureDetail,
+  getCrawlRunFailureTooltip,
   getCrawlRunCountBreakdown,
   getCrawlRunResultLabels,
   getFailureSummaryTooltip,
@@ -18,6 +19,14 @@ import {
 } from "./crawlOutcomePresentation";
 
 overwriteGetLocale(() => "en");
+
+type AssertTrue<T extends true> = T;
+type _CrawlRunOutcomeComesFromGeneratedSchema = AssertTrue<
+  CrawlRun["outcome"] extends CrawlOutcome | null | undefined ? true : false
+>;
+type _WebsiteLatestCrawlComesFromGeneratedSchema = AssertTrue<
+  WebsiteSparse["latest_crawl"] extends CrawlRun | null | undefined ? true : false
+>;
 
 const sourceRetentionOutcome: CrawlOutcome = {
   code: "CRAWL_SOURCE_RETENTION_ONLY",
@@ -73,18 +82,54 @@ test("shutdown outcome has a localized label", () => {
   ).toBe("Crawler shutdown failed");
 });
 
-test("unknown outcome message key falls back to detail", () => {
+test("queue enqueue failure outcome has a localized label", () => {
   expect(
     getCrawlOutcomeLabel(
       {
-        code: "CRAWL_FUTURE_CODE",
+        code: "CRAWL_QUEUE_ENQUEUE_FAILED",
         severity: "error",
-        message_key: "crawl_outcome_future_code",
-        detail: "Future crawl outcome"
+        message_key: "crawl_outcome_queue_enqueue_failed"
       },
       "fallback"
     )
-  ).toBe("Future crawl outcome");
+  ).toBe("Crawl could not be queued");
+});
+
+test("runtime timeout outcome has a localized label", () => {
+  expect(
+    getCrawlOutcomeLabel(
+      {
+        code: "CRAWL_RUNTIME_TIMEOUT",
+        severity: "error",
+        message_key: "crawl_outcome_runtime_timeout"
+      },
+      "fallback"
+    )
+  ).toBe("The crawl ran too long and was stopped");
+});
+
+test("outcome label uses code instead of message key", () => {
+  expect(
+    getCrawlOutcomeLabel(
+      {
+        code: "CRAWL_RUNTIME_TIMEOUT",
+        severity: "error",
+        message_key: "crawl_outcome_unknown_error"
+      },
+      "fallback"
+    )
+  ).toBe("The crawl ran too long and was stopped");
+});
+
+test("unknown outcome code falls back to detail", () => {
+  const futureOutcome = {
+    code: "CRAWL_FUTURE_CODE",
+    severity: "error",
+    message_key: "crawl_outcome_future_code",
+    detail: "Future crawl outcome"
+  } as unknown as CrawlOutcome;
+
+  expect(getCrawlOutcomeLabel(futureOutcome, "fallback")).toBe("Future crawl outcome");
 });
 
 test("failed crawl exposes stored diagnostic detail", () => {
@@ -107,7 +152,7 @@ test("failed crawl exposes stored diagnostic detail", () => {
 test("failed crawl without stored detail explains the diagnostic gap", () => {
   const crawl = {
     status: "failed",
-    result_location: null,
+    result_location: "legacy raw result detail",
     outcome: {
       code: "UNKNOWN_CRAWL_ERROR",
       severity: "error",
@@ -120,11 +165,30 @@ test("failed crawl without stored detail explains the diagnostic gap", () => {
   );
 });
 
+test("failure tooltip does not repeat typed diagnostic detail", () => {
+  const crawl = {
+    status: "failed",
+    result_location: "legacy raw result detail",
+    outcome: {
+      code: "CRAWL_RUNTIME_TIMEOUT",
+      severity: "error",
+      message_key: "crawl_outcome_runtime_timeout",
+      detail: "Crawl exceeded the maximum runtime of 12 hours and was stopped"
+    }
+  } as unknown as CrawlRun;
+
+  const detail = "Crawl exceeded the maximum runtime of 12 hours and was stopped";
+  const tooltip = getCrawlRunFailureTooltip(crawl, "fallback");
+
+  expect(tooltip).toBe(`The crawl ran too long and was stopped\n${detail}`);
+  expect(tooltip?.split(detail)).toHaveLength(2);
+});
+
 test("missing outcome has no tooltip", () => {
   expect(getCrawlOutcomeTooltip(undefined, "fallback")).toBeUndefined();
 });
 
-test("outcome access is centralized while generated crawl types catch up", () => {
+test("outcome access reads the generated crawl run outcome field", () => {
   const crawl = {
     outcome: {
       code: "CRAWL_DUPLICATE_SKIPPED",
@@ -139,7 +203,7 @@ test("outcome access is centralized while generated crawl types catch up", () =>
   expect(isDuplicateCrawlSkip(outcome)).toBe(true);
 });
 
-test("latest crawl outcome access is centralized while generated website types catch up", () => {
+test("latest crawl outcome reads the generated website latest crawl field", () => {
   const website = {
     latest_crawl: {
       outcome: sourceRetentionOutcome

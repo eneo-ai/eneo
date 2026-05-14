@@ -1,0 +1,2509 @@
+version: 2
+
+goal:
+  title: "Crawler Reliability, Robustness, And Transparency"
+  slug: "crawler-reliability-robustness-transparency"
+  kind: open_ended
+  tranche: "Finish terminal ownership, then audit before lifecycle/admin/adapter work."
+  status: active
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+active_task: T057
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Map the existing roadmap, current diff, and remaining terminal ownership work."
+    inputs:
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/task_manager.py"
+    constraints:
+      - "Read-only."
+      - "Preserve unrelated dirty files."
+    expected_output:
+      - "Current progress"
+      - "Remaining safe terminal ownership task"
+    receipt:
+      result: done
+      summary: "Roadmap is active. Step 1 mostly complete, Step 2 in progress. Private TaskManager mutation is removed, duplicate skip already uses TerminalEvent/commit_terminal, and remaining terminal writes are exception, zero-output, and normal/partial completion paths."
+      evidence:
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/src/intric/worker/crawl/terminal.py"
+  - id: T002
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Choose the next safe implementation task by impact, confidence, reversibility, and verification strength."
+    inputs:
+      - "T001 receipt"
+    constraints:
+      - "Do not broaden to lifecycle/admin before terminal row ownership is coherent."
+    expected_output:
+      - "Decision"
+      - "Allowed files"
+      - "Verification commands"
+      - "Stop conditions"
+    receipt:
+      result: done
+      summary: "Next safest slice is to expand commit_terminal coverage beyond duplicate skips while keeping post-commit reactors separate. Start with zero-output terminal path because it already has isolated failed terminal row writes and no website timestamp advancement."
+      spawned_tasks:
+        - T003
+  - id: T003
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Route zero-output terminal crawl writes through TerminalEvent and commit_terminal without changing audit, circuit breaker, or timestamp behavior."
+    allowed_files:
+      - "backend/src/intric/worker/crawl/terminal.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_terminal.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_terminal.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/terminal.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_terminal.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/terminal.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_terminal.py"
+    stop_if:
+      - "Need to alter audit/circuit breaker/website timestamp behavior."
+      - "Need database schema changes."
+      - "Verification fails twice for the same reason."
+    receipt:
+      result: done
+      summary: "Added CrawlRunTerminalUpdate and routed the zero-output terminal path through TerminalEvent plus commit_terminal. The terminal row commit now writes Jobs and CrawlRuns together before circuit breaker and audit reactors run."
+      changed_files:
+        - "backend/src/intric/worker/crawl/terminal.py"
+        - "backend/src/intric/worker/crawl/__init__.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_terminal.py"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_terminal.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/terminal.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_terminal.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/terminal.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_terminal.py"
+  - id: T004
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Route exception/shutdown terminal writes through TerminalEvent and commit_terminal."
+    allowed_files:
+      - "backend/src/intric/worker/crawl/terminal.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_terminal.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_terminal.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/terminal.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_terminal.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/terminal.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_terminal.py"
+    stop_if:
+      - "Outcome overwrite policy is ambiguous."
+    receipt:
+      result: done
+      summary: "Routed crawl exception and shutdown outcome writes through TerminalEvent plus commit_terminal, preserving the previous policy that exception handling only fills a missing crawl-run outcome."
+      changed_files:
+        - "backend/src/intric/worker/crawl/terminal.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_terminal.py"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_terminal.py tests/unittests/worker/test_task_manager.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/terminal.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py src/intric/worker/task_manager.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/worker/test_task_manager.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/terminal.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py src/intric/worker/task_manager.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/worker/test_task_manager.py"
+  - id: T005
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Route normal/partial completion terminal writes through TerminalEvent and commit_terminal."
+    allowed_files:
+      - "backend/src/intric/worker/crawl/terminal.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_terminal.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_terminal.py tests/unittests/worker/test_task_manager.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/terminal.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py src/intric/worker/task_manager.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/worker/test_task_manager.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/terminal.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py src/intric/worker/task_manager.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/worker/test_task_manager.py"
+    stop_if:
+      - "T004 is not done."
+      - "Processing summary fields required by TerminalEvent are ambiguous."
+    receipt:
+      result: done
+      summary: "Routed normal and partial completion through TerminalEvent plus commit_terminal. Successful crawls keep the existing behavior of a null diagnostic outcome, while all summary counters and job completion are written atomically before post-commit reactors."
+      changed_files:
+        - "backend/src/intric/worker/crawl/terminal.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_terminal.py"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_terminal.py tests/unittests/worker/test_task_manager.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/terminal.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py src/intric/worker/task_manager.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/worker/test_task_manager.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/terminal.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py src/intric/worker/task_manager.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/worker/test_task_manager.py"
+  - id: T999
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether terminal ownership is coherent enough to move to lifecycle and phase extraction."
+    inputs:
+      - "All done task receipts"
+      - "Last verification"
+      - "Current dirty diff"
+    constraints:
+      - "Do not implement."
+      - "Reject completion if direct terminal CrawlRuns/Jobs writes remain outside commit_terminal without a documented reason."
+    expected_output:
+      - "complete | not_complete"
+      - "missing evidence"
+      - "next task if not complete"
+    receipt:
+      result: not_complete
+      summary: "Crawler-task terminal writes now use commit_terminal for duplicate, zero-output, exception/shutdown, and normal/partial completion. Audit found two remaining crawler-task terminal ownership gaps: max-age busy-wait abandonment still pre-writes CrawlRun outcome through the repository, and pending-queue enqueue failure still marks Job/CrawlRun failed through separate repository updates."
+      evidence:
+        - "rg direct terminal writes in backend/src/intric/worker/crawl_tasks.py"
+        - "backend/src/intric/worker/crawl_tasks.py max-age busy-wait branch"
+        - "backend/src/intric/worker/crawl_tasks.py pending queue enqueue rollback branch"
+      spawned_tasks:
+        - T006
+        - T007
+  - id: T006
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Remove the direct CrawlRun repository terminal write from max-age busy-wait abandonment by routing the outcome through the exception-to-TerminalEvent path."
+    allowed_files:
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_task_terminal_outcomes.py tests/unittests/worker/test_crawl_terminal.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+    stop_if:
+      - "Need to change ARQ retry semantics for busy-wait retries."
+      - "Need to add a database migration."
+    receipt:
+      result: done
+      summary: "Removed the direct max-age CrawlRun repository terminal write. Busy-wait max-age abandonment now raises a typed CrawlMaxAgeExceededError, and the existing exception-to-TerminalEvent path records CRAWL_MAX_AGE_EXCEEDED through commit_terminal."
+      changed_files:
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_task_terminal_outcomes.py tests/unittests/worker/test_crawl_terminal.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+  - id: T007
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Replace pending-queue enqueue rollback Job/CrawlRun repository terminal writes with one typed terminal commit and a specific product-facing outcome."
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawl_outcome.py"
+      - "backend/src/intric/websites/domain/crawl_outcome_legacy_fallback.py"
+      - "backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/websites/test_crawl_outcome.py"
+      - "backend/tests/fixtures/crawl_outcome_parity.json"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/websites/test_crawl_outcome.py -q"
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawl_outcome.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_outcome.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_outcome.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_outcome.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd frontend/apps/web && bun test src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+    stop_if:
+      - "T006 is not done."
+      - "Outcome enum/frontend presentation change cannot be kept scoped."
+    receipt:
+      result: done
+      summary: "Replaced pending-queue enqueue rollback Job/CrawlRun repository terminal writes with one commit_terminal call and added CRAWL_QUEUE_ENQUEUE_FAILED as a typed backend/frontend outcome."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawl_outcome.py"
+        - "backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/websites/test_crawl_outcome.py"
+        - "backend/tests/fixtures/crawl_outcome_parity.json"
+        - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+        - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+        - "frontend/apps/web/messages/en.json"
+        - "frontend/apps/web/messages/sv.json"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/websites/test_crawl_outcome.py -q"
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawl_outcome.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_outcome.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_outcome.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_outcome.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "cd frontend/apps/web && bun run i18n:compile && bun test src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+  - id: T008
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Introduce a batch terminal commit seam for watchdog terminal outcomes and route early-zombie plus long-running watchdog failures through it."
+    allowed_files:
+      - "backend/src/intric/worker/crawl/terminal.py"
+      - "backend/src/intric/worker/crawl/__init__.py"
+      - "backend/src/intric/worker/feeder/watchdog.py"
+      - "backend/tests/unittests/worker/test_crawl_terminal.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_terminal.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/terminal.py src/intric/worker/crawl/__init__.py src/intric/worker/feeder/watchdog.py tests/unittests/worker/test_crawl_terminal.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/terminal.py src/intric/worker/crawl/__init__.py src/intric/worker/feeder/watchdog.py tests/unittests/worker/test_crawl_terminal.py"
+    stop_if:
+      - "Batch terminal event shape would duplicate lifecycle policy rather than sharing TerminalEvent semantics."
+      - "Existing watchdog integration tests require schema changes."
+    receipt:
+      result: done
+      summary: "Added TerminalBatchEvent plus commit_terminal_batch to keep watchdog terminal commits efficient, then routed early-zombie and long-running IN_PROGRESS watchdog failures through the batch terminal seam."
+      changed_files:
+        - "backend/src/intric/worker/crawl/terminal.py"
+        - "backend/src/intric/worker/crawl/__init__.py"
+        - "backend/src/intric/worker/feeder/watchdog.py"
+        - "backend/tests/unittests/worker/test_crawl_terminal.py"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_terminal.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/terminal.py src/intric/worker/crawl/__init__.py src/intric/worker/feeder/watchdog.py tests/unittests/worker/test_crawl_terminal.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/terminal.py src/intric/worker/crawl/__init__.py src/intric/worker/feeder/watchdog.py tests/unittests/worker/test_crawl_terminal.py"
+        - "cd backend && uv run pytest tests/integration/test_phase0_zombie_reconciliation.py -q"
+  - id: T009
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Route Phase 1 expired queued jobs with crawl runs through commit_terminal_batch while keeping orphaned Job-only cleanup explicit."
+    allowed_files:
+      - "backend/src/intric/worker/feeder/watchdog.py"
+      - "backend/tests/integration/test_phase0_zombie_reconciliation.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_phase0_zombie_reconciliation.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/feeder/watchdog.py tests/integration/test_phase0_zombie_reconciliation.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/feeder/watchdog.py tests/integration/test_phase0_zombie_reconciliation.py"
+    stop_if:
+      - "Orphaned Job-only cleanup needs CrawlRun data that does not exist."
+    receipt:
+      result: done
+      summary: "Routed Phase 1 expired queued jobs that have CrawlRuns through commit_terminal_batch so their Job and CrawlRun terminal state are committed together. Orphaned Job-only cleanup remains explicit because those rows have no CrawlRun to update."
+      changed_files:
+        - "backend/src/intric/worker/feeder/watchdog.py"
+        - "backend/tests/integration/test_phase0_zombie_reconciliation.py"
+      verification:
+        - "cd backend && uv run pytest tests/integration/test_phase0_zombie_reconciliation.py::TestPhase0ZombieCounterReconciliation::test_phase0_runs_before_other_phases -q"
+        - "cd backend && uv run pytest tests/integration/test_phase0_zombie_reconciliation.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/feeder/watchdog.py tests/integration/test_phase0_zombie_reconciliation.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/feeder/watchdog.py tests/integration/test_phase0_zombie_reconciliation.py"
+  - id: T010
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Audit remaining direct lifecycle writes and choose the next highest-ROI reliability/transparency slice from the roadmap."
+    inputs:
+      - "T001-T009 receipts"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "Current grep inventory for direct Job/CrawlRun writes"
+    constraints:
+      - "Read-only except board/roadmap updates."
+      - "Do not broaden to unrelated crawler features."
+    expected_output:
+      - "Terminal ownership completion judgment"
+      - "Next Worker task with allowed files, verification, and stop conditions"
+    receipt:
+      result: done
+      summary: "Terminal ownership is coherent enough to leave Step 2/4 terminal writes: remaining direct watchdog Job writes are orphaned Job-only cleanup and Phase 2 visibility bump, not CrawlRun terminal writes. Claude rejected a vague Step 3 parser-hardening slice and identified a higher-ROI user-visible issue: long-running runtime timeouts currently reuse the queued-too-long outcome. Next worker fixes that typed outcome mismatch first."
+      evidence:
+        - "rg direct Job/CrawlRun writes in crawler worker files"
+        - ".codex/artifacts/claude-peer-loop-crawler-t010-judge-next-reliability-slice-20260514T133444Z.md"
+      spawned_tasks:
+        - T011
+  - id: T011
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Add a distinct typed runtime-timeout crawl outcome and use it for watchdog long-running IN_PROGRESS terminations."
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawl_outcome.py"
+      - "backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+      - "backend/src/intric/worker/feeder/watchdog.py"
+      - "backend/tests/fixtures/crawl_outcome_parity.json"
+      - "backend/tests/unittests/websites/test_crawl_outcome.py"
+      - "backend/tests/unittests/worker/feeder/test_watchdog.py"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/websites/test_crawl_outcome.py tests/unittests/worker/feeder/test_watchdog.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawl_outcome.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/worker/feeder/watchdog.py tests/unittests/websites/test_crawl_outcome.py tests/unittests/worker/feeder/test_watchdog.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_outcome.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/worker/feeder/watchdog.py tests/unittests/websites/test_crawl_outcome.py tests/unittests/worker/feeder/test_watchdog.py"
+      - "cd frontend/apps/web && bun run i18n:compile && bun test src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+    stop_if:
+      - "Need database migration or historical backfill."
+      - "Need broad result_location parser changes."
+      - "Generated OpenAPI type update is broader than the crawler outcome enum."
+    receipt:
+      result: done
+      summary: "Added CRAWL_RUNTIME_TIMEOUT as a distinct typed outcome for long-running IN_PROGRESS watchdog terminations, preserving CRAWL_MAX_AGE_EXCEEDED for queued-too-long cases. Backend presentation, parity fixture, frontend labels, i18n, generated intric-js schema, and watchdog tests now agree. Claude iteration 3 returned GREEN_LIGHT yes with MIN_SCORE 8."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawl_outcome.py"
+        - "backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+        - "backend/src/intric/worker/feeder/watchdog.py"
+        - "backend/tests/fixtures/crawl_outcome_parity.json"
+        - "backend/tests/unittests/websites/test_crawl_outcome.py"
+        - "backend/tests/unittests/worker/feeder/test_watchdog.py"
+        - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+        - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+        - "frontend/apps/web/messages/en.json"
+        - "frontend/apps/web/messages/sv.json"
+        - "frontend/packages/intric-js/src/types/schema.d.ts"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/websites/test_crawl_outcome.py tests/unittests/worker/feeder/test_watchdog.py tests/integration/test_phase0_zombie_reconciliation.py -q"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawl_outcome.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/worker/feeder/watchdog.py tests/unittests/websites/test_crawl_outcome.py tests/unittests/worker/feeder/test_watchdog.py tests/integration/test_phase0_zombie_reconciliation.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_outcome.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/worker/feeder/watchdog.py tests/unittests/websites/test_crawl_outcome.py tests/unittests/worker/feeder/test_watchdog.py tests/integration/test_phase0_zombie_reconciliation.py"
+        - "cd frontend/apps/web && bun run i18n:compile && bun test src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+        - "cd frontend/packages/intric-js && bun run lint"
+      peer_review:
+        - ".codex/artifacts/claude-peer-loop-crawler-t011-runtime-timeout-outcome-review-iteration-3-20260514T134616Z.md"
+  - id: T012
+    type: scout
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Map existing crawler/admin query owners and choose the smallest Step 0 baseline metrics implementation."
+    inputs:
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "backend/src/intric/websites"
+      - "backend/src/intric/api"
+      - "backend/src/intric/server"
+      - "backend/tests"
+    constraints:
+      - "Read-only except board/roadmap updates."
+      - "Do not add a dashboard or write controls in this scout task."
+      - "Baseline must be bounded by time window and tenant scope."
+    expected_output:
+      - "Current owner candidates"
+      - "Recommended canonical owner"
+      - "Next Worker objective with allowed files and tests"
+    receipt:
+      result: done
+      summary: "Chose the smallest Step 0 baseline slice: a read-only `/sysadmin/crawler/baseline` endpoint backed by bounded crawl-run aggregation. Canonical facts stay in `CrawlRunRepository`; API presentation stays in sysadmin models; the response separates typed UNKNOWN failures from historical NULL outcome fallback rows and avoids result_location parsing. Claude iteration 3 returned GREEN_LIGHT yes with MIN_SCORE 8."
+      evidence:
+        - "backend/src/intric/websites/domain/crawl_run_repo.py"
+        - "backend/src/intric/database/tables/websites_table.py"
+        - "backend/src/intric/database/tables/job_table.py"
+        - "backend/src/intric/sysadmin/sysadmin_router.py"
+        - ".codex/artifacts/claude-peer-loop-t012-crawler-baseline-metrics-final-plan-gate-20260514T135958Z.md"
+      spawned_tasks:
+        - T013
+  - id: T013
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Add a read-only sysadmin crawler baseline endpoint backed by bounded crawl-run aggregation."
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawler_baseline.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/src/intric/sysadmin/sysadmin_models.py"
+      - "backend/src/intric/sysadmin/sysadmin_router.py"
+      - "backend/tests/integration/test_sysadmin_crawler_baseline.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_baseline.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawler_baseline.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_baseline.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_baseline.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_outcome.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_baseline.py"
+    stop_if:
+      - "Need to parse result_location strings."
+      - "Need schema migration or index changes."
+      - "Need frontend/dashboard files."
+      - "Need to broaden beyond the listed files."
+      - "Strict outcome parser is unavailable or cannot parse stored outcome buckets safely."
+    receipt:
+      result: done
+      summary: "Added a read-only sysadmin crawler baseline endpoint backed by a bounded CrawlRunRepository aggregate. The response separates total, terminal, failed, typed unknown, legacy-null, and unparseable terminal buckets without parsing result_location, and exposes processing totals for retained/skipped/failed work. Claude iteration 2 returned GREEN_LIGHT yes with MIN_SCORE 8 after bucket semantics were terminal-aligned and edge-case coverage was expanded."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawler_baseline.py"
+        - "backend/src/intric/websites/domain/crawl_run_repo.py"
+        - "backend/src/intric/sysadmin/sysadmin_models.py"
+        - "backend/src/intric/sysadmin/sysadmin_router.py"
+        - "backend/tests/integration/test_sysadmin_crawler_baseline.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+      verification:
+        - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_baseline.py -q"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawler_baseline.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_baseline.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_baseline.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_outcome.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_baseline.py"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t013-crawler-baseline-implementation-review-retry-20260514T142341Z.md"
+        - ".codex/artifacts/claude-peer-loop-t013-crawler-baseline-implementation-review-iteration-2-20260514T142817Z.md"
+      follow_up:
+        - "Run EXPLAIN ANALYZE before using this aggregate for sustained admin dashboard traffic."
+        - "Extract a dedicated CrawlerBaselineQuery if a second analytics aggregate is added."
+  - id: T014
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next highest-ROI reliability slice after the terminal baseline endpoint."
+    inputs:
+      - "T013 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "Current dirty diff"
+    constraints:
+      - "Read-only."
+      - "Prefer long-term reliability and maintainability over quick fixes."
+      - "Preserve unrelated dirty .devcontainer files."
+      - "Do not activate a Worker without allowed files, verification commands, and stop conditions."
+    expected_output:
+      - "Decision"
+      - "Next Worker objective"
+      - "Allowed files"
+      - "Verification commands"
+      - "Stop conditions"
+    receipt:
+      result: done
+      summary: "Chose the next narrow post-commit reactor slice: extract website-crawl audit payload construction and emission from crawl_tasks.py into a typed worker/crawl/audit.py boundary. Claude iteration 3 returned GREEN_LIGHT yes with MIN_SCORE 8 after the TDD plan was tightened to assert full audit call shape, actor/description ownership, and a grep stop condition for removing inline log_async calls."
+      evidence:
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/src/intric/worker/crawl/terminal.py"
+        - ".codex/artifacts/claude-peer-loop-t014-choose-next-crawler-reliability-slice-iteration-3-20260514T143858Z.md"
+      spawned_tasks:
+        - T015
+  - id: T015
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Extract website-crawl audit payload construction and emission into a typed crawl audit boundary."
+    allowed_files:
+      - "backend/src/intric/worker/crawl/audit.py"
+      - "backend/src/intric/worker/crawl/__init__.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_audit.py"
+      - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_audit.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/audit.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_audit.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/audit.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_audit.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "rg \"audit_service\\.log_async\\(\" backend/src/intric/worker/crawl_tasks.py returns no matches"
+    stop_if:
+      - "Need to change audit action/entity semantics beyond WEBSITE_CRAWLED."
+      - "Need to move circuit breaker, website timestamps, slot release, or terminal DB commit behavior."
+      - "Need to add Any, type: ignore, broad dict bags outside the serialization boundary, or untyped metadata construction in crawl_tasks.py."
+      - "Need to change AuditService.log_async signature."
+      - "audit_service.log_async remains in backend/src/intric/worker/crawl_tasks.py after the slice."
+      - "The helper increases crawl_tasks.py complexity or leaves duplicate inline audit metadata construction."
+    receipt:
+      result: done
+      summary: "Extracted website-crawl audit payload construction and emission into `worker/crawl/audit.py`. The new boundary reuses `AuditService`, `ActionType.WEBSITE_CRAWLED`, and `EntityType.WEBSITE`, keeps metadata serialization in one typed payload, and removes direct `audit_service.log_async(...)` calls from crawl_tasks.py. Claude iteration 2 returned GREEN_LIGHT yes with MIN_SCORE 8."
+      changed_files:
+        - "backend/src/intric/worker/crawl/audit.py"
+        - "backend/src/intric/worker/crawl/__init__.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_audit.py"
+        - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_audit.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/audit.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_audit.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/audit.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_audit.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "! rg \"audit_service\\.log_async\\(\" backend/src/intric/worker/crawl_tasks.py"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t015-audit-reactor-implementation-review-20260514T145108Z.md"
+        - ".codex/artifacts/claude-peer-loop-t015-audit-reactor-implementation-review-iteration-2-20260514T145453Z.md"
+      follow_up:
+        - "Audit metadata shape intentionally preserves the existing crawler `target`/`crawl_stats` shape instead of migrating to `AuditMetadata.standard(...)`; coordinate that separately with downstream audit consumers."
+        - "Ownerless crawler audits still fall back to tenant id with the current AuditService default actor type; revisit in a future typed AuditPolicy/system-actor slice."
+        - "Audit descriptions still use the previous `Success`/`Failed` suffix while structured outcome detail lives in `crawl_stats.outcome_code`; revisit operator copy with typed AuditPolicy."
+  - id: T016
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next highest-ROI post-commit reactor or lifecycle-hardening slice after the audit boundary extraction."
+    inputs:
+      - "T015 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "Current dirty diff"
+    constraints:
+      - "Read-only."
+      - "Prefer long-term reliability and maintainability over quick fixes."
+      - "Preserve unrelated dirty .devcontainer files."
+      - "Do not broaden into frontend/admin dashboard work unless it is the highest-confidence next reliability slice."
+      - "Do not activate a Worker without allowed files, verification commands, and stop conditions."
+    expected_output:
+      - "Decision"
+      - "Next Worker objective"
+      - "Allowed files"
+      - "Verification commands"
+      - "Stop conditions"
+    receipt:
+      result: done
+      summary: "Chose circuit-breaker reactor extraction as the next highest-ROI reliability slice. It owns durable scheduling/backoff policy, is currently embedded in crawl_tasks.py, has two post-commit call sites, and is easier/safer to test directly before touching timestamp or slot-release reactors. Claude returned GREEN_LIGHT yes with MIN_SCORE 8."
+      evidence:
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - ".codex/artifacts/claude-peer-loop-t016-choose-next-crawler-reliability-slice-20260514T145941Z.md"
+      spawned_tasks:
+        - T017
+  - id: T017
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Extract crawler circuit-breaker update policy into a typed, directly tested post-commit reactor."
+    allowed_files:
+      - "backend/src/intric/worker/crawl/circuit_breaker.py"
+      - "backend/src/intric/worker/crawl/__init__.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_circuit_breaker.py"
+      - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_circuit_breaker.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/circuit_breaker.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_circuit_breaker.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/circuit_breaker.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_circuit_breaker.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "! rg \"def _update_website_circuit_breaker\" backend/src/intric/worker/crawl_tasks.py"
+      - "! rg \"consecutive_failures|next_retry_at|UpdateInterval\\.NEVER\" backend/src/intric/worker/crawl_tasks.py"
+    stop_if:
+      - "Need to change circuit-breaker thresholds or backoff behavior."
+      - "Need schema/index changes."
+      - "Need to alter terminal commit, audit, timestamp update, slot release, Scrapy, ARQ, or frontend behavior."
+      - "Need a broad interface, registry, factory, or PostCommitReactor service."
+      - "Need Any, type: ignore, or casts in production code."
+      - "The three structured log paths are not preserved: success reset info, auto-disable error, and backoff warning."
+    receipt:
+      result: done
+      summary: "Extracted crawler circuit-breaker update policy into `worker/crawl/circuit_breaker.py`, preserving reset, exponential backoff, 24h cap, auto-disable threshold, structured logs, recovery operation names, and tenant-scoped predicates. Claude iteration 2 returned GREEN_LIGHT yes with MIN_SCORE 8."
+      changed_files:
+        - "backend/src/intric/worker/crawl/circuit_breaker.py"
+        - "backend/src/intric/worker/crawl/__init__.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_circuit_breaker.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_circuit_breaker.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/circuit_breaker.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_circuit_breaker.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/circuit_breaker.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_circuit_breaker.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "! rg \"def _update_website_circuit_breaker\" backend/src/intric/worker/crawl_tasks.py"
+        - "! rg \"next_retry_at|UpdateInterval\\.NEVER|WebsitesTable\\.consecutive_failures\" backend/src/intric/worker/crawl_tasks.py"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t017-circuit-breaker-reactor-implementation-review-20260514T150747Z.md"
+        - ".codex/artifacts/claude-peer-loop-t017-circuit-breaker-reactor-implementation-review-iteration-2-20260514T151016Z.md"
+      follow_up:
+        - "The circuit-breaker increment intentionally preserves the historical read-then-update behavior. A future hardening slice should use an atomic update/returning pattern or row lock to avoid lost increments under concurrent failures."
+        - "The auto-disable threshold value `10` remains duplicated with website-domain checks; consolidate ownership in a separate focused slice."
+  - id: T018
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next highest-ROI reliability slice after audit and circuit-breaker reactor extraction."
+    inputs:
+      - "T017 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "Current dirty diff"
+    constraints:
+      - "Read-only."
+      - "Prefer long-term reliability and maintainability over quick fixes."
+      - "Preserve unrelated dirty .devcontainer files."
+      - "Compare remaining reactor extraction against the circuit-breaker atomic-increment hardening follow-up."
+      - "Do not activate a Worker without allowed files, verification commands, and stop conditions."
+    expected_output:
+      - "Decision"
+      - "Next Worker objective"
+      - "Allowed files"
+      - "Verification commands"
+      - "Stop conditions"
+    receipt:
+      result: done
+      summary: "Chose website timestamp reactor extraction as the next highest-ROI reliability slice. The initial row-lock circuit-breaker hardening proposal was deferred because it needs a real DB concurrency test or single-statement atomic design. Claude iteration 2 returned GREEN_LIGHT yes with MIN_SCORE 8 after the timestamp boundary was tightened to own both policy and SQL write."
+      evidence:
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "backend/tests/unittests/worker/test_persistence.py"
+        - ".codex/artifacts/claude-peer-loop-t018-revised-timestamp-reactor-plan-20260514T152244Z.md"
+      spawned_tasks:
+        - T019
+  - id: T019
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Extract post-crawl website timestamp policy and SQL write into a typed website timestamp reactor."
+    allowed_files:
+      - "backend/src/intric/worker/crawl/website_timestamps.py"
+      - "backend/src/intric/worker/crawl/__init__.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_website_timestamps.py"
+      - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "backend/tests/unittests/worker/test_persistence.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_website_timestamps.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/website_timestamps.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_website_timestamps.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py tests/unittests/worker/test_persistence.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/website_timestamps.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_website_timestamps.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "! rg \"def _website_timestamp_fields_after_crawl|WebsiteTimestampField|last_crawled_values|last_crawled_stmt|last_crawled_at\" backend/src/intric/worker/crawl_tasks.py"
+    stop_if:
+      - "Need to change timestamp policy, operation name, or crawl lifecycle semantics."
+      - "Need schema/index changes."
+      - "Need audit, circuit-breaker, slot-release, ARQ, Scrapy, frontend, or sysadmin changes."
+      - "Need Any, cast, type: ignore, broad dict bags, or verbose tutorial comments in production code."
+      - "The new module does not own both policy and SQL write."
+      - "The existing operation_name `website_post_crawl_timestamps_update` is not preserved."
+      - "_warn_if_retained_items_without_embedding_config is moved into the timestamp reactor."
+    receipt:
+      result: done
+      summary: "Extracted post-crawl website timestamp policy and tenant-scoped SQL write into `worker/crawl/website_timestamps.py`. `crawl_tasks.py` now only wraps `update_website_timestamps_after_crawl(...)` in the existing `website_post_crawl_timestamps_update` recovery operation, and timestamp policy coverage moved out of persistence tests into a direct reactor test. Claude iteration 4 returned GREEN_LIGHT yes with MIN_SCORE 9."
+      changed_files:
+        - "backend/src/intric/worker/crawl/website_timestamps.py"
+        - "backend/src/intric/worker/crawl/__init__.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_website_timestamps.py"
+        - "backend/tests/unittests/worker/test_persistence.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_website_timestamps.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py tests/unittests/worker/test_persistence.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/website_timestamps.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_website_timestamps.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py tests/unittests/worker/test_persistence.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/website_timestamps.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_website_timestamps.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "! rg \"def _website_timestamp_fields_after_crawl|WebsiteTimestampField|last_crawled_values|last_crawled_stmt|last_crawled_at\" backend/src/intric/worker/crawl_tasks.py"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t019-website-timestamp-reactor-implementation-review-20260514T152856Z.md"
+        - ".codex/artifacts/claude-peer-loop-t019-website-timestamp-reactor-final-polish-review-20260514T153155Z.md"
+      follow_up:
+        - "Circuit-breaker atomic-increment hardening remains deferred until it has a real DB concurrency test or a single-statement atomic design."
+        - "The `max_failures_before_disable = 10` threshold remains duplicated with website-domain checks; consolidate ownership in a separate focused slice."
+        - "Consider a tiny reactor-family consistency pass later for one-line docstrings and repeated `_do_*` recovery closures once the next reactor lands."
+  - id: T020
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next highest-ROI crawler reliability slice after audit, circuit-breaker, and website timestamp reactors."
+    inputs:
+      - "T019 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "Current dirty diff"
+    constraints:
+      - "Read-only."
+      - "Prefer long-term reliability and maintainability over quick fixes."
+      - "Preserve unrelated dirty .devcontainer files."
+      - "Compare slot-release reactor extraction, circuit-breaker atomic increment hardening, threshold ownership consolidation, and worker-adapter/lifecycle seams."
+      - "Do not activate a Worker without allowed files, verification commands, and stop conditions."
+    expected_output:
+      - "Decision"
+      - "Next Worker objective"
+      - "Allowed files"
+      - "Verification commands"
+      - "Stop conditions"
+    receipt:
+      result: done
+      summary: "Chose auto-disable threshold ownership consolidation as the next slice. Claude rejected standalone slot-release extraction as premature before WorkerAdapter/CrawlLifecycle, kept atomic circuit-breaker increment deferred until a real concurrency design, and recommended one domain-owned `Final[int]` threshold consumed by both `Website` and the circuit-breaker reactor. Claude returned GREEN_LIGHT yes with MIN_SCORE 8."
+      evidence:
+        - "backend/src/intric/worker/crawl/circuit_breaker.py"
+        - "backend/src/intric/websites/domain/website.py"
+        - ".codex/artifacts/claude-peer-loop-t020-choose-next-crawler-reliability-slice-20260514T153624Z.md"
+      spawned_tasks:
+        - T021
+  - id: T021
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Make website auto-disable failure threshold a domain-owned constant shared by Website and the crawler circuit-breaker reactor."
+    allowed_files:
+      - "backend/src/intric/websites/domain/website.py"
+      - "backend/src/intric/worker/crawl/circuit_breaker.py"
+      - "backend/tests/unittests/websites/test_website.py"
+      - "backend/tests/unittests/worker/test_crawl_circuit_breaker.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/websites/test_website.py tests/unittests/worker/test_crawl_circuit_breaker.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/website.py src/intric/worker/crawl/circuit_breaker.py tests/unittests/websites/test_website.py tests/unittests/worker/test_crawl_circuit_breaker.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/website.py src/intric/worker/crawl/circuit_breaker.py tests/unittests/websites/test_website.py tests/unittests/worker/test_crawl_circuit_breaker.py"
+      - "! rg \"consecutive_failures\\s*>=?\\s*10|max_failures_before_disable\\s*=\\s*10\" backend/src/intric"
+    stop_if:
+      - "Need to change auto-disable behavior or make the threshold runtime-configurable."
+      - "Need schema, frontend, admin, ARQ, Scrapy, slot-release, audit, timestamp, or atomic-increment changes."
+      - "Need a policy class, registry, helper layer, Any, cast, type ignore, or tests that only assert the constant value."
+      - "Behavior tests do not prove the threshold boundary for both Website and circuit_breaker."
+    receipt:
+      result: done
+      summary: "Added `WEBSITE_AUTO_DISABLE_FAILURE_THRESHOLD: Final[int]` to `websites/domain/website.py` and made both `Website` and the crawler circuit-breaker reactor consume that domain-owned constant. Added behavior tests at the threshold boundary for domain auto-disable, manual schedule reset, backoff branch, and disable branch. Claude returned GREEN_LIGHT yes with MIN_SCORE 8."
+      changed_files:
+        - "backend/src/intric/websites/domain/website.py"
+        - "backend/src/intric/worker/crawl/circuit_breaker.py"
+        - "backend/tests/unittests/websites/test_website.py"
+        - "backend/tests/unittests/worker/test_crawl_circuit_breaker.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/websites/test_website.py tests/unittests/worker/test_crawl_circuit_breaker.py -q"
+        - "cd backend && uv run ruff check src/intric/websites/domain/website.py src/intric/worker/crawl/circuit_breaker.py tests/unittests/websites/test_website.py tests/unittests/worker/test_crawl_circuit_breaker.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/website.py src/intric/worker/crawl/circuit_breaker.py tests/unittests/websites/test_website.py tests/unittests/worker/test_crawl_circuit_breaker.py"
+        - "! rg \"consecutive_failures\\s*>=?\\s*10|max_failures_before_disable\\s*=\\s*10|tenth\" backend/src/intric backend/tests/unittests/worker/test_crawl_circuit_breaker.py"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t021-auto-disable-threshold-implementation-review-20260514T153948Z.md"
+      follow_up:
+        - "Atomic circuit-breaker increment is now cleaner to design because the threshold has one domain owner; still requires real DB concurrency test or single-statement semantics."
+        - "Slot-release cleanup remains intentionally deferred until WorkerAdapter/CrawlLifecycle owns lifecycle boundaries."
+  - id: T022
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next reliability slice after auto-disable threshold consolidation."
+    inputs:
+      - "T021 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "Current dirty diff"
+    constraints:
+      - "Read-only."
+      - "Prefer long-term reliability and maintainability over quick fixes."
+      - "Preserve unrelated dirty .devcontainer files."
+      - "Compare atomic circuit-breaker increment hardening, WorkerAdapter/CrawlLifecycle planning, slot-release extraction, and remaining outcome/failure-summary work."
+      - "Do not activate a Worker without allowed files, verification commands, and stop conditions."
+    expected_output:
+      - "Decision"
+      - "Next Worker objective"
+      - "Allowed files"
+      - "Verification commands"
+      - "Stop conditions"
+    receipt:
+      result: done
+      summary: "Chose slot-release reactor extraction as the next reliability slice, but only after reconciling stale integration tests that still encoded exception-text duplicate detection and incorrect duplicate slot semantics. Claude iteration 3 returned GREEN_LIGHT yes with MIN_SCORE 8 after the test reconciliation landed."
+      evidence:
+        - "backend/src/intric/worker/feeder/queues.py"
+        - "backend/src/intric/worker/crawl_feeder.py"
+        - "backend/tests/unittests/worker/feeder/test_queues.py"
+        - "backend/tests/integration/test_feeder_failure_modes.py"
+        - "backend/tests/integration/test_slot_leak_stress.py"
+        - ".codex/artifacts/claude-peer-loop-t022-duplicate-semantics-blocker-review-20260514T155123Z.md"
+        - ".codex/artifacts/claude-peer-loop-t023-duplicate-semantics-test-reconciliation-review-20260514T155813Z.md"
+      spawned_tasks:
+        - T023
+        - T024
+  - id: T023
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Reconcile stale feeder duplicate integration tests with ARQ-native duplicate semantics before slot-release extraction."
+    allowed_files:
+      - "backend/tests/integration/test_slot_leak_stress.py"
+      - "backend/tests/integration/test_feeder_failure_modes.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_feeder_failure_modes.py::TestFeederEnqueueBranches tests/integration/test_slot_leak_stress.py::TestEnqueueGapSlotLeak -q"
+      - "cd backend && uv run ruff check tests/integration/test_slot_leak_stress.py tests/integration/test_feeder_failure_modes.py"
+      - "cd backend && uv run pytest tests/unittests/worker/feeder -q"
+      - "cd backend && uv run pyright --project pyrightconfig.json tests/integration/test_slot_leak_stress.py tests/integration/test_feeder_failure_modes.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/feeder/test_watchdog.py"
+      - "cd backend && uv run pytest tests/integration/test_slot_leak_stress.py tests/integration/test_feeder_failure_modes.py tests/integration/test_slot_leak_fixes.py -q"
+      - "! rg \"already exists|fragile string|various forms of duplicate|GPT-5|Gemini-3|_handle_enqueue_error|pattern matching\" backend/tests/integration/test_slot_leak_stress.py backend/tests/integration/test_feeder_failure_modes.py"
+    stop_if:
+      - "Need to change production duplicate semantics in JobManager, JobEnqueuer, CrawlFeeder, or watchdog."
+      - "Need to reintroduce exception-text duplicate parsing."
+      - "Need to broaden into slot-release production extraction."
+    receipt:
+      result: done
+      summary: "Removed stale exception-text duplicate assertions and rewrote feeder integration coverage around the four observable enqueue branches: new enqueue, duplicate enqueue via JobManager.enqueue(False), enqueue failure, and invalid job_id. The duplicate branch now proves the redundant slot is released while the original slot/flag remains."
+      changed_files:
+        - "backend/tests/integration/test_slot_leak_stress.py"
+        - "backend/tests/integration/test_feeder_failure_modes.py"
+      verification:
+        - "Red: cd backend && uv run pytest tests/integration/test_slot_leak_stress.py::TestEnqueueGapSlotLeak::test_enqueue_duplicate_keeps_slot_but_removes_from_pending tests/integration/test_feeder_failure_modes.py::TestCrashBeforeLremRecovery -q failed as expected."
+        - "cd backend && uv run pytest tests/integration/test_feeder_failure_modes.py::TestFeederEnqueueBranches tests/integration/test_slot_leak_stress.py::TestEnqueueGapSlotLeak -q"
+        - "cd backend && uv run ruff check tests/integration/test_slot_leak_stress.py tests/integration/test_feeder_failure_modes.py"
+        - "cd backend && uv run pytest tests/unittests/worker/feeder -q"
+        - "cd backend && uv run pyright --project pyrightconfig.json tests/integration/test_slot_leak_stress.py tests/integration/test_feeder_failure_modes.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/feeder/test_watchdog.py"
+        - "cd backend && uv run pytest tests/integration/test_slot_leak_stress.py tests/integration/test_feeder_failure_modes.py tests/integration/test_slot_leak_fixes.py -q"
+        - "! rg \"already exists|fragile string|various forms of duplicate|GPT-5|Gemini-3|_handle_enqueue_error|pattern matching\" backend/tests/integration/test_slot_leak_stress.py backend/tests/integration/test_feeder_failure_modes.py"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t023-duplicate-semantics-test-reconciliation-review-20260514T155813Z.md"
+  - id: T024
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Extract crawl-task slot release into a typed post-terminal reactor while preserving existing Redis slot semantics."
+    allowed_files:
+      - "backend/src/intric/worker/crawl/slot_release.py"
+      - "backend/src/intric/worker/crawl/__init__.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_slot_release.py"
+      - "backend/tests/integration/test_slot_leak_stress.py"
+      - "backend/tests/integration/test_feeder_failure_modes.py"
+      - "backend/tests/integration/test_slot_leak_fixes.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_slot_release.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/slot_release.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_slot_release.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/slot_release.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_slot_release.py"
+      - "cd backend && uv run pytest tests/integration/test_slot_leak_fixes.py tests/integration/test_slot_leak_stress.py tests/integration/test_feeder_failure_modes.py -q"
+      - "rg \"slot_preacquired|release_slot|emergency_release_slot|RELEASE_SLOT\" backend/src/intric/worker/crawl_tasks.py"
+    stop_if:
+      - "Need to change feeder or watchdog slot semantics."
+      - "Need schema, frontend, audit, circuit-breaker, website timestamp, Scrapy, ARQ enqueue, or JobManager changes."
+      - "Need to touch backend/src/intric/worker/crawl_feeder.py, backend/src/intric/worker/feeder/watchdog.py, backend/src/intric/jobs/job_manager.py, or backend/src/intric/worker/feeder/queues.py."
+      - "Need Any, cast, type ignore, broad dict bags, or a generic reactor registry."
+      - "Terminal DB commit would be rolled back by Redis slot-release failure."
+    receipt:
+      result: done
+      summary: "Extracted terminal crawl slot release into `worker/crawl/slot_release.py` with typed request/result/path contracts. The crawl-task finally block now resolves Redis once, delegates release to the reactor, logs `slot_release_path` and `slot_released`, and keeps retry-counter cleanup local. Unit coverage now covers normal, pre-acquired fallback, emergency, noop, Lua failure, missing Redis, flag-delete failure, and emergency missing-Redis paths."
+      changed_files:
+        - "backend/src/intric/worker/crawl/slot_release.py"
+        - "backend/src/intric/worker/crawl/__init__.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_slot_release.py"
+        - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      verification:
+        - "Red: cd backend && uv run pytest tests/unittests/worker/test_crawl_slot_release.py -q failed with ModuleNotFoundError before the reactor existed."
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_slot_release.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+        - "cd backend && uv run pytest tests/integration/test_slot_leak_fixes.py tests/integration/test_slot_leak_stress.py tests/integration/test_feeder_failure_modes.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/slot_release.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_slot_release.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/slot_release.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_slot_release.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py tests/integration/test_slot_leak_stress.py tests/integration/test_feeder_failure_modes.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/feeder/test_watchdog.py"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t024-slot-release-implementation-review-20260514T161016Z.md"
+        - ".codex/artifacts/claude-peer-loop-t024-slot-release-implementation-review-iteration-2-20260514T161612Z.md"
+  - id: T025
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next highest-ROI implementation slice after terminal reactors are extracted."
+    inputs:
+      - "T024 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "Current dirty diff"
+    constraints:
+      - "Read-only."
+      - "Prefer long-term reliability, transparency, and maintainability over quick fixes."
+      - "Prioritize user/admin-visible failure transparency if terminal ownership is coherent enough."
+      - "Preserve unrelated dirty .devcontainer files."
+      - "Do not activate a Worker without allowed files, verification commands, and stop conditions."
+    expected_output:
+      - "Decision"
+      - "Next Worker objective"
+      - "Allowed files"
+      - "Verification commands"
+      - "Stop conditions"
+    receipt:
+      result: done
+      summary: "Chose Step 3B before Step 3A: extract the historical outcome fallback boundary before writing a backfill. Claude rejected starting with backfill because migration SQL or Alembic code would otherwise duplicate classifier rules while they still live inside `crawl_models.py`. T026 will make the runtime legacy boundary explicit, keep parity, and prove stored outcome codes do not consult legacy substring logic. T027 backfill mechanism is recorded as a one-time SQL snapshot against durable columns, with runtime classification remaining owned by the T026 boundary."
+      evidence:
+        - "backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+        - "backend/src/intric/websites/domain/crawl_outcome.py"
+        - "backend/src/intric/websites/domain/crawl_run_repo.py"
+        - "backend/alembic/versions/202605111230_add_crawl_run_outcome_code.py"
+        - ".codex/artifacts/claude-peer-loop-t025-choose-next-crawler-reliability-slice-20260514T162256Z.md"
+      spawned_tasks:
+        - T026
+        - T027
+  - id: T026
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Extract historical crawl outcome fallback from `crawl_models.py` into a typed domain boundary without changing public outcome behavior."
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawl_outcome_legacy_fallback.py"
+      - "backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+      - "backend/tests/unittests/websites/test_crawl_outcome_legacy_fallback.py"
+      - "backend/tests/unittests/websites/test_crawl_outcome.py"
+      - "backend/tests/fixtures/crawl_outcome_parity.json"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/unittests/websites/test_crawl_outcome.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawl_outcome_legacy_fallback.py src/intric/websites/crawl_dependencies/crawl_models.py tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/unittests/websites/test_crawl_outcome.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_outcome_legacy_fallback.py src/intric/websites/crawl_dependencies/crawl_models.py tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/unittests/websites/test_crawl_outcome.py"
+      - "! rg \"skipped duplicate crawl|no pages returned|timed out|timeout\" backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+    stop_if:
+      - "Need DB schema or migration changes."
+      - "Need to touch worker, feeder, watchdog, crawler, frontend, generated API types, or sysadmin endpoints."
+      - "Need to add or change `CrawlOutcomeCode` values."
+      - "Need to remove the lenient parser or change its return type."
+      - "Need Any, cast, type ignore, broad helpers, or restating-what comments."
+      - "Net production LOC exceeds 300 or more than three production files need changes."
+    receipt:
+      result: done
+      summary: "Extracted historical outcome fallback into `websites/domain/crawl_outcome_legacy_fallback.py`. Stored typed outcome codes now bypass legacy fallback, legacy inference metrics are emitted only for inferred failure explanations, success-style count-derived fallbacks do not inflate the fallback metric, and legacy string snippets were removed from `crawl_models.py`. Claude iteration 2 returned GREEN_LIGHT yes with MIN_SCORE 8."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawl_outcome_legacy_fallback.py"
+        - "backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+        - "backend/tests/unittests/websites/test_crawl_outcome_legacy_fallback.py"
+        - "backend/tests/unittests/websites/test_crawl_outcome.py"
+      verification:
+        - "Red: cd backend && uv run pytest tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/unittests/websites/test_crawl_outcome.py -q failed with ModuleNotFoundError before the boundary existed."
+        - "cd backend && uv run pytest tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/unittests/websites/test_crawl_outcome.py -q"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawl_outcome_legacy_fallback.py src/intric/websites/crawl_dependencies/crawl_models.py tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/unittests/websites/test_crawl_outcome.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_outcome_legacy_fallback.py src/intric/websites/crawl_dependencies/crawl_models.py tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/unittests/websites/test_crawl_outcome.py"
+        - "! rg '\"skipped duplicate crawl\"|\"no pages returned\"|\"timed out\"|\"timeout\"' backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t026-legacy-outcome-boundary-implementation-review-20260514T163226Z.md"
+        - ".codex/artifacts/claude-peer-loop-t026-legacy-outcome-boundary-implementation-review-iteration-2-20260514T163527Z.md"
+  - id: T027
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Backfill known historical crawl outcome codes using a one-time SQL migration snapshot after T026 makes runtime legacy classification explicit."
+    allowed_files:
+      - "backend/alembic/versions/202605141700_backfill_crawl_run_outcome_codes.py"
+      - "backend/tests/fixtures/crawl_outcome_parity.json"
+      - "backend/tests/unittests/websites/test_crawl_outcome_legacy_fallback.py"
+      - "backend/tests/integration/migrations/test_crawl_outcome_backfill.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/unittests/websites/test_crawl_outcome.py -q"
+      - "cd backend && uv run pytest -m migration_isolation tests/integration/migrations/test_crawl_outcome_backfill.py -q"
+      - "cd backend && uv run ruff check alembic/versions/202605141700_backfill_crawl_run_outcome_codes.py tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/integration/migrations/test_crawl_outcome_backfill.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/integration/migrations/test_crawl_outcome_backfill.py"
+      - "cd backend && uv run alembic heads"
+    stop_if:
+      - "T026 is not done."
+      - "Backfill cannot be expressed as a bounded migration over durable crawl/job columns."
+      - "Need to change runtime outcome classification or add new CrawlOutcomeCode values."
+      - "Need to backfill using unbounded URL samples, raw Scrapy logs, or frontend strings."
+      - "Migration attempts to persist UNKNOWN_CRAWL_ERROR for rows where no known outcome is derivable."
+    receipt:
+      result: done
+      summary: "Added a bounded Alembic backfill for known historical crawl outcome codes after extracting the legacy fallback boundary. The migration backfills only derivable known outcomes, preserves UNKNOWN rows as NULL for fallback metrics, skips unfinished/non-terminal rows, does not overwrite existing typed outcomes, preserves historical updated_at, and uses a 100k single-statement threshold with 5k deterministic batches above that."
+      changed_files:
+        - "backend/alembic/versions/202605141700_backfill_crawl_run_outcome_codes.py"
+        - "backend/tests/fixtures/crawl_outcome_parity.json"
+        - "backend/tests/unittests/websites/test_crawl_outcome_legacy_fallback.py"
+        - "backend/tests/integration/migrations/test_crawl_outcome_backfill.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "Red: cd backend && uv run pytest -m migration_isolation tests/integration/migrations/test_crawl_outcome_backfill.py -q failed before revision 202605141700 existed."
+        - "Red: cd backend && uv run pytest -m migration_isolation tests/integration/migrations/test_crawl_outcome_backfill.py -q failed when the migration rewrote historical updated_at."
+        - "cd backend && uv run pytest tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/unittests/websites/test_crawl_outcome.py -q"
+        - "cd backend && uv run pytest -m migration_isolation tests/integration/migrations/test_crawl_outcome_backfill.py -q"
+        - "cd backend && uv run ruff check alembic/versions/202605141700_backfill_crawl_run_outcome_codes.py tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/integration/migrations/test_crawl_outcome_backfill.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/integration/migrations/test_crawl_outcome_backfill.py"
+        - "cd backend && uv run alembic heads"
+        - "python3 -m json.tool backend/tests/fixtures/crawl_outcome_parity.json >/tmp/crawl_outcome_parity.formatted.json"
+        - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/crawler-reliability-robustness-transparency/state.yaml\"); puts \"state yaml ok\"'"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t027-crawl-outcome-backfill-plan-gate-20260514T164300Z.md"
+        - ".codex/artifacts/claude-peer-loop-t027-crawl-outcome-backfill-plan-gate-iteration-2-20260514T164548Z.md"
+        - ".codex/artifacts/claude-peer-loop-t027-crawl-outcome-backfill-implementation-review-20260514T165714Z.md"
+        - ".codex/artifacts/claude-peer-loop-t027-crawl-outcome-backfill-implementation-review-iteration-4-20260514T170116Z.md"
+  - id: T028
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next safe implementation slice after T027, prioritizing Step 3 completion before broader lifecycle/phase extraction."
+    inputs:
+      - "T026 receipt"
+      - "T027 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "backend/src/intric/websites/domain/crawl_outcome_legacy_fallback.py"
+      - "backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+    constraints:
+      - "Read-only decision task."
+      - "Prefer finishing Step 3 typed outcome transparency before CrawlLifecycle/WorkerAdapter/admin write controls."
+      - "Do not broaden into multi-tenancy unless existing contracts require it."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Next worker objective"
+      - "Allowed files"
+      - "Verification commands"
+      - "Stop conditions"
+    receipt:
+      result: done
+      summary: "Chose a narrowed Step 3 frontend/generated-type cleanup after T027. Claude rejected the first version because the root issue is stale `@intric/intric-js` resource aliases, not only temporary presentation casts. The green plan fixes `CrawlRun` and `WebsiteSparse` aliases first, exports generated crawl outcome types, keeps a defaulted count-breakdown adapter, removes local outcome enum duplication, and bounds the WebsiteSparse blast radius with whole-app typecheck stop conditions."
+      evidence:
+        - ".codex/artifacts/t028-next-step3-slice-decision.md"
+        - ".codex/artifacts/claude-peer-loop-t029-frontend-generated-crawl-outcome-type-cleanup-plan-20260514T171244Z.md"
+        - ".codex/artifacts/claude-peer-loop-t029-frontend-generated-crawl-outcome-type-cleanup-plan-iteration-2-20260514T171623Z.md"
+        - ".codex/artifacts/claude-peer-loop-t029-frontend-generated-crawl-outcome-type-cleanup-plan-iteration-3-20260514T171821Z.md"
+      spawned_tasks:
+        - T029
+  - id: T029
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Fix crawler-related generated frontend resource aliases and remove obsolete crawler outcome presentation shims without broadening frontend scope."
+    allowed_files:
+      - "frontend/packages/intric-js/src/types/resources.d.ts"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd frontend/packages/intric-js && bun run update"
+      - "cd frontend/apps/web && bun test src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+      - "cd frontend/apps/web && bun run check"
+      - "cd frontend/apps/web && bun run lint"
+      - "cd frontend/packages/intric-js && bun run lint"
+    stop_if:
+      - "OpenAPI generation cannot run against the current backend."
+      - "OpenAPI generation changes schemas outside the crawler/outcome fields expected by this slice."
+      - "Generated schema does not expose the chosen crawler outcome/run fields."
+      - "`WebsiteSparse -> WebsitePublic` creates new `bun run check` diagnostics in existing consumers."
+      - "Fixing consumer diagnostics requires editing files outside allowed_files."
+      - "Backend runtime behavior changes are needed."
+      - "Any edit is needed under .devcontainer; those files are known-dirty and unrelated."
+    receipt:
+      result: done
+      summary: "Fixed the crawler-facing generated frontend type aliases and removed the local crawl outcome shim. `CrawlRun` now aliases the generated website presentation crawl-run schema, `WebsiteSparse` aliases `WebsitePublic` with a boundary note because OpenAPI does not expose a WebsiteSparse response, generated crawl outcome types are exported from `intric-js`, and presentation labels are keyed by generated `CrawlOutcomeCode` with a runtime unknown-code fallback."
+      changed_files:
+        - "frontend/packages/intric-js/src/types/resources.d.ts"
+        - "frontend/packages/intric-js/src/types/schema.d.ts"
+        - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+        - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+      verification:
+        - "Attempted: cd frontend/packages/intric-js && ENEO_BACKEND_URL=http://localhost:8123 bun run update; stopped because the currently running backend produced a broad out-of-scope generated schema diff."
+        - "cd frontend/apps/web && bun test src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+        - "cd frontend/apps/web && bun run check"
+        - "cd frontend/apps/web && bun run lint"
+        - "cd frontend/packages/intric-js && bun run lint"
+      notes:
+        - "The normal OpenAPI regeneration plan item remains unchecked until it can run against a clean intended backend snapshot and be reviewed as its own generated-contract change."
+        - "The only remaining string-keyed label map in this presentation file is failure_summary; backend currently exposes it as a string-keyed object rather than a generated FailureReason enum."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t029-frontend-generated-crawl-outcome-type-cleanup-implementation-review-20260514T173230Z.md"
+        - ".codex/artifacts/claude-peer-loop-t029-frontend-generated-crawl-outcome-type-cleanup-implementation-review-iteration-2-20260514T173736Z.md"
+  - id: T030
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Choose the next safe implementation slice after T029, prioritizing Step 3 transparency completion and avoiding broad generated-contract churn."
+    inputs:
+      - "T029 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+      - "backend/src/intric/websites/domain/crawl_outcome.py"
+      - "backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+    constraints:
+      - "Read-only decision task."
+      - "Prefer typed contracts and deletion of brittle string fallbacks."
+      - "Do not run broad OpenAPI regeneration unless the backend snapshot is known-clean and intended."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Next worker objective"
+      - "Allowed files"
+      - "Verification commands"
+      - "Stop conditions"
+    receipt:
+      result: done
+      summary: "Chose a narrow Step 3 frontend status cleanup before backend lifecycle work. The highest-ROI remaining transparency issue is that `crawlStatusPresentation.ts` and `getCrawlRunFailureDetail` still fall back directly to `crawl.result_location`, even though backend presentation now exposes typed `outcome.detail` for stored and legacy crawl rows. Removing the direct frontend legacy-string dependency is smaller and safer than broad OpenAPI regeneration or lifecycle extraction."
+      spawned_tasks:
+        - T031
+  - id: T031
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Remove remaining frontend direct `result_location` fallbacks from crawler status/failure presentation and keep diagnostic detail flowing through typed crawl outcomes."
+    allowed_files:
+      - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlStatusPresentation.ts"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlStatusPresentation.test.ts"
+      - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/knowledge/websites/WebsiteStatus.svelte"
+      - "backend/tests/unittests/websites/test_crawl_outcome.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd frontend/apps/web && bun test src/lib/features/knowledge/crawlOutcomePresentation.test.ts src/lib/features/knowledge/crawlStatusPresentation.test.ts"
+      - "cd frontend/apps/web && bun run check"
+      - "cd frontend/apps/web && bun run lint"
+      - "cd backend && uv run pytest tests/unittests/websites/test_crawl_outcome.py -q"
+      - "cd backend && uv run ruff check tests/unittests/websites/test_crawl_outcome.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json tests/unittests/websites/test_crawl_outcome.py"
+    stop_if:
+      - "Backend public schema changes are needed."
+      - "Frontend must parse or classify result_location strings."
+      - "Fixing consumers requires editing files outside allowed_files."
+      - "The change would hide typed outcome labels or diagnostic detail from users."
+    receipt:
+      result: done
+      summary: "Removed direct raw `result_location` fallback from the website crawler status/failure presentation path. Failure detail now flows through typed crawl outcomes via `getCrawlRunFailureDetail` and `getCrawlRunFailureTooltip`; unknown or missing detail renders a controlled localized diagnostic gap message instead of leaking a legacy job string. Backend tests pin that stored and legacy unknown outcomes preserve detail through `outcome.detail`."
+      changed_files:
+        - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+        - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+        - "frontend/apps/web/src/lib/features/knowledge/crawlStatusPresentation.ts"
+        - "frontend/apps/web/src/lib/features/knowledge/crawlStatusPresentation.test.ts"
+        - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/knowledge/websites/WebsiteStatus.svelte"
+        - "backend/tests/unittests/websites/test_crawl_outcome.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+      verification:
+        - "Red: cd frontend/apps/web && bun test src/lib/features/knowledge/crawlOutcomePresentation.test.ts src/lib/features/knowledge/crawlStatusPresentation.test.ts failed while raw result_location was still used."
+        - "cd frontend/apps/web && bun test src/lib/features/knowledge/crawlOutcomePresentation.test.ts src/lib/features/knowledge/crawlStatusPresentation.test.ts"
+        - "cd frontend/apps/web && bun run check"
+        - "cd frontend/apps/web && bun run lint"
+        - "cd backend && uv run pytest tests/unittests/websites/test_crawl_outcome.py -q"
+        - "cd backend && uv run ruff check tests/unittests/websites/test_crawl_outcome.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json tests/unittests/websites/test_crawl_outcome.py"
+      notes:
+        - "Generic `JobListView.svelte` still renders `job.result_location`; Claude marked that as the next separate frontend surface."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t031-frontend-removes-crawler-result-location-fallback-review-20260514T174849Z.md"
+  - id: T032
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Choose the next safe implementation slice after T031, focusing on the remaining frontend raw result_location surface without broadening into generic job-system redesign."
+    inputs:
+      - "T031 receipt"
+      - "frontend/apps/web/src/lib/features/jobs/components/JobListView.svelte"
+      - "frontend/apps/web/src/lib/features/jobs/components/JobManagerDropdownPanel.svelte"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+    constraints:
+      - "Read-only decision task."
+      - "Do not redesign the generic job system unless the existing contract requires it."
+      - "Prefer crawler-specific typed presentation over raw result_location rendering for crawl jobs."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Next worker objective"
+      - "Allowed files"
+      - "Verification commands"
+      - "Stop conditions"
+    receipt:
+      result: done
+      summary: "Chose a frontend-only generic job dropdown cleanup. A backend Job-to-CrawlRun outcome join would be a broader job API redesign; the safer Step 3 slice is to stop rendering raw `Job.result_location` for crawl jobs because crawler diagnostics are now owned by `CrawlRun.outcome`. Non-crawl jobs keep their existing result detail behavior."
+      spawned_tasks:
+        - T033
+  - id: T033
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Stop the generic job dropdown from rendering raw `result_location` for crawl jobs while preserving non-crawl job details."
+    allowed_files:
+      - "frontend/apps/web/src/lib/features/jobs/jobResultPresentation.ts"
+      - "frontend/apps/web/src/lib/features/jobs/jobResultPresentation.test.ts"
+      - "frontend/apps/web/src/lib/features/jobs/components/JobListView.svelte"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd frontend/apps/web && bun test src/lib/features/jobs/jobResultPresentation.test.ts"
+      - "cd frontend/apps/web && bun run check"
+      - "cd frontend/apps/web && bun run lint"
+    stop_if:
+      - "A typed crawl outcome needs to be added to the generic Job API."
+      - "Non-crawl job result details would be hidden or changed."
+      - "The implementation needs to parse result_location strings."
+    receipt:
+      result: done
+      summary: "Stopped the generic job dropdown from rendering raw `result_location` for crawl jobs. Added a small jobs-feature presentation function that preserves non-crawl job details, hides blank result details, and treats crawl diagnostics as owned by `CrawlRun.outcome` rather than the generic Job string field."
+      changed_files:
+        - "frontend/apps/web/src/lib/features/jobs/jobResultPresentation.ts"
+        - "frontend/apps/web/src/lib/features/jobs/jobResultPresentation.test.ts"
+        - "frontend/apps/web/src/lib/features/jobs/components/JobListView.svelte"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+      verification:
+        - "Red: cd frontend/apps/web && bun test src/lib/features/jobs/jobResultPresentation.test.ts failed before jobResultPresentation existed."
+        - "cd frontend/apps/web && bun test src/lib/features/jobs/jobResultPresentation.test.ts"
+        - "cd frontend/apps/web && bun test src/lib/features/knowledge/crawlOutcomePresentation.test.ts src/lib/features/knowledge/crawlStatusPresentation.test.ts src/lib/features/jobs/jobResultPresentation.test.ts"
+        - "cd frontend/apps/web && bun run check"
+        - "cd frontend/apps/web && bun run lint"
+      notes:
+        - "Production frontend grep now finds `result_location` only in tests and the non-crawl branch of `getJobResultDetail`."
+  - id: T034
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Choose the next safe implementation slice after Step 3 frontend result-string cleanup."
+    inputs:
+      - "T033 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "backend/src/intric/websites/domain/crawl_outcome.py"
+      - "backend/src/intric/websites/presentation/website_models.py"
+    constraints:
+      - "Prefer finishing Step 3 typed-contract gaps before moving to CrawlLifecycle."
+      - "Do not perform broad OpenAPI regeneration from a dirty or unintended backend snapshot."
+      - "Do not add a parallel frontend enum."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Next worker objective"
+      - "Allowed files"
+      - "Verification commands"
+      - "Stop conditions"
+    receipt:
+      result: done
+      summary: "Chose a backend-only Step 3 typed-contract cleanup for `failure_summary` before phase extraction or CrawlLifecycle. Claude rejected phase skeletons as speculative and identified `failure_summary: dict[str, int]` as the last crawler outcome string-keyed contract gap after T029/T031/T033. The next worker will type failure-summary parsing/writes through the existing `FailureReason` enum without changing JSON wire shape, regenerating OpenAPI, or touching frontend."
+      evidence:
+        - "backend/src/intric/websites/domain/crawl_outcome.py"
+        - "backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+        - "backend/src/intric/websites/presentation/website_models.py"
+        - "backend/src/intric/worker/crawl/terminal.py"
+        - ".codex/artifacts/claude-peer-loop-t034-choose-next-crawler-reliability-slice-20260514T180145Z.md"
+      spawned_tasks:
+        - T035
+  - id: T035
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Close the backend `failure_summary` typed-contract gap by parsing and writing failure reasons through the existing `FailureReason` enum without changing the JSON wire shape."
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawl_outcome.py"
+      - "backend/src/intric/websites/domain/crawl_outcome_legacy_fallback.py"
+      - "backend/src/intric/websites/domain/crawl_run.py"
+      - "backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+      - "backend/src/intric/websites/presentation/website_models.py"
+      - "backend/src/intric/worker/crawl/terminal.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/fixtures/crawl_outcome_parity.json"
+      - "backend/tests/unittests/websites/test_crawl_outcome.py"
+      - "backend/tests/unittests/websites/test_crawl_outcome_legacy_fallback.py"
+      - "backend/tests/unittests/worker/test_crawl_terminal.py"
+      - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/websites/test_crawl_outcome.py tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawl_outcome.py src/intric/websites/domain/crawl_outcome_legacy_fallback.py src/intric/websites/domain/crawl_run.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/websites/presentation/website_models.py src/intric/worker/crawl/terminal.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_outcome.py tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_outcome.py src/intric/websites/domain/crawl_outcome_legacy_fallback.py src/intric/websites/domain/crawl_run.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/websites/presentation/website_models.py src/intric/worker/crawl/terminal.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_outcome.py tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+    stop_if:
+      - "Need to regenerate OpenAPI or touch frontend files."
+      - "Need to add a parallel frontend FailureReason enum."
+      - "Need to add a FailureSummary dataclass in this slice."
+      - "Need to change FailureReason enum values or add new ones."
+      - "The failure_summary JSON wire shape would change from string keys to another shape."
+      - "Need Any, cast, or type ignore in production code."
+      - "Need to alter commit_terminal semantics or any post-commit reactor behavior."
+    receipt:
+      result: done
+      summary: "Closed the backend failure_summary typed-contract gap. New worker/terminal/classifier paths use FailureReason keys internally, terminal storage serialization preserves the existing string-keyed JSONB shape, public Pydantic JSON output still emits string keys, and historical read paths meter unknown legacy buckets before dropping them."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawl_outcome.py"
+        - "backend/src/intric/websites/domain/crawl_outcome_legacy_fallback.py"
+        - "backend/src/intric/websites/domain/crawl_run.py"
+        - "backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+        - "backend/src/intric/websites/presentation/website_models.py"
+        - "backend/src/intric/worker/crawl/terminal.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/fixtures/crawl_outcome_parity.json"
+        - "backend/tests/unittests/websites/test_crawl_outcome.py"
+        - "backend/tests/unittests/websites/test_crawl_outcome_legacy_fallback.py"
+        - "backend/tests/unittests/worker/test_crawl_terminal.py"
+      verification:
+        - "TDD red: targeted test run initially failed on missing parse_failure_summary_lenient import."
+        - "cd backend && uv run pytest tests/unittests/websites/test_crawl_outcome.py tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q  # 69 passed, 12 existing warnings"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawl_outcome.py src/intric/websites/domain/crawl_outcome_legacy_fallback.py src/intric/websites/domain/crawl_run.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/websites/presentation/website_models.py src/intric/worker/crawl/terminal.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_outcome.py tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_outcome.py src/intric/websites/domain/crawl_outcome_legacy_fallback.py src/intric/websites/domain/crawl_run.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/websites/presentation/website_models.py src/intric/worker/crawl/terminal.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_outcome.py tests/unittests/websites/test_crawl_outcome_legacy_fallback.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json  # full backend: 0 errors, 0 warnings"
+        - "cd backend && uv run python - <<'PY' ... CrawlRunPublic/CrawlRunUpdate model_json_schema failure_summary inspection ... PY  # schema now has propertyNames -> FailureReason while runtime JSON stays string-keyed"
+        - "rg CrawlRunUpdate/failure_summary reachability and migration grep: no current HTTP/API CrawlRunUpdate construction; backfill migration reads failure_summary only for outcome_code classification."
+        - "python YAML validation through backend uv environment: state yaml ok"
+        - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-reliability-t034-next-slice --title 'T035 failure summary typed contract implementation review' --phase commit-gate --iteration 2 --require-green --required-min-score 8 ..."
+        - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-reliability-t034-next-slice --title 'T035 failure summary typed contract implementation re-review' --phase verification --iteration 3 --require-green --required-min-score 8 ..."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t035-failure-summary-typed-contract-implementation-review-20260514T181728Z.md"
+        - ".codex/artifacts/claude-peer-loop-t035-failure-summary-typed-contract-implementation-re-review-20260514T182243Z.md"
+      followups:
+        - "Next generated-type slice should expect failure_summary OpenAPI schema to gain propertyNames constrained to FailureReason; runtime JSON shape remains unchanged."
+        - "If CrawlRunUpdate ever becomes a client-controlled HTTP body, split read/write Pydantic bases so write-side failure_summary parsing is strict."
+        - "A future focused cleanup may replace the parser callback with default metering if another lenient read site appears."
+  - id: T036
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next safest crawler reliability slice after Step 3 typed-contract cleanup, prioritizing maintainability, transparency, and bounded verification."
+    inputs:
+      - "T035 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "Current dirty diff on feature/crawler-skip-unchanged-pages"
+    constraints:
+      - "Do not implement in this task."
+      - "Prefer one narrow, reviewable slice over broad phase extraction."
+      - "Prefer completing remaining Step 3 generated-contract work or a concrete lifecycle extraction only if evidence shows it is safer than more cleanup."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Next worker objective"
+      - "Allowed files"
+      - "Verification commands"
+      - "Stop conditions"
+    receipt:
+      result: done
+      summary: "Chose a narrow CrawlLifecycle types-only micro-slice before phase extraction, WorkerAdapter, admin overview, or generated frontend schema regeneration. Claude rejected broad phase skeletons and WorkerAdapter work as premature without a lifecycle anchor, flagged generated type refresh as valid but blocked by prior broad schema drift, and required board hygiene before opening another worker."
+      evidence:
+        - ".codex/artifacts/claude-peer-loop-t036-choose-next-crawler-reliability-slice-20260514T182916Z.md"
+        - "frontend/packages/intric-js/src/types/schema.d.ts still exposes failure_summary as {[key: string]: number}; this remains an explicit generated-contract follow-up."
+        - "backend/src/intric/worker/crawl_tasks.py current line count: 2098."
+      board_hygiene:
+        - "Marked T029, T030, T031, T032, and T033 done because each already had a done receipt."
+      spawned_tasks:
+        - T037
+  - id: T037
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Introduce a closed CrawlLifecycle enum and pure lifecycle derivation for existing CrawlRun/Job rows without adding production consumers or changing behavior."
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawl_lifecycle.py"
+      - "backend/src/intric/websites/domain/crawl_run.py"
+      - "backend/tests/unittests/websites/test_crawl_lifecycle.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/websites/test_crawl_lifecycle.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawl_lifecycle.py src/intric/websites/domain/crawl_run.py tests/unittests/websites/test_crawl_lifecycle.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_lifecycle.py src/intric/websites/domain/crawl_run.py tests/unittests/websites/test_crawl_lifecycle.py"
+      - "! rg \"CrawlLifecycle\" backend/src/intric/worker/ backend/src/intric/sysadmin/ backend/src/intric/server/ backend/src/intric/api/"
+    stop_if:
+      - "Any worker, watchdog, feeder, sysadmin, router, frontend, migration, or generated type file needs to change."
+      - "The lifecycle enum needs more than four states."
+      - "Lifecycle derivation needs anything beyond existing CrawlRun and Job status/progress fields."
+      - "Any Any, cast, or type ignore is needed in new code."
+      - "Tests need to assert implementation details instead of the derivation table."
+      - "Production behavior would change in this slice."
+    receipt:
+      result: done
+      summary: "Introduced a closed CrawlLifecycle enum plus pure derive_crawl_lifecycle(crawl_run) function. The slice is intentionally types-only: queued, running without recorded progress, running with recorded progress, and terminal are now named in the website domain, but no worker, watchdog, sysadmin, API, frontend, migration, or generated-type consumer was added."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawl_lifecycle.py"
+        - "backend/tests/unittests/websites/test_crawl_lifecycle.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "Red: cd backend && uv run pytest tests/unittests/websites/test_crawl_lifecycle.py -q failed on missing intric.websites.domain.crawl_lifecycle."
+        - "cd backend && uv run pytest tests/unittests/websites/test_crawl_lifecycle.py -q  # 16 passed"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawl_lifecycle.py src/intric/websites/domain/crawl_run.py tests/unittests/websites/test_crawl_lifecycle.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_lifecycle.py src/intric/websites/domain/crawl_run.py tests/unittests/websites/test_crawl_lifecycle.py"
+        - "! rg \"CrawlLifecycle\" backend/src/intric/worker/ backend/src/intric/sysadmin/ backend/src/intric/server/ backend/src/intric/api/"
+        - "cd backend && uv run pyright --project pyrightconfig.json  # full backend: 0 errors, 0 warnings"
+        - "cd backend && uv run pytest tests/unittests -q  # 1538 passed, 52 existing warnings"
+        - "Attempted: cd backend && uv run pytest tests/integration -q  # failed outside this slice: 674 passed, 27 skipped, 1 xfailed, 28 failed, 41 errors; dominant failures were audit session rate-limit service 503 and existing unrelated integration areas."
+        - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-reliability-t036-next-slice --title 'T037 crawl lifecycle types-only implementation review' --phase commit-gate --iteration 2 --require-green --required-min-score 8 ..."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t037-crawl-lifecycle-types-only-implementation-review-20260514T183541Z.md"
+      intentional_choices:
+        - "CrawlRun.status already projects the linked Job status in CrawlRun.to_domain, so the lifecycle function takes only CrawlRun."
+        - "Failed page/file counters and too-large file counters count as recorded progress because they prove the crawler observed source work even if indexing output failed."
+        - "The TERMINAL enum value is intentionally payload-free until a Step 4 consumer slice maps terminal transitions to TerminalEvent."
+      followups:
+        - "First production consumer should map watchdog Phase 3.5 and Phase 3 behavior to CrawlLifecycle without collapsing the distinction."
+        - "Generated frontend schema still needs a separate clean regeneration slice for failure_summary propertyNames."
+  - id: T038
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next safest Step 4 consumer after the CrawlLifecycle anchor, preserving behavior while reducing lifecycle heuristics."
+    inputs:
+      - "T037 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "backend/src/intric/websites/domain/crawl_lifecycle.py"
+      - "backend/src/intric/worker/feeder/watchdog.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+    constraints:
+      - "Do not implement in this task."
+      - "Prefer one behavior-preserving consumer of CrawlLifecycle over broad phase extraction."
+      - "Do not touch frontend, generated types, migrations, or admin UI in the worker selected by this judge unless evidence proves that is safer."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Next worker objective"
+      - "Allowed files"
+      - "Verification commands"
+      - "Stop conditions"
+    receipt:
+      result: done
+      summary: "Chose an observational watchdog consumer for CrawlLifecycle, not a selection-changing cleanup refactor. Claude flagged that Phase 3.5 currently selects early zombies using only pages_crawled NULL/0, while CrawlLifecycle treats page failures, file downloads, source retention, hash retention, and too-large file skips as recorded progress. The next worker must log and snapshot lifecycle counts for Phase 3.5 and Phase 3 rows without changing SQL predicates, cleanup decisions, terminal outcomes, or derive_crawl_lifecycle semantics."
+      evidence:
+        - ".codex/artifacts/claude-peer-loop-t038-choose-first-crawllifecycle-consumer-20260514T185824Z.md"
+        - "backend/src/intric/worker/feeder/watchdog.py Phase 3.5 predicate still uses pages_crawled IS NULL/0."
+        - "backend/src/intric/websites/domain/crawl_lifecycle.py derives recorded progress from all crawler counters."
+      decision:
+        - "Existing watchdog selection semantics win for cleanup behavior in the next slice."
+        - "CrawlLifecycle is used as an observability tag only until a later task explicitly reconciles progress semantics."
+      spawned_tasks:
+        - T039
+  - id: T039
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Wire CrawlLifecycle into watchdog Phase 3.5 and Phase 3 as observational log and metrics-snapshot tags without changing selection, cleanup, terminal outcome, or slot-release behavior."
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawl_lifecycle.py"
+      - "backend/src/intric/worker/feeder/watchdog.py"
+      - "backend/tests/unittests/websites/test_crawl_lifecycle.py"
+      - "backend/tests/unittests/worker/feeder/test_watchdog.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/feeder/test_watchdog.py tests/unittests/websites/test_crawl_lifecycle.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawl_lifecycle.py src/intric/worker/feeder/watchdog.py tests/unittests/websites/test_crawl_lifecycle.py tests/unittests/worker/feeder/test_watchdog.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_lifecycle.py src/intric/worker/feeder/watchdog.py tests/unittests/websites/test_crawl_lifecycle.py tests/unittests/worker/feeder/test_watchdog.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+      - "cd backend && uv run pytest tests/unittests -q"
+    stop_if:
+      - "Any Phase 3.5 or Phase 3 SQL where predicate changes."
+      - "derive_crawl_lifecycle semantics need to change."
+      - "CrawlOutcomeCode or terminal outcome mapping needs to change."
+      - "Frontend, generated types, admin UI, migrations, or sysadmin files need to change."
+      - "CleanupMetrics needs non-lifecycle fields."
+      - "Tests can only prove implementation details and not the no-selection-change boundary."
+    receipt:
+      result: done
+      summary: "Wired CrawlLifecycle into watchdog Phase 3.5 and Phase 3 as an observational signal only. Watchdog now records lifecycle counts in phase logs, aggregate cleanup metrics, and the Redis metrics snapshot, while preserving Phase 3.5 and Phase 3 selection predicates, terminal outcomes, slot-release behavior, and cleanup decisions."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawl_lifecycle.py"
+        - "backend/src/intric/worker/feeder/watchdog.py"
+        - "backend/tests/unittests/websites/test_crawl_lifecycle.py"
+        - "backend/tests/unittests/worker/feeder/test_watchdog.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "Red: cd backend && uv run pytest tests/unittests/websites/test_crawl_lifecycle.py -q failed on missing derive_crawl_lifecycle_from_counters."
+        - "cd backend && uv run pytest tests/unittests/worker/feeder/test_watchdog.py tests/unittests/websites/test_crawl_lifecycle.py -q  # 41 passed"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawl_lifecycle.py src/intric/worker/feeder/watchdog.py tests/unittests/websites/test_crawl_lifecycle.py tests/unittests/worker/feeder/test_watchdog.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_lifecycle.py src/intric/worker/feeder/watchdog.py tests/unittests/websites/test_crawl_lifecycle.py tests/unittests/worker/feeder/test_watchdog.py  # 0 errors"
+        - "cd backend && uv run pyright --project pyrightconfig.json  # 0 errors"
+        - "cd backend && uv run pytest tests/unittests -q  # 1549 passed, 53 existing warnings"
+        - "cd backend && uv run pytest tests/integration/test_feeder_failure_modes.py tests/integration/test_phase0_zombie_reconciliation.py tests/integration/test_slot_leak_stress.py -q  # 30 passed"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t039-watchdog-lifecycle-observation-implementation-review-20260514T191058Z.md"
+        - ".codex/artifacts/claude-peer-loop-t039-watchdog-lifecycle-observation-implementation-re-review-20260514T192039Z.md"
+      claude_result: "Iteration 2 returned changes_required for synthetic CrawlRun construction and non-exhaustive lifecycle counting. Iteration 3 returned GREEN_LIGHT yes, MIN_SCORE 8 after adding derive_crawl_lifecycle_from_counters, exhaustive counting, no-progress and terminal watchdog tests, compiled WHERE-clause assertions, and single-pass row handling."
+      compatibility_check:
+        - "backend/src/intric/server/main.py parses crawl_watchdog:last_metrics with json.loads into a total=False TypedDict and projects only known WatchdogMetrics fields, so the added lifecycle_observed object is ignored by the existing public health response."
+      intentional_choices:
+        - "CrawlLifecycle derivation now has a primitive-field function owned by the lifecycle domain module; watchdog does not synthesize CrawlRun entities."
+        - "Phase 3.5 still uses the existing pages_crawled NULL/0 predicate; lifecycle's broader progress definition is logged only."
+        - "Status is selected from Jobs and parsed through Status(...) so bad row data fails loudly instead of silently miscounting."
+      followups:
+        - "A later readability slice can extract the shared Phase 3/3.5 observational SELECT columns if watchdog keeps growing."
+        - "Next Step 4 work should define cleanup policy per terminal transition instead of adding more observational consumers."
+    scope_revision:
+      reason: "Claude commit-gate for iteration 2 found that watchdog should not synthesize CrawlRun entities for lifecycle observation. The worker scope was widened to the lifecycle module and its tests so derive_crawl_lifecycle can delegate to a narrower primitive-field function without changing behavior."
+      claude_artifact: ".codex/artifacts/claude-peer-loop-t039-watchdog-lifecycle-observation-implementation-review-20260514T191058Z.md"
+  - id: T040
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next Step 4 lifecycle/cleanup-policy slice after watchdog lifecycle observation, prioritizing maintainability, behavior preservation, and reviewable boundaries."
+    inputs:
+      - "T039 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "backend/src/intric/websites/domain/crawl_lifecycle.py"
+      - "backend/src/intric/worker/feeder/watchdog.py"
+      - "backend/src/intric/worker/crawl/terminal.py"
+    constraints:
+      - "Do not implement in this task."
+      - "Prefer one small behavior-preserving slice."
+      - "Do not broaden to frontend/admin/generated types unless evidence proves it is the safest next step."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Next worker objective"
+      - "Allowed files"
+      - "Verification commands"
+      - "Stop conditions"
+    receipt:
+      result: done
+      summary: "Chose a types-only domain cleanup-policy slice as the next safe Step 4 task. Claude rejected wiring lifecycle/cleanup policy through watchdog in this slice because Phase 3.5 selection semantics are not equivalent to CrawlLifecycle's broader progress definition. The selected worker introduces a domain-owned CleanupPolicy enum and exhaustive CrawlOutcomeCode mapping without production consumers or behavior changes."
+      evidence:
+        - ".codex/artifacts/claude-peer-loop-t040-choose-next-step-4-crawler-lifecycle-slice-20260514T192624Z.md"
+        - ".codex/artifacts/claude-peer-loop-t040-selected-cleanup-policy-worker-card-review-20260514T193137Z.md"
+        - "backend/src/intric/worker/crawl_tasks.py: _compute_stale_titles currently gates stale deletion on crawl_is_partial."
+        - "backend/src/intric/worker/crawl_tasks.py: zero-output terminal branch returns before cleanup."
+      spawned_tasks:
+        - T041
+  - id: T041
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Introduce a domain-owned CleanupPolicy enum and exhaustive mapping from CrawlOutcomeCode | None to CleanupPolicy without adding production consumers or changing runtime behavior."
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawl_cleanup_policy.py"
+      - "backend/tests/unittests/websites/test_crawl_cleanup_policy.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/websites/test_crawl_cleanup_policy.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawl_cleanup_policy.py tests/unittests/websites/test_crawl_cleanup_policy.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_cleanup_policy.py tests/unittests/websites/test_crawl_cleanup_policy.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+      - "cd backend && uv run pytest tests/unittests -q"
+    stop_if:
+      - "Any production caller needs to use CleanupPolicy in this slice."
+      - "TerminalEvent, TerminalBatchEvent, watchdog, crawl_tasks.py, frontend, generated types, migrations, sysadmin, or admin UI need edits."
+      - "A CrawlOutcomeCode mapping is ambiguous."
+      - "Any Any, cast, or type-ignore is needed."
+      - "The mapping cannot be exhaustive without duplicating behavior elsewhere."
+    expected_mappings:
+      NONE: "CLEANUP_ALLOWED"
+      CRAWL_DUPLICATE_SKIPPED: "CLEANUP_NOOP"
+      CRAWL_NO_PAGES_RETURNED: "CLEANUP_NOT_REACHED"
+      CRAWL_SITEMAP_NO_PAGES: "CLEANUP_NOT_REACHED"
+      CRAWL_TIMEOUT_NO_PAGES: "CLEANUP_NOT_REACHED"
+      CRAWL_MAX_AGE_EXCEEDED: "CLEANUP_NOT_REACHED"
+      CRAWL_RUNTIME_TIMEOUT: "CLEANUP_SKIPPED_PARTIAL"
+      CRAWL_QUEUE_ENQUEUE_FAILED: "CLEANUP_NOT_REACHED"
+      CRAWL_SOURCE_RETENTION_ONLY: "CLEANUP_ALLOWED"
+      CRAWL_ALL_UNCHANGED: "CLEANUP_ALLOWED"
+      CRAWL_FILES_TOO_LARGE_ONLY: "CLEANUP_NOT_REACHED"
+      CRAWL_PARTIAL_TIMEOUT: "CLEANUP_SKIPPED_PARTIAL"
+      CRAWL_SHUTDOWN_ERROR: "CLEANUP_NOT_REACHED"
+      CRAWL_COMPLETED_WITH_PAGE_FAILURES: "CLEANUP_ALLOWED"
+      EMBEDDING_CONFIG_MISSING: "CLEANUP_ALLOWED"
+      UNKNOWN_CRAWL_ERROR: "CLEANUP_NOT_REACHED"
+    receipt:
+      result: done
+      summary: "Introduced the domain-owned CleanupPolicy enum and exhaustive CrawlOutcomeCode | None mapping without adding production consumers or changing runtime behavior. The mapping codifies current stale-cleanup behavior before later TerminalEvent/lifecycle wiring."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawl_cleanup_policy.py"
+        - "backend/tests/unittests/websites/test_crawl_cleanup_policy.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/websites/test_crawl_cleanup_policy.py -q"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawl_cleanup_policy.py tests/unittests/websites/test_crawl_cleanup_policy.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_cleanup_policy.py tests/unittests/websites/test_crawl_cleanup_policy.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json"
+        - "cd backend && uv run pytest tests/unittests -q"
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t041-cleanup-policy-implementation-review-20260514T193812Z.md"
+          - ".codex/artifacts/claude-peer-loop-t041-cleanup-policy-implementation-re-review-20260514T194022Z.md"
+        min_score: 8
+  - id: T042
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next safe Step 4 lifecycle/cleanup-policy task after introducing the CleanupPolicy mapping."
+    inputs:
+      - "T039 watchdog lifecycle observation receipt"
+      - "T041 cleanup-policy mapping receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md Step 4"
+      - "Current dirty diff"
+    constraints:
+      - "Do not implement."
+      - "Preserve unrelated .devcontainer dirt."
+      - "Reject broad lifecycle rewrites that would change watchdog Phase 3.5 semantics without equivalent facts."
+      - "Prefer one narrow Worker with explicit allowed files and stop conditions."
+    expected_output:
+      - "Next Worker objective"
+      - "Allowed files"
+      - "Verification commands"
+      - "Stop conditions"
+      - "Risk/trade-off"
+    receipt:
+      result: done
+      summary: "Selected the next Step 4 Worker: replace the primitive crawl_is_partial stale-cleanup gate with CleanupPolicy at the single stale-cleanup boundary. Claude rejected a passive TerminalEvent cleanup_policy property and green-lit a refined Worker that derives policy from cleanup_policy_for_outcome(crawl_output_outcome_code), handles CleanupPolicy exhaustively, and raises on policies that should never reach cleanup."
+      evidence:
+        - ".codex/artifacts/claude-peer-loop-t042-choose-next-step-4-cleanup-policy-worker-20260514T194652Z.md"
+        - ".codex/artifacts/claude-peer-loop-t042-revised-cleanup-policy-worker-card-20260514T195054Z.md"
+        - "backend/src/intric/worker/crawl_tasks.py: zero-output outcomes return before stale cleanup."
+        - "backend/src/intric/worker/crawl_tasks.py: _compute_stale_titles has one production callsite."
+      spawned_tasks:
+        - T043
+  - id: T043
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Replace _compute_stale_titles(crawl_is_partial: bool) with a CleanupPolicy-driven boundary, deriving policy from cleanup_policy_for_outcome(crawl_output_outcome_code) at the single stale-cleanup callsite."
+    allowed_files:
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_persistence.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_persistence.py tests/unittests/websites/test_crawl_cleanup_policy.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl_tasks.py tests/unittests/worker/test_persistence.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl_tasks.py tests/unittests/worker/test_persistence.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+      - "cd backend && uv run pytest tests/unittests -q"
+    stop_if:
+      - "A production path reaches stale cleanup with CLEANUP_NOT_REACHED or CLEANUP_NOOP and the correct behavior is ambiguous."
+      - "Need to add cleanup_policy to TerminalEvent or TerminalBatchEvent."
+      - "Need to change classify_crawl_outcome mappings."
+      - "Need to change watchdog SQL predicates or terminal actions."
+      - "Need frontend, generated type, migration, sysadmin, or admin UI edits."
+      - "Any Any, cast, or type-ignore is needed."
+      - "Strict Pyright cannot prove exhaustive handling without hiding it."
+    expected_output:
+      - "_compute_stale_titles accepts CleanupPolicy."
+      - "Cleanup policy is derived from crawl_output_outcome_code through cleanup_policy_for_outcome at the single production callsite."
+      - "CLEANUP_ALLOWED keeps current stale-deletion behavior."
+      - "CLEANUP_SKIPPED_PARTIAL keeps current partial-crawl skip behavior."
+      - "CLEANUP_NOT_REACHED and CLEANUP_NOOP raise a loud invariant error at this callsite."
+      - "The match over CleanupPolicy uses assert_never for future enum additions."
+    receipt:
+      result: done
+      summary: "Replaced the primitive crawl_is_partial stale-cleanup gate with a CleanupPolicy-driven boundary. The single production callsite now derives cleanup policy from cleanup_policy_for_outcome(crawl_output_outcome_code), preserves allowed and skipped-partial behavior, and raises loudly for cleanup policies that should never reach stale cleanup."
+      changed_files:
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_persistence.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_persistence.py tests/unittests/websites/test_crawl_cleanup_policy.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/crawl_tasks.py tests/unittests/worker/test_persistence.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl_tasks.py tests/unittests/worker/test_persistence.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json"
+        - "cd backend && uv run pytest tests/unittests -q"
+      extra_checks:
+        - "rg -n \"_compute_stale_titles\\(\" backend/src/intric/worker/crawl_tasks.py backend/tests/unittests/worker/test_persistence.py"
+        - "rg -n \"crawl_is_partial|cleanup_policy\" backend/src/intric/worker/crawl_tasks.py"
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t043-cleanup-policy-stale-cleanup-implementation-review-20260514T195627Z.md"
+        min_score: 9
+  - id: T044
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next safe Step 4 lifecycle task after cleanup policy became a real stale-cleanup consumer."
+    inputs:
+      - "T039 watchdog lifecycle observation receipt"
+      - "T041 cleanup-policy mapping receipt"
+      - "T043 cleanup-policy stale-cleanup receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md Step 4"
+      - "Current dirty diff"
+    constraints:
+      - "Do not implement."
+      - "Preserve unrelated .devcontainer dirt."
+      - "Reject broad lifecycle rewrites that change watchdog Phase 3.5 semantics without equivalent lifecycle facts."
+      - "Prefer the next narrow Worker with clear TDD and behavior-preservation proof."
+    expected_output:
+      - "Next Worker objective"
+      - "Allowed files"
+      - "Verification commands"
+      - "Stop conditions"
+      - "Risk/trade-off"
+    receipt:
+      result: done
+      summary: "Closed Step 4 for now as an honest docs/state audit rather than forcing ceremonial lifecycle code. Deferred the remaining lifecycle ambitions explicitly: Phase 3.5 SQL still needs a future page-progress lifecycle fact, TerminalEvent.cleanup_policy remains deferred until a second consumer cannot use outcome_code, and CrawlAdminDetail typing remains deferred because CrawlAdminDetail exists only in the plan."
+      evidence:
+        - ".codex/artifacts/claude-peer-loop-t044-choose-next-step-4-lifecycle-worker-20260514T200218Z.md"
+        - ".codex/artifacts/claude-peer-loop-t044-revised-step-4-audit-decision-20260514T200503Z.md"
+      extra_checks:
+        - "rg -n \"class CrawlAdminDetail|CrawlAdminDetail\" backend/src frontend/apps/web/src docs/crawler-reliability-robustness-transparency-plan.md"
+        - "rg -n \"cleanup_policy_for_outcome\" backend/src backend/tests"
+        - "wc -l backend/src/intric/worker/crawl_tasks.py backend/src/intric/worker/crawl/*.py"
+      deferred_followups:
+        - "Introduce a page-progress lifecycle fact, likely RUNNING_NO_PAGES, before replacing watchdog Phase 3.5's pages_crawled-only SQL heuristic."
+        - "Keep TerminalEvent.cleanup_policy deferred until a second runtime consumer cannot use outcome_code."
+        - "Keep CrawlAdminDetail.lifecycle_state retyping deferred until CrawlAdminDetail exists in production code."
+      spawned_tasks:
+        - T045
+  - id: T045
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Choose one Step 5 micro-tranche to reduce crawl_tasks.py complexity under the reviewability budget."
+    inputs:
+      - "T044 Step 4 audit receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md Step 5"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "Existing worker/crawl extracted modules"
+    constraints:
+      - "Do not implement."
+      - "One phase only."
+      - "At most 3 production files."
+      - "Target less than 500 net LOC."
+      - "Preserve unrelated .devcontainer dirt."
+      - "For duplicate-guard extraction candidates, preserve TaskManager terminal acknowledgement and fall-through-on-exception behavior."
+      - "Forbid edits to task_manager.py and crawl_outcome.py unless the Judge explicitly escalates."
+      - "Prefer typed internal outcomes over dict bags, while keeping ARQ task return shape stable."
+    expected_output:
+      - "Next Worker objective"
+      - "Allowed files"
+      - "Red test plan"
+      - "Verification commands"
+      - "Stop conditions"
+      - "Risk/trade-off"
+    receipt:
+      result: done
+      summary: "Chose a narrower first Step 5 phase-extraction slice: extract only embedding-model/provider pre-resolution into `worker/crawl/bootstrap.py` as `build_embedding_model_spec(...)`. The broader bootstrap extraction was rejected as too wide; this sub-slice removes the riskiest provider branch first, avoids container leakage, and gives the later full bootstrap move a tested typed owner."
+      evidence:
+        - ".codex/artifacts/claude-peer-loop-t045-choose-step-5-micro-tranche-20260514T201012Z.md"
+        - ".codex/artifacts/claude-peer-loop-t045-revised-bootstrap-phase-worker-card-20260514T201351Z.md"
+        - ".codex/artifacts/claude-peer-loop-t045-step5a-embedding-model-spec-worker-card-20260514T202017Z.md"
+      decision:
+        worker: T046
+        allowed_files:
+          - "backend/src/intric/worker/crawl/bootstrap.py"
+          - "backend/src/intric/worker/crawl_tasks.py"
+          - "backend/src/intric/worker/crawl/__init__.py"
+          - "backend/tests/unittests/worker/test_crawl_bootstrap.py"
+          - "docs/crawler-reliability-robustness-transparency-plan.md"
+          - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+        red_tests:
+          - "Returns None without an embedding model."
+          - "Uses model values without a provider."
+          - "Uses active provider credentials and provider/name LiteLLM prefix."
+          - "Ignores inactive provider and keeps the model LiteLLM name."
+          - "Handles a missing provider row without credentials."
+          - "Raises EmbeddingModelSpecError when max_input is missing."
+          - "Preserves empty-string family normalization to None."
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t045-step5a-embedding-model-spec-worker-card-20260514T202017Z.md"
+        min_score: 8
+      spawned_tasks:
+        - T046
+  - id: T046
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Extract embedding-model/provider pre-resolution from crawl_tasks.py into a typed worker/crawl/bootstrap.py helper."
+    allowed_files:
+      - "backend/src/intric/worker/crawl/bootstrap.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl/__init__.py"
+      - "backend/tests/unittests/worker/test_crawl_bootstrap.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_bootstrap.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/bootstrap.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_bootstrap.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/bootstrap.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_bootstrap.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+      - "cd backend && uv run pytest tests/unittests -q"
+    stop_if:
+      - "More than 3 production files need edits."
+      - "Need to change EmbeddingModelSpec field semantics."
+      - "Need to touch CrawlContext, terminal, watchdog, TaskManager, ARQ, frontend, generated types, migrations, sysadmin, admin UI, or the broader bootstrap website/session block."
+      - "Need new Any, cast, or type-ignore in bootstrap.py."
+      - "The fake session/provider harness grows beyond the one execute(...).scalar_one_or_none() provider lookup."
+      - "The helper absorbs CreateEmbeddingsService adapter credential-resolution policy instead of only pre-resolving raw provider fields."
+    expected_output:
+      - "build_embedding_model_spec(session, embedding_model) is the sole worker owner for EmbeddingModelSpec provider pre-resolution."
+      - "crawl_tasks.py no longer imports ModelProviders or builds EmbeddingModelSpec inline."
+      - "Missing max_input raises EmbeddingModelSpecError."
+      - "Active, inactive, missing, and absent provider paths are behavior-tested."
+      - "No new Any, cast, type-ignore, or broad container dependency is introduced."
+    receipt:
+      result: done
+      summary: "Extracted embedding-model/provider pre-resolution into `worker/crawl/bootstrap.py` as `build_embedding_model_spec(...)`. The helper is typed, container-free, validates missing max_input before DB lookup, preserves active/inactive/missing provider behavior, and leaves `crawl_tasks.py` with only the phase call."
+      changed_files:
+        - "backend/src/intric/worker/crawl/bootstrap.py"
+        - "backend/src/intric/worker/crawl/__init__.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_bootstrap.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_bootstrap.py -q"
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_bootstrap.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/bootstrap.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_bootstrap.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/bootstrap.py tests/unittests/worker/test_crawl_bootstrap.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json"
+        - "cd backend && uv run pytest tests/unittests -q"
+      validation_result: "Targeted bootstrap tests passed, targeted terminal regression tests passed, ruff passed, targeted/full Pyright passed, and backend unittests passed with 1574 tests and existing warnings."
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t046-embedding-model-spec-extraction-implementation-review-20260514T202817Z.md"
+          - ".codex/artifacts/claude-peer-loop-t046-post-green-polish-re-review-20260514T203303Z.md"
+        min_score: 9
+      deferred_followups:
+        - "During broader bootstrap extraction, remove the remaining `website: Any = website_row` seam in crawl_tasks.py by giving the bootstrap phase typed inputs/outputs."
+        - "Track the duplicated `f'{provider_type}/{model.name}'` formula between bootstrap.py and CreateEmbeddingsService._get_adapter for a later consolidation only if another consumer or formula change appears."
+      spawned_tasks:
+        - T047
+  - id: T047
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next Step 5 phase-extraction micro-tranche after embedding-model spec pre-resolution landed."
+    inputs:
+      - "T046 embedding-model spec extraction receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md Step 5"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl/bootstrap.py"
+      - ".codex/artifacts/claude-peer-loop-t046-post-green-polish-re-review-20260514T203303Z.md"
+    constraints:
+      - "Do not implement until the Worker card is reviewed."
+      - "Prefer broader bootstrap extraction only if it can avoid Container as an input."
+      - "Preserve the already-tested build_embedding_model_spec owner."
+      - "Keep the slice under the Step 5 reviewability budget."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Next Worker objective"
+      - "Allowed files"
+      - "Red test plan"
+      - "Verification commands"
+      - "Stop conditions"
+      - "Risk/trade-off"
+    receipt:
+      result: done
+      summary: "Selected the full bootstrap phase extraction as the next Step 5 micro-tranche after a two-pass Claude plan gate. The approved slice is container-free, uses the existing `Container.session_scope` UoW shape as an injected context-manager seam, keeps `website_owner_id` distinct from `crawl_context.user_id` for audit semantics, and requires seven behavior red tests before implementation."
+      decision: "Activate T048 to extract `bootstrap_crawl(...)` and `CrawlBootstrapResult` into `worker/crawl/bootstrap.py`."
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t047-bootstrap-phase-extraction-judge-20260514T204324Z.md"
+          - ".codex/artifacts/claude-peer-loop-t047-bootstrap-phase-extraction-judge-iteration-2-20260514T204653Z.md"
+        min_score: 8
+      worker_constraints:
+        - "Do not pass `Container` into the phase."
+        - "Use `session_scope: Callable[[], AbstractAsyncContextManager[AsyncSession]]`; if strict Pyright rejects `Container.session_scope`, use a typed protocol rather than a cast."
+        - "Drop the redundant `tenant_slug` parameter and derive it from `tenant.slug`."
+        - "Keep `website_owner_id` as the website owner/audit actor, distinct from `crawl_context.user_id`."
+        - "Do not update `_crawl_task_exception_outcome(...)` in this slice."
+      spawned_tasks:
+        - T048
+  - id: T048
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Extract the full crawl bootstrap phase into a typed, container-free `bootstrap_crawl(...)` function with behavior-preserving tests."
+    inputs:
+      - "T047 judge receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md Step 5"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl/bootstrap.py"
+      - "backend/tests/unittests/worker/test_crawl_bootstrap.py"
+      - ".codex/artifacts/claude-peer-loop-t047-bootstrap-phase-extraction-judge-iteration-2-20260514T204653Z.md"
+    allowed_files:
+      - "backend/src/intric/worker/crawl/bootstrap.py"
+      - "backend/src/intric/worker/crawl/__init__.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_bootstrap.py"
+      - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "backend/tests/unittests/worker/test_persistence.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Use TDD: add one failing behavior test, implement the minimal passing slice, then continue."
+      - "Preserve the already-tested `build_embedding_model_spec(...)` owner."
+      - "No new production `Any`, `cast`, `type: ignore`, or Container import in bootstrap.py."
+      - "Preserve website owner audit semantics."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Typed `CrawlBootstrapResult` and bootstrap errors."
+      - "Container-free `bootstrap_crawl(...)` using the existing session-scope boundary."
+      - "Updated `crawl_task()` bootstrap orchestration call."
+      - "Behavior tests for success, missing website, tenant mismatch, HTTP auth, no auth, no embedding model, and decryption failure."
+      - "Strict Pyright, ruff, targeted tests, and full backend unit validation."
+      - "Claude implementation-review artifact."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_bootstrap.py -q"
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_bootstrap.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/bootstrap.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_bootstrap.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/bootstrap.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_bootstrap.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+      - "cd backend && uv run pytest tests/unittests -q"
+    stop_if:
+      - "Need to pass `Container` into bootstrap.py."
+      - "Need new production `Any`, `cast`, or type ignores."
+      - "Need to change terminal, audit, circuit breaker, slot release, Scrapy, ARQ, frontend, sysadmin, or persistence behavior."
+      - "Cannot preserve `website_owner_id` audit semantics."
+      - "Test fake grows into a broad ORM simulator instead of a small phase seam fake."
+      - "Implementation requires files outside allowed_files."
+    receipt:
+      result: done
+      summary: "Extracted the crawl bootstrap phase into `worker/crawl/bootstrap.py` as a typed, container-free `bootstrap_crawl(...)` boundary. The phase now owns website lookup, tenant isolation, lazy HTTP-auth password decryption, embedding-model spec construction, `CrawlContext` construction, and existing-blob state lookup while keeping `crawl_tasks.py` as orchestration glue."
+      changed_files:
+        - "backend/src/intric/worker/crawl/bootstrap.py"
+        - "backend/src/intric/worker/crawl/__init__.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_bootstrap.py"
+        - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "backend/tests/unittests/worker/test_persistence.py"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "Red: cd backend && uv run pytest tests/unittests/worker/test_crawl_bootstrap.py -q failed on missing bootstrap_crawl import before implementation."
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_bootstrap.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py tests/unittests/worker/test_persistence.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/bootstrap.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_bootstrap.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py tests/unittests/worker/test_persistence.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/bootstrap.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_bootstrap.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py tests/unittests/worker/test_persistence.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json"
+        - "cd backend && uv run pytest tests/unittests -q"
+      validation_result: "Targeted bootstrap/terminal/persistence tests passed, targeted ruff passed, targeted and full Pyright passed, and backend unittests passed with 1581 tests and existing warnings."
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t048-bootstrap-phase-extraction-implementation-review-20260514T210449Z.md"
+        min_score: 8
+      implementation_notes:
+        - "The bootstrap phase accepts a `session_scope` seam and a lazy password-decrypter callable, not `Container`, so no-auth crawls do not construct the HTTP-auth service."
+        - "`build_existing_blob_lookup(...)` now lives with bootstrap ownership and is exported from `intric.worker.crawl`."
+        - "Terminal-outcome tests use entity-routed fake SQL results rather than call-order routing."
+      spawned_tasks:
+        - T049
+  - id: T049
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next Step 5 phase-extraction micro-tranche after bootstrap extraction landed."
+    inputs:
+      - "T048 bootstrap phase extraction receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md Step 5"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl/bootstrap.py"
+      - ".codex/artifacts/claude-peer-loop-t048-bootstrap-phase-extraction-implementation-review-20260514T210449Z.md"
+    constraints:
+      - "Read-only until the Worker card is reviewed."
+      - "Prefer the next highest-ROI `crawl_tasks.py` reduction that preserves behavior."
+      - "Keep Scrapy-owned behavior in crawler.py/CrawlDiagnostics."
+      - "Keep persistence retention behavior in persist_batch()."
+      - "Keep terminal writes on TerminalEvent/commit_terminal."
+      - "Do not broaden into WorkerAdapter, admin dashboard, frontend, or generated types in this Step 5 tranche."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Next Worker objective"
+      - "Allowed files"
+      - "Red test plan"
+      - "Verification commands"
+      - "Stop conditions"
+      - "Risk/trade-off"
+    receipt:
+      result: done
+      summary: "Selected page-processing extraction as the next Step 5 tranche after a Claude plan gate. The approved slice must be container-free, preserve heartbeat/preemption legacy payload semantics, leave sitemap-lastmod warning ownership in the orchestrator, and add the missing edge-case tests before implementation."
+      decision: "Activate T050 to extract page processing into `worker/crawl/page_processing.py`."
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t049-choose-next-step-5-phase-tranche-20260514T211425Z.md"
+        min_score: 8
+      worker_constraints:
+        - "Use a typed discriminated outcome: success result or abort result."
+        - "Abort result must preserve `heartbeat_failed` versus `preempted_during_crawl` and carry `consecutive_failures` for heartbeat failures."
+        - "Preserve current off-by-one behavior where a heartbeat failure on page N reports `pages_crawled=N` even though page N was not buffered."
+        - "Leave the sitemap-lastmod/source-retained warning log in `crawl_tasks.py`; the phase returns source-retained titles/count only."
+        - "Consume `crawl.pages` once as an `Iterable[CrawledPage]`; tests must include a generator."
+        - "Do not import `Container`, SQLAlchemy sessions, Scrapy internals, frontend, ARQ, watchdog, file processing, or cleanup writes."
+      spawned_tasks:
+        - T050
+  - id: T050
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Extract page processing into a typed, container-free phase that preserves batching, source-retention, heartbeat abort, preemption, and failure aggregation semantics."
+    inputs:
+      - "T049 judge receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md Step 5"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl/persistence.py"
+      - ".codex/artifacts/claude-peer-loop-t049-choose-next-step-5-phase-tranche-20260514T211425Z.md"
+    allowed_files:
+      - "backend/src/intric/worker/crawl/page_processing.py"
+      - "backend/src/intric/worker/crawl/__init__.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_page_processing.py"
+      - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Use TDD: add one failing behavior test, implement the minimal passing slice, then continue."
+      - "No `Container`, dependency-injector, SQLAlchemy session, terminal write, file-processing, cleanup-write, ARQ, watchdog, frontend, migration, or Scrapy-internal changes."
+      - "Preserve `persist_batch(...)` as the persistence/retention owner through an injected persister callable."
+      - "Preserve heartbeat/preemption legacy return payloads in `crawl_task()`."
+      - "No new production `Any`, `cast`, or type-ignore."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Typed page-processing success/abort result contracts."
+      - "`process_pages(...)` or equivalently named phase function in `worker/crawl/page_processing.py`."
+      - "Updated `crawl_task()` page loop replaced by a phase call."
+      - "Behavior tests for batching, source-retention, failure aggregation, heartbeat failure, preemption, final flush, empty pages with retained URLs, generator input, and abort off-by-one semantics."
+      - "Strict Pyright, ruff, targeted tests, full backend unit validation, and Claude implementation-review artifact."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_page_processing.py -q"
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_page_processing.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/page_processing.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_page_processing.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/page_processing.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_page_processing.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+      - "cd backend && uv run pytest tests/unittests -q"
+    stop_if:
+      - "The phase needs `Container`, SQLAlchemy session management, dependency-injector, or terminal writes."
+      - "The phase changes `persist_batch(...)` retention semantics."
+      - "The slice needs files outside allowed_files."
+      - "The test fake becomes a broad mock of crawl_task internals instead of a callable persister/heartbeat behavior seam."
+      - "Implementation would change file processing, cleanup policy, frontend, generated types, watchdog, feeder, ARQ, or admin APIs."
+    receipt:
+      result: done
+      summary: "Extracted page iteration, heartbeat checks, batching, persistence-result aggregation, source-retention bookkeeping, and heartbeat/preemption abort mapping into `worker/crawl/page_processing.py`. The phase is container-free, session-free, terminal-free, and keeps persistence retention owned by `persist_batch(...)` through an injected persister callable."
+      changed_files:
+        - "backend/src/intric/worker/crawl/page_processing.py"
+        - "backend/src/intric/worker/crawl/__init__.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_page_processing.py"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "Red: cd backend && uv run pytest tests/unittests/worker/test_crawl_page_processing.py -q failed with ModuleNotFoundError before the phase existed."
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_page_processing.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/page_processing.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_page_processing.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/page_processing.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_page_processing.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json"
+        - "cd backend && uv run pytest tests/unittests -q"
+      validation_result: "Targeted page/terminal tests passed with 17 tests, targeted ruff passed, targeted and full Pyright passed, and backend unittests passed with 1587 tests and existing warnings. Additional integration smoke found two stale source-inspection tests in `test_slot_leak_fixes.py`; T051 tracks that test hardening separately."
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t050-page-processing-implementation-review-20260514T212258Z.md"
+          - ".codex/artifacts/claude-peer-loop-t050-page-processing-typed-abort-re-review-20260514T212715Z.md"
+        min_score: 8
+      implementation_notes:
+        - "Heartbeat and preemption aborts use separate frozen typed dataclasses so `consecutive_failures` is required only on heartbeat aborts."
+        - "The source-retained lastmod warning remains in `crawl_tasks.py`; the phase only returns source-retained cleanup-protected titles and counts."
+        - "Cross-batch heartbeat-abort coverage proves already-flushed batches remain persisted while the pending buffer is not flushed on abort."
+        - "After this slice, `crawl_tasks.py` is 1,868 lines and `page_processing.py` is 126 lines."
+      spawned_tasks:
+        - T051
+  - id: T051
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Replace stale source-inspection integration assertions with behavior-relevant checks after bootstrap and page-processing extraction."
+    inputs:
+      - "T050 receipt"
+      - "Integration smoke failure from `tests/integration/test_slot_leak_fixes.py`"
+      - "backend/tests/integration/test_slot_leak_fixes.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl/bootstrap.py"
+      - "backend/src/intric/worker/crawl/page_processing.py"
+    allowed_files:
+      - "backend/tests/integration/test_slot_leak_fixes.py"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Test-only change; do not edit production code."
+      - "Replace brittle source-string assertions with checks against the new canonical owners."
+      - "Do not restore old inline bootstrap or JobPreemptedError handling strings to `crawl_tasks.py`."
+      - "Preserve the intent: bootstrap DB work is scoped before the long crawl, and preemption still produces the legacy `preempted_during_crawl` status through page processing."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Integration tests no longer assert removed implementation strings."
+      - "Tests point at `bootstrap_crawl(...)` / `process_pages(...)` ownership where appropriate."
+      - "Targeted integration smoke passes."
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_slot_leak_fixes.py::TestSessionLifecycle::test_session_close_location_documented tests/integration/test_slot_leak_fixes.py::TestZombieJobPrevention::test_preemption_handling_in_crawl_task -q"
+      - "cd backend && uv run pytest tests/integration/test_feeder_failure_modes.py tests/integration/test_slot_leak_stress.py tests/integration/test_slot_leak_fixes.py -q"
+      - "cd backend && uv run ruff check tests/integration/test_slot_leak_fixes.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json tests/integration/test_slot_leak_fixes.py"
+    stop_if:
+      - "A real production runtime regression appears."
+      - "Fixing the tests requires production behavior changes."
+      - "The integration tests need broad rewrites unrelated to bootstrap/page-processing extraction."
+    receipt:
+      result: done
+      summary: "Updated two stale source-inspection integration tests to follow the new canonical owners after bootstrap/page-processing extraction. The session lifecycle test now verifies `crawl_task()` calls `bootstrap_crawl(...)` before entering the Scrapy crawl context and that `bootstrap_crawl(...)` owns `session_scope`; the preemption test now verifies `process_pages(...)` handles `JobPreemptedError` while `crawl_task()` preserves the legacy `preempted_during_crawl` return status."
+      changed_files:
+        - "backend/tests/integration/test_slot_leak_fixes.py"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "Red: cd backend && uv run pytest tests/integration/test_feeder_failure_modes.py tests/integration/test_slot_leak_stress.py tests/integration/test_slot_leak_fixes.py -q failed with two stale source-inspection assertions."
+        - "cd backend && uv run pytest tests/integration/test_slot_leak_fixes.py::TestSessionLifecycle::test_session_close_location_documented tests/integration/test_slot_leak_fixes.py::TestZombieJobPrevention::test_preemption_handling_in_crawl_task -q"
+        - "cd backend && uv run ruff check tests/integration/test_slot_leak_fixes.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json tests/integration/test_slot_leak_fixes.py"
+        - "cd backend && uv run pytest tests/integration/test_feeder_failure_modes.py tests/integration/test_slot_leak_stress.py tests/integration/test_slot_leak_fixes.py -q"
+      validation_result: "Targeted stale tests passed, integration test ruff/Pyright passed, and the crawler/feeder/slot integration smoke passed with 33 tests and existing warnings."
+      spawned_tasks:
+        - T052
+  - id: T052
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next highest-ROI roadmap tranche after bootstrap and page-processing extraction."
+    inputs:
+      - "T050 page-processing receipt"
+      - "T051 integration test-hardening receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl/page_processing.py"
+      - "backend/src/intric/worker/crawl/bootstrap.py"
+    constraints:
+      - "Read-only until the next Worker card is reviewed."
+      - "Prefer the next highest-ROI maintainability/reliability slice that stays reviewable."
+      - "Preserve ARQ and Scrapy built-ins where they fit."
+      - "Do not broaden into admin write controls before WorkerAdapter exists."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Decision"
+      - "Next Worker objective"
+      - "Allowed files"
+      - "Red test plan"
+      - "Verification commands"
+      - "Stop conditions"
+      - "Risk/trade-off"
+    receipt:
+      result: done
+      summary: "Selected downloaded-file processing as the next Step 5 phase-extraction tranche after a two-pass Claude plan gate. The approved slice is container-free, session-free, keeps changed-file processing behind an injected callable, makes `embedding_model_id is None` a phase-owned failed-file outcome for changed/new files, and preserves the current no-heartbeat-during-file-processing behavior."
+      decision: "Activate T053 to extract `process_files(...)` into `worker/crawl/file_processing.py`."
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t052-choose-next-crawler-roadmap-tranche-20260514T213932Z.md"
+          - ".codex/artifacts/claude-peer-loop-t052-revised-file-processing-worker-card-20260514T214229Z.md"
+        min_score: 8
+      worker_constraints:
+        - "The phase accepts `files: Iterable[Path] | None` and normalizes `None` to empty."
+        - "Changed/new files with `embedding_model_id is None` are counted as failed and do not call the changed-file callback; unchanged hash-matched files may still be retained."
+        - "No heartbeat is added to file processing in this tranche; that is preserved current behavior and a separate reliability decision."
+        - "Timing remains orchestration-owned in `crawl_tasks.py`."
+        - "Forbidden imports must be tested with AST import walking, not string matching."
+        - "Do not carry over restating comments from the inline file loop."
+      spawned_tasks:
+        - T053
+  - id: T053
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Extract downloaded-file processing into a typed, container-free phase that preserves unchanged-file retention, changed-file callback processing, per-file failure protection, and cleanup bookkeeping."
+    inputs:
+      - "T052 judge receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md Step 5"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl/persistence.py"
+      - ".codex/artifacts/claude-peer-loop-t052-revised-file-processing-worker-card-20260514T214229Z.md"
+    allowed_files:
+      - "backend/src/intric/worker/crawl/file_processing.py"
+      - "backend/src/intric/worker/crawl/__init__.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_file_processing.py"
+      - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Use TDD: add one failing behavior test, implement the minimal passing slice, then continue."
+      - "No `Container`, dependency-injector, SQLAlchemy session, terminal write, cleanup-write, ARQ, watchdog, frontend, migration, admin API, or Scrapy-internal changes in file_processing.py."
+      - "Preserve changed-file processing behind an injected callback; do not solve the DI/session cast in this slice."
+      - "Preserve current no-heartbeat-during-file-processing behavior."
+      - "No new production `Any`, `cast`, or type-ignore."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Typed `FileProcessingResult` and `process_files(...)` phase."
+      - "Updated `crawl_task()` file loop replaced by a phase call."
+      - "Behavior tests for empty/None files, unchanged retention, changed processing, callback failure continuation, mixed counts, embedding-model mismatch reprocessing, missing embedding model failure, and AST forbidden-import enforcement."
+      - "Strict Pyright, ruff, targeted tests, full backend unit validation, and Claude implementation-review artifact."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_file_processing.py -q"
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_file_processing.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/file_processing.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_file_processing.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/file_processing.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_file_processing.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+      - "cd backend && uv run pytest tests/unittests -q"
+    stop_if:
+      - "The phase needs `Container`, SQLAlchemy session management, dependency-injector, terminal writes, cleanup writes, ARQ, watchdog, frontend, generated types, migrations, or admin APIs."
+      - "Removing the existing DI/session `cast(Any, container.session)` appears necessary."
+      - "Tests become source-inspection or mocks of internals instead of behavior around temp files and callback calls."
+      - "A real file-processing behavior ambiguity appears."
+    receipt:
+      result: done
+      summary: "Extracted downloaded-file processing into `worker/crawl/file_processing.py`. The phase now owns raw-byte SHA-256 checks, unchanged-file retention via `ExistingBlobState.is_current_for(...)`, model-change reprocessing, changed/new file callback dispatch, missing-embedding-model diagnostics, per-file read/hash/callback failure isolation, and cleanup-protected/failed title bookkeeping. `crawl_task()` now keeps only the orchestration-owned session-per-file callback and structured error logging callback."
+      changed_files:
+        - "backend/src/intric/worker/crawl/file_processing.py"
+        - "backend/src/intric/worker/crawl/__init__.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_file_processing.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "Red: cd backend && uv run pytest tests/unittests/worker/test_crawl_file_processing.py -q failed before `record_file_processing_error` existed."
+        - "Red: cd backend && uv run pytest tests/unittests/worker/test_crawl_file_processing.py -q failed when file read/hash errors escaped the phase."
+        - "Red: cd backend && uv run pytest tests/unittests/worker/test_crawl_file_processing.py -q failed when missing embedding model failures did not record diagnostics."
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_file_processing.py -q"
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_file_processing.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/file_processing.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_file_processing.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/file_processing.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_file_processing.py"
+        - "set -a; source backend/.env; set +a; uv run --project backend pytest backend/tests/unittests/worker/test_crawl_file_processing.py -q"
+        - "cd backend && uv run pyright --project pyrightconfig.json"
+        - "cd backend && uv run pytest tests/unittests -q"
+      validation_result: "Claude commit gate passed on the second implementation review with GREEN_LIGHT yes and MIN_SCORE 9. Targeted tests passed, root-invoked AST/path test passed when backend env was sourced, ruff passed, strict Pyright passed, full backend Pyright passed, and full backend unittests passed with 1596 tests and existing warnings."
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t053-file-processing-extraction-implementation-review-20260514T215623Z.md"
+          - ".codex/artifacts/claude-peer-loop-t053-file-processing-extraction-re-review-20260514T220121Z.md"
+        min_score: 9
+      spawned_tasks:
+        - T054
+  - id: T054
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next highest-ROI roadmap tranche after file-processing extraction."
+    inputs:
+      - "T053 file-processing receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl/file_processing.py"
+      - "backend/src/intric/worker/crawl/page_processing.py"
+      - "backend/src/intric/worker/crawl/bootstrap.py"
+    constraints:
+      - "Read-only until the next Worker card is reviewed."
+      - "Prefer the next highest-ROI maintainability/reliability slice that stays reviewable."
+      - "Preserve ARQ and Scrapy built-ins where they fit."
+      - "Do not broaden into admin write controls before the worker boundary is cleaner."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Decision"
+      - "Next Worker objective"
+      - "Allowed files"
+      - "Red test plan"
+      - "Verification commands"
+      - "Stop conditions"
+      - "Risk/trade-off"
+    receipt:
+      result: done
+      summary: "Selected cleanup phase extraction as the next Step 5 tranche after three Claude plan-gate passes. Claude rejected the shallow DI session override helper as premature and approved a container-free cleanup phase with a typed `Sequence[str]` delete callback, preserved `RuntimeError` invariant semantics, preserved orchestrator-side empty-cleanup guard, and behavior tests for ordering plus report/action consistency."
+      decision: "Activate T055 to extract `cleanup_stale_blobs(...)` into `worker/crawl/cleanup.py`."
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t054-choose-next-crawler-roadmap-tranche-20260514T220940Z.md"
+          - ".codex/artifacts/claude-peer-loop-t054-cleanup-extraction-worker-card-review-20260514T221342Z.md"
+          - ".codex/artifacts/claude-peer-loop-t054-cleanup-extraction-worker-card-final-review-20260514T221520Z.md"
+        min_score: 8
+      worker_constraints:
+        - "Cleanup phase must be container-free, SQLAlchemy-free, recovery-free, terminal-free, ARQ-free, Scrapy-free, frontend-free, and admin-free."
+        - "Use `CleanupDeleteCallback = Callable[[Sequence[str]], Awaitable[int]]`."
+        - "Preserve ordered stale-title behavior from existing title input."
+        - "Preserve `RuntimeError` for `CLEANUP_NOT_REACHED` and `CLEANUP_NOOP`."
+        - "Preserve the orchestrator-side `if stale_titles:` guard so empty cleanup does not add recovery operations."
+        - "Move stale-title tests from `test_persistence.py` to the cleanup owner."
+      spawned_tasks:
+        - T055
+  - id: T055
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Extract stale cleanup calculation and execution into a typed, container-free cleanup phase while preserving cleanup policy semantics, title ordering, empty-cleanup behavior, and stale-delete DB callback ownership in `crawl_tasks.py`."
+    inputs:
+      - "T054 judge receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md Step 5"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_persistence.py"
+      - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - ".codex/artifacts/claude-peer-loop-t054-cleanup-extraction-worker-card-final-review-20260514T221520Z.md"
+    allowed_files:
+      - "backend/src/intric/worker/crawl/cleanup.py"
+      - "backend/src/intric/worker/crawl/__init__.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_cleanup.py"
+      - "backend/tests/unittests/worker/test_persistence.py"
+      - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Use TDD: add one failing behavior test, implement the minimal passing slice, then continue."
+      - "No `Container`, dependency-injector, SQLAlchemy session, terminal write, cleanup-write outside the delete callback, ARQ, watchdog, frontend, migration, admin API, or Scrapy-internal changes in cleanup.py."
+      - "Do not implement the DI session override helper in this tranche."
+      - "Do not change stale cleanup behavior."
+      - "No new production `Any`, `cast`, or type-ignore."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Typed `CleanupResult` and `cleanup_stale_blobs(...)` phase."
+      - "`_compute_stale_titles(...)` removed from `crawl_tasks.py` and tested through `test_crawl_cleanup.py`."
+      - "`test_persistence.py` no longer owns cleanup behavior tests."
+      - "Behavior tests for cleanup allowed, no stale titles, partial cleanup skip, unreachable policy `RuntimeError`, delete callback exception propagation, ordered stale title output, report/action consistency, and AST forbidden-import enforcement."
+      - "Strict Pyright, ruff, targeted tests, full backend unit validation, and Claude implementation-review artifact."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_cleanup.py -q"
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_cleanup.py tests/unittests/worker/test_persistence.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/cleanup.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_cleanup.py tests/unittests/worker/test_persistence.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/cleanup.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_cleanup.py tests/unittests/worker/test_persistence.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+      - "cd backend && uv run pytest tests/unittests -q"
+    stop_if:
+      - "The cleanup phase needs Container, SQLAlchemy session management, dependency-injector, terminal writes, ARQ, watchdog, frontend, generated types, migrations, or admin APIs."
+      - "Extracting cleanup requires changing cleanup semantics for partial/no-op/not-reached outcomes."
+      - "Tests become source-inspection or mocks of internals instead of behavior around title sets and delete callback calls."
+      - "The delete callback cannot remain a narrow typed boundary."
+    receipt:
+      result: done
+      summary: "Extracted stale cleanup calculation and typed delete-callback execution into `worker/crawl/cleanup.py`. The phase now owns cleanup-policy handling, ordered stale-title selection, empty-cleanup no-op behavior, delete callback exception propagation, and cleanup result reporting while keeping DB/session/recovery ownership in `crawl_tasks.py`."
+      changed_files:
+        - "backend/src/intric/worker/crawl/cleanup.py"
+        - "backend/src/intric/worker/crawl/__init__.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_cleanup.py"
+        - "backend/tests/unittests/worker/test_persistence.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_cleanup.py -q"
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_cleanup.py tests/unittests/worker/test_persistence.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/cleanup.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_cleanup.py tests/unittests/worker/test_persistence.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/cleanup.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_cleanup.py tests/unittests/worker/test_persistence.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json"
+        - "cd backend && uv run pytest tests/unittests -q"
+      validation_result: "Targeted cleanup tests passed, targeted regression tests passed, ruff passed, targeted/full Pyright passed, and backend unittests passed with 1599 tests and existing warnings."
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t055-cleanup-extraction-implementation-review-20260514T222635Z.md"
+        min_score: 8
+      notes:
+        - "Claude accepted letting cleanup_stale_blobs own the empty-cleanup no-op instead of duplicating an orchestrator-side `if stale_titles:` guard."
+        - "Applied Claude's non-blocking P2 suggestions after the green review: exhaustive `assert_never(...)`, clearer export order, and removal of a restating comment."
+      spawned_tasks:
+        - T056
+  - id: T056
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Add a migration and regression test for active-crawl lookup indexes so `_get_primary_active_job_id` stays bounded as crawl history grows."
+    inputs:
+      - "T055 cleanup extraction receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/database/tables/job_table.py"
+      - "backend/src/intric/database/tables/websites_table.py"
+      - ".codex/artifacts/claude-peer-loop-t056-choose-next-crawler-roadmap-tranche-iteration-2-20260514T224258Z.md"
+    allowed_files:
+      - "backend/alembic/versions/202605142300_idx_active_crawl_lookup.py"
+      - "backend/tests/integration/migrations/test_idx_active_crawl_lookup.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Use TDD: add the migration regression test before adding the migration."
+      - "Application-code scope is limited to making `_get_primary_active_job_id` explicitly filter crawl jobs so the task-scoped partial index predicate matches the query."
+      - "Use DB schema ownership for index work; no Scrapy, ARQ, frontend, settings, or admin API changes."
+      - "Keep migration comments minimal and operational, not tutorial prose."
+      - "Use PostgreSQL migration-isolation tests, not timing assertions."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Alembic migration adding active-crawl lookup indexes."
+      - "Migration-isolation test for schema, downgrade removal, query result parity, and planner index usage."
+      - "No application-code changes beyond the explicit crawl-job predicate in `_get_primary_active_job_id`."
+      - "T057 spawned for slot-acquire extraction if validation passes."
+    verify:
+      - "cd backend && uv run pytest -m migration_isolation tests/integration/migrations/test_idx_active_crawl_lookup.py -q"
+      - "cd backend && uv run ruff check alembic/versions/202605142300_idx_active_crawl_lookup.py tests/integration/migrations/test_idx_active_crawl_lookup.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json alembic/versions/202605142300_idx_active_crawl_lookup.py tests/integration/migrations/test_idx_active_crawl_lookup.py"
+      - "cd backend && uv run alembic upgrade head"
+      - "cd backend && uv run alembic downgrade 202605141700"
+      - "cd backend && uv run alembic upgrade head"
+    stop_if:
+      - "An existing planner-usable index already covers the lookup; document evidence and skip migration."
+      - "The planner refuses to use the partial active-crawl-jobs index; switch to a non-partial composite and document that decision."
+      - "The migration cannot be reversible."
+      - "The test harness cannot run against PostgreSQL."
+      - "Fix requires modifying application query semantics beyond explicit crawl-job ownership."
+    receipt:
+      result: done
+      summary: "Added reversible active-crawl duplicate-guard lookup indexes and tightened `_get_primary_active_job_id` to explicitly filter crawl jobs. The migration-isolation test proves result parity, excludes active non-crawl jobs, verifies downgrade removal, and demonstrates pre/post planner behavior from crawl-run Seq Scan to task-scoped index usage."
+      changed_files:
+        - "backend/alembic/versions/202605142300_idx_active_crawl_lookup.py"
+        - "backend/tests/integration/migrations/test_idx_active_crawl_lookup.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "cd backend && uv run pytest -m migration_isolation tests/integration/migrations/test_idx_active_crawl_lookup.py -q"
+        - "cd backend && uv run ruff check alembic/versions/202605142300_idx_active_crawl_lookup.py tests/integration/migrations/test_idx_active_crawl_lookup.py src/intric/worker/crawl_tasks.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json"
+        - "cd backend && uv run pytest tests/unittests -q"
+      validation_result: "Migration-isolation test passed, ruff passed, full Pyright passed with 0 errors, and backend unittests passed with 1599 tests and existing warnings."
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t056-active-crawl-lookup-index-implementation-review-iteration-2-20260514T230439Z.md"
+        min_score: 8
+      notes:
+        - "Claude iteration 1 blocked on loose planner assertions and an all-active-jobs partial index; iteration 2 accepted the task-scoped predicate and stronger pre/post EXPLAIN regression evidence."
+        - "The migration docstring includes an operator note for interrupted concurrent index builds leaving invalid indexes."
+      spawned_tasks:
+        - T057
+  - id: T057
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Choose and scope the next smallest slot-acquire extraction tranche now that the active-crawl duplicate guard lookup is indexed."
+    inputs:
+      - "T056 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl/slot_release.py"
+      - "backend/src/intric/worker/redis/lua_scripts.py"
+      - ".codex/artifacts/claude-peer-loop-t056-choose-next-crawler-roadmap-tranche-iteration-2-20260514T224258Z.md"
+    constraints:
+      - "Do not implement in this judge task."
+      - "Preserve unrelated .devcontainer dirt."
+      - "Prefer a narrow typed boundary around slot acquire/yield behavior instead of broad worker runtime refactors."
+      - "Keep the queue-runtime migration gate removed."
+    expected_output:
+      - "Decision: proceed, split, or defer slot-acquire extraction."
+      - "Allowed files for the worker tranche."
+      - "Verification commands."
+      - "Stop conditions."
+    receipt: null
+
+checks:
+  dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
+  last_verification:
+    result: passed
+    task: T056
+    commands:
+      - "cd backend && uv run pytest -m migration_isolation tests/integration/migrations/test_idx_active_crawl_lookup.py -q"
+      - "cd backend && uv run ruff check alembic/versions/202605142300_idx_active_crawl_lookup.py tests/integration/migrations/test_idx_active_crawl_lookup.py src/intric/worker/crawl_tasks.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+      - "cd backend && uv run pytest tests/unittests -q"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-reliability-t056-active-crawl-indexes --title 'T056 active crawl lookup index implementation review-iteration-2' --phase verification --iteration 2 --require-green --required-min-score 8 ..."
+    note: "T056 full backend validation and Claude green artifact completed after the active-crawl lookup index revision."

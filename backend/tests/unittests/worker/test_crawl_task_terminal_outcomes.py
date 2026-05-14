@@ -7,9 +7,15 @@ from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy.sql import Select
 
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.crawler.crawler import Crawl, CrawlDiagnostics
 from intric.crawler.parse_html import CrawledPage
+from intric.database.tables.info_blobs_table import InfoBlobs
+from intric.database.tables.model_providers_table import ModelProviders
+from intric.database.tables.websites_table import Websites
 from intric.websites.crawl_dependencies.crawl_models import CrawlTask
 from intric.websites.domain.crawl_outcome import (
     CrawlOutcomeCode,
@@ -17,6 +23,7 @@ from intric.websites.domain.crawl_outcome import (
 )
 from intric.websites.domain.crawl_run import CrawlType
 from intric.worker import crawl_tasks
+from intric.worker.crawl import CrawlSlotReleasePath, CrawlSlotReleaseResult
 
 
 def test_terminal_zero_output_message_includes_scrapy_diagnostics() -> None:
@@ -34,6 +41,14 @@ def test_terminal_zero_output_message_includes_scrapy_diagnostics() -> None:
         "Crawl produced no pages: downloader exceptions: "
         "twisted.internet.error.DNSLookupError=1"
     )
+
+
+def test_crawl_queue_enqueue_failure_message_is_bounded_and_specific() -> None:
+    message = crawl_tasks._crawl_queue_enqueue_failure_message(
+        RuntimeError("Redis unavailable")
+    )
+
+    assert message == "Failed to add crawl to pending queue: Redis unavailable"
 
 
 @dataclass
@@ -56,7 +71,6 @@ class _FakeBootstrapSession:
     ):
         self._website = website
         self._rows = rows
-        self._execute_count = 0
 
     async def begin(self) -> None:
         return None
@@ -64,11 +78,15 @@ class _FakeBootstrapSession:
     async def close(self) -> None:
         return None
 
-    async def execute(self, _stmt: object) -> _FakeExecuteResult:
-        self._execute_count += 1
-        if self._execute_count == 1:
+    async def execute(self, stmt: Select[tuple[object]]) -> _FakeExecuteResult:
+        entity = stmt.column_descriptions[0].get("entity")
+        if entity is Websites:
             return _FakeWebsiteResult(self._website)
-        return _FakeExecuteResult(rows=self._rows)
+        if entity is ModelProviders:
+            return _FakeExecuteResult()
+        if entity is InfoBlobs:
+            return _FakeExecuteResult(rows=self._rows)
+        raise AssertionError(f"Unhandled bootstrap statement entity: {entity!r}")
 
 
 class _FakeWebsiteResult(_FakeExecuteResult):
@@ -95,8 +113,9 @@ class _FakeOutcomeSession:
     def __init__(self):
         self.statements: list[object] = []
 
-    async def execute(self, stmt: object) -> None:
+    async def execute(self, stmt: object) -> _FakeExecuteResult:
         self.statements.append(stmt)
+        return _FakeExecuteResult()
 
 
 def _compiled_params(stmt: object) -> dict[str, object]:
@@ -123,6 +142,12 @@ class _FakeLimiter:
         return None
 
 
+async def _release_crawl_slot_after_task(
+    *_args: object, **_kwargs: object
+) -> CrawlSlotReleaseResult:
+    return CrawlSlotReleaseResult(released=False, path=CrawlSlotReleasePath.NOOP)
+
+
 class _FakeJobRepo:
     async def mark_job_started(self, _job_id: UUID) -> bool:
         return True
@@ -131,11 +156,13 @@ class _FakeJobRepo:
 class _FakeAuditService:
     def __init__(self):
         self.metadata: dict[str, object] | None = None
+        self.calls: list[dict[str, object]] = []
 
     async def log_async(self, **kwargs: object) -> None:
         metadata = kwargs.get("metadata")
         assert isinstance(metadata, dict)
         self.metadata = metadata
+        self.calls.append(kwargs)
 
 
 @dataclass
@@ -303,8 +330,8 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
     recovery_sessions: list[_FakeRecoverySession] = []
 
     @asynccontextmanager
-    async def session_scope() -> AsyncIterator[_FakeRecoverySession]:
-        yield _FakeRecoverySession()
+    async def session_scope() -> AsyncIterator[_FakeBootstrapSession]:
+        yield _FakeBootstrapSession(website)
 
     async def primary_active_job_id(
         _session: object,
@@ -325,20 +352,15 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
         recovery_sessions.append(recovery_session)
         return await operation(recovery_session)
 
-    async def reset_tenant_retry_delay(**_kwargs: object) -> None:
-        return None
-
     monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
-    monkeypatch.setattr(
-        "intric.database.database.sessionmanager.create_session",
-        lambda: _FakeBootstrapSession(website),
-    )
     monkeypatch.setattr(
         crawl_tasks, "_get_primary_active_job_id", primary_active_job_id
     )
     monkeypatch.setattr(crawl_tasks, "execute_with_recovery", execute_with_recovery)
     monkeypatch.setattr(
-        crawl_tasks, "reset_tenant_retry_delay", reset_tenant_retry_delay
+        crawl_tasks,
+        "release_crawl_slot_after_task",
+        _release_crawl_slot_after_task,
     )
     mock_logger = MagicMock()
     monkeypatch.setattr(crawl_tasks, "logger", mock_logger)
@@ -363,9 +385,8 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
         expected_message
     )
     assert operations == [
-        "terminal_crawl_run_update",
+        "terminal_zero_output_commit",
         "terminal_circuit_breaker_update",
-        "terminal_fail_job",
     ]
     emitted_sql = "\n".join(
         str(stmt) for session in recovery_sessions for stmt in session.executed
@@ -404,6 +425,14 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
         "successful": False,
         "outcome_code": expected_outcome_code.value,
     }
+    assert audit_service.calls
+    audit_call = audit_service.calls[-1]
+    assert audit_call["tenant_id"] == tenant.id
+    assert audit_call["actor_id"] == user.id
+    assert audit_call["action"] == ActionType.WEBSITE_CRAWLED
+    assert audit_call["entity_type"] == EntityType.WEBSITE
+    assert audit_call["entity_id"] == website.id
+    assert audit_call["description"] == f"Website crawled: {website.url} - Failed"
     if expect_invalid_settings_warning:
         warning_messages = [
             str(call.args[0]) for call in mock_logger.warning.call_args_list
@@ -467,8 +496,11 @@ async def test_sitemap_source_skip_cutoff_is_passed_to_crawler_when_enabled(
     recovery_sessions: list[_FakeRecoverySession] = []
 
     @asynccontextmanager
-    async def session_scope() -> AsyncIterator[_FakeRecoverySession]:
-        yield _FakeRecoverySession()
+    async def session_scope() -> AsyncIterator[_FakeBootstrapSession]:
+        yield _FakeBootstrapSession(
+            website,
+            rows=((retained_url, b"hash", embedding_model_id),),
+        )
 
     async def primary_active_job_id(
         _session: object,
@@ -489,23 +521,15 @@ async def test_sitemap_source_skip_cutoff_is_passed_to_crawler_when_enabled(
         recovery_sessions.append(recovery_session)
         return await operation(recovery_session)
 
-    async def reset_tenant_retry_delay(**_kwargs: object) -> None:
-        return None
-
     monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
-    monkeypatch.setattr(
-        "intric.database.database.sessionmanager.create_session",
-        lambda: _FakeBootstrapSession(
-            website,
-            rows=((retained_url, b"hash", embedding_model_id),),
-        ),
-    )
     monkeypatch.setattr(
         crawl_tasks, "_get_primary_active_job_id", primary_active_job_id
     )
     monkeypatch.setattr(crawl_tasks, "execute_with_recovery", execute_with_recovery)
     monkeypatch.setattr(
-        crawl_tasks, "reset_tenant_retry_delay", reset_tenant_retry_delay
+        crawl_tasks,
+        "release_crawl_slot_after_task",
+        _release_crawl_slot_after_task,
     )
 
     result = await crawl_tasks.crawl_task(
@@ -534,6 +558,21 @@ async def test_sitemap_source_skip_cutoff_is_passed_to_crawler_when_enabled(
     )
     assert "last_crawled_at" in emitted_sql
     assert "last_source_verified_at" in emitted_sql
+    assert audit_service.metadata is not None
+    source_retention_stats = audit_service.metadata["crawl_stats"]
+    assert isinstance(source_retention_stats, dict)
+    assert (
+        source_retention_stats["outcome_code"]
+        == CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY.value
+    )
+    assert audit_service.calls
+    audit_call = audit_service.calls[-1]
+    assert audit_call["tenant_id"] == tenant.id
+    assert audit_call["actor_id"] == user.id
+    assert audit_call["action"] == ActionType.WEBSITE_CRAWLED
+    assert audit_call["entity_type"] == EntityType.WEBSITE
+    assert audit_call["entity_id"] == website.id
+    assert audit_call["description"] == f"Website crawled: {website.url} - Success"
 
 
 @pytest.mark.asyncio
@@ -598,8 +637,11 @@ async def test_sitemap_source_skip_kwargs_stay_empty_when_not_allowed(
     )
 
     @asynccontextmanager
-    async def session_scope() -> AsyncIterator[_FakeRecoverySession]:
-        yield _FakeRecoverySession()
+    async def session_scope() -> AsyncIterator[_FakeBootstrapSession]:
+        yield _FakeBootstrapSession(
+            website,
+            rows=((page_url, b"hash", embedding_model_id),),
+        )
 
     async def primary_active_job_id(
         _session: object,
@@ -619,24 +661,16 @@ async def test_sitemap_source_skip_kwargs_stay_empty_when_not_allowed(
     async def persist_batch(**_kwargs: object) -> PersistBatchResult:
         return PersistBatchResult(persisted_urls=(page_url,))
 
-    async def reset_tenant_retry_delay(**_kwargs: object) -> None:
-        return None
-
     monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
-    monkeypatch.setattr(
-        "intric.database.database.sessionmanager.create_session",
-        lambda: _FakeBootstrapSession(
-            website,
-            rows=((page_url, b"hash", embedding_model_id),),
-        ),
-    )
     monkeypatch.setattr(
         crawl_tasks, "_get_primary_active_job_id", primary_active_job_id
     )
     monkeypatch.setattr(crawl_tasks, "execute_with_recovery", execute_with_recovery)
     monkeypatch.setattr(crawl_tasks, "persist_batch", persist_batch)
     monkeypatch.setattr(
-        crawl_tasks, "reset_tenant_retry_delay", reset_tenant_retry_delay
+        crawl_tasks,
+        "release_crawl_slot_after_task",
+        _release_crawl_slot_after_task,
     )
 
     result = await crawl_tasks.crawl_task(
@@ -655,6 +689,18 @@ async def test_sitemap_source_skip_kwargs_stay_empty_when_not_allowed(
     assert crawler.captured_kwargs is not None
     assert crawler.captured_kwargs["sitemap_lastmod_skip_cutoff"] is None
     assert crawler.captured_kwargs["sitemap_lastmod_skip_allowed_urls"] == frozenset()
+    assert audit_service.metadata is not None
+    crawl_stats = audit_service.metadata["crawl_stats"]
+    assert isinstance(crawl_stats, dict)
+    assert crawl_stats["outcome_code"] is None
+    assert audit_service.calls
+    audit_call = audit_service.calls[-1]
+    assert audit_call["tenant_id"] == tenant.id
+    assert audit_call["actor_id"] == user.id
+    assert audit_call["action"] == ActionType.WEBSITE_CRAWLED
+    assert audit_call["entity_type"] == EntityType.WEBSITE
+    assert audit_call["entity_id"] == website.id
+    assert audit_call["description"] == f"Website crawled: {website.url} - Success"
 
 
 @pytest.mark.asyncio
@@ -683,4 +729,37 @@ async def test_record_crawl_task_exception_fails_job_with_detail_and_outcome(
     assert job_update["finished_at"] is not None
     assert (
         crawl_run_update["outcome_code"] == CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR.value
+    )
+
+
+@pytest.mark.asyncio
+async def test_record_crawl_task_exception_maps_busy_wait_max_age_to_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake_session = _FakeOutcomeSession()
+
+    @asynccontextmanager
+    async def session_scope() -> AsyncIterator[_FakeOutcomeSession]:
+        yield fake_session
+
+    monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
+
+    await crawl_tasks._record_crawl_task_exception(
+        job_id=uuid4(),
+        run_id=uuid4(),
+        exc=crawl_tasks.CrawlMaxAgeExceededError(
+            "Crawl job abandoned after 1801s waiting for concurrency slot"
+        ),
+    )
+
+    assert len(fake_session.statements) == 2
+    job_update = _compiled_params(fake_session.statements[0])
+    crawl_run_update = _compiled_params(fake_session.statements[1])
+    assert job_update["status"] == "failed"
+    assert job_update["result_location"] == (
+        "Crawl job abandoned after 1801s waiting for concurrency slot"
+    )
+    assert (
+        crawl_run_update["outcome_code"]
+        == CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED.value
     )

@@ -1,45 +1,17 @@
-import type { CrawlRun, WebsiteSparse } from "@intric/intric-js";
+import type {
+  CrawlOutcome,
+  CrawlOutcomeCode,
+  CrawlRun,
+  CrawlRunProcessingSummary,
+  WebsiteSparse
+} from "@intric/intric-js";
 import type { Label } from "@intric/ui";
 import { m } from "$lib/paraglide/messages";
 
-export type CrawlOutcomeCode =
-  | "CRAWL_DUPLICATE_SKIPPED"
-  | "CRAWL_NO_PAGES_RETURNED"
-  | "CRAWL_SITEMAP_NO_PAGES"
-  | "CRAWL_TIMEOUT_NO_PAGES"
-  | "CRAWL_MAX_AGE_EXCEEDED"
-  | "CRAWL_SOURCE_RETENTION_ONLY"
-  | "CRAWL_ALL_UNCHANGED"
-  | "CRAWL_FILES_TOO_LARGE_ONLY"
-  | "CRAWL_PARTIAL_TIMEOUT"
-  | "CRAWL_SHUTDOWN_ERROR"
-  | "CRAWL_COMPLETED_WITH_PAGE_FAILURES"
-  | "EMBEDDING_CONFIG_MISSING"
-  | "UNKNOWN_CRAWL_ERROR";
-
-export type CrawlOutcomeSeverity = "info" | "warning" | "error";
-
-export type CrawlOutcome = {
-  // Keep this open so unknown backend codes still render through the fallback path.
-  code: CrawlOutcomeCode | string;
-  severity: CrawlOutcomeSeverity;
-  message_key: string;
-  detail?: string | null;
-  affected_count?: number | null;
-  samples?: string[];
-};
+export type { CrawlOutcome, CrawlOutcomeCode, CrawlOutcomeSeverity } from "@intric/intric-js";
 
 export type CrawlRunCountBreakdown = {
-  pages_fetched: number;
-  files_downloaded: number;
-  pages_indexed: number;
-  files_indexed: number;
-  pages_hash_retained: number;
-  files_hash_retained: number;
-  files_too_large_skipped: number;
-  pages_source_retained: number;
-  pages_failed: number;
-  files_failed: number;
+  [Key in keyof Required<CrawlRunProcessingSummary>]: number;
 };
 
 export type CrawlRunResultLabel = {
@@ -48,38 +20,23 @@ export type CrawlRunResultLabel = {
   tooltip?: string;
 };
 
-type CrawlRunWithOutcome = CrawlRun & {
-  outcome?: CrawlOutcome | null;
-  pages_source_retained?: number | null;
-  pages_hash_retained?: number | null;
-  files_hash_retained?: number | null;
-  files_too_large_skipped?: number | null;
-  processing_summary?: CrawlRunCountBreakdown | null;
-};
-
-type WebsiteWithOutcome = WebsiteSparse & {
-  latest_crawl?:
-    | (NonNullable<WebsiteSparse["latest_crawl"]> & {
-        outcome?: CrawlOutcome | null;
-      })
-    | null;
-};
-
-const outcomeLabels: Record<string, () => string> = {
-  crawl_outcome_duplicate_skipped: () => m.crawl_outcome_duplicate_skipped(),
-  crawl_outcome_embedding_config_missing: () => m.crawl_outcome_embedding_config_missing(),
-  crawl_outcome_no_pages_returned: () => m.crawl_outcome_no_pages_returned(),
-  crawl_outcome_sitemap_no_pages: () => m.crawl_outcome_sitemap_no_pages(),
-  crawl_outcome_timeout_no_pages: () => m.crawl_outcome_timeout_no_pages(),
-  crawl_outcome_partial_timeout: () => m.crawl_outcome_partial_timeout(),
-  crawl_outcome_max_age_exceeded: () => m.crawl_outcome_max_age_exceeded(),
-  crawl_outcome_source_retention_only: () => m.crawl_outcome_source_retention_only(),
-  crawl_outcome_all_unchanged: () => m.crawl_outcome_all_unchanged(),
-  crawl_outcome_files_too_large_only: () => m.crawl_outcome_files_too_large_only(),
-  crawl_outcome_shutdown_error: () => m.crawl_outcome_shutdown_error(),
-  crawl_outcome_page_failures: () => m.crawl_outcome_page_failures(),
-  crawl_outcome_unknown_error: () => m.crawl_outcome_unknown_error()
-};
+const outcomeLabelsByCode = {
+  CRAWL_DUPLICATE_SKIPPED: () => m.crawl_outcome_duplicate_skipped(),
+  CRAWL_NO_PAGES_RETURNED: () => m.crawl_outcome_no_pages_returned(),
+  CRAWL_SITEMAP_NO_PAGES: () => m.crawl_outcome_sitemap_no_pages(),
+  CRAWL_TIMEOUT_NO_PAGES: () => m.crawl_outcome_timeout_no_pages(),
+  CRAWL_MAX_AGE_EXCEEDED: () => m.crawl_outcome_max_age_exceeded(),
+  CRAWL_RUNTIME_TIMEOUT: () => m.crawl_outcome_runtime_timeout(),
+  CRAWL_QUEUE_ENQUEUE_FAILED: () => m.crawl_outcome_queue_enqueue_failed(),
+  CRAWL_SOURCE_RETENTION_ONLY: () => m.crawl_outcome_source_retention_only(),
+  CRAWL_ALL_UNCHANGED: () => m.crawl_outcome_all_unchanged(),
+  CRAWL_FILES_TOO_LARGE_ONLY: () => m.crawl_outcome_files_too_large_only(),
+  CRAWL_PARTIAL_TIMEOUT: () => m.crawl_outcome_partial_timeout(),
+  CRAWL_SHUTDOWN_ERROR: () => m.crawl_outcome_shutdown_error(),
+  CRAWL_COMPLETED_WITH_PAGE_FAILURES: () => m.crawl_outcome_page_failures(),
+  EMBEDDING_CONFIG_MISSING: () => m.crawl_outcome_embedding_config_missing(),
+  UNKNOWN_CRAWL_ERROR: () => m.crawl_outcome_unknown_error()
+} satisfies Record<CrawlOutcomeCode, () => string>;
 
 const failureReasonLabels: Record<string, () => string> = {
   EMPTY_CONTENT: () => m.failure_reason_EMPTY_CONTENT(),
@@ -93,32 +50,26 @@ const failureReasonLabels: Record<string, () => string> = {
 };
 
 export function getCrawlOutcome(crawl: CrawlRun): CrawlOutcome | undefined {
-  return (crawl as CrawlRunWithOutcome).outcome ?? undefined;
+  return crawl.outcome ?? undefined;
 }
 
 export function getPagesSourceRetained(crawl: CrawlRun): number | undefined {
-  const count = (crawl as CrawlRunWithOutcome).pages_source_retained;
+  const count = crawl.pages_source_retained;
   return typeof count === "number" && count > 0 ? count : undefined;
 }
 
 export function getCrawlRunCountBreakdown(crawl: CrawlRun): CrawlRunCountBreakdown {
-  const crawlWithOutcome = crawl as CrawlRunWithOutcome;
-  if (crawlWithOutcome.processing_summary) {
-    return {
-      ...crawlWithOutcome.processing_summary,
-      files_too_large_skipped: positiveCount(
-        crawlWithOutcome.processing_summary.files_too_large_skipped
-      )
-    };
+  if (crawl.processing_summary) {
+    return countBreakdownFromSummary(crawl.processing_summary);
   }
 
   const pagesFetched = positiveCount(crawl.pages_crawled);
   const filesDownloaded = positiveCount(crawl.files_downloaded);
   const pagesFailed = positiveCount(crawl.pages_failed);
   const filesFailed = positiveCount(crawl.files_failed);
-  const pagesHashRetained = positiveCount(crawlWithOutcome.pages_hash_retained);
-  const filesHashRetained = positiveCount(crawlWithOutcome.files_hash_retained);
-  const filesTooLargeSkipped = positiveCount(crawlWithOutcome.files_too_large_skipped);
+  const pagesHashRetained = positiveCount(crawl.pages_hash_retained);
+  const filesHashRetained = positiveCount(crawl.files_hash_retained);
+  const filesTooLargeSkipped = positiveCount(crawl.files_too_large_skipped);
 
   return {
     pages_fetched: pagesFetched,
@@ -128,7 +79,7 @@ export function getCrawlRunCountBreakdown(crawl: CrawlRun): CrawlRunCountBreakdo
     pages_hash_retained: pagesHashRetained,
     files_hash_retained: filesHashRetained,
     files_too_large_skipped: filesTooLargeSkipped,
-    pages_source_retained: positiveCount(crawlWithOutcome.pages_source_retained),
+    pages_source_retained: positiveCount(crawl.pages_source_retained),
     pages_failed: pagesFailed,
     files_failed: filesFailed
   };
@@ -204,7 +155,7 @@ export function getCrawlRunResultLabels(crawl: CrawlRun): CrawlRunResultLabel[] 
 }
 
 export function getLatestCrawlOutcome(website: WebsiteSparse): CrawlOutcome | undefined {
-  return (website as WebsiteWithOutcome).latest_crawl?.outcome ?? undefined;
+  return website.latest_crawl?.outcome ?? undefined;
 }
 
 export function isDuplicateCrawlSkip(outcome: CrawlOutcome | undefined): boolean {
@@ -218,7 +169,7 @@ export function isSourceRetentionOnly(
 }
 
 export function getCrawlOutcomeLabel(outcome: CrawlOutcome, fallback: string): string {
-  return outcomeLabels[outcome.message_key]?.() ?? outcome.detail ?? fallback;
+  return crawlOutcomeLabelForCode(outcome.code) ?? outcome.detail ?? fallback;
 }
 
 export function getCrawlRunFailureDetail(crawl: CrawlRun): string | undefined {
@@ -228,7 +179,7 @@ export function getCrawlRunFailureDetail(crawl: CrawlRun): string | undefined {
   }
 
   const outcome = getCrawlOutcome(crawl);
-  const detail = normalizeDiagnosticDetail(outcome?.detail ?? crawl.result_location);
+  const detail = normalizeDiagnosticDetail(outcome?.detail);
   if (detail) {
     return detail;
   }
@@ -238,6 +189,22 @@ export function getCrawlRunFailureDetail(crawl: CrawlRun): string | undefined {
   }
 
   return undefined;
+}
+
+export function getCrawlRunFailureTooltip(crawl: CrawlRun, fallback: string): string | undefined {
+  const outcomeTooltip = getCrawlOutcomeTooltip(getCrawlOutcome(crawl), fallback);
+  const failureDetail = getCrawlRunFailureDetail(crawl);
+  if (!failureDetail) {
+    return outcomeTooltip;
+  }
+
+  if (!outcomeTooltip) {
+    return failureDetail;
+  }
+
+  return outcomeTooltip.includes(failureDetail)
+    ? outcomeTooltip
+    : `${outcomeTooltip}\n${failureDetail}`;
 }
 
 export function getSourceRetainedLabel(count: number): string {
@@ -280,6 +247,30 @@ export function getFailureSummaryTooltip(
 
 function positiveCount(count: number | null | undefined): number {
   return typeof count === "number" && count > 0 ? count : 0;
+}
+
+function crawlOutcomeLabelForCode(code: string): string | undefined {
+  // Backend can emit a new outcome code before the frontend schema is regenerated.
+  if (code in outcomeLabelsByCode) {
+    return outcomeLabelsByCode[code as CrawlOutcomeCode]();
+  }
+
+  return undefined;
+}
+
+function countBreakdownFromSummary(summary: CrawlRunProcessingSummary): CrawlRunCountBreakdown {
+  return {
+    pages_fetched: positiveCount(summary.pages_fetched),
+    files_downloaded: positiveCount(summary.files_downloaded),
+    pages_indexed: positiveCount(summary.pages_indexed),
+    files_indexed: positiveCount(summary.files_indexed),
+    pages_hash_retained: positiveCount(summary.pages_hash_retained),
+    files_hash_retained: positiveCount(summary.files_hash_retained),
+    files_too_large_skipped: positiveCount(summary.files_too_large_skipped),
+    pages_source_retained: positiveCount(summary.pages_source_retained),
+    pages_failed: positiveCount(summary.pages_failed),
+    files_failed: positiveCount(summary.files_failed)
+  };
 }
 
 function normalizeDiagnosticDetail(detail: string | null | undefined): string | undefined {
