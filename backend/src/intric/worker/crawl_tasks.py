@@ -58,10 +58,10 @@ from intric.worker.crawl import (
     update_website_timestamps_after_crawl,
 )
 from intric.worker.crawl.persistence import CrawlPageData
-from intric.worker.crawl.post_terminal_reactor import (
-    PostTerminalReactionInput,
+from intric.worker.crawl.post_terminal_effects import (
+    PostTerminalEffectInput,
     PostTerminalRecoveryContext,
-    apply_post_terminal_reactors,
+    apply_post_terminal_effects,
 )
 from intric.worker.crawl_context import EmbeddingModelSpec
 from intric.worker.feeder.election import LeaderElection
@@ -1117,14 +1117,15 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         operation=_do_terminal_zero_output_commit,
                     )
 
-                    await apply_post_terminal_reactors(
-                        PostTerminalReactionInput(
+                    await apply_post_terminal_effects(
+                        PostTerminalEffectInput(
                             recovery=PostTerminalRecoveryContext(
                                 container=container,
                                 session_holder=session_holder,
                                 created_sessions=created_sessions,
                                 execute_with_recovery=execute_with_recovery,
                             ),
+                            audit_service=container.audit_service(),
                             audit_payload=CrawlAuditPayload(
                                 tenant_id=crawl_context.tenant_id,
                                 website_id=params.website_id,
@@ -1596,14 +1597,15 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             total_failed = num_failed_pages + num_failed_files
             crawl_successful = total_items > 0 and total_failed < total_items
 
-            await apply_post_terminal_reactors(
-                PostTerminalReactionInput(
+            await apply_post_terminal_effects(
+                PostTerminalEffectInput(
                     recovery=PostTerminalRecoveryContext(
                         container=container,
                         session_holder=session_holder,
                         created_sessions=created_sessions,
                         execute_with_recovery=execute_with_recovery,
                     ),
+                    audit_service=container.audit_service(),
                     audit_payload=CrawlAuditPayload(
                         tenant_id=crawl_context.tenant_id,
                         website_id=params.website_id,

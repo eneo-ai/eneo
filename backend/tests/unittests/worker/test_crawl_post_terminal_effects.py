@@ -1,40 +1,35 @@
 from collections.abc import Awaitable, Callable
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import intric.worker.crawl.post_terminal_reactor as post_terminal_reactor_module
+import intric.worker.crawl.post_terminal_effects as post_terminal_effects_module
 from intric.audit.application.audit_service import AuditService
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.worker.crawl.audit import CrawlAuditPayload
-from intric.worker.crawl.post_terminal_reactor import (
-    PostTerminalReactionInput,
+from intric.worker.crawl.post_terminal_effects import (
+    PostTerminalEffectInput,
     PostTerminalRecoveryContext,
     PostTerminalRecoveryExecutor,
-    apply_post_terminal_reactors,
+    apply_post_terminal_effects,
 )
 from intric.worker.crawl.recovery import SessionHolder
 
-
-class _FakeContainer:
-    def __init__(self, audit_service: AuditService) -> None:
-        self._audit_service = audit_service
-
-    def audit_service(self) -> AuditService:
-        return self._audit_service
+if TYPE_CHECKING:
+    from intric.main.container.container import Container
 
 
 class _FakeAuditService:
-    def __init__(self) -> None:
-        self.calls: list[CrawlAuditPayload] = []
+    pass
 
 
 class _Recorder:
     def __init__(self) -> None:
         self.events: list[str] = []
         self.circuit_breaker_success_values: list[bool] = []
+        self.audit_services: list[AuditService] = []
         self.audit_payloads: list[CrawlAuditPayload] = []
 
     async def execute_with_recovery(
@@ -73,11 +68,10 @@ def _payload(*, successful: bool, outcome_code: CrawlOutcomeCode) -> CrawlAuditP
 
 
 def _recovery_context(
-    audit_service: AuditService,
     execute_with_recovery: PostTerminalRecoveryExecutor,
 ) -> PostTerminalRecoveryContext:
     return PostTerminalRecoveryContext(
-        container=_FakeContainer(audit_service),
+        container=cast("Container", object()),
         session_holder=SessionHolder(session=None, uploader=None),
         created_sessions=[],
         execute_with_recovery=execute_with_recovery,
@@ -103,15 +97,16 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
         payload: CrawlAuditPayload,
     ) -> None:
         calls.events.append("audit")
+        calls.audit_services.append(audit_service)
         calls.audit_payloads.append(payload)
 
     monkeypatch.setattr(
-        post_terminal_reactor_module,
+        post_terminal_effects_module,
         "update_crawl_circuit_breaker",
         fake_update_crawl_circuit_breaker,
     )
     monkeypatch.setattr(
-        post_terminal_reactor_module,
+        post_terminal_effects_module,
         "record_crawl_audit",
         fake_record_crawl_audit,
     )
@@ -120,7 +115,7 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
 
 
 @pytest.mark.asyncio
-async def test_apply_post_terminal_reactors_records_success_before_audit(
+async def test_apply_post_terminal_effects_records_success_before_audit(
     recorder: _Recorder,
 ) -> None:
     audit_service = _FakeAuditService()
@@ -129,9 +124,10 @@ async def test_apply_post_terminal_reactors_records_success_before_audit(
         outcome_code=CrawlOutcomeCode.CRAWL_ALL_UNCHANGED,
     )
 
-    await apply_post_terminal_reactors(
-        PostTerminalReactionInput(
-            recovery=_recovery_context(audit_service, recorder.execute_with_recovery),
+    await apply_post_terminal_effects(
+        PostTerminalEffectInput(
+            recovery=_recovery_context(recorder.execute_with_recovery),
+            audit_service=audit_service,
             audit_payload=payload,
             circuit_breaker_operation_name="circuit_breaker_update",
         )
@@ -139,6 +135,7 @@ async def test_apply_post_terminal_reactors_records_success_before_audit(
 
     assert recorder.events == ["circuit-breaker", "audit"]
     assert recorder.circuit_breaker_success_values == [True]
+    assert recorder.audit_services == [audit_service]
     assert recorder.audit_payloads == [payload]
     assert (
         recorder.audit_payloads[0].outcome_code == CrawlOutcomeCode.CRAWL_ALL_UNCHANGED
@@ -147,7 +144,7 @@ async def test_apply_post_terminal_reactors_records_success_before_audit(
 
 
 @pytest.mark.asyncio
-async def test_apply_post_terminal_reactors_records_failure_before_audit(
+async def test_apply_post_terminal_effects_records_failure_before_audit(
     recorder: _Recorder,
 ) -> None:
     audit_service = _FakeAuditService()
@@ -156,9 +153,10 @@ async def test_apply_post_terminal_reactors_records_failure_before_audit(
         outcome_code=CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED,
     )
 
-    await apply_post_terminal_reactors(
-        PostTerminalReactionInput(
-            recovery=_recovery_context(audit_service, recorder.execute_with_recovery),
+    await apply_post_terminal_effects(
+        PostTerminalEffectInput(
+            recovery=_recovery_context(recorder.execute_with_recovery),
+            audit_service=audit_service,
             audit_payload=payload,
             circuit_breaker_operation_name="circuit_breaker_update",
         )
@@ -166,6 +164,7 @@ async def test_apply_post_terminal_reactors_records_failure_before_audit(
 
     assert recorder.events == ["circuit-breaker", "audit"]
     assert recorder.circuit_breaker_success_values == [False]
+    assert recorder.audit_services == [audit_service]
     assert recorder.audit_payloads == [payload]
     assert recorder.audit_payloads[0].outcome_code == (
         CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED
@@ -174,7 +173,7 @@ async def test_apply_post_terminal_reactors_records_failure_before_audit(
 
 
 @pytest.mark.asyncio
-async def test_apply_post_terminal_reactors_propagates_circuit_breaker_failure(
+async def test_apply_post_terminal_effects_propagates_circuit_breaker_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _Recorder()
@@ -197,18 +196,16 @@ async def test_apply_post_terminal_reactors_propagates_circuit_breaker_failure(
         calls.events.append("audit")
 
     monkeypatch.setattr(
-        post_terminal_reactor_module,
+        post_terminal_effects_module,
         "record_crawl_audit",
         fake_record_crawl_audit,
     )
 
     with pytest.raises(RuntimeError, match="circuit breaker failed"):
-        await apply_post_terminal_reactors(
-            PostTerminalReactionInput(
-                recovery=_recovery_context(
-                    _FakeAuditService(),
-                    failing_execute_with_recovery,
-                ),
+        await apply_post_terminal_effects(
+            PostTerminalEffectInput(
+                recovery=_recovery_context(failing_execute_with_recovery),
+                audit_service=_FakeAuditService(),
                 audit_payload=_payload(
                     successful=False,
                     outcome_code=CrawlOutcomeCode.CRAWL_RUNTIME_TIMEOUT,

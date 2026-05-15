@@ -9,6 +9,7 @@ from intric.worker.crawl.recovery import SessionHolder
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from intric.audit.application.audit_service import AuditService
     from intric.main.container.container import Container
 
 
@@ -33,8 +34,9 @@ class PostTerminalRecoveryContext:
 
 
 @dataclass(frozen=True, slots=True)
-class PostTerminalReactionInput:
+class PostTerminalEffectInput:
     recovery: PostTerminalRecoveryContext
+    audit_service: "AuditService"
     audit_payload: CrawlAuditPayload
     circuit_breaker_operation_name: Literal[
         "terminal_circuit_breaker_update",
@@ -42,9 +44,9 @@ class PostTerminalReactionInput:
     ]
 
 
-async def apply_post_terminal_reactors(reaction: PostTerminalReactionInput) -> None:
-    payload = reaction.audit_payload
-    recovery = reaction.recovery
+async def apply_post_terminal_effects(effect: PostTerminalEffectInput) -> None:
+    payload = effect.audit_payload
+    recovery = effect.recovery
 
     async def _do_circuit_breaker_update(sess: "AsyncSession") -> None:
         await update_crawl_circuit_breaker(
@@ -59,10 +61,10 @@ async def apply_post_terminal_reactors(reaction: PostTerminalReactionInput) -> N
         container=recovery.container,
         session_holder=recovery.session_holder,
         created_sessions=recovery.created_sessions,
-        operation_name=reaction.circuit_breaker_operation_name,
+        operation_name=effect.circuit_breaker_operation_name,
         operation=_do_circuit_breaker_update,
     )
     await record_crawl_audit(
-        recovery.container.audit_service(),
+        effect.audit_service,
         payload,
     )

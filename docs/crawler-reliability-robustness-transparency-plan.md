@@ -58,6 +58,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Admin recent-failures inventory tranche: add a read-only sysadmin endpoint for terminal failed crawl runs with typed outcomes, bounded pagination, tenant filtering, failure-summary parsing, and explicit `since`/`until` windows.
 - [x] Admin scheduled-crawler aggregate tranche: add a read-only sysadmin endpoint grouped by `UpdateInterval`, with zero buckets, typed totals, tenant filtering, and unparseable legacy interval accounting.
 - [x] Admin per-website processing aggregate tranche: add a read-only sysadmin endpoint grouped by website, with bounded windowing, tenant filtering, stable throughput ordering, orphan-job preservation, and retained/failed/too-large counters.
+- [x] Step 5 post-terminal effects naming tranche: rename the post-terminal side-effect owner away from Twisted-conflicting reactor vocabulary and pass `AuditService` directly instead of routing audit emission through the DI container.
 
 ## Non-Negotiable Principles
 
