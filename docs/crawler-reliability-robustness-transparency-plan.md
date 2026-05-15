@@ -68,6 +68,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Step 5 container override seam tranche: centralize crawler dependency-injector override casts behind `container_overrides.py`, add scoped restoration tests, and remove worker `Any`/`cast` imports from `crawl_tasks.py` and `persistence.py`.
 - [x] Step 5 pre-resolved embedding contract tranche: replace stringly pre-resolved embedding model detection with `PreResolvedEmbeddingModelLike` plus a TypeGuard, preserving provider failure semantics and proving no-DB credential/config pass-through behavior.
 - [x] Step 5 adapter batch-size ownership tranche: make `EmbeddingModelAdapter` the single owner of effective embedding batch-size resolution, remove defensive `self.model` getattr reads, and delete duplicate LiteLLM batch-count calculation.
+- [x] Redis slot Lua ownership tranche: delete duplicated slot Lua and raw slot-key ownership from `CrawlService`, route optimistic acquire/release through `LuaScripts`, and lock the canonical owner with behavior tests.
 
 ## Non-Negotiable Principles
 

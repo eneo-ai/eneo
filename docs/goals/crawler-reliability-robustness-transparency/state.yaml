@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T090
+active_task: T093
 
 tasks:
   - id: T001
@@ -4367,7 +4367,7 @@ tasks:
   - id: T090
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Choose the next bounded crawler reliability/maintainability slice after T089 using current roadmap evidence."
     inputs:
@@ -4382,21 +4382,177 @@ tasks:
       - "Decision: next Worker task, Scout task, or completion-audit task."
       - "Allowed files, verification commands, stop_if conditions, and non-goals."
       - "Evidence that the chosen slice advances crawler reliability, robustness, transparency, or maintainability."
+    receipt:
+      result: done
+      summary: "Selected a read-only WorkerAdapter/queue-boundary Scout as the next roadmap-central task, with Claude-required guardrails against premature interface-first design."
+      decision: "Activate T091 Scout to map crawler ARQ/Redis/slot direct-call surfaces and recommend the smallest first Worker slice; the Scout may recommend no WorkerAdapter interface yet and may recommend duplication collapse first."
+      evidence:
+        - ".codex/artifacts/claude-peer-loop-t090-choose-next-crawler-roadmap-slice-20260515T054825Z.md"
+        - "backend/src/intric/websites/domain/crawl_service.py"
+        - "backend/src/intric/worker/tenant_concurrency.py"
+        - "backend/src/intric/worker/feeder/watchdog.py"
+        - "backend/src/intric/worker/feeder/queues.py"
+      required_scout_findings:
+        - "Inventory duplicated CrawlService slot Lua strings at crawl_service.py:49-85 versus LuaScripts."
+        - "Inventory tenant_concurrency.py and lua_scripts.py getattr(..., \"ev\" + \"al\") evasions, including the LuaScripts docstring example, and recommend the canonical script execution path."
+        - "Inventory direct ARQ Job/JobStatus usage in watchdog requeue."
+        - "Inventory pending queue writers and key formatters, including CrawlService._add_to_pending_queue and PendingQueue.add."
+        - "Count Any/cast/getattr evasions per file in the ARQ/Redis/slot boundary so the next Worker can prove reduction."
+      constraints_added:
+        - "The Scout must not pre-decide a WorkerAdapter interface; no-interface-yet and deduplicate-first are valid recommendations."
+        - "The Scout's recommended Worker must include at least one red test that fails today and proves canonical ownership, not only type-checking."
+        - "No CrawlAdminDetail invention, Phase enum, phase_durations_ms retype, or new helper/manager/common module in the next Worker."
+      spawned_tasks:
+        - T091
+  - id: T091
+    type: scout
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Map crawler ARQ/Redis/slot direct-call surfaces and recommend the smallest first queue-boundary Worker slice without pre-deciding that a WorkerAdapter interface must be introduced first."
+    inputs:
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "backend/src/intric/worker/crawl_feeder.py"
+      - "backend/src/intric/websites/domain/crawl_service.py"
+      - "backend/src/intric/worker/feeder/queues.py"
+      - "backend/src/intric/worker/tenant_concurrency.py"
+      - "backend/src/intric/worker/feeder/watchdog.py"
+      - "backend/src/intric/worker/crawl/slot_acquire.py"
+      - "backend/src/intric/worker/crawl/slot_release.py"
+      - "backend/src/intric/worker/redis/lua_scripts.py"
+      - "backend/src/intric/worker/redis/client.py"
+      - "backend/src/intric/worker/worker.py"
+    constraints:
+      - "Read-only Scout: do not edit production code."
+      - "Treat no-interface-yet and duplication-collapse-first as valid outputs."
+      - "Required inventory must include CrawlService duplicated Lua strings, tenant_concurrency.py and lua_scripts.py ev+al evasions, watchdog direct ARQ Job/JobStatus usage, pending queue writers/key formatters, and per-file Any/cast/getattr evasion counts."
+      - "Recommended Worker should set a measurable per-file evasion-count reduction target when the chosen slice touches Any/cast/getattr boundaries."
+      - "Recommended first Worker must include exact allowed_files, red-test plan, verify commands, stop_if conditions, and non-goals."
+      - "Recommended first Worker must not introduce CrawlAdminDetail, Phase enum, phase_durations_ms retype, or new files named helpers, manager, processor, common, shared, or utils."
+      - "Do not stage unrelated .devcontainer changes."
+    expected_output:
+      - "Direct-call inventory grouped by slot acquire/release, pending queue, ARQ enqueue/duplicate/status, abort/cancel, worker health, and watchdog recovery."
+      - "Canonical owner recommendation for slot Lua, pending queue, Redis key formatting, and ARQ job operations."
+      - "Existing typed seams that should be reused instead of redesigned, including slot_acquire.py, slot_release.py, PendingQueue, and LuaScripts."
+      - "Decision whether the first Worker should introduce an interface, collapse duplication without an interface, or run another Scout."
+      - "Exact first Worker objective with allowed_files, red-test plan, verify commands, stop_if, and non-goals."
+      - "Explicit list of what should not move into the first Worker slice."
+    receipt:
+      result: done
+      summary: "Mapped the crawler ARQ/Redis/slot boundary and recommended deleting duplicated slot Lua ownership in CrawlService before introducing any WorkerAdapter interface."
+      decision: "Activate T092 to route CrawlService optimistic slot acquire/release through LuaScripts and remove private duplicated slot Lua strings."
+      evidence:
+        - "docs/goals/crawler-reliability-robustness-transparency/notes/T091-queue-boundary-scout.md"
+        - "backend/src/intric/websites/domain/crawl_service.py:49"
+        - "backend/src/intric/worker/redis/lua_scripts.py:35"
+        - "backend/src/intric/worker/redis/lua_scripts.py:170"
+      spawned_tasks:
+        - T092
+  - id: T092
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Delete duplicated slot Lua ownership from CrawlService and route optimistic slot acquire/release through LuaScripts."
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawl_service.py"
+      - "backend/tests/unittests/websites/test_crawl_service_slot_ownership.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "docs/goals/crawler-reliability-robustness-transparency/notes/T091-queue-boundary-scout.md"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/websites/test_crawl_service_slot_ownership.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawl_service.py tests/unittests/websites/test_crawl_service_slot_ownership.py"
+      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawl_service.py tests/unittests/websites/test_crawl_service_slot_ownership.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_service.py tests/unittests/websites/test_crawl_service_slot_ownership.py"
+      - "! rg -n \"_acquire_slot_lua|_release_slot_lua|redis_client\\.eval\\(self\\._.*slot_lua|redis\\.call\\(|tenant:.*active_jobs|job:[^\"]*slot_preacquired\" backend/src/intric/websites/domain/crawl_service.py"
+    red_test_plan:
+      - "Behavior test: release_job_resources must use LuaScripts.RELEASE_SLOT, LuaScripts.slot_key(tenant_id), and LuaScripts.preacquired_slot_key(job_id)."
+      - "Behavior test: crawl enqueue rollback must delete LuaScripts.preacquired_slot_key(job_id) and release through LuaScripts.RELEASE_SLOT / LuaScripts.slot_key(tenant_id)."
+      - "Architecture invariant test: CrawlService must not define private slot Lua strings, redis.call Lua bodies, direct private slot eval calls, raw active-slot key literals, or raw pre-acquired-slot key literals."
+    comment_cleanup:
+      - "Delete stale FIX/previous-bug comments attached to the duplicated acquire Lua."
+      - "Delete comments that describe slot Lua as same-as TenantConcurrencyLimiter."
+      - "Delete the direct redis_client.eval explanatory comment in release_job_resources."
+    stop_if:
+      - "Need to change ARQ enqueue behavior, duplicate handling, pending queue behavior, job failure rollback, or queue key format."
+      - "Need to edit tenant_concurrency.py, lua_scripts.py, watchdog, feeder queues, worker runtime, or task manager."
+      - "Need to introduce WorkerAdapter or any new interface/module."
+      - "Need to stage unrelated .devcontainer changes."
+      - "Verification fails twice for the same reason."
+    non_goals:
+      - "No pending queue ownership changes."
+      - "No watchdog ARQ status cleanup."
+      - "No tenant_concurrency.py getattr(..., \"ev\" + \"al\") cleanup yet."
+      - "No LuaScripts eval typing cleanup yet."
+      - "No admin/frontend work."
+      - "No lifecycle, CrawlAdminDetail, Phase enum, or phase-duration work."
+      - "No new files named helper, manager, processor, common, shared, or utils."
+    receipt:
+      result: done
+      summary: "Deleted CrawlService's duplicated slot Lua strings and raw slot-key literals, routed optimistic acquire/release through LuaScripts, and added behavior tests for preemption and enqueue rollback slot cleanup."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawl_service.py"
+        - "backend/tests/unittests/websites/test_crawl_service_slot_ownership.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+        - "docs/goals/crawler-reliability-robustness-transparency/notes/T091-queue-boundary-scout.md"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/websites/test_crawl_service_slot_ownership.py -q -> 3 passed"
+        - "cd backend && uv run pytest tests/unittests/worker/test_tenant_concurrency.py -q -> 10 passed"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawl_service.py tests/unittests/websites/test_crawl_service_slot_ownership.py -> passed"
+        - "cd backend && uv run ruff format --check src/intric/websites/domain/crawl_service.py tests/unittests/websites/test_crawl_service_slot_ownership.py -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_service.py tests/unittests/websites/test_crawl_service_slot_ownership.py -> 0 errors"
+        - "bash -lc '! rg -n ... backend/src/intric/websites/domain/crawl_service.py' -> no matches"
+      tdd:
+        red: "The new tests failed on the current tree because CrawlService still sent private Lua strings and raw slot keys to Redis."
+        green: "Tests passed after replacing direct slot eval/key construction with LuaScripts helpers and deleting stale duplicated-Lua comments."
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t092-slot-lua-ownership-plan-gate-20260515T060343Z.md"
+          - ".codex/artifacts/claude-peer-loop-t092-slot-lua-ownership-plan-gate-revised-20260515T060811Z.md"
+          - ".codex/artifacts/claude-peer-loop-t092-slot-lua-ownership-implementation-review-20260515T061712Z.md"
+      follow_up_candidates:
+        - "Move CrawlService pending queue writes to PendingQueue.add with behavior tests for rpush failure and terminal failure rollback."
+        - "Centralize LuaScripts eval typing to remove getattr(redis, \"ev\" + \"al\") evasions."
+        - "Consider relocating LuaScripts from worker.redis into a shared infrastructure layer before a WorkerAdapter slice."
+      spawned_tasks:
+        - T093
+  - id: T093
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Choose the next bounded crawler reliability/maintainability slice after T092 using the current roadmap, T091 follow-up order, and Claude implementation notes."
+    inputs:
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "docs/goals/crawler-reliability-robustness-transparency/notes/T091-queue-boundary-scout.md"
+      - ".codex/artifacts/claude-peer-loop-t092-slot-lua-ownership-implementation-review-20260515T061712Z.md"
+    constraints:
+      - "Prefer deleting duplicated ownership before introducing WorkerAdapter."
+      - "Keep the next Worker narrow, behavior-tested, and reviewable."
+      - "Do not stage unrelated .devcontainer changes."
+      - "Do not choose broad admin/frontend/lifecycle work unless current evidence shows it is the highest ROI crawler reliability slice."
+    expected_output:
+      - "Decision: next Worker task, Scout task, or completion-audit task."
+      - "Allowed files, red-test plan, verification commands, stop_if conditions, and non-goals."
+      - "Evidence that the chosen slice advances crawler reliability, robustness, transparency, or maintainability."
     receipt: null
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T089
+    task: T092
     commands:
-      - "cd backend && uv run pytest tests/unittests/embedding_models/test_embedding_model_adapter_batching.py -q"
-      - "cd backend && uv run pytest tests/unittests/embedding_models/test_create_embeddings_service.py tests/unittests/embedding_models/test_embedding_model_adapter_batching.py -q"
-      - "cd backend && uv run ruff check src/intric/embedding_models/infrastructure/adapters/base.py src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py tests/unittests/embedding_models/test_embedding_model_adapter_batching.py"
-      - "cd backend && uv run ruff format --check src/intric/embedding_models/infrastructure/adapters/base.py src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py tests/unittests/embedding_models/test_embedding_model_adapter_batching.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/embedding_models/infrastructure/adapters/base.py src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py tests/unittests/embedding_models/test_embedding_model_adapter_batching.py"
-      - "rg -n \"getattr\\(self\\.model\" backend/src/intric/embedding_models/infrastructure/adapters || true"
-      - "rg -n \"max_batch_size|total_batches\" backend/src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py || true"
-      - "rg -n \"model\\.max_batch_size\" backend/src/intric/embedding_models/infrastructure/adapters || true"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t089-adapter-batch-size --phase commit-gate --iteration 1 --require-green --required-min-score 8 ..."
-    note: "T089 adapter batch-size ownership passed red/green behavior tests, T087 regression tests, ruff, format check, targeted strict Pyright, grep postconditions, and Claude green commit-gate."
+      - "cd backend && uv run pytest tests/unittests/websites/test_crawl_service_slot_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/worker/test_tenant_concurrency.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawl_service.py tests/unittests/websites/test_crawl_service_slot_ownership.py"
+      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawl_service.py tests/unittests/websites/test_crawl_service_slot_ownership.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_service.py tests/unittests/websites/test_crawl_service_slot_ownership.py"
+      - "bash -lc '! rg -n ... backend/src/intric/websites/domain/crawl_service.py'"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t092-slot-lua-ownership --phase commit-gate --iteration 3 --require-green --required-min-score 8 ..."
+    note: "T092 slot Lua ownership passed red/green behavior tests, adjacent tenant concurrency regression tests, ruff, format check, targeted strict Pyright, grep postconditions, and Claude green commit-gate."
