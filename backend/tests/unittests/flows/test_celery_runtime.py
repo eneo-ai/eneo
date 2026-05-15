@@ -10,6 +10,10 @@ from uuid import uuid4
 import pytest
 
 from intric.flows.enums import FlowRunLifecycleSource
+from intric.flows.flow_run_dispatch_request import (
+    FlowRunServiceKeyDispatchRequest,
+    FlowRunUserDispatchRequest,
+)
 from intric.flows.runtime.celery_execution_backend import (
     FLOW_EXECUTE_TASK_NAME,
     CeleryFlowExecutionBackend,
@@ -46,10 +50,12 @@ async def test_celery_execution_backend_dispatches_task():
     user_id = uuid4()
 
     await backend.dispatch(
-        run_id=run_id,
-        flow_id=flow_id,
-        tenant_id=tenant_id,
-        user_id=user_id,
+        request=FlowRunUserDispatchRequest(
+            run_id=run_id,
+            flow_id=flow_id,
+            tenant_id=tenant_id,
+            principal_user_id=user_id,
+        ),
     )
 
     celery_app.send_task.assert_called_once_with(
@@ -78,12 +84,12 @@ async def test_celery_execution_backend_dispatches_service_key_principal():
     api_key_id = uuid4()
 
     await backend.dispatch(
-        run_id=run_id,
-        flow_id=flow_id,
-        tenant_id=tenant_id,
-        principal_type="service_key",
-        principal_user_id=None,
-        principal_api_key_id=api_key_id,
+        request=FlowRunServiceKeyDispatchRequest(
+            run_id=run_id,
+            flow_id=flow_id,
+            tenant_id=tenant_id,
+            principal_api_key_id=api_key_id,
+        ),
     )
 
     celery_app.send_task.assert_called_once_with(
@@ -101,7 +107,7 @@ async def test_celery_execution_backend_dispatches_service_key_principal():
 
 
 @pytest.mark.asyncio
-async def test_celery_execution_backend_uses_default_queue_and_none_user(monkeypatch):
+async def test_celery_execution_backend_uses_default_queue(monkeypatch):
     execution_module = importlib.import_module(
         "intric.flows.runtime.celery_execution_backend"
     )
@@ -114,16 +120,18 @@ async def test_celery_execution_backend_uses_default_queue_and_none_user(monkeyp
     backend = execution_module.CeleryFlowExecutionBackend(celery_app=celery_app)
 
     await backend.dispatch(
-        run_id=uuid4(),
-        flow_id=uuid4(),
-        tenant_id=uuid4(),
-        user_id=None,
+        request=FlowRunUserDispatchRequest(
+            run_id=uuid4(),
+            flow_id=uuid4(),
+            tenant_id=uuid4(),
+            principal_user_id=uuid4(),
+        ),
     )
 
     kwargs = celery_app.send_task.call_args.kwargs
     assert kwargs["queue"] == "flows.default"
     assert kwargs["kwargs"]["principal_type"] == "user"
-    assert kwargs["kwargs"]["principal_user_id"] is None
+    assert kwargs["kwargs"]["principal_user_id"] is not None
 
 
 @pytest.mark.asyncio
@@ -136,10 +144,12 @@ async def test_celery_execution_backend_dispatch_propagates_send_task_failure():
 
     with pytest.raises(RuntimeError, match="broker unavailable"):
         await backend.dispatch(
-            run_id=uuid4(),
-            flow_id=uuid4(),
-            tenant_id=uuid4(),
-            user_id=uuid4(),
+            request=FlowRunUserDispatchRequest(
+                run_id=uuid4(),
+                flow_id=uuid4(),
+                tenant_id=uuid4(),
+                principal_user_id=uuid4(),
+            ),
         )
 
 
@@ -218,9 +228,7 @@ def test_execute_flow_run_marks_failed_when_user_id_is_missing(monkeypatch):
         FlowRunLifecycleSource.MISSING_PRINCIPAL
     )
     error = terminalize_failure.await_args.kwargs["error"]
-    assert error.code == (
-        "flow_missing_principal"
-    )
+    assert error.code == ("flow_missing_principal")
     assert error.message == (
         "flow_missing_principal: Flow run execution skipped because run has no execution principal."
     )
@@ -530,13 +538,20 @@ def test_redispatch_stale_queued_task_processes_all_tenants(monkeypatch):
     assert result["status"] == "ok"
     assert result["redispatched"] == 2
     assert backend.dispatch.await_count == 2
-    user_call = backend.dispatch.await_args_list[0]
-    assert user_call.kwargs["principal_type"] == "user"
-    assert user_call.kwargs["principal_user_id"] == user_run_user_id
-    assert user_call.kwargs["principal_api_key_id"] is None
-    service_call = backend.dispatch.await_args_list[1]
-    assert service_call.kwargs["principal_type"] == "service_key"
-    assert service_call.kwargs["principal_api_key_id"] == service_key_id
+    user_request = backend.dispatch.await_args_list[0].kwargs["request"]
+    assert user_request == FlowRunUserDispatchRequest(
+        run_id=user_run.id,
+        flow_id=user_run.flow_id,
+        tenant_id=tenant_one.id,
+        principal_user_id=user_run_user_id,
+    )
+    service_request = backend.dispatch.await_args_list[1].kwargs["request"]
+    assert service_request == FlowRunServiceKeyDispatchRequest(
+        run_id=service_run.id,
+        flow_id=service_run.flow_id,
+        tenant_id=tenant_two.id,
+        principal_api_key_id=service_key_id,
+    )
 
 
 def test_redispatch_stale_queued_skips_runs_lost_to_concurrent_claim(monkeypatch):

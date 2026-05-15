@@ -4,7 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Sequence, TypedDict
+from typing import Sequence
 from uuid import UUID
 
 from intric.files.file_repo import FileRepository
@@ -32,6 +32,10 @@ from intric.flows.flow_input_limits import (
     FlowInputLimits,
     resolve_flow_input_limits_from_source,
 )
+from intric.flows.flow_run_dispatch_request import (
+    FlowRunDispatchRequest,
+    build_flow_run_dispatch_request,
+)
 from intric.flows.flow_run_error import FlowRunError
 from intric.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
 from intric.flows.flow_run_payload_validation import (
@@ -39,6 +43,7 @@ from intric.flows.flow_run_payload_validation import (
     reject_reserved_input_payload_keys,
 )
 from intric.flows.flow_run_step_inputs import (
+    FlowRunStepInputs,
     build_runtime_step_input_specs,
     normalize_step_inputs_payload,
     serialize_step_inputs_payload,
@@ -72,16 +77,6 @@ class FlowRunStepResultsWithFiles:
     result_files: Sequence[FlowRunStepResultFile]
 
 
-class FlowRunDispatchRequest(TypedDict, total=False):
-    run_id: UUID
-    flow_id: UUID
-    tenant_id: UUID
-    user_id: UUID | None
-    principal_type: str
-    principal_user_id: UUID | None
-    principal_api_key_id: UUID | None
-
-
 @dataclass(frozen=True)
 class _PublishedRunDefinition:
     flow: Flow
@@ -95,6 +90,19 @@ class _PreparedRunCreation:
     preseed_steps: list[PreseedStep]
     step_input_files: list[StepInputFileProjection]
     request_fingerprint: str
+
+
+def build_persisted_run_payload(
+    *,
+    normalized_inline_payload: JsonObject | None,
+    flow_version: int,
+    normalized_step_inputs: dict[UUID, list[UUID]],
+) -> JsonObject:
+    payload = dict(normalized_inline_payload or {})
+    payload["expected_flow_version"] = flow_version
+    if normalized_step_inputs:
+        payload["step_inputs"] = serialize_step_inputs_payload(normalized_step_inputs)
+    return payload
 
 
 class FlowRunService:
@@ -150,19 +158,7 @@ class FlowRunService:
         return FlowPrincipal.from_user(self.user)
 
     def build_dispatch_request(self, run: FlowRun) -> FlowRunDispatchRequest:
-        principal = FlowPrincipal.from_run(run)
-        request: FlowRunDispatchRequest = {
-            "run_id": run.id,
-            "flow_id": run.flow_id,
-            "tenant_id": run.tenant_id,
-        }
-        if principal.is_service_key:
-            request["principal_type"] = principal.principal_type.value
-            request["principal_user_id"] = principal.principal_user_id
-            request["principal_api_key_id"] = principal.principal_api_key_id
-        else:
-            request["user_id"] = principal.principal_user_id
-        return request
+        return build_flow_run_dispatch_request(run)
 
     def _validate_idempotency_key(self, idempotency_key: str | None) -> str | None:
         if idempotency_key is None:
@@ -179,9 +175,9 @@ class FlowRunService:
         self,
         *,
         flow_id: UUID,
-        input_payload_json: dict[str, Any] | None,
+        input_payload_json: JsonObject | None,
         expected_flow_version: int | None = None,
-        step_inputs: dict[UUID, dict[str, list[UUID]]] | None = None,
+        step_inputs: FlowRunStepInputs | None = None,
         idempotency_key: str | None = None,
     ) -> FlowRun:
         idempotency_key = self._validate_idempotency_key(idempotency_key)
@@ -265,8 +261,8 @@ class FlowRunService:
         flow_version: int,
         definition: PublishedFlowDefinition,
         principal: FlowPrincipal,
-        input_payload_json: dict[str, Any] | None,
-        step_inputs: dict[UUID, dict[str, list[UUID]]] | None,
+        input_payload_json: JsonObject | None,
+        step_inputs: FlowRunStepInputs | None,
     ) -> _PreparedRunCreation:
         normalized_inline_payload = normalize_and_validate_flow_run_payload(
             metadata=definition.metadata(),
@@ -306,13 +302,11 @@ class FlowRunService:
                 for step_id, file_ids in normalized_step_inputs.items()
                 if file_ids
             ]
-        effective_payload = dict(normalized_inline_payload or {})
-        effective_payload["expected_flow_version"] = flow_version
-        if normalized_step_inputs:
-            effective_payload["step_inputs"] = serialize_step_inputs_payload(
-                normalized_step_inputs
-            )
-        prepared_payload = effective_payload or None
+        prepared_payload = build_persisted_run_payload(
+            normalized_inline_payload=normalized_inline_payload,
+            flow_version=flow_version,
+            normalized_step_inputs=normalized_step_inputs,
+        )
         request_fingerprint = self._build_idempotency_fingerprint(
             tenant_id=self.user.tenant_id,
             principal=principal,
@@ -409,7 +403,7 @@ class FlowRunService:
         principal: FlowPrincipal,
         flow_id: UUID,
         flow_version: int,
-        input_payload_json: dict[str, Any] | None,
+        input_payload_json: JsonObject | None,
     ) -> str:
         normalized = {
             "request_fingerprint_algo_version": 1,
@@ -583,26 +577,11 @@ class FlowRunService:
             if claimed_run is None:
                 continue
             try:
-                principal = FlowPrincipal.from_run(claimed_run)
+                dispatch_request = self.build_dispatch_request(claimed_run)
             except ValueError:
                 continue
             try:
-                if principal.is_service_key:
-                    await backend.dispatch(
-                        run_id=claimed_run.id,
-                        flow_id=claimed_run.flow_id,
-                        tenant_id=claimed_run.tenant_id,
-                        principal_type=principal.principal_type.value,
-                        principal_user_id=principal.principal_user_id,
-                        principal_api_key_id=(principal.principal_api_key_id),
-                    )
-                else:
-                    await backend.dispatch(
-                        run_id=claimed_run.id,
-                        flow_id=claimed_run.flow_id,
-                        tenant_id=claimed_run.tenant_id,
-                        user_id=principal.principal_user_id,
-                    )
+                await backend.dispatch(request=dispatch_request)
                 redispatched += 1
             except Exception:
                 logger.exception(

@@ -37,7 +37,6 @@
     isFlowRunAwaitingReview,
     isFlowRunCancellable,
     shouldPollFlowRunStatus,
-    type FlowRunStatus,
     type FlowRunStatusFilter
   } from "./flowRunStatusSets";
   import { getActiveFlowRunId, shouldAutoFocusFlowRun } from "./flowRunsFocus";
@@ -53,6 +52,15 @@
     syncFlowRunHistoryPolling,
     syncFlowRunHistoryReload
   } from "./flowRunHistoryState";
+  import {
+    DEFAULT_FLOW_RUN_HISTORY_SORT,
+    createFlowRunStatusCounts,
+    getFlowRunHistoryAriaSort,
+    getVisibleFlowRuns,
+    nextFlowRunHistorySortState,
+    type FlowRunHistorySortKey,
+    type FlowRunHistorySortState
+  } from "./flowRunHistoryPresentation";
 
   let {
     flow,
@@ -77,11 +85,8 @@
   let history = $state(createFlowRunHistoryState());
   let selectedRunId: string | null = $state(null);
 
-  type SortKey = "started" | "duration" | "status";
-  type SortDir = "asc" | "desc";
   let statusFilter: FlowRunStatusFilter = $state(null);
-  let sortKey: SortKey = $state("started");
-  let sortDir: SortDir = $state("desc");
+  let sortState: FlowRunHistorySortState = $state(DEFAULT_FLOW_RUN_HISTORY_SORT);
 
   const userMode = getFlowUserMode();
   const showAdvancedControls = $derived($userMode === "power_user");
@@ -90,20 +95,7 @@
     showAdvancedControls ? m.flow_history_power_user_mode_desc() : m.flow_history_user_mode_desc()
   );
 
-  const statusCounts = $derived.by(() => {
-    const counts: Record<FlowRunStatus, number> = {
-      completed: 0,
-      failed: 0,
-      running: 0,
-      queued: 0,
-      awaiting_review: 0,
-      cancelled: 0
-    };
-    for (const r of history.runs) {
-      counts[r.status]++;
-    }
-    return counts;
-  });
+  const statusCounts = $derived(createFlowRunStatusCounts(history.runs));
 
   const statusTranslations = {
     completed: m.flow_run_status_completed,
@@ -118,35 +110,12 @@
     return getFlowRunStatusLabel(status, statusTranslations);
   }
 
-  function runDurationMs(run: FlowRun): number {
-    const startRaw = run.started_at ?? run.created_at;
-    const finishRaw = run.finished_at;
-    if (!startRaw || !finishRaw) return -1;
-    const start = new Date(startRaw).getTime();
-    const finish = new Date(finishRaw).getTime();
-    if (Number.isNaN(start) || Number.isNaN(finish)) return -1;
-    return finish - start;
-  }
-
-  const visibleRuns = $derived.by(() => {
-    const filtered = statusFilter
-      ? history.runs.filter((r) => r.status === statusFilter)
-      : history.runs;
-    const sorted = [...filtered].sort((a, b) => {
-      let cmp = 0;
-      if (sortKey === "started") {
-        cmp =
-          new Date(a.started_at ?? a.created_at ?? 0).getTime() -
-          new Date(b.started_at ?? b.created_at ?? 0).getTime();
-      } else if (sortKey === "duration") {
-        cmp = runDurationMs(a) - runDurationMs(b);
-      } else {
-        cmp = a.status.localeCompare(b.status);
-      }
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-    return sorted;
-  });
+  const visibleRuns = $derived(
+    getVisibleFlowRuns(history.runs, {
+      statusFilter,
+      sortState
+    })
+  );
 
   // mergeOptimisticFlowRuns returns the original array when no merge is needed, which keeps
   // this self-writing effect from looping after the backend list catches up.
@@ -163,18 +132,12 @@
     }
   });
 
-  function toggleSort(key: SortKey) {
-    if (sortKey === key) {
-      sortDir = sortDir === "asc" ? "desc" : "asc";
-    } else {
-      sortKey = key;
-      sortDir = key === "status" ? "asc" : "desc";
-    }
+  function toggleSort(key: FlowRunHistorySortKey) {
+    sortState = nextFlowRunHistorySortState(sortState, key);
   }
 
-  function ariaSortFor(key: SortKey): "ascending" | "descending" | "none" {
-    if (sortKey !== key) return "none";
-    return sortDir === "asc" ? "ascending" : "descending";
+  function ariaSortFor(key: FlowRunHistorySortKey): "ascending" | "descending" | "none" {
+    return getFlowRunHistoryAriaSort(sortState, key);
   }
   let redispatchingRunId: string | null = $state(null);
   let cancellingRunId: string | null = $state(null);
@@ -451,9 +414,11 @@
                     onclick={() => toggleSort("status")}
                   >
                     {m.status()}
-                    {#if sortKey === "status"}
+                    {#if sortState.key === "status"}
                       <IconChevronDown
-                        class="size-3 transition-transform {sortDir === 'asc' ? 'rotate-180' : ''}"
+                        class="size-3 transition-transform {sortState.dir === 'asc'
+                          ? 'rotate-180'
+                          : ''}"
                         aria-hidden="true"
                       />
                     {/if}
@@ -478,9 +443,11 @@
                     onclick={() => toggleSort("started")}
                   >
                     {m.flow_run_started()}
-                    {#if sortKey === "started"}
+                    {#if sortState.key === "started"}
                       <IconChevronDown
-                        class="size-3 transition-transform {sortDir === 'asc' ? 'rotate-180' : ''}"
+                        class="size-3 transition-transform {sortState.dir === 'asc'
+                          ? 'rotate-180'
+                          : ''}"
                         aria-hidden="true"
                       />
                     {/if}
@@ -500,9 +467,11 @@
                     onclick={() => toggleSort("duration")}
                   >
                     {m.duration()}
-                    {#if sortKey === "duration"}
+                    {#if sortState.key === "duration"}
                       <IconChevronDown
-                        class="size-3 transition-transform {sortDir === 'asc' ? 'rotate-180' : ''}"
+                        class="size-3 transition-transform {sortState.dir === 'asc'
+                          ? 'rotate-180'
+                          : ''}"
                         aria-hidden="true"
                       />
                     {/if}

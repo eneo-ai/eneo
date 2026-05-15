@@ -17,8 +17,8 @@ from intric.flows.enums import FlowRunReviewCheckpointState
 from intric.roles.permissions import Permission
 
 
-async def _noop_dispatch_flow_run_after_commit(**kwargs: object) -> None:
-    _ = kwargs
+async def _noop_dispatch_flow_run_after_commit(*, request: object) -> None:
+    _ = request
 
 
 @pytest.fixture

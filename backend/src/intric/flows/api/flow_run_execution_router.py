@@ -48,6 +48,7 @@ from intric.flows.application.flow_run_review_checkpoint_service import (
     FlowRunReviewCheckpointService,
 )
 from intric.flows.application.flow_run_service import FlowRunService
+from intric.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
@@ -305,9 +306,7 @@ _FLOW_RUN_REVIEW_REJECT_REASON_TOO_LONG_ERROR_EXAMPLE: dict[str, object] = {
     "context": {"max_length": 1024},
 }
 
-_FLOW_RUN_REVIEW_STALE_AND_EXPIRED_ERROR_EXAMPLES: dict[
-    str, dict[str, object]
-] = {
+_FLOW_RUN_REVIEW_STALE_AND_EXPIRED_ERROR_EXAMPLES: dict[str, dict[str, object]] = {
     "flow_review_stale_revision": {
         "summary": "Checkpoint revision changed before this request.",
         "value": _FLOW_RUN_REVIEW_STALE_REVISION_ERROR_EXAMPLE,
@@ -513,7 +512,7 @@ async def create_flow_run(
             expected_flow_version=run_in.expected_flow_version,
             step_inputs=(
                 {
-                    step_id: step_input.model_dump(mode="python")
+                    step_id: FlowRunStepInputFiles(file_ids=tuple(step_input.file_ids))
                     for step_id, step_input in run_in.step_inputs.items()
                 }
                 if run_in.step_inputs is not None
@@ -537,7 +536,7 @@ async def create_flow_run(
 
     background_tasks.add_task(
         common.dispatch_flow_run_after_commit,
-        **dispatch_request,
+        request=dispatch_request,
     )
     return assembler.to_run_public(run)
 
@@ -711,7 +710,9 @@ async def get_active_flow_run_review_checkpoint(
         required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
-    checkpoint = await _get_flow_run_review_checkpoint_service(container).get_active_review_checkpoint(
+    checkpoint = await _get_flow_run_review_checkpoint_service(
+        container
+    ).get_active_review_checkpoint(
         flow_id=id,
         run_id=run_id,
     )
@@ -804,7 +805,9 @@ async def edit_flow_run_review_checkpoint(
             required_access=common.FlowApiAction.REVIEW,
             allow_service_key_principals=True,
         )
-        checkpoint = await _get_flow_run_review_checkpoint_service(container).edit_review_checkpoint(
+        checkpoint = await _get_flow_run_review_checkpoint_service(
+            container
+        ).edit_review_checkpoint(
             flow_id=id,
             run_id=run_id,
             checkpoint_id=checkpoint_id,
@@ -878,7 +881,9 @@ async def approve_flow_run_review_checkpoint(
             required_access=common.FlowApiAction.REVIEW,
             allow_service_key_principals=True,
         )
-        checkpoint = await _get_flow_run_review_checkpoint_service(container).approve_review_checkpoint(
+        checkpoint = await _get_flow_run_review_checkpoint_service(
+            container
+        ).approve_review_checkpoint(
             flow_id=id,
             run_id=run_id,
             checkpoint_id=checkpoint_id,
@@ -951,7 +956,9 @@ async def reject_flow_run_review_checkpoint(
             required_access=common.FlowApiAction.REVIEW,
             allow_service_key_principals=True,
         )
-        checkpoint = await _get_flow_run_review_checkpoint_service(container).reject_review_checkpoint(
+        checkpoint = await _get_flow_run_review_checkpoint_service(
+            container
+        ).reject_review_checkpoint(
             flow_id=id,
             run_id=run_id,
             checkpoint_id=checkpoint_id,
@@ -1048,7 +1055,7 @@ async def resume_flow_run_review_checkpoint(
     if dispatch_request is not None:
         background_tasks.add_task(
             common.dispatch_flow_run_recoverably_after_commit,
-            **dispatch_request,
+            request=dispatch_request,
         )
     return FlowAssembler().to_review_checkpoint_resume_response(
         checkpoint=result.checkpoint,
@@ -1168,7 +1175,9 @@ async def rerun_flow_run_step(
             input_payload_json=rerun_in.input_payload_json,
             step_inputs=(
                 {
-                    input_step_id: step_input.model_dump(mode="python")
+                    input_step_id: FlowRunStepInputFiles(
+                        file_ids=tuple(step_input.file_ids)
+                    )
                     for input_step_id, step_input in rerun_in.step_inputs.items()
                 }
                 if rerun_in.step_inputs is not None
@@ -1180,7 +1189,7 @@ async def rerun_flow_run_step(
     if dispatch_request is not None:
         background_tasks.add_task(
             common.dispatch_flow_run_recoverably_after_commit,
-            **dispatch_request,
+            request=dispatch_request,
         )
     return FlowAssembler().to_rerun_response(
         operation=result.operation,

@@ -113,6 +113,11 @@ from intric.flows.flow import (
     FlowVersion,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode
+from intric.flows.flow_run_dispatch_request import (
+    FlowRunServiceKeyDispatchRequest,
+    FlowRunUserDispatchRequest,
+)
+from intric.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.flows.http_transport.test_action import HttpTestResult
 from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
@@ -909,14 +914,12 @@ async def test_create_flow_run_allows_service_key_principals():
     run = _run(flow_id=flow.id, tenant_id=container.user.return_value.tenant_id)
     flow_run_service.create_run.return_value = run
     flow_run_service.build_dispatch_request = MagicMock(
-        return_value={
-            "run_id": run.id,
-            "flow_id": flow.id,
-            "tenant_id": run.tenant_id,
-            "principal_type": "service_key",
-            "principal_user_id": None,
-            "principal_api_key_id": container.user.return_value.active_api_key.id,
-        }
+        return_value=FlowRunServiceKeyDispatchRequest(
+            run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=run.tenant_id,
+            principal_api_key_id=container.user.return_value.active_api_key.id,
+        )
     )
     flow_service.get_flow.return_value = flow
 
@@ -946,12 +949,12 @@ async def test_create_flow_run_schedules_background_dispatch():
 
     def _build_dispatch_request(_run):
         events.append("build_dispatch_request")
-        return {
-            "run_id": run.id,
-            "flow_id": flow_id,
-            "tenant_id": user.tenant_id,
-            "user_id": user.id,
-        }
+        return FlowRunUserDispatchRequest(
+            run_id=run.id,
+            flow_id=flow_id,
+            tenant_id=user.tenant_id,
+            principal_user_id=user.id,
+        )
 
     flow_run_service.build_dispatch_request = MagicMock(
         side_effect=_build_dispatch_request
@@ -985,10 +988,12 @@ async def test_create_flow_run_schedules_background_dispatch():
     scheduled = background_tasks.tasks[0]
     assert scheduled.func is dispatch_flow_run_after_commit
     assert scheduled.kwargs == {
-        "run_id": run.id,
-        "flow_id": flow_id,
-        "tenant_id": user.tenant_id,
-        "user_id": user.id,
+        "request": FlowRunUserDispatchRequest(
+            run_id=run.id,
+            flow_id=flow_id,
+            tenant_id=user.tenant_id,
+            principal_user_id=user.id,
+        )
     }
     flow_run_service.create_run.assert_awaited_once_with(
         flow_id=flow_id,
@@ -1010,12 +1015,12 @@ async def test_create_flow_run_forwards_idempotency_key():
     run = _run(flow_id=flow_id, tenant_id=user.tenant_id)
     flow_run_service.create_run.return_value = run
     flow_run_service.build_dispatch_request = MagicMock(
-        return_value={
-            "run_id": run.id,
-            "flow_id": flow_id,
-            "tenant_id": user.tenant_id,
-            "user_id": user.id,
-        }
+        return_value=FlowRunUserDispatchRequest(
+            run_id=run.id,
+            flow_id=flow_id,
+            tenant_id=user.tenant_id,
+            principal_user_id=user.id,
+        )
     )
     container.flow_run_service.return_value = flow_run_service
     container.flow_service.return_value = AsyncMock()
@@ -1051,12 +1056,12 @@ async def test_create_flow_run_handles_missing_headers_object():
     run = _run(flow_id=flow_id, tenant_id=user.tenant_id)
     flow_run_service.create_run.return_value = run
     flow_run_service.build_dispatch_request = MagicMock(
-        return_value={
-            "run_id": run.id,
-            "flow_id": flow_id,
-            "tenant_id": user.tenant_id,
-            "user_id": user.id,
-        }
+        return_value=FlowRunUserDispatchRequest(
+            run_id=run.id,
+            flow_id=flow_id,
+            tenant_id=user.tenant_id,
+            principal_user_id=user.id,
+        )
     )
     container.flow_run_service.return_value = flow_run_service
     container.flow_service.return_value = AsyncMock()
@@ -1095,12 +1100,12 @@ async def test_rerun_flow_run_step_calls_service_and_schedules_recoverable_dispa
 
     def _build_dispatch_request(_run):
         events.append("build_dispatch_request")
-        return {
-            "run_id": run.id,
-            "flow_id": flow_id,
-            "tenant_id": user.tenant_id,
-            "user_id": user.id,
-        }
+        return FlowRunUserDispatchRequest(
+            run_id=run.id,
+            flow_id=flow_id,
+            tenant_id=user.tenant_id,
+            principal_user_id=user.id,
+        )
 
     run_service.build_dispatch_request = MagicMock(side_effect=_build_dispatch_request)
     flow_service = AsyncMock()
@@ -1156,16 +1161,18 @@ async def test_rerun_flow_run_step_calls_service_and_schedules_recoverable_dispa
         expected_run_revision=1,
         reason="Reviewer accepted corrected transcription",
         input_payload_json={"reviewer_note": "corrected"},
-        step_inputs={step_id: {"file_ids": [input_file_id]}},
+        step_inputs={step_id: FlowRunStepInputFiles(file_ids=(input_file_id,))},
     )
     assert len(background_tasks.tasks) == 1
     scheduled = background_tasks.tasks[0]
     assert scheduled.func is dispatch_flow_run_recoverably_after_commit
     assert scheduled.kwargs == {
-        "run_id": run.id,
-        "flow_id": flow_id,
-        "tenant_id": user.tenant_id,
-        "user_id": user.id,
+        "request": FlowRunUserDispatchRequest(
+            run_id=run.id,
+            flow_id=flow_id,
+            tenant_id=user.tenant_id,
+            principal_user_id=user.id,
+        )
     }
     container.audit_service.return_value.log_async.assert_not_awaited()
 
@@ -1240,12 +1247,12 @@ async def test_resume_review_checkpoint_schedules_dispatch_after_commit(monkeypa
 
     def _build_dispatch_request(_run):
         events.append("build_dispatch_request")
-        return {
-            "run_id": run.id,
-            "flow_id": flow_id,
-            "tenant_id": user.tenant_id,
-            "user_id": user.id,
-        }
+        return FlowRunUserDispatchRequest(
+            run_id=run.id,
+            flow_id=flow_id,
+            tenant_id=user.tenant_id,
+            principal_user_id=user.id,
+        )
 
     run_service = AsyncMock()
     review_service = AsyncMock()
@@ -1295,10 +1302,12 @@ async def test_resume_review_checkpoint_schedules_dispatch_after_commit(monkeypa
     scheduled = background_tasks.tasks[0]
     assert scheduled.func is dispatch_flow_run_recoverably_after_commit
     assert scheduled.kwargs == {
-        "run_id": run.id,
-        "flow_id": flow_id,
-        "tenant_id": user.tenant_id,
-        "user_id": user.id,
+        "request": FlowRunUserDispatchRequest(
+            run_id=run.id,
+            flow_id=flow_id,
+            tenant_id=user.tenant_id,
+            principal_user_id=user.id,
+        )
     }
 
 
@@ -1350,7 +1359,9 @@ async def test_approve_review_checkpoint_commits_before_response(monkeypatch):
         ctx.events.append("approve_review_checkpoint")
         return ctx.checkpoint
 
-    ctx.review_service.approve_review_checkpoint.side_effect = _approve_review_checkpoint
+    ctx.review_service.approve_review_checkpoint.side_effect = (
+        _approve_review_checkpoint
+    )
     _disable_flow_scope_filter(monkeypatch)
 
     response = await approve_flow_run_review_checkpoint(
@@ -1895,13 +1906,14 @@ async def test_dispatch_flow_run_after_commit_marks_failed_on_dispatch_error(
     run_id = uuid4()
     flow_id = uuid4()
     tenant_id = uuid4()
-
-    await dispatch_flow_run_after_commit(
+    request = FlowRunUserDispatchRequest(
         run_id=run_id,
         flow_id=flow_id,
         tenant_id=tenant_id,
-        user_id=uuid4(),
+        principal_user_id=uuid4(),
     )
+
+    await dispatch_flow_run_after_commit(request=request)
 
     terminalizer.terminalize_run.assert_awaited_once()
     kwargs = terminalizer.terminalize_run.await_args.kwargs
@@ -1953,20 +1965,16 @@ async def test_dispatch_flow_run_after_commit_dispatches_without_status_update_o
     flow_id = uuid4()
     tenant_id = uuid4()
     user_id = uuid4()
-
-    await dispatch_flow_run_after_commit(
+    request = FlowRunUserDispatchRequest(
         run_id=run_id,
         flow_id=flow_id,
         tenant_id=tenant_id,
-        user_id=user_id,
+        principal_user_id=user_id,
     )
 
-    backend.dispatch.assert_awaited_once_with(
-        run_id=run_id,
-        flow_id=flow_id,
-        tenant_id=tenant_id,
-        user_id=user_id,
-    )
+    await dispatch_flow_run_after_commit(request=request)
+
+    backend.dispatch.assert_awaited_once_with(request=request)
     run_repo.update_status.assert_not_awaited()
     terminalizer.terminalize_run.assert_not_awaited()
 
@@ -2009,20 +2017,16 @@ async def test_dispatch_flow_run_recoverably_after_commit_dispatches_without_ter
     flow_id = uuid4()
     tenant_id = uuid4()
     user_id = uuid4()
-
-    await dispatch_flow_run_recoverably_after_commit(
+    request = FlowRunUserDispatchRequest(
         run_id=run_id,
         flow_id=flow_id,
         tenant_id=tenant_id,
-        user_id=user_id,
+        principal_user_id=user_id,
     )
 
-    backend.dispatch.assert_awaited_once_with(
-        run_id=run_id,
-        flow_id=flow_id,
-        tenant_id=tenant_id,
-        user_id=user_id,
-    )
+    await dispatch_flow_run_recoverably_after_commit(request=request)
+
+    backend.dispatch.assert_awaited_once_with(request=request)
     run_repo.update_status.assert_not_awaited()
     terminalizer.terminalize_run.assert_not_awaited()
 
@@ -2062,23 +2066,24 @@ async def test_dispatch_flow_run_recoverably_after_commit_logs_without_terminali
     run_id = uuid4()
     flow_id = uuid4()
     tenant_id = uuid4()
-
-    await dispatch_flow_run_recoverably_after_commit(
+    request = FlowRunUserDispatchRequest(
         run_id=run_id,
         flow_id=flow_id,
         tenant_id=tenant_id,
-        user_id=uuid4(),
+        principal_user_id=uuid4(),
     )
+
+    await dispatch_flow_run_recoverably_after_commit(request=request)
 
     assert "flow_recoverable_dispatch_after_commit_failed" in caplog.text
     terminalizer.terminalize_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_dispatch_after_commit_wrappers_share_dispatch_core(monkeypatch):
+async def test_dispatch_after_commit_wrappers_dispatch_same_request_shape(monkeypatch):
     terminalizer = AsyncMock()
     backend = MagicMock()
-    dispatch_core = AsyncMock()
+    backend.dispatch = AsyncMock()
     fake_session = MagicMock()
 
     class _BeginContext:
@@ -2110,28 +2115,20 @@ async def test_dispatch_after_commit_wrappers_share_dispatch_core(monkeypatch):
     monkeypatch.setattr(
         flow_dispatch_module, "Container", lambda session: _FakeContainer()
     )
-    monkeypatch.setattr(flow_dispatch_module, "_dispatch_via_backend", dispatch_core)
 
-    dispatch_kwargs = {
-        "run_id": uuid4(),
-        "flow_id": uuid4(),
-        "tenant_id": uuid4(),
-        "user_id": uuid4(),
-    }
+    request = FlowRunUserDispatchRequest(
+        run_id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=uuid4(),
+        principal_user_id=uuid4(),
+    )
 
-    await dispatch_flow_run_after_commit(**dispatch_kwargs)
-    await dispatch_flow_run_recoverably_after_commit(**dispatch_kwargs)
+    await dispatch_flow_run_after_commit(request=request)
+    await dispatch_flow_run_recoverably_after_commit(request=request)
 
-    assert dispatch_core.await_count == 2
-    first_call, second_call = dispatch_core.await_args_list
-    assert first_call.args == second_call.args == (backend,)
-    assert first_call.kwargs == second_call.kwargs
-    assert first_call.kwargs == {
-        **dispatch_kwargs,
-        "principal_type": None,
-        "principal_user_id": None,
-        "principal_api_key_id": None,
-    }
+    assert backend.dispatch.await_count == 2
+    first_call, second_call = backend.dispatch.await_args_list
+    assert first_call.kwargs == second_call.kwargs == {"request": request}
     terminalizer.terminalize_run.assert_not_awaited()
 
 
@@ -2886,7 +2883,9 @@ async def test_flow_run_alias_evidence_delegates_to_evidence_service(monkeypatch
     }
     run_service = AsyncMock()
     run_service.get_run.return_value = run
-    run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(to_dict=lambda: evidence)
+    run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(
+        to_dict=lambda: evidence
+    )
     container.flow_run_evidence_service.return_value = run_service
     container.audit_service.return_value = AsyncMock()
     flow_service = AsyncMock()
@@ -2916,7 +2915,9 @@ async def test_flow_run_alias_evidence_delegates_to_evidence_service(monkeypatch
         flow_id=flow_id,
         access_kind="evidence_view",
     )
-    run_service.get_redacted_evidence_bundle.assert_awaited_once_with(run_id=run.id, run=run)
+    run_service.get_redacted_evidence_bundle.assert_awaited_once_with(
+        run_id=run.id, run=run
+    )
     container.audit_service.return_value.log_async.assert_awaited_once()
     assert (
         container.audit_service.return_value.log_async.await_args.kwargs["action"]
@@ -3001,7 +3002,9 @@ async def test_flow_run_alias_evidence_allows_space_admin_without_trace_permissi
     }
     run_service = AsyncMock()
     run_service.get_run.return_value = run
-    run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(to_dict=lambda: evidence)
+    run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(
+        to_dict=lambda: evidence
+    )
     container.flow_run_evidence_service.return_value = run_service
     container.audit_service.return_value = AsyncMock()
     flow_service = AsyncMock()
@@ -3121,7 +3124,9 @@ async def test_flow_run_evidence_alias_fails_closed_when_audit_write_fails(monke
     }
     run_service = AsyncMock()
     run_service.get_run.return_value = run
-    run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(to_dict=lambda: evidence)
+    run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(
+        to_dict=lambda: evidence
+    )
     container.flow_run_evidence_service.return_value = run_service
     audit_service = AsyncMock()
     audit_service.log_async.side_effect = RuntimeError("audit unavailable")
@@ -3326,36 +3331,38 @@ async def test_flow_run_alias_control_endpoints_reject_scope_mismatch(monkeypatc
     run_service = AsyncMock()
     run_service.get_run.return_value = run
     run_service.cancel_run.return_value = run
-    run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(to_dict=lambda: {
-        "run": run.model_dump(mode="json"),
-        "definition_snapshot": {"steps": []},
-        "step_results": [],
-        "step_attempts": [],
-        "result_files": [],
-        "debug_export": {
-            "schema_version": "eneo.flow.debug-export.v2",
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "run": {
-                "run_id": str(run.id),
-                "flow_id": str(run.flow_id),
-                "flow_version": run.flow_version,
-                "status": run.status.value,
-            },
-            "definition": {
-                "flow_id": str(run.flow_id),
-                "version": 1,
-                "checksum": "abc",
-                "steps_count": 0,
-            },
+    run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(
+        to_dict=lambda: {
+            "run": run.model_dump(mode="json"),
             "definition_snapshot": {"steps": []},
-            "steps": [],
-            "security": {
-                "redaction_applied": True,
-                "classification_field": "output_classification_override",
-                "mcp_policy_field": "mcp_policy",
+            "step_results": [],
+            "step_attempts": [],
+            "result_files": [],
+            "debug_export": {
+                "schema_version": "eneo.flow.debug-export.v2",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "run": {
+                    "run_id": str(run.id),
+                    "flow_id": str(run.flow_id),
+                    "flow_version": run.flow_version,
+                    "status": run.status.value,
+                },
+                "definition": {
+                    "flow_id": str(run.flow_id),
+                    "version": 1,
+                    "checksum": "abc",
+                    "steps_count": 0,
+                },
+                "definition_snapshot": {"steps": []},
+                "steps": [],
+                "security": {
+                    "redaction_applied": True,
+                    "classification_field": "output_classification_override",
+                    "mcp_policy_field": "mcp_policy",
+                },
             },
-        },
-    })
+        }
+    )
     container.flow_run_service.return_value = run_service
     container.flow_run_evidence_service.return_value = run_service
     flow_service = AsyncMock()

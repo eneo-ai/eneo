@@ -15,6 +15,7 @@ from intric.flows.flow_run_rerun_request import (
     FlowRunRerunRequestFingerprintInput,
     build_rerun_request_fingerprint,
 )
+from intric.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from intric.flows.published_definition import FLOW_PUBLISHED_FORM_SCHEMA_INVALID
 from intric.main.exceptions import BadRequestException
 from tests.unittests.flows.test_flow_run_service import (
@@ -102,7 +103,11 @@ async def test_rerun_step_builds_repository_command(user):
         expected_run_revision=7,
         reason="  Corrected source  ",
         input_payload_json={"case_id": 123},
-        step_inputs={root_step.id: {"file_ids": [file_b_id, file_a_id, file_b_id]}},
+        step_inputs={
+            root_step.id: FlowRunStepInputFiles(
+                file_ids=(file_b_id, file_a_id, file_b_id)
+            )
+        },
     )
 
     assert result == expected_result
@@ -213,7 +218,7 @@ async def test_rerun_step_preserves_empty_root_step_inputs(user):
         rerun_step_id=root_step.id,
         expected_run_revision=3,
         reason="Refresh answer",
-        step_inputs={root_step.id: {"file_ids": []}},
+        step_inputs={root_step.id: FlowRunStepInputFiles()},
     )
 
     assert result == expected_result
@@ -480,7 +485,7 @@ async def test_rerun_step_rejects_downstream_step_inputs(user):
             rerun_step_id=root_step.id,
             expected_run_revision=1,
             reason="Refresh answer",
-            step_inputs={downstream_step.id: {"file_ids": []}},
+            step_inputs={downstream_step.id: FlowRunStepInputFiles()},
         )
 
     assert exc_info.value.code == "flow_run_rerun_step_inputs_invalid"
@@ -668,13 +673,11 @@ async def test_rerun_step_uses_rerun_access_policy(user):
     access_policy_mock.load_run.return_value = run
     flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
     flow_run_repo.get_latest_completed_attempt_id_for_step.return_value = None
-    flow_run_repo.accept_or_replay_rerun_operation.return_value = (
-        _rerun_command_result(
-            user=user,
-            run=run,
-            rerun_step_id=root_step.id,
-            invalidated_step_ids=[root_step.id],
-        )
+    flow_run_repo.accept_or_replay_rerun_operation.return_value = _rerun_command_result(
+        user=user,
+        run=run,
+        rerun_step_id=root_step.id,
+        invalidated_step_ids=[root_step.id],
     )
     service = FlowRunRerunService(
         user=user,

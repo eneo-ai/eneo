@@ -24,6 +24,7 @@ from intric.flows.flow_run_rerun_request import (
     build_rerun_request_fingerprint,
 )
 from intric.flows.flow_run_step_inputs import (
+    FlowRunStepInputs,
     build_runtime_step_input_specs,
     normalize_step_inputs_payload,
     serialize_step_inputs_payload,
@@ -91,7 +92,7 @@ class FlowRunRerunService:
         expected_run_revision: int,
         reason: str,
         input_payload_json: JsonObject | None = None,
-        step_inputs: dict[UUID, dict[str, list[UUID]]] | None = None,
+        step_inputs: FlowRunStepInputs | None = None,
     ) -> FlowRunRerunCommandResult:
         normalized_reason = self._normalize_rerun_reason(reason)
         run = await self.access_policy.load_run(
@@ -235,7 +236,7 @@ class FlowRunRerunService:
         runtime_steps: list[RuntimeStep],
         root_runtime_step: RuntimeStep,
         rerun_step_id: UUID,
-        step_inputs: dict[UUID, dict[str, list[UUID]]] | None,
+        step_inputs: FlowRunStepInputs | None,
     ) -> dict[UUID, list[UUID]]:
         normalized_step_inputs = normalize_step_inputs_payload(step_inputs)
         downstream_step_input_ids = [

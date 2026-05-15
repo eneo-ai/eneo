@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from typing import Protocol
-from uuid import UUID
+
+from intric.flows.flow_run_dispatch_request import FlowRunDispatchRequest
 
 
 class FlowExecutionBackend(Protocol):
@@ -10,11 +11,5 @@ class FlowExecutionBackend(Protocol):
     async def dispatch(
         self,
         *,
-        run_id: UUID,
-        flow_id: UUID,
-        tenant_id: UUID,
-        principal_type: str | None = None,
-        principal_user_id: UUID | None = None,
-        principal_api_key_id: UUID | None = None,
-        user_id: UUID | None = None,
+        request: FlowRunDispatchRequest,
     ) -> None: ...

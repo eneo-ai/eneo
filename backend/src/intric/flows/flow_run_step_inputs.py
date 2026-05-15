@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Protocol
 from uuid import UUID
 
 from intric.files.file_models import File
@@ -46,6 +46,14 @@ class RuntimeStepInputSpec:
     max_files: int | None
 
 
+@dataclass(frozen=True)
+class FlowRunStepInputFiles:
+    file_ids: tuple[UUID, ...] = ()
+
+
+FlowRunStepInputs = Mapping[UUID, FlowRunStepInputFiles]
+
+
 def build_runtime_step_input_specs(
     *,
     steps: list[RuntimeStep],
@@ -69,30 +77,15 @@ def build_runtime_step_input_specs(
 
 
 def normalize_step_inputs_payload(
-    raw_step_inputs: Mapping[UUID, object] | None,
+    raw_step_inputs: FlowRunStepInputs | None,
 ) -> dict[UUID, list[UUID]]:
     normalized: dict[UUID, list[UUID]] = {}
     if raw_step_inputs is None:
         return normalized
 
     for step_id, payload in raw_step_inputs.items():
-        if not isinstance(payload, dict):
-            raise BadRequestException(
-                "Each step_inputs entry must be an object.",
-                code="flow_run_invalid_step_inputs",
-            )
-        payload_dict = cast(dict[str, object], payload)
-        file_ids = payload_dict.get("file_ids")
-        if file_ids is None:
-            normalized[step_id] = []
-            continue
-        if not isinstance(file_ids, list):
-            raise BadRequestException(
-                "Each step_inputs.file_ids value must be an array of UUIDs.",
-                code="flow_run_invalid_step_inputs",
-            )
         normalized_ids: list[UUID] = []
-        for file_id in cast(list[object], file_ids):
+        for file_id in payload.file_ids:
             try:
                 normalized_ids.append(UUID(str(file_id)))
             except (TypeError, ValueError) as exc:

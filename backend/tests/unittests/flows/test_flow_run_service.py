@@ -18,7 +18,10 @@ from intric.authentication.principal_types import PrincipalType
 from intric.files.file_models import FileType
 from intric.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from intric.flows.application.flow_run_evidence_service import FlowRunEvidenceService
-from intric.flows.application.flow_run_service import FlowRunService
+from intric.flows.application.flow_run_service import (
+    FlowRunService,
+    build_persisted_run_payload,
+)
 from intric.flows.domain.flow import (
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
@@ -41,11 +44,21 @@ from intric.flows.flow import (
     FlowStepResult,
     FlowVersion,
 )
+from intric.flows.flow_run_dispatch_request import (
+    FlowRunServiceKeyDispatchRequest,
+    FlowRunUserDispatchRequest,
+)
 from intric.flows.flow_run_provenance import FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
+from intric.flows.flow_run_step_inputs import (
+    FlowRunStepInputFiles,
+    normalize_step_inputs_payload,
+    serialize_step_inputs_payload,
+)
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.flows.infrastructure.flow_run_repo import (
     FlowRunRerunCommandResult,
 )
+from intric.flows.principal import FlowPrincipal
 from intric.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
     FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
@@ -597,6 +610,55 @@ async def test_create_run_replays_existing_run_for_matching_idempotency_key(user
     assert result == existing_run
     flow_run_repo.create.assert_not_awaited()
     flow_run_repo.get_idempotent_run.assert_awaited_once()
+
+
+def test_create_run_idempotency_fingerprint_shape_is_stable(user):
+    service = FlowRunService(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=AsyncMock(),
+        flow_version_repo=AsyncMock(),
+        max_concurrent_runs=5,
+    )
+    payload = build_persisted_run_payload(
+        normalized_inline_payload={"case_id": "A-123", "tags": ["one", "two"]},
+        flow_version=7,
+        normalized_step_inputs={
+            UUID("00000000-0000-0000-0000-000000000003"): [
+                UUID("00000000-0000-0000-0000-000000000004"),
+                UUID("00000000-0000-0000-0000-000000000005"),
+            ]
+        },
+    )
+
+    fingerprint = service._build_idempotency_fingerprint(
+        tenant_id=UUID("00000000-0000-0000-0000-000000000001"),
+        principal=FlowPrincipal(
+            principal_type=PrincipalType.USER,
+            principal_user_id=UUID("00000000-0000-0000-0000-000000000002"),
+        ),
+        flow_id=UUID("00000000-0000-0000-0000-000000000006"),
+        flow_version=7,
+        input_payload_json=payload,
+    )
+
+    assert fingerprint == (
+        "7c74534a589bfcc338ff089c193770aec72e9e0a9dafc4c43af9db82445757cc"
+    )
+
+
+def test_step_inputs_boundary_normalizes_and_serializes_file_ids():
+    step_id = UUID("00000000-0000-0000-0000-000000000010")
+    file_b = UUID("00000000-0000-0000-0000-000000000012")
+    file_a = UUID("00000000-0000-0000-0000-000000000011")
+
+    normalized = normalize_step_inputs_payload(
+        {step_id: FlowRunStepInputFiles(file_ids=(file_b, file_a, file_b))}
+    )
+    serialized = serialize_step_inputs_payload(normalized)
+
+    assert normalized == {step_id: [file_a, file_b]}
+    assert serialized == {str(step_id): {"file_ids": [str(file_a), str(file_b)]}}
 
 
 @pytest.mark.asyncio
@@ -1259,7 +1321,7 @@ async def test_create_run_persists_expected_version_and_step_inputs(user):
         flow_id=flow.id,
         expected_flow_version=2,
         input_payload_json={"x": "y"},
-        step_inputs={runtime_step.id: {"file_ids": [file_id]}},
+        step_inputs={runtime_step.id: FlowRunStepInputFiles(file_ids=(file_id,))},
     )
 
     payload = flow_run_repo.create.await_args.kwargs["input_payload_json"]
@@ -1354,7 +1416,7 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
         flow_id=flow.id,
         expected_flow_version=2,
         input_payload_json={"x": "y"},
-        step_inputs={runtime_step.id: {"file_ids": [file_id]}},
+        step_inputs={runtime_step.id: FlowRunStepInputFiles(file_ids=(file_id,))},
     )
 
     file_repo.get_list_by_id_for_owner.assert_awaited_once_with(
@@ -1430,7 +1492,7 @@ async def test_create_run_rejects_runtime_step_input_mimetype(user):
         await service.create_run(
             flow_id=flow.id,
             input_payload_json={"x": "y"},
-            step_inputs={runtime_step.id: {"file_ids": [file_id]}},
+            step_inputs={runtime_step.id: FlowRunStepInputFiles(file_ids=(file_id,))},
         )
 
     assert exc_info.value.code == "flow_run_step_input_mimetype_rejected"
@@ -1439,7 +1501,6 @@ async def test_create_run_rejects_runtime_step_input_mimetype(user):
         "file_id": str(file_id),
         "mimetype": "application/pdf",
     }
-
 
 
 @pytest.mark.asyncio
@@ -2356,12 +2417,42 @@ def test_build_dispatch_request_uses_run_identity(user):
 
     dispatch_request = service.build_dispatch_request(run)
 
-    assert dispatch_request == {
-        "run_id": run.id,
-        "flow_id": run.flow_id,
-        "tenant_id": run.tenant_id,
-        "user_id": run.user_id,
-    }
+    assert dispatch_request == FlowRunUserDispatchRequest(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        principal_user_id=user.id,
+    )
+
+
+def test_build_dispatch_request_uses_service_key_identity(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    service = FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+    )
+    api_key_id = uuid4()
+    run = _run(user=user, flow_id=uuid4()).model_copy(
+        update={
+            "user_id": None,
+            "principal_type": PrincipalType.SERVICE_KEY.value,
+            "principal_user_id": None,
+            "principal_api_key_id": api_key_id,
+        }
+    )
+
+    dispatch_request = service.build_dispatch_request(run)
+
+    assert dispatch_request == FlowRunServiceKeyDispatchRequest(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        principal_api_key_id=api_key_id,
+    )
 
 
 @pytest.mark.asyncio
@@ -2401,10 +2492,12 @@ async def test_redispatch_stale_queued_runs_dispatches_with_backend(user):
     assert claim_kwargs["flow_id"] == flow_id
     assert isinstance(claim_kwargs["stale_before"], datetime)
     execution_backend.dispatch.assert_awaited_once_with(
-        run_id=stale_run.id,
-        flow_id=flow_id,
-        tenant_id=user.tenant_id,
-        user_id=user.id,
+        request=FlowRunUserDispatchRequest(
+            run_id=stale_run.id,
+            flow_id=flow_id,
+            tenant_id=user.tenant_id,
+            principal_user_id=user.id,
+        )
     )
 
 
@@ -2466,10 +2559,12 @@ async def test_redispatch_stale_queued_runs_skips_runs_without_user_id(user):
     assert count == 1
     assert flow_run_repo.claim_stale_queued_run_for_redispatch.await_count == 2
     execution_backend.dispatch.assert_awaited_once_with(
-        run_id=dispatchable_run.id,
-        flow_id=flow_id,
-        tenant_id=user.tenant_id,
-        user_id=user.id,
+        request=FlowRunUserDispatchRequest(
+            run_id=dispatchable_run.id,
+            flow_id=flow_id,
+            tenant_id=user.tenant_id,
+            principal_user_id=user.id,
+        )
     )
 
 

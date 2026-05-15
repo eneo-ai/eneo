@@ -27,9 +27,9 @@ from intric.flows.flow_input_limits import (
     DEFAULT_MAX_AUDIO_FILES_PER_RUN,
     resolve_flow_input_limits,
 )
+from intric.flows.flow_run_dispatch_request import build_flow_run_dispatch_request
 from intric.flows.flow_run_error import FlowRunError
 from intric.flows.flow_runtime_policy import resolve_flow_runtime_policy
-from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime.celery_app import celery_app
 from intric.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
 from intric.main.config import get_settings
@@ -451,7 +451,7 @@ async def _redispatch_stale_queued_runs_all_tenants(
                 if claimed is None:
                     continue
                 try:
-                    principal = FlowPrincipal.from_run(claimed)
+                    dispatch_request = build_flow_run_dispatch_request(claimed)
                 except ValueError:
                     logger.warning(
                         "Skipping redispatch for run with invalid principal",
@@ -462,24 +462,7 @@ async def _redispatch_stale_queued_runs_all_tenants(
                     )
                     continue
                 try:
-                    if principal.is_service_key:
-                        await backend.dispatch(
-                            run_id=claimed.id,
-                            flow_id=claimed.flow_id,
-                            tenant_id=claimed.tenant_id,
-                            principal_type=principal.principal_type.value,
-                            principal_user_id=principal.principal_user_id,
-                            principal_api_key_id=principal.principal_api_key_id,
-                        )
-                    else:
-                        await backend.dispatch(
-                            run_id=claimed.id,
-                            flow_id=claimed.flow_id,
-                            tenant_id=claimed.tenant_id,
-                            principal_type=principal.principal_type.value,
-                            principal_user_id=principal.principal_user_id,
-                            principal_api_key_id=None,
-                        )
+                    await backend.dispatch(request=dispatch_request)
                     redispatched += 1
                 except Exception:
                     logger.exception(

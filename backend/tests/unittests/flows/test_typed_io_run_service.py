@@ -16,6 +16,7 @@ from intric.flows.flow import (
     FlowStep,
     FlowVersion,
 )
+from intric.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 from intric.main.exceptions import BadRequestException
 
@@ -82,7 +83,7 @@ def _version(user, flow: Flow) -> FlowVersion:
                     "mcp_policy": step.mcp_policy,
                 }
                 for step in flow.steps
-            ]
+            ],
         },
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -162,16 +163,16 @@ async def test_create_run_stores_step_inputs_without_top_level_file_ids(user):
     await service.create_run(
         flow_id=flow.id,
         input_payload_json={"text": "hello"},
-        step_inputs={flow.steps[0].id: {"file_ids": [file_id_2, file_id_1]}},
+        step_inputs={
+            flow.steps[0].id: FlowRunStepInputFiles(file_ids=(file_id_2, file_id_1))
+        },
     )
 
     create_kwargs = flow_run_repo.create.await_args.kwargs
     payload = create_kwargs["input_payload_json"]
     assert payload["expected_flow_version"] == 1
     assert payload["step_inputs"] == {
-        str(flow.steps[0].id): {
-            "file_ids": sorted([str(file_id_1), str(file_id_2)])
-        }
+        str(flow.steps[0].id): {"file_ids": sorted([str(file_id_1), str(file_id_2)])}
     }
     assert payload["text"] == "hello"
     assert create_kwargs["step_input_files"] == [
