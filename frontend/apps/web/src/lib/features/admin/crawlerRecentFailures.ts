@@ -3,6 +3,7 @@ import { m } from "$lib/paraglide/messages";
 import {
   getCrawlOutcomeLabel,
   getCrawlRunResultLabels,
+  positiveCrawlCount,
   type CrawlOutcomeLabelSource,
   type CrawlRunResultLabel
 } from "$lib/features/knowledge/crawlOutcomePresentation";
@@ -33,12 +34,12 @@ export function getCrawlerRecentFailureOutcomeLabel(item: CrawlerRecentFailureIt
 export function getCrawlerRecentFailureResultLabels(
   item: CrawlerRecentFailureItem
 ): CrawlRunResultLabel[] {
-  const pagesFetched = positiveCount(item.pages_crawled);
-  const filesDownloaded = positiveCount(item.files_downloaded);
-  const pagesHashRetained = positiveCount(item.pages_hash_retained);
-  const filesHashRetained = positiveCount(item.files_hash_retained);
-  const pagesFailed = positiveCount(item.pages_failed);
-  const filesFailed = positiveCount(item.files_failed);
+  const pagesFetched = positiveCrawlCount(item.pages_crawled);
+  const filesDownloaded = positiveCrawlCount(item.files_downloaded);
+  const pagesHashRetained = positiveCrawlCount(item.pages_hash_retained);
+  const filesHashRetained = positiveCrawlCount(item.files_hash_retained);
+  const pagesFailed = positiveCrawlCount(item.pages_failed);
+  const filesFailed = positiveCrawlCount(item.files_failed);
 
   return getCrawlRunResultLabels({
     outcome: outcomeFromFailure(item),
@@ -50,8 +51,8 @@ export function getCrawlerRecentFailureResultLabels(
       files_indexed: indexedCount(filesDownloaded, filesHashRetained, filesFailed),
       pages_hash_retained: pagesHashRetained,
       files_hash_retained: filesHashRetained,
-      files_too_large_skipped: positiveCount(item.files_too_large_skipped),
-      pages_source_retained: positiveCount(item.pages_source_retained),
+      files_too_large_skipped: positiveCrawlCount(item.files_too_large_skipped),
+      pages_source_retained: positiveCrawlCount(item.pages_source_retained),
       pages_failed: pagesFailed,
       files_failed: filesFailed
     }
@@ -62,10 +63,6 @@ function outcomeFromFailure(item: CrawlerRecentFailureItem): CrawlOutcomeLabelSo
   return {
     code: item.outcome_code
   };
-}
-
-function positiveCount(count: number | null | undefined): number {
-  return typeof count === "number" && count > 0 ? count : 0;
 }
 
 function indexedCount(total: number, hashRetained: number, failed: number): number {

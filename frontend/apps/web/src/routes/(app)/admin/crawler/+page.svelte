@@ -32,6 +32,14 @@
     type CrawlerSettingsUpdate
   } from "$lib/features/admin/crawlerSettings";
   import {
+    getCrawlerActiveInventoryResultLabels,
+    getCrawlerActiveInventoryStatusLabel,
+    getCrawlerActiveInventoryWebsiteLabel,
+    type CrawlerActiveInventoryItem,
+    type CrawlerActiveInventoryResponse
+  } from "$lib/features/admin/crawlerActiveInventory";
+  import type { CrawlRunResultLabel } from "$lib/features/knowledge/crawlOutcomePresentation";
+  import {
     getCrawlerRecentFailureOutcomeLabel,
     getCrawlerRecentFailureResultLabels,
     getCrawlerRecentFailureWebsiteLabel,
@@ -50,6 +58,8 @@
   }: {
     data: {
       crawlerSettings: CrawlerSettings;
+      crawlerActiveInventory: CrawlerActiveInventoryResponse | null;
+      crawlerActiveInventoryLoadFailed: boolean;
       crawlerRecentFailuresWindowDays: number;
       crawlerRecentFailures: CrawlerRecentFailuresResponse | null;
       crawlerRecentFailuresLoadFailed: boolean;
@@ -133,16 +143,19 @@
     return fieldTextByKey[key]?.() ?? key;
   }
 
-  function formatFinishedAt(value: string) {
+  function formatDateTime(value: string) {
     return new Date(value).toLocaleString(getLocale(), {
       dateStyle: "medium",
       timeStyle: "short"
     });
   }
 
-  function resultBadgeClass(color: string) {
+  function resultBadgeClass(color: CrawlRunResultLabel["color"]) {
     if (color === "orange") {
       return "border-caution/40 bg-caution/8 text-caution";
+    }
+    if (color === "green") {
+      return "border-positive-default/40 bg-positive-dimmer text-positive-stronger";
     }
     if (color === "moss") {
       return "border-success/40 bg-secondary text-success";
@@ -151,6 +164,22 @@
       return "border-accent-default/35 text-accent-default";
     }
     return undefined;
+  }
+
+  function activeStatusBadgeClass(lifecycleState: CrawlerActiveInventoryItem["lifecycle_state"]) {
+    switch (lifecycleState) {
+      case "running_with_progress":
+        return "border-positive-default/40 bg-positive-dimmer text-positive-stronger";
+      case "running_no_progress":
+      case "terminal":
+        return "border-caution/40 bg-caution/8 text-caution";
+      case "queued":
+        return "border-accent-default/35 text-accent-default";
+      default: {
+        const exhaustive: never = lifecycleState;
+        return exhaustive;
+      }
+    }
   }
 
   function rangeHint(field: CrawlerNumberField) {
@@ -286,6 +315,95 @@
         </Card.Content>
       </Card.Root>
 
+      <Card.Root class="mb-14" aria-labelledby="crawler-active-inventory-title">
+        <Card.Header>
+          <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+            <div class="flex min-w-0 flex-col gap-1">
+              <h2 id="crawler-active-inventory-title" class="text-base leading-snug font-semibold">
+                {m.crawler_active_inventory_title()}
+              </h2>
+              <Card.Description>{m.crawler_active_inventory_description()}</Card.Description>
+            </div>
+            {#if data.crawlerActiveInventory}
+              <Badge variant="outline" class="shrink-0 tabular-nums">
+                {m.crawler_active_inventory_count({
+                  shown: data.crawlerActiveInventory.items.length,
+                  total: data.crawlerActiveInventory.total
+                })}
+              </Badge>
+            {/if}
+          </div>
+        </Card.Header>
+        <Card.Content class="pt-0">
+          {#if data.crawlerActiveInventoryLoadFailed}
+            <Alert.Root variant="destructive">
+              <TriangleAlert aria-hidden="true" />
+              <Alert.Description>{m.crawler_active_inventory_load_error()}</Alert.Description>
+            </Alert.Root>
+          {:else if !data.crawlerActiveInventory || data.crawlerActiveInventory.items.length === 0}
+            <p class="text-muted-foreground text-sm">
+              {m.crawler_active_inventory_empty()}
+            </p>
+          {:else}
+            <div class="overflow-x-auto">
+              <Table.Root class="min-w-[56rem]">
+                <Table.Caption class="sr-only">
+                  {m.crawler_active_inventory_table_caption()}
+                </Table.Caption>
+                <Table.Header>
+                  <Table.Row>
+                    <Table.Head>{m.crawler_active_inventory_column_website()}</Table.Head>
+                    <Table.Head>{m.crawler_active_inventory_column_status()}</Table.Head>
+                    <Table.Head>{m.crawler_active_inventory_column_activity()}</Table.Head>
+                    <Table.Head class="text-right">
+                      {m.crawler_active_inventory_column_updated()}
+                    </Table.Head>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {#each data.crawlerActiveInventory.items as activeItem (activeItem.job_id)}
+                    <Table.Row>
+                      <Table.Cell class="max-w-64">
+                        <span
+                          class="block truncate font-medium"
+                          title={getCrawlerActiveInventoryWebsiteLabel(activeItem)}
+                        >
+                          {getCrawlerActiveInventoryWebsiteLabel(activeItem)}
+                        </span>
+                      </Table.Cell>
+                      <Table.Cell>
+                        <Badge
+                          variant="outline"
+                          class={activeStatusBadgeClass(activeItem.lifecycle_state)}
+                        >
+                          {getCrawlerActiveInventoryStatusLabel(activeItem)}
+                        </Badge>
+                      </Table.Cell>
+                      <Table.Cell class="whitespace-normal">
+                        <div class="flex flex-wrap gap-1.5">
+                          {#each getCrawlerActiveInventoryResultLabels(activeItem) as label (label.label)}
+                            <Badge
+                              variant="outline"
+                              class={resultBadgeClass(label.color)}
+                              title={label.tooltip}
+                            >
+                              {label.label}
+                            </Badge>
+                          {/each}
+                        </div>
+                      </Table.Cell>
+                      <Table.Cell class="text-muted-foreground text-right text-xs tabular-nums">
+                        {formatDateTime(activeItem.job_updated_at)}
+                      </Table.Cell>
+                    </Table.Row>
+                  {/each}
+                </Table.Body>
+              </Table.Root>
+            </div>
+          {/if}
+        </Card.Content>
+      </Card.Root>
+
       <Card.Root class="mb-14" aria-labelledby="crawler-recent-failures-title">
         <Card.Header>
           <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
@@ -322,54 +440,56 @@
               })}
             </p>
           {:else}
-            <Table.Root class="min-w-[56rem]">
-              <Table.Caption class="sr-only">
-                {m.crawler_recent_failures_table_caption()}
-              </Table.Caption>
-              <Table.Header>
-                <Table.Row>
-                  <Table.Head>{m.crawler_recent_failures_column_website()}</Table.Head>
-                  <Table.Head>{m.crawler_recent_failures_column_outcome()}</Table.Head>
-                  <Table.Head>{m.crawler_recent_failures_column_activity()}</Table.Head>
-                  <Table.Head class="text-right">
-                    {m.crawler_recent_failures_column_finished()}
-                  </Table.Head>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {#each data.crawlerRecentFailures.items as failure (failure.crawl_run_id)}
+            <div class="overflow-x-auto">
+              <Table.Root class="min-w-[56rem]">
+                <Table.Caption class="sr-only">
+                  {m.crawler_recent_failures_table_caption()}
+                </Table.Caption>
+                <Table.Header>
                   <Table.Row>
-                    <Table.Cell class="max-w-64">
-                      <span
-                        class="block truncate font-medium"
-                        title={getCrawlerRecentFailureWebsiteLabel(failure)}
-                      >
-                        {getCrawlerRecentFailureWebsiteLabel(failure)}
-                      </span>
-                    </Table.Cell>
-                    <Table.Cell class="max-w-72 whitespace-normal">
-                      <span class="text-sm">{getCrawlerRecentFailureOutcomeLabel(failure)}</span>
-                    </Table.Cell>
-                    <Table.Cell class="whitespace-normal">
-                      <div class="flex flex-wrap gap-1.5">
-                        {#each getCrawlerRecentFailureResultLabels(failure) as label (label.label)}
-                          <Badge
-                            variant="outline"
-                            class={resultBadgeClass(label.color)}
-                            title={label.tooltip}
-                          >
-                            {label.label}
-                          </Badge>
-                        {/each}
-                      </div>
-                    </Table.Cell>
-                    <Table.Cell class="text-muted-foreground text-right text-xs tabular-nums">
-                      {formatFinishedAt(failure.finished_at)}
-                    </Table.Cell>
+                    <Table.Head>{m.crawler_recent_failures_column_website()}</Table.Head>
+                    <Table.Head>{m.crawler_recent_failures_column_outcome()}</Table.Head>
+                    <Table.Head>{m.crawler_recent_failures_column_activity()}</Table.Head>
+                    <Table.Head class="text-right">
+                      {m.crawler_recent_failures_column_finished()}
+                    </Table.Head>
                   </Table.Row>
-                {/each}
-              </Table.Body>
-            </Table.Root>
+                </Table.Header>
+                <Table.Body>
+                  {#each data.crawlerRecentFailures.items as failure (failure.crawl_run_id)}
+                    <Table.Row>
+                      <Table.Cell class="max-w-64">
+                        <span
+                          class="block truncate font-medium"
+                          title={getCrawlerRecentFailureWebsiteLabel(failure)}
+                        >
+                          {getCrawlerRecentFailureWebsiteLabel(failure)}
+                        </span>
+                      </Table.Cell>
+                      <Table.Cell class="max-w-72 whitespace-normal">
+                        <span class="text-sm">{getCrawlerRecentFailureOutcomeLabel(failure)}</span>
+                      </Table.Cell>
+                      <Table.Cell class="whitespace-normal">
+                        <div class="flex flex-wrap gap-1.5">
+                          {#each getCrawlerRecentFailureResultLabels(failure) as label (label.label)}
+                            <Badge
+                              variant="outline"
+                              class={resultBadgeClass(label.color)}
+                              title={label.tooltip}
+                            >
+                              {label.label}
+                            </Badge>
+                          {/each}
+                        </div>
+                      </Table.Cell>
+                      <Table.Cell class="text-muted-foreground text-right text-xs tabular-nums">
+                        {formatDateTime(failure.finished_at)}
+                      </Table.Cell>
+                    </Table.Row>
+                  {/each}
+                </Table.Body>
+              </Table.Root>
+            </div>
           {/if}
         </Card.Content>
       </Card.Root>

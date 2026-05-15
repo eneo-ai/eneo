@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T137
+active_task: T138
 
 tasks:
   - id: T001
@@ -6582,7 +6582,7 @@ tasks:
   - id: T137
     type: worker
     assignee: Codex
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Consume the tenant-scoped active crawler inventory endpoint in the admin crawler page so admins can see currently queued/running crawls without sysadmin endpoints."
     depends_on:
@@ -6591,18 +6591,75 @@ tasks:
       - "Use shadcn-Svelte/admin page components, not IntricUI table abstractions."
       - "Read-only UI only; no abort/retry/pause/resume controls."
       - "Run design/UX review skills and Claude gate before commit."
+    receipt:
+      result: done
+      summary: "Added the tenant admin active-crawler inventory UI consumer. The admin crawler page now loads /api/v1/admin/crawler/active through the typed intric.crawlerAdmin client namespace, isolates diagnostics load failure from settings, and renders queued/running crawler jobs with shadcn-Svelte Card/Table/Badge/Alert components, localized lifecycle labels, and activity chips for fetched, indexed, unchanged, source-skipped, too-large, and failed work."
+      changed_files:
+        - "frontend/packages/intric-js/src/endpoints/crawler-admin.js"
+        - "frontend/packages/intric-js/src/types/resources.d.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerActiveInventory.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerActiveInventory.test.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerAdminPageLoad.test.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerRecentFailures.ts"
+        - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+        - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.ts"
+        - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte"
+        - "frontend/apps/web/messages/en.json"
+        - "frontend/apps/web/messages/sv.json"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      red_evidence:
+        - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerActiveInventory.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts failed before the crawlerActiveInventory presentation module existed."
+      verification:
+        - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerActiveInventory.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts src/lib/features/admin/crawlerRecentFailures.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts => 9 passed, 1 todo."
+        - "cd frontend && bun run --filter @intric/web check => 0 errors and one pre-existing ExtendExpirationDialog.svelte warning."
+        - "cd frontend && bun run --filter @intric/web lint => passed."
+        - "cd frontend/packages/intric-js && bun run lint => passed."
+        - "git diff --check on intended T137 files => passed."
+      ui_review:
+        - "Used shadcn MCP registry examples and audit checklist for Table, Card, Badge, and Alert composition."
+        - "Applied critique, adapt, audit, polish, clarify, and ui-ux-pro-max checks: active jobs appear before historical failures, copy distinguishes load failure from crawler failure, dense data tables are horizontally scrollable on narrow viewports, badges use semantic status colors plus text labels, and empty/error states remain readable without action controls."
+      claude:
+        verdict: green
+        min_score: 8
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t137-tenant-admin-active-crawler-ui-20260515T161528Z.md"
+          - ".codex/artifacts/claude-peer-loop-t137-tenant-admin-active-crawler-ui-revision-20260515T162135Z.md"
+        resolution: "Claude's initial changes_required pass found type-widened helper contracts, missing green badge styling, silent terminal fallback, incomplete lifecycle tests, and duplicate positive-count logic. The revision fixed those issues and added a direct queued status-label test before commit."
+      follow_up_notes:
+        - "Extract a reusable CrawlerDiagnosticsCard only if a third diagnostics card appears; keeping two tables inline is currently more reviewable than adding a premature abstraction."
+        - "Add active-inventory pagination controls if admins need to inspect beyond the first page; the current badge honestly reports shown of total."
+        - "Run an authenticated browser smoke test when the local app/session is available."
+  - id: T138
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Audit the roadmap after T137 and choose the next single highest-ROI remaining slice without marking the full goal complete unless current evidence proves every requirement."
+    inputs:
+      - "T137 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "Current git diff after T137"
+    constraints:
+      - "Do not mark the goal complete unless every remaining roadmap requirement has current evidence."
+      - "Preserve unrelated .devcontainer dirt and frontend icon generated ordering drift."
+      - "Prefer bounded reliability, maintainability, or admin transparency slices over broad rewrites."
+      - "Use a fresh Claude gate before WorkerAdapter, admin write controls, lifecycle rewrites, or additional frontend admin work."
+    expected_output:
+      - "complete | not_complete"
+      - "Evidence for remaining explicit open items"
+      - "Next bounded task if not complete"
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T136
+    task: T137
     commands:
-      - "cd backend && uv run pytest tests/integration/test_admin_crawler_active_inventory.py tests/integration/test_sysadmin_crawler_active_inventory.py -q"
-      - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_active_inventory.py tests/integration/test_sysadmin_crawler_active_inventory.py"
-      - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_active_inventory.py tests/integration/test_sysadmin_crawler_active_inventory.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json"
-      - "./scripts/check-intric-js-openapi-schema.sh"
-      - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+      - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerActiveInventory.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts src/lib/features/admin/crawlerRecentFailures.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts"
       - "cd frontend && bun run --filter @intric/web check"
-    note: "T136 tenant-scoped admin active crawler inventory endpoint passed backend integration/sysadmin regression, Ruff, strict Pyright, OpenAPI freshness, frontend generated-type check, frontend check, and Claude commit gate. Frontend check still reports the pre-existing ExtendExpirationDialog.svelte warning."
+      - "cd frontend && bun run --filter @intric/web lint"
+      - "cd frontend/packages/intric-js && bun run lint"
+      - "git diff --check on intended T137 files"
+    note: "T137 tenant admin active-crawler UI passed focused unit tests, frontend check, app lint, intric-js lint, diff whitespace check, shadcn/UX review, and Claude revision gate. Frontend check still reports the pre-existing ExtendExpirationDialog.svelte warning."

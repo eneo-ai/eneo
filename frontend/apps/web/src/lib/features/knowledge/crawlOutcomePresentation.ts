@@ -86,13 +86,13 @@ export function getCrawlRunCountBreakdown(
     return countBreakdownFromSummary(crawl.processing_summary);
   }
 
-  const pagesFetched = positiveCount(crawl.pages_crawled);
-  const filesDownloaded = positiveCount(crawl.files_downloaded);
-  const pagesFailed = positiveCount(crawl.pages_failed);
-  const filesFailed = positiveCount(crawl.files_failed);
-  const pagesHashRetained = positiveCount(crawl.pages_hash_retained);
-  const filesHashRetained = positiveCount(crawl.files_hash_retained);
-  const filesTooLargeSkipped = positiveCount(crawl.files_too_large_skipped);
+  const pagesFetched = positiveCrawlCount(crawl.pages_crawled);
+  const filesDownloaded = positiveCrawlCount(crawl.files_downloaded);
+  const pagesFailed = positiveCrawlCount(crawl.pages_failed);
+  const filesFailed = positiveCrawlCount(crawl.files_failed);
+  const pagesHashRetained = positiveCrawlCount(crawl.pages_hash_retained);
+  const filesHashRetained = positiveCrawlCount(crawl.files_hash_retained);
+  const filesTooLargeSkipped = positiveCrawlCount(crawl.files_too_large_skipped);
 
   return {
     pages_fetched: pagesFetched,
@@ -102,7 +102,7 @@ export function getCrawlRunCountBreakdown(
     pages_hash_retained: pagesHashRetained,
     files_hash_retained: filesHashRetained,
     files_too_large_skipped: filesTooLargeSkipped,
-    pages_source_retained: positiveCount(crawl.pages_source_retained),
+    pages_source_retained: positiveCrawlCount(crawl.pages_source_retained),
     pages_failed: pagesFailed,
     files_failed: filesFailed
   };
@@ -271,7 +271,7 @@ export function getFailureSummaryTooltip(
   return `${m.failure_reasons_tooltip()}:\n${lines}`;
 }
 
-function positiveCount(count: number | null | undefined): number {
+export function positiveCrawlCount(count: number | null | undefined): number {
   return typeof count === "number" && count > 0 ? count : 0;
 }
 
@@ -286,16 +286,16 @@ function crawlOutcomeLabelForCode(code: string): string | undefined {
 
 function countBreakdownFromSummary(summary: CrawlRunProcessingSummary): CrawlRunCountBreakdown {
   return {
-    pages_fetched: positiveCount(summary.pages_fetched),
-    files_downloaded: positiveCount(summary.files_downloaded),
-    pages_indexed: positiveCount(summary.pages_indexed),
-    files_indexed: positiveCount(summary.files_indexed),
-    pages_hash_retained: positiveCount(summary.pages_hash_retained),
-    files_hash_retained: positiveCount(summary.files_hash_retained),
-    files_too_large_skipped: positiveCount(summary.files_too_large_skipped),
-    pages_source_retained: positiveCount(summary.pages_source_retained),
-    pages_failed: positiveCount(summary.pages_failed),
-    files_failed: positiveCount(summary.files_failed)
+    pages_fetched: positiveCrawlCount(summary.pages_fetched),
+    files_downloaded: positiveCrawlCount(summary.files_downloaded),
+    pages_indexed: positiveCrawlCount(summary.pages_indexed),
+    files_indexed: positiveCrawlCount(summary.files_indexed),
+    pages_hash_retained: positiveCrawlCount(summary.pages_hash_retained),
+    files_hash_retained: positiveCrawlCount(summary.files_hash_retained),
+    files_too_large_skipped: positiveCrawlCount(summary.files_too_large_skipped),
+    pages_source_retained: positiveCrawlCount(summary.pages_source_retained),
+    pages_failed: positiveCrawlCount(summary.pages_failed),
+    files_failed: positiveCrawlCount(summary.files_failed)
   };
 }
 

@@ -92,7 +92,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Tenant admin recent-failures hardening tranche: replace the synthetic CrawlRun UI adapter with a narrower shared result-label source type, prove diagnostics-load failure does not break crawler settings, and show explicit shown/total recent-failure counts in the admin UI.
 - [x] Post-T134 audit tranche: reject goal completion, select tenant-scoped active crawler inventory as the next bounded read-only admin transparency slice, and keep the admin UI consumer as an explicit follow-up.
 - [x] Tenant-scoped active crawler inventory endpoint tranche: expose active/running crawler inventory under `/api/v1/admin/crawler/active` with a tenant-required repository method, shared presentation owner, no tenant_id query parameter, and tests for tenant scope, orphan exclusion, bounds, and OpenAPI typing.
-- [ ] Tenant admin active crawler UI tranche: consume `/api/v1/admin/crawler/active` in the admin crawler page so admins can see current queued/running crawler jobs without sysadmin endpoints.
+- [x] Tenant admin active crawler UI tranche: consume `/api/v1/admin/crawler/active` in the admin crawler page so admins can see current queued/running crawler jobs without sysadmin endpoints.
 
 ## Non-Negotiable Principles
 

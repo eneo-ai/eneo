@@ -1,4 +1,5 @@
 /** @typedef {import('../client/client').IntricError} IntricError */
+/** @typedef {import('../types/resources').CrawlerActiveInventoryResponse} CrawlerActiveInventoryResponse */
 /** @typedef {import('../types/resources').CrawlerRecentFailuresResponse} CrawlerRecentFailuresResponse */
 
 /**
@@ -6,6 +7,20 @@
  */
 export function initCrawlerAdmin(client) {
   return {
+    /**
+     * Get active and queued crawler runs for the current tenant.
+     * @param {{limit?: number, offset?: number}} [params]
+     * @returns {Promise<CrawlerActiveInventoryResponse>}
+     * @throws {IntricError}
+     */
+    activeInventory: async (params) => {
+      const res = await client.fetch("/api/v1/admin/crawler/active", {
+        method: "get",
+        params: { query: params }
+      });
+      return res;
+    },
+
     /**
      * Get recent failed crawler runs for the current tenant.
      * @param {{days?: number, limit?: number, offset?: number}} [params]
