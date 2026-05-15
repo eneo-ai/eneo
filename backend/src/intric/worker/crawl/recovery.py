@@ -194,7 +194,6 @@ async def recover_session(
 
 
 async def execute_with_recovery(
-    container: "Container",
     session_holder: SessionHolder,
     created_sessions: list["AsyncSession"],
     operation_name: str,
@@ -214,7 +213,6 @@ async def execute_with_recovery(
     - Return any result needed by the caller
 
     Args:
-        container: DI container (used for recovery, not session creation)
         session_holder: Dict updated with current session for legacy compatibility
         created_sessions: List to track sessions for cleanup on error
         operation_name: Human-readable name for logging
@@ -233,8 +231,7 @@ async def execute_with_recovery(
             # No commit needed - execute_with_recovery handles it
 
         result = await execute_with_recovery(
-            container, session_holder, created_sessions,
-            "website_update", _do_update
+            session_holder, created_sessions, "website_update", _do_update
         )
     """
     from intric.database.database import sessionmanager

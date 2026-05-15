@@ -1110,7 +1110,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         )
 
                     await execute_with_recovery(
-                        container=container,
                         session_holder=session_holder,
                         created_sessions=created_sessions,
                         operation_name="terminal_zero_output_commit",
@@ -1120,7 +1119,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     await apply_post_terminal_effects(
                         PostTerminalEffectInput(
                             recovery=PostTerminalRecoveryContext(
-                                container=container,
                                 session_holder=session_holder,
                                 created_sessions=created_sessions,
                                 execute_with_recovery=execute_with_recovery,
@@ -1286,7 +1284,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         )
 
                     await execute_with_recovery(
-                        container=container,
                         session_holder=session_holder,
                         created_sessions=created_sessions,
                         operation_name=f"process_file_{filename}",
@@ -1344,7 +1341,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     )
 
                 return await execute_with_recovery(
-                    container=container,
                     session_holder=session_holder,
                     created_sessions=created_sessions,
                     operation_name="stale_blob_cleanup",
@@ -1396,7 +1392,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 await sess.execute(stmt)
 
             await execute_with_recovery(
-                container=container,
                 session_holder=session_holder,
                 created_sessions=created_sessions,
                 operation_name="website_size_update",
@@ -1416,7 +1411,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
 
             await execute_with_recovery(
-                container=container,
                 session_holder=session_holder,
                 created_sessions=created_sessions,
                 operation_name="website_post_crawl_timestamps_update",
@@ -1509,7 +1503,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 return result.scalar_one_or_none()
 
             job_status_value = await execute_with_recovery(
-                container=container,
                 session_holder=session_holder,
                 created_sessions=created_sessions,
                 operation_name="suicide_check",
@@ -1584,7 +1577,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
 
             await execute_with_recovery(
-                container=container,
                 session_holder=session_holder,
                 created_sessions=created_sessions,
                 operation_name="terminal_completion_commit",
@@ -1600,7 +1592,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             await apply_post_terminal_effects(
                 PostTerminalEffectInput(
                     recovery=PostTerminalRecoveryContext(
-                        container=container,
                         session_holder=session_holder,
                         created_sessions=created_sessions,
                         execute_with_recovery=execute_with_recovery,

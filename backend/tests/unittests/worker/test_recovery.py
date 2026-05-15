@@ -308,7 +308,6 @@ class TestExecuteWithRecovery:
             return "success"
 
         session_holder = {"session": MagicMock(), "uploader": MagicMock()}
-        container = MagicMock()
         created_sessions = []
 
         # Mock session for session-per-operation pattern
@@ -322,7 +321,6 @@ class TestExecuteWithRecovery:
 
         with patch("intric.database.database.sessionmanager", mock_sessionmanager):
             result = await execute_with_recovery(
-                container=container,
                 session_holder=session_holder,
                 created_sessions=created_sessions,
                 operation_name="test_op",
@@ -344,7 +342,6 @@ class TestExecuteWithRecovery:
             raise ValueError("Not a transaction error")
 
         session_holder = {"session": MagicMock(), "uploader": MagicMock()}
-        container = MagicMock()
         created_sessions = []
 
         # Mock session for session-per-operation pattern
@@ -359,7 +356,6 @@ class TestExecuteWithRecovery:
         with patch("intric.database.database.sessionmanager", mock_sessionmanager):
             with pytest.raises(ValueError, match="Not a transaction error"):
                 await execute_with_recovery(
-                    container=container,
                     session_holder=session_holder,
                     created_sessions=created_sessions,
                     operation_name="test_op",
@@ -384,7 +380,6 @@ class TestExecuteWithRecovery:
             return "success on retry"
 
         session_holder = {"session": MagicMock(), "uploader": MagicMock()}
-        mock_container = MagicMock()
         created_sessions = []
 
         # Mock primary session (fails on first call)
@@ -407,7 +402,6 @@ class TestExecuteWithRecovery:
 
         with patch("intric.database.database.sessionmanager", mock_sessionmanager):
             result = await execute_with_recovery(
-                container=mock_container,
                 session_holder=session_holder,
                 created_sessions=created_sessions,
                 operation_name="test_op",

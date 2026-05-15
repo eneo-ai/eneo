@@ -1,5 +1,5 @@
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, cast
+from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -17,9 +17,6 @@ from intric.worker.crawl.post_terminal_effects import (
 )
 from intric.worker.crawl.recovery import SessionHolder
 
-if TYPE_CHECKING:
-    from intric.main.container.container import Container
-
 
 class _FakeAuditService:
     pass
@@ -35,7 +32,6 @@ class _Recorder:
     async def execute_with_recovery(
         self,
         *,
-        container: object,
         session_holder: SessionHolder,
         created_sessions: list[AsyncSession],
         operation_name: str,
@@ -71,7 +67,6 @@ def _recovery_context(
     execute_with_recovery: PostTerminalRecoveryExecutor,
 ) -> PostTerminalRecoveryContext:
     return PostTerminalRecoveryContext(
-        container=cast("Container", object()),
         session_holder=SessionHolder(session=None, uploader=None),
         created_sessions=[],
         execute_with_recovery=execute_with_recovery,
@@ -180,7 +175,6 @@ async def test_apply_post_terminal_effects_propagates_circuit_breaker_failure(
 
     async def failing_execute_with_recovery(
         *,
-        container: object,
         session_holder: SessionHolder,
         created_sessions: list[AsyncSession],
         operation_name: str,

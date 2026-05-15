@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T076
+active_task: T078
 
 tasks:
   - id: T001
@@ -3587,7 +3587,7 @@ tasks:
   - id: T076
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next bounded crawler reliability/maintainability slice after T075 without widening beyond the roadmap."
     inputs:
@@ -3610,19 +3610,153 @@ tasks:
       - "TDD red-test story."
       - "Verification commands."
       - "Stop conditions."
+    receipt:
+      result: done
+      decision: "Activate T077 to remove the unused `container` parameter from the session-per-operation recovery executor."
+      summary: "Claude green-lit the proposed recovery-seam trim as the next bounded slice. `execute_with_recovery(...)` already uses `sessionmanager` directly and does not read `container`; removing the parameter makes `PostTerminalRecoveryContext` container-free. Claude required this slice to also remove stale docstring text and to record the follow-up order: delete dead `recover_session(...)` later, then trim vestigial `session_holder`/`created_sessions` separately."
+      claude:
+        verdict: green
+        artifact: ".codex/artifacts/claude-peer-loop-t076-choose-next-crawler-reliability-slice-20260515T033121Z.md"
+        min_score: 8
+      spawned_tasks:
+        - T077
+  - id: T077
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Remove the unused `Container` argument from the session-per-operation recovery executor and its callers."
+    inputs:
+      - "T076 receipt"
+      - "backend/src/intric/worker/crawl/recovery.py"
+      - "backend/src/intric/worker/crawl/post_terminal_effects.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_recovery.py"
+      - "backend/tests/unittests/worker/test_crawl_post_terminal_effects.py"
+      - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - ".codex/artifacts/claude-peer-loop-t076-choose-next-crawler-reliability-slice-20260515T033121Z.md"
+    allowed_files:
+      - "backend/src/intric/worker/crawl/recovery.py"
+      - "backend/src/intric/worker/crawl/post_terminal_effects.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_recovery.py"
+      - "backend/tests/unittests/worker/test_crawl_post_terminal_effects.py"
+      - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "TDD: update focused recovery/context tests first and prove they fail before production implementation."
+      - "Remove only the unused `container` argument from `execute_with_recovery(...)`; do not change transaction retry, rollback, commit, or close semantics."
+      - "Remove `container` from `PostTerminalRecoveryContext`."
+      - "Remove stale `container:` docstring text from `execute_with_recovery(...)`."
+      - "Do not modify `recover_session(...)` in this slice; it remains a separate legacy cleanup candidate."
+      - "Do not remove `session_holder` or `created_sessions` in this slice."
+      - "No new `Any`, casts, type ignores, broad kwargs Protocols, helper modules, or comments that restate the code."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "`execute_with_recovery(...)` has no `container` parameter."
+      - "`PostTerminalRecoveryContext` has no `container` field."
+      - "Call sites and fakes use the same container-free executor signature."
+      - "No stale docstring references to a removed `execute_with_recovery` container parameter."
+      - "Follow-up cleanup order is recorded: dead `recover_session(...)`, then vestigial session-holder/created-sessions plumbing."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run pytest tests/unittests/worker -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/recovery.py src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/crawl/recovery.py src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/recovery.py src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "rg -n \"container=recovery\\.container|container: DI container \\(used for recovery\" backend/src/intric/worker/crawl/recovery.py backend/src/intric/worker/crawl/post_terminal_effects.py backend/tests/unittests/worker/test_crawl_post_terminal_effects.py || true"
+    stop_if:
+      - "Removing the argument requires changing `recover_session(...)`, text processor creation policy, or container provider override semantics."
+      - "Any behavior change is needed for transaction retry, rollback, commit, or close ordering."
+      - "Need files outside allowed_files."
+      - "Strict Pyright regresses on touched backend files."
+      - "The slice grows into broader session-management cleanup."
+    receipt:
+      result: done
+      summary: "Removed the unused `container` argument from the session-per-operation recovery executor, post-terminal recovery Protocol, post-terminal recovery context, call sites, and focused test fakes. Transaction begin/commit/rollback/retry/close semantics were left unchanged."
+      changed_files:
+        - "backend/src/intric/worker/crawl/recovery.py"
+        - "backend/src/intric/worker/crawl/post_terminal_effects.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_recovery.py"
+        - "backend/tests/unittests/worker/test_crawl_post_terminal_effects.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      tdd_red:
+        - "cd backend && uv run pytest tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py -q -> 6 failed, 25 passed; failures were the expected missing `container` mismatches"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q -> 42 passed"
+        - "cd backend && uv run pytest tests/unittests/worker -q -> 325 passed"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/recovery.py src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -> passed after import-sort fix"
+        - "cd backend && uv run ruff format --check src/intric/worker/crawl/recovery.py src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/recovery.py src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -> 0 errors"
+        - "rg -n \"container=recovery\\.container|container: DI container \\(used for recovery\" backend/src/intric/worker/crawl/recovery.py backend/src/intric/worker/crawl/post_terminal_effects.py backend/tests/unittests/worker/test_crawl_post_terminal_effects.py || true -> no output"
+      claude:
+        verdict: green
+        artifact: ".codex/artifacts/claude-peer-loop-t077-recovery-executor-container-trim-implementation-review-20260515T033822Z.md"
+        min_score: 8
+      notes:
+        - "Legitimate remaining `Container` usage in `recovery.py` is isolated to dead production function `recover_session(...)`; delete that in the next slice."
+        - "After `recover_session(...)` is gone, trim vestigial `session_holder` and `created_sessions` from `execute_with_recovery(...)` separately."
+        - "`crawl_tasks.py` is down to 1,731 lines after this tranche."
+      spawned_tasks:
+        - T078
+  - id: T078
+    type: worker
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Delete dead production `recover_session(...)` recovery code and its tests."
+    inputs:
+      - "T077 receipt"
+      - "backend/src/intric/worker/crawl/recovery.py"
+      - "backend/src/intric/worker/crawl/__init__.py"
+      - "backend/tests/unittests/worker/test_recovery.py"
+      - ".codex/artifacts/claude-peer-loop-t077-recovery-executor-container-trim-implementation-review-20260515T033822Z.md"
+    allowed_files:
+      - "backend/src/intric/worker/crawl/recovery.py"
+      - "backend/src/intric/worker/crawl/__init__.py"
+      - "backend/tests/unittests/worker/test_recovery.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Prove `recover_session(...)` has no production callers before deletion."
+      - "TDD: update the recovery public-import test or remove `TestRecoverSession` first and prove current production still exports/implements the deleted path."
+      - "Delete the stale `recover_session(...)` export and the stale comment that says it is used directly in `crawl_tasks.py`."
+      - "Do not change `execute_with_recovery(...)` behavior, `session_holder`, or `created_sessions` in this slice."
+      - "No broad session-management refactor, new abstractions, new `Any`, type ignores, or compatibility shims."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "No production import/export/call of `recover_session(...)` remains."
+      - "The `TestRecoverSession` tests are removed with the dead production function they covered."
+      - "Remaining recovery tests for `execute_with_recovery(...)`, backoff, retry stats, and `SessionHolder` still pass."
+      - "Follow-up `session_holder`/`created_sessions` trim remains separate."
+    verify:
+      - "rg -n \"recover_session\" backend/src backend/tests || true"
+      - "cd backend && uv run pytest tests/unittests/worker/test_recovery.py tests/unittests/worker/test_session_transaction_atomicity.py -q"
+      - "cd backend && uv run pytest tests/unittests/worker -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/recovery.py src/intric/worker/crawl/__init__.py tests/unittests/worker/test_recovery.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/crawl/recovery.py src/intric/worker/crawl/__init__.py tests/unittests/worker/test_recovery.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/recovery.py src/intric/worker/crawl/__init__.py tests/unittests/worker/test_recovery.py"
+    stop_if:
+      - "Any production caller of `recover_session(...)` is found."
+      - "Deleting it requires changing session retry behavior."
+      - "Need files outside allowed_files."
+      - "Strict Pyright regresses on touched backend files."
     receipt: null
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T075
+    task: T077
     commands:
-      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_audit.py tests/unittests/worker/test_crawl_circuit_breaker.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run pytest tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
       - "cd backend && uv run pytest tests/unittests/worker -q"
-      - "cd backend && uv run ruff check src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_effects.py"
-      - "cd backend && uv run ruff format --check src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_effects.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_effects.py"
-      - "rg -n \"post_terminal_reacto[r]|PostTerminalReactio[n]|apply_post_terminal_reacto[r]s\" backend docs || true"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t075-post-terminal-effects --phase verification --iteration 2 --require-green --required-min-score 8 ..."
-    note: "T075 post-terminal effects rename and audit-service decoupling passed targeted worker tests, full worker unit tests, ruff, format check, strict Pyright, old-name grep, and Claude green review."
+      - "cd backend && uv run ruff check src/intric/worker/crawl/recovery.py src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/crawl/recovery.py src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/recovery.py src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "rg -n \"container=recovery\\.container|container: DI container \\(used for recovery\" backend/src/intric/worker/crawl/recovery.py backend/src/intric/worker/crawl/post_terminal_effects.py backend/tests/unittests/worker/test_crawl_post_terminal_effects.py || true"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t076-next-slice --phase commit-gate --iteration 2 --require-green --required-min-score 8 ..."
+    note: "T077 recovery executor container trim passed targeted worker tests, full worker unit tests, ruff, format check, strict Pyright, stale-container grep, and Claude green review."

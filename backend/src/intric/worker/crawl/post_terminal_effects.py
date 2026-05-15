@@ -10,14 +10,12 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from intric.audit.application.audit_service import AuditService
-    from intric.main.container.container import Container
 
 
 class PostTerminalRecoveryExecutor(Protocol):
     async def __call__(
         self,
         *,
-        container: "Container",
         session_holder: SessionHolder,
         created_sessions: list["AsyncSession"],
         operation_name: str,
@@ -27,7 +25,6 @@ class PostTerminalRecoveryExecutor(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class PostTerminalRecoveryContext:
-    container: "Container"
     session_holder: SessionHolder
     created_sessions: list["AsyncSession"]
     execute_with_recovery: PostTerminalRecoveryExecutor
@@ -58,7 +55,6 @@ async def apply_post_terminal_effects(effect: PostTerminalEffectInput) -> None:
         )
 
     await recovery.execute_with_recovery(
-        container=recovery.container,
         session_holder=recovery.session_holder,
         created_sessions=recovery.created_sessions,
         operation_name=effect.circuit_breaker_operation_name,
