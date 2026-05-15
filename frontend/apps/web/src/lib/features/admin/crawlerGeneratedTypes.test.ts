@@ -90,6 +90,14 @@ type _CrawlerWebsiteProcessingHashRetainedField = AssertHasKey<
   components["schemas"]["CrawlerWebsiteProcessingAggregateItem"],
   "pages_hash_retained"
 >;
+type _CrawlerWebsiteProcessingCostPressureField = AssertHasKey<
+  components["schemas"]["CrawlerWebsiteProcessingAggregateItem"],
+  "cost_pressure_score"
+>;
+type _CrawlerWebsiteProcessingRetentionRateField = AssertHasKey<
+  components["schemas"]["CrawlerWebsiteProcessingAggregateItem"],
+  "retention_rate"
+>;
 type _CrawlerTenantWebsiteProcessingItemsField = AssertHasKey<
   components["schemas"]["CrawlerTenantWebsiteProcessingAggregateResponse"],
   "items"
@@ -97,6 +105,14 @@ type _CrawlerTenantWebsiteProcessingItemsField = AssertHasKey<
 type _CrawlerTenantWebsiteProcessingTooLargeField = AssertHasKey<
   components["schemas"]["CrawlerTenantWebsiteProcessingAggregateItem"],
   "files_too_large_skipped"
+>;
+type _CrawlerTenantWebsiteProcessingCostPressureField = AssertHasKey<
+  components["schemas"]["CrawlerTenantWebsiteProcessingAggregateItem"],
+  "cost_pressure_score"
+>;
+type _CrawlerTenantWebsiteProcessingUpdateIntervalField = AssertHasKey<
+  components["schemas"]["CrawlerTenantWebsiteProcessingAggregateItem"],
+  "update_interval"
 >;
 type _CrawlerScheduledBucketsField = AssertHasKey<
   components["schemas"]["CrawlerScheduledAggregateResponse"],

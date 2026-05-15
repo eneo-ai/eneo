@@ -33,6 +33,7 @@ async def _create_website(
     embedding_model_id: UUID,
     url_suffix: str,
     name: str | None,
+    update_interval: UpdateInterval = UpdateInterval.NEVER,
 ) -> Websites:
     website = Websites(
         id=website_id,
@@ -40,7 +41,7 @@ async def _create_website(
         url=f"https://website-processing-{url_suffix}.example.com",
         download_files=True,
         crawl_type=CrawlType.CRAWL,
-        update_interval=UpdateInterval.NEVER,
+        update_interval=update_interval,
         size=0,
         tenant_id=tenant_id,
         user_id=user_id,
@@ -188,6 +189,7 @@ async def test_sysadmin_crawler_website_processing_aggregate_groups_by_website(
             embedding_model_id=embedding_model_id,
             url_suffix="a",
             name="Website processing A",
+            update_interval=UpdateInterval.DAILY,
         )
         await _create_website(
             session,
@@ -197,6 +199,7 @@ async def test_sysadmin_crawler_website_processing_aggregate_groups_by_website(
             embedding_model_id=embedding_model_id,
             url_suffix="b",
             name=None,
+            update_interval=UpdateInterval.WEEKLY,
         )
         await _create_website(
             session,
@@ -344,6 +347,11 @@ async def test_sysadmin_crawler_website_processing_aggregate_groups_by_website(
         "files_too_large_skipped": 2,
         "pages_failed": 4,
         "files_failed": 1,
+        "update_interval": UpdateInterval.DAILY.value,
+        "schedule_frequency_weight": 7.0,
+        "indexed_content_count": 15,
+        "retention_rate": pytest.approx(5 / 15),
+        "cost_pressure_score": pytest.approx(70.0),
     }
     assert data["items"][1]["website_name"] is None
     assert data["items"][1]["total_runs"] == 1
@@ -351,6 +359,11 @@ async def test_sysadmin_crawler_website_processing_aggregate_groups_by_website(
     assert data["items"][1]["failed_runs"] == 0
     assert data["items"][1]["pages_crawled"] == 10
     assert data["items"][1]["files_downloaded"] == 0
+    assert data["items"][1]["update_interval"] == UpdateInterval.WEEKLY.value
+    assert data["items"][1]["schedule_frequency_weight"] == 1.0
+    assert data["items"][1]["indexed_content_count"] == 20
+    assert data["items"][1]["retention_rate"] == pytest.approx(10 / 20)
+    assert data["items"][1]["cost_pressure_score"] == pytest.approx(10.0)
 
     next_page = await client.get(
         "/api/v1/sysadmin/crawler/website-processing",
@@ -370,6 +383,8 @@ async def test_sysadmin_crawler_website_processing_aggregate_groups_by_website(
     assert next_data["items"][0]["failed_runs"] == 0
     assert next_data["items"][0]["pages_crawled"] == 0
     assert next_data["items"][0]["files_downloaded"] == 0
+    assert next_data["items"][0]["retention_rate"] == 0.0
+    assert next_data["items"][0]["cost_pressure_score"] == 0.0
 
 
 @pytest.mark.asyncio

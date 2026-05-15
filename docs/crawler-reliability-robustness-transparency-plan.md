@@ -129,7 +129,7 @@ Important current friction:
 - `backend/src/intric/websites/domain/crawl_outcome.py` now has strict and lenient outcome parsers; remaining work is deleting normal new-row dependence on legacy result strings.
 - `backend/src/intric/websites/crawl_dependencies/crawl_models.py` still contains legacy read-side result string fallback from `result_location`.
 - `backend/src/intric/tenants/crawler_settings_helper.py` now owns typed `CrawlerSettingSpec` values as the crawler-settings source of truth.
-- `frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte` exposes current tenant crawler settings, active/queued crawl jobs, and recent terminal failures, but not scheduled crawler load, high-cost websites, too-large-file samples, watchdog interventions, or circuit-breaker state.
+- `frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte` exposes current tenant crawler settings, active/queued crawl jobs, scheduled load, per-website processing, high-cost/cost-pressure ranking, and recent terminal failures, but not too-large-file samples, watchdog interventions, or circuit-breaker state.
 
 ## Core Recommendation
 
@@ -734,9 +734,9 @@ Work:
 - [ ] Show active and queued crawls with age, tenant/space/website, worker state, and lifecycle state.
 - [x] Expose scheduled crawls grouped by interval and approximate content size through a bounded sysadmin endpoint.
 - [x] Expose scheduled crawls grouped by interval and approximate content size through a tenant-scoped admin endpoint.
-- [ ] Show scheduled crawls grouped by interval and approximate content size in the tenant admin browser page.
+- [x] Show scheduled crawls grouped by interval and approximate content size in the tenant admin browser page.
 - [x] Expose per-website processing totals for pages, files, retained content, too-large files, and failed items over a bounded window.
-- [ ] Show high-cost websites by a defined score: `schedule_frequency_weight * indexed_content_count * (1 - retention_rate)`, with embedding spend added when reliable cost data exists.
+- [x] Show high-cost websites by a defined score: `schedule_frequency_weight * indexed_content_count * (1 - retention_rate)`, with embedding spend added later only when reliable cost data exists.
 - [x] Expose recent terminal failed crawler runs by typed `CrawlOutcomeCode` through a bounded sysadmin endpoint.
 - [x] Expose recent terminal failed crawler runs through a bounded tenant-scoped admin endpoint without a `tenant_id` query parameter.
 - [x] Show recent terminal failed crawler runs in the tenant admin crawler page without calling super-API-key `/sysadmin` endpoints.

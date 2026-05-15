@@ -58,6 +58,7 @@
     type CrawlerScheduledAggregateResponse
   } from "$lib/features/admin/crawlerScheduledAggregate";
   import {
+    getCrawlerWebsiteProcessingCostLabel,
     getCrawlerWebsiteProcessingFailureLabel,
     getCrawlerWebsiteProcessingFetchedLabel,
     getCrawlerWebsiteProcessingRetainedLabel,
@@ -612,6 +613,7 @@
                 <Table.Header>
                   <Table.Row>
                     <Table.Head>{m.crawler_website_processing_column_website()}</Table.Head>
+                    <Table.Head>{m.crawler_website_processing_column_cost()}</Table.Head>
                     <Table.Head>{m.crawler_website_processing_column_runs()}</Table.Head>
                     <Table.Head>{m.crawler_website_processing_column_fetched()}</Table.Head>
                     <Table.Head>{m.crawler_website_processing_column_retained()}</Table.Head>
@@ -629,6 +631,15 @@
                         >
                           {getCrawlerWebsiteProcessingWebsiteLabel(processingItem)}
                         </span>
+                      </Table.Cell>
+                      <Table.Cell>
+                        <Badge
+                          variant="outline"
+                          class="tabular-nums"
+                          title={m.crawler_website_processing_cost_hint()}
+                        >
+                          {getCrawlerWebsiteProcessingCostLabel(processingItem)}
+                        </Badge>
                       </Table.Cell>
                       <Table.Cell class="text-muted-foreground tabular-nums">
                         {m.crawler_website_processing_runs({

@@ -1,6 +1,11 @@
 import type { components } from "@intric/intric-js";
 import { m } from "$lib/paraglide/messages";
-import { formatCrawlerCount } from "./crawlerNumberFormat";
+import {
+  formatCrawlerCount,
+  formatCrawlerDecimal,
+  formatCrawlerPercent
+} from "./crawlerNumberFormat";
+import { getCrawlerScheduledIntervalLabel } from "./crawlerScheduledAggregate";
 
 export type CrawlerTenantWebsiteProcessingAggregateResponse =
   components["schemas"]["CrawlerTenantWebsiteProcessingAggregateResponse"];
@@ -40,6 +45,19 @@ export function getCrawlerWebsiteProcessingFetchedLabel(
   return m.crawler_website_processing_fetched({
     pages: formatCrawlerCount(item.pages_crawled),
     files: formatCrawlerCount(item.files_downloaded)
+  });
+}
+
+export function getCrawlerWebsiteProcessingCostLabel(
+  item: CrawlerTenantWebsiteProcessingAggregateItem
+): string {
+  return m.crawler_website_processing_cost({
+    interval:
+      item.update_interval === null
+        ? m.crawler_website_processing_unknown_interval()
+        : getCrawlerScheduledIntervalLabel(item.update_interval),
+    score: formatCrawlerDecimal(item.cost_pressure_score),
+    retentionRate: formatCrawlerPercent(item.retention_rate)
   });
 }
 

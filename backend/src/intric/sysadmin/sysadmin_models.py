@@ -311,6 +311,7 @@ class CrawlerWebsiteProcessingAggregateItem(BaseModel):
     website_name: str | None
     tenant_id: UUID
     tenant_display_name: str | None
+    update_interval: UpdateInterval | None
     total_runs: int = Field(ge=0)
     terminal_runs: int = Field(ge=0)
     failed_runs: int = Field(ge=0)
@@ -322,6 +323,23 @@ class CrawlerWebsiteProcessingAggregateItem(BaseModel):
     files_too_large_skipped: int = Field(ge=0)
     pages_failed: int = Field(ge=0)
     files_failed: int = Field(ge=0)
+    schedule_frequency_weight: float = Field(
+        ge=0,
+        description="Schedule multiplier used for crawler cost-pressure ranking.",
+    )
+    indexed_content_count: int = Field(
+        ge=0,
+        description="Fetched, downloaded, and retained page/file count in the window.",
+    )
+    retention_rate: float = Field(
+        ge=0,
+        le=1,
+        description="Share of indexed content retained without fetching or rewriting.",
+    )
+    cost_pressure_score: float = Field(
+        ge=0,
+        description="Schedule-weighted changed/new page and file count for ranking.",
+    )
 
     @classmethod
     def from_domain(
@@ -332,6 +350,7 @@ class CrawlerWebsiteProcessingAggregateItem(BaseModel):
             website_name=item.website_name,
             tenant_id=item.tenant_id,
             tenant_display_name=item.tenant_display_name,
+            update_interval=item.update_interval,
             total_runs=item.total_runs,
             terminal_runs=item.terminal_runs,
             failed_runs=item.failed_runs,
@@ -343,6 +362,10 @@ class CrawlerWebsiteProcessingAggregateItem(BaseModel):
             files_too_large_skipped=item.files_too_large_skipped,
             pages_failed=item.pages_failed,
             files_failed=item.files_failed,
+            schedule_frequency_weight=item.schedule_frequency_weight,
+            indexed_content_count=item.indexed_content_count,
+            retention_rate=item.retention_rate,
+            cost_pressure_score=item.cost_pressure_score,
         )
 
 

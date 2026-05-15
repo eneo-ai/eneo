@@ -26,6 +26,7 @@ async def _create_website(
     user_id: UUID,
     embedding_model_id: UUID,
     name: str | None,
+    update_interval: UpdateInterval = UpdateInterval.NEVER,
 ) -> Websites:
     website = Websites(
         id=uuid4(),
@@ -33,7 +34,7 @@ async def _create_website(
         url=f"https://tenant-processing-{uuid4()}.example.com",
         download_files=True,
         crawl_type=CrawlType.CRAWL,
-        update_interval=UpdateInterval.NEVER,
+        update_interval=update_interval,
         size=0,
         tenant_id=tenant_id,
         user_id=user_id,
@@ -134,6 +135,7 @@ async def test_admin_crawler_website_processing_aggregate_is_tenant_scoped(
             user_id=admin_user.id,
             embedding_model_id=embedding_model_id,
             name="Expensive crawler website",
+            update_interval=UpdateInterval.DAILY,
         )
         other_website = await _create_website(
             session,
@@ -229,6 +231,11 @@ async def test_admin_crawler_website_processing_aggregate_is_tenant_scoped(
     assert primary["files_too_large_skipped"] == 3
     assert primary["pages_failed"] == 1
     assert primary["files_failed"] == 2
+    assert primary["update_interval"] == UpdateInterval.DAILY.value
+    assert primary["schedule_frequency_weight"] == 7.0
+    assert primary["indexed_content_count"] == 22
+    assert primary["retention_rate"] == pytest.approx(9 / 22)
+    assert primary["cost_pressure_score"] == pytest.approx(91.0)
 
     secondary = data["items"][1]
     assert secondary["website_name"] is None

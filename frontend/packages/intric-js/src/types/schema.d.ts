@@ -10137,6 +10137,7 @@ export interface components {
       website_id: string;
       /** Website Name */
       website_name: string | null;
+      update_interval: components["schemas"]["UpdateInterval"] | null;
       /** Total Runs */
       total_runs: number;
       /** Terminal Runs */
@@ -10159,6 +10160,26 @@ export interface components {
       pages_failed: number;
       /** Files Failed */
       files_failed: number;
+      /**
+       * Schedule Frequency Weight
+       * @description Schedule multiplier used for crawler cost-pressure ranking.
+       */
+      schedule_frequency_weight: number;
+      /**
+       * Indexed Content Count
+       * @description Fetched, downloaded, and retained page/file count in the window.
+       */
+      indexed_content_count: number;
+      /**
+       * Retention Rate
+       * @description Share of indexed content retained without fetching or rewriting.
+       */
+      retention_rate: number;
+      /**
+       * Cost Pressure Score
+       * @description Schedule-weighted changed/new page and file count for ranking.
+       */
+      cost_pressure_score: number;
     };
     /** CrawlerTenantWebsiteProcessingAggregateResponse */
     CrawlerTenantWebsiteProcessingAggregateResponse: {
@@ -10238,6 +10259,7 @@ export interface components {
       tenant_id: string;
       /** Tenant Display Name */
       tenant_display_name: string | null;
+      update_interval: components["schemas"]["UpdateInterval"] | null;
       /** Total Runs */
       total_runs: number;
       /** Terminal Runs */
@@ -10260,6 +10282,26 @@ export interface components {
       pages_failed: number;
       /** Files Failed */
       files_failed: number;
+      /**
+       * Schedule Frequency Weight
+       * @description Schedule multiplier used for crawler cost-pressure ranking.
+       */
+      schedule_frequency_weight: number;
+      /**
+       * Indexed Content Count
+       * @description Fetched, downloaded, and retained page/file count in the window.
+       */
+      indexed_content_count: number;
+      /**
+       * Retention Rate
+       * @description Share of indexed content retained without fetching or rewriting.
+       */
+      retention_rate: number;
+      /**
+       * Cost Pressure Score
+       * @description Schedule-weighted changed/new page and file count for ranking.
+       */
+      cost_pressure_score: number;
     };
     /** CrawlerWebsiteProcessingAggregateResponse */
     CrawlerWebsiteProcessingAggregateResponse: {

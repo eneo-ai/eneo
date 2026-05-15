@@ -44,8 +44,13 @@ from intric.websites.domain.crawler_recent_failures import (
     CrawlerRecentFailures,
 )
 from intric.websites.domain.crawler_website_processing_aggregate import (
+    SCHEDULE_FREQUENCY_WEIGHTS,
     CrawlerWebsiteProcessingAggregate,
     CrawlerWebsiteProcessingAggregateItem,
+    cost_pressure_score,
+    parse_update_interval_for_cost_score,
+    retention_rate,
+    schedule_frequency_weight,
 )
 
 if TYPE_CHECKING:
@@ -567,6 +572,24 @@ class CrawlRunRepository:
         files_failed = sa.func.coalesce(
             sa.func.sum(CrawlRunsTable.files_failed), 0
         ).label("files_failed")
+        retained_content_count = (
+            pages_hash_retained + files_hash_retained + pages_source_retained
+        )
+        indexed_content_count = (
+            pages_crawled + files_downloaded + retained_content_count
+        ).label("indexed_content_count")
+        schedule_weight = sa.case(
+            *(
+                (Websites.update_interval == update_interval.value, weight)
+                for update_interval, weight in SCHEDULE_FREQUENCY_WEIGHTS.items()
+            ),
+            else_=0.0,
+        )
+        # Algebraically matches the public score formula after aggregation:
+        # weight * indexed_count * (1 - retention_rate) == weight * fetched_count.
+        cost_pressure_for_ordering = schedule_weight * (
+            pages_crawled + files_downloaded
+        )
         throughput = pages_crawled + files_downloaded
 
         rows_stmt = (
@@ -575,6 +598,7 @@ class CrawlRunRepository:
                 Websites.name.label("website_name"),
                 CrawlRunsTable.tenant_id.label("tenant_id"),
                 Tenants.display_name.label("tenant_display_name"),
+                Websites.update_interval.label("update_interval"),
                 sa.func.count(CrawlRunsTable.id).label("total_runs"),
                 sa.func.count(CrawlRunsTable.id)
                 .filter(Jobs.finished_at.is_not(None))
@@ -590,6 +614,7 @@ class CrawlRunRepository:
                 files_too_large_skipped,
                 pages_failed,
                 files_failed,
+                indexed_content_count,
             )
             .select_from(rows_from)
             .where(*base_conditions)
@@ -598,8 +623,13 @@ class CrawlRunRepository:
                 Websites.name,
                 CrawlRunsTable.tenant_id,
                 Tenants.display_name,
+                Websites.update_interval,
             )
-            .order_by(throughput.desc(), CrawlRunsTable.website_id.asc())
+            .order_by(
+                cost_pressure_for_ordering.desc(),
+                throughput.desc(),
+                CrawlRunsTable.website_id.asc(),
+            )
             .limit(limit)
             .offset(offset)
         )
@@ -607,12 +637,23 @@ class CrawlRunRepository:
 
         items: list[CrawlerWebsiteProcessingAggregateItem] = []
         for row in result.mappings():
+            update_interval = parse_update_interval_for_cost_score(
+                row["update_interval"]
+            )
+            schedule_weight_value = schedule_frequency_weight(update_interval)
+            indexed_content_count_value = int(row["indexed_content_count"])
+            retained_content_count_value = (
+                int(row["pages_hash_retained"])
+                + int(row["files_hash_retained"])
+                + int(row["pages_source_retained"])
+            )
             items.append(
                 CrawlerWebsiteProcessingAggregateItem(
                     website_id=row["website_id"],
                     website_name=row["website_name"],
                     tenant_id=row["tenant_id"],
                     tenant_display_name=row["tenant_display_name"],
+                    update_interval=update_interval,
                     total_runs=int(row["total_runs"]),
                     terminal_runs=int(row["terminal_runs"]),
                     failed_runs=int(row["failed_runs"]),
@@ -624,6 +665,17 @@ class CrawlRunRepository:
                     files_too_large_skipped=int(row["files_too_large_skipped"]),
                     pages_failed=int(row["pages_failed"]),
                     files_failed=int(row["files_failed"]),
+                    schedule_frequency_weight=schedule_weight_value,
+                    indexed_content_count=indexed_content_count_value,
+                    retention_rate=retention_rate(
+                        retained_count=retained_content_count_value,
+                        indexed_content_count=indexed_content_count_value,
+                    ),
+                    cost_pressure_score=cost_pressure_score(
+                        schedule_weight=schedule_weight_value,
+                        indexed_content_count=indexed_content_count_value,
+                        retained_count=retained_content_count_value,
+                    ),
                 )
             )
 

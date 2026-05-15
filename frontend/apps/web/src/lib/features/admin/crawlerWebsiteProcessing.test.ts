@@ -6,6 +6,7 @@ import type {
   CrawlerTenantWebsiteProcessingAggregateResponse
 } from "./crawlerWebsiteProcessing";
 import {
+  getCrawlerWebsiteProcessingCostLabel,
   getCrawlerWebsiteProcessingFailureLabel,
   getCrawlerWebsiteProcessingFetchedLabel,
   getCrawlerWebsiteProcessingRetainedLabel,
@@ -38,7 +39,12 @@ const item: CrawlerTenantWebsiteProcessingAggregateItem = {
   pages_source_retained: 20,
   files_too_large_skipped: 7,
   pages_failed: 1,
-  files_failed: 2
+  files_failed: 2,
+  update_interval: "daily",
+  schedule_frequency_weight: 7,
+  indexed_content_count: 325,
+  retention_rate: 313 / 325,
+  cost_pressure_score: 84
 };
 
 test("website processing labels keep crawler cost and retention readable", () => {
@@ -50,6 +56,7 @@ test("website processing labels keep crawler cost and retention readable", () =>
   ).toBe("Showing 1 of 12 websites from the last 7 days");
   expect(getCrawlerWebsiteProcessingWebsiteLabel(item)).toBe("Municipality site");
   expect(getCrawlerWebsiteProcessingFetchedLabel(item)).toBe("10 pages · 2 files");
+  expect(getCrawlerWebsiteProcessingCostLabel(item)).toBe("Daily · score 84 · 96% retained");
   expect(getCrawlerWebsiteProcessingRetainedLabel(item)).toBe("313 retained · 7 too large");
   expect(getCrawlerWebsiteProcessingFailureLabel(item)).toBe("Failed runs: 1 · failed items: 3");
 });
@@ -69,4 +76,11 @@ test("website processing labels handle unnamed and healthy websites", () => {
       files_failed: 0
     })
   ).toBeNull();
+  expect(
+    getCrawlerWebsiteProcessingCostLabel({
+      ...item,
+      update_interval: null,
+      cost_pressure_score: 0
+    })
+  ).toBe("Unknown schedule · score 0 · 96% retained");
 });
