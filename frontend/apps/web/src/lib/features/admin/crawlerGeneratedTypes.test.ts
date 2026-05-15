@@ -26,6 +26,11 @@ type _CrawlerWatchdogStatusResponseExists = AssertTrue<
 type _CrawlerWebsiteProcessingAggregateResponseExists = AssertTrue<
   components["schemas"]["CrawlerWebsiteProcessingAggregateResponse"] extends object ? true : false
 >;
+type _CrawlerTenantWebsiteProcessingAggregateResponseExists = AssertTrue<
+  components["schemas"]["CrawlerTenantWebsiteProcessingAggregateResponse"] extends object
+    ? true
+    : false
+>;
 type _CrawlerScheduledAggregateResponseExists = AssertTrue<
   components["schemas"]["CrawlerScheduledAggregateResponse"] extends object ? true : false
 >;
@@ -85,6 +90,14 @@ type _CrawlerWebsiteProcessingHashRetainedField = AssertHasKey<
   components["schemas"]["CrawlerWebsiteProcessingAggregateItem"],
   "pages_hash_retained"
 >;
+type _CrawlerTenantWebsiteProcessingItemsField = AssertHasKey<
+  components["schemas"]["CrawlerTenantWebsiteProcessingAggregateResponse"],
+  "items"
+>;
+type _CrawlerTenantWebsiteProcessingTooLargeField = AssertHasKey<
+  components["schemas"]["CrawlerTenantWebsiteProcessingAggregateItem"],
+  "files_too_large_skipped"
+>;
 type _CrawlerScheduledBucketsField = AssertHasKey<
   components["schemas"]["CrawlerScheduledAggregateResponse"],
   "buckets"
@@ -129,6 +142,11 @@ type _AdminCrawlerScheduledPathExists = AssertTrue<
     ? true
     : false
 >;
+type _AdminCrawlerWebsiteProcessingPathExists = AssertTrue<
+  paths["/api/v1/admin/crawler/website-processing"]["get"] extends operations["get_current_tenant_crawler_website_processing_aggregate_api_v1_admin_crawler_website_processing_get"]
+    ? true
+    : false
+>;
 type _AdminCrawlerAbortQueuedPathExists = AssertTrue<
   paths["/api/v1/admin/crawler/jobs/{job_id}/abort"]["post"] extends operations["abort_current_tenant_queued_crawl_api_v1_admin_crawler_jobs__job_id__abort_post"]
     ? true
@@ -154,6 +172,13 @@ type _AdminCrawlerScheduledQueryIsEmpty = AssertTrue<
   > extends never
     ? true
     : false
+>;
+type _AdminCrawlerWebsiteProcessingQueryHasNoTenantId = AssertTrue<
+  "tenant_id" extends keyof NonNullable<
+    operations["get_current_tenant_crawler_website_processing_aggregate_api_v1_admin_crawler_website_processing_get"]["parameters"]["query"]
+  >
+    ? false
+    : true
 >;
 type _AdminCrawlerAbortQueuedPathHasJobId = AssertHasKey<
   NonNullable<

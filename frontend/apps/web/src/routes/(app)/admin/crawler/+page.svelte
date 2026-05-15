@@ -41,6 +41,7 @@
     type CrawlerActiveInventoryItem,
     type CrawlerActiveInventoryResponse
   } from "$lib/features/admin/crawlerActiveInventory";
+  import { formatCrawlerCount } from "$lib/features/admin/crawlerNumberFormat";
   import type { CrawlRunResultLabel } from "$lib/features/knowledge/crawlOutcomePresentation";
   import {
     getCrawlerRecentFailureOutcomeLabel,
@@ -56,6 +57,14 @@
     getCrawlerScheduledUnparseableLabel,
     type CrawlerScheduledAggregateResponse
   } from "$lib/features/admin/crawlerScheduledAggregate";
+  import {
+    getCrawlerWebsiteProcessingFailureLabel,
+    getCrawlerWebsiteProcessingFetchedLabel,
+    getCrawlerWebsiteProcessingRetainedLabel,
+    getCrawlerWebsiteProcessingTotalLabel,
+    getCrawlerWebsiteProcessingWebsiteLabel,
+    type CrawlerTenantWebsiteProcessingAggregateResponse
+  } from "$lib/features/admin/crawlerWebsiteProcessing";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { CircleX, ShieldCheck, TriangleAlert } from "lucide-svelte";
@@ -76,6 +85,9 @@
       crawlerRecentFailuresLoadFailed: boolean;
       crawlerScheduledAggregate: CrawlerScheduledAggregateResponse | null;
       crawlerScheduledAggregateLoadFailed: boolean;
+      crawlerWebsiteProcessingWindowDays: number;
+      crawlerWebsiteProcessing: CrawlerTenantWebsiteProcessingAggregateResponse | null;
+      crawlerWebsiteProcessingLoadFailed: boolean;
     };
   } = $props();
 
@@ -551,6 +563,108 @@
                   </Alert.Description>
                 </Alert.Root>
               {/if}
+            </div>
+          {/if}
+        </Card.Content>
+      </Card.Root>
+
+      <Card.Root class="mb-14" aria-labelledby="crawler-website-processing-title">
+        <Card.Header>
+          <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+            <div class="flex min-w-0 flex-col gap-1">
+              <h2
+                id="crawler-website-processing-title"
+                class="text-base leading-snug font-semibold"
+              >
+                {m.crawler_website_processing_title()}
+              </h2>
+              <Card.Description>
+                {m.crawler_website_processing_description({
+                  days: data.crawlerWebsiteProcessingWindowDays
+                })}
+              </Card.Description>
+            </div>
+            {#if data.crawlerWebsiteProcessing}
+              <Badge variant="outline" class="shrink-0 tabular-nums">
+                {getCrawlerWebsiteProcessingTotalLabel(data.crawlerWebsiteProcessing)}
+              </Badge>
+            {/if}
+          </div>
+        </Card.Header>
+        <Card.Content class="pt-0">
+          {#if data.crawlerWebsiteProcessingLoadFailed}
+            <Alert.Root variant="destructive">
+              <TriangleAlert aria-hidden="true" />
+              <Alert.Description>{m.crawler_website_processing_load_error()}</Alert.Description>
+            </Alert.Root>
+          {:else if !data.crawlerWebsiteProcessing || data.crawlerWebsiteProcessing.items.length === 0}
+            <p class="text-muted-foreground text-sm">
+              {m.crawler_website_processing_empty({
+                days: data.crawlerWebsiteProcessingWindowDays
+              })}
+            </p>
+          {:else}
+            <div class="overflow-x-auto">
+              <Table.Root class="min-w-[58rem]">
+                <Table.Caption class="sr-only">
+                  {m.crawler_website_processing_table_caption()}
+                </Table.Caption>
+                <Table.Header>
+                  <Table.Row>
+                    <Table.Head>{m.crawler_website_processing_column_website()}</Table.Head>
+                    <Table.Head>{m.crawler_website_processing_column_runs()}</Table.Head>
+                    <Table.Head>{m.crawler_website_processing_column_fetched()}</Table.Head>
+                    <Table.Head>{m.crawler_website_processing_column_retained()}</Table.Head>
+                    <Table.Head>{m.crawler_website_processing_column_failures()}</Table.Head>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {#each data.crawlerWebsiteProcessing.items as processingItem (processingItem.website_id)}
+                    {@const failureLabel = getCrawlerWebsiteProcessingFailureLabel(processingItem)}
+                    <Table.Row>
+                      <Table.Cell class="max-w-64">
+                        <span
+                          class="block truncate font-medium"
+                          title={getCrawlerWebsiteProcessingWebsiteLabel(processingItem)}
+                        >
+                          {getCrawlerWebsiteProcessingWebsiteLabel(processingItem)}
+                        </span>
+                      </Table.Cell>
+                      <Table.Cell class="text-muted-foreground tabular-nums">
+                        {m.crawler_website_processing_runs({
+                          total: formatCrawlerCount(processingItem.total_runs),
+                          terminal: formatCrawlerCount(processingItem.terminal_runs)
+                        })}
+                      </Table.Cell>
+                      <Table.Cell class="tabular-nums">
+                        {getCrawlerWebsiteProcessingFetchedLabel(processingItem)}
+                      </Table.Cell>
+                      <Table.Cell>
+                        <Badge
+                          variant="outline"
+                          class="border-accent-default/35 text-accent-default"
+                        >
+                          {getCrawlerWebsiteProcessingRetainedLabel(processingItem)}
+                        </Badge>
+                      </Table.Cell>
+                      <Table.Cell>
+                        {#if failureLabel}
+                          <Badge
+                            variant="outline"
+                            class="border-caution/40 bg-caution/8 text-caution"
+                          >
+                            {failureLabel}
+                          </Badge>
+                        {:else}
+                          <span class="text-muted-foreground text-sm">
+                            {m.crawler_website_processing_no_failures()}
+                          </span>
+                        {/if}
+                      </Table.Cell>
+                    </Table.Row>
+                  {/each}
+                </Table.Body>
+              </Table.Root>
             </div>
           {/if}
         </Card.Content>

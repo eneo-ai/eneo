@@ -30,6 +30,7 @@ from intric.websites.presentation.crawler_admin_models import (
     CrawlerActiveInventoryResponse,
     CrawlerRecentFailuresResponse,
     CrawlerScheduledAggregateResponse,
+    CrawlerTenantWebsiteProcessingAggregateResponse,
 )
 
 router = APIRouter(
@@ -114,6 +115,34 @@ async def get_current_tenant_crawler_scheduled_aggregate(
             tenant_id=current_user.tenant_id,
         )
     return CrawlerScheduledAggregateResponse.from_domain(aggregate)
+
+
+@router.get(
+    "/website-processing",
+    response_model=CrawlerTenantWebsiteProcessingAggregateResponse,
+    summary="Get crawler processing aggregate by website for the current tenant",
+)
+async def get_current_tenant_crawler_website_processing_aggregate(
+    current_user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    days: Annotated[int, Query(ge=1, le=30)] = 7,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> CrawlerTenantWebsiteProcessingAggregateResponse:
+    until = datetime.now(timezone.utc)
+    since = until - timedelta(days=days)
+
+    async with session.begin():
+        repo = CrawlRunRepository(session=session)
+        aggregate = await repo.website_processing_aggregate_for_tenant(
+            since=since,
+            until=until,
+            days=days,
+            limit=limit,
+            offset=offset,
+            tenant_id=current_user.tenant_id,
+        )
+    return CrawlerTenantWebsiteProcessingAggregateResponse.from_domain(aggregate)
 
 
 @router.post(

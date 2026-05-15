@@ -1,0 +1,72 @@
+import { expect, test } from "vitest";
+import { overwriteGetLocale } from "$lib/paraglide/runtime";
+
+import type {
+  CrawlerTenantWebsiteProcessingAggregateItem,
+  CrawlerTenantWebsiteProcessingAggregateResponse
+} from "./crawlerWebsiteProcessing";
+import {
+  getCrawlerWebsiteProcessingFailureLabel,
+  getCrawlerWebsiteProcessingFetchedLabel,
+  getCrawlerWebsiteProcessingRetainedLabel,
+  getCrawlerWebsiteProcessingTotalLabel,
+  getCrawlerWebsiteProcessingWebsiteLabel
+} from "./crawlerWebsiteProcessing";
+
+overwriteGetLocale(() => "en");
+
+const aggregate: CrawlerTenantWebsiteProcessingAggregateResponse = {
+  items: [],
+  total: 12,
+  limit: 5,
+  offset: 0,
+  days: 7,
+  since: "2026-05-08T12:00:00Z",
+  until: "2026-05-15T12:00:00Z"
+};
+
+const item: CrawlerTenantWebsiteProcessingAggregateItem = {
+  website_id: "12345678-1234-4234-8234-123456789abc",
+  website_name: "Municipality site",
+  total_runs: 4,
+  terminal_runs: 4,
+  failed_runs: 1,
+  pages_crawled: 10,
+  files_downloaded: 2,
+  pages_hash_retained: 290,
+  files_hash_retained: 3,
+  pages_source_retained: 20,
+  files_too_large_skipped: 7,
+  pages_failed: 1,
+  files_failed: 2
+};
+
+test("website processing labels keep crawler cost and retention readable", () => {
+  expect(
+    getCrawlerWebsiteProcessingTotalLabel({
+      ...aggregate,
+      items: [item]
+    })
+  ).toBe("Showing 1 of 12 websites from the last 7 days");
+  expect(getCrawlerWebsiteProcessingWebsiteLabel(item)).toBe("Municipality site");
+  expect(getCrawlerWebsiteProcessingFetchedLabel(item)).toBe("10 pages · 2 files");
+  expect(getCrawlerWebsiteProcessingRetainedLabel(item)).toBe("313 retained · 7 too large");
+  expect(getCrawlerWebsiteProcessingFailureLabel(item)).toBe("Failed runs: 1 · failed items: 3");
+});
+
+test("website processing labels handle unnamed and healthy websites", () => {
+  expect(
+    getCrawlerWebsiteProcessingWebsiteLabel({
+      ...item,
+      website_name: null
+    })
+  ).toBe("Website 12345678");
+  expect(
+    getCrawlerWebsiteProcessingFailureLabel({
+      ...item,
+      failed_runs: 0,
+      pages_failed: 0,
+      files_failed: 0
+    })
+  ).toBeNull();
+});

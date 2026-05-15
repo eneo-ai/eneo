@@ -101,6 +101,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Tenant admin queued abort UI tranche: expose queued-only crawler cancellation from the admin crawler page with shadcn confirmation, canonical typed 409 handling, generated OpenAPI coverage, localized `CRAWL_ABORTED` presentation, and audit metadata that preserves the website label.
 - [x] Backend-owned active-inventory abortability tranche: expose `is_abortable` on active crawler inventory from the shared queued-abort predicate, so frontend action visibility no longer derives from lifecycle presentation state.
 - [x] Sysadmin orphan abortability tranche: keep orphan queued crawl jobs visible in sysadmin active inventory while marking them non-abortable, because queued abort requires a `CrawlRun`-backed target.
+- [x] Tenant admin website-processing UI tranche: expose tenant-scoped per-website crawler work with fetched, retained, too-large, and failure counters using a typed backend contract, generated frontend schema, shadcn table/card composition, and bounded default windowing.
 
 ## Non-Negotiable Principles
 

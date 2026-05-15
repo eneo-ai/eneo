@@ -7199,15 +7199,119 @@ tasks:
       follow_up_notes:
         - "If a sysadmin abort endpoint is later designed to accept orphan queued jobs, revisit `is_queued_crawl_abortable_target(...)` and the inventory contract deliberately."
         - "Sysadmin frontend rows with `is_abortable=false` should continue to render without an abort affordance."
+  - id: T146
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Expose tenant-admin crawler work by website so admins can see fetched, retained, too-large, and failed crawler work without sysadmin endpoints."
+    allowed_files:
+      - "backend/src/intric/admin/crawler_admin_router.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/src/intric/websites/presentation/crawler_admin_models.py"
+      - "backend/tests/integration/test_admin_crawler_website_processing_aggregate.py"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "frontend/apps/web/src/lib/features/admin/crawlerAdminPageLoad.test.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerNumberFormat.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerScheduledAggregate.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerWebsiteProcessing.test.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerWebsiteProcessing.ts"
+      - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte"
+      - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.ts"
+      - "frontend/packages/intric-js/src/endpoints/crawler-admin.js"
+      - "frontend/packages/intric-js/src/types/resources.d.ts"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Use tenant-scoped admin endpoints; do not expose `tenant_id` as an admin query parameter or response field."
+      - "Reuse the existing website-processing aggregate query owner instead of duplicating SQL."
+      - "Use shadcn-Svelte Card/Table/Badge/Alert composition; do not introduce IntricUI or custom dashboard primitives."
+      - "Keep the page bounded and cheap by default; do not add unbounded URL/file samples or raw crawl logs."
+      - "Keep failure/retention/cost wording clear enough for admins to distinguish fetched work from retained unchanged work."
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_admin_crawler_website_processing_aggregate.py -q"
+      - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_website_processing_aggregate.py"
+      - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_website_processing_aggregate.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/admin/crawler_admin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_website_processing_aggregate.py"
+      - "./scripts/check-intric-js-openapi-schema.sh"
+      - "cd frontend && bun run --filter @intric/web i18n:compile"
+      - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerWebsiteProcessing.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+      - "cd frontend && bun run --filter @intric/web check"
+      - "cd frontend && bun run --filter @intric/web lint"
+      - "cd frontend/packages/intric-js && bun run lint"
+    red_tests:
+      - "Backend integration test failed until `/admin/crawler/website-processing` existed, enforced tenant scope, stripped tenant fields, and returned the retained/too-large/failure counters."
+      - "Frontend page-load test failed until the new aggregate request had independent graceful-degradation handling."
+      - "Generated type contract test failed until the OpenAPI schema exposed the tenant response and kept `tenant_id` out of the admin query."
+    stop_if:
+      - "The UI requires unbounded historical rows, URL samples, or raw queue payloads."
+      - "The admin route needs to accept a tenant id."
+      - "Strict Pyright requires broad casts, `Any`, or type ignores."
+    receipt:
+      result: done
+      summary: "Added `/api/v1/admin/crawler/website-processing` for the current tenant, backed by the existing website-processing aggregate with a tenant-required repository wrapper and tenant-safe response model. The admin crawler page now loads that contract independently from settings, active jobs, scheduled load, and recent failures, then renders a shadcn card/table showing runs, fetched pages/files, retained unchanged/source-skipped work, too-large files, and failures. The frontend uses generated OpenAPI types, a shared crawler count formatter, localized copy, explicit empty/error states, and bounded defaults of 7 days and 5 rows."
+      changed_files:
+        - "backend/src/intric/admin/crawler_admin_router.py"
+        - "backend/src/intric/websites/domain/crawl_run_repo.py"
+        - "backend/src/intric/websites/presentation/crawler_admin_models.py"
+        - "backend/tests/integration/test_admin_crawler_website_processing_aggregate.py"
+        - "frontend/apps/web/messages/en.json"
+        - "frontend/apps/web/messages/sv.json"
+        - "frontend/apps/web/src/lib/features/admin/crawlerAdminPageLoad.test.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerNumberFormat.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerScheduledAggregate.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerWebsiteProcessing.test.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerWebsiteProcessing.ts"
+        - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte"
+        - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.ts"
+        - "frontend/packages/intric-js/src/endpoints/crawler-admin.js"
+        - "frontend/packages/intric-js/src/types/resources.d.ts"
+        - "frontend/packages/intric-js/src/types/schema.d.ts"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      validation:
+        - "cd backend && uv run pytest tests/integration/test_admin_crawler_website_processing_aggregate.py -q"
+        - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_website_processing_aggregate.py"
+        - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_website_processing_aggregate.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/admin/crawler_admin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_website_processing_aggregate.py"
+        - "./scripts/check-intric-js-openapi-schema.sh"
+        - "cd frontend && bun run --filter @intric/web i18n:compile"
+        - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerWebsiteProcessing.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+        - "cd frontend && bun run --filter @intric/web check"
+        - "cd frontend && bun run --filter @intric/web lint"
+        - "cd frontend/packages/intric-js && bun run lint"
+      ux_review:
+        - "shadcn MCP audit checklist applied: imports resolve, installed shadcn Card/Table/Badge/Alert primitives are reused, lint and Svelte checks pass, and no additional dependencies were introduced."
+        - "critique/adapt/audit/polish/clarify/ui-ux-pro-max review applied: the card separates fetched from retained work, calls out too-large files, keeps the dense admin table horizontally scrollable on narrow viewports, uses bounded copy instead of feature-explainer prose, and degrades independently if diagnostics loading fails."
+      claude:
+        verdict: green
+        min_score: 8
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t146-tenant-website-processing-ui-20260515T195246Z.md"
+        resolution: "Claude green-lit the tenant website-processing API/UI slice with MIN_SCORE 8. P3 suggestions for fetched naming, shared count formatting, and stricter zero-failure checks were applied before commit. P2 suggestions for reducing duplicated Pydantic field projection and avoiding the unused tenant join on tenant-only aggregate reads remain separate follow-ups."
+      follow_up_notes:
+        - "Add pagination or a drill-down only when product wants more than the top five websites; the current bounded summary is intentionally cheap and glanceable."
+        - "Consider consolidating sysadmin and tenant website-processing Pydantic projection if another aggregate response shape repeats the same field list."
+        - "Consider splitting the aggregate query builder to skip the `Tenants` join for tenant-only reads if query plans show it matters."
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T145
+    task: T146
     commands:
-      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_active_inventory.py tests/integration/test_admin_crawler_active_inventory.py tests/integration/test_admin_crawler_abort.py -q"
-      - "cd backend && uv run ruff check src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py tests/integration/test_sysadmin_crawler_active_inventory.py tests/integration/test_admin_crawler_abort.py"
-      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py tests/integration/test_sysadmin_crawler_active_inventory.py tests/integration/test_admin_crawler_abort.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py tests/integration/test_sysadmin_crawler_active_inventory.py tests/integration/test_admin_crawler_abort.py"
-    note: "T145 passed backend sysadmin active-inventory and abort integration coverage, focused Ruff/format, focused strict Pyright, and Claude review. Orphan queued jobs remain visible but are no longer advertised as abortable unless they have a `CrawlRun` target."
+      - "cd backend && uv run pytest tests/integration/test_admin_crawler_website_processing_aggregate.py -q"
+      - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_website_processing_aggregate.py"
+      - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_website_processing_aggregate.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/admin/crawler_admin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_website_processing_aggregate.py"
+      - "./scripts/check-intric-js-openapi-schema.sh"
+      - "cd frontend && bun run --filter @intric/web i18n:compile"
+      - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerWebsiteProcessing.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+      - "cd frontend && bun run --filter @intric/web check"
+      - "cd frontend && bun run --filter @intric/web lint"
+      - "cd frontend/packages/intric-js && bun run lint"
+    note: "T146 passed tenant website-processing backend integration coverage, focused Ruff/format, focused strict Pyright, OpenAPI freshness, targeted frontend unit tests, i18n compile, Svelte check, web lint, intric-js lint, shadcn/UX review, and Claude commit-gate review."

@@ -1,5 +1,6 @@
 import { CRAWLER_ACTIVE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerActiveInventory";
 import { CRAWLER_RECENT_FAILURES_DEFAULTS } from "$lib/features/admin/crawlerRecentFailures";
+import { CRAWLER_WEBSITE_PROCESSING_DEFAULTS } from "$lib/features/admin/crawlerWebsiteProcessing";
 
 export const load = async (event) => {
   const { intric } = await event.parent();
@@ -7,23 +8,33 @@ export const load = async (event) => {
   event.depends("admin:crawler-active-inventory");
   event.depends("admin:crawler-recent-failures");
   event.depends("admin:crawler-scheduled");
+  event.depends("admin:crawler-website-processing");
 
-  const [crawlerSettings, activeInventoryResult, recentFailuresResult, scheduledAggregateResult] =
-    await Promise.all([
-      intric.settings.getCrawler(),
-      intric.crawlerAdmin
-        .activeInventory(CRAWLER_ACTIVE_INVENTORY_DEFAULTS)
-        .then((crawlerActiveInventory) => ({ ok: true as const, crawlerActiveInventory }))
-        .catch(() => ({ ok: false as const })),
-      intric.crawlerAdmin
-        .recentFailures(CRAWLER_RECENT_FAILURES_DEFAULTS)
-        .then((crawlerRecentFailures) => ({ ok: true as const, crawlerRecentFailures }))
-        .catch(() => ({ ok: false as const })),
-      intric.crawlerAdmin
-        .scheduledAggregate()
-        .then((crawlerScheduledAggregate) => ({ ok: true as const, crawlerScheduledAggregate }))
-        .catch(() => ({ ok: false as const }))
-    ]);
+  const [
+    crawlerSettings,
+    activeInventoryResult,
+    recentFailuresResult,
+    scheduledAggregateResult,
+    websiteProcessingResult
+  ] = await Promise.all([
+    intric.settings.getCrawler(),
+    intric.crawlerAdmin
+      .activeInventory(CRAWLER_ACTIVE_INVENTORY_DEFAULTS)
+      .then((crawlerActiveInventory) => ({ ok: true as const, crawlerActiveInventory }))
+      .catch(() => ({ ok: false as const })),
+    intric.crawlerAdmin
+      .recentFailures(CRAWLER_RECENT_FAILURES_DEFAULTS)
+      .then((crawlerRecentFailures) => ({ ok: true as const, crawlerRecentFailures }))
+      .catch(() => ({ ok: false as const })),
+    intric.crawlerAdmin
+      .scheduledAggregate()
+      .then((crawlerScheduledAggregate) => ({ ok: true as const, crawlerScheduledAggregate }))
+      .catch(() => ({ ok: false as const })),
+    intric.crawlerAdmin
+      .websiteProcessingAggregate(CRAWLER_WEBSITE_PROCESSING_DEFAULTS)
+      .then((crawlerWebsiteProcessing) => ({ ok: true as const, crawlerWebsiteProcessing }))
+      .catch(() => ({ ok: false as const }))
+  ]);
 
   return {
     crawlerSettings,
@@ -39,6 +50,11 @@ export const load = async (event) => {
     crawlerScheduledAggregate: scheduledAggregateResult.ok
       ? scheduledAggregateResult.crawlerScheduledAggregate
       : null,
-    crawlerScheduledAggregateLoadFailed: !scheduledAggregateResult.ok
+    crawlerScheduledAggregateLoadFailed: !scheduledAggregateResult.ok,
+    crawlerWebsiteProcessingWindowDays: CRAWLER_WEBSITE_PROCESSING_DEFAULTS.days,
+    crawlerWebsiteProcessing: websiteProcessingResult.ok
+      ? websiteProcessingResult.crawlerWebsiteProcessing
+      : null,
+    crawlerWebsiteProcessingLoadFailed: !websiteProcessingResult.ok
   };
 };

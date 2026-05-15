@@ -2428,6 +2428,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/crawler/website-processing": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get crawler processing aggregate by website for the current tenant */
+    get: operations["get_current_tenant_crawler_website_processing_aggregate_api_v1_admin_crawler_website_processing_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/crawler/jobs/{job_id}/abort": {
     parameters: {
       query?: never;
@@ -10110,6 +10127,61 @@ export interface components {
        * @description Enable trusted sitemap lastmod values to retain unchanged URL pages without downloading them
        */
       crawl_sitemap_lastmod_skip_enabled?: boolean | null;
+    };
+    /** CrawlerTenantWebsiteProcessingAggregateItem */
+    CrawlerTenantWebsiteProcessingAggregateItem: {
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Website Name */
+      website_name: string | null;
+      /** Total Runs */
+      total_runs: number;
+      /** Terminal Runs */
+      terminal_runs: number;
+      /** Failed Runs */
+      failed_runs: number;
+      /** Pages Crawled */
+      pages_crawled: number;
+      /** Files Downloaded */
+      files_downloaded: number;
+      /** Pages Hash Retained */
+      pages_hash_retained: number;
+      /** Files Hash Retained */
+      files_hash_retained: number;
+      /** Pages Source Retained */
+      pages_source_retained: number;
+      /** Files Too Large Skipped */
+      files_too_large_skipped: number;
+      /** Pages Failed */
+      pages_failed: number;
+      /** Files Failed */
+      files_failed: number;
+    };
+    /** CrawlerTenantWebsiteProcessingAggregateResponse */
+    CrawlerTenantWebsiteProcessingAggregateResponse: {
+      /** Items */
+      items: components["schemas"]["CrawlerTenantWebsiteProcessingAggregateItem"][];
+      /** Total */
+      total: number;
+      /** Limit */
+      limit: number;
+      /** Offset */
+      offset: number;
+      /** Days */
+      days: number;
+      /**
+       * Since
+       * Format: date-time
+       */
+      since: string;
+      /**
+       * Until
+       * Format: date-time
+       */
+      until: string;
     };
     /** CrawlerWatchdogLifecycleObserved */
     CrawlerWatchdogLifecycleObserved: {
@@ -26074,6 +26146,39 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CrawlerScheduledAggregateResponse"];
+        };
+      };
+    };
+  };
+  get_current_tenant_crawler_website_processing_aggregate_api_v1_admin_crawler_website_processing_get: {
+    parameters: {
+      query?: {
+        days?: number;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerTenantWebsiteProcessingAggregateResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

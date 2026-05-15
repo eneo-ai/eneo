@@ -1,6 +1,7 @@
 import type { components } from "@intric/intric-js";
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
+import { formatCrawlerCount } from "./crawlerNumberFormat";
 
 export type CrawlerScheduledAggregateResponse =
   components["schemas"]["CrawlerScheduledAggregateResponse"];
@@ -47,9 +48,7 @@ export function getCrawlerScheduledUnparseableLabel(
 }
 
 export function formatCrawlerScheduledCount(count: number): string {
-  return new Intl.NumberFormat(getLocale(), {
-    maximumFractionDigits: 0
-  }).format(Math.max(Math.trunc(count), 0));
+  return formatCrawlerCount(count);
 }
 
 export function formatCrawlerScheduledIndexedSize(bytes: number): string {

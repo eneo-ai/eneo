@@ -123,6 +123,8 @@ export type CrawlerActiveInventoryResponse =
 export type CrawlerActiveInventoryItem = components["schemas"]["CrawlerActiveInventoryItem"];
 export type CrawlerScheduledAggregateResponse =
   components["schemas"]["CrawlerScheduledAggregateResponse"];
+export type CrawlerTenantWebsiteProcessingAggregateResponse =
+  components["schemas"]["CrawlerTenantWebsiteProcessingAggregateResponse"];
 export type CrawlerRecentFailuresResponse = components["schemas"]["CrawlerRecentFailuresResponse"];
 export type CrawlerRecentFailureItem = components["schemas"]["CrawlerRecentFailureItem"];
 export type CrawlerAbortConflictResponse = components["schemas"]["CrawlerAbortConflictResponse"];

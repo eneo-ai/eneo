@@ -638,6 +638,25 @@ class CrawlRunRepository:
             tenant_id=tenant_id,
         )
 
+    async def website_processing_aggregate_for_tenant(
+        self,
+        *,
+        since: datetime,
+        until: datetime,
+        days: int,
+        limit: int,
+        offset: int,
+        tenant_id: UUID,
+    ) -> CrawlerWebsiteProcessingAggregate:
+        return await self.website_processing_aggregate(
+            since=since,
+            until=until,
+            days=days,
+            limit=limit,
+            offset=offset,
+            tenant_id=tenant_id,
+        )
+
     async def aggregate_baseline(
         self,
         *,

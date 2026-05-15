@@ -25,6 +25,12 @@ from intric.websites.domain.crawler_scheduled_aggregate import (
 from intric.websites.domain.crawler_scheduled_aggregate import (
     CrawlerScheduledIntervalBucket as DomainCrawlerScheduledIntervalBucket,
 )
+from intric.websites.domain.crawler_website_processing_aggregate import (
+    CrawlerWebsiteProcessingAggregate as DomainCrawlerWebsiteProcessingAggregate,
+)
+from intric.websites.domain.crawler_website_processing_aggregate import (
+    CrawlerWebsiteProcessingAggregateItem as DomainCrawlerWebsiteProcessingAggregateItem,
+)
 from intric.websites.domain.website import UpdateInterval
 
 
@@ -217,4 +223,67 @@ class CrawlerScheduledAggregateResponse(BaseModel):
                 aggregate.unparseable_update_interval_total_size_bytes
             ),
             tenant_id=aggregate.tenant_id,
+        )
+
+
+class CrawlerTenantWebsiteProcessingAggregateItem(BaseModel):
+    website_id: UUID
+    website_name: str | None
+    total_runs: int = Field(ge=0)
+    terminal_runs: int = Field(ge=0)
+    failed_runs: int = Field(ge=0)
+    pages_crawled: int = Field(ge=0)
+    files_downloaded: int = Field(ge=0)
+    pages_hash_retained: int = Field(ge=0)
+    files_hash_retained: int = Field(ge=0)
+    pages_source_retained: int = Field(ge=0)
+    files_too_large_skipped: int = Field(ge=0)
+    pages_failed: int = Field(ge=0)
+    files_failed: int = Field(ge=0)
+
+    @classmethod
+    def from_domain(
+        cls, item: DomainCrawlerWebsiteProcessingAggregateItem
+    ) -> "CrawlerTenantWebsiteProcessingAggregateItem":
+        return cls(
+            website_id=item.website_id,
+            website_name=item.website_name,
+            total_runs=item.total_runs,
+            terminal_runs=item.terminal_runs,
+            failed_runs=item.failed_runs,
+            pages_crawled=item.pages_crawled,
+            files_downloaded=item.files_downloaded,
+            pages_hash_retained=item.pages_hash_retained,
+            files_hash_retained=item.files_hash_retained,
+            pages_source_retained=item.pages_source_retained,
+            files_too_large_skipped=item.files_too_large_skipped,
+            pages_failed=item.pages_failed,
+            files_failed=item.files_failed,
+        )
+
+
+class CrawlerTenantWebsiteProcessingAggregateResponse(BaseModel):
+    items: list[CrawlerTenantWebsiteProcessingAggregateItem]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=200)
+    offset: int = Field(ge=0)
+    days: int = Field(ge=1, le=30)
+    since: datetime
+    until: datetime
+
+    @classmethod
+    def from_domain(
+        cls, aggregate: DomainCrawlerWebsiteProcessingAggregate
+    ) -> "CrawlerTenantWebsiteProcessingAggregateResponse":
+        return cls(
+            items=[
+                CrawlerTenantWebsiteProcessingAggregateItem.from_domain(item)
+                for item in aggregate.items
+            ],
+            total=aggregate.total,
+            limit=aggregate.limit,
+            offset=aggregate.offset,
+            days=aggregate.days,
+            since=aggregate.since,
+            until=aggregate.until,
         )
