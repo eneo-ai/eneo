@@ -22,6 +22,14 @@ from intric.websites.domain.crawler_baseline import (
 from intric.websites.domain.crawler_baseline import (
     CrawlOutcomeBucket as DomainCrawlOutcomeBucket,
 )
+from intric.websites.domain.crawler_failure_inventory import (
+    CrawlerFailureInventory as DomainCrawlerFailureInventory,
+)
+from intric.websites.domain.crawler_failure_inventory import (
+    CrawlerFailureInventoryItem as DomainCrawlerFailureInventoryItem,
+)
+from intric.websites.domain.crawler_failure_inventory import CrawlerFailureState
+from intric.websites.domain.website import UpdateInterval
 
 
 def _empty_model_id_list() -> list[ModelId]:
@@ -223,6 +231,59 @@ class CrawlerActiveInventoryResponse(BaseModel):
         return cls(
             items=[
                 CrawlerActiveInventoryItem.from_domain(item) for item in inventory.items
+            ],
+            total=inventory.total,
+            limit=inventory.limit,
+            offset=inventory.offset,
+        )
+
+
+class CrawlerFailureInventoryItem(BaseModel):
+    website_id: UUID
+    website_url: str
+    website_name: str | None
+    tenant_id: UUID
+    tenant_display_name: str | None
+    state: CrawlerFailureState
+    update_interval: UpdateInterval
+    consecutive_failures: int = Field(ge=0)
+    next_retry_at: datetime | None
+    last_crawled_at: datetime | None
+    updated_at: datetime
+
+    @classmethod
+    def from_domain(
+        cls, item: DomainCrawlerFailureInventoryItem
+    ) -> "CrawlerFailureInventoryItem":
+        return cls(
+            website_id=item.website_id,
+            website_url=item.website_url,
+            website_name=item.website_name,
+            tenant_id=item.tenant_id,
+            tenant_display_name=item.tenant_display_name,
+            state=item.state,
+            update_interval=item.update_interval,
+            consecutive_failures=item.consecutive_failures,
+            next_retry_at=item.next_retry_at,
+            last_crawled_at=item.last_crawled_at,
+            updated_at=item.updated_at,
+        )
+
+
+class CrawlerFailureInventoryResponse(BaseModel):
+    items: list[CrawlerFailureInventoryItem]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=200)
+    offset: int = Field(ge=0)
+
+    @classmethod
+    def from_domain(
+        cls, inventory: DomainCrawlerFailureInventory
+    ) -> "CrawlerFailureInventoryResponse":
+        return cls(
+            items=[
+                CrawlerFailureInventoryItem.from_domain(item)
+                for item in inventory.items
             ],
             total=inventory.total,
             limit=inventory.limit,

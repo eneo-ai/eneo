@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T064
+active_task: T066
 
 tasks:
   - id: T001
@@ -2890,7 +2890,7 @@ tasks:
   - id: T064
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next highest-ROI crawler reliability/transparency tranche after active-inventory name resolution."
     inputs:
@@ -2908,6 +2908,126 @@ tasks:
       - "Keep the user-deleted Celery re-evaluation gate out of scope."
       - "Preserve unrelated .devcontainer dirt."
       - "Account for the broad backend test-suite failures without broadening this goal into non-crawler audit/encryption/federation repairs."
+    expected_output:
+      - "Decision: next worker tranche."
+      - "Allowed files."
+      - "TDD red-test story."
+      - "Verification commands."
+      - "Stop conditions."
+    receipt:
+      result: done
+      decision: "Activate T065 as a backend-only read-only sysadmin failure-inventory endpoint for auto-disabled and backed-off crawler websites."
+      summary: "Claude selected failure inventory as the smallest next transparency slice after active inventory. It exposes durable circuit-breaker state already written on Websites without touching worker write paths, frontend, generated types, Redis/ARQ, schema, or indexes."
+      claude:
+        verdict: green
+        artifact: ".codex/artifacts/claude-peer-loop-t064-choose-next-crawler-reliability-tranche-20260515T010922Z.md"
+        min_score: 8
+      spawned_tasks:
+        - T065
+  - id: T065
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Add a read-only sysadmin endpoint exposing crawler websites currently auto-disabled or backed off so operators can see circuit-breaker outcomes without DB access."
+    inputs:
+      - "T064 receipt"
+      - "backend/src/intric/worker/crawl/circuit_breaker.py"
+      - "backend/src/intric/websites/domain/website.py"
+      - "backend/src/intric/database/tables/websites_table.py"
+      - "backend/src/intric/sysadmin/sysadmin_router.py"
+      - ".codex/artifacts/claude-peer-loop-t064-choose-next-crawler-reliability-tranche-20260515T010922Z.md"
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawler_failure_inventory.py"
+      - "backend/src/intric/websites/domain/website_admin_repo.py"
+      - "backend/src/intric/sysadmin/sysadmin_models.py"
+      - "backend/src/intric/sysadmin/sysadmin_router.py"
+      - "backend/tests/integration/test_sysadmin_crawler_failure_inventory.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "TDD: write the integration test first; it must fail because the endpoint does not exist."
+      - "Backend-only. No frontend, OpenAPI regeneration, generated-type changes, Redis/ARQ reads, writes, schema migration, new index, or worker path changes."
+      - "Reuse `WEBSITE_AUTO_DISABLE_FAILURE_THRESHOLD` from `intric.websites.domain.website`; do not redefine or hardcode the threshold."
+      - "DTO state field is a closed enum or `Literal['AUTO_DISABLED', 'BACKED_OFF']`; not a free str."
+      - "Use LEFT joins to `Tenants.display_name`; nullable in the DTO."
+      - "Count query scopes to Websites only; no Tenants join."
+      - "Pagination: `limit` uses Query(ge=1, le=200) default 50; `offset` uses Query(ge=0) default 0."
+      - "No Any, casts, type ignores, broad helpers, pass-through services, or utils/manager/processor/common modules."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "`GET /api/v1/sysadmin/crawler/failure-inventory` returns a paginated response with state, consecutive_failures, next_retry_at, website name, tenant display name, website id, and tenant id."
+      - "Auto-disabled predicate is `update_interval = NEVER` and `consecutive_failures >= WEBSITE_AUTO_DISABLE_FAILURE_THRESHOLD`."
+      - "Backed-off predicate is `consecutive_failures > 0`, `next_retry_at IS NOT NULL`, and `update_interval != NEVER`."
+      - "User-set NEVER with zero failures is excluded."
+      - "Healthy websites are excluded."
+      - "`tenant_id` query param scopes results."
+      - "Nullable `Websites.name` and `Tenants.display_name` remain null in the response."
+      - "The count query remains tenant-join-free by construction or explicit test evidence."
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_failure_inventory.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawler_failure_inventory.py src/intric/websites/domain/website_admin_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_failure_inventory.py"
+      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_failure_inventory.py src/intric/websites/domain/website_admin_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_failure_inventory.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_failure_inventory.py src/intric/websites/domain/website_admin_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_failure_inventory.py"
+    stop_if:
+      - "Need frontend, generated OpenAPI type, schema migration, new index, Redis/ARQ, or worker write-path changes."
+      - "Need to touch `crawl_tasks.py`, `circuit_breaker.py`, `watchdog.py`, or feeder code."
+      - "Auto-disable predicate cannot be expressed without a new durable column."
+      - "Net diff exceeds roughly 250 lines."
+      - "Need files outside allowed_files."
+    receipt:
+      result: done
+      summary: "Added a read-only sysadmin crawler failure-inventory endpoint for websites currently auto-disabled by the circuit breaker or backed off with a pending retry timestamp."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawler_failure_inventory.py"
+        - "backend/src/intric/websites/domain/website_admin_repo.py"
+        - "backend/src/intric/sysadmin/sysadmin_models.py"
+        - "backend/src/intric/sysadmin/sysadmin_router.py"
+        - "backend/tests/integration/test_sysadmin_crawler_failure_inventory.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      tdd:
+        red: "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_failure_inventory.py -q failed with 404 before the route existed."
+        green: "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_failure_inventory.py -q passed after adding the typed domain DTO, website admin repository, sysadmin response model, and route."
+      verification:
+        - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_failure_inventory.py -q"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawler_failure_inventory.py src/intric/websites/domain/website_admin_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_failure_inventory.py"
+        - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_failure_inventory.py src/intric/websites/domain/website_admin_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_failure_inventory.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_failure_inventory.py src/intric/websites/domain/website_admin_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_failure_inventory.py"
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t065-crawler-failure-inventory-implementation-review-20260515T012044Z.md"
+          - ".codex/artifacts/claude-peer-loop-t065-crawler-failure-inventory-implementation-review-iteration-2-20260515T012512Z.md"
+        min_score: 8
+      notes:
+        - "State labeling and filtering share the same SQL predicate objects via CASE; `update_interval` remains the existing `UpdateInterval` enum end-to-end."
+        - "The endpoint is read-only and uses only durable Websites/Tenants state; it does not read Redis/ARQ or mutate circuit-breaker state."
+        - "Known broad backend suite failures remain outside this crawler tranche and were not widened into this task."
+      spawned_tasks:
+        - T066
+  - id: T066
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next highest-ROI crawler reliability/transparency tranche after active and failure inventory endpoints."
+    inputs:
+      - "T065 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl_feeder.py"
+      - "backend/src/intric/worker/feeder/watchdog.py"
+      - "backend/src/intric/sysadmin/sysadmin_router.py"
+      - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte"
+      - ".codex/artifacts/claude-peer-loop-t065-crawler-failure-inventory-implementation-review-iteration-2-20260515T012512Z.md"
+    constraints:
+      - "Do not implement in this judge task."
+      - "Prefer the smallest slice that improves crawler reliability, maintainability, or operator transparency without broad frontend/generated-type churn."
+      - "Keep the user-deleted Celery re-evaluation gate out of scope."
+      - "Preserve unrelated .devcontainer dirt."
+      - "Do not broaden into non-crawler audit/encryption/federation test failures."
     expected_output:
       - "Decision: next worker tranche."
       - "Allowed files."

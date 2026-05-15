@@ -63,6 +63,7 @@ from intric.server.protocol import responses
 from intric.sysadmin.sysadmin_models import (
     CrawlerActiveInventoryResponse,
     CrawlerBaselineResponse,
+    CrawlerFailureInventoryResponse,
 )
 from intric.sysadmin.sysadmin_service import SysAdminService
 from intric.tenants.tenant import (
@@ -72,6 +73,7 @@ from intric.tenants.tenant import (
 )
 from intric.users.user import UserAddSuperAdmin, UserCreated, UserInDB, UserUpdatePublic
 from intric.websites.domain.crawl_run_repo import CrawlRunRepository
+from intric.websites.domain.website_admin_repo import WebsiteAdminRepository
 from intric.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direct
 
 logger = get_logger(__name__)
@@ -507,6 +509,28 @@ async def get_crawler_active_inventory(
             tenant_id=tenant_id,
         )
     return CrawlerActiveInventoryResponse.from_domain(inventory)
+
+
+@router.get(
+    "/crawler/failure-inventory",
+    response_model=CrawlerFailureInventoryResponse,
+    summary="Get crawler websites currently in failure states",
+)
+async def get_crawler_failure_inventory(
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    tenant_id: Annotated[UUID | None, Query()] = None,
+) -> CrawlerFailureInventoryResponse:
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        repo = WebsiteAdminRepository(session=session)
+        inventory = await repo.crawler_failure_inventory(
+            limit=limit,
+            offset=offset,
+            tenant_id=tenant_id,
+        )
+    return CrawlerFailureInventoryResponse.from_domain(inventory)
 
 
 def _mask_actor_label() -> str:
