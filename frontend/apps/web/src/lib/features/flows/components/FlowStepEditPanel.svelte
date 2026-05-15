@@ -79,6 +79,7 @@
     syncDraftsFromStepValues,
     clearHiddenFieldErrors,
     parseAdvancedJsonField,
+    formatAdvancedJsonDraftField,
     getErrorFields,
     type AdvancedJsonDrafts,
     type AdvancedJsonErrors
@@ -261,6 +262,16 @@
 
   function handleAdvancedJsonFieldUpdate(field: AdvancedJsonField, rawValue: string) {
     const result = parseAdvancedJsonField(advancedJsonDrafts, advancedJsonErrors, field, rawValue);
+    advancedJsonDrafts = result.drafts;
+    advancedJsonErrors = result.errors;
+    emitAdvancedJsonValidationState();
+    if (result.parseError === null) {
+      updateStep(field, result.parsed);
+    }
+  }
+
+  function handleAdvancedJsonFieldFormat(field: AdvancedJsonField) {
+    const result = formatAdvancedJsonDraftField(advancedJsonDrafts, advancedJsonErrors, field);
     advancedJsonDrafts = result.drafts;
     advancedJsonErrors = result.errors;
     emitAdvancedJsonValidationState();
@@ -1150,7 +1161,8 @@
             {advancedJsonDrafts}
             {advancedJsonErrors}
             onJsonFieldUpdate={(detail) =>
-              handleAdvancedJsonFieldUpdate(detail.field as AdvancedJsonField, detail.value)}
+              handleAdvancedJsonFieldUpdate(detail.field, detail.value)}
+            onJsonFieldFormat={(detail) => handleAdvancedJsonFieldFormat(detail.field)}
           />
         {/if}
 

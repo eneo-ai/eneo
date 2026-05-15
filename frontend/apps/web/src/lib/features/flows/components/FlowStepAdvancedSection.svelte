@@ -6,20 +6,27 @@
   import { IconQuestionMark } from "@intric/icons/question-mark";
   import { slide } from "svelte/transition";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import type { AdvancedJsonDrafts, AdvancedJsonErrors } from "./advancedJsonDrafts";
+  import type {
+    AdvancedJsonDrafts,
+    AdvancedJsonErrors,
+    AdvancedJsonField
+  } from "./advancedJsonDrafts";
+  import FlowStepAdvancedJsonField from "./FlowStepAdvancedJsonField.svelte";
 
   let {
     step,
     isPublished,
     advancedJsonDrafts,
     advancedJsonErrors,
-    onJsonFieldUpdate
+    onJsonFieldUpdate,
+    onJsonFieldFormat
   }: {
     step: FlowStep;
     isPublished: boolean;
     advancedJsonDrafts: AdvancedJsonDrafts;
     advancedJsonErrors: AdvancedJsonErrors;
-    onJsonFieldUpdate?: (detail: { field: string; value: string }) => void;
+    onJsonFieldUpdate?: (detail: { field: AdvancedJsonField; value: string }) => void;
+    onJsonFieldFormat?: (detail: { field: AdvancedJsonField }) => void;
   } = $props();
 </script>
 
@@ -58,20 +65,16 @@
           </Alert.Description>
         </Alert.Root>
       {/if}
-      <textarea
-        rows="4"
-        class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 font-mono text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+      <FlowStepAdvancedJsonField
+        field="input_contract"
+        stepOrder={step.step_order}
         value={advancedJsonDrafts.input_contract}
-        disabled={isPublished}
-        oninput={(e) =>
-          onJsonFieldUpdate?.({ field: "input_contract", value: e.currentTarget.value })}
+        error={advancedJsonErrors.input_contract}
+        {isPublished}
         placeholder={'{"type": "object", "properties": {...}}'}
-      ></textarea>
-      {#if advancedJsonErrors.input_contract}
-        <p class="text-warning-stronger mt-1 text-xs" role="alert">
-          {advancedJsonErrors.input_contract}
-        </p>
-      {/if}
+        onUpdate={onJsonFieldUpdate}
+        onFormat={onJsonFieldFormat}
+      />
     </Settings.Row>
 
     <Settings.Row
@@ -107,20 +110,16 @@
           </Alert.Description>
         </Alert.Root>
       {/if}
-      <textarea
-        rows="4"
-        class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 font-mono text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+      <FlowStepAdvancedJsonField
+        field="output_contract"
+        stepOrder={step.step_order}
         value={advancedJsonDrafts.output_contract}
-        disabled={isPublished}
-        oninput={(e) =>
-          onJsonFieldUpdate?.({ field: "output_contract", value: e.currentTarget.value })}
+        error={advancedJsonErrors.output_contract}
+        {isPublished}
         placeholder={'{"type": "object", "properties": {...}}'}
-      ></textarea>
-      {#if advancedJsonErrors.output_contract}
-        <p class="text-warning-stronger mt-1 text-xs" role="alert">
-          {advancedJsonErrors.output_contract}
-        </p>
-      {/if}
+        onUpdate={onJsonFieldUpdate}
+        onFormat={onJsonFieldFormat}
+      />
     </Settings.Row>
 
     {#if step.input_source === "http_get" || step.input_source === "http_post"}
@@ -128,20 +127,16 @@
         title={m.flow_step_input_config()}
         description={m.flow_step_input_config_desc()}
       >
-        <textarea
-          rows="4"
-          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 font-mono text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+        <FlowStepAdvancedJsonField
+          field="input_config"
+          stepOrder={step.step_order}
           value={advancedJsonDrafts.input_config}
-          disabled={isPublished}
-          oninput={(e) =>
-            onJsonFieldUpdate?.({ field: "input_config", value: e.currentTarget.value })}
+          error={advancedJsonErrors.input_config}
+          {isPublished}
           placeholder={'{"url": "https://...", "headers": {...}}'}
-        ></textarea>
-        {#if advancedJsonErrors.input_config}
-          <p class="text-warning-stronger mt-1 text-xs" role="alert">
-            {advancedJsonErrors.input_config}
-          </p>
-        {/if}
+          onUpdate={onJsonFieldUpdate}
+          onFormat={onJsonFieldFormat}
+        />
       </Settings.Row>
     {/if}
 
@@ -150,20 +145,16 @@
         title={m.flow_step_output_config()}
         description={m.flow_step_output_config_desc()}
       >
-        <textarea
-          rows="4"
-          class="border-default bg-primary focus-within:border-accent-default focus-within:ring-accent-default/20 hover:border-stronger w-full rounded-xl border px-3.5 py-2.5 font-mono text-sm shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow focus-within:ring-2 focus-visible:outline-none disabled:opacity-50"
+        <FlowStepAdvancedJsonField
+          field="output_config"
+          stepOrder={step.step_order}
           value={advancedJsonDrafts.output_config}
-          disabled={isPublished}
-          oninput={(e) =>
-            onJsonFieldUpdate?.({ field: "output_config", value: e.currentTarget.value })}
+          error={advancedJsonErrors.output_config}
+          {isPublished}
           placeholder={'{"url": "https://...", "headers": {...}}'}
-        ></textarea>
-        {#if advancedJsonErrors.output_config}
-          <p class="text-warning-stronger mt-1 text-xs" role="alert">
-            {advancedJsonErrors.output_config}
-          </p>
-        {/if}
+          onUpdate={onJsonFieldUpdate}
+          onFormat={onJsonFieldFormat}
+        />
       </Settings.Row>
     {/if}
   </Settings.Group>

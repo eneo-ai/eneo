@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   collectTemplateStepReferenceOrders,
-  collectUnresolvedTemplateTokens,
-  collectInvalidStructuredOutputReferences,
+  analyzeTemplateTokens,
+  collectTemplateValidationIssues,
   getInputTemplateSourceConflictStepOrders,
   remapStepOrderTemplateTokens,
   replaceExactTemplateToken,
@@ -11,6 +11,12 @@ import {
   getChipClasses,
   type VariableClassificationContext
 } from "./flowVariableTokens";
+
+function collectInvalidTokens(text: string, context: VariableClassificationContext): string[] {
+  return analyzeTemplateTokens(text, context)
+    .filter((analysis) => analysis.kind === "invalid")
+    .map((analysis) => analysis.token);
+}
 
 describe("replaceExactTemplateToken", () => {
   it("rewrites only exact friendly tokens", () => {
@@ -85,7 +91,7 @@ describe("remapStepOrderTemplateTokens", () => {
   });
 });
 
-describe("collectUnresolvedTemplateTokens", () => {
+describe("analyzeTemplateTokens invalid tokens", () => {
   const context: VariableClassificationContext = {
     knownFieldNames: new Set(["datum"]),
     knownStepNames: new Map([[1, "Sammanfattning"]]),
@@ -97,7 +103,7 @@ describe("collectUnresolvedTemplateTokens", () => {
   it("accepts friendly and technical tokens, flags unknown aliases", () => {
     const input =
       "{{Namn på brukare}} {{flow_input.text}} {{step_1.output.text}} {{okänd_variabel}}";
-    const unresolved = collectUnresolvedTemplateTokens(input, {
+    const unresolved = collectInvalidTokens(input, {
       ...context,
       knownFieldNames: new Set(["Namn på brukare"])
     });
@@ -106,13 +112,13 @@ describe("collectUnresolvedTemplateTokens", () => {
 
   it("treats step_input.* as a resolved technical token on document-input steps", () => {
     const input = "{{step_input.text}} och {{step_input.file_ids}}";
-    const unresolved = collectUnresolvedTemplateTokens(input, context);
+    const unresolved = collectInvalidTokens(input, context);
     expect(unresolved).toEqual([]);
   });
 
   it("flags misspelled single-segment flow_input form field references", () => {
     const input = "{{flow_input.datm}}";
-    const unresolved = collectUnresolvedTemplateTokens(input, context);
+    const unresolved = collectInvalidTokens(input, context);
     expect(unresolved).toEqual(["flow_input.datm"]);
     expect(classifyVariable("flow_input.datm", context)).toBe("unknown");
   });
@@ -120,7 +126,7 @@ describe("collectUnresolvedTemplateTokens", () => {
   it("keeps primary flow_input keys and JSON-shaped paths resolved", () => {
     const input =
       "{{flow_input.text}} {{flow_input.file_ids}} {{flow_input.customer.id}} {{flow_input.datm.foo}}";
-    const unresolved = collectUnresolvedTemplateTokens(input, context);
+    const unresolved = collectInvalidTokens(input, context);
     expect(unresolved).toEqual([]);
     expect(classifyVariable("flow_input.text", context)).toBe("technical");
     expect(classifyVariable("flow_input.customer.id", context)).toBe("technical");
@@ -128,7 +134,7 @@ describe("collectUnresolvedTemplateTokens", () => {
   });
 
   it("flags bare or empty flow_input references as unresolved", () => {
-    const unresolved = collectUnresolvedTemplateTokens("{{flow_input}} {{flow_input.}}", context);
+    const unresolved = collectInvalidTokens("{{flow_input}} {{flow_input.}}", context);
 
     expect(unresolved).toEqual(["flow_input", "flow_input."]);
     expect(classifyVariable("flow_input", context)).toBe("unknown");
@@ -136,7 +142,7 @@ describe("collectUnresolvedTemplateTokens", () => {
   });
 
   it("does not apply form-field typo detection to step_input paths", () => {
-    const unresolved = collectUnresolvedTemplateTokens("{{step_input.datm}}", context);
+    const unresolved = collectInvalidTokens("{{step_input.datm}}", context);
 
     expect(unresolved).toEqual([]);
     expect(classifyVariable("step_input.datm", context)).toBe("technical");
@@ -144,7 +150,7 @@ describe("collectUnresolvedTemplateTokens", () => {
 
   it("does not flag unknown single-segment flow_input references when no form fields are declared", () => {
     const input = "{{flow_input.unknown}}";
-    const unresolved = collectUnresolvedTemplateTokens(input, {
+    const unresolved = collectInvalidTokens(input, {
       ...context,
       knownFieldNames: new Set()
     });
@@ -165,7 +171,7 @@ describe("collectUnresolvedTemplateTokens", () => {
     ];
 
     for (const token of tokens) {
-      const unresolved = collectUnresolvedTemplateTokens(`{{${token}}}`, context);
+      const unresolved = collectInvalidTokens(`{{${token}}}`, context);
       expect(unresolved.length > 0).toBe(classifyVariable(token, context) === "unknown");
     }
   });
@@ -223,6 +229,26 @@ describe("classifyVariable", () => {
     expect(classifyVariable("Analys", baseContext)).toBe("step");
   });
 
+  it("treats step_N tokens as step order references before matching step names", () => {
+    const context: VariableClassificationContext = {
+      ...baseContext,
+      knownStepNames: new Map([[3, "step_2"]]),
+      stepOutputTypes: new Map([[3, "text"]]),
+      currentStepOrder: 4
+    };
+
+    expect(classifyVariable("step_2", context)).toBe("unknown");
+    expect(analyzeTemplateTokens("{{step_2}}", context)).toEqual([
+      {
+        token: "step_2",
+        kind: "invalid",
+        category: "unknown",
+        reason: "unavailable_step",
+        stepOrder: 2
+      }
+    ]);
+  });
+
   it("classifies valid structured step output as 'structured'", () => {
     expect(classifyVariable("step_2.output.structured.title", baseContext)).toBe("structured");
   });
@@ -234,6 +260,16 @@ describe("classifyVariable", () => {
   it("classifies step output references as 'step'", () => {
     expect(classifyVariable("step_1.output.text", baseContext)).toBe("step");
     expect(classifyVariable("step_2.output", baseContext)).toBe("step");
+  });
+
+  it("classifies current, future, and missing step references as unknown", () => {
+    expect(classifyVariable("step_3.output.text", baseContext)).toBe("unknown");
+    expect(classifyVariable("step_4.output.text", baseContext)).toBe("unknown");
+    expect(classifyVariable("step_99.output.text", baseContext)).toBe("unknown");
+  });
+
+  it("classifies deleted step marker references as unknown", () => {
+    expect(classifyVariable("step_2_deleted.output.text", baseContext)).toBe("unknown");
   });
 
   it("classifies non-field flow_input references as 'technical'", () => {
@@ -297,41 +333,113 @@ describe("parsePromptSegments", () => {
   });
 });
 
-describe("collectInvalidStructuredOutputReferences", () => {
-  it("flags structured references to non-json steps", () => {
-    const issues = collectInvalidStructuredOutputReferences(
-      "Hej {{step_1.output.structured.name}}",
-      [
-        { step_order: 1, output_type: "text" },
-        { step_order: 2, output_type: "json" }
-      ],
-      3
-    );
+describe("collectTemplateValidationIssues", () => {
+  const context: VariableClassificationContext = {
+    knownFieldNames: new Set(["Namn"]),
+    knownStepNames: new Map([[1, "Sammanfattning"]]),
+    stepOutputTypes: new Map([
+      [1, "text"],
+      [2, "json"]
+    ]),
+    transcriptionEnabled: true,
+    currentStepOrder: 3
+  };
 
-    expect(issues).toEqual([
+  it("reports unknown variables with the exact token", () => {
+    expect(collectTemplateValidationIssues("Hej {{okänd}}", context)).toEqual([
       {
-        token: "step_1.output.structured.name",
-        stepOrder: 1,
-        reason: "non_json_output"
+        token: "okänd",
+        reason: "unknown_variable"
       }
     ]);
   });
 
-  it("flags structured references to the current or future step", () => {
-    const issues = collectInvalidStructuredOutputReferences(
-      "Hej {{step_2.output.structured.name}}",
-      [
-        { step_order: 1, output_type: "json" },
-        { step_order: 2, output_type: "json" }
-      ],
-      2
-    );
-
-    expect(issues).toEqual([
+  it("reports unavailable generic step references instead of treating them as valid", () => {
+    expect(
+      collectTemplateValidationIssues(
+        "{{step_3.output.text}} {{step_4.output.text}} {{step_99.output.text}}",
+        context
+      )
+    ).toEqual([
       {
-        token: "step_2.output.structured.name",
-        stepOrder: 2,
-        reason: "unavailable_step"
+        token: "step_3.output.text",
+        reason: "unavailable_step",
+        stepOrder: 3
+      },
+      {
+        token: "step_4.output.text",
+        reason: "unavailable_step",
+        stepOrder: 4
+      },
+      {
+        token: "step_99.output.text",
+        reason: "unavailable_step",
+        stepOrder: 99
+      }
+    ]);
+  });
+
+  it("reports structured references to text-output steps with a specific reason", () => {
+    expect(collectTemplateValidationIssues("{{step_1.output.structured.name}}", context)).toEqual([
+      {
+        token: "step_1.output.structured.name",
+        reason: "non_json_output",
+        stepOrder: 1
+      }
+    ]);
+  });
+
+  it("reports deleted step marker references with a specific reason", () => {
+    expect(collectTemplateValidationIssues("{{step_2_deleted.output.text}}", context)).toEqual([
+      {
+        token: "step_2_deleted.output.text",
+        reason: "deleted_step",
+        stepOrder: 2
+      }
+    ]);
+  });
+});
+
+describe("analyzeTemplateTokens", () => {
+  const context: VariableClassificationContext = {
+    knownFieldNames: new Set(["Rubrik"]),
+    knownStepNames: new Map([[1, "Skapa utkast"]]),
+    stepOutputTypes: new Map([
+      [1, "text"],
+      [2, "json"]
+    ]),
+    transcriptionEnabled: true,
+    currentStepOrder: 3
+  };
+
+  it("returns one typed analysis per token for valid and invalid tokens", () => {
+    expect(
+      analyzeTemplateTokens(
+        "{{Rubrik}} {{Skapa utkast}} {{step_2.output.structured.title}} {{step_9.output.text}}",
+        context
+      )
+    ).toEqual([
+      {
+        token: "Rubrik",
+        kind: "valid",
+        category: "field"
+      },
+      {
+        token: "Skapa utkast",
+        kind: "valid",
+        category: "step"
+      },
+      {
+        token: "step_2.output.structured.title",
+        kind: "valid",
+        category: "structured"
+      },
+      {
+        token: "step_9.output.text",
+        kind: "invalid",
+        category: "unknown",
+        reason: "unavailable_step",
+        stepOrder: 9
       }
     ]);
   });

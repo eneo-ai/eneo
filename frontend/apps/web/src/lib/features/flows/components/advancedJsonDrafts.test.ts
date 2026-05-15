@@ -9,6 +9,7 @@ import {
   syncDraftsFromStepValues,
   clearHiddenFieldErrors,
   parseAdvancedJsonField,
+  formatAdvancedJsonDraftField,
   getErrorFields,
   ADVANCED_JSON_FIELDS
 } from "./advancedJsonDrafts";
@@ -254,6 +255,43 @@ describe("parseAdvancedJsonField", () => {
     const result = parseAdvancedJsonField(emptyDrafts, {}, "input_contract", "  ");
     expect(result.parsed).toBeNull();
     expect(result.parseError).toBeNull();
+  });
+});
+
+describe("formatAdvancedJsonDraftField", () => {
+  const emptyDrafts = {
+    input_contract: "",
+    output_contract: "",
+    input_config: "",
+    output_config: ""
+  };
+
+  test("formats a valid draft and returns the parsed value", () => {
+    const result = formatAdvancedJsonDraftField(
+      { ...emptyDrafts, output_contract: '{"type":"object","required":["name"]}' },
+      {},
+      "output_contract"
+    );
+
+    expect(result.formatted).toBe(true);
+    expect(result.parseError).toBeNull();
+    expect(result.parsed).toEqual({ type: "object", required: ["name"] });
+    expect(result.drafts.output_contract).toBe(
+      '{\n  "type": "object",\n  "required": [\n    "name"\n  ]\n}'
+    );
+  });
+
+  test("keeps the draft and returns an error for invalid JSON", () => {
+    const result = formatAdvancedJsonDraftField(
+      { ...emptyDrafts, input_contract: "{invalid" },
+      {},
+      "input_contract"
+    );
+
+    expect(result.formatted).toBe(false);
+    expect(result.parseError).toBeTruthy();
+    expect(result.drafts.input_contract).toBe("{invalid");
+    expect(result.errors.input_contract).toBeTruthy();
   });
 });
 

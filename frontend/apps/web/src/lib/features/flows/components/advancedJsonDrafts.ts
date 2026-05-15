@@ -65,7 +65,7 @@ export function getVisibleAdvancedJsonFields(step: FlowStep | null): Set<Advance
 // ---------------------------------------------------------------------------
 // Reducer-style state functions
 //
-// These return new state objects so Svelte 3 reactivity works via assignment.
+// These return new state objects so callers can update draft state by assignment.
 // ---------------------------------------------------------------------------
 
 export function syncDraftsFromStep(step: FlowStep | null): {
@@ -151,6 +151,36 @@ export function parseAdvancedJsonField(
     const errors = { ...currentErrors, [field]: parseError };
     return { drafts, errors, parsed: null, parseError };
   }
+}
+
+export function formatAdvancedJsonDraftField(
+  currentDrafts: AdvancedJsonDrafts,
+  currentErrors: AdvancedJsonErrors,
+  field: AdvancedJsonField
+): {
+  drafts: AdvancedJsonDrafts;
+  errors: AdvancedJsonErrors;
+  parsed: unknown | null;
+  parseError: string | null;
+  formatted: boolean;
+} {
+  const result = parseAdvancedJsonField(
+    currentDrafts,
+    currentErrors,
+    field,
+    currentDrafts[field]
+  );
+  if (result.parseError !== null || result.parsed === null) {
+    return { ...result, formatted: false };
+  }
+
+  return {
+    drafts: { ...result.drafts, [field]: formatAdvancedJson(result.parsed) },
+    errors: result.errors,
+    parsed: result.parsed,
+    parseError: null,
+    formatted: true
+  };
 }
 
 export function getErrorFields(errors: AdvancedJsonErrors): string[] {

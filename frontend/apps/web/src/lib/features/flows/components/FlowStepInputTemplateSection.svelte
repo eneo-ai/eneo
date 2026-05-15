@@ -9,6 +9,8 @@
   import { slide } from "svelte/transition";
   import FlowPromptEditor from "./FlowPromptEditor.svelte";
   import { INPUT_SOURCE_LABELS } from "./flowStepEditHelpers";
+  import type { FlowFormSchemaMetadata } from "$lib/features/flows/flowFormSchema";
+  import type { FlowStepUxCopy } from "$lib/features/flows/flowStepUxCopy";
 
   let {
     step,
@@ -42,10 +44,10 @@
     templateSourceConflict: number[] | null;
     templateStepRefs: number[];
     steps: FlowStep[];
-    formSchema: any;
+    formSchema: FlowFormSchemaMetadata | undefined;
     transcriptionEnabled: boolean;
     hasAudioInputSteps: boolean;
-    stepUxCopy: any;
+    stepUxCopy: FlowStepUxCopy;
     inputTemplateSectionTitle: string;
     inputTemplateSectionDescription: string;
     onRevealInputTemplate?: () => void;

@@ -1,7 +1,11 @@
 import { isFlowFormFieldBareAliasSafe, PRIMARY_FLOW_INPUT_KEYS } from "./flowFormSchema";
 
-const TEMPLATE_TOKEN_PATTERN = /\{\{\s*([^{}]+)\s*\}\}/g;
+const TEMPLATE_TOKEN_PATTERN_SOURCE = String.raw`\{\{\s*([^{}]+)\s*\}\}`;
+const TEMPLATE_TOKEN_PATTERN = new RegExp(TEMPLATE_TOKEN_PATTERN_SOURCE, "g");
 const STEP_ORDER_TOKEN_PATTERN = /^step_(\d+)(\..+)?$/;
+const STEP_REFERENCE_TOKEN_PATTERN = /^step_(\d+)(\.|$)/;
+const STRUCTURED_OUTPUT_TOKEN_PATTERN = /^step_(\d+)\.output\.structured(?:\.|$)/;
+const DELETED_STEP_TOKEN_PATTERN = /^step_(\d+)_deleted(?:\.|$)/;
 const SYSTEM_VARIABLE_NAMES = new Set([
   "datum",
   "transkribering",
@@ -107,17 +111,6 @@ export function remapStepOrderTemplateTokens(
   };
 }
 
-export function collectUnresolvedTemplateTokens(
-  text: string,
-  context: VariableClassificationContext
-): string[] {
-  const unresolved = new Set<string>();
-  for (const token of extractTemplateTokens(text)) {
-    if (classifyVariable(token, context) === "unknown") unresolved.add(token);
-  }
-  return [...unresolved];
-}
-
 // --- Unified Variable Color System ---
 
 export type VariableCategory = "field" | "system" | "step" | "structured" | "technical" | "unknown";
@@ -177,52 +170,100 @@ export function classifyVariable(
   token: string,
   context: VariableClassificationContext
 ): VariableCategory {
-  // 1. Namespaced form field reference
+  const analysis = analyzeTemplateToken(token, context);
+  return analysis.kind === "valid" ? analysis.category : "unknown";
+}
+
+function analyzeTemplateToken(
+  token: string,
+  context: VariableClassificationContext
+): TemplateTokenAnalysis {
+  const deletedStepMatch = DELETED_STEP_TOKEN_PATTERN.exec(token);
+  if (deletedStepMatch) {
+    return {
+      token,
+      kind: "invalid",
+      category: "unknown",
+      reason: "deleted_step",
+      stepOrder: Number(deletedStepMatch[1])
+    };
+  }
+
+  const structuredMatch = STRUCTURED_OUTPUT_TOKEN_PATTERN.exec(token);
+  if (structuredMatch) {
+    const stepOrder = Number(structuredMatch[1]);
+    const outputType = context.stepOutputTypes.get(stepOrder);
+    if (stepOrder >= context.currentStepOrder || outputType === undefined) {
+      return {
+        token,
+        kind: "invalid",
+        category: "unknown",
+        reason: "unavailable_step",
+        stepOrder
+      };
+    }
+    if (outputType !== "json") {
+      return {
+        token,
+        kind: "invalid",
+        category: "unknown",
+        reason: "non_json_output",
+        stepOrder
+      };
+    }
+    return { token, kind: "valid", category: "structured" };
+  }
+
+  const stepReferenceMatch = STEP_REFERENCE_TOKEN_PATTERN.exec(token);
+  if (stepReferenceMatch) {
+    const stepOrder = Number(stepReferenceMatch[1]);
+    if (stepOrder >= context.currentStepOrder || !context.stepOutputTypes.has(stepOrder)) {
+      return {
+        token,
+        kind: "invalid",
+        category: "unknown",
+        reason: "unavailable_step",
+        stepOrder
+      };
+    }
+    return { token, kind: "valid", category: "step" };
+  }
+
   const flowInputFieldName = token.startsWith("flow_input.")
     ? token.slice("flow_input.".length)
     : null;
   if (flowInputFieldName !== null) {
-    if (context.knownFieldNames.has(flowInputFieldName)) return "field";
-    if (PRIMARY_FLOW_INPUT_KEYS.has(flowInputFieldName.toLowerCase())) return "technical";
+    if (context.knownFieldNames.has(flowInputFieldName)) {
+      return { token, kind: "valid", category: "field" };
+    }
+    if (PRIMARY_FLOW_INPUT_KEYS.has(flowInputFieldName.toLowerCase())) {
+      return { token, kind: "valid", category: "technical" };
+    }
     // Multi-segment paths are JSON-shaped at runtime; the editor cannot lint them without a schema.
-    if (flowInputFieldName.includes(".")) return "technical";
-    if (context.knownFieldNames.size > 0) return "unknown";
-    return "technical";
+    if (flowInputFieldName.includes(".")) return { token, kind: "valid", category: "technical" };
+    if (context.knownFieldNames.size > 0) {
+      return { token, kind: "invalid", category: "unknown", reason: "unknown_variable" };
+    }
+    return { token, kind: "valid", category: "technical" };
   }
 
-  // 2. System variables
-  if (SYSTEM_VARIABLE_NAMES.has(token)) return "system";
+  if (SYSTEM_VARIABLE_NAMES.has(token)) return { token, kind: "valid", category: "system" };
 
-  // 3. Backward-compatible bare form field reference
-  if (context.knownFieldNames.has(token) && isFlowFormFieldBareAliasSafe(token)) return "field";
+  if (context.knownFieldNames.has(token) && isFlowFormFieldBareAliasSafe(token)) {
+    return { token, kind: "valid", category: "field" };
+  }
 
-  // 4. Step name alias (matches a previous step's user_description)
   for (const [order, name] of context.knownStepNames) {
-    if (order < context.currentStepOrder && name === token) return "step";
+    if (order < context.currentStepOrder && name === token) {
+      return { token, kind: "valid", category: "step" };
+    }
   }
 
-  // 5. Structured step output (step_N.output.structured.*)
-  const structuredMatch = /^step_(\d+)\.output\.structured(?:\.|$)/.exec(token);
-  if (structuredMatch) {
-    const stepOrder = Number(structuredMatch[1]);
-    const outputType = context.stepOutputTypes.get(stepOrder);
-    if (stepOrder >= context.currentStepOrder || outputType !== "json") return "unknown";
-    return "structured";
+  if (token.startsWith("flow.input.") || token.startsWith("step_input.")) {
+    return { token, kind: "valid", category: "technical" };
   }
 
-  // 6. Step output reference (step_N.output.* or step_N.*)
-  const stepMatch = /^step_(\d+)(\.|$)/.exec(token);
-  if (stepMatch) return "step";
-
-  // 7. Technical flow / step_input references
-  if (
-    token.startsWith("flow.input.") ||
-    token.startsWith("step_input.")
-  )
-    return "technical";
-
-  // 8. Unknown
-  return "unknown";
+  return { token, kind: "invalid", category: "unknown", reason: "unknown_variable" };
 }
 
 export type PromptSegment =
@@ -234,7 +275,7 @@ export function parsePromptSegments(
   context: VariableClassificationContext
 ): PromptSegment[] {
   const segments: PromptSegment[] = [];
-  const regex = /\{\{\s*([^{}]+?)\s*\}\}/g;
+  const regex = new RegExp(TEMPLATE_TOKEN_PATTERN_SOURCE, "g");
   let lastIndex = 0;
   let match: RegExpExecArray | null = null;
 
@@ -261,34 +302,41 @@ export function parsePromptSegments(
   return segments;
 }
 
-export type StructuredOutputReferenceIssue = {
+export type TemplateValidationIssue = {
   token: string;
-  stepOrder: number;
-  reason: "non_json_output" | "unavailable_step";
+  reason: "unknown_variable" | "unavailable_step" | "deleted_step" | "non_json_output";
+  stepOrder?: number;
 };
 
-export function collectInvalidStructuredOutputReferences(
+export type TemplateTokenAnalysis =
+  | {
+      token: string;
+      kind: "valid";
+      category: Exclude<VariableCategory, "unknown">;
+    }
+  | {
+      token: string;
+      kind: "invalid";
+      category: "unknown";
+      reason: TemplateValidationIssue["reason"];
+      stepOrder?: number;
+    };
+
+export function collectTemplateValidationIssues(
   text: string,
-  steps: Array<{ step_order: number; output_type: string }>,
-  currentStepOrder: number
-): StructuredOutputReferenceIssue[] {
-  const stepOutputTypes = new Map(steps.map((step) => [step.step_order, step.output_type]));
-  const issues: StructuredOutputReferenceIssue[] = [];
+  context: VariableClassificationContext
+): TemplateValidationIssue[] {
+  return analyzeTemplateTokens(text, context)
+    .filter(
+      (analysis): analysis is Extract<TemplateTokenAnalysis, { kind: "invalid" }> =>
+        analysis.kind === "invalid"
+    )
+    .map(({ token, reason, stepOrder }) => ({ token, reason, stepOrder }));
+}
 
-  for (const token of extractTemplateTokens(text)) {
-    const structuredMatch = /^step_(\d+)\.output\.structured(?:\.|$)/.exec(token);
-    if (!structuredMatch) continue;
-
-    const stepOrder = Number(structuredMatch[1]);
-    if (stepOrder >= currentStepOrder || !stepOutputTypes.has(stepOrder)) {
-      issues.push({ token, stepOrder, reason: "unavailable_step" });
-      continue;
-    }
-
-    if (stepOutputTypes.get(stepOrder) !== "json") {
-      issues.push({ token, stepOrder, reason: "non_json_output" });
-    }
-  }
-
-  return issues;
+export function analyzeTemplateTokens(
+  text: string,
+  context: VariableClassificationContext
+): TemplateTokenAnalysis[] {
+  return extractTemplateTokens(text).map((token) => analyzeTemplateToken(token, context));
 }

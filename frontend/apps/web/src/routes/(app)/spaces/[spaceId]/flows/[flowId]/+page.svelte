@@ -20,13 +20,14 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { CheckCircle2 } from "lucide-svelte";
+  import { CheckCircle2, CircleAlert } from "lucide-svelte";
   import { IntricError, type FlowRun, type TranscriptionModel } from "@intric/intric-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
@@ -428,12 +429,15 @@
         bind:isExpanded={validationBannerExpanded}
       />
       {#if hasStepJsonValidationErrors}
-        <div
+        <Alert.Root
           class="border-warning-default/40 bg-warning-dimmer text-warning-stronger border-b px-4 py-2 text-sm"
-          role="status"
+          role="alert"
         >
-          {m.flow_step_json_invalid({ fields: stepJsonValidationSummary })}
-        </div>
+          <CircleAlert class="shrink-0" />
+          <Alert.Description class="text-warning-stronger">
+            {m.flow_step_json_invalid({ fields: stepJsonValidationSummary })}
+          </Alert.Description>
+        </Alert.Root>
       {/if}
 
       <!-- Wizard Stepper -->

@@ -10,14 +10,15 @@
   import {
     getChipClasses,
     parsePromptSegments,
-    collectUnresolvedTemplateTokens,
-    collectInvalidStructuredOutputReferences,
+    collectTemplateValidationIssues,
     type VariableCategory,
-    type VariableClassificationContext
+    type VariableClassificationContext,
+    type TemplateValidationIssue
   } from "$lib/features/flows/flowVariableTokens";
   import VariablePicker from "./VariablePicker.svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
+  import { CircleAlert } from "lucide-svelte";
 
   let {
     value,
@@ -58,6 +59,8 @@
     onChange?: (value: string) => void;
     onCommit?: (value: string) => void;
   } = $props();
+
+  const MAX_VISIBLE_TEMPLATE_VALIDATION_ISSUES = 5;
 
   let currentEditorValue = $state(untrack(() => value));
   let lastCommittedValue = $state(untrack(() => value));
@@ -282,13 +285,26 @@
       : availableVariables.filter((v) => v.category === "field" || v.category === "step")
   );
 
-  // Unresolved count
-  const unresolvedCount = $derived(
-    collectUnresolvedTemplateTokens(currentEditorValue, classificationContext).length
+  const templateValidationIssues = $derived(
+    collectTemplateValidationIssues(currentEditorValue, classificationContext)
   );
-  const invalidStructuredReferences = $derived(
-    collectInvalidStructuredOutputReferences(currentEditorValue, steps, currentStepOrder)
+  const visibleTemplateValidationIssues = $derived(
+    templateValidationIssues.slice(0, MAX_VISIBLE_TEMPLATE_VALIDATION_ISSUES)
   );
+  const hiddenTemplateValidationIssueCount = $derived(
+    Math.max(0, templateValidationIssues.length - visibleTemplateValidationIssues.length)
+  );
+
+  const templateValidationIssueMessages: Record<TemplateValidationIssue["reason"], () => string> = {
+    deleted_step: m.flow_template_issue_deleted_step,
+    unavailable_step: m.flow_template_issue_unavailable_step,
+    non_json_output: m.flow_template_issue_non_json_output,
+    unknown_variable: m.flow_template_issue_unknown_variable
+  };
+
+  function getTemplateValidationIssueText(issue: TemplateValidationIssue): string {
+    return templateValidationIssueMessages[issue.reason]();
+  }
 
   // Filtered suggestions for autocomplete
   const filteredSuggestions = $derived(
@@ -530,7 +546,7 @@
     <!-- Mirror layer (behind, shows colored chips) -->
     <div
       aria-hidden="true"
-      class="pointer-events-none absolute inset-0 overflow-hidden px-4 py-3 font-mono text-sm leading-relaxed break-words whitespace-pre-wrap"
+      class="pointer-events-none absolute inset-0 overflow-hidden px-4 py-3 font-mono text-base leading-relaxed break-words whitespace-pre-wrap sm:text-sm"
       bind:this={mirrorEl}
     >
       {#each mirrorSegments as seg, index (`${seg.type}:${seg.value}:${index}`)}
@@ -540,7 +556,7 @@
             class="inline"
             style="width:0;overflow:hidden">&#8203;</span
           >{:else if seg.type === "text"}<span class="text-primary">{seg.value}</span>{:else}<span
-            class="{getChipClasses(seg.category ?? 'unknown')} inline !px-0 !py-0 !text-sm"
+            class="{getChipClasses(seg.category ?? 'unknown')} inline !px-0 !py-0 !text-base sm:!text-sm"
             >{seg.value}</span
           >{/if}
       {/each}
@@ -550,7 +566,7 @@
     <!-- Textarea layer (on top, transparent text, visible caret) -->
     <textarea
       bind:this={textareaEl}
-      class="selection:bg-accent-dimmer selection:text-primary relative z-10 w-full overflow-hidden bg-transparent px-4 py-3 font-mono text-sm leading-relaxed text-transparent caret-gray-900 focus:outline-none dark:caret-gray-100"
+      class="selection:bg-accent-dimmer selection:text-primary relative z-10 w-full overflow-hidden bg-transparent px-4 py-3 font-mono text-base leading-relaxed text-transparent caret-gray-900 focus:outline-none dark:caret-gray-100 sm:text-sm"
       style={`min-height: ${minHeight}px`}
       oninput={handleInput}
       onkeydown={handleKeydown}
@@ -612,35 +628,34 @@
     </div>
   {/if}
 
-  <!-- Unresolved variables warning -->
-  {#if unresolvedCount > 0}
+  {#if templateValidationIssues.length > 0}
     <Alert.Root
       role="status"
-      class="border-warning-default/40 bg-warning-dimmer text-warning-stronger rounded-none border-x-0 border-b-0 px-3 py-1.5 text-xs"
+      class="border-warning-default/40 bg-warning-dimmer text-warning-stronger rounded-none border-x-0 border-b-0 px-3 py-2 text-xs"
     >
-      <svg class="size-3.5 shrink-0" viewBox="0 0 16 16" fill="currentColor">
-        <path
-          d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"
-        />
-      </svg>
-      {unresolvedCount}
-      {m.flow_prompt_unresolved_variables()}
-    </Alert.Root>
-  {/if}
-
-  {#if invalidStructuredReferences.length > 0}
-    <Alert.Root
-      role="status"
-      class="border-warning-default/40 bg-warning-dimmer text-warning-stronger rounded-none border-x-0 border-b-0 px-3 py-1.5 text-xs"
-    >
-      <svg class="size-3.5 shrink-0" viewBox="0 0 16 16" fill="currentColor">
-        <path
-          d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"
-        />
-      </svg>
-      {m.flow_prompt_invalid_structured_reference({
-        tokens: invalidStructuredReferences.map((issue) => `{{${issue.token}}}`).join(", ")
-      })}
+      <CircleAlert class="shrink-0" />
+      <Alert.Title>{m.flow_template_issues_title()}</Alert.Title>
+      <Alert.Description class="text-warning-stronger flex flex-col gap-1.5">
+        <p>{m.flow_template_issues_description()}</p>
+        <ul class="flex flex-col gap-1">
+          {#each visibleTemplateValidationIssues as issue (issue.token)}
+            <li class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              <code
+                class="bg-primary/70 text-warning-stronger max-w-full rounded-md px-1.5 py-0.5 font-mono text-xs break-all"
+                >{`{{${issue.token}}}`}</code
+              >
+              <span>{getTemplateValidationIssueText(issue)}</span>
+            </li>
+          {/each}
+        </ul>
+        {#if hiddenTemplateValidationIssueCount > 0}
+          <p>
+            {m.flow_template_issues_more({
+              count: String(hiddenTemplateValidationIssueCount)
+            })}
+          </p>
+        {/if}
+      </Alert.Description>
     </Alert.Root>
   {/if}
 </Card.Root>
