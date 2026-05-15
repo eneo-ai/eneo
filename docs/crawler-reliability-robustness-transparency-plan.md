@@ -76,6 +76,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Manual direct-enqueue terminal parity tranche: route `CrawlService` direct ARQ/pre-acquired rollback failures through `TerminalEvent(CRAWL_DIRECT_ENQUEUE_FAILED)`, preserve flag-delete/slot-release/terminal-commit ordering, and expose the distinct typed outcome through backend/frontend presentation.
 - [x] Completion audit tranche: T105 and Claude both rejected marking the whole roadmap complete; remaining WorkerAdapter, admin write controls, lifecycle completion, OpenAPI regeneration, and phase-size/type cleanup remain explicit follow-up work.
 - [x] Static terminal-ownership guard tranche: add a source-level regression test that keeps crawler `CrawlRuns` terminal writes and crawler entrypoint job terminal mutations on the canonical `crawl_terminal.py` / `TerminalEvent` path.
+- [x] Typed Redis pipeline boundary tranche: move Redis pipeline result typing to `worker/redis/client.py` so `worker/crawl/heartbeat.py` and `worker/crawl/recovery.py` no longer need local `cast(...)` for pipeline results.
 
 ## Non-Negotiable Principles
 
@@ -619,6 +620,7 @@ Work:
 - [ ] Introduce a `Phase` enum and retype `CrawlAdminDetail.phase_durations_ms` to `Mapping[Phase, int]`.
 - [ ] Remove restating comments while preserving comments that explain upstream Scrapy constraints, transaction/idempotency invariants, or production incident history.
 - [x] Centralize dependency-injector override typing in `container_overrides.py` and remove the obvious crawler `cast(Any, container.*).override(...)` sites from worker code.
+- [x] Centralize Redis pipeline result typing in `worker/redis/client.py` and remove crawl-phase `cast(...)` calls from `heartbeat.py` and `recovery.py`.
 - [ ] Address obvious `Any`/cast seams introduced by the split with typed phase inputs, not broad ignores.
 
 Acceptance criteria:

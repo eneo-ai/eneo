@@ -1,8 +1,9 @@
 """Redis client connection management for worker operations."""
 
 import re
+from collections.abc import Sequence
 from datetime import datetime, timezone
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Protocol, Self
 
 import redis.asyncio as aioredis
 from intric.main.config import get_settings
@@ -35,7 +36,57 @@ def get_redis() -> aioredis.Redis:
     return _redis_client
 
 
+def redis_pipeline_items(raw_result: Sequence[object]) -> tuple[object, ...]:
+    """Return Redis pipeline results as an immutable tuple.
+
+    redis-py exposes pipeline results through a weakly typed async boundary.
+    Keep that uncertainty here so crawl phase modules do not need broad casts.
+    """
+    if isinstance(raw_result, str | bytes | bytearray):
+        raise TypeError(
+            f"Redis pipeline returned {type(raw_result).__name__}, "
+            "expected a non-string sequence"
+        )
+
+    return tuple(raw_result)
+
+
 r = get_redis()
+
+
+class RedisPipelineLike(Protocol):
+    def expire(self, name: str, time: int) -> object: ...
+
+    def set(
+        self,
+        name: str,
+        value: str | bytes,
+        ex: int | None = None,
+        *,
+        nx: bool = False,
+    ) -> object: ...
+
+    def get(self, name: str) -> object: ...
+
+    def incr(self, name: str) -> object: ...
+
+    async def execute(self) -> Sequence[object]: ...
+
+    async def __aenter__(self) -> Self: ...
+
+    async def __aexit__(
+        self,
+        exc_type: object,
+        exc_value: object,
+        traceback: object,
+    ) -> None: ...
+
+
+def redis_pipeline(
+    redis: aioredis.Redis, *, transaction: bool = True
+) -> RedisPipelineLike:
+    """Create a Redis pipeline through the worker's typed boundary."""
+    return redis.pipeline(transaction=transaction)
 
 
 class WorkerHealth(NamedTuple):

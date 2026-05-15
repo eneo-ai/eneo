@@ -20,10 +20,12 @@ import logging
 import random
 import time
 from collections.abc import Awaitable
-from typing import TYPE_CHECKING, Callable, TypeVar, cast
+from typing import TYPE_CHECKING, Callable, TypeVar
 from uuid import UUID
 
 from sqlalchemy.exc import InvalidRequestError, PendingRollbackError
+
+from intric.worker.redis.client import redis_pipeline, redis_pipeline_items
 
 if TYPE_CHECKING:
     import redis.asyncio as aioredis
@@ -335,7 +337,7 @@ async def update_job_retry_stats(
 
     try:
         # Use Pipeline for network efficiency (not strict atomicity, but good enough)
-        async with redis_client.pipeline(transaction=True) as pipe:
+        async with redis_pipeline(redis_client, transaction=True) as pipe:
             # 1. Set start time ONLY if it doesn't exist (NX flag)
             #    This ensures we always track from the FIRST attempt
             pipe.set(start_key, str(now), nx=True, ex=ttl_seconds)
@@ -351,7 +353,7 @@ async def update_job_retry_stats(
             else:
                 pipe.get(count_key)  # Just read current value
 
-            results: list[object] = cast(list[object], await pipe.execute())
+            results = redis_pipeline_items(await pipe.execute())
 
         # Parse results
         # results[0] = True/False (whether SET succeeded)

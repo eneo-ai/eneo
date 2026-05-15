@@ -1,10 +1,49 @@
 """Unit tests for worker redis client utilities."""
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+import pytest
+
+from intric.worker.redis.client import (
+    parse_arq_health_string,
+    redis_pipeline,
+    redis_pipeline_items,
+)
 
 
-from intric.worker.redis.client import parse_arq_health_string
+class TestRedisPipelineItems:
+    """Tests for Redis pipeline result normalization."""
+
+    def test_accepts_list_result(self):
+        assert redis_pipeline_items([1, b"2", None]) == (1, b"2", None)
+
+    def test_accepts_tuple_result(self):
+        assert redis_pipeline_items((1, "2")) == (1, "2")
+
+    def test_accepts_empty_result(self):
+        assert redis_pipeline_items(()) == ()
+
+    @pytest.mark.parametrize(
+        "raw_result", ["not-a-pipeline-result", b"no", bytearray(b"no")]
+    )
+    def test_rejects_string_like_sequences(self, raw_result):
+        with pytest.raises(TypeError, match="Redis pipeline returned"):
+            redis_pipeline_items(raw_result)
+
+
+class TestRedisPipeline:
+    """Tests for Redis pipeline construction."""
+
+    def test_forwards_transaction_setting(self):
+        redis_client = Mock()
+        pipeline = Mock()
+        redis_client.pipeline.return_value = pipeline
+
+        result = redis_pipeline(redis_client, transaction=False)
+
+        assert result is pipeline
+        redis_client.pipeline.assert_called_once_with(transaction=False)
 
 
 class TestParseArqHealthString:

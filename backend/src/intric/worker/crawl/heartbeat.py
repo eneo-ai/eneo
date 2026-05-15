@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from uuid import UUID
 
+from intric.worker.redis.client import redis_pipeline, redis_pipeline_items
 from intric.worker.redis.lua_scripts import LuaScripts
 
 if TYPE_CHECKING:
@@ -149,10 +150,10 @@ class HeartbeatMonitor:
         flag_key = LuaScripts.preacquired_slot_key(self._job_id)
 
         try:
-            pipe = self._redis_client.pipeline(transaction=True)
-            pipe.expire(concurrency_key, self._semaphore_ttl_seconds)
-            pipe.expire(flag_key, self._semaphore_ttl_seconds)
-            results: list[object] = cast(list[object], await pipe.execute())
+            async with redis_pipeline(self._redis_client, transaction=True) as pipe:
+                pipe.expire(concurrency_key, self._semaphore_ttl_seconds)
+                pipe.expire(flag_key, self._semaphore_ttl_seconds)
+                results = redis_pipeline_items(await pipe.execute())
 
             self._consecutive_failures = 0
 

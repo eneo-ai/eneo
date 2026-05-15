@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T107
+active_task: T109
 
 tasks:
   - id: T001
@@ -5206,7 +5206,7 @@ tasks:
   - id: T107
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Choose the next bounded roadmap slice after adding the static terminal-ownership guard, deciding between roadmap split, Any/cast cleanup, finalize extraction, or another narrow transparency hardening task."
     inputs:
@@ -5222,6 +5222,89 @@ tasks:
     expected_output:
       - "Decision: documentation split, typed-boundary cleanup, finalize extraction, or another bounded worker."
       - "Allowed files, red tests, verification commands, and stop_if conditions for the selected worker."
+    receipt:
+      result: done
+      decision: "Activate T108 typed Redis pipeline boundary cleanup before roadmap split. This is the smallest code slice that reduces real Step 5 type debt in newly extracted crawl phase modules without starting WorkerAdapter or admin write controls."
+      summary: "Selected a bounded typed-boundary cleanup for Redis pipeline results. heartbeat.py and recovery.py were the only newly extracted crawl phase modules still using local casts for Redis pipeline result typing. The canonical owner is worker/redis/client.py because redis-py's pipeline result type is an external library boundary."
+      spawned_tasks:
+        - T108
+        - T109
+  - id: T108
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: low
+    objective: "Move Redis pipeline result typing to the worker Redis boundary and remove local crawl-phase casts from heartbeat and recovery."
+    inputs:
+      - "T107 receipt"
+      - "backend/src/intric/worker/crawl/heartbeat.py"
+      - "backend/src/intric/worker/crawl/recovery.py"
+      - "backend/src/intric/worker/redis/client.py"
+    allowed_files:
+      - "backend/src/intric/worker/redis/client.py"
+      - "backend/src/intric/worker/crawl/heartbeat.py"
+      - "backend/src/intric/worker/crawl/recovery.py"
+      - "backend/tests/unittests/worker/test_redis_client.py"
+      - "backend/tests/unittests/worker/test_heartbeat.py"
+      - "backend/tests/unittests/worker/test_recovery.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "No behavior changes to Redis retry, heartbeat, or preemption semantics."
+      - "Do not introduce broad Any, cast, or type ignore."
+      - "Do not start WorkerAdapter or admin write controls."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Redis pipeline result coercion lives in worker/redis/client.py."
+      - "heartbeat.py and recovery.py have no local cast(...) for Redis pipeline results."
+      - "Strict Pyright stays green."
+    receipt:
+      result: done
+      summary: "Added a typed RedisPipelineLike protocol plus redis_pipeline(...) and redis_pipeline_items(...) at the worker Redis boundary, then removed local Redis pipeline result casts from heartbeat.py and recovery.py. The Redis boundary now owns pipeline construction and result typing; heartbeat and recovery use the same async-with pipeline lifecycle."
+      changed_files:
+        - "backend/src/intric/worker/redis/client.py"
+        - "backend/src/intric/worker/crawl/heartbeat.py"
+        - "backend/src/intric/worker/crawl/recovery.py"
+        - "backend/tests/unittests/worker/test_redis_client.py"
+        - "backend/tests/unittests/worker/test_heartbeat.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      red_verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_redis_client.py -q failed before implementation with ImportError: cannot import name redis_pipeline_items."
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_redis_client.py tests/unittests/worker/test_heartbeat.py tests/unittests/worker/test_recovery.py -q -> 55 passed, 12 existing warnings"
+        - "cd backend && uv run ruff check src/intric/worker/redis/client.py src/intric/worker/crawl/heartbeat.py src/intric/worker/crawl/recovery.py tests/unittests/worker/test_redis_client.py tests/unittests/worker/test_heartbeat.py tests/unittests/worker/test_recovery.py -> passed"
+        - "cd backend && uv run ruff format --check <same paths> -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/redis/client.py src/intric/worker/crawl/heartbeat.py src/intric/worker/crawl/recovery.py tests/unittests/worker/test_redis_client.py tests/unittests/worker/test_heartbeat.py tests/unittests/worker/test_recovery.py -> 0 errors"
+        - "cd backend && uv run pyright --project pyrightconfig.json -> 0 errors"
+        - "rg -n \"cast\\(\" backend/src/intric/worker/crawl/heartbeat.py backend/src/intric/worker/crawl/recovery.py -> no matches"
+      claude:
+        verdict: changes_required
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t108-redis-pipeline-typed-boundary-review-20260515T085246Z.md"
+        resolution: "Claude rejected the first identity-wrapper shape. The implementation was revised so redis_pipeline(...) owns pipeline construction, heartbeat and recovery both use async-with, bytearray/empty result coverage was added, RedisPipelineLike.set was widened to str | bytes, and the redis_pipeline factory forwarding contract is directly tested."
+      spawned_tasks:
+        - T109
+  - id: T109
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Choose the next bounded roadmap slice after Redis pipeline type-boundary cleanup, with roadmap split still the leading candidate before larger WorkerAdapter/admin-write epics."
+    inputs:
+      - "T105 receipt"
+      - "T106 receipt"
+      - "T108 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "Current git status and verification"
+    constraints:
+      - "Do not mark the goal complete."
+      - "Do not start WorkerAdapter or admin write controls without a fresh plan gate."
+      - "Prefer splitting future epics from current branch scope if that improves human reviewability more than another small code slice."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Decision: roadmap split, finalize extraction, another typed-boundary cleanup, or a narrower admin transparency slice."
+      - "Allowed files, red tests, verification commands, and stop_if conditions if another worker is selected."
     receipt: null
 
 checks:

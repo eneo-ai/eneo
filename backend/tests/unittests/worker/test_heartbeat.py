@@ -7,15 +7,22 @@ Tests the heartbeat module's behavior:
 - Preemption detection
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
+
+import pytest
 
 from intric.worker.crawl.heartbeat import (
     HeartbeatFailedError,
     HeartbeatMonitor,
     JobPreemptedError,
 )
+
+
+def _redis_pipeline_context(pipeline: MagicMock) -> MagicMock:
+    pipeline.__aenter__ = AsyncMock(return_value=pipeline)
+    pipeline.__aexit__ = AsyncMock(return_value=None)
+    return pipeline
 
 
 class TestHeartbeatMonitorInterval:
@@ -86,7 +93,7 @@ class TestHeartbeatMonitorFailures:
     async def test_consecutive_failures_increment_on_redis_error(self):
         """Redis errors should increment consecutive_failures counter."""
         redis_client = MagicMock()
-        pipeline = MagicMock()
+        pipeline = _redis_pipeline_context(MagicMock())
         pipeline.expire = MagicMock()
         pipeline.execute = AsyncMock(side_effect=Exception("Redis down"))
         redis_client.pipeline = MagicMock(return_value=pipeline)
@@ -118,7 +125,7 @@ class TestHeartbeatMonitorFailures:
     async def test_heartbeat_failed_error_on_threshold(self):
         """HeartbeatFailedError raised when max_failures reached."""
         redis_client = MagicMock()
-        pipeline = MagicMock()
+        pipeline = _redis_pipeline_context(MagicMock())
         pipeline.expire = MagicMock()
         pipeline.execute = AsyncMock(side_effect=Exception("Redis down"))
         redis_client.pipeline = MagicMock(return_value=pipeline)
@@ -150,7 +157,7 @@ class TestHeartbeatMonitorFailures:
     async def test_failures_reset_on_success(self):
         """Consecutive failures should reset to 0 on successful heartbeat."""
         redis_client = MagicMock()
-        pipeline = MagicMock()
+        pipeline = _redis_pipeline_context(MagicMock())
         pipeline.expire = MagicMock()
         pipeline.execute = AsyncMock(return_value=[1, 1])  # Both keys exist
         redis_client.pipeline = MagicMock(return_value=pipeline)
