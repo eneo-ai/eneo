@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T072
+active_task: T074
 
 tasks:
   - id: T001
@@ -3366,7 +3366,7 @@ tasks:
   - id: T072
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next bounded Step 5 phase-extraction slice after closing the admin read-model tranche."
     inputs:
@@ -3389,17 +3389,127 @@ tasks:
       - "TDD red-test story."
       - "Verification commands."
       - "Stop conditions."
+    receipt:
+      result: done
+      decision: "Activate T073 to extract the duplicated post-terminal reactor sequence into `worker/crawl/post_terminal_reactor.py`."
+      summary: "Claude rejected scheduler extraction as Step 6 work, rejected pure logging extraction as lower ROI, and selected the duplicated post-terminal circuit-breaker/audit sequence as the next bounded Step 5 extraction. The new owner must not absorb terminal commits, website timestamp advancement, exception handling, slot release, or final cleanup."
+      claude:
+        verdict: green
+        artifact: ".codex/artifacts/claude-peer-loop-t072-choose-next-step-5-phase-extraction-20260515T024045Z.md"
+        min_score: 8
+      spawned_tasks:
+        - T073
+  - id: T073
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Extract the duplicated post-terminal-commit reactor sequence into a typed canonical owner."
+    inputs:
+      - "T072 receipt"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl/audit.py"
+      - "backend/src/intric/worker/crawl/circuit_breaker.py"
+      - "backend/src/intric/worker/crawl/recovery.py"
+      - ".codex/artifacts/claude-peer-loop-t072-choose-next-step-5-phase-extraction-20260515T024045Z.md"
+    allowed_files:
+      - "backend/src/intric/worker/crawl/post_terminal_reactor.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_post_terminal_reactor.py"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "TDD: mandatory post-terminal reactor tests must fail before production code lands."
+      - "Canonical owner is `backend/src/intric/worker/crawl/post_terminal_reactor.py`; do not use helper/manager/processor/common naming."
+      - "Extract only the ordered post-terminal side effects: `update_crawl_circuit_breaker` through `execute_with_recovery`, then `record_crawl_audit`."
+      - "Do not absorb `commit_terminal`, `update_website_timestamps_after_crawl`, `_record_crawl_task_exception`, `queue_website_crawls`, slot release, final Redis cleanup, or recovery-session cleanup."
+      - "Audit metadata shape, circuit-breaker math, and `execute_with_recovery` semantics must stay unchanged."
+      - "No new `Any`, casts, type ignores, dict-shaped reactor payloads, shallow helper modules, or broad abstractions."
+      - "Line count of `crawl_tasks.py` must strictly decrease."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "One frozen-slots input dataclass for post-terminal reactor input."
+      - "One async `apply_post_terminal_reactors(...)` function."
+      - "Successful crawl path invokes circuit breaker with `crawl_successful=True`, then audit with `successful=True` and the same outcome code."
+      - "Zero-output failure path invokes circuit breaker with `crawl_successful=False`, then audit with `successful=False` and the same outcome code."
+      - "Circuit-breaker failure propagates and audit does not run."
+      - "Existing terminal outcome, audit, and circuit-breaker tests pass."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_post_terminal_reactor.py tests/unittests/worker/test_crawl_audit.py tests/unittests/worker/test_crawl_circuit_breaker.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/post_terminal_reactor.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_reactor.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/crawl/post_terminal_reactor.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_reactor.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/post_terminal_reactor.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_reactor.py"
+    stop_if:
+      - "Extraction requires changing audit metadata shape, circuit-breaker math, or `execute_with_recovery` retry semantics."
+      - "Pyright strict regresses on touched files."
+      - "`crawl_tasks.py` line count does not decrease."
+      - "Any new `Any` import appears in the new module or touched `crawl_tasks.py` lines."
+      - "The reactor starts absorbing terminal-commit, timestamp, exception-path, scheduler, or finally-block responsibilities."
+      - "Need files outside allowed_files."
+    receipt:
+      result: done
+      summary: "Extracted the duplicated post-terminal circuit-breaker/audit ordering into `worker/crawl/post_terminal_reactor.py`. Both zero-output terminal failures and normal/partial completions now call one typed owner after `commit_terminal`, preserving the old operation labels, audit metadata shape, circuit-breaker success math, and recovery semantics."
+      changed_files:
+        - "backend/src/intric/worker/crawl/post_terminal_reactor.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_post_terminal_reactor.py"
+      tdd_red:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_post_terminal_reactor.py -q -> failed with ModuleNotFoundError before production module existed"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_post_terminal_reactor.py tests/unittests/worker/test_crawl_audit.py tests/unittests/worker/test_crawl_circuit_breaker.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q -> 24 passed"
+        - "cd backend && uv run pytest tests/unittests/worker -q -> 325 passed"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/post_terminal_reactor.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_reactor.py -> passed"
+        - "cd backend && uv run ruff format --check src/intric/worker/crawl/post_terminal_reactor.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_reactor.py -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/post_terminal_reactor.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_reactor.py -> 0 errors"
+        - "wc -l backend/src/intric/worker/crawl_tasks.py -> 1738, down from 1757"
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t073-post-terminal-reactor-implementation-review-20260515T025347Z.md"
+          - ".codex/artifacts/claude-peer-loop-t073-post-terminal-reactor-implementation-review-iteration-2-20260515T025622Z.md"
+        min_score: 8
+      notes:
+        - "Claude's cheap P2 type-safety suggestion was applied: `circuit_breaker_operation_name` is now a closed Literal of the two production operation labels."
+        - "Follow-up candidates: rename the reactor vocabulary before it spreads; consider dropping container coupling by passing AuditService directly; consider a future TerminalResult aggregate to remove duplicated audit-payload assembly."
+      spawned_tasks:
+        - T074
+  - id: T074
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next bounded crawler reliability/maintainability task after T073 without broadening beyond the roadmap."
+    inputs:
+      - "T073 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl"
+      - ".codex/artifacts/claude-peer-loop-t073-post-terminal-reactor-implementation-review-iteration-2-20260515T025622Z.md"
+    constraints:
+      - "Read-only except board/roadmap updates."
+      - "Prefer highest ROI reliability, transparency, and maintainability work still tied to crawler brittleness and unchanged-page/source-skip behavior."
+      - "Do not implement before choosing a narrow Worker with allowed files, TDD red story, verification commands, and stop conditions."
+      - "Preserve unrelated .devcontainer dirt."
+      - "Do not resurrect the removed Celery re-evaluation gate."
+    expected_output:
+      - "Decision: next Worker tranche or PM audit if the current tranche is complete."
+      - "Specific canonical owner."
+      - "Allowed files."
+      - "TDD red-test story."
+      - "Verification commands."
+      - "Stop conditions."
     receipt: null
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T071
+    task: T073
     commands:
-      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_website_processing_aggregate.py -q"
-      - "cd backend && uv run ruff check src/intric/websites/domain/crawler_website_processing_aggregate.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_website_processing_aggregate.py"
-      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_website_processing_aggregate.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_website_processing_aggregate.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_website_processing_aggregate.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_website_processing_aggregate.py"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t071-website-processing --title 'T071 website processing aggregate implementation review' --phase commit-gate --iteration 1 --require-green --required-min-score 8 ..."
-    note: "T071 backend per-website processing aggregate endpoint passed targeted integration tests, ruff, format check, Pyright, and Claude green review."
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_post_terminal_reactor.py tests/unittests/worker/test_crawl_audit.py tests/unittests/worker/test_crawl_circuit_breaker.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run pytest tests/unittests/worker -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/post_terminal_reactor.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_reactor.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/crawl/post_terminal_reactor.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_reactor.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/post_terminal_reactor.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_reactor.py"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t073-post-terminal-reactor --phase verification --iteration 2 --require-green --required-min-score 8 ..."
+    note: "T073 post-terminal reactor extraction passed targeted worker tests, full worker unit tests, ruff, format check, strict Pyright, line-count reduction, and Claude green review."

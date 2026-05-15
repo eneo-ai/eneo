@@ -53,13 +53,16 @@ from intric.worker.crawl import (
     persist_batch,
     process_files,
     process_pages,
-    record_crawl_audit,
     release_crawl_slot_after_task,
-    update_crawl_circuit_breaker,
     update_job_retry_stats,
     update_website_timestamps_after_crawl,
 )
 from intric.worker.crawl.persistence import CrawlPageData
+from intric.worker.crawl.post_terminal_reactor import (
+    PostTerminalReactionInput,
+    PostTerminalRecoveryContext,
+    apply_post_terminal_reactors,
+)
 from intric.worker.crawl_context import EmbeddingModelSpec
 from intric.worker.feeder.election import LeaderElection
 from intric.worker.feeder.queues import CrawlPendingJobData, PendingQueue
@@ -1114,45 +1117,36 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         operation=_do_terminal_zero_output_commit,
                     )
 
-                    async def _do_terminal_circuit_breaker_update(
-                        sess: AsyncSession,
-                    ) -> None:
-                        await update_crawl_circuit_breaker(
-                            sess,
-                            website_id=params.website_id,
-                            tenant_id=crawl_context.tenant_id,
-                            website_url=website_url,
-                            crawl_successful=False,
+                    await apply_post_terminal_reactors(
+                        PostTerminalReactionInput(
+                            recovery=PostTerminalRecoveryContext(
+                                container=container,
+                                session_holder=session_holder,
+                                created_sessions=created_sessions,
+                                execute_with_recovery=execute_with_recovery,
+                            ),
+                            audit_payload=CrawlAuditPayload(
+                                tenant_id=crawl_context.tenant_id,
+                                website_id=params.website_id,
+                                website_url=website_url,
+                                website_name=website_name,
+                                website_owner_id=website_owner_id,
+                                pages_crawled=0,
+                                pages_failed=0,
+                                pages_hash_retained=0,
+                                pages_source_retained=0,
+                                files_downloaded=0,
+                                files_failed=0,
+                                files_hash_retained=0,
+                                files_too_large_skipped=num_files_too_large_skipped,
+                                blobs_deleted=0,
+                                successful=False,
+                                outcome_code=terminal_outcome_code,
+                            ),
+                            circuit_breaker_operation_name=(
+                                "terminal_circuit_breaker_update"
+                            ),
                         )
-
-                    await execute_with_recovery(
-                        container=container,
-                        session_holder=session_holder,
-                        created_sessions=created_sessions,
-                        operation_name="terminal_circuit_breaker_update",
-                        operation=_do_terminal_circuit_breaker_update,
-                    )
-
-                    await record_crawl_audit(
-                        container.audit_service(),
-                        CrawlAuditPayload(
-                            tenant_id=crawl_context.tenant_id,
-                            website_id=params.website_id,
-                            website_url=website_url,
-                            website_name=website_name,
-                            website_owner_id=website_owner_id,
-                            pages_crawled=0,
-                            pages_failed=0,
-                            pages_hash_retained=0,
-                            pages_source_retained=0,
-                            files_downloaded=0,
-                            files_failed=0,
-                            files_hash_retained=0,
-                            files_too_large_skipped=num_files_too_large_skipped,
-                            blobs_deleted=0,
-                            successful=False,
-                            outcome_code=terminal_outcome_code,
-                        ),
                     )
 
                     # Terminal zero-output crawls advance no website crawl
@@ -1598,51 +1592,38 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             task_manager.acknowledge_terminal_commit(successful=True)
 
-            # Circuit breaker: Update failure tracking and exponential backoff
-
-            # Determine if crawl was successful
-            # Success = at least one item (page or file) AND not everything failed
             total_items = num_pages + num_files + num_source_retained_pages
             total_failed = num_failed_pages + num_failed_files
             crawl_successful = total_items > 0 and total_failed < total_items
 
-            async def _do_circuit_breaker_update(sess: AsyncSession) -> None:
-                await update_crawl_circuit_breaker(
-                    sess,
-                    website_id=params.website_id,
-                    tenant_id=crawl_context.tenant_id,
-                    website_url=website_url,
-                    crawl_successful=crawl_successful,
+            await apply_post_terminal_reactors(
+                PostTerminalReactionInput(
+                    recovery=PostTerminalRecoveryContext(
+                        container=container,
+                        session_holder=session_holder,
+                        created_sessions=created_sessions,
+                        execute_with_recovery=execute_with_recovery,
+                    ),
+                    audit_payload=CrawlAuditPayload(
+                        tenant_id=crawl_context.tenant_id,
+                        website_id=params.website_id,
+                        website_url=website_url,
+                        website_name=website_name,
+                        website_owner_id=website_owner_id,
+                        pages_crawled=num_pages,
+                        pages_failed=num_failed_pages,
+                        pages_hash_retained=num_hash_retained_pages,
+                        pages_source_retained=num_source_retained_pages,
+                        files_downloaded=num_files,
+                        files_failed=num_failed_files,
+                        files_hash_retained=num_hash_retained_files,
+                        files_too_large_skipped=num_files_too_large_skipped,
+                        blobs_deleted=num_deleted_blobs,
+                        successful=crawl_successful,
+                        outcome_code=crawl_run_outcome_code,
+                    ),
+                    circuit_breaker_operation_name="circuit_breaker_update",
                 )
-
-            await execute_with_recovery(
-                container=container,
-                session_holder=session_holder,
-                created_sessions=created_sessions,
-                operation_name="circuit_breaker_update",
-                operation=_do_circuit_breaker_update,
-            )
-
-            await record_crawl_audit(
-                container.audit_service(),
-                CrawlAuditPayload(
-                    tenant_id=crawl_context.tenant_id,
-                    website_id=params.website_id,
-                    website_url=website_url,
-                    website_name=website_name,
-                    website_owner_id=website_owner_id,
-                    pages_crawled=num_pages,
-                    pages_failed=num_failed_pages,
-                    pages_hash_retained=num_hash_retained_pages,
-                    pages_source_retained=num_source_retained_pages,
-                    files_downloaded=num_files,
-                    files_failed=num_failed_files,
-                    files_hash_retained=num_hash_retained_files,
-                    files_too_large_skipped=num_files_too_large_skipped,
-                    blobs_deleted=num_deleted_blobs,
-                    successful=crawl_successful,
-                    outcome_code=crawl_run_outcome_code,
-                ),
             )
 
         return task_manager.successful()
