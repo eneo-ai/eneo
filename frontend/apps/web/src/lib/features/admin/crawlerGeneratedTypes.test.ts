@@ -112,9 +112,21 @@ type _AdminCrawlerRecentFailuresPathExists = AssertTrue<
     ? true
     : false
 >;
+type _AdminCrawlerActivePathExists = AssertTrue<
+  paths["/api/v1/admin/crawler/active"]["get"] extends operations["get_current_tenant_crawler_active_inventory_api_v1_admin_crawler_active_get"]
+    ? true
+    : false
+>;
 type _AdminCrawlerRecentFailuresQueryHasNoTenantId = AssertTrue<
   "tenant_id" extends keyof NonNullable<
     operations["get_current_tenant_crawler_recent_failures_api_v1_admin_crawler_recent_failures_get"]["parameters"]["query"]
+  >
+    ? false
+    : true
+>;
+type _AdminCrawlerActiveQueryHasNoTenantId = AssertTrue<
+  "tenant_id" extends keyof NonNullable<
+    operations["get_current_tenant_crawler_active_inventory_api_v1_admin_crawler_active_get"]["parameters"]["query"]
   >
     ? false
     : true

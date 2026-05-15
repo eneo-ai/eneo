@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T135
+active_task: T137
 
 tasks:
   - id: T001
@@ -6471,7 +6471,7 @@ tasks:
   - id: T135
     type: judge
     assignee: Codex
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Audit the roadmap after T134 and select the next single highest-ROI reliability/maintainability slice without broadening admin UI work prematurely."
     inputs:
@@ -6487,19 +6487,122 @@ tasks:
       - "complete | not_complete"
       - "Remaining explicit open items"
       - "Next bounded worker task with allowed files and verification commands"
+    receipt:
+      result: not_complete
+      summary: "Roadmap audit rejected goal completion after T134. The next highest-ROI bounded slice is a tenant-scoped read-only /api/v1/admin/crawler/active endpoint, because it closes the next browser/admin visibility gap for crawls that look stuck as syncing while deferring risky abort/retry mutations and broad WorkerAdapter work."
+      changed_files:
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+      verification:
+        - "Plan still has explicit open Step 6 WorkerAdapter/abort/idempotency, Step 7 broader admin visibility, Step 8 admin write controls, and phase/lifecycle follow-ups."
+        - "backend/src/intric/sysadmin/sysadmin_router.py already exposes /sysadmin/crawler/active, but this is super-API-key-only and not browser/admin-callable."
+        - "backend/src/intric/websites/domain/crawl_run_repo.py has active_inventory(limit, offset, tenant_id) with existing lifecycle/name/counter query support."
+        - "backend/tests/integration/test_sysadmin_crawler_active_inventory.py already covers lifecycle states, tenant filtering, pagination, terminal/non-crawl exclusion, orphan queued job handling, and null linked names for the sysadmin endpoint."
+      claude:
+        verdict: changes_required
+        min_score: 7
+        artifact: ".codex/artifacts/claude-peer-loop-t135-roadmap-audit-next-slice-after-admin-recent-failures-ui-20260515T154223Z.md"
+        follow_up_notes:
+          - "Proceed with the tenant-scoped active endpoint only after tightening the worker scope."
+          - "Add active_inventory_for_tenant(tenant_id: UUID) rather than calling an optional tenant filter from the admin router."
+          - "Move or centralize CrawlerActiveInventoryResponse outside sysadmin ownership before the admin router consumes it."
+          - "Mirror the recent-failures OpenAPI test proving no tenant_id query parameter exists on the admin endpoint."
+          - "Add an explicit follow-up worker for the admin UI consumer; endpoint-only does not solve the visible syncing problem by itself."
+  - id: T136
+    type: worker
+    assignee: Codex
+    status: done
+    reasoning_hint: medium
+    objective: "Add a tenant-scoped read-only /api/v1/admin/crawler/active endpoint for active and queued crawler inventory, using tenant-required repository and shared presentation owners."
+    allowed_files:
+      - "backend/src/intric/admin/crawler_admin_router.py"
+      - "backend/src/intric/server/routers.py"
+      - "backend/src/intric/sysadmin/sysadmin_models.py"
+      - "backend/src/intric/sysadmin/sysadmin_router.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/src/intric/websites/presentation/crawler_admin_models.py"
+      - "backend/tests/integration/test_admin_crawler_active_inventory.py"
+      - "backend/tests/integration/test_sysadmin_crawler_active_inventory.py"
+      - "frontend/apps/web/src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_admin_crawler_active_inventory.py tests/integration/test_sysadmin_crawler_active_inventory.py -q"
+      - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_active_inventory.py tests/integration/test_sysadmin_crawler_active_inventory.py"
+      - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_active_inventory.py tests/integration/test_sysadmin_crawler_active_inventory.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+      - "./scripts/check-intric-js-openapi-schema.sh"
+      - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+      - "cd frontend && bun run --filter @intric/web check"
+    stop_if:
+      - "Need admin write controls, abort/retry behavior, or running-crawl mutation semantics."
+      - "Need browser/admin UI consumption in this same slice."
+      - "Need to infer tenant ownership for orphan queued jobs without a CrawlRun row."
+      - "Need to stage unrelated .devcontainer dirt or frontend icon ordering drift."
+    required_tests:
+      - "Red-first admin endpoint empty result."
+      - "Red-first tenant scope: current tenant sees only linked active crawl rows from its tenant."
+      - "Red-first OpenAPI assertion: /api/v1/admin/crawler/active has no tenant_id query parameter."
+      - "Red-first non-admin rejection."
+      - "Red-first orphan queued exclusion for tenant admin, documenting the current limitation that orphan jobs without CrawlRun.tenant_id are not tenant-visible."
+      - "Red-first pagination/bounds rejection such as limit=201 -> 422."
+      - "Generated OpenAPI client type coverage for the new admin active endpoint."
+    receipt:
+      result: complete
+      summary: "Added tenant-scoped read-only /api/v1/admin/crawler/active for active crawler inventory, split repository entry points into active_inventory_for_tenant and active_inventory_for_sysadmin, moved active inventory presentation models into the shared crawler admin owner, and regenerated OpenAPI schema types."
+      changed_files:
+        - "backend/src/intric/admin/crawler_admin_router.py"
+        - "backend/src/intric/sysadmin/sysadmin_models.py"
+        - "backend/src/intric/sysadmin/sysadmin_router.py"
+        - "backend/src/intric/websites/domain/crawl_run_repo.py"
+        - "backend/src/intric/websites/presentation/crawler_admin_models.py"
+        - "backend/tests/integration/test_admin_crawler_active_inventory.py"
+        - "frontend/apps/web/src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+        - "frontend/packages/intric-js/src/types/schema.d.ts"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      red_evidence:
+        - "cd backend && uv run pytest tests/integration/test_admin_crawler_active_inventory.py -q failed before implementation with missing endpoint/schema path errors."
+      verification:
+        - "cd backend && uv run pytest tests/integration/test_admin_crawler_active_inventory.py tests/integration/test_sysadmin_crawler_active_inventory.py -q => 11 passed."
+        - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_active_inventory.py tests/integration/test_sysadmin_crawler_active_inventory.py => passed."
+        - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_active_inventory.py tests/integration/test_sysadmin_crawler_active_inventory.py => passed."
+        - "cd backend && uv run pyright --project pyrightconfig.json => 0 errors."
+        - "./scripts/check-intric-js-openapi-schema.sh => generated OpenAPI schema types are up to date."
+        - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerGeneratedTypes.test.ts => exited 0; type-level todo test only."
+        - "cd frontend && bun run --filter @intric/web check => exited 0 with one pre-existing ExtendExpirationDialog.svelte warning."
+      claude:
+        verdict: green
+        min_score: 8
+        artifact: ".codex/artifacts/claude-peer-loop-t136-tenant-admin-active-crawler-inventory-endpoint-20260515T155813Z.md"
+        notes:
+          - "Claude approved commit as endpoint-only slice and confirmed UI is properly deferred to T137."
+          - "Applied Claude's non-blocking comment hardening for orphan queued job exclusion."
+  - id: T137
+    type: worker
+    assignee: Codex
+    status: active
+    reasoning_hint: medium
+    objective: "Consume the tenant-scoped active crawler inventory endpoint in the admin crawler page so admins can see currently queued/running crawls without sysadmin endpoints."
+    depends_on:
+      - T136
+    constraints:
+      - "Use shadcn-Svelte/admin page components, not IntricUI table abstractions."
+      - "Read-only UI only; no abort/retry/pause/resume controls."
+      - "Run design/UX review skills and Claude gate before commit."
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T132
+    task: T136
     commands:
-      - "cd backend && uv run pytest tests/integration/test_admin_crawler_recent_failures.py tests/integration/test_sysadmin_crawler_recent_failures.py -q"
-      - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/server/routers.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_recent_failures.py"
-      - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/server/routers.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_recent_failures.py"
+      - "cd backend && uv run pytest tests/integration/test_admin_crawler_active_inventory.py tests/integration/test_sysadmin_crawler_active_inventory.py -q"
+      - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_active_inventory.py tests/integration/test_sysadmin_crawler_active_inventory.py"
+      - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_active_inventory.py tests/integration/test_sysadmin_crawler_active_inventory.py"
       - "cd backend && uv run pyright --project pyrightconfig.json"
       - "./scripts/check-intric-js-openapi-schema.sh"
+      - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerGeneratedTypes.test.ts"
       - "cd frontend && bun run --filter @intric/web check"
-      - "cd frontend && bun run --filter @intric/web test:unit"
-      - "cd frontend && bun run --filter @intric/web lint && cd packages/intric-js && bun run lint"
-    note: "T132 tenant-scoped admin recent-failures endpoint passed integration, sysadmin regression, Ruff, strict Pyright, OpenAPI freshness, frontend generated-type checks, and Claude revision gate. Frontend check still reports the pre-existing ExtendExpirationDialog.svelte warning."
+    note: "T136 tenant-scoped admin active crawler inventory endpoint passed backend integration/sysadmin regression, Ruff, strict Pyright, OpenAPI freshness, frontend generated-type check, frontend check, and Claude commit gate. Frontend check still reports the pre-existing ExtendExpirationDialog.svelte warning."

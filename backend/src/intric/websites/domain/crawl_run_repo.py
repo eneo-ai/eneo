@@ -151,7 +151,33 @@ class CrawlRunRepository:
         records = await self.session.scalars(stmt)
         return [CrawlRun.to_domain(record=record) for record in records]
 
-    async def active_inventory(
+    async def active_inventory_for_tenant(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        tenant_id: UUID,
+    ) -> CrawlerActiveInventory:
+        return await self._active_inventory(
+            limit=limit,
+            offset=offset,
+            tenant_id=tenant_id,
+        )
+
+    async def active_inventory_for_sysadmin(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        tenant_id: UUID | None,
+    ) -> CrawlerActiveInventory:
+        return await self._active_inventory(
+            limit=limit,
+            offset=offset,
+            tenant_id=tenant_id,
+        )
+
+    async def _active_inventory(
         self,
         *,
         limit: int,
@@ -163,7 +189,8 @@ class CrawlRunRepository:
             Jobs.status.in_([Status.QUEUED.value, Status.IN_PROGRESS.value]),
         ]
         if tenant_id is not None:
-            # Orphan queued jobs have no crawl run yet, so tenant-scoped views exclude them.
+            # Orphan queued jobs have no crawl run yet; filtering on the
+            # outer-joined crawl run tenant column intentionally excludes them.
             active_conditions.append(CrawlRunsTable.tenant_id == tenant_id)
 
         base_from = sa.outerjoin(Jobs, CrawlRunsTable, Jobs.id == CrawlRunsTable.job_id)

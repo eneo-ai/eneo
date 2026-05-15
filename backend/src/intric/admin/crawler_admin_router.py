@@ -12,6 +12,7 @@ from intric.roles.permissions import Permission
 from intric.users.user import UserInDB
 from intric.websites.domain.crawl_run_repo import CrawlRunRepository
 from intric.websites.presentation.crawler_admin_models import (
+    CrawlerActiveInventoryResponse,
     CrawlerRecentFailuresResponse,
 )
 
@@ -20,6 +21,27 @@ router = APIRouter(
         Depends(require_permission(Permission.ADMIN)),
     ],
 )
+
+
+@router.get(
+    "/active",
+    response_model=CrawlerActiveInventoryResponse,
+    summary="Get active and queued crawler runs for the current tenant",
+)
+async def get_current_tenant_crawler_active_inventory(
+    current_user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> CrawlerActiveInventoryResponse:
+    async with session.begin():
+        repo = CrawlRunRepository(session=session)
+        inventory = await repo.active_inventory_for_tenant(
+            limit=limit,
+            offset=offset,
+            tenant_id=current_user.tenant_id,
+        )
+    return CrawlerActiveInventoryResponse.from_domain(inventory)
 
 
 @router.get(

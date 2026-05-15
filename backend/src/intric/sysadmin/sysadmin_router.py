@@ -61,7 +61,6 @@ from intric.server.dependencies.container import (
 from intric.server.dependencies.get_repository import get_repository
 from intric.server.protocol import responses
 from intric.sysadmin.sysadmin_models import (
-    CrawlerActiveInventoryResponse,
     CrawlerBaselineResponse,
     CrawlerFailureInventoryResponse,
     CrawlerRecentFailuresResponse,
@@ -78,6 +77,9 @@ from intric.tenants.tenant import (
 from intric.users.user import UserAddSuperAdmin, UserCreated, UserInDB, UserUpdatePublic
 from intric.websites.domain.crawl_run_repo import CrawlRunRepository
 from intric.websites.domain.website_admin_repo import WebsiteAdminRepository
+from intric.websites.presentation.crawler_admin_models import (
+    CrawlerActiveInventoryResponse,
+)
 from intric.worker.redis.client import read_watchdog_status_snapshot
 from intric.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direct
 
@@ -508,7 +510,7 @@ async def get_crawler_active_inventory(
     session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = CrawlRunRepository(session=session)
-        inventory = await repo.active_inventory(
+        inventory = await repo.active_inventory_for_sysadmin(
             limit=limit,
             offset=offset,
             tenant_id=tenant_id,
