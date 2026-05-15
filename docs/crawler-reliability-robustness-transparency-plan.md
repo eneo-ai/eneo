@@ -93,6 +93,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Post-T134 audit tranche: reject goal completion, select tenant-scoped active crawler inventory as the next bounded read-only admin transparency slice, and keep the admin UI consumer as an explicit follow-up.
 - [x] Tenant-scoped active crawler inventory endpoint tranche: expose active/running crawler inventory under `/api/v1/admin/crawler/active` with a tenant-required repository method, shared presentation owner, no tenant_id query parameter, and tests for tenant scope, orphan exclusion, bounds, and OpenAPI typing.
 - [x] Tenant admin active crawler UI tranche: consume `/api/v1/admin/crawler/active` in the admin crawler page so admins can see current queued/running crawler jobs without sysadmin endpoints.
+- [x] Post-T137 roadmap reconciliation tranche: refresh stale plan evidence before starting another code slice, close baseline/phase-skeleton checklist drift against current code, and keep broader admin overview, WorkerAdapter, and write-control work as explicit follow-ups.
 
 ## Non-Negotiable Principles
 
@@ -111,7 +112,7 @@ The current branch already improved skip-unchanged behavior, source-retained cou
 
 Important current friction:
 
-- `backend/src/intric/worker/crawl_tasks.py` is still too large at 1,663 lines, but bootstrap, page iteration, file processing, cleanup, audit, circuit breaker, website timestamps, slot acquire/release, terminal commits, and cleanup policy are now extracted behind typed boundaries.
+- `backend/src/intric/worker/crawl_tasks.py` is still too large at 1,593 lines, but bootstrap, page iteration, file processing, cleanup, audit, circuit breaker, website timestamps, slot acquire/release, terminal commits, and cleanup policy are now extracted behind typed boundaries.
 - `backend/src/intric/worker/crawl_tasks.py` now uses a public `TaskManager.acknowledge_terminal_commit(...)` seam. Duplicate crawl skips, zero-output crawls, exception/shutdown outcomes, normal/partial completion, max-age busy-wait abandonment, pending-queue enqueue failure rollback, and manual `CrawlService` pending/direct enqueue failures go through `commit_terminal(...)`.
 - `_get_primary_active_job_id(...)` now filters explicitly to crawl jobs and is backed by reversible PostgreSQL indexes on active crawl jobs and crawl-run website/job lookups. The migration test proves the duplicate-guard lookup changes from a crawl-run sequential scan before the migration to planner-visible index usage after it.
 - `backend/src/intric/worker/crawl_feeder.py` owns custom scheduling, Redis queues, leader election, tenant capacity, and pre-acquired slot protocol.
@@ -120,7 +121,7 @@ Important current friction:
 - `backend/src/intric/websites/domain/crawl_outcome.py` now has strict and lenient outcome parsers; remaining work is deleting normal new-row dependence on legacy result strings.
 - `backend/src/intric/websites/crawl_dependencies/crawl_models.py` still contains legacy read-side result string fallback from `result_location`.
 - `backend/src/intric/tenants/crawler_settings_helper.py` now owns typed `CrawlerSettingSpec` values as the crawler-settings source of truth.
-- `frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte` exposes current tenant crawler settings, but not an admin/operator overview of active, queued, scheduled, expensive, failed, or stuck crawls.
+- `frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte` exposes current tenant crawler settings, active/queued crawl jobs, and recent terminal failures, but not scheduled crawler load, high-cost websites, too-large-file samples, watchdog interventions, or circuit-breaker state.
 
 ## Core Recommendation
 
@@ -343,16 +344,17 @@ Default guardrails:
 
 ### Step 0: Baseline And Safety Metrics
 
-Status: closed for now. Remaining lifecycle ambitions are explicitly deferred
-until their prerequisites exist.
+Status: closed for implemented baseline counters. The only remaining item is
+runtime/UI performance telemetry for the admin crawler page, which is deferred
+until the admin overview surface is stable enough to measure meaningfully.
 
 Purpose: capture the current state before refactoring so we can prove reliability improved instead of trusting intuition.
 
 Work:
 
-- [ ] Record baseline percentage of failed crawls that surface `UNKNOWN_CRAWL_ERROR`.
-- [ ] Record count/rate of read-side legacy outcome fallback usage.
-- [ ] Record counts for hash-retained pages/files, source-retained pages, too-large files, page failures, partial timeouts, duplicate skips, and no-page failures.
+- [x] Record baseline percentage of failed crawls that surface `UNKNOWN_CRAWL_ERROR`.
+- [x] Record count/rate of read-side legacy outcome fallback usage.
+- [x] Record counts for hash-retained pages/files, source-retained pages, too-large files, page failures, partial timeouts, duplicate skips, and no-page failures.
 - [ ] Record current admin crawler page query latency and payload size if available.
 
 Acceptance criteria:
@@ -373,8 +375,8 @@ Tests:
 
 ### Step 1: Type Foundations And Safe Phase Entry Points
 
-Status: closed for now. Remaining lifecycle ambitions are deferred until their
-prerequisites exist.
+Status: closed for foundational type work. The early phase-skeleton intent was
+superseded by the concrete Step 5 phase extractions listed below.
 
 Purpose: reduce type debt and create behavior-preserving entry points before moving terminal writes.
 
@@ -383,7 +385,7 @@ Work:
 - [x] Replace `CRAWLER_SETTING_SPECS: dict[str, dict[str, Any]]` with a typed `CrawlerSettingSpec` dataclass or discriminated union.
 - [x] Remove avoidable `Any` in `crawler_settings_helper.py` touched by the setting spec change.
 - [x] Add strict and lenient crawl outcome parsers; keep lenient parser only for historical read fallback.
-- [ ] Introduce typed phase input/output skeletons for bootstrap, crawl, persist, cleanup, and finalize without moving terminal write semantics yet.
+- [x] Introduce typed phase input/output skeletons for bootstrap, crawl, persist, cleanup, and finalize without moving terminal write semantics yet.
 - [x] Document the direct terminal write sites in `crawl_tasks.py` as the deletion list for Step 2.
 - [x] Add `tests/fixtures/crawl_outcome_parity.json` as the parity oracle for current `derive_crawl_outcome(...)` output: one row per currently emitted `CrawlOutcomeCode` plus one historical-unknown row.
 
@@ -404,16 +406,11 @@ Step 2 terminal-write deletion inventory:
 
 | Site | Current behavior | Step 2 deletion path |
 |---|---|---|
-| `backend/src/intric/worker/crawl_tasks.py:397-419` | `_record_crawl_task_exception(...)` uses `TerminalEvent` and `commit_terminal(...)` after shutdown/unknown exceptions, with the previous "only fill missing crawl-run outcome" policy preserved. | Keep exception terminal writes on the canonical commit seam; move audit policy into post-commit reactors later. |
-| `backend/src/intric/worker/crawl_tasks.py:963-984` | Duplicate crawl guard uses `TerminalEvent` and `commit_terminal(...)`. | Treat duplicate skip as a non-error terminal outcome in audit/UI when audit policy is extracted. |
-| `backend/src/intric/worker/crawl_tasks.py:1006` | Duplicate skip now calls `task_manager.acknowledge_terminal_commit(successful=True)`. | Keep the public acknowledgement, but trigger it only after `commit_terminal(...)` owns the duplicate terminal row writes. |
-| `backend/src/intric/worker/crawl_tasks.py:1500-1519` | Zero-output terminal path uses `TerminalEvent` plus `CrawlRunTerminalUpdate` and `commit_terminal(...)`. | Keep circuit breaker and audit as post-commit reactors; add audit policy later. |
-| `backend/src/intric/worker/crawl_tasks.py:1585-1603` | Zero-output terminal job write is now part of the same `commit_terminal(...)` call. | Keep row commit atomic while reactors stay independent. |
-| `backend/src/intric/worker/crawl_tasks.py:1614` | Zero-output terminal path now calls `task_manager.acknowledge_terminal_commit(successful=False)` after `commit_terminal(...)`. | Reassess the acknowledgement seam after all terminal paths use `commit_terminal(...)`. |
-| `backend/src/intric/worker/crawl_tasks.py:2070-2090` | Normal/partial completion uses `TerminalEvent` plus `CrawlRunTerminalUpdate` and `commit_terminal(...)` for counters, failure summary, outcome, job status, finish time, and result location. | Keep audit and circuit breaker as post-commit reactors; add audit policy later. |
-| `backend/src/intric/worker/crawl_tasks.py:2171-2186` | Normal completion job write is now part of the same `commit_terminal(...)` call. | Keep row commit atomic while reactors stay independent. |
-| `backend/src/intric/worker/crawl_tasks.py:2201` | Normal completion now calls `task_manager.acknowledge_terminal_commit(successful=True)` after `commit_terminal(...)`. | Reassess the acknowledgement seam after all crawler-task terminal paths use `commit_terminal(...)`. |
-| `backend/src/intric/worker/task_manager.py:35-49,165-180` | `TaskManager` has a public terminal acknowledgement backed by private state. | Keep `TaskManager` out of terminal row ownership; after all terminal paths use `commit_terminal(...)`, reassess whether the acknowledgement seam is still needed. |
+| `backend/src/intric/worker/crawl_tasks.py:274-294` | `_record_crawl_task_exception(...)` uses `TerminalEvent` and `commit_terminal(...)` after shutdown/unknown exceptions, with the previous "only fill missing crawl-run outcome" policy preserved. | Keep exception terminal writes on the canonical commit seam; move audit policy into post-commit effects later. |
+| `backend/src/intric/worker/crawl_tasks.py:746-778` | Duplicate crawl guard uses `TerminalEvent` and `commit_terminal(...)`, then acknowledges terminal completion through `TaskManager`. | Treat duplicate skip as a non-error terminal outcome in audit/UI and reassess the acknowledgement seam now that row ownership is canonical. |
+| `backend/src/intric/worker/crawl_tasks.py:1071-1132` | Zero-output terminal path uses `TerminalEvent`, `CrawlRunTerminalUpdate`, and `commit_terminal(...)`, then acknowledges terminal failure through `TaskManager`. | Keep row commit atomic while post-terminal effects stay independent; reassess whether `TaskManager` still needs a public terminal acknowledgement seam. |
+| `backend/src/intric/worker/crawl_tasks.py:1447-1480` | Normal/partial completion uses `TerminalEvent` plus `CrawlRunTerminalUpdate` and `commit_terminal(...)` for counters, failure summary, outcome, job status, finish time, and result location, then acknowledges terminal success through `TaskManager`. | Keep audit and circuit breaker as post-terminal effects; reassess whether `TaskManager` still needs a public terminal acknowledgement seam. |
+| `backend/src/intric/worker/task_manager.py:162-164` | `TaskManager` has a public terminal acknowledgement backed by private state. | Keep `TaskManager` out of terminal row ownership; after all terminal paths use `commit_terminal(...)`, reassess whether the acknowledgement seam is still needed. |
 
 Tests:
 
@@ -548,12 +545,12 @@ Work:
 
 - [x] Introduce `CrawlLifecycle` with explicit running and terminal states.
 - [x] Add watchdog Phase 3.5 and Phase 3 lifecycle observations without changing cleanup selection.
-- [ ] Deferred: preserve watchdog Phase 3.5 early-zombie and Phase 3
+- [ ] Blocked follow-up: preserve watchdog Phase 3.5 early-zombie and Phase 3
   long-running concepts as named lifecycle transitions after a page-progress
   lifecycle fact exists.
-- [ ] Deferred: replace null/zero watchdog heuristics only after equivalent
+- [ ] Blocked follow-up: replace null/zero watchdog heuristics only after equivalent
   lifecycle facts exist.
-- [ ] Deferred: define cleanup policy on terminal event values only when a
+- [ ] Blocked follow-up: define cleanup policy on terminal event values only when a
   second runtime consumer cannot use `outcome_code`.
 - [x] Introduce `CleanupPolicy` and exhaustive `CrawlOutcomeCode` mapping without
   production consumers or runtime behavior changes.
@@ -561,7 +558,7 @@ Work:
   `crawl_is_partial` flag.
 - [x] Audit terminal transitions: crawl-task paths use `TerminalEvent`, watchdog
   batch paths use `TerminalBatchEvent`, and no cleanup-policy field is added yet.
-- [ ] Deferred: retype `CrawlAdminDetail.lifecycle_state` from `str` to
+- [ ] Blocked follow-up: retype `CrawlAdminDetail.lifecycle_state` from `str` to
   `CrawlLifecycle` only after `CrawlAdminDetail` exists in production code.
 
 Lifecycle anchor note: the first Step 4 tranche is intentionally types-only.
@@ -677,8 +674,9 @@ Tests:
 
 ### Step 6: WorkerAdapter For ARQ, Idempotency, Abort, And Health
 
-Status: in progress. Several concrete queue/Redis/status owners now exist, but
-the full `WorkerAdapter`, abort semantics, and idempotency tests remain open.
+Status: interface not started. Several concrete queue/Redis/status owners now
+exist, but no `WorkerAdapter` abstraction exists yet; abort semantics and
+idempotency tests remain open.
 
 Purpose: isolate ARQ queue/runtime behavior behind a typed crawler-facing seam.
 

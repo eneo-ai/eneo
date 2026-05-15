@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T138
+active_task: T139
 
 tasks:
   - id: T001
@@ -6633,7 +6633,7 @@ tasks:
   - id: T138
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Audit the roadmap after T137 and choose the next single highest-ROI remaining slice without marking the full goal complete unless current evidence proves every requirement."
     inputs:
@@ -6650,6 +6650,73 @@ tasks:
       - "complete | not_complete"
       - "Evidence for remaining explicit open items"
       - "Next bounded task if not complete"
+    result:
+      status: not_complete
+      completed_at: "2026-05-15T16:50:00+02:00"
+      summary: "Rejected goal completion and reconciled stale roadmap items before activating another code slice. The plan now reflects the current crawl_tasks.py line count, implemented baseline endpoint coverage, superseded phase-skeleton item, current terminal acknowledgement seam locations, blocked Step 4 follow-ups, and the fact that WorkerAdapter itself is not started yet."
+      evidence:
+        - "`wc -l backend/src/intric/worker/crawl_tasks.py` returned 1593."
+        - "`/sysadmin/crawler/baseline` exists in `backend/src/intric/sysadmin/sysadmin_router.py` and is backed by typed `CrawlerBaselineMetrics` plus `CrawlRunRepository.aggregate_baseline(...)`."
+        - "`rg 'class WorkerAdapter|WorkerAdapter' backend/src` found no production WorkerAdapter implementation."
+        - "Step 5 concrete phase modules already exist for bootstrap, page processing, file processing, cleanup, slot acquire, website size update, preemption, and completion logging."
+      claude:
+        verdict: green
+        min_score: 9
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t138-roadmap-audit-after-tenant-active-crawler-ui-20260515T163651Z.md"
+          - ".codex/artifacts/claude-peer-loop-t138-roadmap-reconciliation-verification-20260515T164321Z.md"
+          - ".codex/artifacts/claude-peer-loop-t138-roadmap-reconciliation-verification-20260515T164648Z.md"
+        resolution: "Claude blocked another code slice until plan/code drift was corrected, then blocked the first T139 spec because it named the wrong router owner and lacked exact verification. Codex accepted both findings, performed a doc-only reconciliation, tightened T139 to one scheduled-aggregate tenant endpoint, and received GREEN_LIGHT yes with MIN_SCORE 9."
+      follow_up_notes:
+        - "Keep `CrawlAdminDetail`/Phase enum work out of scope until the production detail object exists."
+        - "Do not bundle scheduled, website-processing, watchdog, circuit-breaker, and high-cost ranking into one tenant admin tranche."
+        - "Reassess the `TaskManager.acknowledge_terminal_commit(...)` seam as a small cleanup after the next bounded visibility slice."
+  - id: T139
+    type: worker
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Add one tenant-scoped read-only `/api/v1/admin/crawler/scheduled` endpoint so tenant admins can inspect scheduled crawl load without sysadmin endpoints."
+    allowed_files:
+      - "backend/src/intric/admin/crawler_admin_router.py"
+      - "backend/src/intric/sysadmin/sysadmin_models.py"
+      - "backend/src/intric/sysadmin/sysadmin_router.py"
+      - "backend/src/intric/websites/presentation/crawler_admin_models.py"
+      - "backend/src/intric/websites/domain/website_admin_repo.py"
+      - "backend/tests/integration/test_admin_crawler_scheduled_aggregate.py"
+      - "backend/tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "frontend/packages/intric-js/src/types/resources.d.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Backend endpoint only for this slice; do not add admin page UI until a separate shadcn/UX-gated worker task."
+      - "Reuse existing scheduled aggregate domain/repository logic where possible; do not create a parallel aggregate model if the sysadmin model can be safely mapped."
+      - "Split `WebsiteAdminRepository.scheduled_aggregate(...)` into `scheduled_aggregate_for_tenant(tenant_id: UUID)` and `scheduled_aggregate_for_sysadmin(tenant_id: UUID | None)`, mirroring the T136 active-inventory pattern."
+      - "Relocate the scheduled aggregate response model to `crawler_admin_models.py` for shared tenant/sysadmin ownership, then update the sysadmin router import."
+      - "No tenant_id query parameter on the tenant admin endpoint; tenant scope comes from the authenticated admin context."
+      - "Keep response bounded and stable; include zero buckets and unparseable interval accounting if existing sysadmin aggregate already does."
+      - "Do not add abort/retry/pause write controls in this slice."
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_admin_crawler_scheduled_aggregate.py tests/integration/test_sysadmin_crawler_scheduled_aggregate.py -q"
+      - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/website_admin_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_scheduled_aggregate.py tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
+      - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/website_admin_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_scheduled_aggregate.py tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+      - "./scripts/check-intric-js-openapi-schema.sh"
+      - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+      - "cd frontend && bun run --filter @intric/web check"
+    red_tests:
+      - "API test: tenant admin scheduled aggregate rejects non-admin users."
+      - "API test: empty result returns zero buckets and zero totals for a tenant with no scheduled crawlers."
+      - "API test: endpoint returns only websites whose `WebsitesTable.tenant_id` matches the current tenant and has no `tenant_id` query parameter."
+      - "API test: unparseable legacy update intervals remain counted in the unparseable aggregate fields."
+      - "API/OpenAPI type test: generated schema exposes the tenant endpoint response contract."
+    stop_if:
+      - "Implementing the endpoint requires bundling website-processing, watchdog, circuit-breaker, or high-cost ranking data into the same response."
+      - "Existing scheduled aggregate ownership cannot be reused without a broader repository refactor."
+      - "Generated OpenAPI types require unrelated schema churn."
+      - "Admin page UI consumption becomes necessary in the same slice."
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
