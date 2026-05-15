@@ -14,11 +14,10 @@ import asyncio
 import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import sqlalchemy as sa
-from dependency_injector import providers
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from typing_extensions import TypedDict
 
@@ -27,6 +26,7 @@ from intric.database.tables.info_blob_chunk_table import InfoBlobChunks
 from intric.database.tables.info_blobs_table import InfoBlobs
 from intric.info_blobs.info_blob import InfoBlobChunk
 from intric.main.config import get_settings
+from intric.main.container.container_overrides import scoped_container_overrides
 from intric.main.logging import get_logger
 from intric.websites.domain.crawl_outcome import FailureReason
 from intric.worker.crawl_context import (
@@ -324,9 +324,8 @@ async def persist_batch(
     embedding_session = sessionmanager.create_session()
     try:
         await embedding_session.begin()
-        session_provider = cast(Any, container.session)
-        session_provider.override(providers.Object(embedding_session))
-        create_embeddings_service = container.create_embeddings_service()
+        with scoped_container_overrides(container, session=embedding_session):
+            create_embeddings_service = container.create_embeddings_service()
     except Exception as e:
         logger.error(
             "Failed to initialize embedding service",
@@ -404,7 +403,7 @@ async def persist_batch(
                         async with asyncio.timeout(ctx.embedding_timeout_seconds):
                             chunk_embedding_list = (
                                 await create_embeddings_service.get_embeddings(
-                                    model=cast(Any, embedding_model),
+                                    model=embedding_model,
                                     chunks=chunk_objects,
                                 )
                             )

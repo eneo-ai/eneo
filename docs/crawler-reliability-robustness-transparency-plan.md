@@ -65,6 +65,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Step 5 post-terminal recovery-context collapse tranche: delete the one-field `PostTerminalRecoveryContext` wrapper and pass the typed recovery executor directly through `PostTerminalEffectInput`.
 - [x] Step 5 post-terminal operation-name coverage tranche: cover both post-terminal circuit-breaker operation-name literals while keeping the recovery fake behavior-focused and signature-exact.
 - [x] Step 5 crawler TaskManager result-location trim tranche: remove normal-completion dependence on generic `TaskManager.result_location` while preserving the terminal job result URL.
+- [x] Step 5 container override seam tranche: centralize crawler dependency-injector override casts behind `container_overrides.py`, add scoped restoration tests, and remove worker `Any`/`cast` imports from `crawl_tasks.py` and `persistence.py`.
 
 ## Non-Negotiable Principles
 
@@ -606,6 +607,7 @@ Work:
 - [ ] Keep terminal state in `TerminalEvent` + `commit_terminal(...)`.
 - [ ] Introduce a `Phase` enum and retype `CrawlAdminDetail.phase_durations_ms` to `Mapping[Phase, int]`.
 - [ ] Remove restating comments while preserving comments that explain upstream Scrapy constraints, transaction/idempotency invariants, or production incident history.
+- [x] Centralize dependency-injector override typing in `container_overrides.py` and remove the obvious crawler `cast(Any, container.*).override(...)` sites from worker code.
 - [ ] Address obvious `Any`/cast seams introduced by the split with typed phase inputs, not broad ignores.
 
 Acceptance criteria:

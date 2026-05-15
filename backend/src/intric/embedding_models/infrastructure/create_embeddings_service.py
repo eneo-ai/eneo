@@ -27,15 +27,32 @@ class EmbeddingModelLike(Protocol):
     these attributes, so any object providing them will work.
     """
 
-    id: UUID
-    name: str
-    provider_id: UUID | None
-    litellm_model_name: str | None
-    family: str | None
-    max_input: int | None
-    max_batch_size: int | None
-    dimensions: int | None
-    open_source: bool
+    @property
+    def id(self) -> UUID: ...
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def provider_id(self) -> UUID | None: ...
+
+    @property
+    def litellm_model_name(self) -> str | None: ...
+
+    @property
+    def family(self) -> str | None: ...
+
+    @property
+    def max_input(self) -> int | None: ...
+
+    @property
+    def max_batch_size(self) -> int | None: ...
+
+    @property
+    def dimensions(self) -> int | None: ...
+
+    @property
+    def open_source(self) -> bool: ...
 
 
 class CreateEmbeddingsService:

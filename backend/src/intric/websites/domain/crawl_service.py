@@ -23,7 +23,9 @@ from intric.websites.domain.crawl_run import CrawlRun
 if TYPE_CHECKING:
     from intric.jobs.task_service import TaskService
     from intric.websites.domain.crawl_run_repo import CrawlRunRepository
-    from intric.websites.domain.website import Website
+    from intric.websites.domain.website import Website, WebsiteSparse
+
+    CrawlableWebsite = Website | WebsiteSparse
 
 logger = get_logger(__name__)
 
@@ -225,7 +227,7 @@ class CrawlService:
         tenant_id: UUID,
         job_id: UUID,
         user_id: UUID,
-        website: "Website",
+        website: "CrawlableWebsite",
         run_id: UUID,
     ) -> None:
         """Add job to pending queue for feeder to process later.
@@ -288,7 +290,7 @@ class CrawlService:
     async def _enqueue_to_arq(
         self,
         job_id: UUID,
-        website: "Website",
+        website: "CrawlableWebsite",
         run_id: UUID,
     ) -> None:
         """Enqueue crawl job directly to ARQ."""
@@ -310,7 +312,7 @@ class CrawlService:
             params=params,
         )
 
-    async def crawl(self, website: "Website") -> CrawlRun:
+    async def crawl(self, website: "CrawlableWebsite") -> CrawlRun:
         """Start a crawl for a website with optimistic slot acquisition.
 
         When feeder is enabled:

@@ -5,18 +5,17 @@ from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
 from uuid import UUID
 
 import redis.asyncio as aioredis
 import sqlalchemy as sa
 from arq import Retry
-from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.crawler.crawler import CrawlDiagnostics, CrawlShutdownError
 from intric.main.config import get_settings
 from intric.main.container.container import Container
+from intric.main.container.container_overrides import scoped_container_overrides
 from intric.main.logging import get_logger
 from intric.tenants.crawler_settings_helper import (
     TenantCrawlerSettings,
@@ -403,123 +402,120 @@ async def queue_website_crawls(container: Container):
                     # Get user for this website
                     user = await user_repo.get_user_by_id(website.user_id)
                     assert user is not None
-                    cast(Any, container.user).override(providers.Object(user))
-                    cast(Any, container.tenant).override(providers.Object(user.tenant))
 
-                    # Feeder mode: Create crawl run AND job record, then add to pending queue
-                    # Why: Pre-create DB records so feeder only handles ARQ enqueueing
-                    # Deterministic job_id based on run_id prevents duplicate enqueues
-                    if settings.crawl_feeder_enabled and redis_client:
-                        from intric.jobs.job_models import Job, Task
-                        from intric.main.models import Status
-                        from intric.websites.domain.crawl_run import CrawlRun
+                    with scoped_container_overrides(container, user=user):
+                        # Feeder mode: Create crawl run AND job record, then add to pending queue
+                        # Why: Pre-create DB records so feeder only handles ARQ enqueueing
+                        # Deterministic job_id based on run_id prevents duplicate enqueues
+                        if settings.crawl_feeder_enabled and redis_client:
+                            from intric.jobs.job_models import Job, Task
+                            from intric.main.models import Status
+                            from intric.websites.domain.crawl_run import CrawlRun
 
-                        # Step 1: Create crawl run record
-                        crawl_run_repo = container.crawl_run_repo()
-                        crawl_run_repo.session = website_session
-                        crawl_run = CrawlRun.create(website=website)
-                        crawl_run = await crawl_run_repo.add(crawl_run=crawl_run)
+                            # Step 1: Create crawl run record
+                            crawl_run_repo = container.crawl_run_repo()
+                            crawl_run_repo.session = website_session
+                            crawl_run = CrawlRun.create(website=website)
+                            crawl_run = await crawl_run_repo.add(crawl_run=crawl_run)
 
-                        # Step 2: Create job record in database
-                        # Why: Pre-create so job_id is deterministic and available for feeder
-                        # CRITICAL: Use website_session, not container's outer cron_job session!
-                        # Bug fix: Job and CrawlRun must commit together for watchdog JOIN to work.
-                        # See: watchdog.py zombie reconciliation query joins Jobs with CrawlRuns
-                        job_repo = container.job_repo()
-                        job_repo.delegate.session = (
-                            website_session  # Align with crawl_run_repo
-                        )
-                        job = Job(
-                            task=Task.CRAWL,
-                            name=f"Crawl: {website.name or website.url}",
-                            status=Status.QUEUED,
-                            user_id=website.user_id,
-                        )
-                        job_in_db = await job_repo.add_job(job=job)
-
-                        # Step 3: Link job_id to crawl_run
-                        crawl_run.update(job_id=job_in_db.id)
-                        await crawl_run_repo.update(crawl_run=crawl_run)
-
-                        # Step 4: Prepare job data for pending queue
-                        # Store database job_id for deterministic enqueueing
-                        job_data: CrawlPendingJobData = {
-                            "job_id": str(
-                                job_in_db.id
-                            ),  # Critical: Deterministic ID from DB
-                            "user_id": str(website.user_id),
-                            "website_id": str(website.id),
-                            "run_id": str(crawl_run.id),
-                            "url": website.url,
-                            "download_files": website.download_files,
-                            "crawl_type": website.crawl_type.value,
-                        }
-
-                        # Step 5: Add to pending queue with orphaning protection.
-                        try:
-                            pending_queue = PendingQueue(redis_client)
-                            if not await pending_queue.add(
-                                tenant_id=user.tenant.id,
-                                job_data=job_data,
-                            ):
-                                raise Exception("Failed to add to pending queue")
-
-                            successful_crawls += 1
-                            logger.debug(
-                                f"Added crawl to pending queue: {website.url}",
-                                extra={
-                                    "feeder_mode": True,
-                                    "job_id": str(job_in_db.id),
-                                    "run_id": str(crawl_run.id),
-                                },
+                            # Step 2: Create job record in database
+                            # Why: Pre-create so job_id is deterministic and available for feeder
+                            # CRITICAL: Use website_session, not container's outer cron_job session!
+                            # Bug fix: Job and CrawlRun must commit together for watchdog JOIN to work.
+                            # See: watchdog.py zombie reconciliation query joins Jobs with CrawlRuns
+                            job_repo = container.job_repo()
+                            job_repo.delegate.session = (
+                                website_session  # Align with crawl_run_repo
                             )
-                        except Exception as redis_exc:
-                            failure_message = _crawl_queue_enqueue_failure_message(
-                                redis_exc
+                            job = Job(
+                                task=Task.CRAWL,
+                                name=f"Crawl: {website.name or website.url}",
+                                status=Status.QUEUED,
+                                user_id=website.user_id,
                             )
-                            # Redis push failed; commit one terminal event so the UI
-                            # has a typed reason and no orphaned job remains.
+                            job_in_db = await job_repo.add_job(job=job)
+
+                            # Step 3: Link job_id to crawl_run
+                            crawl_run.update(job_id=job_in_db.id)
+                            await crawl_run_repo.update(crawl_run=crawl_run)
+
+                            # Step 4: Prepare job data for pending queue
+                            # Store database job_id for deterministic enqueueing
+                            job_data: CrawlPendingJobData = {
+                                "job_id": str(
+                                    job_in_db.id
+                                ),  # Critical: Deterministic ID from DB
+                                "user_id": str(website.user_id),
+                                "website_id": str(website.id),
+                                "run_id": str(crawl_run.id),
+                                "url": website.url,
+                                "download_files": website.download_files,
+                                "crawl_type": website.crawl_type.value,
+                            }
+
+                            # Step 5: Add to pending queue with orphaning protection.
                             try:
-                                await commit_terminal(
-                                    website_session,
-                                    TerminalEvent(
-                                        crawl_run_id=crawl_run.id,
-                                        job_id=job_in_db.id,
-                                        job_status=Status.FAILED,
-                                        outcome_code=(
-                                            CrawlOutcomeCode.CRAWL_QUEUE_ENQUEUE_FAILED
-                                        ),
-                                        finished_at=datetime.now(timezone.utc),
-                                        result_location=failure_message,
-                                    ),
-                                )
-                            except Exception as update_exc:
-                                logger.warning(
-                                    "Failed to rollback DB records after Redis error",
+                                pending_queue = PendingQueue(redis_client)
+                                if not await pending_queue.add(
+                                    tenant_id=user.tenant.id,
+                                    job_data=job_data,
+                                ):
+                                    raise Exception("Failed to add to pending queue")
+
+                                successful_crawls += 1
+                                logger.debug(
+                                    f"Added crawl to pending queue: {website.url}",
                                     extra={
+                                        "feeder_mode": True,
                                         "job_id": str(job_in_db.id),
-                                        "error": str(update_exc),
+                                        "run_id": str(crawl_run.id),
                                     },
                                 )
+                            except Exception as redis_exc:
+                                failure_message = _crawl_queue_enqueue_failure_message(
+                                    redis_exc
+                                )
+                                # Redis push failed; commit one terminal event so the UI
+                                # has a typed reason and no orphaned job remains.
+                                try:
+                                    await commit_terminal(
+                                        website_session,
+                                        TerminalEvent(
+                                            crawl_run_id=crawl_run.id,
+                                            job_id=job_in_db.id,
+                                            job_status=Status.FAILED,
+                                            outcome_code=(
+                                                CrawlOutcomeCode.CRAWL_QUEUE_ENQUEUE_FAILED
+                                            ),
+                                            finished_at=datetime.now(timezone.utc),
+                                            result_location=failure_message,
+                                        ),
+                                    )
+                                except Exception as update_exc:
+                                    logger.warning(
+                                        "Failed to rollback DB records after Redis error",
+                                        extra={
+                                            "job_id": str(job_in_db.id),
+                                            "error": str(update_exc),
+                                        },
+                                    )
 
-                            failed_crawls += 1
-                            logger.error(
-                                failure_message,
-                                extra={
-                                    "website_id": str(website.id),
-                                    "url": website.url,
-                                    "job_id": str(job_in_db.id),
-                                },
-                            )
-                    else:
-                        # Direct enqueue mode (original behavior when feeder disabled)
-                        from intric.websites.domain.website import Website
+                                failed_crawls += 1
+                                logger.error(
+                                    failure_message,
+                                    extra={
+                                        "website_id": str(website.id),
+                                        "url": website.url,
+                                        "job_id": str(job_in_db.id),
+                                    },
+                                )
+                        else:
+                            # Direct enqueue mode (original behavior when feeder disabled)
+                            crawl_service = container.crawl_service()
+                            await crawl_service.crawl(website)
+                            successful_crawls += 1
 
-                        crawl_service = container.crawl_service()
-                        await crawl_service.crawl(cast(Website, website))
-                        successful_crawls += 1
-
-                        logger.debug(f"Successfully queued crawl for {website.url}")
+                            logger.debug(f"Successfully queued crawl for {website.url}")
 
                 # Session is now CLOSED for this website - connection returned to pool
 
@@ -1239,25 +1235,24 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     content_hash: bytes,
                 ) -> None:
                     async def _process_single_file(sess: AsyncSession) -> None:
-                        session_provider = cast(Any, container.session)
-                        session_provider.override(providers.Object(sess))
-                        file_uploader = container.text_processor()
-                        embedding_model_repo = container.embedding_model_repo2()
-                        embedding_model_id = crawl_context.embedding_model_id
-                        if embedding_model_id is None:
-                            raise RuntimeError(
-                                "Changed-file processing requires an embedding model"
+                        with scoped_container_overrides(container, session=sess):
+                            file_uploader = container.text_processor()
+                            embedding_model_repo = container.embedding_model_repo2()
+                            embedding_model_id = crawl_context.embedding_model_id
+                            if embedding_model_id is None:
+                                raise RuntimeError(
+                                    "Changed-file processing requires an embedding model"
+                                )
+                            file_embedding_model = await embedding_model_repo.one(
+                                embedding_model_id
                             )
-                        file_embedding_model = await embedding_model_repo.one(
-                            embedding_model_id
-                        )
-                        await file_uploader.process_file(
-                            filepath=file,
-                            filename=filename,
-                            website_id=params.website_id,
-                            embedding_model=file_embedding_model,
-                            content_hash=content_hash,
-                        )
+                            await file_uploader.process_file(
+                                filepath=file,
+                                filename=filename,
+                                website_id=params.website_id,
+                                embedding_model=file_embedding_model,
+                                content_hash=content_hash,
+                            )
 
                     await execute_with_recovery(
                         operation_name=f"process_file_{filename}",
@@ -1305,14 +1300,13 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 titles_to_delete = list(titles)
 
                 async def _do_stale_blob_cleanup(sess: AsyncSession) -> int:
-                    session_provider = cast(Any, container.session)
-                    session_provider.override(providers.Object(sess))
-                    cleanup_repo = container.info_blob_repo()
-                    return await cleanup_repo.batch_delete_by_titles_and_website(
-                        titles=titles_to_delete,
-                        website_id=params.website_id,
-                        tenant_id=crawl_context.tenant_id,
-                    )
+                    with scoped_container_overrides(container, session=sess):
+                        cleanup_repo = container.info_blob_repo()
+                        return await cleanup_repo.batch_delete_by_titles_and_website(
+                            titles=titles_to_delete,
+                            website_id=params.website_id,
+                            tenant_id=crawl_context.tenant_id,
+                        )
 
                 return await execute_with_recovery(
                     operation_name="stale_blob_cleanup",
