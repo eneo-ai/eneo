@@ -838,7 +838,7 @@ async def generate_api_key(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.API_KEY_GENERATED,
         entity_type=EntityType.API_KEY,
         entity_id=current_user.id,  # Use user ID as entity ID for user API keys
@@ -880,7 +880,7 @@ async def revoke_legacy_api_key(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.API_KEY_REVOKED,
         entity_type=EntityType.API_KEY,
         entity_id=current_user.id,
@@ -972,7 +972,7 @@ async def invite_user(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.USER_CREATED,
         entity_type=EntityType.USER,
         entity_id=new_user.id,
@@ -1090,7 +1090,7 @@ async def update_user(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.USER_UPDATED,
         entity_type=EntityType.USER,
         entity_id=id,
@@ -1163,7 +1163,7 @@ async def delete_user(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.USER_DELETED,
         entity_type=EntityType.USER,
         entity_id=id,

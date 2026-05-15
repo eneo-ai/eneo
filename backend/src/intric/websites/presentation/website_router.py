@@ -201,7 +201,7 @@ async def update_website(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.WEBSITE_UPDATED,
         entity_type=EntityType.WEBSITE,
         entity_id=id,
@@ -234,7 +234,7 @@ async def delete_website(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.WEBSITE_DELETED,
         entity_type=EntityType.WEBSITE,
         entity_id=id,
@@ -319,7 +319,7 @@ async def transfer_website_to_space(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.WEBSITE_TRANSFERRED,
         entity_type=EntityType.WEBSITE,
         entity_id=id,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from uuid import NAMESPACE_URL, uuid5
 
 from intric.authentication.auth_models import ApiKeyV2InDB
 from intric.roles.permissions import Permission
@@ -16,18 +15,12 @@ def build_service_key_user(
     tenant: TenantInDB,
     permissions: Iterable[Permission] | None = None,
 ) -> UserInDB:
-    """Build an in-memory execution user for service-key principals.
+    """Build an in-memory execution user for service-key principals."""
 
-    This is a compatibility adapter for code paths that still expect `UserInDB`
-    while persisted ownership/execution identity is stored separately as a
-    principal.
-    """
-
-    synthetic_id = uuid5(NAMESPACE_URL, f"service-key:{key.id}")
     synthetic_role = None
     if permissions is not None:
         synthetic_role = RoleInDB(
-            id=uuid5(NAMESPACE_URL, f"service-key-role:{key.id}"),
+            id=key.id,
             tenant_id=key.tenant_id,
             name=f"Service Key Role ({key.name})",
             permissions=sorted(permissions, key=lambda permission: permission.value),
@@ -35,7 +28,7 @@ def build_service_key_user(
 
     key_suffix = key.key_suffix or key.id.hex[:8]
     return UserInDB(
-        id=synthetic_id,
+        id=key.id,
         email=f"sk-{key_suffix}@service.key",
         username=f"Service Key ({key.name})",
         state=UserState.ACTIVE,

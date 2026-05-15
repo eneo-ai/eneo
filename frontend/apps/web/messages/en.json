@@ -3884,5 +3884,11 @@
   "api_keys_rotate_disable_grace_label": "Revoke old key immediately",
   "api_keys_rotate_disable_grace_help": "The current secret stops working as soon as rotation completes.",
   "api_keys_rotate_disable_grace_warning": "Use this only after every client has switched away from the current secret.",
-  "api_keys_ownership_service_user_endpoints_hint": "Service keys cannot use endpoints that require a user identity (e.g. \"my profile\", legacy user keys, info blob updates). They also cannot manage other API keys — use a session login for those operations."
+  "remove_all_attachments": "Remove all attachments",
+  "attachments_count_one": "{count} file attached",
+  "attachments_count_other": "{count} files attached",
+  "attachments_show_more": "+{count} more",
+  "attachments_show_less": "Show less",
+  "api_keys_ownership_service_explainer": "Service keys are built for automation and can read, update, and delete existing resources within their scope. They cannot create new resources (e.g. assistants, apps, spaces, files), use endpoints that require a user identity (e.g. \"my profile\"), or manage other API keys.",
+  "api_keys_ownership_service_badge_tooltip": "Service keys cannot create new resources. They can read, update and delete existing resources within their scope."
 }

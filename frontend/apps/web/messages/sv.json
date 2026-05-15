@@ -3886,5 +3886,11 @@
   "api_keys_rotate_disable_grace_label": "Revokera nuvarande nyckel direkt",
   "api_keys_rotate_disable_grace_help": "Den nuvarande hemligheten slutar fungera så snart rotationen är klar.",
   "api_keys_rotate_disable_grace_warning": "Använd detta först när alla klienter har bytt bort från den nuvarande hemligheten.",
-  "api_keys_ownership_service_user_endpoints_hint": "Tjänstenycklar kan inte använda endpoints som kräver en användaridentitet (t.ex. \"min profil\", äldre användarnycklar, uppdatering av info-blobbar). De kan inte heller hantera andra API-nycklar — använd en sessionsinloggning för dessa åtgärder."
+  "remove_all_attachments": "Ta bort alla bilagor",
+  "attachments_count_one": "{count} bilaga bifogad",
+  "attachments_count_other": "{count} bilagor bifogade",
+  "attachments_show_more": "+{count} fler",
+  "attachments_show_less": "Visa färre",
+  "api_keys_ownership_service_explainer": "Tjänstenycklar är gjorda för automatisering och kan läsa, uppdatera och ta bort befintliga resurser inom sitt scope. De kan inte skapa nya resurser (t.ex. assistenter, appar, spaces, filer), använda endpoints som kräver en användaridentitet (t.ex. \"min profil\"), eller hantera andra API-nycklar.",
+  "api_keys_ownership_service_badge_tooltip": "Tjänstenycklar kan inte skapa nya resurser. De kan läsa, uppdatera och ta bort befintliga resurser inom sitt scope."
 }

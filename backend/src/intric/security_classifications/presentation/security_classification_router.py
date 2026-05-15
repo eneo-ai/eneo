@@ -62,7 +62,7 @@ async def create_security_classification(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.SECURITY_CLASSIFICATION_CREATED,
         entity_type=EntityType.SECURITY_CLASSIFICATION,
         entity_id=security_classification.id,
@@ -174,7 +174,7 @@ async def update_security_classification_levels(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.SECURITY_CLASSIFICATION_LEVELS_UPDATED,
         entity_type=EntityType.SECURITY_CLASSIFICATION,
         entity_id=user.tenant_id,  # Use tenant as entity since multiple classifications affected
@@ -240,7 +240,7 @@ async def delete_security_classification(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.SECURITY_CLASSIFICATION_DELETED,
         entity_type=EntityType.SECURITY_CLASSIFICATION,
         entity_id=id,
@@ -305,7 +305,7 @@ async def update_security_classification(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.SECURITY_CLASSIFICATION_UPDATED,
         entity_type=EntityType.SECURITY_CLASSIFICATION,
         entity_id=id,
@@ -360,7 +360,7 @@ async def toggle_security_classifications(
 
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=action,
         entity_type=EntityType.TENANT_SETTINGS,
         entity_id=user.tenant_id,

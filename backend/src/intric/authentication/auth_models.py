@@ -75,13 +75,12 @@ def is_service_api_key(user: "UserInDB") -> bool:
 def audit_actor_for(user: "UserInDB") -> tuple[UUID | None, ActorType]:
     """Resolve (actor_id, actor_type) for an audit_log entry on this request.
 
-    Service keys have no real user row — passing the synthetic user.id into
-    audit_log.actor_id (FK to users.id) would FK-violate. Mirror the gating
-    pattern used by user_service._log_api_key_used: emit (None, SYSTEM) for
-    service keys, (user.id, USER) for real users.
+    Service keys have no real user row, so the synthetic user.id must not be
+    written to audit_log.actor_id. The audit log stores those actors through
+    actor_api_key_id instead.
     """
     if is_service_api_key(user):
-        return None, ActorType.SYSTEM
+        return None, ActorType.API_KEY
     return user.id, ActorType.USER
 
 

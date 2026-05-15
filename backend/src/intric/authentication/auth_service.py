@@ -9,6 +9,7 @@ from uuid import UUID
 import bcrypt
 import jwt
 import sqlalchemy as sa
+from jwt.types import Options
 from pydantic import ValidationError
 
 from intric.authentication.api_key_repo import ApiKeysRepository
@@ -162,33 +163,6 @@ class AuthService:
 
         return api_key
 
-    async def create_user_api_key_v2(
-        self, *, user_id: UUID, tenant_id: UUID
-    ) -> ApiKeyCreated:
-        """Mint a v2 personal API key for a user, no v1 row, no Legacy mirror."""
-        if self.api_key_v2_repo is None:
-            raise RuntimeError("api_key_v2_repo is required to mint v2 keys")
-
-        api_key = self._create_and_hash_api_key(prefix="sk")
-        await self.api_key_v2_repo.create(
-            tenant_id=tenant_id,
-            owner_user_id=user_id,
-            created_by_user_id=user_id,
-            scope_type=ApiKeyScopeType.TENANT.value,
-            scope_id=None,
-            permission=ApiKeyPermission.ADMIN.value,
-            key_type=ApiKeyType.SK.value,
-            key_hash=api_key.hashed_key,
-            hash_version=ApiKeyHashVersion.SHA256.value,
-            key_prefix=self._normalize_prefix(api_key.key, fallback="sk"),
-            key_suffix=api_key.truncated_key,
-            name="Personal API key",
-            description=None,
-            state=ApiKeyState.ACTIVE.value,
-        )
-
-        return api_key
-
     async def create_assistant_api_key(
         self,
         prefix: str,
@@ -325,12 +299,12 @@ class AuthService:
         key: jwt.PyJWK,
         signing_algos: list[str],
         client_id: str,
-        options: dict[str, Any] | None = None,
+        options: Options | None = None,
         correlation_id: str | None = None,
     ) -> dict[str, Any]:
         correlation_id = correlation_id or "no-correlation-id"
 
-        jwt_options = dict(options or {})
+        jwt_options = options or None
         clock_leeway = OIDC_CLOCK_LEEWAY_SECONDS or 0
         leeway_applied = clock_leeway > 0
 
@@ -340,7 +314,7 @@ class AuthService:
                 "correlation_id": correlation_id,
                 "client_id": client_id,
                 "signing_algos": signing_algos,
-                "options": jwt_options or None,
+                "options": jwt_options,
                 "id_token_length": len(id_token) if id_token else 0,
                 "leeway_seconds": OIDC_CLOCK_LEEWAY_SECONDS if leeway_applied else 0,
             },
@@ -373,7 +347,7 @@ class AuthService:
                 key=key,
                 algorithms=signing_algos,
                 audience=client_id,
-                options=jwt_options or None,
+                options=jwt_options,
                 leeway=clock_leeway,
             )
 
@@ -552,7 +526,7 @@ class AuthService:
         key: jwt.PyJWK,
         signing_algos: list[str],
         client_id: str,
-        options: dict[str, Any] | None = None,
+        options: Options | None = None,
         correlation_id: str | None = None,
     ) -> tuple[str, str]:
         correlation_id = correlation_id or "no-correlation-id"

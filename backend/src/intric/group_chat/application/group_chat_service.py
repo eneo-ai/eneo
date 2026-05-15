@@ -35,6 +35,14 @@ if TYPE_CHECKING:
     from intric.users.user import UserInDB
 
 
+# Strict contract with the selector model: a routing decision is the whole
+# response and nothing else. Anything that isn't an exact `ASSISTANT=<n>` line
+# is treated as clarification prose and surfaced to the user — including
+# digits embedded in clarification text, which previously caused false-positive
+# routing or crashes.
+_ASSISTANT_SENTINEL = re.compile(r"\s*ASSISTANT\s*=\s*(\d+)\s*", re.IGNORECASE)
+
+
 @dataclass
 class GroupChatAssistantSelectionResult:
     assistant: Optional[GroupChatAssistant]
@@ -234,41 +242,41 @@ class GroupChatService:
         assistant_list = "\n".join(assistant_info)
 
         return f"""
-                Given a user question and a list of AI assistants, you need to determine the most
-                appropriate assistant to answer the question.
+                You are routing a user question to one of {len(assistants)} AI assistants.
+
                 User Question: {question}
+
                 Available Assistants:
                 {assistant_list}
 
-                Based only on the descriptions above, which assistant number (1-{len(assistants)})
-                would be most appropriate to answer this question?
+                Reply with EXACTLY ONE of:
+                - The literal line `ASSISTANT=<n>` where <n> is an integer in
+                  1-{len(assistants)}, when one assistant is the clear best match. Nothing
+                  else on the line. No commentary, no quotes, no punctuation.
+                - A friendly clarification in the language of the question when the
+                  question is ambiguous or spans multiple assistants. Never include the
+                  token `ASSISTANT=` anywhere in clarification text.
 
-                Follow these guidelines:
-                - Choose ONE assistant from the list. Return only a single number.
-                - Select the assistant whose expertise best matches the question.
-                - Always be decisive - do not suggest multiple assistants.
-
-                If and only if there is a clear answer respond ONLY with the assistant number
-                (e.g., "1"), otherwise you should tell the user to be more
-                specific in a friendly tone.
-                Answer in the language of the question.
-
-                Take earlier questions in the context into account.
+                Take earlier questions in the conversation into account.
                 """
 
     def _is_match(
         self, response_text: str, assistants: list[GroupChatAssistant]
     ) -> int | None:
-        """Parse the model's response to determine which assistant to use"""
-        response_text = response_text.strip().upper()
+        """Parse the model's response to a 1-indexed assistant number, or None.
 
-        # Look for a number in the response
-        match = re.search(r"(\d+)", response_text)
-
-        if match:
-            return int(match.group(1))
-        else:
+        Routing requires the response to be exactly `ASSISTANT=<n>` (with
+        flexible whitespace and case). Anything else — including bare digits,
+        prose containing numbers, or out-of-range sentinels — returns None and
+        the caller surfaces the text as a clarification reply.
+        """
+        match = _ASSISTANT_SENTINEL.fullmatch(response_text)
+        if match is None:
             return None
+        n = int(match.group(1))
+        if 1 <= n <= len(assistants):
+            return n
+        return None
 
     async def _select_assistant_with_completion_model(
         self,
@@ -306,24 +314,21 @@ class GroupChatService:
             session=session,
             text_input=question,
         )
-        # parse the response to determine which assistant to use
         assistant_match = self._is_match(
             response.completion.text,  # type: ignore[union-attr]
             assistants,
         )
-        if assistant_match:
-            if 1 <= assistant_match <= len(assistants):
-                return GroupChatAssistantSelectionResult(
-                    assistant=assistants[assistant_match - 1],
-                    response_str=response.completion.text,  # type: ignore[union-attr]
-                    assistant_selector_tokens=assistant_selector_tokens,
-                )
-        else:
+        if assistant_match is not None:
             return GroupChatAssistantSelectionResult(
-                assistant=None,
+                assistant=assistants[assistant_match - 1],
                 response_str=response.completion.text,  # type: ignore[union-attr]
                 assistant_selector_tokens=assistant_selector_tokens,
             )
+        return GroupChatAssistantSelectionResult(
+            assistant=None,
+            response_str=response.completion.text,  # type: ignore[union-attr]
+            assistant_selector_tokens=assistant_selector_tokens,
+        )
 
     async def _handle_response(
         self,
