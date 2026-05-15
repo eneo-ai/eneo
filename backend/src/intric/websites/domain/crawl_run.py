@@ -1,3 +1,5 @@
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Optional, Union, cast, overload
 
@@ -27,6 +29,86 @@ class CrawlType(str, Enum):
     SITEMAP = "sitemap"
 
 
+MAX_CRAWL_FILE_TOO_LARGE_SAMPLES = 5
+MAX_CRAWL_FILE_TOO_LARGE_SAMPLE_URL_CHARS = 2048
+
+
+def truncate_crawl_file_too_large_sample_url(url: str) -> str:
+    return url[:MAX_CRAWL_FILE_TOO_LARGE_SAMPLE_URL_CHARS]
+
+
+@dataclass(frozen=True, slots=True)
+class CrawlFileTooLargeSample:
+    """Observed size may be the declared Content-Length when headers stop the download."""
+
+    url: str
+    observed_size_bytes: int | None
+
+
+def parse_crawl_file_too_large_samples(
+    value: object,
+) -> tuple[CrawlFileTooLargeSample, ...]:
+    if not isinstance(value, list):
+        return ()
+
+    samples: list[CrawlFileTooLargeSample] = []
+    for raw_sample in cast(list[object], value):
+        if len(samples) >= MAX_CRAWL_FILE_TOO_LARGE_SAMPLES:
+            break
+        parsed = _parse_crawl_file_too_large_sample(raw_sample)
+        if parsed is not None:
+            samples.append(parsed)
+
+    return tuple(samples)
+
+
+def serialize_crawl_file_too_large_samples(
+    samples: Sequence[CrawlFileTooLargeSample],
+) -> list[dict[str, int | str | None]] | None:
+    serialized = [
+        {
+            "url": truncate_crawl_file_too_large_sample_url(sample.url),
+            "observed_size_bytes": sample.observed_size_bytes,
+        }
+        for sample in samples[:MAX_CRAWL_FILE_TOO_LARGE_SAMPLES]
+    ]
+    return serialized or None
+
+
+def _parse_crawl_file_too_large_sample(
+    value: object,
+) -> CrawlFileTooLargeSample | None:
+    if not isinstance(value, Mapping):
+        return None
+    sample = cast(Mapping[object, object], value)
+
+    raw_url = sample.get("url")
+    if not isinstance(raw_url, str) or not raw_url.strip():
+        return None
+
+    try:
+        observed_size_bytes = _optional_non_negative_int(
+            sample.get("observed_size_bytes")
+        )
+    except ValueError:
+        return None
+
+    return CrawlFileTooLargeSample(
+        url=truncate_crawl_file_too_large_sample_url(raw_url),
+        observed_size_bytes=observed_size_bytes,
+    )
+
+
+def _optional_non_negative_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("expected non-negative int or None")
+    if value < 0:
+        raise ValueError("expected non-negative int or None")
+    return value
+
+
 class CrawlRun(Entity):
     def __init__(
         self,
@@ -49,6 +131,8 @@ class CrawlRun(Entity):
         job_id: Optional["UUID"],
         failure_summary: Optional[dict[FailureReason, int]] = None,
         outcome_code: Optional[CrawlOutcomeCode] = None,
+        files_too_large_download_limit_bytes: Optional[int] = None,
+        files_too_large_samples: tuple[CrawlFileTooLargeSample, ...] = (),
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.status = status
@@ -61,6 +145,8 @@ class CrawlRun(Entity):
         self.pages_hash_retained = pages_hash_retained
         self.files_hash_retained = files_hash_retained
         self.files_too_large_skipped = files_too_large_skipped
+        self.files_too_large_download_limit_bytes = files_too_large_download_limit_bytes
+        self.files_too_large_samples = files_too_large_samples
         self.finished_at = finished_at
         self.website_id = website_id
         self.tenant_id = tenant_id
@@ -98,6 +184,8 @@ class CrawlRun(Entity):
             pages_hash_retained=None,
             files_hash_retained=None,
             files_too_large_skipped=None,
+            files_too_large_download_limit_bytes=None,
+            files_too_large_samples=(),
             status=Status.QUEUED,
             result_location=None,
             finished_at=None,
@@ -147,6 +235,12 @@ class CrawlRun(Entity):
             pages_hash_retained=record.pages_hash_retained,
             files_hash_retained=record.files_hash_retained,
             files_too_large_skipped=record.files_too_large_skipped,
+            files_too_large_download_limit_bytes=(
+                record.files_too_large_download_limit_bytes
+            ),
+            files_too_large_samples=parse_crawl_file_too_large_samples(
+                record.files_too_large_samples
+            ),
             job_id=record.job_id,
             status=Status(job.status) if job else Status.QUEUED,
             result_location=job.result_location if job else None,
@@ -170,6 +264,8 @@ class CrawlRun(Entity):
         files_hash_retained: Optional[int] = None,
         files_too_large_skipped: Optional[int] = None,
         outcome_code: Optional[CrawlOutcomeCode] = None,
+        files_too_large_download_limit_bytes: Optional[int] = None,
+        files_too_large_samples: Sequence[CrawlFileTooLargeSample] | None = None,
     ) -> "CrawlRun":
         if job_id is not None:
             self.job_id = job_id
@@ -197,6 +293,14 @@ class CrawlRun(Entity):
 
         if files_too_large_skipped is not None:
             self.files_too_large_skipped = files_too_large_skipped
+
+        if files_too_large_download_limit_bytes is not None:
+            self.files_too_large_download_limit_bytes = (
+                files_too_large_download_limit_bytes
+            )
+
+        if files_too_large_samples is not None:
+            self.files_too_large_samples = tuple(files_too_large_samples)
 
         if outcome_code is not None:
             self.outcome_code = outcome_code

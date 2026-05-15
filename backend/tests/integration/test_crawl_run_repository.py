@@ -7,10 +7,15 @@ import pytest
 import sqlalchemy as sa
 
 from intric.database.tables.ai_models_table import EmbeddingModels
+from intric.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from intric.database.tables.websites_table import Websites as WebsitesTable
 from intric.main.models import Status
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
-from intric.websites.domain.crawl_run import CrawlRun, CrawlType
+from intric.websites.domain.crawl_run import (
+    CrawlFileTooLargeSample,
+    CrawlRun,
+    CrawlType,
+)
 from intric.websites.domain.crawl_run_repo import CrawlRunRepository
 from intric.websites.domain.website import UpdateInterval
 
@@ -24,6 +29,8 @@ def _crawl_run_for_website(
     files_hash_retained: int,
     files_too_large_skipped: int,
     outcome_code: CrawlOutcomeCode,
+    files_too_large_download_limit_bytes: int | None = None,
+    files_too_large_samples: tuple[CrawlFileTooLargeSample, ...] = (),
 ) -> CrawlRun:
     return CrawlRun(
         id=None,
@@ -39,6 +46,8 @@ def _crawl_run_for_website(
         pages_hash_retained=pages_hash_retained,
         files_hash_retained=files_hash_retained,
         files_too_large_skipped=files_too_large_skipped,
+        files_too_large_download_limit_bytes=files_too_large_download_limit_bytes,
+        files_too_large_samples=files_too_large_samples,
         status=Status.QUEUED,
         result_location=None,
         finished_at=None,
@@ -86,6 +95,13 @@ async def test_crawl_run_repository_round_trips_source_retention_fields(
                 pages_hash_retained=4,
                 files_hash_retained=1,
                 files_too_large_skipped=2,
+                files_too_large_download_limit_bytes=10_485_760,
+                files_too_large_samples=(
+                    CrawlFileTooLargeSample(
+                        url="https://example.com/large.pdf",
+                        observed_size_bytes=19_746_387,
+                    ),
+                ),
                 outcome_code=CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY,
             )
         )
@@ -95,7 +111,25 @@ async def test_crawl_run_repository_round_trips_source_retention_fields(
         assert inserted.pages_hash_retained == 4
         assert inserted.files_hash_retained == 1
         assert inserted.files_too_large_skipped == 2
+        assert inserted.files_too_large_download_limit_bytes == 10_485_760
+        assert inserted.files_too_large_samples == (
+            CrawlFileTooLargeSample(
+                url="https://example.com/large.pdf",
+                observed_size_bytes=19_746_387,
+            ),
+        )
         assert inserted.outcome_code == CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY
+        stored_shape = await session.scalar(
+            sa.select(CrawlRunsTable.files_too_large_samples).where(
+                CrawlRunsTable.id == inserted_id
+            )
+        )
+        assert stored_shape == [
+            {
+                "url": "https://example.com/large.pdf",
+                "observed_size_bytes": 19_746_387,
+            }
+        ]
 
     async with db_session() as session:
         repo = CrawlRunRepository(session)
@@ -104,6 +138,13 @@ async def test_crawl_run_repository_round_trips_source_retention_fields(
         assert loaded.pages_hash_retained == 4
         assert loaded.files_hash_retained == 1
         assert loaded.files_too_large_skipped == 2
+        assert loaded.files_too_large_download_limit_bytes == 10_485_760
+        assert loaded.files_too_large_samples == (
+            CrawlFileTooLargeSample(
+                url="https://example.com/large.pdf",
+                observed_size_bytes=19_746_387,
+            ),
+        )
         assert loaded.outcome_code == CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY
 
         loaded.update(
@@ -111,6 +152,13 @@ async def test_crawl_run_repository_round_trips_source_retention_fields(
             pages_hash_retained=8,
             files_hash_retained=2,
             files_too_large_skipped=3,
+            files_too_large_download_limit_bytes=20_971_520,
+            files_too_large_samples=(
+                CrawlFileTooLargeSample(
+                    url="https://example.com/other.pdf",
+                    observed_size_bytes=None,
+                ),
+            ),
             outcome_code=CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES,
         )
         updated = await repo.update(loaded)
@@ -118,6 +166,13 @@ async def test_crawl_run_repository_round_trips_source_retention_fields(
         assert updated.pages_hash_retained == 8
         assert updated.files_hash_retained == 2
         assert updated.files_too_large_skipped == 3
+        assert updated.files_too_large_download_limit_bytes == 20_971_520
+        assert updated.files_too_large_samples == (
+            CrawlFileTooLargeSample(
+                url="https://example.com/other.pdf",
+                observed_size_bytes=None,
+            ),
+        )
         assert (
             updated.outcome_code == CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
         )
@@ -129,6 +184,13 @@ async def test_crawl_run_repository_round_trips_source_retention_fields(
         assert reloaded.pages_hash_retained == 8
         assert reloaded.files_hash_retained == 2
         assert reloaded.files_too_large_skipped == 3
+        assert reloaded.files_too_large_download_limit_bytes == 20_971_520
+        assert reloaded.files_too_large_samples == (
+            CrawlFileTooLargeSample(
+                url="https://example.com/other.pdf",
+                observed_size_bytes=None,
+            ),
+        )
         assert (
             reloaded.outcome_code == CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
         )

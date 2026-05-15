@@ -9514,6 +9514,13 @@ export interface components {
      * @enum {string}
      */
     CrawlAbortConflictCode: "RUNNING_ABORT_NOT_IMPLEMENTED" | "CRAWL_NOT_ABORTABLE";
+    /** CrawlFileTooLargeSamplePublic */
+    CrawlFileTooLargeSamplePublic: {
+      /** Url */
+      url: string;
+      /** Observed Size Bytes */
+      observed_size_bytes?: number | null;
+    };
     /**
      * CrawlLifecycle
      * @enum {string}
@@ -9560,8 +9567,6 @@ export interface components {
       detail?: string | null;
       /** Affected Count */
       affected_count?: number | null;
-      /** Samples */
-      samples?: string[];
     };
     /**
      * CrawlOutcomeSeverity
@@ -17629,6 +17634,10 @@ export interface components {
       files_hash_retained?: number | null;
       /** Files Too Large Skipped */
       files_too_large_skipped?: number | null;
+      /** Files Too Large Download Limit Bytes */
+      files_too_large_download_limit_bytes?: number | null;
+      /** Files Too Large Samples */
+      files_too_large_samples?: components["schemas"]["CrawlFileTooLargeSamplePublic"][];
       /** Failure Summary */
       failure_summary?: {
         [key: string]: number;
@@ -17670,6 +17679,10 @@ export interface components {
       files_hash_retained?: number | null;
       /** Files Too Large Skipped */
       files_too_large_skipped?: number | null;
+      /** Files Too Large Download Limit Bytes */
+      files_too_large_download_limit_bytes?: number | null;
+      /** Files Too Large Samples */
+      files_too_large_samples?: components["schemas"]["CrawlFileTooLargeSamplePublic"][];
       /** Failure Summary */
       failure_summary?: {
         [key: string]: number;

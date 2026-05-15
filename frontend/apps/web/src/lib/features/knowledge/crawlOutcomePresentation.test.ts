@@ -362,7 +362,18 @@ test("crawl run labels explain files skipped by size limit", () => {
       pages_source_retained: 0,
       pages_failed: 0,
       files_failed: 0
-    }
+    },
+    files_too_large_download_limit_bytes: 10_485_760,
+    files_too_large_samples: [
+      {
+        url: "https://example.com/large.pdf",
+        observed_size_bytes: 19_746_387
+      },
+      {
+        url: "https://example.com/unknown.pdf",
+        observed_size_bytes: null
+      }
+    ]
   } as unknown as CrawlRun;
 
   const labels = getCrawlRunResultLabels(crawl);
@@ -373,6 +384,9 @@ test("crawl run labels explain files skipped by size limit", () => {
     "Too large: 12 files"
   ]);
   expect(labels[2].tooltip).toBe(
-    "12 files were skipped because they exceed the crawler download size limit."
+    "12 files were skipped because they exceed the crawler download size limit.\n" +
+      "Limit: 10 MB\n" +
+      "https://example.com/large.pdf (19 MB)\n" +
+      "https://example.com/unknown.pdf (size unknown)"
   );
 });

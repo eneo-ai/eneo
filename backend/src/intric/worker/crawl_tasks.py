@@ -33,7 +33,7 @@ from intric.websites.domain.crawl_outcome import (
     FailureReason,
     classify_crawl_outcome,
 )
-from intric.websites.domain.crawl_run import CrawlType
+from intric.websites.domain.crawl_run import CrawlFileTooLargeSample, CrawlType
 from intric.websites.domain.crawl_terminal import (
     crawl_pending_queue_enqueue_failure_message,
 )
@@ -909,6 +909,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             num_hash_retained_files = 0
             num_source_retained_pages = 0
             num_files_too_large_skipped = 0
+            files_too_large_download_limit_bytes: int | None = None
+            files_too_large_samples: tuple[CrawlFileTooLargeSample, ...] = ()
 
             # Aggregate failure reasons across all batches
             failure_counts: dict[FailureReason, int] = defaultdict(int)
@@ -1031,6 +1033,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 num_files_too_large_skipped = (
                     crawl.diagnostics.files_too_large_skipped_count
                 )
+                files_too_large_download_limit_bytes = (
+                    crawl.diagnostics.files_too_large_download_limit_bytes
+                )
+                files_too_large_samples = crawl.diagnostics.files_too_large_samples
                 # Page/file failures cannot exist before processing; this call only
                 # classifies crawler-level terminal conditions that must skip cleanup.
                 crawl_output_outcome_code = classify_crawl_outcome(
@@ -1089,6 +1095,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                     pages_hash_retained=0,
                                     files_hash_retained=0,
                                     files_too_large_skipped=num_files_too_large_skipped,
+                                    files_too_large_download_limit_bytes=(
+                                        files_too_large_download_limit_bytes
+                                    ),
+                                    files_too_large_samples=files_too_large_samples,
                                     failure_summary=None,
                                 ),
                             ),
@@ -1462,6 +1472,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             pages_hash_retained=num_hash_retained_pages,
                             files_hash_retained=num_hash_retained_files,
                             files_too_large_skipped=num_files_too_large_skipped,
+                            files_too_large_download_limit_bytes=(
+                                files_too_large_download_limit_bytes
+                            ),
+                            files_too_large_samples=files_too_large_samples,
                             failure_summary=failure_summary,
                         ),
                     ),

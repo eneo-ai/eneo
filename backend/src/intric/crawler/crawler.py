@@ -30,6 +30,8 @@ from twisted.python.failure import Failure
 from intric.crawler.parse_html import CrawledPage
 from intric.crawler.pipelines import (
     FILE_STATUS_TOO_LARGE,
+    FILE_TOO_LARGE_DOWNLOAD_LIMIT_STAT,
+    FILE_TOO_LARGE_SKIPPED_SAMPLES_STAT,
     FileNamePipeline,
     FileSizeLimitStatsExtension,
 )
@@ -42,7 +44,12 @@ from intric.tenants.crawler_settings_helper import (
     get_crawler_setting,
 )
 from intric.websites.domain.crawl_outcome import CrawlTerminationReason
-from intric.websites.domain.crawl_run import CrawlType
+from intric.websites.domain.crawl_run import (
+    CrawlFileTooLargeSample,
+    CrawlType,
+    parse_crawl_file_too_large_samples,
+    serialize_crawl_file_too_large_samples,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +247,8 @@ class CrawlDiagnostics:
         default_factory=_empty_string_counts
     )
     file_status_counts: dict[str, int] = field(default_factory=_empty_string_counts)
+    files_too_large_download_limit_bytes: int | None = None
+    files_too_large_samples: tuple[CrawlFileTooLargeSample, ...] = ()
     finish_reason: str | None = None
     elapsed_time_seconds: float | None = None
 
@@ -269,6 +278,12 @@ class CrawlDiagnostics:
                 typed_stats, "downloader/exception_type_count/"
             ),
             file_status_counts=_string_counts(typed_stats, "file_status_count/"),
+            files_too_large_download_limit_bytes=_optional_int_stat(
+                typed_stats, FILE_TOO_LARGE_DOWNLOAD_LIMIT_STAT
+            ),
+            files_too_large_samples=parse_crawl_file_too_large_samples(
+                typed_stats.get(FILE_TOO_LARGE_SKIPPED_SAMPLES_STAT)
+            ),
             finish_reason=_str_stat(typed_stats, "finish_reason"),
             elapsed_time_seconds=_float_stat(typed_stats, "elapsed_time_seconds"),
         )
@@ -339,6 +354,13 @@ class CrawlDiagnostics:
             },
             "downloader_exception_counts": self.downloader_exception_counts,
             "file_status_counts": self.file_status_counts,
+            "files_too_large_download_limit_bytes": (
+                self.files_too_large_download_limit_bytes
+            ),
+            "files_too_large_samples": (
+                serialize_crawl_file_too_large_samples(self.files_too_large_samples)
+                or []
+            ),
             "finish_reason": self.finish_reason,
             "elapsed_time_seconds": self.elapsed_time_seconds,
         }
@@ -347,6 +369,11 @@ class CrawlDiagnostics:
 def _int_stat(stats: dict[object, object], key: str) -> int:
     value = stats.get(key)
     return value if isinstance(value, int) else 0
+
+
+def _optional_int_stat(stats: dict[object, object], key: str) -> int | None:
+    value = stats.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _float_stat(stats: dict[object, object], key: str) -> float | None:

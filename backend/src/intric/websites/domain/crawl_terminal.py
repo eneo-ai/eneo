@@ -14,6 +14,10 @@ from intric.websites.domain.crawl_outcome import (
     FailureReason,
     serialize_failure_summary_for_storage,
 )
+from intric.websites.domain.crawl_run import (
+    CrawlFileTooLargeSample,
+    serialize_crawl_file_too_large_samples,
+)
 
 ACTIVE_TERMINAL_JOB_STATUSES: tuple[Status, ...] = (
     Status.QUEUED,
@@ -32,6 +36,8 @@ class CrawlRunTerminalUpdate:
     files_hash_retained: int
     files_too_large_skipped: int
     failure_summary: dict[FailureReason, int] | None
+    files_too_large_download_limit_bytes: int | None = None
+    files_too_large_samples: tuple[CrawlFileTooLargeSample, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +187,12 @@ def _crawl_run_values(event: TerminalEvent) -> dict[str, object]:
         pages_hash_retained=update.pages_hash_retained,
         files_hash_retained=update.files_hash_retained,
         files_too_large_skipped=update.files_too_large_skipped,
+        files_too_large_download_limit_bytes=(
+            update.files_too_large_download_limit_bytes
+        ),
+        files_too_large_samples=serialize_crawl_file_too_large_samples(
+            update.files_too_large_samples
+        ),
         failure_summary=serialize_failure_summary_for_storage(update.failure_summary),
     )
     return values

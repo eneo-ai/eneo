@@ -43,6 +43,17 @@ class CrawlRuns(BasePublic):
         nullable=True,
         comment="Files skipped because Scrapy stopped the download at DOWNLOAD_MAXSIZE",
     )
+    files_too_large_download_limit_bytes: Mapped[Optional[int]] = mapped_column(
+        nullable=True,
+        comment="Resolved DOWNLOAD_MAXSIZE value used when file-size skips occurred",
+    )
+    files_too_large_samples: Mapped[Optional[list[dict[str, int | str | None]]]] = (
+        mapped_column(
+            JSONB,
+            nullable=True,
+            comment="Capped file URLs and observed sizes skipped by DOWNLOAD_MAXSIZE",
+        )
+    )
     outcome_code: Mapped[Optional[str]] = mapped_column(
         String,
         nullable=True,

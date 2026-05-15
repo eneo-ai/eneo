@@ -20,6 +20,7 @@ from intric.main.models import (
     is_provided,
 )
 from intric.websites.crawl_dependencies.crawl_models import (
+    CrawlFileTooLargeSamplePublic,
     CrawlOutcomePublic,
     CrawlRunProcessingSummary,
     CrawlRunSparse,
@@ -74,6 +75,10 @@ class WebsiteSparse(ResourcePermissionsMixin, WebsiteBase, InDB):
     metadata: WebsiteMetadata
 
 
+def _empty_too_large_file_samples() -> list[CrawlFileTooLargeSamplePublic]:
+    return []
+
+
 class CrawlRunPublic(BaseResponse):
     pages_crawled: Optional[int]
     files_downloaded: Optional[int]
@@ -83,6 +88,10 @@ class CrawlRunPublic(BaseResponse):
     pages_hash_retained: Optional[int] = None
     files_hash_retained: Optional[int] = None
     files_too_large_skipped: Optional[int] = None
+    files_too_large_download_limit_bytes: Optional[int] = None
+    files_too_large_samples: list[CrawlFileTooLargeSamplePublic] = Field(
+        default_factory=_empty_too_large_file_samples
+    )
     failure_summary: Optional[dict[FailureReason, int]] = None
     outcome_code: Optional[CrawlOutcomeCode] = None
     status: Status
@@ -115,6 +124,16 @@ class CrawlRunPublic(BaseResponse):
             pages_hash_retained=crawl_run.pages_hash_retained,
             files_hash_retained=crawl_run.files_hash_retained,
             files_too_large_skipped=crawl_run.files_too_large_skipped,
+            files_too_large_download_limit_bytes=(
+                crawl_run.files_too_large_download_limit_bytes
+            ),
+            files_too_large_samples=[
+                CrawlFileTooLargeSamplePublic(
+                    url=sample.url,
+                    observed_size_bytes=sample.observed_size_bytes,
+                )
+                for sample in crawl_run.files_too_large_samples
+            ],
             failure_summary=crawl_run.failure_summary,
             outcome_code=crawl_run.outcome_code,
             status=crawl_run.status,

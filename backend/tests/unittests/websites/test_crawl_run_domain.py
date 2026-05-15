@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from intric.main.models import Status
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
-from intric.websites.domain.crawl_run import CrawlRun
+from intric.websites.domain.crawl_run import CrawlFileTooLargeSample, CrawlRun
 from intric.websites.domain.crawl_run_repo import _serialize_crawl_outcome_code
 from intric.websites.presentation.website_models import (
     CrawlRunPublic as PresentationCrawlRunPublic,
@@ -18,6 +18,8 @@ def _crawl_run_record(
     pages_hash_retained: int | None = None,
     files_hash_retained: int | None = None,
     files_too_large_skipped: int | None = None,
+    files_too_large_download_limit_bytes: int | None = None,
+    files_too_large_samples: list[dict[str, int | str | None]] | None = None,
 ):
     now = datetime.now(timezone.utc)
     return SimpleNamespace(
@@ -34,6 +36,8 @@ def _crawl_run_record(
         pages_hash_retained=pages_hash_retained,
         files_hash_retained=files_hash_retained,
         files_too_large_skipped=files_too_large_skipped,
+        files_too_large_download_limit_bytes=files_too_large_download_limit_bytes,
+        files_too_large_samples=files_too_large_samples,
         job_id=uuid4(),
         job=SimpleNamespace(
             status=Status.FAILED.value,
@@ -98,6 +102,42 @@ def test_crawl_run_domain_maps_files_too_large_skipped():
     assert crawl_run.files_too_large_skipped == 2
 
 
+def test_crawl_run_domain_maps_too_large_file_samples():
+    crawl_run = CrawlRun.to_domain(
+        record=_crawl_run_record(
+            outcome_code=None,
+            files_too_large_download_limit_bytes=10_485_760,
+            files_too_large_samples=[
+                {
+                    "url": "https://example.com/large.pdf",
+                    "observed_size_bytes": 19_746_387,
+                }
+            ],
+        )
+    )
+
+    assert crawl_run.files_too_large_download_limit_bytes == 10_485_760
+    assert crawl_run.files_too_large_samples == (
+        CrawlFileTooLargeSample(
+            url="https://example.com/large.pdf",
+            observed_size_bytes=19_746_387,
+        ),
+    )
+
+
+def test_crawl_run_domain_tolerates_legacy_null_too_large_file_samples():
+    crawl_run = CrawlRun.to_domain(
+        record=_crawl_run_record(
+            outcome_code=None,
+            files_too_large_download_limit_bytes=None,
+            files_too_large_samples=None,
+        )
+    )
+
+    assert crawl_run.files_too_large_download_limit_bytes is None
+    assert crawl_run.files_too_large_samples == ()
+
+
 def test_crawl_run_create_defaults_pages_source_retained_to_none():
     website = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
 
@@ -107,6 +147,8 @@ def test_crawl_run_create_defaults_pages_source_retained_to_none():
     assert crawl_run.pages_hash_retained is None
     assert crawl_run.files_hash_retained is None
     assert crawl_run.files_too_large_skipped is None
+    assert crawl_run.files_too_large_download_limit_bytes is None
+    assert crawl_run.files_too_large_samples == ()
 
 
 def test_crawl_run_update_accepts_typed_outcome_code():
@@ -222,6 +264,46 @@ def test_crawl_run_update_accepts_files_too_large_skipped():
     assert crawl_run.files_too_large_skipped == 3
 
 
+def test_crawl_run_update_accepts_too_large_file_sample_fields():
+    crawl_run = CrawlRun(
+        id=uuid4(),
+        created_at=None,
+        updated_at=None,
+        website_id=uuid4(),
+        tenant_id=uuid4(),
+        pages_crawled=None,
+        files_downloaded=None,
+        pages_failed=None,
+        files_failed=None,
+        pages_source_retained=None,
+        pages_hash_retained=None,
+        files_hash_retained=None,
+        files_too_large_skipped=None,
+        status=Status.QUEUED,
+        result_location=None,
+        finished_at=None,
+        job_id=None,
+    )
+
+    crawl_run.update(
+        files_too_large_download_limit_bytes=10_485_760,
+        files_too_large_samples=(
+            CrawlFileTooLargeSample(
+                url="https://example.com/large.pdf",
+                observed_size_bytes=19_746_387,
+            ),
+        ),
+    )
+
+    assert crawl_run.files_too_large_download_limit_bytes == 10_485_760
+    assert crawl_run.files_too_large_samples == (
+        CrawlFileTooLargeSample(
+            url="https://example.com/large.pdf",
+            observed_size_bytes=19_746_387,
+        ),
+    )
+
+
 def test_presentation_crawl_run_public_exposes_pages_source_retained():
     now = datetime.now(timezone.utc)
     crawl_run = CrawlRun(
@@ -269,6 +351,13 @@ def test_presentation_crawl_run_public_exposes_processing_summary():
         pages_hash_retained=290,
         files_hash_retained=1,
         files_too_large_skipped=2,
+        files_too_large_download_limit_bytes=10_485_760,
+        files_too_large_samples=(
+            CrawlFileTooLargeSample(
+                url="https://example.com/large.pdf",
+                observed_size_bytes=19_746_387,
+            ),
+        ),
         status=Status.COMPLETE,
         result_location=None,
         finished_at=now,
@@ -282,6 +371,10 @@ def test_presentation_crawl_run_public_exposes_processing_summary():
     assert public.pages_hash_retained == 290
     assert public.files_hash_retained == 1
     assert public.files_too_large_skipped == 2
+    assert public.files_too_large_download_limit_bytes == 10_485_760
+    assert len(public.files_too_large_samples) == 1
+    assert public.files_too_large_samples[0].url == "https://example.com/large.pdf"
+    assert public.files_too_large_samples[0].observed_size_bytes == 19_746_387
     assert public.processing_summary is not None
     assert public.processing_summary.pages_fetched == 300
     assert public.processing_summary.pages_indexed == 10

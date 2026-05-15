@@ -7482,21 +7482,130 @@ tasks:
       follow_up_notes:
         - "Add retry/reset circuit-breaker actions only as a separate audited mutation slice."
         - "If product wants one per-website health table later, merge failure state with processing only after preserving websites that have current failure state but no recent processing rows."
+  - id: T149
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Persist and expose capped too-large crawler file samples so users and admins can see which files were skipped because they exceeded Scrapy's configured download limit."
+    allowed_files:
+      - "backend/alembic/versions/202605152115_add_crawl_run_too_large_file_samples.py"
+      - "backend/src/intric/crawler/crawler.py"
+      - "backend/src/intric/crawler/pipelines.py"
+      - "backend/src/intric/database/tables/websites_table.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+      - "backend/src/intric/websites/domain/crawl_run.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/src/intric/websites/domain/crawl_terminal.py"
+      - "backend/src/intric/websites/presentation/website_models.py"
+      - "backend/tests/fixtures/crawl_outcome_parity.json"
+      - "backend/tests/integration/test_crawl_run_repository.py"
+      - "backend/tests/unittests/crawler/test_crawler_diagnostics.py"
+      - "backend/tests/unittests/crawler/test_filename_pipeline.py"
+      - "backend/tests/unittests/websites/test_crawl_run_domain.py"
+      - "backend/tests/unittests/worker/test_crawl_terminal.py"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "frontend/apps/web/src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Use Scrapy's downloader/pipeline failure signals and stats collector instead of pre-crawling or downloading oversized files manually."
+      - "Store only bounded diagnostics: one per-run configured byte limit and at most five samples with URL plus observed size."
+      - "Do not add unbounded URL logs, per-sample duplicate limit fields, raw exception payloads, or another generic JSON diagnostics bag."
+      - "Keep page-level failure summaries separate from too-large file skip visibility; oversized files are a skipped-file outcome, not a crawl failure."
+      - "Regenerate OpenAPI types instead of hand-maintaining frontend/backend schema duplicates."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/crawler/test_filename_pipeline.py tests/unittests/crawler/test_crawler_diagnostics.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/websites/test_crawl_run_domain.py tests/unittests/websites/test_crawl_outcome.py tests/integration/test_crawl_run_repository.py -q"
+      - "cd backend && uv run ruff check src/intric/crawler/pipelines.py src/intric/crawler/crawler.py src/intric/worker/crawl_tasks.py src/intric/websites/domain/crawl_run.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_terminal.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/websites/presentation/website_models.py tests/unittests/crawler/test_filename_pipeline.py tests/unittests/crawler/test_crawler_diagnostics.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/websites/test_crawl_run_domain.py tests/unittests/websites/test_crawl_outcome.py tests/integration/test_crawl_run_repository.py"
+      - "cd backend && uv run ruff format --check src/intric/crawler/pipelines.py src/intric/crawler/crawler.py src/intric/worker/crawl_tasks.py src/intric/websites/domain/crawl_run.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_terminal.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/websites/presentation/website_models.py tests/unittests/crawler/test_filename_pipeline.py tests/unittests/crawler/test_crawler_diagnostics.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/websites/test_crawl_run_domain.py tests/unittests/websites/test_crawl_outcome.py tests/integration/test_crawl_run_repository.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/crawler/pipelines.py src/intric/crawler/crawler.py src/intric/worker/crawl_tasks.py src/intric/websites/domain/crawl_run.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_terminal.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/websites/presentation/website_models.py tests/unittests/crawler/test_filename_pipeline.py tests/unittests/crawler/test_crawler_diagnostics.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/websites/test_crawl_run_domain.py tests/unittests/websites/test_crawl_outcome.py tests/integration/test_crawl_run_repository.py"
+      - "cd backend && uv run alembic heads"
+      - "./scripts/check-intric-js-openapi-schema.sh"
+      - "cd frontend/apps/web && bun run i18n:compile"
+      - "cd frontend/apps/web && bun run test:unit src/lib/features/knowledge/crawlOutcomePresentation.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts --run"
+      - "cd frontend/apps/web && bun run check"
+      - "cd frontend/apps/web && bun run lint"
+      - "cd frontend && bun run --filter @intric/intric-js lint"
+    red_tests:
+      - "Pipeline tests failed until too-large failures recorded Scrapy stats for count, configured limit, and capped samples from both header-time and byte-time stop paths."
+      - "Diagnostics tests failed until Scrapy stats converted into typed `CrawlDiagnostics` limit/sample fields with malformed legacy tolerance."
+      - "Repository and terminal tests failed until crawl-run writes persisted and round-tripped the new bounded JSONB sample shape."
+      - "Frontend presentation tests failed until too-large file chips explained the configured limit and showed capped sample URLs with observed sizes when available."
+    stop_if:
+      - "The design requires storing every oversized file URL for a large municipal crawl."
+      - "The UI needs raw Scrapy exception text or downloader internals."
+      - "Strict Pyright requires broad `Any`, `type: ignore`, or untyped diagnostics bags."
+    receipt:
+      result: done
+      summary: "Added durable too-large file diagnostics for crawl runs. Scrapy downloader/pipeline failure handling now records the configured download limit and at most five URL samples in Scrapy stats. `CrawlDiagnostics`, terminal crawl-run writes, repository writes, public crawl-run schemas, OpenAPI-generated frontend types, and crawl-result presentation all carry the bounded contract. UI tooltips now explain the file-size limit and show representative skipped files without storing unbounded logs."
+      changed_files:
+        - "backend/alembic/versions/202605152115_add_crawl_run_too_large_file_samples.py"
+        - "backend/src/intric/crawler/crawler.py"
+        - "backend/src/intric/crawler/pipelines.py"
+        - "backend/src/intric/database/tables/websites_table.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+        - "backend/src/intric/websites/domain/crawl_run.py"
+        - "backend/src/intric/websites/domain/crawl_run_repo.py"
+        - "backend/src/intric/websites/domain/crawl_terminal.py"
+        - "backend/src/intric/websites/presentation/website_models.py"
+        - "backend/tests/fixtures/crawl_outcome_parity.json"
+        - "backend/tests/integration/test_crawl_run_repository.py"
+        - "backend/tests/unittests/crawler/test_crawler_diagnostics.py"
+        - "backend/tests/unittests/crawler/test_filename_pipeline.py"
+        - "backend/tests/unittests/websites/test_crawl_run_domain.py"
+        - "backend/tests/unittests/worker/test_crawl_terminal.py"
+        - "frontend/apps/web/messages/en.json"
+        - "frontend/apps/web/messages/sv.json"
+        - "frontend/apps/web/src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+        - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+        - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+        - "frontend/packages/intric-js/src/types/schema.d.ts"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/crawler/test_filename_pipeline.py tests/unittests/crawler/test_crawler_diagnostics.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/websites/test_crawl_run_domain.py tests/unittests/websites/test_crawl_outcome.py tests/integration/test_crawl_run_repository.py -q"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/crawler/pipelines.py src/intric/crawler/crawler.py src/intric/worker/crawl_tasks.py src/intric/websites/domain/crawl_run.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_terminal.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/websites/presentation/website_models.py tests/unittests/crawler/test_filename_pipeline.py tests/unittests/crawler/test_crawler_diagnostics.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/websites/test_crawl_run_domain.py tests/unittests/websites/test_crawl_outcome.py tests/integration/test_crawl_run_repository.py"
+        - "cd backend && uv run alembic heads"
+        - "./scripts/check-intric-js-openapi-schema.sh"
+        - "cd frontend/apps/web && bun run i18n:compile"
+        - "cd frontend/apps/web && bun run test:unit src/lib/features/knowledge/crawlOutcomePresentation.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts --run"
+      claude:
+        verdict: green
+        min_score: 8
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t149-capped-too-large-file-samples-plan-20260515T210952Z.md"
+          - ".codex/artifacts/claude-peer-loop-t149-capped-too-large-file-samples-plan-re-review-20260515T211337Z.md"
+          - ".codex/artifacts/claude-peer-loop-t149-too-large-file-samples-implementation-review-20260515T214051Z.md"
+        resolution: "Claude initially returned changes_required for duplicated per-sample limits, dead `CrawlOutcomePublic.samples`, and missing migration proof. The re-review green-lit the revised contract after the design moved the limit to a per-run column, removed the dead outcome samples field, and added an Alembic migration plus bounded JSONB samples."
+      implementation_review:
+        verdict: green
+        min_score: 8
+        resolution: "Claude green-lit the implementation. Non-blocking polish for crawl-task local initialization, domain-owned URL truncation, and Scrapy CancelledError wording context was applied before commit."
+      follow_up_notes:
+        - "If product later needs more than five oversized file examples, add a separate paginated diagnostics endpoint instead of widening the crawl-run row."
+        - "Keep future file skip classes on the same bounded diagnostics pattern: typed count, optional per-run configuration, capped examples, no raw logs."
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T148
+    task: T149
     commands:
-      - "cd backend && uv run pytest tests/integration/test_admin_crawler_failure_inventory.py -q"
-      - "cd backend && uv run ruff check src/intric/websites/domain/website_admin_repo.py src/intric/websites/presentation/crawler_admin_models.py src/intric/admin/crawler_admin_router.py tests/integration/test_admin_crawler_failure_inventory.py"
-      - "cd backend && uv run pyright --pythonpath ./.venv/bin/python src/intric/websites/domain/website_admin_repo.py src/intric/websites/presentation/crawler_admin_models.py src/intric/admin/crawler_admin_router.py"
+      - "cd backend && uv run pytest tests/unittests/crawler/test_filename_pipeline.py tests/unittests/crawler/test_crawler_diagnostics.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/websites/test_crawl_run_domain.py tests/unittests/websites/test_crawl_outcome.py tests/integration/test_crawl_run_repository.py -q"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/crawler/pipelines.py src/intric/crawler/crawler.py src/intric/worker/crawl_tasks.py src/intric/websites/domain/crawl_run.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_terminal.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/websites/presentation/website_models.py tests/unittests/crawler/test_filename_pipeline.py tests/unittests/crawler/test_crawler_diagnostics.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/websites/test_crawl_run_domain.py tests/unittests/websites/test_crawl_outcome.py tests/integration/test_crawl_run_repository.py"
+      - "cd backend && uv run alembic heads"
       - "./scripts/check-intric-js-openapi-schema.sh"
       - "cd frontend/apps/web && bun run i18n:compile"
-      - "cd frontend/apps/web && bun run test:unit src/lib/features/admin/crawlerFailureInventory.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts --run"
+      - "cd frontend/apps/web && bun run test:unit src/lib/features/knowledge/crawlOutcomePresentation.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts --run"
       - "cd frontend/apps/web && bun run check"
       - "cd frontend/apps/web && bun run lint"
       - "cd frontend && bun run --filter @intric/intric-js lint"
-      - "cd backend && uv run pytest tests/integration/test_admin_crawler_failure_inventory.py tests/integration/test_sysadmin_crawler_failure_inventory.py -q"
-    note: "T148 passed red-first backend tenant failure-inventory tests, focused Ruff, focused strict Pyright on product source files, OpenAPI freshness, targeted frontend unit tests, i18n compile, Svelte check, web lint, intric-js lint, shadcn/UX review, and sysadmin regression coverage."
+      - "rg -n \"outcome\\.samples|CrawlOutcomePublic.*samples|samples.*CrawlOutcomePublic\" frontend backend/src backend/tests || true"
+      - "git diff --check -- <intended T149 files>"
+    note: "T149 passed red-first Scrapy too-large stats tests, typed diagnostics/domain/terminal/repository tests, scoped Ruff, scoped strict Pyright, Alembic head check, OpenAPI freshness, i18n compile, targeted frontend presentation/generated-type tests, Svelte check, web lint, intric-js lint, removed-outcome-samples grep, scoped whitespace check, and a green Claude implementation gate. Svelte check still reports one existing unrelated warning in api-keys/ExtendExpirationDialog.svelte."

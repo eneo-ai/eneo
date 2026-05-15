@@ -15,8 +15,7 @@
       "severity": "info",
       "message_key": "crawl_outcome_duplicate_skipped",
       "detail": "active job 123",
-      "affected_count": null,
-      "samples": []
+      "affected_count": null
     }
   },
   {
@@ -34,8 +33,7 @@
       "severity": "info",
       "message_key": "crawl_outcome_duplicate_skipped",
       "detail": "Skipped duplicate crawl: active job 123",
-      "affected_count": null,
-      "samples": []
+      "affected_count": null
     }
   },
   {
@@ -53,8 +51,7 @@
       "severity": "error",
       "message_key": "crawl_outcome_no_pages_returned",
       "detail": "Crawl failed for https://example.com: no pages returned",
-      "affected_count": null,
-      "samples": []
+      "affected_count": null
     }
   },
   {
@@ -72,8 +69,7 @@
       "severity": "error",
       "message_key": "crawl_outcome_no_pages_returned",
       "detail": "Crawl failed for https://example.com: no pages returned",
-      "affected_count": null,
-      "samples": []
+      "affected_count": null
     }
   },
   {
@@ -93,8 +89,7 @@
       "severity": "warning",
       "message_key": "crawl_outcome_embedding_config_missing",
       "detail": null,
-      "affected_count": 1,
-      "samples": []
+      "affected_count": 1
     }
   },
   {
@@ -127,8 +122,7 @@
       "severity": "error",
       "message_key": "crawl_outcome_sitemap_no_pages",
       "detail": "Sitemap returned no page items",
-      "affected_count": null,
-      "samples": []
+      "affected_count": null
     }
   },
   {
@@ -146,8 +140,7 @@
       "severity": "error",
       "message_key": "crawl_outcome_timeout_no_pages",
       "detail": "Crawl timed out before collecting pages",
-      "affected_count": null,
-      "samples": []
+      "affected_count": null
     }
   },
   {
@@ -166,8 +159,7 @@
       "severity": "error",
       "message_key": "crawl_outcome_max_age_exceeded",
       "detail": "crawl waited past the configured maximum age",
-      "affected_count": null,
-      "samples": []
+      "affected_count": null
     }
   },
   {
@@ -186,8 +178,7 @@
       "severity": "error",
       "message_key": "crawl_outcome_queue_enqueue_failed",
       "detail": "Failed to add crawl to pending queue: Redis unavailable",
-      "affected_count": null,
-      "samples": []
+      "affected_count": null
     }
   },
   {
@@ -206,8 +197,7 @@
       "severity": "error",
       "message_key": "crawl_outcome_direct_enqueue_failed",
       "detail": "Failed to enqueue crawl directly: ARQ unavailable",
-      "affected_count": null,
-      "samples": []
+      "affected_count": null
     }
   },
   {
@@ -226,8 +216,7 @@
       "severity": "error",
       "message_key": "crawl_outcome_runtime_timeout",
       "detail": "Crawl exceeded the maximum runtime of 12 hours and was stopped",
-      "affected_count": null,
-      "samples": []
+      "affected_count": null
     }
   },
   {
@@ -246,8 +235,7 @@
       "severity": "info",
       "message_key": "crawl_outcome_source_retention_only",
       "detail": null,
-      "affected_count": 42,
-      "samples": []
+      "affected_count": 42
     }
   },
   {
@@ -280,8 +268,7 @@
       "severity": "info",
       "message_key": "crawl_outcome_all_unchanged",
       "detail": null,
-      "affected_count": 4,
-      "samples": []
+      "affected_count": 4
     }
   },
   {
@@ -314,8 +301,7 @@
       "severity": "warning",
       "message_key": "crawl_outcome_files_too_large_only",
       "detail": null,
-      "affected_count": 3,
-      "samples": []
+      "affected_count": 3
     }
   },
   {
@@ -334,8 +320,7 @@
       "severity": "warning",
       "message_key": "crawl_outcome_partial_timeout",
       "detail": "Timed out after partial output",
-      "affected_count": null,
-      "samples": []
+      "affected_count": null
     }
   },
   {
@@ -354,8 +339,7 @@
       "severity": "error",
       "message_key": "crawl_outcome_shutdown_error",
       "detail": "Scrapy reactor did not stop cleanly",
-      "affected_count": null,
-      "samples": []
+      "affected_count": null
     }
   },
   {
@@ -375,8 +359,7 @@
       "severity": "warning",
       "message_key": "crawl_outcome_page_failures",
       "detail": null,
-      "affected_count": 2,
-      "samples": []
+      "affected_count": 2
     }
   },
   {
@@ -394,8 +377,7 @@
       "severity": "warning",
       "message_key": "crawl_outcome_page_failures",
       "detail": null,
-      "affected_count": 2,
-      "samples": []
+      "affected_count": 2
     }
   },
   {
@@ -415,8 +397,7 @@
       "severity": "warning",
       "message_key": "crawl_outcome_embedding_config_missing",
       "detail": null,
-      "affected_count": 2,
-      "samples": []
+      "affected_count": 2
     }
   },
   {
@@ -434,8 +415,7 @@
       "severity": "error",
       "message_key": "crawl_outcome_unknown_error",
       "detail": "legacy failure without a known phrase",
-      "affected_count": null,
-      "samples": []
+      "affected_count": null
     }
   },
   {
@@ -453,8 +433,7 @@
       "severity": "error",
       "message_key": "crawl_outcome_unknown_error",
       "detail": "worker exited unexpectedly",
-      "affected_count": 2,
-      "samples": []
+      "affected_count": 2
     }
   }
 ]

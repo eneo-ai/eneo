@@ -14,10 +14,17 @@ from twisted.internet.defer import CancelledError
 from twisted.python.failure import Failure
 from typing_extensions import override
 
+from intric.websites.domain.crawl_run import (
+    MAX_CRAWL_FILE_TOO_LARGE_SAMPLES,
+    truncate_crawl_file_too_large_sample_url,
+)
+
 # Maximum filename length in bytes (ext4 limit is 255, leave room for safety)
 MAX_FILENAME_BYTES = 200
 FILE_STATUS_TOO_LARGE = "too_large"
 FILE_TOO_LARGE_SKIPPED_STAT = "file_too_large_skipped_count"
+FILE_TOO_LARGE_SKIPPED_SAMPLES_STAT = "file_too_large_skipped/samples"
+FILE_TOO_LARGE_DOWNLOAD_LIMIT_STAT = "file_too_large_skipped/download_limit_bytes"
 INTRIC_FILE_DOWNLOAD_META_KEY = "intric_file_download"
 FILE_SIZE_SKIP_RECORDED_META_KEY = "intric_file_size_skip_recorded"
 FILE_SIZE_SKIP_OBSERVED_BYTES_META_KEY = "intric_file_size_skip_observed_bytes"
@@ -94,7 +101,11 @@ class FileNamePipeline(FilesPipeline):
             _record_file_too_large_skip(
                 spider=cast(Any, info).spider,
                 request=request,
-                observed_size=_observed_size_from_request(request),
+                observed_size=_observed_size_from_request(request)
+                or _observed_size_from_failure(failure),
+                download_max_size=_download_max_size_from_spider(
+                    cast(Any, info).spider
+                ),
             )
             return {
                 "url": _request_url(request),
@@ -173,6 +184,7 @@ class FileSizeLimitStatsExtension:
             spider=spider,
             request=request,
             observed_size=body_length,
+            download_max_size=self._download_max_size,
         )
         raise _new_stop_download()
 
@@ -186,6 +198,7 @@ class FileSizeLimitStatsExtension:
             spider=spider,
             request=request,
             observed_size=observed_size,
+            download_max_size=self._download_max_size,
         )
         raise _new_stop_download()
 
@@ -221,11 +234,31 @@ def _observed_size_from_request(request: object) -> int:
     return observed_size if isinstance(observed_size, int) else 0
 
 
+def _observed_size_from_failure(failure: Failure) -> int:
+    failure_value = getattr(failure, "value", None)
+    # Scrapy's HTTP/1.1 handler currently includes the observed byte count in
+    # CancelledError messages when DOWNLOAD_MAXSIZE stops a response mid-body.
+    match = re.search(r"\((\d+)\).*larger than download max size", str(failure_value))
+    if match is None:
+        return 0
+    return int(match.group(1))
+
+
+def _download_max_size_from_spider(spider: object) -> int | None:
+    settings = getattr(getattr(spider, "crawler", None), "settings", None)
+    getint = getattr(settings, "getint", None)
+    if not callable(getint):
+        return None
+    value = getint("DOWNLOAD_MAXSIZE")
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def _record_file_too_large_skip(
     *,
     spider: object,
     request: object,
     observed_size: int,
+    download_max_size: int | None,
 ) -> None:
     meta = _request_meta(request)
     if meta.get(FILE_SIZE_SKIP_RECORDED_META_KEY) is True:
@@ -240,6 +273,33 @@ def _record_file_too_large_skip(
         observed_size,
         spider=spider,
     )
+    if download_max_size is not None:
+        stats.set_value(FILE_TOO_LARGE_DOWNLOAD_LIMIT_STAT, download_max_size)
+    _append_file_too_large_sample(
+        stats=stats,
+        url=_request_url(request),
+        observed_size=observed_size,
+    )
+
+
+def _append_file_too_large_sample(
+    *,
+    stats: object,
+    url: str,
+    observed_size: int,
+) -> None:
+    stats_owner = cast(Any, stats)
+    raw_samples = stats_owner.get_value(FILE_TOO_LARGE_SKIPPED_SAMPLES_STAT, [])
+    samples: list[object] = (
+        cast(list[object], raw_samples) if isinstance(raw_samples, list) else []
+    )
+    if len(samples) >= MAX_CRAWL_FILE_TOO_LARGE_SAMPLES:
+        return
+    sample = {
+        "url": truncate_crawl_file_too_large_sample_url(url),
+        "observed_size_bytes": observed_size if observed_size > 0 else None,
+    }
+    stats_owner.set_value(FILE_TOO_LARGE_SKIPPED_SAMPLES_STAT, [*samples, sample])
 
 
 def _request_meta(request: object) -> dict[str, object]:

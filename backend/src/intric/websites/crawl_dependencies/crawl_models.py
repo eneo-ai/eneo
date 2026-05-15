@@ -41,6 +41,15 @@ class CrawlTask(TaskParams):
     crawl_type: CrawlType = CrawlType.CRAWL
 
 
+class CrawlFileTooLargeSamplePublic(BaseModel):
+    url: str
+    observed_size_bytes: Optional[int] = None
+
+
+def _empty_too_large_file_samples() -> list[CrawlFileTooLargeSamplePublic]:
+    return []
+
+
 class CrawlRunBase(BaseModel):
     pages_crawled: Optional[int] = None
     files_downloaded: Optional[int] = None
@@ -50,6 +59,10 @@ class CrawlRunBase(BaseModel):
     pages_hash_retained: Optional[int] = None
     files_hash_retained: Optional[int] = None
     files_too_large_skipped: Optional[int] = None
+    files_too_large_download_limit_bytes: Optional[int] = None
+    files_too_large_samples: list[CrawlFileTooLargeSamplePublic] = Field(
+        default_factory=_empty_too_large_file_samples
+    )
     failure_summary: Optional[dict[FailureReason, int]] = None
     outcome_code: Optional["CrawlOutcomeCode"] = None
 
@@ -159,7 +172,6 @@ class CrawlOutcomePublic(BaseModel):
     message_key: str
     detail: Optional[str] = None
     affected_count: Optional[int] = None
-    samples: list[str] = Field(default_factory=list)
 
 
 def derive_crawl_outcome(

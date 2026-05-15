@@ -103,6 +103,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Sysadmin orphan abortability tranche: keep orphan queued crawl jobs visible in sysadmin active inventory while marking them non-abortable, because queued abort requires a `CrawlRun`-backed target.
 - [x] Tenant admin website-processing UI tranche: expose tenant-scoped per-website crawler work with fetched, retained, too-large, and failure counters using a typed backend contract, generated frontend schema, shadcn table/card composition, and bounded default windowing.
 - [x] Tenant admin crawler failure-state UI tranche: expose backed-off and paused-after-failures crawler websites to tenant admins with tenant-safe API contracts, shadcn table/card composition, and clear recovery-oriented copy.
+- [x] Too-large file sample tranche: persist the configured download limit plus capped too-large file URL samples on crawl runs, expose them through generated backend/frontend contracts, and show actionable crawl-result tooltips without storing unbounded crawl logs.
 
 ## Non-Negotiable Principles
 
@@ -130,7 +131,7 @@ Important current friction:
 - `backend/src/intric/websites/domain/crawl_outcome.py` now has strict and lenient outcome parsers; remaining work is deleting normal new-row dependence on legacy result strings.
 - `backend/src/intric/websites/crawl_dependencies/crawl_models.py` still contains legacy read-side result string fallback from `result_location`.
 - `backend/src/intric/tenants/crawler_settings_helper.py` now owns typed `CrawlerSettingSpec` values as the crawler-settings source of truth.
-- `frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte` exposes current tenant crawler settings, active/queued crawl jobs, scheduled load, per-website processing, high-cost/cost-pressure ranking, backed-off/paused failure state, and recent terminal failures, but not too-large-file samples or watchdog interventions.
+- `frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte` exposes current tenant crawler settings, active/queued crawl jobs, scheduled load, per-website processing, high-cost/cost-pressure ranking, backed-off/paused failure state, and recent terminal failures. Crawl-run result presentation now also exposes too-large file counts, the configured download limit, and capped URL samples; watchdog interventions remain a separate admin visibility gap.
 
 ## Core Recommendation
 
@@ -741,7 +742,7 @@ Work:
 - [x] Expose recent terminal failed crawler runs by typed `CrawlOutcomeCode` through a bounded sysadmin endpoint.
 - [x] Expose recent terminal failed crawler runs through a bounded tenant-scoped admin endpoint without a `tenant_id` query parameter.
 - [x] Show recent terminal failed crawler runs in the tenant admin crawler page without calling super-API-key `/sysadmin` endpoints.
-- [ ] Show too-large file counts and capped samples. Counts are visible; capped URL samples still need a durable bounded storage contract.
+- [x] Show too-large file counts and capped samples through a durable bounded crawl-run storage contract.
 - [x] Show hash-retained/source-retained/file-retained counts and rates in tenant admin processing rows.
 - [x] Show current backed-off and paused-after-failures circuit-breaker state in the tenant admin crawler page.
 - [ ] Show watchdog interventions in tenant/admin crawler visibility.

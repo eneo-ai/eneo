@@ -6,6 +6,7 @@ import pytest
 
 from intric.main.models import Status
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode, FailureReason
+from intric.websites.domain.crawl_run import CrawlFileTooLargeSample
 from intric.websites.domain.crawl_terminal import (
     ACTIVE_TERMINAL_JOB_STATUSES,
     CrawlRunTerminalUpdate,
@@ -80,6 +81,13 @@ async def test_commit_terminal_can_update_zero_output_crawl_run_counts():
             pages_hash_retained=0,
             files_hash_retained=0,
             files_too_large_skipped=2,
+            files_too_large_download_limit_bytes=10_485_760,
+            files_too_large_samples=(
+                CrawlFileTooLargeSample(
+                    url="https://example.com/large.pdf",
+                    observed_size_bytes=19_746_387,
+                ),
+            ),
             failure_summary=None,
         ),
     )
@@ -100,6 +108,13 @@ async def test_commit_terminal_can_update_zero_output_crawl_run_counts():
     assert crawl_run_params["pages_hash_retained"] == 0
     assert crawl_run_params["files_hash_retained"] == 0
     assert crawl_run_params["files_too_large_skipped"] == 2
+    assert crawl_run_params["files_too_large_download_limit_bytes"] == 10_485_760
+    assert crawl_run_params["files_too_large_samples"] == [
+        {
+            "url": "https://example.com/large.pdf",
+            "observed_size_bytes": 19_746_387,
+        }
+    ]
     assert crawl_run_params["failure_summary"] is None
 
 

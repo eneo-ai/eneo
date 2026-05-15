@@ -6,6 +6,7 @@ import type {
   WebsiteSparse
 } from "@intric/intric-js";
 import type { Label } from "@intric/ui";
+import { formatBytes } from "$lib/core/formatting/formatBytes";
 import { m } from "$lib/paraglide/messages";
 
 export type { CrawlOutcome, CrawlOutcomeCode, CrawlOutcomeSeverity } from "@intric/intric-js";
@@ -37,6 +38,8 @@ export type CrawlRunResultLabelSource = {
   pages_hash_retained?: CrawlRun["pages_hash_retained"];
   files_hash_retained?: CrawlRun["files_hash_retained"];
   files_too_large_skipped?: CrawlRun["files_too_large_skipped"];
+  files_too_large_download_limit_bytes?: CrawlRun["files_too_large_download_limit_bytes"];
+  files_too_large_samples?: CrawlRun["files_too_large_samples"];
   pages_source_retained?: CrawlRun["pages_source_retained"];
 };
 
@@ -160,9 +163,7 @@ export function getCrawlRunResultLabels(crawl: CrawlRunResultLabelSource): Crawl
     labels.push({
       color: "orange",
       label: m.crawl_too_large_skipped_resources({ resources: tooLargeResources }),
-      tooltip: m.crawl_too_large_skipped_tooltip({
-        resources: tooLargeResources
-      })
+      tooltip: getTooLargeFilesTooltip(crawl, tooLargeResources)
     });
   }
 
@@ -270,6 +271,41 @@ export function getFailureSummaryTooltip(
     .join("\n");
 
   return `${m.failure_reasons_tooltip()}:\n${lines}`;
+}
+
+function getTooLargeFilesTooltip(crawl: CrawlRunResultLabelSource, resources: string): string {
+  const lines: string[] = [
+    m.crawl_too_large_skipped_tooltip({
+      resources
+    })
+  ];
+  if (typeof crawl.files_too_large_download_limit_bytes === "number") {
+    lines.push(
+      m.crawl_too_large_skipped_limit({
+        limit: formatBytes(crawl.files_too_large_download_limit_bytes)
+      })
+    );
+  }
+
+  const samples = crawl.files_too_large_samples ?? [];
+  for (const sample of samples.slice(0, 5)) {
+    lines.push(formatTooLargeFileSample(sample));
+  }
+
+  return lines.join("\n");
+}
+
+function formatTooLargeFileSample(
+  sample: NonNullable<CrawlRunResultLabelSource["files_too_large_samples"]>[number]
+): string {
+  const size =
+    typeof sample.observed_size_bytes === "number"
+      ? formatBytes(sample.observed_size_bytes)
+      : m.crawl_too_large_skipped_unknown_size();
+  return m.crawl_too_large_skipped_sample({
+    url: sample.url,
+    size
+  });
 }
 
 export function positiveCrawlCount(count: number | null | undefined): number {

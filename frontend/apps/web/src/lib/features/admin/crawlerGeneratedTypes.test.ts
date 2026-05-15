@@ -7,6 +7,7 @@ import type {
 
 type AssertTrue<T extends true> = T;
 type AssertHasKey<T, _K extends keyof T> = true;
+type AssertNoKey<T, K extends PropertyKey> = K extends keyof T ? false : true;
 
 type _CrawlerBaselineResponseExists = AssertTrue<
   components["schemas"]["CrawlerBaselineResponse"] extends object ? true : false
@@ -39,6 +40,9 @@ type _CrawlerScheduledAggregateResponseExists = AssertTrue<
 >;
 type _CrawlerAbortConflictResponseExists = AssertTrue<
   components["schemas"]["CrawlerAbortConflictResponse"] extends object ? true : false
+>;
+type _CrawlFileTooLargeSamplePublicExists = AssertTrue<
+  components["schemas"]["CrawlFileTooLargeSamplePublic"] extends object ? true : false
 >;
 
 type _CrawlerBaselineOutcomeCountsField = AssertHasKey<
@@ -132,6 +136,21 @@ type _CrawlerScheduledBucketsField = AssertHasKey<
 type _CrawlerScheduledUpdateIntervalField = AssertHasKey<
   components["schemas"]["CrawlerScheduledIntervalBucket"],
   "update_interval"
+>;
+type _CrawlRunTooLargeLimitField = AssertHasKey<
+  components["schemas"]["intric__websites__presentation__website_models__CrawlRunPublic"],
+  "files_too_large_download_limit_bytes"
+>;
+type _CrawlRunTooLargeSamplesField = AssertHasKey<
+  components["schemas"]["intric__websites__presentation__website_models__CrawlRunPublic"],
+  "files_too_large_samples"
+>;
+type _CrawlFileTooLargeSampleObservedBytesField = AssertHasKey<
+  components["schemas"]["CrawlFileTooLargeSamplePublic"],
+  "observed_size_bytes"
+>;
+type _CrawlOutcomeSamplesFieldRemoved = AssertTrue<
+  AssertNoKey<components["schemas"]["CrawlOutcomePublic"], "samples">
 >;
 
 type _CrawlerBaselinePathExists = AssertTrue<
