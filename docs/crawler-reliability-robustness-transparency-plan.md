@@ -74,6 +74,8 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Terminal ownership relocation tranche: move `TerminalEvent` / `commit_terminal(...)` to a website-owned crawl terminal persistence boundary and delete the worker-local implementation file.
 - [x] Manual pending-queue terminal parity tranche: route `CrawlService` pending queue add failures through `TerminalEvent(CRAWL_QUEUE_ENQUEUE_FAILED)`, share the bounded enqueue-failure message helper with scheduled crawls, and keep the original `PendingQueueAddError` authoritative when terminal commit fails.
 - [x] Manual direct-enqueue terminal parity tranche: route `CrawlService` direct ARQ/pre-acquired rollback failures through `TerminalEvent(CRAWL_DIRECT_ENQUEUE_FAILED)`, preserve flag-delete/slot-release/terminal-commit ordering, and expose the distinct typed outcome through backend/frontend presentation.
+- [x] Completion audit tranche: T105 and Claude both rejected marking the whole roadmap complete; remaining WorkerAdapter, admin write controls, lifecycle completion, OpenAPI regeneration, and phase-size/type cleanup remain explicit follow-up work.
+- [x] Static terminal-ownership guard tranche: add a source-level regression test that keeps crawler `CrawlRuns` terminal writes and crawler entrypoint job terminal mutations on the canonical `crawl_terminal.py` / `TerminalEvent` path.
 
 ## Non-Negotiable Principles
 
@@ -444,6 +446,7 @@ Tests:
 - Red DB integration: unknown exception commits `UNKNOWN_CRAWL_ERROR` only through a typed terminal event.
 - Red reactor unit: audit reactor failure logs a metric and does not change committed CrawlRun/Job state.
 - Red DB integration: DB error during `commit_terminal(...)` rolls back both CrawlRun and Job terminal writes.
+- Static architecture test: crawler `CrawlRuns` terminal writes stay in `crawl_terminal.py`, and crawler entrypoints do not call `job_service.fail_job`, mutate private TaskManager terminal flags, or update `Jobs` terminal state directly.
 
 ### Step 3: Backfill Outcome Codes And Delete Normal String Fallback
 
