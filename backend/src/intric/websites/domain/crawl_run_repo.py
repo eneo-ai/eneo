@@ -34,6 +34,10 @@ from intric.websites.domain.crawler_recent_failures import (
     CrawlerRecentFailureItem,
     CrawlerRecentFailures,
 )
+from intric.websites.domain.crawler_website_processing_aggregate import (
+    CrawlerWebsiteProcessingAggregate,
+    CrawlerWebsiteProcessingAggregateItem,
+)
 
 if TYPE_CHECKING:
     from intric.database.database import AsyncSession
@@ -344,6 +348,138 @@ class CrawlRunRepository:
             days=days,
             since=since,
             until=until,
+        )
+
+    async def website_processing_aggregate(
+        self,
+        *,
+        since: datetime,
+        until: datetime,
+        days: int,
+        limit: int,
+        offset: int,
+        tenant_id: UUID | None,
+    ) -> CrawlerWebsiteProcessingAggregate:
+        base_conditions = [
+            CrawlRunsTable.created_at >= since,
+            CrawlRunsTable.created_at < until,
+        ]
+        if tenant_id is not None:
+            base_conditions.append(CrawlRunsTable.tenant_id == tenant_id)
+
+        total_stmt = (
+            sa.select(sa.func.count(sa.distinct(CrawlRunsTable.website_id)))
+            .select_from(CrawlRunsTable)
+            .where(*base_conditions)
+        )
+        total = int(await self.session.scalar(total_stmt) or 0)
+
+        rows_from = sa.outerjoin(
+            sa.outerjoin(
+                sa.outerjoin(
+                    CrawlRunsTable,
+                    Jobs,
+                    CrawlRunsTable.job_id == Jobs.id,
+                ),
+                Websites,
+                CrawlRunsTable.website_id == Websites.id,
+            ),
+            Tenants,
+            CrawlRunsTable.tenant_id == Tenants.id,
+        )
+        pages_crawled = sa.func.coalesce(
+            sa.func.sum(CrawlRunsTable.pages_crawled), 0
+        ).label("pages_crawled")
+        files_downloaded = sa.func.coalesce(
+            sa.func.sum(CrawlRunsTable.files_downloaded), 0
+        ).label("files_downloaded")
+        pages_hash_retained = sa.func.coalesce(
+            sa.func.sum(CrawlRunsTable.pages_hash_retained), 0
+        ).label("pages_hash_retained")
+        files_hash_retained = sa.func.coalesce(
+            sa.func.sum(CrawlRunsTable.files_hash_retained), 0
+        ).label("files_hash_retained")
+        pages_source_retained = sa.func.coalesce(
+            sa.func.sum(CrawlRunsTable.pages_source_retained), 0
+        ).label("pages_source_retained")
+        files_too_large_skipped = sa.func.coalesce(
+            sa.func.sum(CrawlRunsTable.files_too_large_skipped), 0
+        ).label("files_too_large_skipped")
+        pages_failed = sa.func.coalesce(
+            sa.func.sum(CrawlRunsTable.pages_failed), 0
+        ).label("pages_failed")
+        files_failed = sa.func.coalesce(
+            sa.func.sum(CrawlRunsTable.files_failed), 0
+        ).label("files_failed")
+        throughput = pages_crawled + files_downloaded
+
+        rows_stmt = (
+            sa.select(
+                CrawlRunsTable.website_id.label("website_id"),
+                Websites.name.label("website_name"),
+                CrawlRunsTable.tenant_id.label("tenant_id"),
+                Tenants.display_name.label("tenant_display_name"),
+                sa.func.count(CrawlRunsTable.id).label("total_runs"),
+                sa.func.count(CrawlRunsTable.id)
+                .filter(Jobs.finished_at.is_not(None))
+                .label("terminal_runs"),
+                sa.func.count(CrawlRunsTable.id)
+                .filter(Jobs.status == Status.FAILED.value)
+                .label("failed_runs"),
+                pages_crawled,
+                files_downloaded,
+                pages_hash_retained,
+                files_hash_retained,
+                pages_source_retained,
+                files_too_large_skipped,
+                pages_failed,
+                files_failed,
+            )
+            .select_from(rows_from)
+            .where(*base_conditions)
+            .group_by(
+                CrawlRunsTable.website_id,
+                Websites.name,
+                CrawlRunsTable.tenant_id,
+                Tenants.display_name,
+            )
+            .order_by(throughput.desc(), CrawlRunsTable.website_id.asc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self.session.execute(rows_stmt)
+
+        items: list[CrawlerWebsiteProcessingAggregateItem] = []
+        for row in result.mappings():
+            items.append(
+                CrawlerWebsiteProcessingAggregateItem(
+                    website_id=row["website_id"],
+                    website_name=row["website_name"],
+                    tenant_id=row["tenant_id"],
+                    tenant_display_name=row["tenant_display_name"],
+                    total_runs=int(row["total_runs"]),
+                    terminal_runs=int(row["terminal_runs"]),
+                    failed_runs=int(row["failed_runs"]),
+                    pages_crawled=int(row["pages_crawled"]),
+                    files_downloaded=int(row["files_downloaded"]),
+                    pages_hash_retained=int(row["pages_hash_retained"]),
+                    files_hash_retained=int(row["files_hash_retained"]),
+                    pages_source_retained=int(row["pages_source_retained"]),
+                    files_too_large_skipped=int(row["files_too_large_skipped"]),
+                    pages_failed=int(row["pages_failed"]),
+                    files_failed=int(row["files_failed"]),
+                )
+            )
+
+        return CrawlerWebsiteProcessingAggregate(
+            items=tuple(items),
+            total=total,
+            limit=limit,
+            offset=offset,
+            days=days,
+            since=since,
+            until=until,
+            tenant_id=tenant_id,
         )
 
     async def aggregate_baseline(

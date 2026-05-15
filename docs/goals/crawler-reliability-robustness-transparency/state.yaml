@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T070
+active_task: T072
 
 tasks:
   - id: T001
@@ -3242,7 +3242,7 @@ tasks:
   - id: T070
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next highest-ROI crawler reliability/transparency tranche after the scheduled aggregate endpoint."
     inputs:
@@ -3262,17 +3262,144 @@ tasks:
       - "TDD red-test story."
       - "Verification commands."
       - "Stop conditions."
+    receipt:
+      result: done
+      decision: "Reject shallow admin overview composition and activate T071 as the closing admin read-model tranche: a per-website processing aggregate over CrawlRuns."
+      summary: "Claude blocked a composite admin overview as a shallow wrapper over existing endpoints. After adopting the per-website processing aggregate candidate and dropping unnecessary outcome parsing, Claude green-lit T071 as a bounded endpoint that answers a new operator question: which websites drive crawler processing volume over a bounded window."
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t070-choose-next-crawler-reliability-tranche-20260515T022126Z.md"
+          - ".codex/artifacts/claude-peer-loop-t070-choose-next-crawler-reliability-tranche-iteration-2-20260515T022509Z.md"
+        min_score: 8
+      spawned_tasks:
+        - T071
+      notes:
+        - "T071 must not add a backend dashboard-composition endpoint, high-cost score, retention rate, failure rate, or schedule weight."
+        - "After T071, the next tranche should return to Step 5 phase extraction rather than adding another admin endpoint."
+  - id: T071
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Add a read-only sysadmin per-website processing aggregate endpoint over CrawlRuns grouped by website_id within a bounded window."
+    inputs:
+      - "T070 receipt"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/src/intric/sysadmin/sysadmin_router.py"
+      - "backend/src/intric/sysadmin/sysadmin_models.py"
+      - ".codex/artifacts/claude-peer-loop-t070-choose-next-crawler-reliability-tranche-iteration-2-20260515T022509Z.md"
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawler_website_processing_aggregate.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/src/intric/sysadmin/sysadmin_models.py"
+      - "backend/src/intric/sysadmin/sysadmin_router.py"
+      - "backend/tests/integration/test_sysadmin_crawler_website_processing_aggregate.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "TDD: integration tests must fail with 404 before production code lands."
+      - "Backend-only. No frontend, generated OpenAPI type, schema migration, new index, Redis, ARQ, Scrapy, worker, watchdog, feeder, or crawl_tasks changes."
+      - "Add the query to `CrawlRunRepository`; do not create another admin repository or shared inventory abstraction."
+      - "Group by `CrawlRuns.website_id` with sum aggregates on existing typed counters only."
+      - "Use `CrawlRuns.tenant_id` for tenant scope, not `Websites.tenant_id`."
+      - "Use `outerjoin` for Jobs, Websites, and Tenants so orphan crawl-run rows remain visible."
+      - "Every nullable counter sum must use `coalesce(sum(...), 0)`."
+      - "Use `Jobs.status == FAILED` for failed run counts; do not parse outcome codes in this slice."
+      - "Do NOT compute a high-cost score, retention rate, failure rate, schedule weight, or unparseable outcome count in this slice."
+      - "Default days=7, cap days <= 30; default limit=50, cap limit <= 200; offset >= 0."
+      - "Window predicate is `CrawlRuns.created_at >= since AND CrawlRuns.created_at < until`."
+      - "Order rows by `(pages_crawled + files_downloaded) DESC`, then `website_id ASC` for stable pagination."
+      - "Count query must not join Websites or Tenants."
+      - "failure_summary aggregation is out of scope for this tranche; do not introduce it here."
+      - "No Any, casts, type ignores, broad helpers, pass-through services, or utils/manager/processor/common modules."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "`GET /api/v1/sysadmin/crawler/website-processing` returns a paginated per-website aggregate within the requested window."
+      - "Each item carries: website_id, website_name, tenant_id, tenant_display_name, total_runs, terminal_runs, failed_runs, pages_crawled, files_downloaded, pages_hash_retained, files_hash_retained, pages_source_retained, files_too_large_skipped, pages_failed, files_failed."
+      - "Response carries days, since, until, total, limit, offset, and tenant_id."
+      - "Empty windows return an empty page with total=0."
+      - "Tenant filter scopes by `CrawlRuns.tenant_id`."
+      - "Pagination keeps total independent of limit/offset."
+      - "Ordering ties resolve deterministically by `website_id ASC`."
+      - "Rows with deleted/missing Jobs remain counted."
+      - "days=31 and limit=201 return 422."
+      - "Missing super API key returns 401/403."
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_website_processing_aggregate.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawler_website_processing_aggregate.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_website_processing_aggregate.py"
+      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_website_processing_aggregate.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_website_processing_aggregate.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_website_processing_aggregate.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_website_processing_aggregate.py"
+    stop_if:
+      - "Need frontend, generated OpenAPI type, schema migration, new index, Redis/ARQ, Scrapy, or worker write-path changes."
+      - "Need to touch crawl_tasks.py, circuit_breaker.py, watchdog.py, crawl_feeder.py, or feeder code."
+      - "Need a new *_admin_repo module or shared inventory abstraction."
+      - "Need to compute a cost score, retention rate, failure rate, schedule weight, or unparseable outcome count."
+      - "Need to aggregate failure_summary across rows."
+      - "Net diff exceeds roughly 350 lines."
+      - "Need files outside allowed_files."
+    receipt:
+      result: done
+      summary: "Added `GET /api/v1/sysadmin/crawler/website-processing` as a read-only per-website crawl-run processing aggregate. The query groups by `CrawlRuns.website_id`, uses `CrawlRuns.tenant_id` for tenant scope, keeps the count query on `CrawlRuns`, outer-joins Jobs/Websites/Tenants for row labels, preserves missing-job rows, and exposes retained/failed/too-large counters without inventing scores or rates."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawler_website_processing_aggregate.py"
+        - "backend/src/intric/websites/domain/crawl_run_repo.py"
+        - "backend/src/intric/sysadmin/sysadmin_models.py"
+        - "backend/src/intric/sysadmin/sysadmin_router.py"
+        - "backend/tests/integration/test_sysadmin_crawler_website_processing_aggregate.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+      verification:
+        - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_website_processing_aggregate.py -q"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawler_website_processing_aggregate.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_website_processing_aggregate.py"
+        - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_website_processing_aggregate.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_website_processing_aggregate.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_website_processing_aggregate.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_website_processing_aggregate.py"
+      claude:
+        verdict: green
+        artifact: ".codex/artifacts/claude-peer-loop-t071-website-processing-aggregate-implementation-review-20260515T023439Z.md"
+        min_score: 8
+      notes:
+        - "TDD red phase failed 4/4 on 404 before production code landed."
+        - "Tests cover empty result, tenant scoping, pagination total, stable tie ordering, missing-job rows, nullable counters, bounds, and auth."
+        - "The next tranche should return to Step 5 phase extraction rather than adding another admin endpoint."
+      spawned_tasks:
+        - T072
+  - id: T072
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next bounded Step 5 phase-extraction slice after closing the admin read-model tranche."
+    inputs:
+      - "T071 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl"
+      - "backend/tests/unittests/worker"
+      - ".codex/artifacts/claude-peer-loop-t071-website-processing-aggregate-implementation-review-20260515T023439Z.md"
+    constraints:
+      - "Read-only except board/roadmap updates."
+      - "Prefer maintainability and phase-boundary clarity over more admin endpoints."
+      - "Do not activate a broad WorkerAdapter, admin write-control, schema migration, or frontend task."
+      - "Do not implement before choosing a narrow extraction target with allowed files and red-test story."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Decision: next Worker tranche."
+      - "Specific extraction target and canonical owner."
+      - "Allowed files."
+      - "TDD red-test story."
+      - "Verification commands."
+      - "Stop conditions."
     receipt: null
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T069
+    task: T071
     commands:
-      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_scheduled_aggregate.py -q"
-      - "cd backend && uv run ruff check src/intric/websites/domain/crawler_scheduled_aggregate.py src/intric/websites/domain/website_admin_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
-      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_scheduled_aggregate.py src/intric/websites/domain/website_admin_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_scheduled_aggregate.py src/intric/websites/domain/website_admin_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t069-scheduled-aggregate --title 'T069 scheduled crawler aggregate implementation review iteration 2' --phase verification --iteration 2 --require-green --required-min-score 8 ..."
-    note: "T069 backend scheduled-crawler aggregate endpoint passed targeted integration tests, ruff, format check, Pyright, and Claude green review after adding legacy unparseable interval handling."
+      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_website_processing_aggregate.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawler_website_processing_aggregate.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_website_processing_aggregate.py"
+      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_website_processing_aggregate.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_website_processing_aggregate.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_website_processing_aggregate.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_website_processing_aggregate.py"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t071-website-processing --title 'T071 website processing aggregate implementation review' --phase commit-gate --iteration 1 --require-green --required-min-score 8 ..."
+    note: "T071 backend per-website processing aggregate endpoint passed targeted integration tests, ruff, format check, Pyright, and Claude green review."

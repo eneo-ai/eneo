@@ -66,6 +66,7 @@ from intric.sysadmin.sysadmin_models import (
     CrawlerFailureInventoryResponse,
     CrawlerRecentFailuresResponse,
     CrawlerScheduledAggregateResponse,
+    CrawlerWebsiteProcessingAggregateResponse,
 )
 from intric.sysadmin.sysadmin_service import SysAdminService
 from intric.tenants.tenant import (
@@ -562,6 +563,35 @@ async def get_crawler_recent_failures(
             tenant_id=tenant_id,
         )
     return CrawlerRecentFailuresResponse.from_domain(failures)
+
+
+@router.get(
+    "/crawler/website-processing",
+    response_model=CrawlerWebsiteProcessingAggregateResponse,
+    summary="Get crawler processing aggregate by website",
+)
+async def get_crawler_website_processing_aggregate(
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+    days: Annotated[int, Query(ge=1, le=30)] = 7,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    tenant_id: Annotated[UUID | None, Query()] = None,
+) -> CrawlerWebsiteProcessingAggregateResponse:
+    until = datetime.now(timezone.utc)
+    since = until - timedelta(days=days)
+
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        repo = CrawlRunRepository(session=session)
+        aggregate = await repo.website_processing_aggregate(
+            since=since,
+            until=until,
+            days=days,
+            limit=limit,
+            offset=offset,
+            tenant_id=tenant_id,
+        )
+    return CrawlerWebsiteProcessingAggregateResponse.from_domain(aggregate)
 
 
 @router.get(
