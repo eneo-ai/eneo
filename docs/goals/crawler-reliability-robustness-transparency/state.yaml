@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T080
+active_task: T081
 
 tasks:
   - id: T001
@@ -3855,7 +3855,7 @@ tasks:
   - id: T080
     type: worker
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Collapse the one-field `PostTerminalRecoveryContext` wrapper into a direct post-terminal recovery executor field."
     inputs:
@@ -3893,19 +3893,80 @@ tasks:
       - "Deleting it requires changing audit or circuit-breaker behavior."
       - "Need files outside allowed_files."
       - "Strict Pyright regresses on touched backend files."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Deleted the one-field `PostTerminalRecoveryContext` wrapper. `PostTerminalEffectInput` now carries the typed `recovery_executor` callable directly, and both crawl-task call sites pass `execute_with_recovery` without changing audit ordering, circuit-breaker operation names, or transaction recovery semantics."
+      changed_files:
+        - "backend/src/intric/worker/crawl/post_terminal_effects.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_post_terminal_effects.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      tdd_red:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_post_terminal_effects.py -q -> 3 failed; failures were expected stale `PostTerminalEffectInput(..., recovery=...)` contract mismatches after changing tests first"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q -> 14 passed"
+        - "cd backend && uv run pytest tests/unittests/worker -q -> 320 passed"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_effects.py -> passed"
+        - "cd backend && uv run ruff format --check src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_effects.py -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_effects.py -> 0 errors"
+        - "rg -n \"PostTerminalRecoveryContext|recovery=PostTerminalRecoveryContext\" backend/src backend/tests || true -> no output"
+        - "wc -l backend/src/intric/worker/crawl_tasks.py -> 1663"
+      claude:
+        verdict: green
+        artifact: ".codex/artifacts/claude-peer-loop-t080-post-terminal-recovery-context-collapse-implementation-review-20260515T040204Z.md"
+        min_score: 9
+      notes:
+        - "Claude's only non-blocking implementation follow-up was to exercise the second `circuit_breaker_operation_name` literal in the post-terminal tests."
+      spawned_tasks:
+        - T081
+  - id: T081
+    type: worker
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Cover both post-terminal circuit-breaker operation-name literals without broadening production behavior."
+    inputs:
+      - "T080 receipt"
+      - ".codex/artifacts/claude-peer-loop-t080-post-terminal-recovery-context-collapse-implementation-review-20260515T040204Z.md"
+      - "backend/src/intric/worker/crawl/post_terminal_effects.py"
+      - "backend/tests/unittests/worker/test_crawl_post_terminal_effects.py"
+    allowed_files:
+      - "backend/tests/unittests/worker/test_crawl_post_terminal_effects.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "TDD: add the literal-variant test expectation first and prove the current test seam rejects it before production/test-helper adjustment."
+      - "Do not change production behavior unless the test exposes a real bug."
+      - "Keep the test behavior-focused: circuit breaker runs before audit and receives the requested operation name."
+      - "No broad post-terminal refactor, new abstractions, or permissive fake signatures."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "The post-terminal tests exercise both `circuit_breaker_update` and `terminal_circuit_breaker_update` operation names."
+      - "The recovery fake keeps the exact keyword-only executor signature."
+      - "No production behavior changes unless required by the red test."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_post_terminal_effects.py -q"
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run ruff check tests/unittests/worker/test_crawl_post_terminal_effects.py"
+      - "cd backend && uv run ruff format --check tests/unittests/worker/test_crawl_post_terminal_effects.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json tests/unittests/worker/test_crawl_post_terminal_effects.py"
+    stop_if:
+      - "Need production files beyond `post_terminal_effects.py` to make the test pass."
+      - "The test would only assert private implementation details instead of behavior."
+      - "Strict Pyright regresses on touched files."
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T079
+    task: T080
     commands:
-      - "cd backend && uv run pytest tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
       - "cd backend && uv run pytest tests/unittests/worker -q"
-      - "cd backend && uv run ruff check src/intric/worker/crawl/recovery.py src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py src/intric/worker/crawl/__init__.py tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
-      - "cd backend && uv run ruff format --check src/intric/worker/crawl/recovery.py src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py src/intric/worker/crawl/__init__.py tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/recovery.py src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py src/intric/worker/crawl/__init__.py tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
-      - "rg -n \"session_holder|created_sessions|SessionHolder\" backend/src || true"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t079-recovery-plumbing-trim --phase commit-gate --iteration 1 --require-green --required-min-score 8 ..."
-    note: "T079 recovery plumbing trim passed targeted worker tests, full worker unit tests, ruff, format check, strict Pyright, production residue grep, and Claude green review."
+      - "cd backend && uv run ruff check src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_effects.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_effects.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_effects.py"
+      - "rg -n \"PostTerminalRecoveryContext|recovery=PostTerminalRecoveryContext\" backend/src backend/tests || true"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t080-post-terminal-recovery-context-collapse --phase commit-gate --iteration 1 --require-green --required-min-score 8 ..."
+    note: "T080 post-terminal recovery-context collapse passed targeted worker tests, full worker unit tests, ruff, format check, strict Pyright, stale-reference grep, and Claude green review."

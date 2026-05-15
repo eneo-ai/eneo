@@ -59,7 +59,6 @@ from intric.worker.crawl import (
 from intric.worker.crawl.persistence import CrawlPageData
 from intric.worker.crawl.post_terminal_effects import (
     PostTerminalEffectInput,
-    PostTerminalRecoveryContext,
     apply_post_terminal_effects,
 )
 from intric.worker.crawl_context import EmbeddingModelSpec
@@ -1099,9 +1098,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                     await apply_post_terminal_effects(
                         PostTerminalEffectInput(
-                            recovery=PostTerminalRecoveryContext(
-                                execute_with_recovery=execute_with_recovery,
-                            ),
+                            recovery_executor=execute_with_recovery,
                             audit_service=container.audit_service(),
                             audit_payload=CrawlAuditPayload(
                                 tenant_id=crawl_context.tenant_id,
@@ -1558,9 +1555,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             await apply_post_terminal_effects(
                 PostTerminalEffectInput(
-                    recovery=PostTerminalRecoveryContext(
-                        execute_with_recovery=execute_with_recovery,
-                    ),
+                    recovery_executor=execute_with_recovery,
                     audit_service=container.audit_service(),
                     audit_payload=CrawlAuditPayload(
                         tenant_id=crawl_context.tenant_id,

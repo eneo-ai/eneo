@@ -11,8 +11,6 @@ from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.worker.crawl.audit import CrawlAuditPayload
 from intric.worker.crawl.post_terminal_effects import (
     PostTerminalEffectInput,
-    PostTerminalRecoveryContext,
-    PostTerminalRecoveryExecutor,
     apply_post_terminal_effects,
 )
 
@@ -57,14 +55,6 @@ def _payload(*, successful: bool, outcome_code: CrawlOutcomeCode) -> CrawlAuditP
         blobs_deleted=0,
         successful=successful,
         outcome_code=outcome_code,
-    )
-
-
-def _recovery_context(
-    execute_with_recovery: PostTerminalRecoveryExecutor,
-) -> PostTerminalRecoveryContext:
-    return PostTerminalRecoveryContext(
-        execute_with_recovery=execute_with_recovery,
     )
 
 
@@ -116,7 +106,7 @@ async def test_apply_post_terminal_effects_records_success_before_audit(
 
     await apply_post_terminal_effects(
         PostTerminalEffectInput(
-            recovery=_recovery_context(recorder.execute_with_recovery),
+            recovery_executor=recorder.execute_with_recovery,
             audit_service=audit_service,
             audit_payload=payload,
             circuit_breaker_operation_name="circuit_breaker_update",
@@ -145,7 +135,7 @@ async def test_apply_post_terminal_effects_records_failure_before_audit(
 
     await apply_post_terminal_effects(
         PostTerminalEffectInput(
-            recovery=_recovery_context(recorder.execute_with_recovery),
+            recovery_executor=recorder.execute_with_recovery,
             audit_service=audit_service,
             audit_payload=payload,
             circuit_breaker_operation_name="circuit_breaker_update",
@@ -191,7 +181,7 @@ async def test_apply_post_terminal_effects_propagates_circuit_breaker_failure(
     with pytest.raises(RuntimeError, match="circuit breaker failed"):
         await apply_post_terminal_effects(
             PostTerminalEffectInput(
-                recovery=_recovery_context(failing_execute_with_recovery),
+                recovery_executor=failing_execute_with_recovery,
                 audit_service=_FakeAuditService(),
                 audit_payload=_payload(
                     successful=False,

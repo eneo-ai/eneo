@@ -21,13 +21,8 @@ class PostTerminalRecoveryExecutor(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class PostTerminalRecoveryContext:
-    execute_with_recovery: PostTerminalRecoveryExecutor
-
-
-@dataclass(frozen=True, slots=True)
 class PostTerminalEffectInput:
-    recovery: PostTerminalRecoveryContext
+    recovery_executor: PostTerminalRecoveryExecutor
     audit_service: "AuditService"
     audit_payload: CrawlAuditPayload
     circuit_breaker_operation_name: Literal[
@@ -38,7 +33,6 @@ class PostTerminalEffectInput:
 
 async def apply_post_terminal_effects(effect: PostTerminalEffectInput) -> None:
     payload = effect.audit_payload
-    recovery = effect.recovery
 
     async def _do_circuit_breaker_update(sess: "AsyncSession") -> None:
         await update_crawl_circuit_breaker(
@@ -49,7 +43,7 @@ async def apply_post_terminal_effects(effect: PostTerminalEffectInput) -> None:
             crawl_successful=payload.successful,
         )
 
-    await recovery.execute_with_recovery(
+    await effect.recovery_executor(
         operation_name=effect.circuit_breaker_operation_name,
         operation=_do_circuit_breaker_update,
     )
