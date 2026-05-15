@@ -152,6 +152,7 @@ def _assert_abort_audit_call(
     user_id: UUID,
     job_id: UUID,
     website_id: UUID,
+    website_name: str,
     already_terminal: bool,
 ) -> None:
     abort_calls = _abort_audit_calls(audit_calls)
@@ -165,6 +166,10 @@ def _assert_abort_audit_call(
 
     metadata = audit_call["metadata"]
     assert isinstance(metadata, dict)
+    target = metadata["target"]
+    assert isinstance(target, dict)
+    assert target["id"] == str(website_id)
+    assert target["name"] == website_name
     extra = metadata["extra"]
     assert isinstance(extra, dict)
     assert extra["job_id"] == str(job_id)
@@ -238,6 +243,7 @@ async def test_admin_abort_queued_crawl_commits_terminal_abort_and_cleans_queue(
         crawl_run_id = crawl_run.id
         website_id = website.id
         website_url = website.url
+        website.name = None
         await session.commit()
 
     pending_queue = PendingQueue(redis_client)
@@ -289,6 +295,7 @@ async def test_admin_abort_queued_crawl_commits_terminal_abort_and_cleans_queue(
         user_id=admin_user.id,
         job_id=job_id,
         website_id=website_id,
+        website_name=website_url,
         already_terminal=False,
     )
 
@@ -417,7 +424,7 @@ async def test_admin_abort_running_crawl_returns_typed_conflict_without_arq_abor
     )
 
     assert response.status_code == 409
-    assert response.json()["detail"]["error_code"] == "RUNNING_ABORT_NOT_IMPLEMENTED"
+    assert response.json()["error_code"] == "RUNNING_ABORT_NOT_IMPLEMENTED"
     assert abort_called is False
     assert _abort_audit_calls(audit_calls) == []
 
@@ -516,6 +523,7 @@ async def test_admin_abort_already_aborted_crawl_is_idempotent_and_retries_clean
         user_id=admin_user.id,
         job_id=job_id,
         website_id=website_id,
+        website_name="Abortable queued website",
         already_terminal=True,
     )
 
@@ -638,6 +646,6 @@ async def test_admin_abort_queued_crawl_returns_conflict_when_terminal_commit_lo
     )
 
     assert response.status_code == 409
-    assert response.json()["detail"]["error_code"] == "CRAWL_NOT_ABORTABLE"
+    assert response.json()["error_code"] == "CRAWL_NOT_ABORTABLE"
     assert abort_called is False
     assert _abort_audit_calls(audit_calls) == []

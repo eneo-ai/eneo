@@ -2428,6 +2428,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/crawler/jobs/{job_id}/abort": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Abort a queued crawler job for the current tenant */
+    post: operations["abort_current_tenant_queued_crawl_api_v1_admin_crawler_jobs__job_id__abort_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/credentials/{provider}": {
     parameters: {
       query?: never;
@@ -7086,6 +7103,7 @@ export interface components {
       | "website_updated"
       | "website_deleted"
       | "website_crawled"
+      | "website_crawl_aborted"
       | "website_transferred"
       | "group_chat_created"
       | "collection_created"
@@ -9458,6 +9476,11 @@ export interface components {
       questions: number;
     };
     /**
+     * CrawlAbortConflictCode
+     * @enum {string}
+     */
+    CrawlAbortConflictCode: "RUNNING_ABORT_NOT_IMPLEMENTED" | "CRAWL_NOT_ABORTABLE";
+    /**
      * CrawlLifecycle
      * @enum {string}
      */
@@ -9484,6 +9507,7 @@ export interface components {
       | "CRAWL_RUNTIME_TIMEOUT"
       | "CRAWL_QUEUE_ENQUEUE_FAILED"
       | "CRAWL_DIRECT_ENQUEUE_FAILED"
+      | "CRAWL_ABORTED"
       | "CRAWL_SOURCE_RETENTION_ONLY"
       | "CRAWL_ALL_UNCHANGED"
       | "CRAWL_FILES_TOO_LARGE_ONLY"
@@ -9568,6 +9592,12 @@ export interface components {
      * @enum {string}
      */
     CrawlType: "crawl" | "sitemap";
+    /** CrawlerAbortConflictResponse */
+    CrawlerAbortConflictResponse: {
+      error_code: components["schemas"]["CrawlAbortConflictCode"];
+      /** Detail */
+      detail: string;
+    };
     /** CrawlerActiveInventoryItem */
     CrawlerActiveInventoryItem: {
       /**
@@ -26042,6 +26072,51 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CrawlerScheduledAggregateResponse"];
+        };
+      };
+    };
+  };
+  abort_current_tenant_queued_crawl_api_v1_admin_crawler_jobs__job_id__abort_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        job_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Crawl job not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerAbortConflictResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

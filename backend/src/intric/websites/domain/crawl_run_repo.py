@@ -70,6 +70,8 @@ class CrawlAbortTarget:
     job_id: UUID
     crawl_run_id: UUID
     website_id: UUID
+    website_name: str | None
+    website_url: str
     tenant_id: UUID
     status: Status
     outcome_code: CrawlOutcomeCode | None
@@ -166,11 +168,14 @@ class CrawlRunRepository:
                 Jobs.status.label("job_status"),
                 CrawlRunsTable.id.label("crawl_run_id"),
                 CrawlRunsTable.website_id,
+                Websites.name.label("website_name"),
+                Websites.url.label("website_url"),
                 CrawlRunsTable.tenant_id,
                 CrawlRunsTable.outcome_code,
             )
             .select_from(Jobs)
             .join(CrawlRunsTable, CrawlRunsTable.job_id == Jobs.id)
+            .join(Websites, CrawlRunsTable.website_id == Websites.id)
             .where(
                 Jobs.id == job_id,
                 Jobs.task == Task.CRAWL.value,
@@ -185,6 +190,8 @@ class CrawlRunRepository:
             job_id=row["job_id"],
             crawl_run_id=row["crawl_run_id"],
             website_id=row["website_id"],
+            website_name=row["website_name"],
+            website_url=row["website_url"],
             tenant_id=row["tenant_id"],
             status=Status(str(row["job_status"])),
             outcome_code=parse_crawl_outcome_code_lenient(row["outcome_code"]),

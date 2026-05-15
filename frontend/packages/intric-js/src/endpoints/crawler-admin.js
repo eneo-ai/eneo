@@ -46,6 +46,19 @@ export function initCrawlerAdmin(client) {
         method: "get"
       });
       return res;
+    },
+
+    /**
+     * Abort a queued crawler job for the current tenant.
+     * @param {string} jobId
+     * @returns {Promise<void>}
+     * @throws {IntricError}
+     */
+    abortQueuedJob: async (jobId) => {
+      await client.fetch("/api/v1/admin/crawler/jobs/{job_id}/abort", {
+        method: "post",
+        params: { path: { job_id: jobId } }
+      });
     }
   };
 }

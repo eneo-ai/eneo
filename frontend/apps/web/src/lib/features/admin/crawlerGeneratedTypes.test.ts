@@ -29,6 +29,9 @@ type _CrawlerWebsiteProcessingAggregateResponseExists = AssertTrue<
 type _CrawlerScheduledAggregateResponseExists = AssertTrue<
   components["schemas"]["CrawlerScheduledAggregateResponse"] extends object ? true : false
 >;
+type _CrawlerAbortConflictResponseExists = AssertTrue<
+  components["schemas"]["CrawlerAbortConflictResponse"] extends object ? true : false
+>;
 
 type _CrawlerBaselineOutcomeCountsField = AssertHasKey<
   components["schemas"]["CrawlerBaselineResponse"],
@@ -122,6 +125,11 @@ type _AdminCrawlerScheduledPathExists = AssertTrue<
     ? true
     : false
 >;
+type _AdminCrawlerAbortQueuedPathExists = AssertTrue<
+  paths["/api/v1/admin/crawler/jobs/{job_id}/abort"]["post"] extends operations["abort_current_tenant_queued_crawl_api_v1_admin_crawler_jobs__job_id__abort_post"]
+    ? true
+    : false
+>;
 type _AdminCrawlerRecentFailuresQueryHasNoTenantId = AssertTrue<
   "tenant_id" extends keyof NonNullable<
     operations["get_current_tenant_crawler_recent_failures_api_v1_admin_crawler_recent_failures_get"]["parameters"]["query"]
@@ -139,6 +147,19 @@ type _AdminCrawlerActiveQueryHasNoTenantId = AssertTrue<
 type _AdminCrawlerScheduledQueryIsEmpty = AssertTrue<
   NonNullable<
     operations["get_current_tenant_crawler_scheduled_aggregate_api_v1_admin_crawler_scheduled_get"]["parameters"]["query"]
+  > extends never
+    ? true
+    : false
+>;
+type _AdminCrawlerAbortQueuedPathHasJobId = AssertHasKey<
+  NonNullable<
+    operations["abort_current_tenant_queued_crawl_api_v1_admin_crawler_jobs__job_id__abort_post"]["parameters"]["path"]
+  >,
+  "job_id"
+>;
+type _AdminCrawlerAbortQueuedQueryIsEmpty = AssertTrue<
+  NonNullable<
+    operations["abort_current_tenant_queued_crawl_api_v1_admin_crawler_jobs__job_id__abort_post"]["parameters"]["query"]
   > extends never
     ? true
     : false

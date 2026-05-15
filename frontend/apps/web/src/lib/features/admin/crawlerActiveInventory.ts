@@ -1,4 +1,4 @@
-import type { components } from "@intric/intric-js";
+import { IntricError, type components } from "@intric/intric-js";
 import {
   getCrawlRunResultLabels,
   positiveCrawlCount,
@@ -9,6 +9,8 @@ import { m } from "$lib/paraglide/messages";
 export type CrawlerActiveInventoryResponse =
   components["schemas"]["CrawlerActiveInventoryResponse"];
 export type CrawlerActiveInventoryItem = components["schemas"]["CrawlerActiveInventoryItem"];
+type CrawlerAbortConflictCode = components["schemas"]["CrawlAbortConflictCode"];
+type CrawlerAbortConflictResponse = components["schemas"]["CrawlerAbortConflictResponse"];
 
 export const CRAWLER_ACTIVE_INVENTORY_DEFAULTS = {
   limit: 8,
@@ -45,6 +47,67 @@ export function getCrawlerActiveInventoryStatusLabel(item: CrawlerActiveInventor
       return exhaustive;
     }
   }
+}
+
+export function canAbortCrawlerActiveInventoryItem(item: CrawlerActiveInventoryItem): boolean {
+  return item.lifecycle_state === "queued";
+}
+
+export function getCrawlerAbortConflictMessage(error: unknown): string | null {
+  if (!(error instanceof IntricError) || error.status !== 409) {
+    return null;
+  }
+
+  const conflict = readCrawlerAbortConflict(error.response);
+  if (conflict === null) {
+    return null;
+  }
+
+  switch (conflict.error_code) {
+    case "RUNNING_ABORT_NOT_IMPLEMENTED":
+      return m.crawler_abort_conflict_running();
+    case "CRAWL_NOT_ABORTABLE":
+      return m.crawler_abort_conflict_not_abortable();
+    default: {
+      const exhaustive: never = conflict.error_code;
+      return exhaustive;
+    }
+  }
+}
+
+function readCrawlerAbortConflict(value: unknown): CrawlerAbortConflictResponse | null {
+  const response = readObject(value);
+  if (response === null) return null;
+
+  return readConflictResponse(response);
+}
+
+function readConflictResponse(
+  value: Record<string, unknown> | null
+): CrawlerAbortConflictResponse | null {
+  if (value === null) return null;
+  const errorCode = value.error_code;
+  const detail = value.detail;
+  if (!isCrawlerAbortConflictCode(errorCode) || typeof detail !== "string") {
+    return null;
+  }
+  return { error_code: errorCode, detail };
+}
+
+function readObject(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+const crawlAbortConflictCodes = {
+  RUNNING_ABORT_NOT_IMPLEMENTED: true,
+  CRAWL_NOT_ABORTABLE: true
+} satisfies Record<CrawlerAbortConflictCode, true>;
+
+function isCrawlerAbortConflictCode(value: unknown): value is CrawlerAbortConflictCode {
+  return typeof value === "string" && value in crawlAbortConflictCodes;
 }
 
 export function getCrawlerActiveInventoryResultLabels(

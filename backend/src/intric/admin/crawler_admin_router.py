@@ -1,9 +1,9 @@
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
-from typing import Annotated
+from typing import Annotated, assert_never
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import JSONResponse
 
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
@@ -47,6 +47,7 @@ def _abort_conflict_detail(code: CrawlAbortConflictCode) -> str:
             return "Running crawl abort is not implemented yet."
         case CrawlAbortConflictCode.CRAWL_NOT_ABORTABLE:
             return "The crawl job is no longer abortable."
+    assert_never(code)
 
 
 @router.get(
@@ -146,22 +147,22 @@ async def abort_current_tenant_queued_crawl(
                 error_code=code,
                 detail=_abort_conflict_detail(code),
             )
-            raise HTTPException(
+            return JSONResponse(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=conflict.model_dump(mode="json"),
+                content=conflict.model_dump(mode="json"),
             )
-        case CrawlAbortSucceeded(website_id=website_id, already_terminal=already):
+        case CrawlAbortSucceeded(website=website, already_terminal=already):
             audit_service = container.audit_service()
             await audit_service.log_async(
                 tenant_id=current_user.tenant_id,
                 actor_id=current_user.id,
                 action=ActionType.WEBSITE_CRAWL_ABORTED,
                 entity_type=EntityType.WEBSITE,
-                entity_id=website_id,
+                entity_id=website.id,
                 description="Admin aborted queued website crawl",
                 metadata=AuditMetadata.standard(
                     actor=current_user,
-                    target=SimpleNamespace(id=website_id, name=None),
+                    target=website,
                     extra={
                         "job_id": str(job_id),
                         "already_terminal": already,
@@ -169,3 +170,4 @@ async def abort_current_tenant_queued_crawl(
                 ),
             )
             return Response(status_code=status.HTTP_204_NO_CONTENT)
+    assert_never(result)

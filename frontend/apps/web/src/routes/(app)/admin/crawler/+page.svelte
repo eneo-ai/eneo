@@ -6,6 +6,7 @@
 
 <script lang="ts">
   import { invalidate } from "$app/navigation";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
@@ -32,6 +33,8 @@
     type CrawlerSettingsUpdate
   } from "$lib/features/admin/crawlerSettings";
   import {
+    canAbortCrawlerActiveInventoryItem,
+    getCrawlerAbortConflictMessage,
     getCrawlerActiveInventoryResultLabels,
     getCrawlerActiveInventoryStatusLabel,
     getCrawlerActiveInventoryWebsiteLabel,
@@ -55,7 +58,7 @@
   } from "$lib/features/admin/crawlerScheduledAggregate";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
-  import { ShieldCheck, TriangleAlert } from "lucide-svelte";
+  import { CircleX, ShieldCheck, TriangleAlert } from "lucide-svelte";
 
   type CrawlerSettingsFormValue = boolean | number | string;
   type CrawlerSettingsFormValues = Record<CrawlerSettingsEditableKey, CrawlerSettingsFormValue>;
@@ -80,6 +83,9 @@
   let formValues = $state<CrawlerSettingsFormValues>(emptyFormValues());
   let savedValues = $state<CrawlerSettingsFormValues>(emptyFormValues());
   let savingKey = $state<CrawlerSettingsEditableKey | null>(null);
+  let abortDialogOpen = $state(false);
+  let abortCandidate = $state<CrawlerActiveInventoryItem | null>(null);
+  let abortingJobId = $state<string | null>(null);
 
   const fieldTextByKey: Record<string, () => string> = {
     crawler_hash_skip_title: () => m.crawler_hash_skip_title(),
@@ -181,8 +187,9 @@
       case "running_with_progress":
         return "border-positive-default/40 bg-positive-dimmer text-positive-stronger";
       case "running_no_progress":
-      case "terminal":
         return "border-caution/40 bg-caution/8 text-caution";
+      case "terminal":
+        return "border-border text-muted-foreground";
       case "queued":
         return "border-accent-default/35 text-accent-default";
       default: {
@@ -280,6 +287,41 @@
 
     await saveCrawlerSettings(update, field.key);
   }
+
+  function openAbortDialog(item: CrawlerActiveInventoryItem) {
+    abortCandidate = item;
+    abortDialogOpen = true;
+  }
+
+  async function handleAbortQueuedCrawler() {
+    const candidate = abortCandidate;
+    if (candidate === null) return;
+
+    abortingJobId = candidate.job_id;
+
+    try {
+      await intric.crawlerAdmin.abortQueuedJob(candidate.job_id);
+      abortDialogOpen = false;
+      abortCandidate = null;
+      toast.success(m.crawler_abort_success());
+      await Promise.all([
+        invalidate("admin:crawler-active-inventory"),
+        invalidate("admin:crawler-recent-failures")
+      ]);
+    } catch (error) {
+      const conflictMessage = getCrawlerAbortConflictMessage(error);
+      if (conflictMessage) {
+        abortDialogOpen = false;
+        abortCandidate = null;
+        toast.error(conflictMessage);
+        await invalidate("admin:crawler-active-inventory");
+      } else {
+        toastError(error, m.crawler_abort_failed());
+      }
+    } finally {
+      abortingJobId = null;
+    }
+  }
 </script>
 
 <svelte:head>
@@ -368,6 +410,9 @@
                     <Table.Head class="text-right">
                       {m.crawler_active_inventory_column_updated()}
                     </Table.Head>
+                    <Table.Head class="text-right">
+                      {m.crawler_active_inventory_column_action()}
+                    </Table.Head>
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
@@ -404,6 +449,26 @@
                       </Table.Cell>
                       <Table.Cell class="text-muted-foreground text-right text-xs tabular-nums">
                         {formatDateTime(activeItem.job_updated_at)}
+                      </Table.Cell>
+                      <Table.Cell class="text-right">
+                        {#if canAbortCrawlerActiveInventoryItem(activeItem)}
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            disabled={abortingJobId !== null}
+                            aria-label={m.crawler_abort_button_aria({
+                              website: getCrawlerActiveInventoryWebsiteLabel(activeItem)
+                            })}
+                            onclick={() => openAbortDialog(activeItem)}
+                          >
+                            <CircleX data-icon="inline-start" aria-hidden="true" />
+                            {abortingJobId === activeItem.job_id
+                              ? m.crawler_abort_button_busy()
+                              : m.crawler_abort_button()}
+                          </Button>
+                        {:else}
+                          <span class="text-muted-foreground text-xs" aria-hidden="true">—</span>
+                        {/if}
                       </Table.Cell>
                     </Table.Row>
                   {/each}
@@ -683,3 +748,28 @@
     </Settings.Page>
   </Page.Main>
 </Page.Root>
+
+<AlertDialog.Root bind:open={abortDialogOpen}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.crawler_abort_dialog_title()}</AlertDialog.Title>
+      <AlertDialog.Description>
+        {#if abortCandidate}
+          {m.crawler_abort_dialog_description({
+            website: getCrawlerActiveInventoryWebsiteLabel(abortCandidate)
+          })}
+        {/if}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel disabled={abortingJobId !== null}>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action
+        variant="destructive"
+        disabled={abortingJobId !== null || abortCandidate === null}
+        onclick={() => void handleAbortQueuedCrawler()}
+      >
+        {abortingJobId !== null ? m.crawler_abort_button_busy() : m.crawler_abort_dialog_confirm()}
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

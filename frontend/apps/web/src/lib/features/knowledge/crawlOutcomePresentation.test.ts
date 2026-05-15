@@ -121,6 +121,19 @@ test("runtime timeout outcome has a localized label", () => {
   ).toBe("The crawl ran too long and was stopped");
 });
 
+test("aborted crawl outcome has a localized label", () => {
+  expect(
+    getCrawlOutcomeLabel(
+      {
+        code: "CRAWL_ABORTED",
+        severity: "info",
+        message_key: "crawl_outcome_aborted"
+      },
+      "fallback"
+    )
+  ).toBe("Cancelled by admin");
+});
+
 test("outcome label uses code instead of message key", () => {
   expect(
     getCrawlOutcomeLabel(

@@ -125,6 +125,7 @@ export type CrawlerScheduledAggregateResponse =
   components["schemas"]["CrawlerScheduledAggregateResponse"];
 export type CrawlerRecentFailuresResponse = components["schemas"]["CrawlerRecentFailuresResponse"];
 export type CrawlerRecentFailureItem = components["schemas"]["CrawlerRecentFailureItem"];
+export type CrawlerAbortConflictResponse = components["schemas"]["CrawlerAbortConflictResponse"];
 // OpenAPI exposes website list/detail responses as WebsitePublic; the backend WebsiteSparse
 // Pydantic model is not returned to frontend clients.
 export type WebsiteSparse = components["schemas"]["WebsitePublic"];

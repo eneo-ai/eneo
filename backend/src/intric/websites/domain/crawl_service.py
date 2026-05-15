@@ -25,6 +25,7 @@ from intric.websites.domain.crawl_abort import (
     CrawlAbortNotFound,
     CrawlAbortResult,
     CrawlAbortSucceeded,
+    CrawlAbortWebsite,
 )
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.websites.domain.crawl_run import CrawlRun
@@ -46,12 +47,22 @@ from intric.worker.redis.lua_scripts import LuaScripts
 
 if TYPE_CHECKING:
     from intric.jobs.task_service import TaskService
-    from intric.websites.domain.crawl_run_repo import CrawlRunRepository
+    from intric.websites.domain.crawl_run_repo import (
+        CrawlAbortTarget,
+        CrawlRunRepository,
+    )
     from intric.websites.domain.website import Website, WebsiteSparse
 
     CrawlableWebsite = Website | WebsiteSparse
 
 logger = get_logger(__name__)
+
+
+def _abort_website(target: "CrawlAbortTarget") -> CrawlAbortWebsite:
+    return CrawlAbortWebsite(
+        id=target.website_id,
+        name=target.website_name or target.website_url,
+    )
 
 
 class CrawlService:
@@ -242,7 +253,7 @@ class CrawlService:
             return CrawlAbortSucceeded(
                 job_id=job_id,
                 crawl_run_id=target.crawl_run_id,
-                website_id=target.website_id,
+                website=_abort_website(target),
                 already_terminal=True,
             )
 
@@ -279,7 +290,7 @@ class CrawlService:
         return CrawlAbortSucceeded(
             job_id=job_id,
             crawl_run_id=target.crawl_run_id,
-            website_id=target.website_id,
+            website=_abort_website(target),
             already_terminal=False,
         )
 

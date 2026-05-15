@@ -98,6 +98,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Tenant admin scheduled crawler load UI tranche: consume `/api/v1/admin/crawler/scheduled` in the admin crawler page with a bounded shadcn summary card, independent load failure handling, locale-aware scheduled-count/size labels, and explicit shadcn plus UX review gates.
 - [x] Step 6 ARQ abort primitive tranche: add `JobManager.abort_job(...)` as the narrow ARQ-native abort owner while deferring crawler-domain abort terminal/cleanup/slot/admin semantics until a production caller exists.
 - [x] Step 6 queued-only abort tranche: add the first real tenant admin abort caller for queued crawl jobs, write a typed terminal abort outcome, and prevent pending-queue resurrection while explicitly deferring running abort.
+- [x] Tenant admin queued abort UI tranche: expose queued-only crawler cancellation from the admin crawler page with shadcn confirmation, canonical typed 409 handling, generated OpenAPI coverage, localized `CRAWL_ABORTED` presentation, and audit metadata that preserves the website label.
 
 ## Non-Negotiable Principles
 
@@ -764,17 +765,21 @@ Tests:
 
 ### Step 8: Admin Write Controls
 
-Status: not started.
+Status: in progress. Queued crawl abort is implemented end-to-end for tenant
+admins; running abort, retry, pause/resume, interval changes, and circuit-breaker
+reset remain separate safety slices.
 
 Purpose: allow admins to safely intervene when crawls are expensive, broken, or stuck.
 
 Dependencies:
 
-- Must come after `TerminalEvent`, `CrawlLifecycle`, and `WorkerAdapter`.
+- Must come after `TerminalEvent`, `CrawlLifecycle`, and the narrow queue
+  operation being exposed. A broad `WorkerAdapter` is still deferred until
+  direct ARQ leakage proves it is needed.
 
 Work:
 
-- [ ] Abort queued crawl.
+- [x] Abort queued crawl.
 - [ ] Abort running crawl.
 - [ ] Retry now.
 - [ ] Pause/resume scheduled crawl.

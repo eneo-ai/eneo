@@ -47,6 +47,7 @@ const outcomeLabelsByCode = {
   CRAWL_TIMEOUT_NO_PAGES: () => m.crawl_outcome_timeout_no_pages(),
   CRAWL_MAX_AGE_EXCEEDED: () => m.crawl_outcome_max_age_exceeded(),
   CRAWL_RUNTIME_TIMEOUT: () => m.crawl_outcome_runtime_timeout(),
+  CRAWL_ABORTED: () => m.crawl_outcome_aborted(),
   CRAWL_QUEUE_ENQUEUE_FAILED: () => m.crawl_outcome_queue_enqueue_failed(),
   CRAWL_DIRECT_ENQUEUE_FAILED: () => m.crawl_outcome_direct_enqueue_failed(),
   CRAWL_SOURCE_RETENTION_ONLY: () => m.crawl_outcome_source_retention_only(),

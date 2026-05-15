@@ -10,10 +10,16 @@ class CrawlAbortConflictCode(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class CrawlAbortWebsite:
+    id: UUID
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
 class CrawlAbortSucceeded:
     job_id: UUID
     crawl_run_id: UUID
-    website_id: UUID
+    website: CrawlAbortWebsite
     already_terminal: bool
 
 

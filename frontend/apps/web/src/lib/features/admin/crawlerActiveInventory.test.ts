@@ -1,8 +1,11 @@
+import { IntricError } from "@intric/intric-js";
 import { expect, test } from "vitest";
 import { overwriteGetLocale } from "$lib/paraglide/runtime";
 
 import type { CrawlerActiveInventoryItem } from "./crawlerActiveInventory";
 import {
+  canAbortCrawlerActiveInventoryItem,
+  getCrawlerAbortConflictMessage,
   getCrawlerActiveInventoryResultLabels,
   getCrawlerActiveInventoryStatusLabel,
   getCrawlerActiveInventoryWebsiteLabel
@@ -86,4 +89,60 @@ test("queued orphan-like item falls back to job id when website is absent", () =
       lifecycle_state: "queued"
     })
   ).toBe("Crawler job 11111111");
+});
+
+test("only queued crawler jobs are abortable from the admin inventory", () => {
+  expect(
+    canAbortCrawlerActiveInventoryItem({
+      ...baseActiveItem,
+      lifecycle_state: "queued"
+    })
+  ).toBe(true);
+  expect(canAbortCrawlerActiveInventoryItem(baseActiveItem)).toBe(false);
+  expect(
+    canAbortCrawlerActiveInventoryItem({
+      ...baseActiveItem,
+      lifecycle_state: "terminal"
+    })
+  ).toBe(false);
+  expect(
+    canAbortCrawlerActiveInventoryItem({
+      ...baseActiveItem,
+      lifecycle_state: "running_no_progress"
+    })
+  ).toBe(false);
+});
+
+test("abort conflict messages use typed backend conflict codes", () => {
+  expect(
+    getCrawlerAbortConflictMessage(
+      new IntricError(
+        "Conflict",
+        "RESPONSE",
+        409,
+        0,
+        {
+          error_code: "RUNNING_ABORT_NOT_IMPLEMENTED",
+          detail: "Running crawl abort is not implemented yet."
+        },
+        { endpoint: "POST@/api/v1/admin/crawler/jobs/id/abort" }
+      )
+    )
+  ).toBe("Running crawls cannot be cancelled from this page yet.");
+
+  expect(
+    getCrawlerAbortConflictMessage(
+      new IntricError(
+        "Conflict",
+        "RESPONSE",
+        409,
+        0,
+        {
+          error_code: "CRAWL_NOT_ABORTABLE",
+          detail: "The crawl job is no longer abortable."
+        },
+        { endpoint: "POST@/api/v1/admin/crawler/jobs/id/abort" }
+      )
+    )
+  ).toBe("This crawler job can no longer be cancelled. Refreshing status.");
 });

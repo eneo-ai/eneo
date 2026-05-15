@@ -6967,15 +6967,118 @@ tasks:
         - "Running crawl cancellation remains explicitly unimplemented and returns `RUNNING_ABORT_NOT_IMPLEMENTED`; implement it only with a separate Scrapy/process lifecycle design."
         - "The admin UI abort button is intentionally deferred so the backend contract can be reviewed independently before adding destructive UI controls."
         - "Later hardening can inject JobManager into CrawlService, log false ARQ abort returns, and batch feeder DB status checks if abort bursts become common."
+  - id: T143
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Expose queued-only tenant admin crawler abort in the admin crawler UI with shadcn confirmation, typed backend/frontend conflict handling, and faithful audit metadata."
+    allowed_files:
+      - "backend/src/intric/admin/crawler_admin_router.py"
+      - "backend/src/intric/websites/domain/crawl_abort.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/src/intric/websites/domain/crawl_service.py"
+      - "backend/tests/integration/test_admin_crawler_abort.py"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "frontend/apps/web/src/lib/features/admin/crawlerActiveInventory.test.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerActiveInventory.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+      - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte"
+      - "frontend/packages/intric-js/src/endpoints/crawler-admin.js"
+      - "frontend/packages/intric-js/src/types/resources.d.ts"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Use existing shadcn-Svelte components for the admin UI; do not introduce IntricUI or custom modal primitives."
+      - "Expose only queued abort; running crawl cancellation remains explicitly unsupported through the typed backend 409."
+      - "Keep the frontend conflict parser on the canonical generated 409 OpenAPI response shape; do not preserve dead legacy wrappers."
+      - "Keep audit metadata faithful by carrying the website label through the abort domain result instead of fabricating router targets."
+      - "Do not broaden this UI slice into retry, running abort, pause/resume, or global crawler settings changes."
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_admin_crawler_abort.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py -q"
+      - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py tests/integration/test_admin_crawler_abort.py"
+      - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py tests/integration/test_admin_crawler_abort.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/admin/crawler_admin_router.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py tests/integration/test_admin_crawler_abort.py"
+      - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerActiveInventory.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+      - "cd frontend && bun run --filter @intric/web check"
+      - "cd frontend && bun run --filter @intric/web lint"
+      - "cd frontend/packages/intric-js && bun run lint"
+      - "./scripts/check-intric-js-openapi-schema.sh"
+    red_tests:
+      - "Frontend abort helper test initially failed because `canAbortCrawlerActiveInventoryItem` and typed conflict mapping did not exist."
+      - "Backend integration expectations were changed first to the canonical top-level 409 body and failed until the router returned `JSONResponse(content=...)` instead of `HTTPException(detail=...)`."
+      - "Generated OpenAPI presentation check failed until `CRAWL_ABORTED` was added to the frontend outcome mapping."
+      - "Claude iteration 1 rejected the slice until the legacy wrapped-conflict fallback was removed and abort audit metadata preserved a non-null website target label."
+    stop_if:
+      - "The UI needs to cancel already-running Scrapy work."
+      - "Strict Pyright requires broad casts, `Any`, or type ignores."
+      - "The frontend cannot use the generated OpenAPI operation and response contracts."
+    receipt:
+      result: done
+      summary: "Added a queued-only cancel action to the tenant admin active crawler inventory. The UI uses shadcn AlertDialog/Button/Table composition, shows the action only for queued jobs, disables queued abort actions while an abort request is in flight, handles typed 409 conflicts with localized copy, and refreshes active/failure diagnostics after success or conflict. The Intric client now exposes the generated abort operation, generated schema/resource aliases include the abort conflict response and `CRAWL_ABORTED`, and crawl outcome presentation labels render admin-cancelled runs. Backend conflict responses now match the OpenAPI top-level 409 model, and abort audit metadata carries a domain `CrawlAbortWebsite` label with URL fallback for unnamed websites."
+      changed_files:
+        - "backend/src/intric/admin/crawler_admin_router.py"
+        - "backend/src/intric/websites/domain/crawl_abort.py"
+        - "backend/src/intric/websites/domain/crawl_run_repo.py"
+        - "backend/src/intric/websites/domain/crawl_service.py"
+        - "backend/tests/integration/test_admin_crawler_abort.py"
+        - "frontend/apps/web/messages/en.json"
+        - "frontend/apps/web/messages/sv.json"
+        - "frontend/apps/web/src/lib/features/admin/crawlerActiveInventory.test.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerActiveInventory.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+        - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+        - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+        - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte"
+        - "frontend/packages/intric-js/src/endpoints/crawler-admin.js"
+        - "frontend/packages/intric-js/src/types/resources.d.ts"
+        - "frontend/packages/intric-js/src/types/schema.d.ts"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      validation:
+        - "cd backend && uv run pytest tests/integration/test_admin_crawler_abort.py -q"
+        - "cd backend && uv run pytest tests/integration/test_admin_crawler_abort.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py -q"
+        - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py tests/integration/test_admin_crawler_abort.py"
+        - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py tests/integration/test_admin_crawler_abort.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/admin/crawler_admin_router.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py tests/integration/test_admin_crawler_abort.py"
+        - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerActiveInventory.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+        - "cd frontend && bun run --filter @intric/web check"
+        - "cd frontend && bun run --filter @intric/web lint"
+        - "cd frontend/packages/intric-js && bun run lint"
+        - "./scripts/check-intric-js-openapi-schema.sh"
+        - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/crawler-reliability-robustness-transparency/state.yaml\"); puts \"state yaml ok\"'"
+      ux_review:
+        - "critique/adapt/audit/polish/clarify/ui-ux-pro-max review applied: one destructive action, explicit confirmation, no feature-explainer copy, localized conflict details, accessible icon label, and bounded table impact."
+        - "shadcn MCP confirmed the existing registry components; latest shadcn CLI could not parse this shadcn-svelte `components.json`, so the implementation reused installed shadcn-Svelte primitives and MCP checklist guidance."
+      claude:
+        verdict: green
+        min_score: 8
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t143-admin-crawler-queued-abort-ui-20260515T184819Z.md"
+          - ".codex/artifacts/claude-peer-loop-t143-admin-crawler-queued-abort-ui-iteration-2-20260515T190057Z.md"
+        resolution: "Claude iteration 1 required removing the dead wrapped-conflict frontend parser and preserving website names in abort audit metadata. The slice was revised with a `CrawlAbortWebsite` value object, canonical 409 parsing, audit target assertions, `assert_never` guards, clearer destructive copy, and in-flight action gating. Iteration 2 returned GREEN_LIGHT yes with MIN_SCORE 8; non-blocking P3 nits for URL fallback and running-no-progress coverage were also addressed before commit."
+      follow_up_notes:
+        - "Running crawl cancellation remains deferred behind a separate Scrapy/process lifecycle design."
+        - "A future backend-owned `is_abortable` field on active inventory could remove the frontend's queued-only lifecycle predicate when running abort support exists."
+        - "404 remains the legacy FastAPI `{detail: ...}` shape while 409 is typed; change only with a deliberate endpoint error-contract cleanup."
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T142
+    task: T143
     commands:
       - "cd backend && uv run pytest tests/integration/test_admin_crawler_abort.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py -q"
-      - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/audit/domain/action_types.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_outcome.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py src/intric/websites/presentation/crawler_admin_models.py src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/integration/test_admin_crawler_abort.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
-      - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/audit/domain/action_types.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_outcome.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py src/intric/websites/presentation/crawler_admin_models.py src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/integration/test_admin_crawler_abort.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/admin/crawler_admin_router.py src/intric/audit/domain/action_types.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_outcome.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py src/intric/websites/presentation/crawler_admin_models.py src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/integration/test_admin_crawler_abort.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
-    note: "T142 passed queued abort integration coverage, pending queue/feeder race unit coverage, Ruff check/format, and focused strict Pyright. Running abort remains explicitly deferred behind a typed 409."
+      - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py tests/integration/test_admin_crawler_abort.py"
+      - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py tests/integration/test_admin_crawler_abort.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/admin/crawler_admin_router.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py tests/integration/test_admin_crawler_abort.py"
+      - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerActiveInventory.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+      - "cd frontend && bun run --filter @intric/web check"
+      - "cd frontend && bun run --filter @intric/web lint"
+      - "cd frontend/packages/intric-js && bun run lint"
+      - "./scripts/check-intric-js-openapi-schema.sh"
+    note: "T143 passed queued abort UI/helper coverage, backend abort integration and feeder race coverage, generated OpenAPI freshness, frontend check/lint, focused Ruff, and focused strict Pyright. Running abort remains explicitly deferred behind a typed 409."
