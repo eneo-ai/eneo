@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T060
+active_task: T062
 
 tasks:
   - id: T001
@@ -2656,7 +2656,7 @@ tasks:
   - id: T060
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next highest-ROI implementation tranche after slot acquire/key ownership: phase typing, WorkerAdapter, or admin/operator visibility."
     inputs:
@@ -2680,16 +2680,124 @@ tasks:
       - "TDD red-test story."
       - "Verification commands."
       - "Stop conditions."
+    receipt:
+      result: done
+      decision: "Activate T061 as a backend-only read-only sysadmin active/queued crawler inventory endpoint."
+      summary: "Claude rejected Phase enum work as premature without a production `CrawlAdminDetail` consumer, rejected WorkerAdapter as too broad for the next slice, and selected a bounded active-inventory endpoint because it gives `CrawlLifecycle` its first production read-side consumer without touching crawler write paths."
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t060-choose-next-crawler-reliability-tranche-20260514T234353Z.md"
+        min_score: 8
+      spawned_tasks:
+        - T061
+  - id: T061
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Add a read-only sysadmin active and queued crawler inventory endpoint backed by typed lifecycle derivation and bounded repository pagination."
+    inputs:
+      - "T060 receipt"
+      - ".codex/artifacts/claude-peer-loop-t060-choose-next-crawler-reliability-tranche-20260514T234353Z.md"
+      - "backend/src/intric/websites/domain/crawler_baseline.py"
+      - "backend/src/intric/websites/domain/crawl_lifecycle.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/src/intric/sysadmin/sysadmin_router.py"
+      - "backend/src/intric/sysadmin/sysadmin_models.py"
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawler_active_inventory.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/src/intric/sysadmin/sysadmin_models.py"
+      - "backend/src/intric/sysadmin/sysadmin_router.py"
+      - "backend/tests/integration/test_sysadmin_crawler_active_inventory.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Use TDD: add failing integration coverage before production code."
+      - "Read-only endpoint only; no frontend, generated schema, abort/retry/write actions, ARQ Redis introspection, schema migration, or new indexes."
+      - "Use existing lifecycle derivation; do not add lifecycle states or parse `result_location`."
+      - "Bound rows with limit/offset and cap max limit."
+      - "No Any, casts, type ignores, pass-through services, broad helpers, or raw URL/log sample payloads."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Typed domain inventory row/result models."
+      - "Bounded repository query for active queued/in-progress crawl jobs."
+      - "Sysadmin GET endpoint and response model."
+      - "Integration tests for empty result, queued orphan job, running lifecycle variants, terminal/non-crawl exclusion, tenant filter, pagination, ordering, and non-sysadmin authorization."
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_active_inventory.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_active_inventory.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_active_inventory.py"
+    stop_if:
+      - "Need to parse `result_location`."
+      - "Need to add or change `CrawlLifecycle` states."
+      - "Need to change `CrawlOutcomeCode`."
+      - "Need frontend, generated schema, ARQ Redis introspection, queue payloads, worker health, schema migration, or new index."
+      - "Need to expose raw URL samples or logs."
+      - "Need write actions such as abort, retry, pause, or reset."
+      - "Need files outside allowed_files."
+    receipt:
+      result: done
+      summary: "Added a backend-only read-only sysadmin endpoint at `GET /api/v1/sysadmin/crawler/active` for bounded active/queued crawler inventory. The repository query filters active crawl jobs by `Task.CRAWL` and `Status.QUEUED/IN_PROGRESS`, left-joins crawl runs to keep orphan queued jobs visible, derives `CrawlLifecycle` with the existing helper, supports tenant filtering and pagination, and exposes typed Pydantic models with `Status` and `CrawlLifecycle` enums."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawler_active_inventory.py"
+        - "backend/src/intric/websites/domain/crawl_run_repo.py"
+        - "backend/src/intric/sysadmin/sysadmin_models.py"
+        - "backend/src/intric/sysadmin/sysadmin_router.py"
+        - "backend/tests/integration/test_sysadmin_crawler_active_inventory.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_active_inventory.py -q"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_active_inventory.py"
+        - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_active_inventory.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_active_inventory.py"
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t061-active-crawler-inventory-implementation-review-iteration-3-20260515T000045Z.md"
+        min_score: 8
+      notes:
+        - "Claude iteration 2 blocked on `status: str`, redundant `finished_at IS NULL`, `COUNT(DISTINCT)`, and unpinned orphan tenant filtering. Iteration 3 accepted the revised typed status, predicate alignment, count simplification, counter normalization, and orphan tenant assertion."
+        - "Remaining P3 follow-ups: record EXPLAIN evidence for sustained admin traffic, split the bundled integration test when next touched, and consider website filtering in a future overview slice."
+      spawned_tasks:
+        - T062
+  - id: T062
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next highest-ROI tranche after the backend active crawler inventory endpoint."
+    inputs:
+      - "T061 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte"
+      - "backend/src/intric/sysadmin/sysadmin_router.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - ".codex/artifacts/claude-peer-loop-t061-active-crawler-inventory-implementation-review-iteration-3-20260515T000045Z.md"
+    constraints:
+      - "Do not implement in this judge task."
+      - "Prefer the smallest slice that improves operator transparency or maintainability without write actions."
+      - "Do not start WorkerAdapter unless the next worker slice can stay narrow and read-only."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Decision: next worker tranche."
+      - "Allowed files."
+      - "TDD red-test story."
+      - "Verification commands."
+      - "Stop conditions."
     receipt: null
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T059
+    task: T061
     commands:
-      - "cd backend && uv run pytest tests/unittests/worker/test_lua_ttl_fix.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_slot_release.py tests/unittests/worker/feeder/test_capacity.py tests/unittests/worker/feeder/test_watchdog.py -q"
-      - "cd backend && uv run ruff check src/intric/worker/redis/lua_scripts.py src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/slot_release.py src/intric/worker/crawl/heartbeat.py src/intric/worker/feeder/capacity.py src/intric/worker/feeder/watchdog.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_lua_ttl_fix.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_slot_release.py tests/unittests/worker/feeder/test_capacity.py tests/unittests/worker/feeder/test_watchdog.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/redis/lua_scripts.py src/intric/worker/crawl/slot_acquire.py src/intric/worker/crawl/slot_release.py src/intric/worker/crawl/heartbeat.py src/intric/worker/feeder/capacity.py src/intric/worker/feeder/watchdog.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_lua_ttl_fix.py tests/unittests/worker/test_crawl_slot_acquire.py tests/unittests/worker/test_crawl_slot_release.py tests/unittests/worker/feeder/test_capacity.py tests/unittests/worker/feeder/test_watchdog.py"
-      - "cd backend && rg -n \"job:\\{[^\\n]*slot_preacquired\" src/intric/worker tests/unittests/worker"
-    note: "T059 consolidated the pre-acquired crawl slot Redis key helper and kept targeted tests, ruff, and Pyright green."
+      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_active_inventory.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_active_inventory.py"
+      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_active_inventory.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_active_inventory.py"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-reliability-t060-next-tranche --title 'T061 active crawler inventory implementation review-iteration-3' --phase verification --iteration 3 --require-green --required-min-score 8 ..."
+    note: "T061 backend active/queued crawler inventory endpoint passed targeted integration tests, ruff, format check, Pyright, and Claude green review after addressing iteration-2 blockers."

@@ -52,6 +52,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Active-crawl duplicate-guard index tranche: add task-scoped PostgreSQL lookup indexes, make the duplicate-guard query explicitly crawl-only, and cover pre/post planner behavior with a migration-isolation regression test.
 - [x] Step 5 slot-acquire tranche: extract pre-acquired crawl slot discovery/reuse/mismatch handling into typed `worker/crawl/slot_acquire.py` boundaries while keeping ARQ retry and busy-wait policy in `crawl_tasks.py`.
 - [x] Redis slot-key ownership tranche: consolidate the pre-acquired crawl slot Redis key behind one canonical helper reused by acquire, release, feeder, capacity, heartbeat, and watchdog code.
+- [x] Admin active-crawler inventory tranche: add a read-only sysadmin endpoint for active/queued crawler jobs with typed lifecycle derivation, bounded pagination, tenant filtering, and orphan queued-job visibility.
 
 ## Non-Negotiable Principles
 
@@ -661,7 +662,8 @@ Purpose: give admins visibility into crawler cost, failures, stuck work, and sch
 
 Work:
 
-- [ ] Add read-only admin endpoints for crawler overview.
+- [x] Add read-only admin endpoints for crawler active/queued inventory.
+- [ ] Add read-only admin endpoints for broader crawler overview.
 - [ ] Show active and queued crawls with age, tenant/space/website, worker state, and lifecycle state.
 - [ ] Show scheduled crawls grouped by interval and approximate content size.
 - [ ] Show high-cost websites by a defined score: `schedule_frequency_weight * indexed_content_count * (1 - retention_rate)`, with embedding spend added when reliable cost data exists.

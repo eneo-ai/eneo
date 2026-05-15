@@ -60,7 +60,10 @@ from intric.server.dependencies.container import (
 )
 from intric.server.dependencies.get_repository import get_repository
 from intric.server.protocol import responses
-from intric.sysadmin.sysadmin_models import CrawlerBaselineResponse
+from intric.sysadmin.sysadmin_models import (
+    CrawlerActiveInventoryResponse,
+    CrawlerBaselineResponse,
+)
 from intric.sysadmin.sysadmin_service import SysAdminService
 from intric.tenants.tenant import (
     TenantBase,
@@ -482,6 +485,28 @@ async def get_crawler_baseline(
             tenant_id=tenant_id,
         )
     return CrawlerBaselineResponse.from_domain(metrics)
+
+
+@router.get(
+    "/crawler/active",
+    response_model=CrawlerActiveInventoryResponse,
+    summary="Get cross-tenant active and queued crawler inventory",
+)
+async def get_crawler_active_inventory(
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    tenant_id: Annotated[UUID | None, Query()] = None,
+) -> CrawlerActiveInventoryResponse:
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        repo = CrawlRunRepository(session=session)
+        inventory = await repo.active_inventory(
+            limit=limit,
+            offset=offset,
+            tenant_id=tenant_id,
+        )
+    return CrawlerActiveInventoryResponse.from_domain(inventory)
 
 
 def _mask_actor_label() -> str:

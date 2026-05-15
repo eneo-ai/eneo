@@ -3,9 +3,16 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from intric.main.models import ModelId
+from intric.main.models import ModelId, Status
 from intric.spaces.api.space_models import AddSpaceMemberRequest
+from intric.websites.domain.crawl_lifecycle import CrawlLifecycle
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
+from intric.websites.domain.crawler_active_inventory import (
+    CrawlerActiveInventory as DomainCrawlerActiveInventory,
+)
+from intric.websites.domain.crawler_active_inventory import (
+    CrawlerActiveInventoryItem as DomainCrawlerActiveInventoryItem,
+)
 from intric.websites.domain.crawler_baseline import (
     CrawlerBaselineMetrics as DomainCrawlerBaselineMetrics,
 )
@@ -152,4 +159,68 @@ class CrawlerBaselineResponse(BaseModel):
             processing_totals=CrawlerBaselineProcessingTotals.from_domain(
                 metrics.processing_totals
             ),
+        )
+
+
+class CrawlerActiveInventoryItem(BaseModel):
+    job_id: UUID
+    crawl_run_id: UUID | None
+    website_id: UUID | None
+    tenant_id: UUID | None
+    status: Status
+    lifecycle_state: CrawlLifecycle
+    job_created_at: datetime
+    job_updated_at: datetime
+    crawl_run_created_at: datetime | None
+    pages_crawled: int | None
+    files_downloaded: int | None
+    pages_failed: int | None
+    files_failed: int | None
+    pages_source_retained: int | None
+    pages_hash_retained: int | None
+    files_hash_retained: int | None
+    files_too_large_skipped: int | None
+
+    @classmethod
+    def from_domain(
+        cls, item: DomainCrawlerActiveInventoryItem
+    ) -> "CrawlerActiveInventoryItem":
+        return cls(
+            job_id=item.job_id,
+            crawl_run_id=item.crawl_run_id,
+            website_id=item.website_id,
+            tenant_id=item.tenant_id,
+            status=item.status,
+            lifecycle_state=item.lifecycle_state,
+            job_created_at=item.job_created_at,
+            job_updated_at=item.job_updated_at,
+            crawl_run_created_at=item.crawl_run_created_at,
+            pages_crawled=item.pages_crawled,
+            files_downloaded=item.files_downloaded,
+            pages_failed=item.pages_failed,
+            files_failed=item.files_failed,
+            pages_source_retained=item.pages_source_retained,
+            pages_hash_retained=item.pages_hash_retained,
+            files_hash_retained=item.files_hash_retained,
+            files_too_large_skipped=item.files_too_large_skipped,
+        )
+
+
+class CrawlerActiveInventoryResponse(BaseModel):
+    items: list[CrawlerActiveInventoryItem]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=200)
+    offset: int = Field(ge=0)
+
+    @classmethod
+    def from_domain(
+        cls, inventory: DomainCrawlerActiveInventory
+    ) -> "CrawlerActiveInventoryResponse":
+        return cls(
+            items=[
+                CrawlerActiveInventoryItem.from_domain(item) for item in inventory.items
+            ],
+            total=inventory.total,
+            limit=inventory.limit,
+            offset=inventory.offset,
         )

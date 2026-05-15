@@ -7,13 +7,19 @@ from sqlalchemy.orm import selectinload
 
 from intric.database.tables.job_table import Jobs
 from intric.database.tables.websites_table import CrawlRuns as CrawlRunsTable
+from intric.jobs.job_models import Task
 from intric.main.exceptions import NotFoundException
 from intric.main.models import Status
+from intric.websites.domain.crawl_lifecycle import derive_crawl_lifecycle_from_counters
 from intric.websites.domain.crawl_outcome import (
     CrawlOutcomeCode,
     parse_crawl_outcome_code_strict,
 )
 from intric.websites.domain.crawl_run import CrawlRun
+from intric.websites.domain.crawler_active_inventory import (
+    CrawlerActiveInventory,
+    CrawlerActiveInventoryItem,
+)
 from intric.websites.domain.crawler_baseline import (
     CrawlerBaselineMetrics,
     CrawlerBaselineProcessingTotals,
@@ -28,6 +34,14 @@ def _serialize_crawl_outcome_code(
     outcome_code: CrawlOutcomeCode | None,
 ) -> str | None:
     return outcome_code.value if outcome_code is not None else None
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    raise TypeError(f"Expected integer crawl counter, got {type(value).__name__}")
 
 
 class CrawlRunRepository:
@@ -113,6 +127,96 @@ class CrawlRunRepository:
         )
         records = await self.session.scalars(stmt)
         return [CrawlRun.to_domain(record=record) for record in records]
+
+    async def active_inventory(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        tenant_id: UUID | None,
+    ) -> CrawlerActiveInventory:
+        active_conditions = [
+            Jobs.task == Task.CRAWL.value,
+            Jobs.status.in_([Status.QUEUED.value, Status.IN_PROGRESS.value]),
+        ]
+        if tenant_id is not None:
+            active_conditions.append(CrawlRunsTable.tenant_id == tenant_id)
+
+        base_from = sa.outerjoin(Jobs, CrawlRunsTable, Jobs.id == CrawlRunsTable.job_id)
+        total_stmt = (
+            sa.select(sa.func.count(Jobs.id))
+            .select_from(base_from)
+            .where(*active_conditions)
+        )
+        total = int(await self.session.scalar(total_stmt) or 0)
+
+        rows_stmt = (
+            sa.select(
+                Jobs.id.label("job_id"),
+                Jobs.status.label("job_status"),
+                Jobs.created_at.label("job_created_at"),
+                Jobs.updated_at.label("job_updated_at"),
+                CrawlRunsTable.id.label("crawl_run_id"),
+                CrawlRunsTable.website_id.label("website_id"),
+                CrawlRunsTable.tenant_id.label("tenant_id"),
+                CrawlRunsTable.created_at.label("crawl_run_created_at"),
+                CrawlRunsTable.pages_crawled.label("pages_crawled"),
+                CrawlRunsTable.files_downloaded.label("files_downloaded"),
+                CrawlRunsTable.pages_failed.label("pages_failed"),
+                CrawlRunsTable.files_failed.label("files_failed"),
+                CrawlRunsTable.pages_source_retained.label("pages_source_retained"),
+                CrawlRunsTable.pages_hash_retained.label("pages_hash_retained"),
+                CrawlRunsTable.files_hash_retained.label("files_hash_retained"),
+                CrawlRunsTable.files_too_large_skipped.label("files_too_large_skipped"),
+            )
+            .select_from(base_from)
+            .where(*active_conditions)
+            .order_by(Jobs.created_at.desc(), Jobs.id.asc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self.session.execute(rows_stmt)
+        items: list[CrawlerActiveInventoryItem] = []
+        for row in result.mappings():
+            status = Status(str(row["job_status"]))
+            counters = {
+                "pages_crawled": _optional_int(row["pages_crawled"]),
+                "files_downloaded": _optional_int(row["files_downloaded"]),
+                "pages_failed": _optional_int(row["pages_failed"]),
+                "files_failed": _optional_int(row["files_failed"]),
+                "pages_source_retained": _optional_int(row["pages_source_retained"]),
+                "pages_hash_retained": _optional_int(row["pages_hash_retained"]),
+                "files_hash_retained": _optional_int(row["files_hash_retained"]),
+                "files_too_large_skipped": _optional_int(
+                    row["files_too_large_skipped"]
+                ),
+            }
+            lifecycle_state = derive_crawl_lifecycle_from_counters(
+                status=status,
+                finished_at=None,
+                **counters,
+            )
+            items.append(
+                CrawlerActiveInventoryItem(
+                    job_id=row["job_id"],
+                    crawl_run_id=row["crawl_run_id"],
+                    website_id=row["website_id"],
+                    tenant_id=row["tenant_id"],
+                    status=status,
+                    lifecycle_state=lifecycle_state,
+                    job_created_at=row["job_created_at"],
+                    job_updated_at=row["job_updated_at"],
+                    crawl_run_created_at=row["crawl_run_created_at"],
+                    **counters,
+                )
+            )
+
+        return CrawlerActiveInventory(
+            items=tuple(items),
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
 
     async def aggregate_baseline(
         self,
