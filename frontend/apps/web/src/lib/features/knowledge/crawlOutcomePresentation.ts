@@ -20,6 +20,26 @@ export type CrawlRunResultLabel = {
   tooltip?: string;
 };
 
+export type CrawlOutcomeLabelSource = Pick<CrawlOutcome, "code"> & {
+  affected_count?: CrawlOutcome["affected_count"];
+  detail?: CrawlOutcome["detail"];
+};
+export type CrawlOutcomePresentationSource = CrawlOutcome | CrawlOutcomeLabelSource;
+
+export type CrawlRunResultLabelSource = {
+  processing_summary?: CrawlRunProcessingSummary | null;
+  outcome?: CrawlOutcomePresentationSource | null;
+  failure_summary?: CrawlRun["failure_summary"];
+  pages_crawled?: CrawlRun["pages_crawled"];
+  files_downloaded?: CrawlRun["files_downloaded"];
+  pages_failed?: CrawlRun["pages_failed"];
+  files_failed?: CrawlRun["files_failed"];
+  pages_hash_retained?: CrawlRun["pages_hash_retained"];
+  files_hash_retained?: CrawlRun["files_hash_retained"];
+  files_too_large_skipped?: CrawlRun["files_too_large_skipped"];
+  pages_source_retained?: CrawlRun["pages_source_retained"];
+};
+
 const outcomeLabelsByCode = {
   CRAWL_DUPLICATE_SKIPPED: () => m.crawl_outcome_duplicate_skipped(),
   CRAWL_NO_PAGES_RETURNED: () => m.crawl_outcome_no_pages_returned(),
@@ -59,7 +79,9 @@ export function getPagesSourceRetained(crawl: CrawlRun): number | undefined {
   return typeof count === "number" && count > 0 ? count : undefined;
 }
 
-export function getCrawlRunCountBreakdown(crawl: CrawlRun): CrawlRunCountBreakdown {
+export function getCrawlRunCountBreakdown(
+  crawl: CrawlRunResultLabelSource
+): CrawlRunCountBreakdown {
   if (crawl.processing_summary) {
     return countBreakdownFromSummary(crawl.processing_summary);
   }
@@ -86,9 +108,9 @@ export function getCrawlRunCountBreakdown(crawl: CrawlRun): CrawlRunCountBreakdo
   };
 }
 
-export function getCrawlRunResultLabels(crawl: CrawlRun): CrawlRunResultLabel[] {
+export function getCrawlRunResultLabels(crawl: CrawlRunResultLabelSource): CrawlRunResultLabel[] {
   const breakdown = getCrawlRunCountBreakdown(crawl);
-  const outcome = getCrawlOutcome(crawl);
+  const outcome = crawl.outcome ?? undefined;
   const labels: CrawlRunResultLabel[] = [];
 
   const fetchedResources = resourceLabel(breakdown.pages_fetched, breakdown.files_downloaded);
@@ -169,7 +191,10 @@ export function isSourceRetentionOnly(
   return outcome?.code === "CRAWL_SOURCE_RETENTION_ONLY";
 }
 
-export function getCrawlOutcomeLabel(outcome: CrawlOutcome, fallback: string): string {
+export function getCrawlOutcomeLabel(
+  outcome: CrawlOutcomePresentationSource,
+  fallback: string
+): string {
   return crawlOutcomeLabelForCode(outcome.code) ?? outcome.detail ?? fallback;
 }
 
@@ -213,7 +238,7 @@ export function getSourceRetainedLabel(count: number): string {
 }
 
 export function getCrawlOutcomeTooltip(
-  outcome: CrawlOutcome | undefined,
+  outcome: CrawlOutcomePresentationSource | undefined,
   fallback: string
 ): string | undefined {
   if (!outcome) {

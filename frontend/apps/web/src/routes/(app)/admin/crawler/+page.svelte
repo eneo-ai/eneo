@@ -13,6 +13,7 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
+  import * as Table from "$lib/components/ui/table/index.js";
   import { Page, Settings } from "$lib/components/layout";
   import { toast } from "$lib/components/toast";
   import { getIntric } from "$lib/core/Intric.js";
@@ -30,14 +31,30 @@
     type CrawlerSettingsEditableKey,
     type CrawlerSettingsUpdate
   } from "$lib/features/admin/crawlerSettings";
+  import {
+    getCrawlerRecentFailureOutcomeLabel,
+    getCrawlerRecentFailureResultLabels,
+    getCrawlerRecentFailureWebsiteLabel,
+    type CrawlerRecentFailuresResponse
+  } from "$lib/features/admin/crawlerRecentFailures";
   import { m } from "$lib/paraglide/messages";
+  import { getLocale } from "$lib/paraglide/runtime";
   import { ShieldCheck, TriangleAlert } from "lucide-svelte";
 
   type CrawlerSettingsFormValue = boolean | number | string;
   type CrawlerSettingsFormValues = Record<CrawlerSettingsEditableKey, CrawlerSettingsFormValue>;
 
   const intric = getIntric();
-  let { data }: { data: { crawlerSettings: CrawlerSettings } } = $props();
+  let {
+    data
+  }: {
+    data: {
+      crawlerSettings: CrawlerSettings;
+      crawlerRecentFailuresWindowDays: number;
+      crawlerRecentFailures: CrawlerRecentFailuresResponse | null;
+      crawlerRecentFailuresLoadFailed: boolean;
+    };
+  } = $props();
 
   let crawlerSettings = $state<CrawlerSettings | null>(null);
   let formValues = $state<CrawlerSettingsFormValues>(emptyFormValues());
@@ -114,6 +131,26 @@
 
   function fieldText(key: string) {
     return fieldTextByKey[key]?.() ?? key;
+  }
+
+  function formatFinishedAt(value: string) {
+    return new Date(value).toLocaleString(getLocale(), {
+      dateStyle: "medium",
+      timeStyle: "short"
+    });
+  }
+
+  function resultBadgeClass(color: string) {
+    if (color === "orange") {
+      return "border-caution/40 bg-caution/8 text-caution";
+    }
+    if (color === "moss") {
+      return "border-success/40 bg-secondary text-success";
+    }
+    if (color === "blue") {
+      return "border-accent-default/35 text-accent-default";
+    }
+    return undefined;
   }
 
   function rangeHint(field: CrawlerNumberField) {
@@ -246,6 +283,94 @@
               </div>
             </div>
           {/each}
+        </Card.Content>
+      </Card.Root>
+
+      <Card.Root class="mb-14" aria-labelledby="crawler-recent-failures-title">
+        <Card.Header>
+          <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+            <div class="flex min-w-0 flex-col gap-1">
+              <h2 id="crawler-recent-failures-title" class="text-base leading-snug font-semibold">
+                {m.crawler_recent_failures_title()}
+              </h2>
+              <Card.Description>
+                {m.crawler_recent_failures_description({
+                  days: data.crawlerRecentFailuresWindowDays
+                })}
+              </Card.Description>
+            </div>
+            {#if data.crawlerRecentFailures}
+              <Badge variant="outline" class="shrink-0 tabular-nums">
+                {m.crawler_recent_failures_count({
+                  shown: data.crawlerRecentFailures.items.length,
+                  total: data.crawlerRecentFailures.total
+                })}
+              </Badge>
+            {/if}
+          </div>
+        </Card.Header>
+        <Card.Content class="pt-0">
+          {#if data.crawlerRecentFailuresLoadFailed}
+            <Alert.Root variant="destructive">
+              <TriangleAlert aria-hidden="true" />
+              <Alert.Description>{m.crawler_recent_failures_load_error()}</Alert.Description>
+            </Alert.Root>
+          {:else if !data.crawlerRecentFailures || data.crawlerRecentFailures.items.length === 0}
+            <p class="text-muted-foreground text-sm">
+              {m.crawler_recent_failures_empty({
+                days: data.crawlerRecentFailuresWindowDays
+              })}
+            </p>
+          {:else}
+            <Table.Root class="min-w-[56rem]">
+              <Table.Caption class="sr-only">
+                {m.crawler_recent_failures_table_caption()}
+              </Table.Caption>
+              <Table.Header>
+                <Table.Row>
+                  <Table.Head>{m.crawler_recent_failures_column_website()}</Table.Head>
+                  <Table.Head>{m.crawler_recent_failures_column_outcome()}</Table.Head>
+                  <Table.Head>{m.crawler_recent_failures_column_activity()}</Table.Head>
+                  <Table.Head class="text-right">
+                    {m.crawler_recent_failures_column_finished()}
+                  </Table.Head>
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
+                {#each data.crawlerRecentFailures.items as failure (failure.crawl_run_id)}
+                  <Table.Row>
+                    <Table.Cell class="max-w-64">
+                      <span
+                        class="block truncate font-medium"
+                        title={getCrawlerRecentFailureWebsiteLabel(failure)}
+                      >
+                        {getCrawlerRecentFailureWebsiteLabel(failure)}
+                      </span>
+                    </Table.Cell>
+                    <Table.Cell class="max-w-72 whitespace-normal">
+                      <span class="text-sm">{getCrawlerRecentFailureOutcomeLabel(failure)}</span>
+                    </Table.Cell>
+                    <Table.Cell class="whitespace-normal">
+                      <div class="flex flex-wrap gap-1.5">
+                        {#each getCrawlerRecentFailureResultLabels(failure) as label (label.label)}
+                          <Badge
+                            variant="outline"
+                            class={resultBadgeClass(label.color)}
+                            title={label.tooltip}
+                          >
+                            {label.label}
+                          </Badge>
+                        {/each}
+                      </div>
+                    </Table.Cell>
+                    <Table.Cell class="text-muted-foreground text-right text-xs tabular-nums">
+                      {formatFinishedAt(failure.finished_at)}
+                    </Table.Cell>
+                  </Table.Row>
+                {/each}
+              </Table.Body>
+            </Table.Root>
+          {/if}
         </Card.Content>
       </Card.Root>
 

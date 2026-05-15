@@ -118,6 +118,8 @@ export type CrawlerSettingsUpdate = Partial<
     | "closespider_itemcount"
   >
 >;
+export type CrawlerRecentFailuresResponse = components["schemas"]["CrawlerRecentFailuresResponse"];
+export type CrawlerRecentFailureItem = components["schemas"]["CrawlerRecentFailureItem"];
 // OpenAPI exposes website list/detail responses as WebsitePublic; the backend WebsiteSparse
 // Pydantic model is not returned to frontend clients.
 export type WebsiteSparse = components["schemas"]["WebsitePublic"];

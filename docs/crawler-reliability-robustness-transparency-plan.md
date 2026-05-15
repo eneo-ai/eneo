@@ -88,6 +88,8 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Generated crawler sysadmin OpenAPI contract tranche: regenerate `@intric/intric-js` schema types from the current backend OpenAPI snapshot and add type-level coverage for the seven sysadmin crawler response and operation contracts.
 - [x] OpenAPI freshness guard tranche: add a CI-backed regenerate-and-diff check that compares checked-in `@intric/intric-js` schema types with the current backend `app.openapi()` output.
 - [x] Tenant-scoped admin recent-failures tranche: add `/admin/crawler/recent-failures` as the first browser/admin-callable crawler diagnostics endpoint, scoped to the current admin's tenant without exposing `tenant_id`, and split repository entry points into tenant-required vs sysadmin-optional methods.
+- [x] Tenant admin recent-failures UI tranche: consume the tenant-scoped recent-failures endpoint from the admin crawler page through a typed Intric client method, using shadcn-Svelte components and bounded presentation helpers for outcome, website fallback, and activity labels.
+- [x] Tenant admin recent-failures hardening tranche: replace the synthetic CrawlRun UI adapter with a narrower shared result-label source type, prove diagnostics-load failure does not break crawler settings, and show explicit shown/total recent-failure counts in the admin UI.
 
 ## Non-Negotiable Principles
 
@@ -672,9 +674,8 @@ Tests:
 
 ### Step 6: WorkerAdapter For ARQ, Idempotency, Abort, And Health
 
-Status: in progress. Sysadmin read APIs exist for the main crawler inventory
-views, and the first tenant-scoped admin diagnostics endpoint now exists for
-recent crawler failures.
+Status: in progress. Several concrete queue/Redis/status owners now exist, but
+the full `WorkerAdapter`, abort semantics, and idempotency tests remain open.
 
 Purpose: isolate ARQ queue/runtime behavior behind a typed crawler-facing seam.
 
@@ -711,7 +712,9 @@ Tests:
 
 ### Step 7: AdminOperations Read-Only Dashboard/API
 
-Status: not started.
+Status: in progress. Sysadmin read APIs exist for the main crawler inventory
+views, and the first tenant-scoped admin diagnostics endpoint is now consumed by
+the browser admin crawler page.
 
 Purpose: give admins visibility into crawler cost, failures, stuck work, and scheduled load without logging into user accounts.
 
@@ -725,6 +728,7 @@ Work:
 - [ ] Show high-cost websites by a defined score: `schedule_frequency_weight * indexed_content_count * (1 - retention_rate)`, with embedding spend added when reliable cost data exists.
 - [x] Expose recent terminal failed crawler runs by typed `CrawlOutcomeCode` through a bounded sysadmin endpoint.
 - [x] Expose recent terminal failed crawler runs through a bounded tenant-scoped admin endpoint without a `tenant_id` query parameter.
+- [x] Show recent terminal failed crawler runs in the tenant admin crawler page without calling super-API-key `/sysadmin` endpoints.
 - [ ] Show too-large file counts and capped samples.
 - [ ] Show hash-retained/source-retained/file-retained counts and rates.
 - [ ] Show watchdog interventions and circuit breaker state.

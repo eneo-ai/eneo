@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T133
+active_task: T135
 
 tasks:
   - id: T001
@@ -6366,7 +6366,7 @@ tasks:
   - id: T133
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Audit the roadmap after T132 and choose the next single highest-ROI remaining slice without marking the full goal complete unless current evidence proves every requirement."
     inputs:
@@ -6382,6 +6382,111 @@ tasks:
       - "complete | not_complete"
       - "Evidence for remaining explicit open items"
       - "Next bounded task if not complete"
+    receipt:
+      result: not_complete
+      summary: "Roadmap audit rejected goal completion. Claude rejected another backend-only diagnostics endpoint as the next slice and selected closing the browser/admin loop for the tenant-scoped recent-failures endpoint already added in T132."
+      changed_files:
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "Plan audit after T132 still found open Step 6 WorkerAdapter/abort/idempotency, Step 7 admin visibility, and Step 8 admin write-control requirements."
+        - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte currently exposes crawler settings only and does not show recent crawl failures."
+        - "T132 provides /api/v1/admin/crawler/recent-failures as a browser/admin-callable tenant-scoped endpoint, so the UI can consume diagnostics without calling super-API-key /sysadmin endpoints."
+      claude:
+        verdict: changes_required
+        min_score: 7
+        artifact: ".codex/artifacts/claude-peer-loop-t133-roadmap-audit-next-slice-20260515T145057Z.md"
+        follow_up_notes:
+          - "Do not add another backend-only endpoint before the existing tenant-scoped diagnostics path has a browser/admin consumer."
+          - "Add a thin admin crawler diagnostics UI using the existing endpoint and keep the first UI slice read-only."
+          - "Defer watchdog_interventions naming symmetry unless a touched call site makes it local."
+  - id: T134
+    type: worker
+    assignee: Codex
+    status: done
+    reasoning_hint: medium
+    objective: "Show recent crawler failures on the tenant admin crawler page by consuming /api/v1/admin/crawler/recent-failures through a typed Intric client path."
+    allowed_files:
+      - "frontend/packages/intric-js/src/intric.js"
+      - "frontend/packages/intric-js/src/endpoints/crawler-admin.js"
+      - "frontend/packages/intric-js/src/types/resources.d.ts"
+      - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.ts"
+      - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte"
+      - "frontend/apps/web/src/lib/features/admin/crawlerRecentFailures.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerRecentFailures.test.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerAdminPageLoad.test.ts"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd frontend && bun run --filter @intric/web test:unit"
+      - "cd frontend && bun run --filter @intric/web check"
+      - "cd frontend && bun run --filter @intric/web lint"
+      - "cd frontend/packages/intric-js && bun run lint"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+      - "./scripts/check-intric-js-openapi-schema.sh"
+    stop_if:
+      - "Need browser/admin UI consumption of /sysadmin/crawler/*."
+      - "Need admin write controls or crawler mutations."
+      - "Need to stage unrelated .devcontainer dirt."
+      - "Need a broad admin dashboard redesign instead of a bounded diagnostics section."
+    receipt:
+      result: done
+      summary: "Added the tenant admin recent-failures UI consumer. The admin crawler page now loads /api/v1/admin/crawler/recent-failures through a typed intric.crawlerAdmin client namespace, degrades diagnostics-load failure without breaking settings, and renders a shadcn-Svelte diagnostics table with explicit shown/total counts, localized outcome labels, unchanged/too-large/failed activity badges, and fixed-window copy. Shared crawl result presentation now accepts a narrower structural source type instead of forcing a synthetic CrawlRun cast."
+      changed_files:
+        - "frontend/packages/intric-js/src/intric.js"
+        - "frontend/packages/intric-js/src/endpoints/crawler-admin.js"
+        - "frontend/packages/intric-js/src/types/resources.d.ts"
+        - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.ts"
+        - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte"
+        - "frontend/apps/web/src/lib/features/admin/crawlerRecentFailures.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerRecentFailures.test.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerAdminPageLoad.test.ts"
+        - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+        - "frontend/apps/web/messages/en.json"
+        - "frontend/apps/web/messages/sv.json"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "Red test: cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerRecentFailures.test.ts failed with module-not-found before the presentation helper existed."
+        - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerRecentFailures.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts"
+        - "cd frontend && bun run --filter @intric/web check"
+        - "cd frontend && bun run --filter @intric/web test:unit"
+        - "cd frontend && bun run --filter @intric/web lint && cd packages/intric-js && bun run lint"
+        - "./scripts/check-intric-js-openapi-schema.sh"
+        - "cd backend && uv run pyright --project pyrightconfig.json"
+        - "git diff --check on intended files"
+        - "shadcn MCP audit checklist and registry details for table, badge, alert, and card were consulted; new admin UI uses shadcn-Svelte components, not IntricUI components."
+      claude:
+        verdict: green
+        min_score: 8
+        artifact: ".codex/artifacts/claude-peer-loop-t134-admin-crawler-recent-failures-ui-iteration-2-20260515T153243Z.md"
+        follow_up_notes:
+          - "crawlerAdmin is intentionally treated as the stable namespace for future tenant-admin crawler diagnostics reads; fold into settings only if it remains a one-off."
+          - "Optional follow-up: collapse crawlerRecentFailures plus crawlerRecentFailuresLoadFailed into a discriminated load-state union if this panel gains more states."
+          - "Optional follow-up: add empty-string website_name and all-null counter edge tests if the endpoint begins returning incomplete historical rows."
+  - id: T135
+    type: judge
+    assignee: Codex
+    status: active
+    reasoning_hint: high
+    objective: "Audit the roadmap after T134 and select the next single highest-ROI reliability/maintainability slice without broadening admin UI work prematurely."
+    inputs:
+      - "T134 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "Current git diff after T134"
+    constraints:
+      - "Do not implement in the judge task."
+      - "Preserve unrelated .devcontainer dirt and frontend icon ordering drift."
+      - "Prefer the next slice that reduces crawler brittleness or improves product/admin diagnosability with bounded reviewable scope."
+    expected_output:
+      - "complete | not_complete"
+      - "Remaining explicit open items"
+      - "Next bounded worker task with allowed files and verification commands"
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
