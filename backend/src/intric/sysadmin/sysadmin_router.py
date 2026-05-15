@@ -66,6 +66,7 @@ from intric.sysadmin.sysadmin_models import (
     CrawlerFailureInventoryResponse,
     CrawlerRecentFailuresResponse,
     CrawlerScheduledAggregateResponse,
+    CrawlerWatchdogStatusResponse,
     CrawlerWebsiteProcessingAggregateResponse,
 )
 from intric.sysadmin.sysadmin_service import SysAdminService
@@ -77,6 +78,7 @@ from intric.tenants.tenant import (
 from intric.users.user import UserAddSuperAdmin, UserCreated, UserInDB, UserUpdatePublic
 from intric.websites.domain.crawl_run_repo import CrawlRunRepository
 from intric.websites.domain.website_admin_repo import WebsiteAdminRepository
+from intric.worker.redis.client import read_watchdog_status_snapshot
 from intric.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direct
 
 logger = get_logger(__name__)
@@ -563,6 +565,40 @@ async def get_crawler_recent_failures(
             tenant_id=tenant_id,
         )
     return CrawlerRecentFailuresResponse.from_domain(failures)
+
+
+@router.get(
+    "/crawler/watchdog-status",
+    response_model=CrawlerWatchdogStatusResponse,
+    summary="Get crawler watchdog status and recent watchdog interventions",
+)
+async def get_crawler_watchdog_status(
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+    days: Annotated[int, Query(ge=1, le=30)] = 7,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    tenant_id: Annotated[UUID | None, Query()] = None,
+) -> CrawlerWatchdogStatusResponse:
+    until = datetime.now(timezone.utc)
+    since = until - timedelta(days=days)
+    redis_client = container.redis_client()
+    snapshot = await read_watchdog_status_snapshot(redis_client)
+
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        repo = CrawlRunRepository(session=session)
+        interventions = await repo.watchdog_interventions(
+            since=since,
+            until=until,
+            days=days,
+            limit=limit,
+            offset=offset,
+            tenant_id=tenant_id,
+        )
+    return CrawlerWatchdogStatusResponse.from_domain(
+        snapshot=snapshot,
+        recent_interventions=interventions,
+    )
 
 
 @router.get(

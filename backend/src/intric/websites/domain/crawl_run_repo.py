@@ -36,6 +36,7 @@ from intric.websites.domain.crawler_baseline import (
 )
 from intric.websites.domain.crawler_recent_failures import (
     RECENT_FAILURE_OUTCOME_CODES,
+    WATCHDOG_INTERVENTION_OUTCOME_CODES,
     CrawlerRecentFailureItem,
     CrawlerRecentFailures,
 )
@@ -264,13 +265,52 @@ class CrawlRunRepository:
         offset: int,
         tenant_id: UUID | None,
     ) -> CrawlerRecentFailures:
+        return await self._recent_terminal_outcomes(
+            since=since,
+            until=until,
+            days=days,
+            limit=limit,
+            offset=offset,
+            tenant_id=tenant_id,
+            outcome_codes=RECENT_FAILURE_OUTCOME_CODES,
+        )
+
+    async def watchdog_interventions(
+        self,
+        *,
+        since: datetime,
+        until: datetime,
+        days: int,
+        limit: int,
+        offset: int,
+        tenant_id: UUID | None,
+    ) -> CrawlerRecentFailures:
+        return await self._recent_terminal_outcomes(
+            since=since,
+            until=until,
+            days=days,
+            limit=limit,
+            offset=offset,
+            tenant_id=tenant_id,
+            outcome_codes=WATCHDOG_INTERVENTION_OUTCOME_CODES,
+        )
+
+    async def _recent_terminal_outcomes(
+        self,
+        *,
+        since: datetime,
+        until: datetime,
+        days: int,
+        limit: int,
+        offset: int,
+        tenant_id: UUID | None,
+        outcome_codes: frozenset[CrawlOutcomeCode],
+    ) -> CrawlerRecentFailures:
         recent_failure_conditions = [
             Jobs.finished_at.is_not(None),
             Jobs.finished_at >= since,
             Jobs.finished_at < until,
-            CrawlRunsTable.outcome_code.in_(
-                [code.value for code in RECENT_FAILURE_OUTCOME_CODES]
-            ),
+            CrawlRunsTable.outcome_code.in_([code.value for code in outcome_codes]),
         ]
         if tenant_id is not None:
             recent_failure_conditions.append(CrawlRunsTable.tenant_id == tenant_id)

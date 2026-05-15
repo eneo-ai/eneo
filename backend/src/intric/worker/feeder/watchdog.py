@@ -47,7 +47,11 @@ from intric.worker.feeder.crawl_enqueue import (
     CrawlEnqueueFailed,
     enqueue_crawl_job,
 )
-from intric.worker.redis.client import redis_scan_match_bytes
+from intric.worker.redis.client import (
+    WATCHDOG_LAST_METRICS_KEY,
+    WATCHDOG_LAST_SUCCESS_EPOCH_KEY,
+    redis_scan_match_bytes,
+)
 from intric.worker.redis.lua_scripts import LuaScripts
 
 if TYPE_CHECKING:
@@ -299,7 +303,7 @@ class OrphanWatchdog:
             )
             try:
                 await self._redis.set(
-                    "crawl_watchdog:last_success_epoch",
+                    WATCHDOG_LAST_SUCCESS_EPOCH_KEY,
                     str(int(now.timestamp())),
                     ex=watchdog_ttl,
                 )
@@ -1167,7 +1171,7 @@ class OrphanWatchdog:
         ttl = max(2 * feeder_interval, 300)
         try:
             await self._redis.set(
-                "crawl_watchdog:last_metrics",
+                WATCHDOG_LAST_METRICS_KEY,
                 json.dumps(snapshot),
                 ex=ttl,
             )

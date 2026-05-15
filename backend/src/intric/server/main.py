@@ -1,10 +1,9 @@
 import asyncio
-import json
 import time
 import traceback
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional, Protocol, cast
+from typing import TYPE_CHECKING, Any, Optional, Protocol, cast
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -26,6 +25,9 @@ from intric.server.models.api import VersionResponse
 from intric.server.routers import router as api_router
 
 logger = get_logger(__name__)
+
+if TYPE_CHECKING:
+    from intric.worker.redis.client import WatchdogMetricsSnapshot
 
 
 def _log_api_key_security_overrides() -> None:
@@ -89,6 +91,24 @@ class WatchdogMetrics(BaseModel):
     slots_released: int = 0
 
 
+def _watchdog_health_metrics(
+    metrics: "WatchdogMetricsSnapshot | None",
+    *,
+    age_seconds: float | None,
+) -> WatchdogMetrics:
+    if metrics is None:
+        return WatchdogMetrics(age_seconds=age_seconds)
+    return WatchdogMetrics(
+        age_seconds=age_seconds,
+        zombies_reconciled=metrics.zombies_reconciled,
+        expired_killed=metrics.expired_killed,
+        rescued=metrics.rescued,
+        early_zombies_failed=metrics.early_zombies_failed,
+        long_running_failed=metrics.long_running_failed,
+        slots_released=metrics.slots_released,
+    )
+
+
 class FeederLeader(BaseModel):
     """Feeder leader election status."""
 
@@ -128,16 +148,6 @@ class ArqHealthData(TypedDict, total=False):
     queued: int
 
 
-class WatchdogMetricsData(TypedDict, total=False):
-    timestamp: str
-    zombies_reconciled: int
-    expired_killed: int
-    rescued: int
-    early_zombies_failed: int
-    long_running_failed: int
-    slots_released: int
-
-
 class _ArqHealthParser(Protocol):
     def parse_arq_health_string(self, raw: str) -> ArqHealthData: ...
 
@@ -171,10 +181,6 @@ def _parse_arq_health_string(raw: str) -> ArqHealthData:
     from intric.worker.redis import client as redis_client
 
     return cast(_ArqHealthParser, redis_client).parse_arq_health_string(raw)
-
-
-def _parse_watchdog_metrics(raw: str) -> WatchdogMetricsData:
-    return cast(WatchdogMetricsData, json.loads(raw))
 
 
 def _remove_invalid_defaults(schema: dict[str, Any]) -> None:
@@ -518,7 +524,7 @@ def get_application():
         Args:
             include_all: If True, return all tenant queue lengths instead of top-10.
         """
-        from intric.worker.redis.client import get_redis
+        from intric.worker.redis.client import get_redis, read_watchdog_status_snapshot
 
         redis_client = cast(Any, get_redis())
         settings = get_settings()
@@ -526,7 +532,7 @@ def get_application():
 
         # Initialize defaults for graceful degradation on Redis errors
         arq_health: ArqHealthData = {}
-        watchdog_metrics: WatchdogMetricsData = {}
+        watchdog_metrics = None
         watchdog_age: float | None = None
         leader_id: str | None = None
         leader_ttl: int = -2
@@ -545,25 +551,13 @@ def get_application():
             arq_health = _parse_arq_health_string(arq_raw)
             arq_heartbeat_ttl = await redis_client.ttl("arq:queue:health-check")
 
-            # 2. Get watchdog metrics
-            watchdog_raw = await redis_client.get("crawl_watchdog:last_metrics")
-            if watchdog_raw:
-                try:
-                    if isinstance(watchdog_raw, bytes):
-                        watchdog_raw = watchdog_raw.decode()
-                    watchdog_metrics = _parse_watchdog_metrics(watchdog_raw)
-                except json.JSONDecodeError:
-                    pass
-
-            # 3. Get watchdog age
-            last_success = await redis_client.get("crawl_watchdog:last_success_epoch")
-            if last_success:
-                try:
-                    if isinstance(last_success, bytes):
-                        last_success = last_success.decode()
-                    watchdog_age = time.time() - float(last_success)
-                except (ValueError, TypeError):
-                    pass
+            # 2. Get watchdog metrics and age
+            watchdog_snapshot = await read_watchdog_status_snapshot(redis_client)
+            watchdog_metrics = watchdog_snapshot.metrics
+            if watchdog_snapshot.last_cleanup_at is not None:
+                watchdog_age = (
+                    time.time() - watchdog_snapshot.last_cleanup_at.timestamp()
+                )
 
             # 4. Get feeder leader info
             leader_id = await redis_client.get("crawl_feeder:leader")
@@ -760,16 +754,9 @@ def get_application():
                 j_ongoing=arq_ongoing,
                 queued=arq_health.get("queued", 0),
             ),
-            watchdog=WatchdogMetrics(
+            watchdog=_watchdog_health_metrics(
+                watchdog_metrics,
                 age_seconds=watchdog_age,
-                zombies_reconciled=int(watchdog_metrics.get("zombies_reconciled", 0)),
-                expired_killed=int(watchdog_metrics.get("expired_killed", 0)),
-                rescued=int(watchdog_metrics.get("rescued", 0)),
-                early_zombies_failed=int(
-                    watchdog_metrics.get("early_zombies_failed", 0)
-                ),
-                long_running_failed=int(watchdog_metrics.get("long_running_failed", 0)),
-                slots_released=int(watchdog_metrics.get("slots_released", 0)),
             ),
             feeder=FeederLeader(
                 leader_id=leader_id,
@@ -789,7 +776,9 @@ def get_application():
             debug=DebugInfo(
                 arq_raw=arq_health.get("raw", ""),
                 arq_timestamp=arq_health.get("timestamp"),
-                watchdog_timestamp=watchdog_metrics.get("timestamp"),
+                watchdog_timestamp=watchdog_metrics.observed_at.isoformat()
+                if watchdog_metrics is not None
+                else None,
                 redis_db=redis_db,
                 queue_name="arq:queue",
             ),

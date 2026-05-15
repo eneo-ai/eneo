@@ -48,6 +48,15 @@ from intric.websites.domain.crawler_website_processing_aggregate import (
     CrawlerWebsiteProcessingAggregateItem as DomainCrawlerWebsiteProcessingAggregateItem,
 )
 from intric.websites.domain.website import UpdateInterval
+from intric.worker.redis.client import (
+    WatchdogLifecycleSnapshot as DomainWatchdogLifecycleSnapshot,
+)
+from intric.worker.redis.client import (
+    WatchdogMetricsSnapshot as DomainWatchdogMetricsSnapshot,
+)
+from intric.worker.redis.client import (
+    WatchdogStatusSnapshot as DomainWatchdogStatusSnapshot,
+)
 
 
 def _empty_model_id_list() -> list[ModelId]:
@@ -378,6 +387,75 @@ class CrawlerRecentFailuresResponse(BaseModel):
             days=failures.days,
             since=failures.since,
             until=failures.until,
+        )
+
+
+class CrawlerWatchdogLifecycleObserved(BaseModel):
+    queued: int = Field(ge=0)
+    running_no_progress: int = Field(ge=0)
+    running_with_progress: int = Field(ge=0)
+    terminal: int = Field(ge=0)
+
+    @classmethod
+    def from_domain(
+        cls, lifecycle: DomainWatchdogLifecycleSnapshot
+    ) -> "CrawlerWatchdogLifecycleObserved":
+        return cls(
+            queued=lifecycle.queued,
+            running_no_progress=lifecycle.running_no_progress,
+            running_with_progress=lifecycle.running_with_progress,
+            terminal=lifecycle.terminal,
+        )
+
+
+class CrawlerWatchdogMetricsResponse(BaseModel):
+    observed_at: datetime
+    zombies_reconciled: int = Field(ge=0)
+    expired_killed: int = Field(ge=0)
+    rescued: int = Field(ge=0)
+    early_zombies_failed: int = Field(ge=0)
+    long_running_failed: int = Field(ge=0)
+    slots_released: int = Field(ge=0)
+    lifecycle_observed: CrawlerWatchdogLifecycleObserved
+
+    @classmethod
+    def from_domain(
+        cls, metrics: DomainWatchdogMetricsSnapshot
+    ) -> "CrawlerWatchdogMetricsResponse":
+        return cls(
+            observed_at=metrics.observed_at,
+            zombies_reconciled=metrics.zombies_reconciled,
+            expired_killed=metrics.expired_killed,
+            rescued=metrics.rescued,
+            early_zombies_failed=metrics.early_zombies_failed,
+            long_running_failed=metrics.long_running_failed,
+            slots_released=metrics.slots_released,
+            lifecycle_observed=CrawlerWatchdogLifecycleObserved.from_domain(
+                metrics.lifecycle_observed
+            ),
+        )
+
+
+class CrawlerWatchdogStatusResponse(BaseModel):
+    last_cleanup_at: datetime | None
+    metrics: CrawlerWatchdogMetricsResponse | None
+    recent_interventions: CrawlerRecentFailuresResponse
+
+    @classmethod
+    def from_domain(
+        cls,
+        *,
+        snapshot: DomainWatchdogStatusSnapshot,
+        recent_interventions: DomainCrawlerRecentFailures,
+    ) -> "CrawlerWatchdogStatusResponse":
+        return cls(
+            last_cleanup_at=snapshot.last_cleanup_at,
+            metrics=CrawlerWatchdogMetricsResponse.from_domain(snapshot.metrics)
+            if snapshot.metrics is not None
+            else None,
+            recent_interventions=CrawlerRecentFailuresResponse.from_domain(
+                recent_interventions
+            ),
         )
 
 

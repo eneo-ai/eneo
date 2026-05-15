@@ -83,6 +83,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Pending-feeder typed enqueue consumption tranche: remove the tuple-shaped pending enqueue compatibility edge, make `CrawlFeeder._process_tenant_queue` consume `CrawlEnqueueResult` exhaustively, and prove pending-entry, slot, and pre-acquired-flag invariants with behavior tests.
 - [x] Typed Redis feeder/queue boundary tranche: move Redis list, delete, expiry, and SCAN typing uncertainty to `worker/redis/client.py`, remove local Redis `Any`/`cast` usage from pending queue and feeder consumers, split strict producer payloads from lenient parsed payloads, and cover raw-byte LREM, cursor scanning, DLQ ordering, and source-ownership guard behavior.
 - [x] Watchdog/capacity Redis SCAN boundary tranche: route watchdog Phase 0 active-counter scanning and capacity pending-queue scanning through `redis_scan_match_bytes(...)`, remove local Redis `Any`/raw SCAN ownership, and protect the boundary with behavior plus AST source-guard tests.
+- [x] Sysadmin watchdog-status tranche: add a read-only `/sysadmin/crawler/watchdog-status` endpoint that exposes the canonical Redis watchdog snapshot, bounded watchdog-driven interventions, tenant filtering, pagination, malformed-snapshot degradation, and shared producer/healthz key ownership.
 
 ## Non-Negotiable Principles
 

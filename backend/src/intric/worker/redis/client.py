@@ -1,7 +1,9 @@
 """Redis client connection management for worker operations."""
 
+import json
 import re
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, NamedTuple, Protocol, Self, cast
 
@@ -58,6 +60,159 @@ def redis_pipeline_items(raw_result: Sequence[object]) -> tuple[object, ...]:
 
 
 r = get_redis()
+
+WATCHDOG_LAST_SUCCESS_EPOCH_KEY = "crawl_watchdog:last_success_epoch"
+WATCHDOG_LAST_METRICS_KEY = "crawl_watchdog:last_metrics"
+
+
+@dataclass(frozen=True, slots=True)
+class WatchdogLifecycleSnapshot:
+    queued: int
+    running_no_progress: int
+    running_with_progress: int
+    terminal: int
+
+
+@dataclass(frozen=True, slots=True)
+class WatchdogMetricsSnapshot:
+    observed_at: datetime
+    zombies_reconciled: int
+    expired_killed: int
+    rescued: int
+    early_zombies_failed: int
+    long_running_failed: int
+    slots_released: int
+    lifecycle_observed: WatchdogLifecycleSnapshot
+
+
+@dataclass(frozen=True, slots=True)
+class WatchdogStatusSnapshot:
+    last_cleanup_at: datetime | None
+    metrics: WatchdogMetricsSnapshot | None
+
+
+def _redis_text(raw_value: object) -> str | None:
+    if raw_value is None:
+        return None
+    if isinstance(raw_value, bytes):
+        return raw_value.decode("utf-8")
+    if isinstance(raw_value, str):
+        return raw_value
+    return None
+
+
+def _string_key_mapping(source: object) -> Mapping[str, object] | None:
+    if not isinstance(source, Mapping):
+        return None
+    source_mapping = cast(Mapping[object, object], source)
+    values: dict[str, object] = {}
+    for raw_key, raw_value in source_mapping.items():
+        if not isinstance(raw_key, str):
+            return None
+        values[raw_key] = raw_value
+    return values
+
+
+def _int_field(source: Mapping[str, object], key: str) -> int | None:
+    raw_value = source.get(key)
+    if isinstance(raw_value, bool):
+        return None
+    if isinstance(raw_value, int):
+        return raw_value
+    return None
+
+
+def _parse_epoch_seconds(raw_value: object) -> datetime | None:
+    raw_text = _redis_text(raw_value)
+    if raw_text is None:
+        return None
+    try:
+        return datetime.fromtimestamp(int(raw_text), tz=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _parse_watchdog_metrics(raw_value: object) -> WatchdogMetricsSnapshot | None:
+    raw_text = _redis_text(raw_value)
+    if raw_text is None:
+        return None
+
+    try:
+        payload: object = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return None
+    payload_mapping = _string_key_mapping(payload)
+    if payload_mapping is None:
+        return None
+
+    raw_timestamp = payload_mapping.get("timestamp")
+    if not isinstance(raw_timestamp, str):
+        return None
+    try:
+        observed_at = datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if observed_at.tzinfo is None:
+        observed_at = observed_at.replace(tzinfo=timezone.utc)
+
+    lifecycle_payload = payload_mapping.get("lifecycle_observed")
+    lifecycle_mapping = _string_key_mapping(lifecycle_payload)
+    if lifecycle_mapping is None:
+        return None
+
+    queued = _int_field(lifecycle_mapping, "queued")
+    running_no_progress = _int_field(lifecycle_mapping, "running_no_progress")
+    running_with_progress = _int_field(lifecycle_mapping, "running_with_progress")
+    terminal = _int_field(lifecycle_mapping, "terminal")
+    zombies_reconciled = _int_field(payload_mapping, "zombies_reconciled")
+    expired_killed = _int_field(payload_mapping, "expired_killed")
+    rescued = _int_field(payload_mapping, "rescued")
+    early_zombies_failed = _int_field(payload_mapping, "early_zombies_failed")
+    long_running_failed = _int_field(payload_mapping, "long_running_failed")
+    slots_released = _int_field(payload_mapping, "slots_released")
+
+    if (
+        queued is None
+        or running_no_progress is None
+        or running_with_progress is None
+        or terminal is None
+        or zombies_reconciled is None
+        or expired_killed is None
+        or rescued is None
+        or early_zombies_failed is None
+        or long_running_failed is None
+        or slots_released is None
+    ):
+        return None
+
+    return WatchdogMetricsSnapshot(
+        observed_at=observed_at,
+        zombies_reconciled=zombies_reconciled,
+        expired_killed=expired_killed,
+        rescued=rescued,
+        early_zombies_failed=early_zombies_failed,
+        long_running_failed=long_running_failed,
+        slots_released=slots_released,
+        lifecycle_observed=WatchdogLifecycleSnapshot(
+            queued=queued,
+            running_no_progress=running_no_progress,
+            running_with_progress=running_with_progress,
+            terminal=terminal,
+        ),
+    )
+
+
+async def read_watchdog_status_snapshot(
+    redis: aioredis.Redis,
+) -> WatchdogStatusSnapshot:
+    """Read the watchdog's ephemeral Redis status snapshot."""
+    redis_client: Any = redis
+    raw_last_success: object = await redis_client.get(WATCHDOG_LAST_SUCCESS_EPOCH_KEY)
+    raw_metrics: object = await redis_client.get(WATCHDOG_LAST_METRICS_KEY)
+    return WatchdogStatusSnapshot(
+        last_cleanup_at=_parse_epoch_seconds(raw_last_success),
+        metrics=_parse_watchdog_metrics(raw_metrics),
+    )
 
 
 class RedisPipelineLike(Protocol):

@@ -5932,7 +5932,7 @@ tasks:
   - id: T123
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Audit the roadmap after T122 and decide whether the active goal is provably complete or which single remaining slice is highest ROI."
     inputs:
@@ -5948,17 +5948,95 @@ tasks:
       - "complete | not_complete"
       - "Evidence for each remaining explicit open item"
       - "Next bounded task if not complete"
+    receipt:
+      result: not_complete
+      summary: "Roadmap audit rejected goal completion and selected a bounded read-only sysadmin watchdog status endpoint as the next highest-ROI transparency slice."
+      changed_files: []
+      verification:
+        - "Plan checkbox count before T124: 116 checked, 39 open."
+        - "State audit before T124: T123 active after 123 completed tasks."
+        - "Claude review selected read-only sysadmin watchdog status as the next bounded task and explicitly rejected broad WorkerAdapter/admin-write/frontend/lifecycle work for this slice."
+      claude:
+        verdict: changes_required
+        min_score: 7
+        artifact: ".codex/artifacts/claude-peer-loop-t123-roadmap-audit-next-slice-20260515T121819Z.md"
+  - id: T124
+    type: worker
+    assignee: Codex
+    status: done
+    reasoning_hint: medium
+    objective: "Add a read-only sysadmin crawler watchdog-status endpoint backed by the canonical typed Redis watchdog snapshot reader and bounded watchdog intervention query."
+    allowed_files:
+      - "backend/src/intric/worker/redis/client.py"
+      - "backend/src/intric/worker/feeder/watchdog.py"
+      - "backend/src/intric/server/main.py"
+      - "backend/src/intric/websites/domain/crawler_recent_failures.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/src/intric/sysadmin/sysadmin_models.py"
+      - "backend/src/intric/sysadmin/sysadmin_router.py"
+      - "backend/tests/integration/test_sysadmin_crawler_watchdog_status.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    receipt:
+      result: done
+      summary: "Added /sysadmin/crawler/watchdog-status with a typed Redis watchdog snapshot reader, shared watchdog Redis key constants for producer and consumers, a bounded watchdog-intervention outcome allowlist, tenant-filtered/paginated repository query reuse, and integration coverage for auth, empty snapshots, producer-shaped metrics, malformed snapshots, pagination, outcome filtering, and tenant isolation."
+      changed_files:
+        - "backend/src/intric/worker/redis/client.py"
+        - "backend/src/intric/worker/feeder/watchdog.py"
+        - "backend/src/intric/server/main.py"
+        - "backend/src/intric/websites/domain/crawler_recent_failures.py"
+        - "backend/src/intric/websites/domain/crawl_run_repo.py"
+        - "backend/src/intric/sysadmin/sysadmin_models.py"
+        - "backend/src/intric/sysadmin/sysadmin_router.py"
+        - "backend/tests/integration/test_sysadmin_crawler_watchdog_status.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "Red test: cd backend && uv run pytest tests/integration/test_sysadmin_crawler_watchdog_status.py -q failed before implementation with 404 for the missing endpoint."
+        - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_watchdog_status.py -q"
+        - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_watchdog_status.py tests/integration/test_sysadmin_crawler_recent_failures.py tests/integration/test_sysadmin_crawler_baseline.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/redis/client.py src/intric/worker/feeder/watchdog.py src/intric/server/main.py src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_watchdog_status.py"
+        - "cd backend && uv run ruff format --check src/intric/worker/redis/client.py src/intric/worker/feeder/watchdog.py src/intric/server/main.py src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_watchdog_status.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/redis/client.py src/intric/worker/feeder/watchdog.py src/intric/server/main.py src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_watchdog_status.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json"
+        - "rg -n \"crawl_watchdog:last_(success_epoch|metrics)|_parse_watchdog_metrics|WatchdogMetricsData|json\\.loads\\(raw\\)\" backend/src/intric/server/main.py backend/src/intric/worker/feeder/watchdog.py backend/src/intric/worker/redis/client.py"
+      claude:
+        verdict: green
+        min_score: 8
+        artifact: ".codex/artifacts/claude-peer-loop-crawler-t124-watchdog-status-endpoint-iteration-2-20260515T124553Z.md"
+        follow_up_notes:
+          - "Consider narrowing the pre-existing server healthz get_redis Any cast through a future Redis Protocol boundary."
+          - "Keep unrelated .devcontainer dirt out of the T124 commit."
+  - id: T125
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Audit the roadmap after T124 and choose the next single highest-ROI remaining slice without marking the full goal complete unless current evidence proves every requirement."
+    inputs:
+      - "T124 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "Current git diff after T124"
+    constraints:
+      - "Do not mark the goal complete unless every remaining roadmap requirement has current evidence."
+      - "Preserve unrelated .devcontainer dirt."
+      - "Prefer bounded read-only/admin-observability or canonical-owner cleanup slices over broad rewrites."
+    expected_output:
+      - "complete | not_complete"
+      - "Evidence for remaining explicit open items"
+      - "Next bounded task if not complete"
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T122
+    task: T124
     commands:
-      - "cd backend && uv run pytest tests/unittests/worker/feeder/test_watchdog.py tests/unittests/worker/feeder/test_capacity.py tests/integration/test_orphan_cleanup.py tests/integration/test_crawl_feeder.py -q"
-      - "cd backend && uv run ruff check src/intric/worker/feeder/watchdog.py src/intric/worker/feeder/capacity.py src/intric/worker/redis/client.py tests/unittests/worker/feeder/test_watchdog.py tests/unittests/worker/feeder/test_capacity.py"
-      - "cd backend && uv run ruff format --check src/intric/worker/feeder/watchdog.py src/intric/worker/feeder/capacity.py src/intric/worker/redis/client.py tests/unittests/worker/feeder/test_watchdog.py tests/unittests/worker/feeder/test_capacity.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/feeder/watchdog.py src/intric/worker/feeder/capacity.py src/intric/worker/redis/client.py tests/unittests/worker/feeder/test_watchdog.py tests/unittests/worker/feeder/test_capacity.py"
+      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_watchdog_status.py tests/integration/test_sysadmin_crawler_recent_failures.py tests/integration/test_sysadmin_crawler_baseline.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/redis/client.py src/intric/worker/feeder/watchdog.py src/intric/server/main.py src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_watchdog_status.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/redis/client.py src/intric/worker/feeder/watchdog.py src/intric/server/main.py src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_watchdog_status.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/redis/client.py src/intric/worker/feeder/watchdog.py src/intric/server/main.py src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_watchdog_status.py"
       - "cd backend && uv run pyright --project pyrightconfig.json"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t122-watchdog-capacity-redis-boundary --phase commit-gate --iteration 1 --require-green --required-min-score 8 ..."
-    note: "T122 watchdog/capacity Redis SCAN boundary cleanup passed red/green behavior tests, feeder/watchdog integration coverage, ruff, format check, targeted and full strict Pyright, source guard grep, and Claude green final verification."
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t124-watchdog-status-endpoint --phase review --iteration 2 --required-min-score 8 ..."
+    note: "T124 sysadmin watchdog-status endpoint passed red/green integration tests, recent-failures/baseline regressions, ruff, format check, targeted and full strict Pyright, canonical Redis key grep, and Claude green final verification."
