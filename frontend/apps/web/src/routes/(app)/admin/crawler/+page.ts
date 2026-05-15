@@ -1,4 +1,5 @@
 import { CRAWLER_ACTIVE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerActiveInventory";
+import { CRAWLER_FAILURE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerFailureInventory";
 import { CRAWLER_RECENT_FAILURES_DEFAULTS } from "$lib/features/admin/crawlerRecentFailures";
 import { CRAWLER_WEBSITE_PROCESSING_DEFAULTS } from "$lib/features/admin/crawlerWebsiteProcessing";
 
@@ -6,6 +7,7 @@ export const load = async (event) => {
   const { intric } = await event.parent();
   event.depends("admin:crawler-settings");
   event.depends("admin:crawler-active-inventory");
+  event.depends("admin:crawler-failure-inventory");
   event.depends("admin:crawler-recent-failures");
   event.depends("admin:crawler-scheduled");
   event.depends("admin:crawler-website-processing");
@@ -13,6 +15,7 @@ export const load = async (event) => {
   const [
     crawlerSettings,
     activeInventoryResult,
+    failureInventoryResult,
     recentFailuresResult,
     scheduledAggregateResult,
     websiteProcessingResult
@@ -21,6 +24,10 @@ export const load = async (event) => {
     intric.crawlerAdmin
       .activeInventory(CRAWLER_ACTIVE_INVENTORY_DEFAULTS)
       .then((crawlerActiveInventory) => ({ ok: true as const, crawlerActiveInventory }))
+      .catch(() => ({ ok: false as const })),
+    intric.crawlerAdmin
+      .failureInventory(CRAWLER_FAILURE_INVENTORY_DEFAULTS)
+      .then((crawlerFailureInventory) => ({ ok: true as const, crawlerFailureInventory }))
       .catch(() => ({ ok: false as const })),
     intric.crawlerAdmin
       .recentFailures(CRAWLER_RECENT_FAILURES_DEFAULTS)
@@ -42,6 +49,10 @@ export const load = async (event) => {
       ? activeInventoryResult.crawlerActiveInventory
       : null,
     crawlerActiveInventoryLoadFailed: !activeInventoryResult.ok,
+    crawlerFailureInventory: failureInventoryResult.ok
+      ? failureInventoryResult.crawlerFailureInventory
+      : null,
+    crawlerFailureInventoryLoadFailed: !failureInventoryResult.ok,
     crawlerRecentFailuresWindowDays: CRAWLER_RECENT_FAILURES_DEFAULTS.days,
     crawlerRecentFailures: recentFailuresResult.ok
       ? recentFailuresResult.crawlerRecentFailures

@@ -17,6 +17,9 @@ type _CrawlerActiveInventoryResponseExists = AssertTrue<
 type _CrawlerFailureInventoryResponseExists = AssertTrue<
   components["schemas"]["CrawlerFailureInventoryResponse"] extends object ? true : false
 >;
+type _CrawlerTenantFailureInventoryResponseExists = AssertTrue<
+  components["schemas"]["CrawlerTenantFailureInventoryResponse"] extends object ? true : false
+>;
 type _CrawlerRecentFailuresResponseExists = AssertTrue<
   components["schemas"]["CrawlerRecentFailuresResponse"] extends object ? true : false
 >;
@@ -64,6 +67,14 @@ type _CrawlerFailureInventoryItemsField = AssertHasKey<
 >;
 type _CrawlerFailureInventoryStateField = AssertHasKey<
   components["schemas"]["CrawlerFailureInventoryItem"],
+  "state"
+>;
+type _CrawlerTenantFailureInventoryItemsField = AssertHasKey<
+  components["schemas"]["CrawlerTenantFailureInventoryResponse"],
+  "items"
+>;
+type _CrawlerTenantFailureInventoryStateField = AssertHasKey<
+  components["schemas"]["CrawlerTenantFailureInventoryItem"],
   "state"
 >;
 type _CrawlerRecentFailuresItemsField = AssertHasKey<
@@ -153,6 +164,11 @@ type _AdminCrawlerActivePathExists = AssertTrue<
     ? true
     : false
 >;
+type _AdminCrawlerFailureInventoryPathExists = AssertTrue<
+  paths["/api/v1/admin/crawler/failure-inventory"]["get"] extends operations["get_current_tenant_crawler_failure_inventory_api_v1_admin_crawler_failure_inventory_get"]
+    ? true
+    : false
+>;
 type _AdminCrawlerScheduledPathExists = AssertTrue<
   paths["/api/v1/admin/crawler/scheduled"]["get"] extends operations["get_current_tenant_crawler_scheduled_aggregate_api_v1_admin_crawler_scheduled_get"]
     ? true
@@ -178,6 +194,13 @@ type _AdminCrawlerRecentFailuresQueryHasNoTenantId = AssertTrue<
 type _AdminCrawlerActiveQueryHasNoTenantId = AssertTrue<
   "tenant_id" extends keyof NonNullable<
     operations["get_current_tenant_crawler_active_inventory_api_v1_admin_crawler_active_get"]["parameters"]["query"]
+  >
+    ? false
+    : true
+>;
+type _AdminCrawlerFailureInventoryQueryHasNoTenantId = AssertTrue<
+  "tenant_id" extends keyof NonNullable<
+    operations["get_current_tenant_crawler_failure_inventory_api_v1_admin_crawler_failure_inventory_get"]["parameters"]["query"]
   >
     ? false
     : true

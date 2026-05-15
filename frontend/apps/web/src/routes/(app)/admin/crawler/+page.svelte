@@ -41,6 +41,17 @@
     type CrawlerActiveInventoryItem,
     type CrawlerActiveInventoryResponse
   } from "$lib/features/admin/crawlerActiveInventory";
+  import {
+    getCrawlerFailureInventoryFailureLabel,
+    getCrawlerFailureInventoryLastCrawledLabel,
+    getCrawlerFailureInventoryNextStepLabel,
+    getCrawlerFailureInventoryStateLabel,
+    getCrawlerFailureInventoryStateTooltip,
+    getCrawlerFailureInventoryTotalLabel,
+    getCrawlerFailureInventoryWebsiteLabel,
+    type CrawlerTenantFailureInventoryItem,
+    type CrawlerTenantFailureInventoryResponse
+  } from "$lib/features/admin/crawlerFailureInventory";
   import { formatCrawlerCount } from "$lib/features/admin/crawlerNumberFormat";
   import type { CrawlRunResultLabel } from "$lib/features/knowledge/crawlOutcomePresentation";
   import {
@@ -81,6 +92,8 @@
       crawlerSettings: CrawlerSettings;
       crawlerActiveInventory: CrawlerActiveInventoryResponse | null;
       crawlerActiveInventoryLoadFailed: boolean;
+      crawlerFailureInventory: CrawlerTenantFailureInventoryResponse | null;
+      crawlerFailureInventoryLoadFailed: boolean;
       crawlerRecentFailuresWindowDays: number;
       crawlerRecentFailures: CrawlerRecentFailuresResponse | null;
       crawlerRecentFailuresLoadFailed: boolean;
@@ -207,6 +220,19 @@
         return "border-accent-default/35 text-accent-default";
       default: {
         const exhaustive: never = lifecycleState;
+        return exhaustive;
+      }
+    }
+  }
+
+  function failureStateBadgeClass(state: CrawlerTenantFailureInventoryItem["state"]) {
+    switch (state) {
+      case "BACKED_OFF":
+        return "border-caution/40 bg-caution/8 text-caution";
+      case "AUTO_DISABLED":
+        return "border-destructive/35 bg-destructive/8 text-destructive";
+      default: {
+        const exhaustive: never = state;
         return exhaustive;
       }
     }
@@ -482,6 +508,87 @@
                         {:else}
                           <span class="text-muted-foreground text-xs" aria-hidden="true">—</span>
                         {/if}
+                      </Table.Cell>
+                    </Table.Row>
+                  {/each}
+                </Table.Body>
+              </Table.Root>
+            </div>
+          {/if}
+        </Card.Content>
+      </Card.Root>
+
+      <Card.Root class="mb-14" aria-labelledby="crawler-failure-inventory-title">
+        <Card.Header>
+          <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+            <div class="flex min-w-0 flex-col gap-1">
+              <h2 id="crawler-failure-inventory-title" class="text-base leading-snug font-semibold">
+                {m.crawler_failure_inventory_title()}
+              </h2>
+              <Card.Description>{m.crawler_failure_inventory_description()}</Card.Description>
+            </div>
+            {#if data.crawlerFailureInventory}
+              <Badge variant="outline" class="shrink-0 tabular-nums">
+                {getCrawlerFailureInventoryTotalLabel(data.crawlerFailureInventory)}
+              </Badge>
+            {/if}
+          </div>
+        </Card.Header>
+        <Card.Content class="pt-0">
+          {#if data.crawlerFailureInventoryLoadFailed}
+            <Alert.Root variant="destructive">
+              <TriangleAlert aria-hidden="true" />
+              <Alert.Description>{m.crawler_failure_inventory_load_error()}</Alert.Description>
+            </Alert.Root>
+          {:else if !data.crawlerFailureInventory || data.crawlerFailureInventory.items.length === 0}
+            <p class="text-muted-foreground text-sm">
+              {m.crawler_failure_inventory_empty()}
+            </p>
+          {:else}
+            <div class="overflow-x-auto">
+              <Table.Root class="min-w-[58rem]">
+                <Table.Caption class="sr-only">
+                  {m.crawler_failure_inventory_table_caption()}
+                </Table.Caption>
+                <Table.Header>
+                  <Table.Row>
+                    <Table.Head>{m.crawler_failure_inventory_column_website()}</Table.Head>
+                    <Table.Head>{m.crawler_failure_inventory_column_state()}</Table.Head>
+                    <Table.Head>{m.crawler_failure_inventory_column_failures()}</Table.Head>
+                    <Table.Head>{m.crawler_failure_inventory_column_next_step()}</Table.Head>
+                    <Table.Head class="text-right">
+                      {m.crawler_failure_inventory_column_last_crawled()}
+                    </Table.Head>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {#each data.crawlerFailureInventory.items as failureState (failureState.website_id)}
+                    <Table.Row>
+                      <Table.Cell class="max-w-64">
+                        <span
+                          class="block truncate font-medium"
+                          title={getCrawlerFailureInventoryWebsiteLabel(failureState)}
+                        >
+                          {getCrawlerFailureInventoryWebsiteLabel(failureState)}
+                        </span>
+                      </Table.Cell>
+                      <Table.Cell>
+                        <Badge
+                          variant="outline"
+                          class={failureStateBadgeClass(failureState.state)}
+                          title={getCrawlerFailureInventoryStateTooltip(failureState)}
+                        >
+                          {getCrawlerFailureInventoryStateLabel(failureState)}
+                        </Badge>
+                      </Table.Cell>
+                      <Table.Cell class="tabular-nums">
+                        {getCrawlerFailureInventoryFailureLabel(failureState)}
+                      </Table.Cell>
+                      <Table.Cell class="text-muted-foreground max-w-80 text-sm whitespace-normal">
+                        {getCrawlerFailureInventoryNextStepLabel(failureState)}
+                      </Table.Cell>
+                      <Table.Cell class="text-muted-foreground text-right text-xs tabular-nums">
+                        {getCrawlerFailureInventoryLastCrawledLabel(failureState)}
                       </Table.Cell>
                     </Table.Row>
                   {/each}

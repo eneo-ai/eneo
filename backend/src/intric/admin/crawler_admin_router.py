@@ -30,6 +30,7 @@ from intric.websites.presentation.crawler_admin_models import (
     CrawlerActiveInventoryResponse,
     CrawlerRecentFailuresResponse,
     CrawlerScheduledAggregateResponse,
+    CrawlerTenantFailureInventoryResponse,
     CrawlerTenantWebsiteProcessingAggregateResponse,
 )
 
@@ -70,6 +71,27 @@ async def get_current_tenant_crawler_active_inventory(
             tenant_id=current_user.tenant_id,
         )
     return CrawlerActiveInventoryResponse.from_domain(inventory)
+
+
+@router.get(
+    "/failure-inventory",
+    response_model=CrawlerTenantFailureInventoryResponse,
+    summary="Get crawler websites currently backed off or disabled for the current tenant",
+)
+async def get_current_tenant_crawler_failure_inventory(
+    current_user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> CrawlerTenantFailureInventoryResponse:
+    async with session.begin():
+        repo = WebsiteAdminRepository(session=session)
+        inventory = await repo.crawler_failure_inventory_for_tenant(
+            limit=limit,
+            offset=offset,
+            tenant_id=current_user.tenant_id,
+        )
+    return CrawlerTenantFailureInventoryResponse.from_domain(inventory)
 
 
 @router.get(

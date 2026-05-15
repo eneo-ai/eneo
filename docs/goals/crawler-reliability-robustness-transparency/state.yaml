@@ -7390,20 +7390,113 @@ tasks:
         - "Do not add embedding-spend weighting until reliable per-run cost attribution exists."
         - "If product wants more actionable prioritization later, add a threshold or percentile band to the cost badge as a separate UX decision."
         - "Consider renaming `parse_update_interval_for_cost_score` if another caller needs the same lenient parsing behavior."
+  - id: T148
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Expose tenant-admin crawler failure states so admins can see websites currently waiting to retry or paused after repeated failures without sysadmin endpoints."
+    allowed_files:
+      - "backend/src/intric/websites/domain/website_admin_repo.py"
+      - "backend/src/intric/websites/presentation/crawler_admin_models.py"
+      - "backend/src/intric/admin/crawler_admin_router.py"
+      - "backend/tests/integration/test_admin_crawler_failure_inventory.py"
+      - "frontend/packages/intric-js/src/endpoints/crawler-admin.js"
+      - "frontend/packages/intric-js/src/types/resources.d.ts"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "frontend/apps/web/src/lib/features/admin/crawlerAdminPageLoad.test.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerFailureInventory.test.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerFailureInventory.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+      - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte"
+      - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.ts"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Reuse the existing crawler failure inventory query owner; do not duplicate SQL."
+      - "Use a tenant-required repository wrapper and tenant-safe response shape with no tenant metadata."
+      - "Do not add retry, reset circuit breaker, pause/resume, or interval-change mutations in this read-only slice."
+      - "Use shadcn-Svelte Card/Table/Badge/Alert composition and keep the admin UI dense but scannable."
+      - "Keep copy honest about current state; do not overclaim that every paused website was automatically disabled if legacy/manual state can look equivalent."
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_admin_crawler_failure_inventory.py tests/integration/test_sysadmin_crawler_failure_inventory.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/website_admin_repo.py src/intric/websites/presentation/crawler_admin_models.py src/intric/admin/crawler_admin_router.py tests/integration/test_admin_crawler_failure_inventory.py"
+      - "cd backend && uv run pyright --pythonpath ./.venv/bin/python src/intric/websites/domain/website_admin_repo.py src/intric/websites/presentation/crawler_admin_models.py src/intric/admin/crawler_admin_router.py"
+      - "./scripts/check-intric-js-openapi-schema.sh"
+      - "cd frontend/apps/web && bun run i18n:compile"
+      - "cd frontend/apps/web && bun run test:unit src/lib/features/admin/crawlerFailureInventory.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts --run"
+      - "cd frontend/apps/web && bun run check"
+      - "cd frontend/apps/web && bun run lint"
+      - "cd frontend && bun run --filter @intric/intric-js lint"
+    red_tests:
+      - "Backend integration tests failed with 404 until `/admin/crawler/failure-inventory` existed, enforced tenant scope, stripped tenant fields, rejected non-admin users, and omitted tenant_id from query parameters."
+      - "Frontend page-load test failed until the new failure-state request had independent graceful-degradation handling."
+      - "Generated type contract test failed until OpenAPI exposed the tenant failure inventory response and kept `tenant_id` out of the admin query."
+    stop_if:
+      - "The UI requires mutating crawler state in this slice."
+      - "The admin endpoint needs to accept a tenant id."
+      - "Strict Pyright requires broad casts, `Any`, or type ignores."
+    receipt:
+      result: done
+      summary: "Added `/api/v1/admin/crawler/failure-inventory` for the current tenant, backed by the existing failure inventory query through a tenant-required repository wrapper and tenant-safe response model. The admin crawler page now loads that contract independently from settings, active jobs, scheduled load, website processing, and recent failures, then renders a shadcn card/table for websites waiting to retry or paused after repeated failures. The frontend uses generated OpenAPI types, localized recovery-oriented copy, explicit empty/error states, and bounded defaults of five rows."
+      changed_files:
+        - "backend/src/intric/websites/domain/website_admin_repo.py"
+        - "backend/src/intric/websites/presentation/crawler_admin_models.py"
+        - "backend/src/intric/admin/crawler_admin_router.py"
+        - "backend/tests/integration/test_admin_crawler_failure_inventory.py"
+        - "frontend/packages/intric-js/src/endpoints/crawler-admin.js"
+        - "frontend/packages/intric-js/src/types/resources.d.ts"
+        - "frontend/packages/intric-js/src/types/schema.d.ts"
+        - "frontend/apps/web/messages/en.json"
+        - "frontend/apps/web/messages/sv.json"
+        - "frontend/apps/web/src/lib/features/admin/crawlerAdminPageLoad.test.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerFailureInventory.test.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerFailureInventory.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+        - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte"
+        - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.ts"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      validation:
+        - "cd backend && uv run pytest tests/integration/test_admin_crawler_failure_inventory.py -q"
+        - "cd backend && uv run ruff check src/intric/websites/domain/website_admin_repo.py src/intric/websites/presentation/crawler_admin_models.py src/intric/admin/crawler_admin_router.py tests/integration/test_admin_crawler_failure_inventory.py"
+        - "cd backend && uv run pyright --pythonpath ./.venv/bin/python src/intric/websites/domain/website_admin_repo.py src/intric/websites/presentation/crawler_admin_models.py src/intric/admin/crawler_admin_router.py"
+        - "./scripts/check-intric-js-openapi-schema.sh"
+        - "cd frontend/apps/web && bun run i18n:compile"
+        - "cd frontend/apps/web && bun run test:unit src/lib/features/admin/crawlerFailureInventory.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts --run"
+        - "cd frontend/apps/web && bun run check"
+        - "cd frontend/apps/web && bun run lint"
+        - "cd frontend && bun run --filter @intric/intric-js lint"
+        - "cd backend && uv run pytest tests/integration/test_admin_crawler_failure_inventory.py tests/integration/test_sysadmin_crawler_failure_inventory.py -q"
+      ux_review:
+        - "shadcn MCP audit checklist applied: the UI reuses installed shadcn Card/Table/Badge/Alert primitives, imports resolve, lint/check pass, and no new dependencies were introduced."
+        - "critique/adapt/audit/polish/clarify/ui-ux-pro-max review applied: the card answers a current-state question distinct from recent failed runs, uses non-alarming recovery copy, keeps dense operational data horizontally scrollable on narrow viewports, includes visible text alongside color, avoids raw log detail, and degrades independently if diagnostics loading fails."
+      claude:
+        verdict: pending
+        min_score: null
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-tenant-admin-crawler-failure-inventory-plan-20260515T203754Z.md"
+        resolution: "Claude's plan gate initially returned changes_required. Blockers were addressed by committing to non-admin and cross-tenant tests, adding a tenant-required repository wrapper, adding a tenant-safe response model, and documenting why the failure-state card is separate from the bounded per-website processing window."
+      follow_up_notes:
+        - "Add retry/reset circuit-breaker actions only as a separate audited mutation slice."
+        - "If product wants one per-website health table later, merge failure state with processing only after preserving websites that have current failure state but no recent processing rows."
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T147
+    task: T148
     commands:
-      - "cd backend && uv run ruff check src/intric/websites/domain/crawler_website_processing_aggregate.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py src/intric/sysadmin/sysadmin_models.py tests/integration/test_admin_crawler_website_processing_aggregate.py tests/integration/test_sysadmin_crawler_website_processing_aggregate.py tests/unittests/websites/test_crawler_website_processing_aggregate.py"
-      - "cd backend && uv run pyright --project pyproject.toml src/intric/websites/domain/crawler_website_processing_aggregate.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py src/intric/sysadmin/sysadmin_models.py"
-      - "cd backend && uv run pytest tests/unittests/websites/test_crawler_website_processing_aggregate.py tests/integration/test_admin_crawler_website_processing_aggregate.py tests/integration/test_sysadmin_crawler_website_processing_aggregate.py -q"
+      - "cd backend && uv run pytest tests/integration/test_admin_crawler_failure_inventory.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/website_admin_repo.py src/intric/websites/presentation/crawler_admin_models.py src/intric/admin/crawler_admin_router.py tests/integration/test_admin_crawler_failure_inventory.py"
+      - "cd backend && uv run pyright --pythonpath ./.venv/bin/python src/intric/websites/domain/website_admin_repo.py src/intric/websites/presentation/crawler_admin_models.py src/intric/admin/crawler_admin_router.py"
       - "./scripts/check-intric-js-openapi-schema.sh"
-      - "cd frontend && bun run --filter @intric/web i18n:compile"
-      - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerWebsiteProcessing.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts"
-      - "cd frontend && bun run --filter @intric/web check"
-      - "cd frontend && bun run --filter @intric/web lint"
-      - "cd frontend/packages/intric-js && bun run lint"
-    note: "T147 passed focused Ruff, focused strict Pyright on product source files, helper unit tests, tenant/sysadmin website-processing integration tests, OpenAPI freshness, targeted frontend unit tests, i18n compile, Svelte check, web lint, intric-js lint, shadcn/UX review, and Claude iteration-2 commit-gate review."
+      - "cd frontend/apps/web && bun run i18n:compile"
+      - "cd frontend/apps/web && bun run test:unit src/lib/features/admin/crawlerFailureInventory.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts --run"
+      - "cd frontend/apps/web && bun run check"
+      - "cd frontend/apps/web && bun run lint"
+      - "cd frontend && bun run --filter @intric/intric-js lint"
+      - "cd backend && uv run pytest tests/integration/test_admin_crawler_failure_inventory.py tests/integration/test_sysadmin_crawler_failure_inventory.py -q"
+    note: "T148 passed red-first backend tenant failure-inventory tests, focused Ruff, focused strict Pyright on product source files, OpenAPI freshness, targeted frontend unit tests, i18n compile, Svelte check, web lint, intric-js lint, shadcn/UX review, and sysadmin regression coverage."

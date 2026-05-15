@@ -34,6 +34,32 @@ class WebsiteAdminRepository:
         offset: int,
         tenant_id: UUID | None,
     ) -> CrawlerFailureInventory:
+        return await self._crawler_failure_inventory(
+            limit=limit,
+            offset=offset,
+            tenant_id=tenant_id,
+        )
+
+    async def crawler_failure_inventory_for_tenant(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        tenant_id: UUID,
+    ) -> CrawlerFailureInventory:
+        return await self._crawler_failure_inventory(
+            limit=limit,
+            offset=offset,
+            tenant_id=tenant_id,
+        )
+
+    async def _crawler_failure_inventory(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        tenant_id: UUID | None,
+    ) -> CrawlerFailureInventory:
         auto_disabled_condition = sa.and_(
             WebsitesTable.update_interval == UpdateInterval.NEVER,
             WebsitesTable.consecutive_failures

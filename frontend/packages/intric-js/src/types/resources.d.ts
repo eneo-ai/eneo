@@ -121,6 +121,8 @@ export type CrawlerSettingsUpdate = Partial<
 export type CrawlerActiveInventoryResponse =
   components["schemas"]["CrawlerActiveInventoryResponse"];
 export type CrawlerActiveInventoryItem = components["schemas"]["CrawlerActiveInventoryItem"];
+export type CrawlerTenantFailureInventoryResponse =
+  components["schemas"]["CrawlerTenantFailureInventoryResponse"];
 export type CrawlerScheduledAggregateResponse =
   components["schemas"]["CrawlerScheduledAggregateResponse"];
 export type CrawlerTenantWebsiteProcessingAggregateResponse =

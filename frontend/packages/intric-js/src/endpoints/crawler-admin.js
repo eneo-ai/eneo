@@ -1,5 +1,6 @@
 /** @typedef {import('../client/client').IntricError} IntricError */
 /** @typedef {import('../types/resources').CrawlerActiveInventoryResponse} CrawlerActiveInventoryResponse */
+/** @typedef {import('../types/resources').CrawlerTenantFailureInventoryResponse} CrawlerTenantFailureInventoryResponse */
 /** @typedef {import('../types/resources').CrawlerRecentFailuresResponse} CrawlerRecentFailuresResponse */
 /** @typedef {import('../types/resources').CrawlerScheduledAggregateResponse} CrawlerScheduledAggregateResponse */
 /** @typedef {import('../types/resources').CrawlerTenantWebsiteProcessingAggregateResponse} CrawlerTenantWebsiteProcessingAggregateResponse */
@@ -17,6 +18,20 @@ export function initCrawlerAdmin(client) {
      */
     activeInventory: async (params) => {
       const res = await client.fetch("/api/v1/admin/crawler/active", {
+        method: "get",
+        params: { query: params }
+      });
+      return res;
+    },
+
+    /**
+     * Get crawler websites currently backed off or disabled for the current tenant.
+     * @param {{limit?: number, offset?: number}} [params]
+     * @returns {Promise<CrawlerTenantFailureInventoryResponse>}
+     * @throws {IntricError}
+     */
+    failureInventory: async (params) => {
+      const res = await client.fetch("/api/v1/admin/crawler/failure-inventory", {
         method: "get",
         params: { query: params }
       });
