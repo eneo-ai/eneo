@@ -15,9 +15,17 @@ from uuid import UUID
 
 import redis.asyncio as aioredis
 
+from intric.jobs.job_manager import job_manager
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.main.models import Status
+from intric.websites.domain.crawl_abort import (
+    CrawlAbortConflict,
+    CrawlAbortConflictCode,
+    CrawlAbortNotFound,
+    CrawlAbortResult,
+    CrawlAbortSucceeded,
+)
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.websites.domain.crawl_run import CrawlRun
 from intric.websites.domain.crawl_terminal import (
@@ -179,6 +187,101 @@ class CrawlService:
                 "Failed to delete slot_preacquired flag during preemption",
                 extra={"job_id": str(job_id), "error": str(flag_exc)},
             )
+
+    async def _cleanup_aborted_queued_job(self, job_id: UUID, tenant_id: UUID) -> None:
+        await PendingQueue(self.redis_client).remove_by_job_id(tenant_id, job_id)
+        try:
+            await job_manager.abort_job(job_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to abort queued crawl in ARQ after terminal commit",
+                extra={
+                    "job_id": str(job_id),
+                    "tenant_id": str(tenant_id),
+                    "error": str(exc),
+                },
+            )
+
+        flag_key = LuaScripts.preacquired_slot_key(job_id)
+        try:
+            has_preacquired_slot = await self.redis_client.get(flag_key) is not None
+        except Exception as exc:
+            logger.warning(
+                "Failed to inspect pre-acquired crawl slot during abort cleanup",
+                extra={
+                    "job_id": str(job_id),
+                    "tenant_id": str(tenant_id),
+                    "error": str(exc),
+                },
+            )
+            has_preacquired_slot = False
+
+        # Pending-queue-only jobs do not own a tenant slot; releasing without the
+        # handoff flag can decrement capacity for an unrelated running crawl.
+        if has_preacquired_slot:
+            await self.release_job_resources(job_id, tenant_id)
+
+    async def abort_queued_crawl(
+        self,
+        *,
+        job_id: UUID,
+        tenant_id: UUID,
+    ) -> CrawlAbortResult:
+        target = await self.repo.abort_target_for_tenant(
+            job_id=job_id,
+            tenant_id=tenant_id,
+        )
+        if target is None:
+            return CrawlAbortNotFound(job_id=job_id)
+
+        if (
+            target.status == Status.FAILED
+            and target.outcome_code == CrawlOutcomeCode.CRAWL_ABORTED
+        ):
+            await self._cleanup_aborted_queued_job(job_id, tenant_id)
+            return CrawlAbortSucceeded(
+                job_id=job_id,
+                crawl_run_id=target.crawl_run_id,
+                website_id=target.website_id,
+                already_terminal=True,
+            )
+
+        if target.status == Status.IN_PROGRESS:
+            return CrawlAbortConflict(
+                job_id=job_id,
+                code=CrawlAbortConflictCode.RUNNING_ABORT_NOT_IMPLEMENTED,
+            )
+
+        if target.status != Status.QUEUED:
+            return CrawlAbortConflict(
+                job_id=job_id,
+                code=CrawlAbortConflictCode.CRAWL_NOT_ABORTABLE,
+            )
+
+        result = await self.repo.commit_terminal(
+            TerminalEvent(
+                crawl_run_id=target.crawl_run_id,
+                job_id=job_id,
+                job_status=Status.FAILED,
+                outcome_code=CrawlOutcomeCode.CRAWL_ABORTED,
+                finished_at=datetime.now(timezone.utc),
+                result_location="Crawl aborted by tenant admin",
+                allowed_current_job_statuses=(Status.QUEUED,),
+            )
+        )
+        if result.job_rows_updated == 0:
+            return CrawlAbortConflict(
+                job_id=job_id,
+                code=CrawlAbortConflictCode.CRAWL_NOT_ABORTABLE,
+            )
+
+        await self._cleanup_aborted_queued_job(job_id, tenant_id)
+        return CrawlAbortSucceeded(
+            job_id=job_id,
+            crawl_run_id=target.crawl_run_id,
+            website_id=target.website_id,
+            already_terminal=False,
+        )
 
     async def _add_to_pending_queue(
         self,

@@ -179,6 +179,44 @@ class PendingQueue:
                 extra={"tenant_id": str(tenant_id), "error": str(exc)},
             )
 
+    async def remove_by_job_id(self, tenant_id: UUID, job_id: UUID) -> int:
+        key = self._key(tenant_id)
+
+        try:
+            pending_bytes = await redis_lrange_bytes(self._redis, key, 0, -1)
+        except Exception as exc:
+            logger.warning(
+                "Failed to read pending queue for job removal",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "job_id": str(job_id),
+                    "error": str(exc),
+                },
+            )
+            return 0
+
+        removed = 0
+        for raw_bytes in pending_bytes:
+            try:
+                job_data = _loads_pending_job_data(raw_bytes.decode())
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if job_data.get("job_id") != str(job_id):
+                continue
+            try:
+                removed += await redis_lrem_exact(self._redis, key, raw_bytes)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to remove matching job from pending queue",
+                    extra={
+                        "tenant_id": str(tenant_id),
+                        "job_id": str(job_id),
+                        "error": str(exc),
+                    },
+                )
+
+        return removed
+
     async def add(self, tenant_id: UUID, job_data: CrawlPendingJobData) -> None:
         """Add a crawl job to the pending queue for feeder processing.
 

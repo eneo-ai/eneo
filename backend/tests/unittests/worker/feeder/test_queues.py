@@ -4,7 +4,7 @@ Tests PendingQueue and JobEnqueuer classes for feeder job management.
 """
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -144,6 +144,55 @@ class TestPendingQueueRemove:
         queue = PendingQueue(redis_mock)
         # Should not raise
         await queue.remove(uuid4(), b"data")
+
+
+class TestPendingQueueRemoveByJobId:
+    """Tests for PendingQueue.remove_by_job_id method."""
+
+    @pytest.mark.asyncio
+    async def test_removes_all_entries_for_matching_job_id(self):
+        """Should remove every pending entry matching the job id."""
+        from intric.worker.feeder.queues import PendingQueue
+
+        tenant_id = uuid4()
+        job_id = uuid4()
+        first_match = json.dumps({"job_id": str(job_id), "url": "https://a.test"})
+        second_match = json.dumps({"job_id": str(job_id), "url": "https://b.test"})
+        other_job = json.dumps({"job_id": str(uuid4()), "url": "https://c.test"})
+
+        redis_mock = MagicMock()
+        redis_mock.lrange = AsyncMock(
+            return_value=[
+                first_match.encode(),
+                other_job.encode(),
+                b"not json",
+                second_match.encode(),
+            ]
+        )
+        redis_mock.lrem = AsyncMock(return_value=1)
+
+        queue = PendingQueue(redis_mock)
+        removed = await queue.remove_by_job_id(tenant_id, job_id)
+
+        assert removed == 2
+        key = f"tenant:{tenant_id}:crawl_pending"
+        assert redis_mock.lrem.await_args_list == [
+            call(key, 1, first_match.encode()),
+            call(key, 1, second_match.encode()),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_returns_zero_when_queue_read_fails(self):
+        """Should keep abort cleanup best-effort if Redis is temporarily down."""
+        from intric.worker.feeder.queues import PendingQueue
+
+        redis_mock = MagicMock()
+        redis_mock.lrange = AsyncMock(side_effect=RuntimeError("redis down"))
+
+        queue = PendingQueue(redis_mock)
+        removed = await queue.remove_by_job_id(uuid4(), uuid4())
+
+        assert removed == 0
 
 
 class TestPendingQueueAdd:

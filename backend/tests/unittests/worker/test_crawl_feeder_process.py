@@ -45,6 +45,7 @@ class _PendingQueueForProcessTest(PendingQueue):
 
 class _CapacityManagerForProcessTest(CapacityManager):
     def __init__(self) -> None:
+        self.acquire_attempts: list[UUID] = []
         self.released_tenants: list[UUID] = []
         self.preacquired_jobs: list[UUID] = []
 
@@ -63,6 +64,7 @@ class _CapacityManagerForProcessTest(CapacityManager):
         tenant_id: UUID,
         tenant_settings: TenantCrawlerSettings | None = None,
     ) -> bool:
+        self.acquire_attempts.append(tenant_id)
         return True
 
     async def mark_slot_preacquired(
@@ -93,6 +95,15 @@ class _TypedJobEnqueuerForProcessTest(JobEnqueuer):
         return self.result
 
 
+class _CrawlFeederForProcessTest(CrawlFeeder):
+    def __init__(self, queued_job_ids: set[UUID]) -> None:
+        super().__init__()
+        self._queued_job_ids = queued_job_ids
+
+    async def _pending_job_is_still_queued(self, job_id: UUID) -> bool:
+        return job_id in self._queued_job_ids
+
+
 def _pending_job(job_id: UUID, raw_bytes: bytes) -> _PendingJob:
     return _PendingJob(
         raw_bytes=raw_bytes,
@@ -120,7 +131,7 @@ class TestCrawlFeederProcessTenantQueue:
         redis_client = MagicMock()
         redis_client.delete = AsyncMock()
 
-        feeder = CrawlFeeder()
+        feeder = _CrawlFeederForProcessTest({job_id})
         feeder._pending_queue = pending_queue
         feeder._capacity_manager = capacity_manager
         feeder._job_enqueuer = job_enqueuer
@@ -146,7 +157,7 @@ class TestCrawlFeederProcessTenantQueue:
         redis_client = MagicMock()
         redis_client.delete = AsyncMock()
 
-        feeder = CrawlFeeder()
+        feeder = _CrawlFeederForProcessTest({job_id})
         feeder._pending_queue = pending_queue
         feeder._capacity_manager = capacity_manager
         feeder._job_enqueuer = job_enqueuer
@@ -172,7 +183,7 @@ class TestCrawlFeederProcessTenantQueue:
         redis_client = MagicMock()
         redis_client.delete = AsyncMock()
 
-        feeder = CrawlFeeder()
+        feeder = _CrawlFeederForProcessTest({job_id})
         feeder._pending_queue = pending_queue
         feeder._capacity_manager = capacity_manager
         feeder._job_enqueuer = job_enqueuer
@@ -206,7 +217,7 @@ class TestCrawlFeederProcessTenantQueue:
         redis_client.ltrim = AsyncMock(return_value=True)
         redis_client.expire = AsyncMock(return_value=True)
 
-        feeder = CrawlFeeder()
+        feeder = _CrawlFeederForProcessTest(set())
         feeder._pending_queue = pending_queue
         feeder._capacity_manager = capacity_manager
         feeder._job_enqueuer = job_enqueuer
@@ -221,6 +232,30 @@ class TestCrawlFeederProcessTenantQueue:
         ]
         assert pending_queue.removed_raw_bytes == [raw_bytes]
         assert capacity_manager.preacquired_jobs == []
+        assert job_enqueuer.calls == []
+
+    async def test_terminal_pending_job_is_removed_without_slot_or_enqueue(
+        self,
+    ) -> None:
+        tenant_id = uuid4()
+        job_id = uuid4()
+        raw_bytes = b'{"job_id":"aborted"}'
+        pending_queue = _PendingQueueForProcessTest([_pending_job(job_id, raw_bytes)])
+        capacity_manager = _CapacityManagerForProcessTest()
+        job_enqueuer = _TypedJobEnqueuerForProcessTest(CrawlEnqueued(job_id=job_id))
+        redis_client = MagicMock()
+
+        feeder = _CrawlFeederForProcessTest(set())
+        feeder._pending_queue = pending_queue
+        feeder._capacity_manager = capacity_manager
+        feeder._job_enqueuer = job_enqueuer
+
+        await feeder._process_tenant_queue(tenant_id, redis_client)
+
+        assert pending_queue.removed_raw_bytes == [raw_bytes]
+        assert capacity_manager.acquire_attempts == []
+        assert capacity_manager.preacquired_jobs == []
+        assert capacity_manager.released_tenants == []
         assert job_enqueuer.calls == []
 
 

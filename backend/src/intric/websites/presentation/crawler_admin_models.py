@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from intric.main.models import Status
+from intric.websites.domain.crawl_abort import CrawlAbortConflictCode
 from intric.websites.domain.crawl_lifecycle import CrawlLifecycle
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode, FailureReason
 from intric.websites.domain.crawler_active_inventory import (
@@ -25,6 +26,11 @@ from intric.websites.domain.crawler_scheduled_aggregate import (
     CrawlerScheduledIntervalBucket as DomainCrawlerScheduledIntervalBucket,
 )
 from intric.websites.domain.website import UpdateInterval
+
+
+class CrawlerAbortConflictResponse(BaseModel):
+    error_code: CrawlAbortConflictCode
+    detail: str
 
 
 class CrawlerActiveInventoryItem(BaseModel):

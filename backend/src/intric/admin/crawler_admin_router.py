@@ -1,18 +1,32 @@
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.authentication.auth_dependencies import (
     get_current_active_user,
     require_permission,
 )
 from intric.database.database import AsyncSession, get_session
+from intric.main.container.container import Container
 from intric.roles.permissions import Permission
+from intric.server.dependencies.container import get_container
 from intric.users.user import UserInDB
+from intric.websites.domain.crawl_abort import (
+    CrawlAbortConflict,
+    CrawlAbortConflictCode,
+    CrawlAbortNotFound,
+    CrawlAbortSucceeded,
+)
 from intric.websites.domain.crawl_run_repo import CrawlRunRepository
 from intric.websites.domain.website_admin_repo import WebsiteAdminRepository
 from intric.websites.presentation.crawler_admin_models import (
+    CrawlerAbortConflictResponse,
     CrawlerActiveInventoryResponse,
     CrawlerRecentFailuresResponse,
     CrawlerScheduledAggregateResponse,
@@ -23,6 +37,16 @@ router = APIRouter(
         Depends(require_permission(Permission.ADMIN)),
     ],
 )
+
+AdminContainer = Annotated[Container, Depends(get_container(with_user=True))]
+
+
+def _abort_conflict_detail(code: CrawlAbortConflictCode) -> str:
+    match code:
+        case CrawlAbortConflictCode.RUNNING_ABORT_NOT_IMPLEMENTED:
+            return "Running crawl abort is not implemented yet."
+        case CrawlAbortConflictCode.CRAWL_NOT_ABORTABLE:
+            return "The crawl job is no longer abortable."
 
 
 @router.get(
@@ -89,3 +113,59 @@ async def get_current_tenant_crawler_scheduled_aggregate(
             tenant_id=current_user.tenant_id,
         )
     return CrawlerScheduledAggregateResponse.from_domain(aggregate)
+
+
+@router.post(
+    "/jobs/{job_id}/abort",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_404_NOT_FOUND: {"description": "Crawl job not found"},
+        status.HTTP_409_CONFLICT: {"model": CrawlerAbortConflictResponse},
+    },
+    summary="Abort a queued crawler job for the current tenant",
+)
+async def abort_current_tenant_queued_crawl(
+    job_id: UUID,
+    current_user: Annotated[UserInDB, Depends(get_current_active_user)],
+    container: AdminContainer,
+) -> Response:
+    crawl_service = container.crawl_service()
+    result = await crawl_service.abort_queued_crawl(
+        job_id=job_id,
+        tenant_id=current_user.tenant_id,
+    )
+
+    match result:
+        case CrawlAbortNotFound():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Crawl job not found",
+            )
+        case CrawlAbortConflict(code=code):
+            conflict = CrawlerAbortConflictResponse(
+                error_code=code,
+                detail=_abort_conflict_detail(code),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=conflict.model_dump(mode="json"),
+            )
+        case CrawlAbortSucceeded(website_id=website_id, already_terminal=already):
+            audit_service = container.audit_service()
+            await audit_service.log_async(
+                tenant_id=current_user.tenant_id,
+                actor_id=current_user.id,
+                action=ActionType.WEBSITE_CRAWL_ABORTED,
+                entity_type=EntityType.WEBSITE,
+                entity_id=website_id,
+                description="Admin aborted queued website crawl",
+                metadata=AuditMetadata.standard(
+                    actor=current_user,
+                    target=SimpleNamespace(id=website_id, name=None),
+                    extra={
+                        "job_id": str(job_id),
+                        "already_terminal": already,
+                    },
+                ),
+            )
+            return Response(status_code=status.HTTP_204_NO_CONTENT)

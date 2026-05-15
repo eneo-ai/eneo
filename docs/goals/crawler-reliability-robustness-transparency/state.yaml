@@ -6884,15 +6884,98 @@ tasks:
       follow_up_notes:
         - "The next abort-related slice should start from a production caller and define queued/running terminal semantics, cleanup policy, slot release, and audit behavior in the same bounded change."
         - "Do not introduce a full WorkerAdapter until there is enough direct ARQ leakage left to justify the abstraction."
+  - id: T142
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Add a queued-only tenant admin crawl abort operation that uses the ARQ abort primitive, writes a typed terminal outcome, and prevents pending-queue resurrection without implementing running aborts."
+    allowed_files:
+      - "backend/src/intric/admin/crawler_admin_router.py"
+      - "backend/src/intric/audit/domain/action_types.py"
+      - "backend/src/intric/websites/domain/crawl_abort.py"
+      - "backend/src/intric/websites/domain/crawl_outcome.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/src/intric/websites/domain/crawl_service.py"
+      - "backend/src/intric/websites/presentation/crawler_admin_models.py"
+      - "backend/src/intric/worker/crawl_feeder.py"
+      - "backend/src/intric/worker/feeder/queues.py"
+      - "backend/tests/integration/test_admin_crawler_abort.py"
+      - "backend/tests/unittests/worker/feeder/test_queues.py"
+      - "backend/tests/unittests/worker/test_crawl_feeder_process.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Queued-only behavior: abort `Status.QUEUED` crawl jobs and return an explicit conflict for `Status.IN_PROGRESS` jobs."
+      - "Use ARQ's native `Job.abort(...)` through `JobManager.abort_job(...)`; do not simulate ARQ queue cancellation by deleting Redis keys."
+      - "Write a typed crawl terminal outcome through the existing `TerminalEvent` / `commit_terminal(...)` path."
+      - "Prevent pending-queue resurrection: a queued abort must remove matching pending-queue entries, and feeder processing must not enqueue a pending entry whose DB job is no longer queued."
+      - "Keep route tenant-scoped from the authenticated admin context; do not expose a `tenant_id` query parameter."
+      - "Do not implement running-job cancellation, unsafe cleanup policy changes, retry controls, pause/resume controls, or frontend buttons in this slice."
+      - "Do not introduce a broad `WorkerAdapter` interface until a concrete remaining duplication proves it is needed."
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_admin_crawler_abort.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py -q"
+      - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/audit/domain/action_types.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_outcome.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py src/intric/websites/presentation/crawler_admin_models.py src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/integration/test_admin_crawler_abort.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
+      - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/audit/domain/action_types.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_outcome.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py src/intric/websites/presentation/crawler_admin_models.py src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/integration/test_admin_crawler_abort.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/admin/crawler_admin_router.py src/intric/audit/domain/action_types.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_outcome.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py src/intric/websites/presentation/crawler_admin_models.py src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/integration/test_admin_crawler_abort.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
+    red_tests:
+      - "Tenant admin aborting a queued crawl returns 204, marks the job failed, writes `CRAWL_ABORTED`, calls ARQ abort, releases pre-acquired resources, and removes the pending queue entry."
+      - "Tenant admin aborting an in-progress crawl returns 409 with a typed `RUNNING_ABORT_NOT_IMPLEMENTED` code and does not call ARQ abort."
+      - "Unknown or other-tenant crawl job abort returns 404 without leaking existence."
+      - "Already aborted crawl job abort is idempotent and returns 204 while retrying best-effort pending/resource cleanup."
+      - "Feeder removes pending entries whose DB job is no longer queued before slot acquisition."
+    stop_if:
+      - "The endpoint requires cancelling already-running Scrapy work or changing stale cleanup behavior."
+      - "The endpoint cannot prevent pending-queue resurrection without a broader feeder rewrite."
+      - "Strict Pyright requires broad casts, `Any`, or type ignores."
+    receipt:
+      result: done
+      summary: "Added a tenant-scoped queued crawl abort operation under the existing admin crawler router. The route delegates to CrawlService, commits `CRAWL_ABORTED` through TerminalEvent/commit_terminal, calls the ARQ-native JobManager abort primitive, removes matching Redis pending entries, retries cleanup idempotently for already-aborted jobs, and returns a typed 409 for running crawls instead of pretending running cancellation is implemented. Feeder processing now verifies the DB job is still queued before slot acquisition, removing terminal pending entries so aborted jobs cannot resurrect from a stale Redis snapshot."
+      changed_files:
+        - "backend/src/intric/admin/crawler_admin_router.py"
+        - "backend/src/intric/audit/domain/action_types.py"
+        - "backend/src/intric/websites/domain/crawl_abort.py"
+        - "backend/src/intric/websites/domain/crawl_outcome.py"
+        - "backend/src/intric/websites/domain/crawl_run_repo.py"
+        - "backend/src/intric/websites/domain/crawl_service.py"
+        - "backend/src/intric/websites/presentation/crawler_admin_models.py"
+        - "backend/src/intric/worker/crawl_feeder.py"
+        - "backend/src/intric/worker/feeder/queues.py"
+        - "backend/tests/integration/test_admin_crawler_abort.py"
+        - "backend/tests/unittests/worker/feeder/test_queues.py"
+        - "backend/tests/unittests/worker/test_crawl_feeder_process.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      red_evidence:
+        - "Initial admin abort integration test failed because the endpoint did not exist."
+        - "Feeder race test failed because terminal pending jobs were still enqueued after Redis snapshot."
+        - "Pending-without-preacquired-slot integration test failed because abort cleanup released an unowned tenant slot; cleanup now releases only when the pre-acquired flag exists."
+        - "Claude commit gate rejected the first implementation until cross-tenant 404, abort audit payload, and zero-row terminal commit race coverage were added."
+      validation:
+        - "cd backend && uv run pytest tests/integration/test_admin_crawler_abort.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py -q"
+        - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/audit/domain/action_types.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_outcome.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py src/intric/websites/presentation/crawler_admin_models.py src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/integration/test_admin_crawler_abort.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
+        - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/audit/domain/action_types.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_outcome.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py src/intric/websites/presentation/crawler_admin_models.py src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/integration/test_admin_crawler_abort.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/admin/crawler_admin_router.py src/intric/audit/domain/action_types.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_outcome.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py src/intric/websites/presentation/crawler_admin_models.py src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/integration/test_admin_crawler_abort.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
+      claude:
+        verdict: green
+        min_score: 8
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t142-queued-crawl-abort-implementation-review-20260515T181628Z.md"
+          - ".codex/artifacts/claude-peer-loop-t142-queued-crawl-abort-implementation-re-review-20260515T182308Z.md"
+        resolution: "Claude initially required cross-tenant, audit, and zero-row race coverage. Those tests were added, a why-comment documented pre-acquired-slot ownership, and Claude green-lit the slice at 8/10."
+      follow_up_notes:
+        - "Running crawl cancellation remains explicitly unimplemented and returns `RUNNING_ABORT_NOT_IMPLEMENTED`; implement it only with a separate Scrapy/process lifecycle design."
+        - "The admin UI abort button is intentionally deferred so the backend contract can be reviewed independently before adding destructive UI controls."
+        - "Later hardening can inject JobManager into CrawlService, log false ARQ abort returns, and batch feeder DB status checks if abort bursts become common."
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T141
+    task: T142
     commands:
-      - "cd backend && uv run pytest tests/unittests/jobs/test_job_manager.py -q"
-      - "cd backend && uv run ruff check src/intric/jobs/job_manager.py tests/unittests/jobs/test_job_manager.py"
-      - "cd backend && uv run ruff format --check src/intric/jobs/job_manager.py tests/unittests/jobs/test_job_manager.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/jobs/job_manager.py tests/unittests/jobs/test_job_manager.py"
-    note: "T141 passed focused JobManager behavior tests, Ruff check, Ruff format check, strict Pyright, and Claude review. It intentionally adds only the low-level ARQ abort primitive; production caller semantics remain deferred."
+      - "cd backend && uv run pytest tests/integration/test_admin_crawler_abort.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py -q"
+      - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/audit/domain/action_types.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_outcome.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py src/intric/websites/presentation/crawler_admin_models.py src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/integration/test_admin_crawler_abort.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
+      - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/audit/domain/action_types.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_outcome.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py src/intric/websites/presentation/crawler_admin_models.py src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/integration/test_admin_crawler_abort.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/admin/crawler_admin_router.py src/intric/audit/domain/action_types.py src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_outcome.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py src/intric/websites/presentation/crawler_admin_models.py src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/integration/test_admin_crawler_abort.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
+    note: "T142 passed queued abort integration coverage, pending queue/feeder race unit coverage, Ruff check/format, and focused strict Pyright. Running abort remains explicitly deferred behind a typed 409."

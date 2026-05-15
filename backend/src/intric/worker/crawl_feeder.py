@@ -20,9 +20,13 @@ from typing import assert_never
 from uuid import UUID
 
 import redis.asyncio as aioredis
+import sqlalchemy as sa
 
+from intric.database.database import sessionmanager
+from intric.database.tables.job_table import Jobs
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
+from intric.main.models import Status
 from intric.tenants.crawler_settings_helper import get_crawler_setting
 from intric.worker.feeder.capacity import CapacityManager
 from intric.worker.feeder.crawl_enqueue import (
@@ -119,6 +123,21 @@ class CrawlFeeder:
                 extra={"error": str(exc)},
             )
 
+    async def _pending_job_is_still_queued(self, job_id: UUID) -> bool:
+        try:
+            async with sessionmanager.session() as session:
+                job_status = await session.scalar(
+                    sa.select(Jobs.status).where(Jobs.id == job_id)
+                )
+        except Exception as exc:
+            logger.warning(
+                "Failed to verify pending crawl job status before enqueue",
+                extra={"job_id": str(job_id), "error": str(exc)},
+            )
+            return True
+
+        return job_status == Status.QUEUED.value
+
     async def _process_tenant_queue(
         self, tenant_id: UUID, redis_client: aioredis.Redis
     ) -> None:
@@ -207,6 +226,19 @@ class CrawlFeeder:
                 except Exception:
                     pass  # Best effort removal
                 failed_count += 1
+                continue
+
+            if not await self._pending_job_is_still_queued(job_id):
+                await self._pending_queue.remove(tenant_id, raw_bytes)
+                logger.info(
+                    "Removed terminal crawl job from pending queue",
+                    extra={
+                        "tenant_id": str(tenant_id),
+                        "job_id": str(job_id),
+                        "metric_name": "feeder.terminal_pending_removed",
+                        "metric_value": 1,
+                    },
+                )
                 continue
 
             # Atomically acquire slot BEFORE enqueueing to eliminate race condition

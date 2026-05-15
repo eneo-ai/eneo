@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -15,6 +16,7 @@ from intric.main.models import Status
 from intric.websites.domain.crawl_lifecycle import derive_crawl_lifecycle_from_counters
 from intric.websites.domain.crawl_outcome import (
     CrawlOutcomeCode,
+    parse_crawl_outcome_code_lenient,
     parse_crawl_outcome_code_strict,
     parse_failure_summary_lenient,
     report_legacy_failure_summary_key_dropped,
@@ -61,6 +63,16 @@ def _optional_int(value: object) -> int | None:
     if isinstance(value, int):
         return value
     raise TypeError(f"Expected integer crawl counter, got {type(value).__name__}")
+
+
+@dataclass(frozen=True, slots=True)
+class CrawlAbortTarget:
+    job_id: UUID
+    crawl_run_id: UUID
+    website_id: UUID
+    tenant_id: UUID
+    status: Status
+    outcome_code: CrawlOutcomeCode | None
 
 
 class CrawlRunRepository:
@@ -141,6 +153,42 @@ class CrawlRunRepository:
     async def commit_terminal(self, event: TerminalEvent) -> TerminalCommitResult:
         """Multi-table terminal write delegated to crawl_terminal; this repo owns the session."""
         return await commit_terminal(self.session, event)
+
+    async def abort_target_for_tenant(
+        self,
+        *,
+        job_id: UUID,
+        tenant_id: UUID,
+    ) -> CrawlAbortTarget | None:
+        stmt = (
+            sa.select(
+                Jobs.id.label("job_id"),
+                Jobs.status.label("job_status"),
+                CrawlRunsTable.id.label("crawl_run_id"),
+                CrawlRunsTable.website_id,
+                CrawlRunsTable.tenant_id,
+                CrawlRunsTable.outcome_code,
+            )
+            .select_from(Jobs)
+            .join(CrawlRunsTable, CrawlRunsTable.job_id == Jobs.id)
+            .where(
+                Jobs.id == job_id,
+                Jobs.task == Task.CRAWL.value,
+                CrawlRunsTable.tenant_id == tenant_id,
+            )
+        )
+        row = (await self.session.execute(stmt)).mappings().first()
+        if row is None:
+            return None
+
+        return CrawlAbortTarget(
+            job_id=row["job_id"],
+            crawl_run_id=row["crawl_run_id"],
+            website_id=row["website_id"],
+            tenant_id=row["tenant_id"],
+            status=Status(str(row["job_status"])),
+            outcome_code=parse_crawl_outcome_code_lenient(row["outcome_code"]),
+        )
 
     async def get_crawl_runs(self, website_id: UUID) -> list[CrawlRun]:
         stmt = (
