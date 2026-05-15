@@ -53,6 +53,20 @@ export function initCrawlerAdmin(client) {
     },
 
     /**
+     * Get recent crawler runs stopped by lifecycle protection for the current tenant.
+     * @param {{days?: number, limit?: number, offset?: number}} [params]
+     * @returns {Promise<CrawlerRecentFailuresResponse>}
+     * @throws {IntricError}
+     */
+    watchdogInterventions: async (params) => {
+      const res = await client.fetch("/api/v1/admin/crawler/watchdog-interventions", {
+        method: "get",
+        params: { query: params }
+      });
+      return res;
+    },
+
+    /**
      * Get scheduled crawler load grouped by update interval for the current tenant.
      * @returns {Promise<CrawlerScheduledAggregateResponse>}
      * @throws {IntricError}

@@ -2,6 +2,7 @@ import { expect, test, vi } from "vitest";
 import { CRAWLER_ACTIVE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerActiveInventory";
 import { CRAWLER_FAILURE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerFailureInventory";
 import { CRAWLER_RECENT_FAILURES_DEFAULTS } from "$lib/features/admin/crawlerRecentFailures";
+import { CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS } from "$lib/features/admin/crawlerWatchdogInterventions";
 import { CRAWLER_WEBSITE_PROCESSING_DEFAULTS } from "$lib/features/admin/crawlerWebsiteProcessing";
 import { load } from "../../../routes/(app)/admin/crawler/+page";
 
@@ -11,6 +12,7 @@ test("admin crawler load keeps settings available when diagnostics cannot be loa
   const activeInventory = vi.fn().mockRejectedValue(new Error("active unavailable"));
   const failureInventory = vi.fn().mockRejectedValue(new Error("failure inventory unavailable"));
   const recentFailures = vi.fn().mockRejectedValue(new Error("diagnostics unavailable"));
+  const watchdogInterventions = vi.fn().mockRejectedValue(new Error("watchdog unavailable"));
   const scheduledAggregate = vi.fn().mockRejectedValue(new Error("scheduled unavailable"));
   const websiteProcessingAggregate = vi.fn().mockRejectedValue(new Error("processing unavailable"));
   const depends = vi.fn();
@@ -24,6 +26,7 @@ test("admin crawler load keeps settings available when diagnostics cannot be loa
           activeInventory,
           failureInventory,
           recentFailures,
+          watchdogInterventions,
           scheduledAggregate,
           websiteProcessingAggregate
         }
@@ -35,12 +38,14 @@ test("admin crawler load keeps settings available when diagnostics cannot be loa
   expect(depends).toHaveBeenCalledWith("admin:crawler-active-inventory");
   expect(depends).toHaveBeenCalledWith("admin:crawler-failure-inventory");
   expect(depends).toHaveBeenCalledWith("admin:crawler-recent-failures");
+  expect(depends).toHaveBeenCalledWith("admin:crawler-watchdog-interventions");
   expect(depends).toHaveBeenCalledWith("admin:crawler-scheduled");
   expect(depends).toHaveBeenCalledWith("admin:crawler-website-processing");
   expect(getCrawler).toHaveBeenCalledOnce();
   expect(activeInventory).toHaveBeenCalledWith(CRAWLER_ACTIVE_INVENTORY_DEFAULTS);
   expect(failureInventory).toHaveBeenCalledWith(CRAWLER_FAILURE_INVENTORY_DEFAULTS);
   expect(recentFailures).toHaveBeenCalledWith(CRAWLER_RECENT_FAILURES_DEFAULTS);
+  expect(watchdogInterventions).toHaveBeenCalledWith(CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS);
   expect(scheduledAggregate).toHaveBeenCalledOnce();
   expect(websiteProcessingAggregate).toHaveBeenCalledWith(CRAWLER_WEBSITE_PROCESSING_DEFAULTS);
   expect(result).toEqual({
@@ -52,6 +57,9 @@ test("admin crawler load keeps settings available when diagnostics cannot be loa
     crawlerRecentFailuresWindowDays: CRAWLER_RECENT_FAILURES_DEFAULTS.days,
     crawlerRecentFailures: null,
     crawlerRecentFailuresLoadFailed: true,
+    crawlerWatchdogInterventionsWindowDays: CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS.days,
+    crawlerWatchdogInterventions: null,
+    crawlerWatchdogInterventionsLoadFailed: true,
     crawlerScheduledAggregate: null,
     crawlerScheduledAggregateLoadFailed: true,
     crawlerWebsiteProcessingWindowDays: CRAWLER_WEBSITE_PROCESSING_DEFAULTS.days,
@@ -136,6 +144,16 @@ test("admin crawler load returns crawler diagnostics when both diagnostics calls
   };
   const failureInventory = vi.fn().mockResolvedValue(crawlerFailureInventory);
   const recentFailures = vi.fn().mockResolvedValue(crawlerRecentFailures);
+  const crawlerWatchdogInterventions = {
+    ...crawlerRecentFailures,
+    items: [
+      {
+        ...crawlerRecentFailures.items[0],
+        outcome_code: "CRAWL_RUNTIME_TIMEOUT"
+      }
+    ]
+  };
+  const watchdogInterventions = vi.fn().mockResolvedValue(crawlerWatchdogInterventions);
   const crawlerScheduledAggregate = {
     buckets: [
       { update_interval: "daily", website_count: 2, total_size_bytes: 1_048_576 },
@@ -186,6 +204,7 @@ test("admin crawler load returns crawler diagnostics when both diagnostics calls
           activeInventory,
           failureInventory,
           recentFailures,
+          watchdogInterventions,
           scheduledAggregate,
           websiteProcessingAggregate
         }
@@ -196,6 +215,7 @@ test("admin crawler load returns crawler diagnostics when both diagnostics calls
   expect(activeInventory).toHaveBeenCalledWith(CRAWLER_ACTIVE_INVENTORY_DEFAULTS);
   expect(failureInventory).toHaveBeenCalledWith(CRAWLER_FAILURE_INVENTORY_DEFAULTS);
   expect(recentFailures).toHaveBeenCalledWith(CRAWLER_RECENT_FAILURES_DEFAULTS);
+  expect(watchdogInterventions).toHaveBeenCalledWith(CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS);
   expect(scheduledAggregate).toHaveBeenCalledOnce();
   expect(websiteProcessingAggregate).toHaveBeenCalledWith(CRAWLER_WEBSITE_PROCESSING_DEFAULTS);
   expect(result).toEqual({
@@ -207,6 +227,9 @@ test("admin crawler load returns crawler diagnostics when both diagnostics calls
     crawlerRecentFailuresWindowDays: CRAWLER_RECENT_FAILURES_DEFAULTS.days,
     crawlerRecentFailures,
     crawlerRecentFailuresLoadFailed: false,
+    crawlerWatchdogInterventionsWindowDays: CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS.days,
+    crawlerWatchdogInterventions,
+    crawlerWatchdogInterventionsLoadFailed: false,
     crawlerScheduledAggregate,
     crawlerScheduledAggregateLoadFailed: false,
     crawlerWebsiteProcessingWindowDays: CRAWLER_WEBSITE_PROCESSING_DEFAULTS.days,

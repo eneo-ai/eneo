@@ -104,6 +104,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Tenant admin website-processing UI tranche: expose tenant-scoped per-website crawler work with fetched, retained, too-large, and failure counters using a typed backend contract, generated frontend schema, shadcn table/card composition, and bounded default windowing.
 - [x] Tenant admin crawler failure-state UI tranche: expose backed-off and paused-after-failures crawler websites to tenant admins with tenant-safe API contracts, shadcn table/card composition, and clear recovery-oriented copy.
 - [x] Too-large file sample tranche: persist the configured download limit plus capped too-large file URL samples on crawl runs, expose them through generated backend/frontend contracts, and show actionable crawl-result tooltips without storing unbounded crawl logs.
+- [x] Tenant admin watchdog-interventions tranche: expose watchdog-driven terminal outcomes through a tenant-scoped admin endpoint, generated frontend contract, and shadcn admin card without exposing a `tenant_id` query parameter.
 
 ## Non-Negotiable Principles
 
@@ -745,7 +746,7 @@ Work:
 - [x] Show too-large file counts and capped samples through a durable bounded crawl-run storage contract.
 - [x] Show hash-retained/source-retained/file-retained counts and rates in tenant admin processing rows.
 - [x] Show current backed-off and paused-after-failures circuit-breaker state in the tenant admin crawler page.
-- [ ] Show watchdog interventions in tenant/admin crawler visibility.
+- [x] Show watchdog interventions in tenant/admin crawler visibility.
 - [ ] Add filters by tenant, space, status, outcome, update interval, and time range.
 
 Acceptance criteria:

@@ -7590,22 +7590,121 @@ tasks:
       follow_up_notes:
         - "If product later needs more than five oversized file examples, add a separate paginated diagnostics endpoint instead of widening the crawl-run row."
         - "Keep future file skip classes on the same bounded diagnostics pattern: typed count, optional per-run configuration, capped examples, no raw logs."
+  - id: T150
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Expose tenant-admin crawler watchdog interventions so admins can see runs stopped by lifecycle protection without using sysadmin endpoints."
+    allowed_files:
+      - "backend/src/intric/admin/crawler_admin_router.py"
+      - "backend/src/intric/sysadmin/sysadmin_router.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/src/intric/websites/presentation/crawler_admin_models.py"
+      - "backend/tests/integration/test_admin_crawler_watchdog_interventions.py"
+      - "frontend/packages/intric-js/src/endpoints/crawler-admin.js"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "frontend/apps/web/src/lib/features/admin/crawlerAdminPageLoad.test.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerTerminalOutcomeFeed.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerWatchdogInterventions.test.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerWatchdogInterventions.ts"
+      - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte"
+      - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.ts"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Reuse the canonical bounded terminal outcome feed shape; do not create a parallel watchdog response contract."
+      - "Keep the tenant endpoint tenant-scoped through the current user and do not expose a tenant_id query parameter."
+      - "Keep sysadmin Redis metrics separate from tenant admin visibility; tenant admins get the durable terminal interventions feed only."
+      - "Use shadcn-Svelte Card/Table/Badge/Alert composition and keep the admin UI bounded and independently degradable."
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_admin_crawler_watchdog_interventions.py tests/integration/test_sysadmin_crawler_watchdog_status.py -q"
+      - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_watchdog_interventions.py tests/integration/test_sysadmin_crawler_watchdog_status.py"
+      - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_watchdog_interventions.py tests/integration/test_sysadmin_crawler_watchdog_status.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_watchdog_interventions.py tests/integration/test_sysadmin_crawler_watchdog_status.py"
+      - "./scripts/check-intric-js-openapi-schema.sh"
+      - "cd frontend/apps/web && bun run i18n:compile"
+      - "cd frontend/apps/web && bun run test:unit src/lib/features/admin/crawlerWatchdogInterventions.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts --run"
+      - "cd frontend/apps/web && bun run check"
+      - "cd frontend/apps/web && bun run lint"
+      - "cd frontend && bun run --filter @intric/intric-js lint"
+    red_tests:
+      - "Backend integration tests failed with 404 until `/admin/crawler/watchdog-interventions` existed."
+      - "Backend integration coverage failed until only watchdog outcome codes were returned, current-tenant scope was enforced, non-admin users were rejected, and OpenAPI omitted tenant_id."
+      - "Frontend page-load tests failed until watchdog interventions loaded independently and degraded without breaking crawler settings."
+      - "Generated type contract tests failed until the new admin path existed in checked-in OpenAPI types."
+    receipt:
+      result: done
+      summary: "Added `/api/v1/admin/crawler/watchdog-interventions` for the current tenant, backed by the existing terminal outcome query through tenant-required and sysadmin-specific repository entry points. The admin crawler page now loads the bounded watchdog intervention feed independently, renders a shadcn card/table with typed outcome and activity labels, and uses localized empty/error/count copy that explains these rows can overlap with recent failures. Claude's duplicate-adapter note was resolved before commit by extracting shared terminal outcome result-label mapping for recent failures and watchdog interventions."
+      changed_files:
+        - "backend/src/intric/admin/crawler_admin_router.py"
+        - "backend/src/intric/sysadmin/sysadmin_router.py"
+        - "backend/src/intric/websites/domain/crawl_run_repo.py"
+        - "backend/src/intric/websites/presentation/crawler_admin_models.py"
+        - "backend/tests/integration/test_admin_crawler_watchdog_interventions.py"
+        - "frontend/packages/intric-js/src/endpoints/crawler-admin.js"
+        - "frontend/packages/intric-js/src/types/schema.d.ts"
+        - "frontend/apps/web/messages/en.json"
+        - "frontend/apps/web/messages/sv.json"
+        - "frontend/apps/web/src/lib/features/admin/crawlerAdminPageLoad.test.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerTerminalOutcomeFeed.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerWatchdogInterventions.test.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerWatchdogInterventions.ts"
+        - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte"
+        - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.ts"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      validation:
+        - "Red test: cd backend && uv run pytest tests/integration/test_admin_crawler_watchdog_interventions.py -q failed with 404 before implementation."
+        - "cd backend && uv run pytest tests/integration/test_admin_crawler_watchdog_interventions.py -q"
+        - "cd backend && uv run pytest tests/integration/test_admin_crawler_watchdog_interventions.py tests/integration/test_sysadmin_crawler_watchdog_status.py -q"
+        - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_watchdog_interventions.py tests/integration/test_sysadmin_crawler_watchdog_status.py"
+        - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_watchdog_interventions.py tests/integration/test_sysadmin_crawler_watchdog_status.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_watchdog_interventions.py tests/integration/test_sysadmin_crawler_watchdog_status.py"
+        - "./scripts/check-intric-js-openapi-schema.sh"
+        - "cd frontend/apps/web && bun run i18n:compile"
+        - "cd frontend/apps/web && bun run test:unit src/lib/features/admin/crawlerWatchdogInterventions.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts --run"
+        - "cd frontend/apps/web && bun run check"
+        - "cd frontend/apps/web && bun run lint"
+        - "cd frontend && bun run --filter @intric/intric-js lint"
+      ux_review:
+        - "shadcn MCP checklist applied: the card reuses installed Card/Table/Badge/Alert primitives, imports resolve, lint/check pass, and no new dependency was introduced."
+        - "The UI keeps watchdog interventions separate from recent failures because it answers a distinct lifecycle-protection question while the copy explicitly states overlap can happen."
+      claude:
+        verdict: green
+        min_score: 8
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t150-tenant-watchdog-interventions-plan-20260515T215142Z.md"
+          - ".codex/artifacts/claude-peer-loop-t150-tenant-watchdog-interventions-plan-re-review-20260515T215404Z.md"
+          - ".codex/artifacts/claude-peer-loop-claude-peer-loop-iteration-4-20260515T222804Z.md"
+        resolution: "Claude's plan gate initially required stronger contract reuse, cross-tenant, allowlist, and copy decisions. The revised plan kept the existing bounded terminal outcome response as canonical, added tenant-scope and outcome-allowlist red tests, and pinned product copy before implementation."
+      implementation_review:
+        verdict: green
+        min_score: 8
+        resolution: "Claude green-lit the implementation with a P2 frontend adapter duplication note and a P3 docstring wording note. Both were addressed before commit by extracting `crawlerTerminalOutcomeFeed.ts` and tightening the response docstring to include outcome-filtered."
+      follow_up_notes:
+        - "If the admin crawler page keeps growing, split it into tabs or sections before adding more cards."
+        - "A future broader overview/filtering slice should decide whether watchdog interventions are a separate table, a filter on recent failures, or both."
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T149
+    task: T150
     commands:
-      - "cd backend && uv run pytest tests/unittests/crawler/test_filename_pipeline.py tests/unittests/crawler/test_crawler_diagnostics.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/websites/test_crawl_run_domain.py tests/unittests/websites/test_crawl_outcome.py tests/integration/test_crawl_run_repository.py -q"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/crawler/pipelines.py src/intric/crawler/crawler.py src/intric/worker/crawl_tasks.py src/intric/websites/domain/crawl_run.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_terminal.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/websites/presentation/website_models.py tests/unittests/crawler/test_filename_pipeline.py tests/unittests/crawler/test_crawler_diagnostics.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/websites/test_crawl_run_domain.py tests/unittests/websites/test_crawl_outcome.py tests/integration/test_crawl_run_repository.py"
-      - "cd backend && uv run alembic heads"
+      - "cd backend && uv run pytest tests/integration/test_admin_crawler_watchdog_interventions.py tests/integration/test_sysadmin_crawler_watchdog_status.py -q"
+      - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_watchdog_interventions.py tests/integration/test_sysadmin_crawler_watchdog_status.py"
+      - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_watchdog_interventions.py tests/integration/test_sysadmin_crawler_watchdog_status.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_watchdog_interventions.py tests/integration/test_sysadmin_crawler_watchdog_status.py"
       - "./scripts/check-intric-js-openapi-schema.sh"
       - "cd frontend/apps/web && bun run i18n:compile"
-      - "cd frontend/apps/web && bun run test:unit src/lib/features/knowledge/crawlOutcomePresentation.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts --run"
+      - "cd frontend/apps/web && bun run test:unit src/lib/features/admin/crawlerWatchdogInterventions.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts --run"
       - "cd frontend/apps/web && bun run check"
       - "cd frontend/apps/web && bun run lint"
       - "cd frontend && bun run --filter @intric/intric-js lint"
-      - "rg -n \"outcome\\.samples|CrawlOutcomePublic.*samples|samples.*CrawlOutcomePublic\" frontend backend/src backend/tests || true"
-      - "git diff --check -- <intended T149 files>"
-    note: "T149 passed red-first Scrapy too-large stats tests, typed diagnostics/domain/terminal/repository tests, scoped Ruff, scoped strict Pyright, Alembic head check, OpenAPI freshness, i18n compile, targeted frontend presentation/generated-type tests, Svelte check, web lint, intric-js lint, removed-outcome-samples grep, scoped whitespace check, and a green Claude implementation gate. Svelte check still reports one existing unrelated warning in api-keys/ExtendExpirationDialog.svelte."
+      - "git diff --check -- <intended T150 files>"
+    note: "T150 passed red-first tenant admin watchdog-intervention integration tests, sysadmin watchdog-status regression tests, scoped Ruff, scoped strict Pyright, OpenAPI freshness, i18n compile, targeted frontend helper/page-load/generated-type tests, Svelte check, web lint, intric-js lint, scoped whitespace check, and shadcn MCP checklist review. Svelte check still reports one existing unrelated warning in api-keys/ExtendExpirationDialog.svelte."

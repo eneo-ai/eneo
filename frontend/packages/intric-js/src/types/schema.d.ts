@@ -2428,6 +2428,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/crawler/watchdog-interventions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get recently watchdog-terminated crawler runs for the current tenant */
+    get: operations["get_current_tenant_crawler_watchdog_interventions_api_v1_admin_crawler_watchdog_interventions_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/crawler/scheduled": {
     parameters: {
       query?: never;
@@ -9906,7 +9923,10 @@ export interface components {
       /** Files Too Large Skipped */
       files_too_large_skipped: number | null;
     };
-    /** CrawlerRecentFailuresResponse */
+    /**
+     * CrawlerRecentFailuresResponse
+     * @description Canonical bounded terminal outcome feed for crawler admin pages.
+     */
     CrawlerRecentFailuresResponse: {
       /** Items */
       items: components["schemas"]["CrawlerRecentFailureItem"][];
@@ -26238,6 +26258,39 @@ export interface operations {
     };
   };
   get_current_tenant_crawler_recent_failures_api_v1_admin_crawler_recent_failures_get: {
+    parameters: {
+      query?: {
+        days?: number;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerRecentFailuresResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_current_tenant_crawler_watchdog_interventions_api_v1_admin_crawler_watchdog_interventions_get: {
     parameters: {
       query?: {
         days?: number;

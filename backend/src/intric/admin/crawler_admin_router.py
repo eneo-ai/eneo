@@ -123,6 +123,34 @@ async def get_current_tenant_crawler_recent_failures(
 
 
 @router.get(
+    "/watchdog-interventions",
+    response_model=CrawlerRecentFailuresResponse,
+    summary="Get recently watchdog-terminated crawler runs for the current tenant",
+)
+async def get_current_tenant_crawler_watchdog_interventions(
+    current_user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    days: Annotated[int, Query(ge=1, le=30)] = 7,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> CrawlerRecentFailuresResponse:
+    until = datetime.now(timezone.utc)
+    since = until - timedelta(days=days)
+
+    async with session.begin():
+        repo = CrawlRunRepository(session=session)
+        interventions = await repo.watchdog_interventions_for_tenant(
+            since=since,
+            until=until,
+            days=days,
+            limit=limit,
+            offset=offset,
+            tenant_id=current_user.tenant_id,
+        )
+    return CrawlerRecentFailuresResponse.from_domain(interventions)
+
+
+@router.get(
     "/scheduled",
     response_model=CrawlerScheduledAggregateResponse,
     summary="Get scheduled crawler aggregate for the current tenant",

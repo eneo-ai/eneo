@@ -589,7 +589,7 @@ async def get_crawler_watchdog_status(
     session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = CrawlRunRepository(session=session)
-        interventions = await repo.watchdog_interventions(
+        interventions = await repo.watchdog_interventions_for_sysadmin(
             since=since,
             until=until,
             days=days,

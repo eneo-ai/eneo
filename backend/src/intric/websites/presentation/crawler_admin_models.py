@@ -212,6 +212,8 @@ class CrawlerRecentFailureItem(BaseModel):
 
 
 class CrawlerRecentFailuresResponse(BaseModel):
+    """Canonical bounded outcome-filtered terminal feed for crawler admin pages."""
+
     items: list[CrawlerRecentFailureItem]
     total: int = Field(ge=0)
     limit: int = Field(ge=1, le=200)

@@ -61,6 +61,12 @@
     type CrawlerRecentFailuresResponse
   } from "$lib/features/admin/crawlerRecentFailures";
   import {
+    getCrawlerWatchdogInterventionOutcomeLabel,
+    getCrawlerWatchdogInterventionResultLabels,
+    getCrawlerWatchdogInterventionWebsiteLabel,
+    type CrawlerWatchdogInterventionsResponse
+  } from "$lib/features/admin/crawlerWatchdogInterventions";
+  import {
     formatCrawlerScheduledCount,
     formatCrawlerScheduledIndexedSize,
     getCrawlerScheduledAggregateTotalLabel,
@@ -97,6 +103,9 @@
       crawlerRecentFailuresWindowDays: number;
       crawlerRecentFailures: CrawlerRecentFailuresResponse | null;
       crawlerRecentFailuresLoadFailed: boolean;
+      crawlerWatchdogInterventionsWindowDays: number;
+      crawlerWatchdogInterventions: CrawlerWatchdogInterventionsResponse | null;
+      crawlerWatchdogInterventionsLoadFailed: boolean;
       crawlerScheduledAggregate: CrawlerScheduledAggregateResponse | null;
       crawlerScheduledAggregateLoadFailed: boolean;
       crawlerWebsiteProcessingWindowDays: number;
@@ -778,6 +787,101 @@
                             {m.crawler_website_processing_no_failures()}
                           </span>
                         {/if}
+                      </Table.Cell>
+                    </Table.Row>
+                  {/each}
+                </Table.Body>
+              </Table.Root>
+            </div>
+          {/if}
+        </Card.Content>
+      </Card.Root>
+
+      <Card.Root class="mb-14" aria-labelledby="crawler-watchdog-interventions-title">
+        <Card.Header>
+          <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+            <div class="flex min-w-0 flex-col gap-1">
+              <h2
+                id="crawler-watchdog-interventions-title"
+                class="text-base leading-snug font-semibold"
+              >
+                {m.crawler_watchdog_interventions_title()}
+              </h2>
+              <Card.Description>
+                {m.crawler_watchdog_interventions_description({
+                  days: data.crawlerWatchdogInterventionsWindowDays
+                })}
+              </Card.Description>
+            </div>
+            {#if data.crawlerWatchdogInterventions}
+              <Badge variant="outline" class="shrink-0 tabular-nums">
+                {m.crawler_watchdog_interventions_count({
+                  shown: data.crawlerWatchdogInterventions.items.length,
+                  total: data.crawlerWatchdogInterventions.total
+                })}
+              </Badge>
+            {/if}
+          </div>
+        </Card.Header>
+        <Card.Content class="pt-0">
+          {#if data.crawlerWatchdogInterventionsLoadFailed}
+            <Alert.Root variant="destructive">
+              <TriangleAlert aria-hidden="true" />
+              <Alert.Description>{m.crawler_watchdog_interventions_load_error()}</Alert.Description>
+            </Alert.Root>
+          {:else if !data.crawlerWatchdogInterventions || data.crawlerWatchdogInterventions.items.length === 0}
+            <p class="text-muted-foreground text-sm">
+              {m.crawler_watchdog_interventions_empty({
+                days: data.crawlerWatchdogInterventionsWindowDays
+              })}
+            </p>
+          {:else}
+            <div class="overflow-x-auto">
+              <Table.Root class="min-w-[56rem]">
+                <Table.Caption class="sr-only">
+                  {m.crawler_watchdog_interventions_table_caption()}
+                </Table.Caption>
+                <Table.Header>
+                  <Table.Row>
+                    <Table.Head>{m.crawler_watchdog_interventions_column_website()}</Table.Head>
+                    <Table.Head>{m.crawler_watchdog_interventions_column_outcome()}</Table.Head>
+                    <Table.Head>{m.crawler_watchdog_interventions_column_activity()}</Table.Head>
+                    <Table.Head class="text-right">
+                      {m.crawler_watchdog_interventions_column_finished()}
+                    </Table.Head>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {#each data.crawlerWatchdogInterventions.items as intervention (intervention.crawl_run_id)}
+                    <Table.Row>
+                      <Table.Cell class="max-w-64">
+                        <span
+                          class="block truncate font-medium"
+                          title={getCrawlerWatchdogInterventionWebsiteLabel(intervention)}
+                        >
+                          {getCrawlerWatchdogInterventionWebsiteLabel(intervention)}
+                        </span>
+                      </Table.Cell>
+                      <Table.Cell class="max-w-72 whitespace-normal">
+                        <span class="text-sm">
+                          {getCrawlerWatchdogInterventionOutcomeLabel(intervention)}
+                        </span>
+                      </Table.Cell>
+                      <Table.Cell class="whitespace-normal">
+                        <div class="flex flex-wrap gap-1.5">
+                          {#each getCrawlerWatchdogInterventionResultLabels(intervention) as label (label.label)}
+                            <Badge
+                              variant="outline"
+                              class={resultBadgeClass(label.color)}
+                              title={label.tooltip}
+                            >
+                              {label.label}
+                            </Badge>
+                          {/each}
+                        </div>
+                      </Table.Cell>
+                      <Table.Cell class="text-muted-foreground text-right text-xs tabular-nums">
+                        {formatDateTime(intervention.finished_at)}
                       </Table.Cell>
                     </Table.Row>
                   {/each}

@@ -1,6 +1,7 @@
 import { CRAWLER_ACTIVE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerActiveInventory";
 import { CRAWLER_FAILURE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerFailureInventory";
 import { CRAWLER_RECENT_FAILURES_DEFAULTS } from "$lib/features/admin/crawlerRecentFailures";
+import { CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS } from "$lib/features/admin/crawlerWatchdogInterventions";
 import { CRAWLER_WEBSITE_PROCESSING_DEFAULTS } from "$lib/features/admin/crawlerWebsiteProcessing";
 
 export const load = async (event) => {
@@ -9,6 +10,7 @@ export const load = async (event) => {
   event.depends("admin:crawler-active-inventory");
   event.depends("admin:crawler-failure-inventory");
   event.depends("admin:crawler-recent-failures");
+  event.depends("admin:crawler-watchdog-interventions");
   event.depends("admin:crawler-scheduled");
   event.depends("admin:crawler-website-processing");
 
@@ -17,6 +19,7 @@ export const load = async (event) => {
     activeInventoryResult,
     failureInventoryResult,
     recentFailuresResult,
+    watchdogInterventionsResult,
     scheduledAggregateResult,
     websiteProcessingResult
   ] = await Promise.all([
@@ -32,6 +35,13 @@ export const load = async (event) => {
     intric.crawlerAdmin
       .recentFailures(CRAWLER_RECENT_FAILURES_DEFAULTS)
       .then((crawlerRecentFailures) => ({ ok: true as const, crawlerRecentFailures }))
+      .catch(() => ({ ok: false as const })),
+    intric.crawlerAdmin
+      .watchdogInterventions(CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS)
+      .then((crawlerWatchdogInterventions) => ({
+        ok: true as const,
+        crawlerWatchdogInterventions
+      }))
       .catch(() => ({ ok: false as const })),
     intric.crawlerAdmin
       .scheduledAggregate()
@@ -58,6 +68,11 @@ export const load = async (event) => {
       ? recentFailuresResult.crawlerRecentFailures
       : null,
     crawlerRecentFailuresLoadFailed: !recentFailuresResult.ok,
+    crawlerWatchdogInterventionsWindowDays: CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS.days,
+    crawlerWatchdogInterventions: watchdogInterventionsResult.ok
+      ? watchdogInterventionsResult.crawlerWatchdogInterventions
+      : null,
+    crawlerWatchdogInterventionsLoadFailed: !watchdogInterventionsResult.ok,
     crawlerScheduledAggregate: scheduledAggregateResult.ok
       ? scheduledAggregateResult.crawlerScheduledAggregate
       : null,
