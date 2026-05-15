@@ -9,6 +9,7 @@ This eliminates retry storms for manual crawls while maintaining low latency
 for normal operations when capacity is available.
 """
 
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -17,7 +18,13 @@ import redis.asyncio as aioredis
 from intric.jobs.job_manager import job_manager
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
+from intric.main.models import Status
+from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.websites.domain.crawl_run import CrawlRun
+from intric.websites.domain.crawl_terminal import (
+    TerminalEvent,
+    crawl_queue_enqueue_failure_message,
+)
 from intric.worker.feeder.queues import (
     CrawlPendingJobData,
     PendingQueue,
@@ -202,28 +209,34 @@ class CrawlService:
                 },
             )
         except PendingQueueAddError as exc:
+            failure_message = crawl_queue_enqueue_failure_message(exc)
             logger.error(
-                "Failed to add to pending queue",
+                failure_message,
                 extra={
                     "tenant_id": str(tenant_id),
                     "job_id": str(job_id),
                     "error": str(exc),
                 },
             )
-            # Rollback to prevent a QUEUED job that was never written to Redis.
             try:
-                await self.task_service.job_service.fail_job(
-                    job_id, error_message=f"Failed to queue: {exc}"
+                await self.repo.commit_terminal(
+                    TerminalEvent(
+                        crawl_run_id=run_id,
+                        job_id=job_id,
+                        job_status=Status.FAILED,
+                        outcome_code=CrawlOutcomeCode.CRAWL_QUEUE_ENQUEUE_FAILED,
+                        finished_at=datetime.now(timezone.utc),
+                        result_location=failure_message,
+                    )
                 )
                 logger.info(
-                    "Marked orphaned job as FAILED after pending queue write failure",
+                    "Committed crawl terminal failure after pending queue write failure",
                     extra={"job_id": str(job_id)},
                 )
-            except Exception as fail_exc:
-                # Best effort - orphan cleanup will catch it eventually
+            except Exception as terminal_exc:
                 logger.warning(
-                    "Could not fail orphaned job",
-                    extra={"job_id": str(job_id), "error": str(fail_exc)},
+                    "Terminal commit after pending queue failure failed",
+                    extra={"job_id": str(job_id), "error": str(terminal_exc)},
                 )
             raise
 

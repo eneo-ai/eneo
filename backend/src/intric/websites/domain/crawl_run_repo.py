@@ -20,6 +20,11 @@ from intric.websites.domain.crawl_outcome import (
     report_legacy_failure_summary_key_dropped,
 )
 from intric.websites.domain.crawl_run import CrawlRun
+from intric.websites.domain.crawl_terminal import (
+    TerminalCommitResult,
+    TerminalEvent,
+    commit_terminal,
+)
 from intric.websites.domain.crawler_active_inventory import (
     CrawlerActiveInventory,
     CrawlerActiveInventoryItem,
@@ -131,6 +136,10 @@ class CrawlRunRepository:
         if record is None:
             raise RuntimeError("Update of crawl_run did not return a record")
         return CrawlRun.to_domain(record=record)
+
+    async def commit_terminal(self, event: TerminalEvent) -> TerminalCommitResult:
+        """Multi-table terminal write delegated to crawl_terminal; this repo owns the session."""
+        return await commit_terminal(self.session, event)
 
     async def get_crawl_runs(self, website_id: UUID) -> list[CrawlRun]:
         stmt = (

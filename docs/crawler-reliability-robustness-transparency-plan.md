@@ -72,6 +72,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Pending queue ownership tranche: make `PendingQueue.add` the typed canonical writer, remove raw queue key/serialization/rpush ownership from `CrawlService`, and preserve scheduled/manual rollback behavior with tests.
 - [x] Tenant limiter Lua ownership tranche: route `TenantConcurrencyLimiter` through `LuaScripts.acquire_slot/release_slot`, preserving circuit-breaker and fallback semantics while removing inline Redis slot eval ownership.
 - [x] Terminal ownership relocation tranche: move `TerminalEvent` / `commit_terminal(...)` to a website-owned crawl terminal persistence boundary and delete the worker-local implementation file.
+- [x] Manual pending-queue terminal parity tranche: route `CrawlService` pending queue add failures through `TerminalEvent(CRAWL_QUEUE_ENQUEUE_FAILED)`, share the bounded enqueue-failure message helper with scheduled crawls, and keep the original `PendingQueueAddError` authoritative when terminal commit fails.
 
 ## Non-Negotiable Principles
 
@@ -414,7 +415,7 @@ Work:
 - [x] Extract the website-crawl audit emission path into a typed post-commit reactor boundary.
 - [x] Extract the website-crawl circuit-breaker path into a typed post-commit reactor boundary.
 - [x] Add remaining post-commit reactors for website timestamps and slot release.
-- [ ] Replace direct terminal `sa.update(CrawlRuns)` and `sa.update(Jobs)` call sites in one vertical path at a time. Complete so far: worker crawl-task terminal branches, watchdog CrawlRun terminal branches, and terminal writer ownership relocation. Remaining known escape: manual `CrawlService` enqueue failure parity after the terminal owner is website-owned.
+- [ ] Replace direct terminal `sa.update(CrawlRuns)` and `sa.update(Jobs)` call sites in one vertical path at a time. Complete so far: worker crawl-task terminal branches, watchdog CrawlRun terminal branches, terminal writer ownership relocation, and manual pending-queue failure parity. Remaining known escape: manual `CrawlService` direct-ARQ/pre-acquired rollback failure parity, which needs a separate ordering-sensitive slice because flag deletion and slot release currently happen before terminal failure commit.
 - [x] Remove all direct `setattr(task_manager, "_job_already_handled", True)` call sites.
 - [x] Replace TaskManager private-flag coordination with an explicit public terminal-commit acknowledgement or remove TaskManager from crawler terminal ownership.
 

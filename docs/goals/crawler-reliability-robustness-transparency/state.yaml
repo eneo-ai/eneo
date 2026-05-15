@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T101
+active_task: T103
 
 tasks:
   - id: T001
@@ -4897,7 +4897,7 @@ tasks:
   - id: T101
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Choose the next manual CrawlService terminal parity slice now that terminal ownership is website-owned."
     inputs:
@@ -4919,6 +4919,103 @@ tasks:
       - "Decision: pending-queue failure first, direct-ARQ enqueue failure first, import cleanup first, or a narrower Scout."
       - "Allowed files, red-test plan, verification commands, stop_if conditions, and non-goals for the next Worker."
       - "Assessment of session/UoW ownership, rollback ordering, and cleanup/slot-release ordering."
+    receipt:
+      result: done
+      summary: "Chose manual pending-queue failure parity as the next worker slice. Claude green-lit the revised plan after moving the shared message helper to crawl_terminal.py, documenting CrawlRunRepository.commit_terminal as a deliberate multi-table session delegate, and adding a red test for terminal-commit failure preserving the original PendingQueueAddError."
+      decision: "Activate T102 to route CrawlService pending queue add failure through TerminalEvent(CRAWL_QUEUE_ENQUEUE_FAILED), while leaving the direct ARQ/pre-acquired rollback path for a separate ordering-sensitive slice."
+      artifacts:
+        - ".codex/artifacts/claude-peer-loop-t101-choose-manual-crawlservice-terminal-parity-slice-20260515T073718Z.md"
+        - ".codex/artifacts/claude-peer-loop-t101-choose-manual-crawlservice-terminal-parity-slice-revised-20260515T074024Z.md"
+      spawned_tasks:
+        - T102
+  - id: T102
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Route manual CrawlService pending queue add failures through the canonical TerminalEvent commit path."
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawl_service.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/src/intric/websites/domain/crawl_terminal.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/websites/test_crawl_service_pending_queue_ownership.py"
+      - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawl_service.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_terminal.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawl_service.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_terminal.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_service.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_terminal.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && bash -lc 'test $(rg -n \"job_service\\.fail_job\" src/intric/websites/domain/crawl_service.py | wc -l | tr -d \" \") -eq 1'"
+      - "cd backend && bash -lc '! awk \"/_add_to_pending_queue/,/async def _enqueue_to_arq/\" src/intric/websites/domain/crawl_service.py | rg \"job_service\\.fail_job\"'"
+      - "cd backend && rg \"crawl_queue_enqueue_failure_message\" src/intric/websites/domain/crawl_terminal.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t102-manual-pending-queue-terminal-parity --phase commit-gate --iteration 1 --require-green --required-min-score 8 ..."
+    stop_if:
+      - "Need to change direct ARQ/pre-acquired flag failure behavior."
+      - "Need to import worker.* from websites.domain."
+      - "Need to add a protocol, factory, UoW wrapper, Any, cast, or type ignore."
+      - "Need to reach through repo.session from CrawlService."
+      - "Need schema migration or frontend changes."
+      - "Find a second consumer of crawl_queue_enqueue_failure_message not listed in allowed files."
+      - "Cannot preserve the existing 512-character message cap."
+      - "CrawlRunRepository.commit_terminal needs behavior beyond delegating to crawl_terminal.commit_terminal."
+    receipt:
+      result: done
+      summary: "Routed manual CrawlService pending queue add failures through the canonical website-owned terminal commit path. The branch now builds a typed TerminalEvent(CRAWL_QUEUE_ENQUEUE_FAILED), delegates the multi-table write through CrawlRunRepository.commit_terminal, shares the bounded enqueue-failure message helper with scheduled crawls, and preserves the original PendingQueueAddError when terminal commit fails."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawl_service.py"
+        - "backend/src/intric/websites/domain/crawl_run_repo.py"
+        - "backend/src/intric/websites/domain/crawl_terminal.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/websites/test_crawl_service_pending_queue_ownership.py"
+        - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      red_verification:
+        - "Updated test_at_capacity_queue_failure_fails_precreated_job to require a TerminalEvent and no job_service.fail_job; it failed against the pre-change implementation because CrawlService still called job_service.fail_job."
+        - "Added test_at_capacity_queue_failure_preserves_original_error_when_terminal_commit_fails to prove terminal-commit failure logs a warning while the original PendingQueueAddError remains authoritative."
+      verification:
+        - "cd backend && uv run pytest tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q -> 15 passed"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawl_service.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_terminal.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -> passed"
+        - "cd backend && uv run ruff format --check src/intric/websites/domain/crawl_service.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_terminal.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_service.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_terminal.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -> 0 errors"
+        - "cd backend && bash -lc 'test $(rg -n \"job_service\\.fail_job\" src/intric/websites/domain/crawl_service.py | wc -l | tr -d \" \") -eq 1 && ! awk \"/_add_to_pending_queue/,/async def _enqueue_to_arq/\" src/intric/websites/domain/crawl_service.py | rg \"job_service\\.fail_job\"' -> passed"
+        - "cd backend && rg \"crawl_queue_enqueue_failure_message\" src/intric/websites/domain/crawl_terminal.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -> passed"
+        - "cd backend && ! rg \"_describe_redis_failure\" src/intric/worker -> passed"
+        - "cd backend && ! rg \"from intric\\.worker\" src/intric/websites/domain/crawl_terminal.py -> passed"
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t102-manual-pending-queue-terminal-parity-implementation-review-20260515T074944Z.md"
+      follow_up_candidates:
+        - "Migrate the remaining direct-ARQ/pre-acquired flag enqueue failure path in CrawlService to the canonical terminal commit path while preserving flag deletion and slot-release ordering."
+        - "Consider adding a CrawlRunRepository.commit_terminal_batch delegate only when a non-worker caller needs batch terminal commits."
+      spawned_tasks:
+        - T103
+  - id: T103
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Choose the next ordering-safe slice after manual pending-queue terminal parity, with special attention to the remaining CrawlService direct-ARQ/pre-acquired rollback failure path and the broader unchecked roadmap items."
+    inputs:
+      - "T102 receipt"
+      - "backend/src/intric/websites/domain/crawl_service.py"
+      - "backend/src/intric/websites/domain/crawl_terminal.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+    constraints:
+      - "Read-only except board/roadmap updates."
+      - "Do not implement during the Judge task."
+      - "Preserve unrelated .devcontainer dirt."
+      - "Do not broaden into WorkerAdapter/admin write controls unless the remaining terminal ownership audit proves CrawlService direct-ARQ parity is no longer the highest-ROI blocker."
+      - "Preserve flag deletion and slot-release ordering in any proposed direct-ARQ failure slice."
+    expected_output:
+      - "Decision: direct-ARQ/pre-acquired rollback parity, completion audit, WorkerAdapter scoping, or another narrower Scout."
+      - "Allowed files, red-test plan, verification commands, stop_if conditions, and non-goals for the next Worker."
+      - "Evidence for whether the plan can be marked complete after the next slice or still has explicit unfinished requirements."
     receipt: null
 
 checks:

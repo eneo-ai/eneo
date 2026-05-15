@@ -73,6 +73,14 @@ class TerminalCommitResult:
     crawl_run_rows_updated: int
 
 
+def crawl_queue_enqueue_failure_message(exc: BaseException) -> str:
+    """Bound text to the legacy job/result storage limit before terminal commit."""
+    message = str(exc).strip()
+    if not message:
+        message = type(exc).__name__
+    return f"Failed to add crawl to pending queue: {message}"[:512]
+
+
 async def commit_terminal(
     session: AsyncSession,
     event: TerminalEvent,

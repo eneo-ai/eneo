@@ -11,8 +11,14 @@ import redis.asyncio as aioredis
 
 from intric.jobs.job_models import JobInDb, Task
 from intric.main.models import Status
+from intric.websites.domain import crawl_service as crawl_service_module
+from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.websites.domain.crawl_run import CrawlRun, CrawlType
 from intric.websites.domain.crawl_service import CrawlService
+from intric.websites.domain.crawl_terminal import (
+    TerminalCommitResult,
+    TerminalEvent,
+)
 from intric.websites.domain.website import UpdateInterval, WebsiteSparse
 from intric.worker.feeder.queues import (
     CrawlPendingJobData,
@@ -36,11 +42,23 @@ class AtCapacityRedis(aioredis.Redis):
 
 
 class CrawlRunRepositoryStub:
+    def __init__(self) -> None:
+        self.terminal_events: list[TerminalEvent] = []
+        self.terminal_error: Exception | None = None
+
     async def add(self, crawl_run: CrawlRun) -> CrawlRun:
+        if crawl_run.id is None:
+            crawl_run.id = uuid4()
         return crawl_run
 
     async def update(self, crawl_run: CrawlRun) -> CrawlRun:
         return crawl_run
+
+    async def commit_terminal(self, event: TerminalEvent) -> TerminalCommitResult:
+        if self.terminal_error is not None:
+            raise self.terminal_error
+        self.terminal_events.append(event)
+        return TerminalCommitResult(job_rows_updated=1, crawl_run_rows_updated=1)
 
 
 class JobServiceStub:
@@ -88,9 +106,10 @@ def _make_service(
     *,
     redis_client: AtCapacityRedis,
     task_service: TaskServiceStub,
+    repo: CrawlRunRepositoryStub | None = None,
 ) -> CrawlService:
     return CrawlService(
-        repo=cast("CrawlRunRepository", CrawlRunRepositoryStub()),
+        repo=cast("CrawlRunRepository", repo or CrawlRunRepositoryStub()),
         task_service=cast("TaskService", task_service),
         redis_client=redis_client,
     )
@@ -173,10 +192,12 @@ async def test_at_capacity_queue_failure_fails_precreated_job(
     tenant_id = uuid4()
     job_id = uuid4()
     redis_error = RuntimeError("redis unavailable")
+    repo = CrawlRunRepositoryStub()
     task_service = TaskServiceStub(job_id=job_id, user_id=user_id)
     service = _make_service(
         redis_client=AtCapacityRedis(),
         task_service=task_service,
+        repo=repo,
     )
     website = _make_website(user_id=user_id, tenant_id=tenant_id)
 
@@ -193,8 +214,57 @@ async def test_at_capacity_queue_failure_fails_precreated_job(
     with pytest.raises(PendingQueueAddError):
         await service.crawl(website)
 
-    assert task_service.job_service.failed_job_ids == [job_id]
-    assert "redis unavailable" in task_service.job_service.error_messages[0]
+    assert task_service.job_service.failed_job_ids == []
+    assert len(repo.terminal_events) == 1
+    terminal_event = repo.terminal_events[0]
+    assert terminal_event.job_id == job_id
+    assert terminal_event.crawl_run_id == task_service.queued_run_id
+    assert terminal_event.job_status == Status.FAILED
+    assert terminal_event.outcome_code == CrawlOutcomeCode.CRAWL_QUEUE_ENQUEUE_FAILED
+    assert terminal_event.result_location is not None
+    assert "redis unavailable" in terminal_event.result_location
+
+
+@pytest.mark.asyncio
+async def test_at_capacity_queue_failure_preserves_original_error_when_terminal_commit_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    tenant_id = uuid4()
+    job_id = uuid4()
+    redis_error = RuntimeError("redis unavailable")
+    repo = CrawlRunRepositoryStub()
+    repo.terminal_error = RuntimeError("session lost")
+    task_service = TaskServiceStub(job_id=job_id, user_id=user_id)
+    service = _make_service(
+        redis_client=AtCapacityRedis(),
+        task_service=task_service,
+        repo=repo,
+    )
+    website = _make_website(user_id=user_id, tenant_id=tenant_id)
+    warnings: list[str] = []
+
+    def record_warning(message: str, **kwargs: object) -> None:
+        del kwargs
+        warnings.append(message)
+
+    async def fail_add(
+        self: PendingQueue,
+        tenant_id: UUID,
+        job_data: CrawlPendingJobData,
+    ) -> None:
+        del self, job_data
+        raise PendingQueueAddError(tenant_id=tenant_id, cause=redis_error)
+
+    monkeypatch.setattr(PendingQueue, "add", fail_add)
+    monkeypatch.setattr(crawl_service_module.logger, "warning", record_warning)
+
+    with pytest.raises(PendingQueueAddError):
+        await service.crawl(website)
+
+    assert task_service.job_service.failed_job_ids == []
+    assert repo.terminal_events == []
+    assert "Terminal commit after pending queue failure failed" in warnings
 
 
 def test_callers_do_not_own_pending_queue_key_or_serialization() -> None:
@@ -215,3 +285,9 @@ def test_callers_do_not_own_pending_queue_key_or_serialization() -> None:
         source = source_path.read_text()
         for pattern in forbidden_patterns:
             assert pattern.search(source) is None
+
+    crawl_service_source = source_paths[0].read_text()
+    pending_queue_region = crawl_service_source.split(
+        "async def _add_to_pending_queue", maxsplit=1
+    )[1].split("async def _enqueue_to_arq", maxsplit=1)[0]
+    assert "job_service.fail_job" not in pending_queue_region
