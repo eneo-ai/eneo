@@ -134,6 +134,69 @@ class TestPendingQueueRemove:
         await queue.remove(uuid4(), b"data")
 
 
+class TestPendingQueueAdd:
+    """Tests for PendingQueue.add method."""
+
+    @pytest.mark.asyncio
+    async def test_pushes_deterministic_payload_bytes(self):
+        """Should serialize job data consistently for exact queue matching."""
+        from intric.worker.feeder.queues import CrawlPendingJobData, PendingQueue
+
+        tenant_id = uuid4()
+        job_data: CrawlPendingJobData = {
+            "job_id": str(uuid4()),
+            "user_id": str(uuid4()),
+            "website_id": str(uuid4()),
+            "run_id": str(uuid4()),
+            "url": "https://example.com",
+            "download_files": True,
+            "crawl_type": "crawl",
+        }
+
+        redis_mock = MagicMock()
+        redis_mock.rpush = AsyncMock()
+
+        queue = PendingQueue(redis_mock)
+        await queue.add(tenant_id, job_data)
+
+        redis_mock.rpush.assert_called_once_with(
+            f"tenant:{tenant_id}:crawl_pending",
+            json.dumps(job_data, default=str, sort_keys=True),
+        )
+
+    @pytest.mark.asyncio
+    async def test_raises_typed_error_on_rpush_failure(self):
+        """Should preserve the original Redis failure for caller rollback policy."""
+        from intric.worker.feeder.queues import (
+            CrawlPendingJobData,
+            PendingQueue,
+            PendingQueueAddError,
+        )
+
+        tenant_id = uuid4()
+        job_data: CrawlPendingJobData = {
+            "job_id": str(uuid4()),
+            "user_id": str(uuid4()),
+            "website_id": str(uuid4()),
+            "run_id": str(uuid4()),
+            "url": "https://example.com",
+            "download_files": False,
+            "crawl_type": "crawl",
+        }
+        redis_error = RuntimeError("redis unavailable")
+
+        redis_mock = MagicMock()
+        redis_mock.rpush = AsyncMock(side_effect=redis_error)
+
+        queue = PendingQueue(redis_mock)
+        with pytest.raises(PendingQueueAddError) as exc_info:
+            await queue.add(tenant_id, job_data)
+
+        assert exc_info.value.tenant_id == tenant_id
+        assert exc_info.value.__cause__ is redis_error
+        assert "redis unavailable" in str(exc_info.value)
+
+
 class TestJobEnqueuerEnqueue:
     """Tests for JobEnqueuer.enqueue method."""
 

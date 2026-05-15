@@ -9,8 +9,7 @@ This eliminates retry storms for manual crawls while maintaining low latency
 for normal operations when capacity is available.
 """
 
-import json
-from typing import TYPE_CHECKING, Awaitable, cast
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import redis.asyncio as aioredis
@@ -19,6 +18,11 @@ from intric.jobs.job_manager import job_manager
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.websites.domain.crawl_run import CrawlRun
+from intric.worker.feeder.queues import (
+    CrawlPendingJobData,
+    PendingQueue,
+    PendingQueueAddError,
+)
 from intric.worker.redis.lua_scripts import LuaScripts
 
 if TYPE_CHECKING:
@@ -176,9 +180,7 @@ class CrawlService:
 
         Same format as scheduler uses, so feeder can process uniformly.
         """
-        key = f"tenant:{tenant_id}:crawl_pending"
-
-        job_data = {
+        job_data: CrawlPendingJobData = {
             "job_id": str(job_id),
             "user_id": str(user_id),
             "website_id": str(website.id),
@@ -189,8 +191,7 @@ class CrawlService:
         }
 
         try:
-            job_json = json.dumps(job_data, default=str, sort_keys=True)
-            await cast(Awaitable[int], self.redis_client.rpush(key, job_json))
+            await PendingQueue(self.redis_client).add(tenant_id, job_data)
             logger.info(
                 "Added crawl to pending queue (at capacity)",
                 extra={
@@ -200,7 +201,7 @@ class CrawlService:
                     "url": website.url,
                 },
             )
-        except Exception as exc:
+        except PendingQueueAddError as exc:
             logger.error(
                 "Failed to add to pending queue",
                 extra={
@@ -209,16 +210,13 @@ class CrawlService:
                     "error": str(exc),
                 },
             )
-            # CRITICAL: Fail the job immediately to prevent orphaned DB records
-            # Why: If rpush fails, job stays QUEUED in DB but never enters Redis.
-            # Without this, job becomes zombie (blocks recrawl but never runs).
-            # By marking FAILED, user can immediately retry.
+            # Rollback to prevent a QUEUED job that was never written to Redis.
             try:
                 await self.task_service.job_service.fail_job(
                     job_id, error_message=f"Failed to queue: {exc}"
                 )
                 logger.info(
-                    "Marked orphaned job as FAILED after rpush failure",
+                    "Marked orphaned job as FAILED after pending queue write failure",
                     extra={"job_id": str(job_id)},
                 )
             except Exception as fail_exc:

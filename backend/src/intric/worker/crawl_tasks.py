@@ -62,7 +62,11 @@ from intric.worker.crawl.post_terminal_effects import (
 )
 from intric.worker.crawl_context import EmbeddingModelSpec
 from intric.worker.feeder.election import LeaderElection
-from intric.worker.feeder.queues import CrawlPendingJobData, PendingQueue
+from intric.worker.feeder.queues import (
+    CrawlPendingJobData,
+    PendingQueue,
+    PendingQueueAddError,
+)
 from intric.worker.task_manager import TaskManager
 
 logger = get_logger(__name__)
@@ -456,11 +460,10 @@ async def queue_website_crawls(container: Container):
                             # Step 5: Add to pending queue with orphaning protection.
                             try:
                                 pending_queue = PendingQueue(redis_client)
-                                if not await pending_queue.add(
+                                await pending_queue.add(
                                     tenant_id=user.tenant.id,
                                     job_data=job_data,
-                                ):
-                                    raise Exception("Failed to add to pending queue")
+                                )
 
                                 successful_crawls += 1
                                 logger.debug(
@@ -471,7 +474,7 @@ async def queue_website_crawls(container: Container):
                                         "run_id": str(crawl_run.id),
                                     },
                                 )
-                            except Exception as redis_exc:
+                            except PendingQueueAddError as redis_exc:
                                 failure_message = _crawl_queue_enqueue_failure_message(
                                     redis_exc
                                 )

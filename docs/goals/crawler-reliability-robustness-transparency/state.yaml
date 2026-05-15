@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T093
+active_task: T095
 
 tasks:
   - id: T001
@@ -4523,7 +4523,7 @@ tasks:
   - id: T093
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Choose the next bounded crawler reliability/maintainability slice after T092 using the current roadmap, T091 follow-up order, and Claude implementation notes."
     inputs:
@@ -4540,19 +4540,129 @@ tasks:
       - "Decision: next Worker task, Scout task, or completion-audit task."
       - "Allowed files, red-test plan, verification commands, stop_if conditions, and non-goals."
       - "Evidence that the chosen slice advances crawler reliability, robustness, transparency, or maintainability."
+    receipt:
+      result: done
+      summary: "Claude selected the pending-queue ownership slice, but required tightening PendingQueue.add from bool-swallowing to a typed exception contract before implementation."
+      decision: "Activate T094 to make PendingQueue.add the canonical raising writer for pending crawl jobs and route CrawlService/crawl_tasks through that contract."
+      evidence:
+        - ".codex/artifacts/claude-peer-loop-t093-choose-next-crawler-roadmap-slice-20260515T062321Z.md"
+        - "backend/src/intric/websites/domain/crawl_service.py"
+        - "backend/src/intric/worker/feeder/queues.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+      rationale:
+        - "PendingQueue already owns the key and deterministic serialization but currently hides rpush errors behind False."
+        - "A typed raising contract improves error handling for both manual CrawlService enqueue and scheduled crawl enqueue rollback."
+        - "LuaScripts eval typing and tenant_concurrency reuse remain valid follow-ups but do not delete the current duplicated pending-queue writer."
+      spawned_tasks:
+        - T094
+  - id: T094
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Make PendingQueue.add the canonical raising writer for pending crawl jobs and route CrawlService plus scheduled crawl enqueue through it without losing rollback/error behavior."
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawl_service.py"
+      - "backend/src/intric/worker/feeder/queues.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/websites/test_crawl_service_pending_queue_ownership.py"
+      - "backend/tests/unittests/worker/feeder/test_queues.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    red_test_plan:
+      - "PendingQueue.add raises a typed PendingQueueAddError with original exception context when rpush fails."
+      - "PendingQueue.add serializes CrawlPendingJobData deterministically as the canonical payload bytes."
+      - "CrawlService at-capacity path writes through PendingQueue-owned bytes and still fails the pre-created job if queue add fails."
+      - "Architecture invariant: CrawlService must not contain direct rpush, raw crawl_pending key formatting, or json.dumps queue serialization."
+      - "Scheduler path no longer contains a dead bool-return branch after PendingQueue.add raises."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/feeder/test_queues.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/websites/test_crawl_service_slot_ownership.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawl_service.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/feeder/test_queues.py"
+      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawl_service.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/feeder/test_queues.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_service.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/feeder/test_queues.py"
+      - "! rg -n \"\\.rpush\\(|tenant:.*crawl_pending|json\\.dumps\\(.*sort_keys=True|if not await pending_queue\\.add\" backend/src/intric/websites/domain/crawl_service.py backend/src/intric/worker/crawl_tasks.py"
+    stop_if:
+      - "Need to change feeder dequeue/remove semantics, JobEnqueuer duplicate semantics, ARQ enqueue behavior, or Redis queue key format."
+      - "Need to align CrawlService failure outcome to CRAWL_QUEUE_ENQUEUE_FAILED in this same slice."
+      - "Need a new generic helper/common/manager/processor module."
+      - "Need to stage unrelated .devcontainer changes."
+      - "Verification fails twice for the same reason."
+    non_goals:
+      - "Do not align CrawlService manual enqueue failure to CRAWL_QUEUE_ENQUEUE_FAILED yet; record it as a follow-up because scheduler and manual crawl still use different terminal-write paths."
+      - "No WorkerAdapter."
+      - "No LuaScripts eval typing cleanup."
+      - "No tenant_concurrency.py changes."
+      - "No watchdog, feeder scheduling, admin, frontend, lifecycle, or settings changes."
+    receipt:
+      result: done
+      summary: "Made PendingQueue.add the typed canonical writer for pending crawl jobs, removed CrawlService's direct pending queue key/serialization/rpush ownership, and deleted the scheduled crawl bool-return branch."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawl_service.py"
+        - "backend/src/intric/worker/feeder/queues.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/websites/test_crawl_service_pending_queue_ownership.py"
+        - "backend/tests/unittests/worker/feeder/test_queues.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/worker/feeder/test_queues.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/websites/test_crawl_service_slot_ownership.py -q -> 26 passed"
+        - "cd backend && uv run pytest tests/integration/test_crawl_feeder.py -q -> 19 passed, 18 existing warnings"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawl_service.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/feeder/test_queues.py -> passed"
+        - "cd backend && uv run ruff format --check src/intric/websites/domain/crawl_service.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/feeder/test_queues.py -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_service.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/feeder/test_queues.py -> 0 errors"
+        - "bash -lc '! rg -n ... backend/src/intric/websites/domain/crawl_service.py backend/src/intric/worker/crawl_tasks.py' -> no matches"
+      tdd:
+        red: "Pending queue tests initially failed because PendingQueueAddError did not exist and PendingQueue.add still returned False on rpush failure."
+        green: "Tests passed after adding PendingQueueAddError, changing PendingQueue.add to raise, routing CrawlService through PendingQueue.add, and removing the scheduler bool branch."
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t093-choose-next-crawler-roadmap-slice-20260515T062321Z.md"
+          - ".codex/artifacts/claude-peer-loop-t094-pending-queue-ownership-implementation-review-20260515T063327Z.md"
+      follow_up_candidates:
+        - "Align manual CrawlService pending-queue failure with CRAWL_QUEUE_ENQUEUE_FAILED through the terminal event path."
+        - "Consider narrowing PendingQueue.add's catch to Redis/network exceptions if the Redis client exposes stable exception types."
+        - "Centralize LuaScripts eval typing and tenant_concurrency reuse after queue ownership cleanup."
+      spawned_tasks:
+        - T095
+  - id: T095
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Choose the next bounded crawler reliability/maintainability slice after T094 with emphasis on closing typed failure parity or remaining Redis/Lua eval evasions."
+    inputs:
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - ".codex/artifacts/claude-peer-loop-t094-pending-queue-ownership-implementation-review-20260515T063327Z.md"
+      - "backend/src/intric/websites/domain/crawl_service.py"
+      - "backend/src/intric/worker/feeder/queues.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/redis/lua_scripts.py"
+      - "backend/src/intric/worker/tenant_concurrency.py"
+    constraints:
+      - "Prefer closing user-visible error/outcome parity if it can be done through existing terminal-event ownership without broad surgery."
+      - "Otherwise prefer remaining Redis/Lua ownership cleanup before WorkerAdapter."
+      - "Keep the next Worker narrow, behavior-tested, and reviewable."
+      - "Do not stage unrelated .devcontainer changes."
+    expected_output:
+      - "Decision: next Worker task, Scout task, or completion-audit task."
+      - "Allowed files, red-test plan, verification commands, stop_if conditions, and non-goals."
+      - "Evidence that the chosen slice advances crawler reliability, robustness, transparency, or maintainability."
     receipt: null
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T092
+    task: T094
     commands:
-      - "cd backend && uv run pytest tests/unittests/websites/test_crawl_service_slot_ownership.py -q"
-      - "cd backend && uv run pytest tests/unittests/worker/test_tenant_concurrency.py -q"
-      - "cd backend && uv run ruff check src/intric/websites/domain/crawl_service.py tests/unittests/websites/test_crawl_service_slot_ownership.py"
-      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawl_service.py tests/unittests/websites/test_crawl_service_slot_ownership.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_service.py tests/unittests/websites/test_crawl_service_slot_ownership.py"
-      - "bash -lc '! rg -n ... backend/src/intric/websites/domain/crawl_service.py'"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t092-slot-lua-ownership --phase commit-gate --iteration 3 --require-green --required-min-score 8 ..."
-    note: "T092 slot Lua ownership passed red/green behavior tests, adjacent tenant concurrency regression tests, ruff, format check, targeted strict Pyright, grep postconditions, and Claude green commit-gate."
+      - "cd backend && uv run pytest tests/unittests/worker/feeder/test_queues.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/websites/test_crawl_service_slot_ownership.py -q"
+      - "cd backend && uv run pytest tests/integration/test_crawl_feeder.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawl_service.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/feeder/test_queues.py"
+      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawl_service.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/feeder/test_queues.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_service.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/feeder/test_queues.py"
+      - "bash -lc '! rg -n ... backend/src/intric/websites/domain/crawl_service.py backend/src/intric/worker/crawl_tasks.py'"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t094-pending-queue-ownership --phase commit-gate --iteration 1 --require-green --required-min-score 8 ..."
+    note: "T094 pending-queue ownership passed red/green behavior tests, feeder integration smoke, ruff, format check, targeted strict Pyright, grep postconditions, and Claude green commit-gate."

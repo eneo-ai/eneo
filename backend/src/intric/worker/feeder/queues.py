@@ -31,6 +31,16 @@ class CrawlPendingJobData(TypedDict):
     crawl_type: str
 
 
+class PendingQueueAddError(RuntimeError):
+    """Raised when a pending crawl job cannot be written to Redis."""
+
+    def __init__(self, *, tenant_id: UUID, cause: Exception) -> None:
+        self.tenant_id = tenant_id
+        super().__init__(
+            f"Failed to add crawl to pending queue for tenant {tenant_id}: {cause}"
+        )
+
+
 class PendingQueue:
     """Manages the Redis pending crawl queue for a tenant.
 
@@ -122,7 +132,7 @@ class PendingQueue:
                 extra={"tenant_id": str(tenant_id), "error": str(exc)},
             )
 
-    async def add(self, tenant_id: UUID, job_data: CrawlPendingJobData) -> bool:
+    async def add(self, tenant_id: UUID, job_data: CrawlPendingJobData) -> None:
         """Add a crawl job to the pending queue for feeder processing.
 
         Appends to the right side of the list (FIFO queue). The job_data
@@ -134,8 +144,8 @@ class PendingQueue:
             tenant_id: Tenant identifier.
             job_data: Job parameters dict with serializable values.
 
-        Returns:
-            True if successfully added, False on error.
+        Raises:
+            PendingQueueAddError: If Redis rejects the write.
         """
         key = self._key(tenant_id)
         redis_client = cast(Any, self._redis)
@@ -153,17 +163,9 @@ class PendingQueue:
                     "url": job_data.get("url"),
                 },
             )
-            return True
 
         except Exception as exc:
-            logger.error(
-                "Failed to add to pending queue",
-                extra={
-                    "tenant_id": str(tenant_id),
-                    "error": str(exc),
-                },
-            )
-            return False
+            raise PendingQueueAddError(tenant_id=tenant_id, cause=exc) from exc
 
 
 class JobEnqueuer:
