@@ -117,6 +117,11 @@ type _AdminCrawlerActivePathExists = AssertTrue<
     ? true
     : false
 >;
+type _AdminCrawlerScheduledPathExists = AssertTrue<
+  paths["/api/v1/admin/crawler/scheduled"]["get"] extends operations["get_current_tenant_crawler_scheduled_aggregate_api_v1_admin_crawler_scheduled_get"]
+    ? true
+    : false
+>;
 type _AdminCrawlerRecentFailuresQueryHasNoTenantId = AssertTrue<
   "tenant_id" extends keyof NonNullable<
     operations["get_current_tenant_crawler_recent_failures_api_v1_admin_crawler_recent_failures_get"]["parameters"]["query"]
@@ -130,6 +135,13 @@ type _AdminCrawlerActiveQueryHasNoTenantId = AssertTrue<
   >
     ? false
     : true
+>;
+type _AdminCrawlerScheduledQueryIsEmpty = AssertTrue<
+  NonNullable<
+    operations["get_current_tenant_crawler_scheduled_aggregate_api_v1_admin_crawler_scheduled_get"]["parameters"]["query"]
+  > extends never
+    ? true
+    : false
 >;
 type _CrawlerWatchdogStatusPathExists = AssertTrue<
   paths["/api/v1/sysadmin/crawler/watchdog-status"]["get"] extends operations["get_crawler_watchdog_status_api_v1_sysadmin_crawler_watchdog_status_get"]

@@ -64,7 +64,6 @@ from intric.sysadmin.sysadmin_models import (
     CrawlerBaselineResponse,
     CrawlerFailureInventoryResponse,
     CrawlerRecentFailuresResponse,
-    CrawlerScheduledAggregateResponse,
     CrawlerWatchdogStatusResponse,
     CrawlerWebsiteProcessingAggregateResponse,
 )
@@ -79,6 +78,7 @@ from intric.websites.domain.crawl_run_repo import CrawlRunRepository
 from intric.websites.domain.website_admin_repo import WebsiteAdminRepository
 from intric.websites.presentation.crawler_admin_models import (
     CrawlerActiveInventoryResponse,
+    CrawlerScheduledAggregateResponse,
 )
 from intric.worker.redis.client import read_watchdog_status_snapshot
 from intric.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direct
@@ -644,7 +644,7 @@ async def get_crawler_scheduled_aggregate(
     session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = WebsiteAdminRepository(session=session)
-        aggregate = await repo.scheduled_aggregate(tenant_id=tenant_id)
+        aggregate = await repo.scheduled_aggregate_for_sysadmin(tenant_id=tenant_id)
     return CrawlerScheduledAggregateResponse.from_domain(aggregate)
 
 

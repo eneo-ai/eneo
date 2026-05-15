@@ -94,6 +94,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Tenant-scoped active crawler inventory endpoint tranche: expose active/running crawler inventory under `/api/v1/admin/crawler/active` with a tenant-required repository method, shared presentation owner, no tenant_id query parameter, and tests for tenant scope, orphan exclusion, bounds, and OpenAPI typing.
 - [x] Tenant admin active crawler UI tranche: consume `/api/v1/admin/crawler/active` in the admin crawler page so admins can see current queued/running crawler jobs without sysadmin endpoints.
 - [x] Post-T137 roadmap reconciliation tranche: refresh stale plan evidence before starting another code slice, close baseline/phase-skeleton checklist drift against current code, and keep broader admin overview, WorkerAdapter, and write-control work as explicit follow-ups.
+- [x] Tenant-scoped scheduled crawler aggregate endpoint tranche: expose `/api/v1/admin/crawler/scheduled` through the existing tenant admin crawler router, split scheduled aggregate repository ownership into tenant/sysadmin entry points, and move the shared scheduled response model into the crawler admin presentation owner.
 
 ## Non-Negotiable Principles
 
@@ -724,7 +725,9 @@ Work:
 - [x] Add read-only admin endpoints for crawler active/queued inventory.
 - [ ] Add read-only admin endpoints for broader crawler overview.
 - [ ] Show active and queued crawls with age, tenant/space/website, worker state, and lifecycle state.
-- [x] Show scheduled crawls grouped by interval and approximate content size.
+- [x] Expose scheduled crawls grouped by interval and approximate content size through a bounded sysadmin endpoint.
+- [x] Expose scheduled crawls grouped by interval and approximate content size through a tenant-scoped admin endpoint.
+- [ ] Show scheduled crawls grouped by interval and approximate content size in the tenant admin browser page.
 - [x] Expose per-website processing totals for pages, files, retained content, too-large files, and failed items over a bounded window.
 - [ ] Show high-cost websites by a defined score: `schedule_frequency_weight * indexed_content_count * (1 - retention_rate)`, with embedding spend added when reliable cost data exists.
 - [x] Expose recent terminal failed crawler runs by typed `CrawlOutcomeCode` through a bounded sysadmin endpoint.

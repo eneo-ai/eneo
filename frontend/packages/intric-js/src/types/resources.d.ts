@@ -121,6 +121,8 @@ export type CrawlerSettingsUpdate = Partial<
 export type CrawlerActiveInventoryResponse =
   components["schemas"]["CrawlerActiveInventoryResponse"];
 export type CrawlerActiveInventoryItem = components["schemas"]["CrawlerActiveInventoryItem"];
+export type CrawlerScheduledAggregateResponse =
+  components["schemas"]["CrawlerScheduledAggregateResponse"];
 export type CrawlerRecentFailuresResponse = components["schemas"]["CrawlerRecentFailuresResponse"];
 export type CrawlerRecentFailureItem = components["schemas"]["CrawlerRecentFailureItem"];
 // OpenAPI exposes website list/detail responses as WebsitePublic; the backend WebsiteSparse

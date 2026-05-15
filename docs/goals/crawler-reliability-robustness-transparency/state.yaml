@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T139
+active_task: T140
 
 tasks:
   - id: T001
@@ -6674,7 +6674,7 @@ tasks:
   - id: T139
     type: worker
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Add one tenant-scoped read-only `/api/v1/admin/crawler/scheduled` endpoint so tenant admins can inspect scheduled crawl load without sysadmin endpoints."
     allowed_files:
@@ -6717,6 +6717,82 @@ tasks:
       - "Existing scheduled aggregate ownership cannot be reused without a broader repository refactor."
       - "Generated OpenAPI types require unrelated schema churn."
       - "Admin page UI consumption becomes necessary in the same slice."
+    receipt:
+      result: complete
+      summary: "Added tenant-scoped read-only `/api/v1/admin/crawler/scheduled`, split `WebsiteAdminRepository` scheduled aggregate reads into tenant-required and sysadmin-optional entry points, moved the scheduled aggregate response model into the shared crawler admin presentation owner, kept the existing sysadmin endpoint intact, and regenerated checked-in OpenAPI schema types."
+      changed_files:
+        - "backend/src/intric/admin/crawler_admin_router.py"
+        - "backend/src/intric/sysadmin/sysadmin_models.py"
+        - "backend/src/intric/sysadmin/sysadmin_router.py"
+        - "backend/src/intric/websites/domain/website_admin_repo.py"
+        - "backend/src/intric/websites/presentation/crawler_admin_models.py"
+        - "backend/tests/integration/test_admin_crawler_scheduled_aggregate.py"
+        - "backend/tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
+        - "frontend/apps/web/src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+        - "frontend/packages/intric-js/src/types/resources.d.ts"
+        - "frontend/packages/intric-js/src/types/schema.d.ts"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      red_evidence:
+        - "`cd backend && uv run pytest tests/integration/test_admin_crawler_scheduled_aggregate.py -q` failed red with five 404/KeyError failures before the route existed."
+      validation:
+        - "cd backend && uv run pytest tests/integration/test_admin_crawler_scheduled_aggregate.py tests/integration/test_sysadmin_crawler_scheduled_aggregate.py -q"
+        - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/website_admin_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_scheduled_aggregate.py tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
+        - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/website_admin_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_scheduled_aggregate.py tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json"
+        - "./scripts/check-intric-js-openapi-schema.sh"
+        - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+        - "cd frontend && bun run --filter @intric/web check"
+        - "cd frontend/packages/intric-js && bun run lint"
+      notes:
+        - "The frontend generated-type unit test was rerun solo after a concurrent Paraglide compile printed a transient ENOTEMPTY message; the solo rerun exited cleanly."
+        - "Frontend check still reports the pre-existing `ExtendExpirationDialog.svelte` warning and no errors."
+      claude:
+        verdict: green
+        min_score: 8
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t139-tenant-scheduled-crawler-aggregate-endpoint-20260515T170108Z.md"
+        resolution: "Claude green-lit the endpoint-only slice and found no blockers. Deferred findings were broader shared-model consolidation, duplicate scheduled-test helper cleanup, and pre-existing domain docstring trim."
+      follow_up_notes:
+        - "Consume the scheduled aggregate endpoint in the tenant admin crawler page as a separate shadcn/UX-gated UI slice."
+        - "After the scheduled UI consumer, pivot to the Step 6 typed crawl abort intent owner or the small `TaskManager.acknowledge_terminal_commit(...)` seam cleanup rather than adding more read-only cards."
+  - id: T140
+    type: worker
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Consume the tenant scheduled crawler aggregate endpoint in the admin crawler page with shadcn components and explicit UX review gates."
+    allowed_files:
+      - "frontend/packages/intric-js/src/endpoints/crawler-admin.js"
+      - "frontend/packages/intric-js/src/types/resources.d.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerScheduledAggregate.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerScheduledAggregate.test.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerAdminPageLoad.test.ts"
+      - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.ts"
+      - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Use shadcn components and shadcn MCP examples/checklist; do not introduce IntricUI table/card abstractions for the admin page."
+      - "Apply critique, adapt, audit, polish, clarify, and ui-ux-pro-max checks before commit."
+      - "Show the scheduled aggregate as one bounded read-only summary; do not add abort/retry/pause controls in this slice."
+      - "Keep diagnostics loads independent so scheduled aggregate failure does not break crawler settings, active inventory, or recent failures."
+      - "Do not add website-processing, watchdog, circuit-breaker, or high-cost ranking UI in this slice."
+    verify:
+      - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerScheduledAggregate.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts"
+      - "cd frontend && bun run --filter @intric/web check"
+      - "cd frontend && bun run --filter @intric/web lint"
+      - "cd frontend/packages/intric-js && bun run lint"
+    red_tests:
+      - "Page load calls `intric.crawlerAdmin.scheduledAggregate()` and isolates its load failure."
+      - "Presentation helper returns interval labels, totals, unparseable counts, and empty-state labels without nullable drift."
+      - "UI renders a bounded scheduled-load summary distinct from active jobs and recent failures."
+    stop_if:
+      - "The UI needs another backend endpoint or additional aggregate shape."
+      - "The page starts requiring pagination, expensive per-website lists, or write controls."
+      - "shadcn MCP/examples cannot be consulted for the chosen components."
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"

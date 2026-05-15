@@ -119,7 +119,21 @@ class WebsiteAdminRepository:
             offset=offset,
         )
 
-    async def scheduled_aggregate(
+    async def scheduled_aggregate_for_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+    ) -> CrawlerScheduledAggregate:
+        return await self._scheduled_aggregate(tenant_id=tenant_id)
+
+    async def scheduled_aggregate_for_sysadmin(
+        self,
+        *,
+        tenant_id: UUID | None,
+    ) -> CrawlerScheduledAggregate:
+        return await self._scheduled_aggregate(tenant_id=tenant_id)
+
+    async def _scheduled_aggregate(
         self,
         *,
         tenant_id: UUID | None,

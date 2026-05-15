@@ -11,9 +11,11 @@ from intric.database.database import AsyncSession, get_session
 from intric.roles.permissions import Permission
 from intric.users.user import UserInDB
 from intric.websites.domain.crawl_run_repo import CrawlRunRepository
+from intric.websites.domain.website_admin_repo import WebsiteAdminRepository
 from intric.websites.presentation.crawler_admin_models import (
     CrawlerActiveInventoryResponse,
     CrawlerRecentFailuresResponse,
+    CrawlerScheduledAggregateResponse,
 )
 
 router = APIRouter(
@@ -70,3 +72,20 @@ async def get_current_tenant_crawler_recent_failures(
             tenant_id=current_user.tenant_id,
         )
     return CrawlerRecentFailuresResponse.from_domain(failures)
+
+
+@router.get(
+    "/scheduled",
+    response_model=CrawlerScheduledAggregateResponse,
+    summary="Get scheduled crawler aggregate for the current tenant",
+)
+async def get_current_tenant_crawler_scheduled_aggregate(
+    current_user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> CrawlerScheduledAggregateResponse:
+    async with session.begin():
+        repo = WebsiteAdminRepository(session=session)
+        aggregate = await repo.scheduled_aggregate_for_tenant(
+            tenant_id=current_user.tenant_id,
+        )
+    return CrawlerScheduledAggregateResponse.from_domain(aggregate)
