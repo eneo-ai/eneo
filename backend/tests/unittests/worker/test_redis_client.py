@@ -1,15 +1,164 @@
 """Unit tests for worker redis client utilities."""
 
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, patch
 
 import pytest
+import redis.asyncio as aioredis
 
 from intric.worker.redis.client import (
     parse_arq_health_string,
+    redis_delete_keys,
+    redis_expire_key,
+    redis_lpush_bytes,
+    redis_lrange_bytes,
+    redis_lrem_exact,
+    redis_ltrim_list,
     redis_pipeline,
     redis_pipeline_items,
+    redis_rpush_text,
+    redis_scan_match_bytes,
 )
+
+
+class _RedisListFake(aioredis.Redis):
+    def __init__(self) -> None:
+        self.lists: dict[str, list[bytes]] = {}
+        self.expirations: dict[str, int] = {}
+        self.deleted_keys: list[str] = []
+
+    async def lrange(self, key: str, start: int, stop: int) -> list[bytes]:
+        values = self.lists.get(key, [])
+        if stop == -1:
+            return values[start:]
+        return values[start : stop + 1]
+
+    async def lrem(self, key: str, count: int, value: bytes) -> int:
+        removed = 0
+        kept: list[bytes] = []
+        for current in self.lists.get(key, []):
+            if current == value and (count == 0 or removed < count):
+                removed += 1
+                continue
+            kept.append(current)
+        self.lists[key] = kept
+        return removed
+
+    async def rpush(self, key: str, value: str) -> int:
+        self.lists.setdefault(key, []).append(value.encode())
+        return len(self.lists[key])
+
+    async def lpush(self, key: str, value: bytes) -> int:
+        self.lists.setdefault(key, []).insert(0, value)
+        return len(self.lists[key])
+
+    async def ltrim(self, key: str, start: int, stop: int) -> bool:
+        values = self.lists.get(key, [])
+        if stop == -1:
+            self.lists[key] = values[start:]
+        else:
+            self.lists[key] = values[start : stop + 1]
+        return True
+
+    async def expire(self, key: str, seconds: int) -> bool:
+        self.expirations[key] = seconds
+        return True
+
+    async def delete(self, *keys: str) -> int:
+        deleted = 0
+        for key in keys:
+            self.deleted_keys.append(key)
+            if key in self.lists:
+                deleted += 1
+                del self.lists[key]
+        return deleted
+
+
+class _RedisScanFake(aioredis.Redis):
+    def __init__(self, scan_pages: Mapping[int, tuple[int, list[bytes]]]) -> None:
+        self.scan_pages = dict(scan_pages)
+        self.calls: list[tuple[int, str, int]] = []
+
+    async def scan(
+        self, *, cursor: int, match: str, count: int
+    ) -> tuple[int, list[bytes]]:
+        self.calls.append((cursor, match, count))
+        return self.scan_pages[cursor]
+
+
+class TestRedisListBoundaries:
+    """Tests for Redis list and scan typing boundaries."""
+
+    @pytest.mark.asyncio
+    async def test_lrange_bytes_returns_bytes(self) -> None:
+        redis_client = _RedisListFake()
+        redis_client.lists["pending"] = [b"one", b"two"]
+
+        result = await redis_lrange_bytes(redis_client, "pending", 0, 1)
+
+        assert result == [b"one", b"two"]
+
+    @pytest.mark.asyncio
+    async def test_lrem_exact_removes_only_matching_raw_bytes(self) -> None:
+        redis_client = _RedisListFake()
+        redis_client.lists["pending"] = [
+            b'{"job_id":"1","url":"a"}',
+            b'{"url":"a","job_id":"1"}',
+        ]
+
+        removed = await redis_lrem_exact(
+            redis_client, "pending", b'{"job_id":"1","url":"a"}'
+        )
+
+        assert removed == 1
+        assert redis_client.lists["pending"] == [b'{"url":"a","job_id":"1"}']
+
+    @pytest.mark.asyncio
+    async def test_rpush_text_round_trips_through_lrange_bytes(self) -> None:
+        redis_client = _RedisListFake()
+
+        await redis_rpush_text(redis_client, "pending", '{"job_id":"1"}')
+
+        assert await redis_lrange_bytes(redis_client, "pending", 0, -1) == [
+            b'{"job_id":"1"}'
+        ]
+
+    @pytest.mark.asyncio
+    async def test_lpush_ltrim_expire_and_delete_cover_dlq_operations(self) -> None:
+        redis_client = _RedisListFake()
+
+        await redis_lpush_bytes(redis_client, "dlq", b"old")
+        await redis_lpush_bytes(redis_client, "dlq", b"new")
+        await redis_ltrim_list(redis_client, "dlq", 0, 0)
+        await redis_expire_key(redis_client, "dlq", 60)
+        deleted = await redis_delete_keys(redis_client, "dlq", "missing")
+
+        assert redis_client.lists.get("dlq") is None
+        assert redis_client.expirations == {"dlq": 60}
+        assert deleted == 1
+
+    @pytest.mark.asyncio
+    async def test_scan_match_bytes_hides_cursor_loop(self) -> None:
+        redis_client = _RedisScanFake(
+            {
+                0: (7, [b"tenant:one:crawl_pending"]),
+                7: (0, [b"tenant:two:crawl_pending"]),
+            }
+        )
+
+        result = [
+            key
+            async for key in redis_scan_match_bytes(
+                redis_client, pattern="tenant:*:crawl_pending", count=100
+            )
+        ]
+
+        assert result == [b"tenant:one:crawl_pending", b"tenant:two:crawl_pending"]
+        assert redis_client.calls == [
+            (0, "tenant:*:crawl_pending", 100),
+            (7, "tenant:*:crawl_pending", 100),
+        ]
 
 
 class TestRedisPipelineItems:

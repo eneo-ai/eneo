@@ -7,7 +7,7 @@ extracted from the monolithic CrawlFeeder class for better testability.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from typing_extensions import TypedDict
@@ -19,6 +19,11 @@ from intric.worker.feeder.crawl_enqueue import (
     CrawlEnqueueFailed,
     CrawlEnqueueResult,
     enqueue_crawl_job,
+)
+from intric.worker.redis.client import (
+    redis_lrange_bytes,
+    redis_lrem_exact,
+    redis_rpush_text,
 )
 
 if TYPE_CHECKING:
@@ -35,6 +40,45 @@ class CrawlPendingJobData(TypedDict):
     url: str
     download_files: bool
     crawl_type: str
+
+
+class PendingCrawlPayload(TypedDict, total=False):
+    job_id: str
+    user_id: str
+    website_id: str
+    run_id: str
+    url: str
+    download_files: bool
+    crawl_type: str
+
+
+def _pending_job_data_from_pairs(
+    pairs: list[tuple[str, object]],
+) -> PendingCrawlPayload:
+    # Incomplete payloads continue to JobEnqueuer, which owns failure bucketing.
+    job_data: PendingCrawlPayload = {}
+    for key, value in pairs:
+        if key in {"job_id", "user_id", "website_id", "run_id", "url", "crawl_type"}:
+            if isinstance(value, str):
+                job_data[key] = value
+        elif key == "download_files" and isinstance(value, bool):
+            job_data["download_files"] = value
+    return job_data
+
+
+def _loads_pending_job_data(raw_json: str) -> PendingCrawlPayload:
+    parsed_payloads: list[PendingCrawlPayload] = []
+
+    def collect_payload(pairs: list[tuple[str, object]]) -> PendingCrawlPayload:
+        payload = _pending_job_data_from_pairs(pairs)
+        parsed_payloads.append(payload)
+        return payload
+
+    # object_pairs_hook keeps JSON shape conversion typed without a local cast.
+    loaded_object: object = json.loads(raw_json, object_pairs_hook=collect_payload)
+    if not isinstance(loaded_object, dict):
+        raise ValueError("pending crawl payload must be a JSON object")
+    return parsed_payloads[-1]
 
 
 class PendingQueueAddError(RuntimeError):
@@ -68,7 +112,7 @@ class PendingQueue:
 
     async def get_pending(
         self, tenant_id: UUID, limit: int
-    ) -> list[tuple[bytes, CrawlPendingJobData]]:
+    ) -> list[tuple[bytes, PendingCrawlPayload]]:
         """Get pending crawl jobs from the queue.
 
         Args:
@@ -81,29 +125,27 @@ class PendingQueue:
             serialization mismatch issues.
         """
         key = self._key(tenant_id)
-        redis_client = cast(Any, self._redis)
 
         try:
-            pending_bytes = cast(
-                list[bytes], await redis_client.lrange(key, 0, limit - 1)
-            )
+            pending_bytes = await redis_lrange_bytes(self._redis, key, 0, limit - 1)
 
             if not pending_bytes:
                 return []
 
-            pending_jobs: list[tuple[bytes, CrawlPendingJobData]] = []
+            pending_jobs: list[tuple[bytes, PendingCrawlPayload]] = []
             for raw_bytes in pending_bytes:
                 try:
-                    job_data = cast(CrawlPendingJobData, json.loads(raw_bytes.decode()))
-                    pending_jobs.append((raw_bytes, job_data))
-                except json.JSONDecodeError as parse_exc:
+                    pending_jobs.append(
+                        (raw_bytes, _loads_pending_job_data(raw_bytes.decode()))
+                    )
+                except (json.JSONDecodeError, ValueError) as parse_exc:
                     # Remove poison message to prevent infinite retry loop
                     logger.warning(
                         "Removing invalid JSON from pending queue (poison message)",
                         extra={"tenant_id": str(tenant_id), "error": str(parse_exc)},
                     )
                     try:
-                        await redis_client.lrem(key, 1, raw_bytes)
+                        await redis_lrem_exact(self._redis, key, raw_bytes)
                     except Exception:
                         pass  # Best effort removal
                     continue
@@ -128,10 +170,9 @@ class PendingQueue:
             raw_bytes: Original raw bytes from lrange (NOT re-serialized).
         """
         key = self._key(tenant_id)
-        redis_client = cast(Any, self._redis)
 
         try:
-            await redis_client.lrem(key, 1, raw_bytes)
+            await redis_lrem_exact(self._redis, key, raw_bytes)
         except Exception as exc:
             logger.warning(
                 "Failed to remove from pending queue",
@@ -154,12 +195,11 @@ class PendingQueue:
             PendingQueueAddError: If Redis rejects the write.
         """
         key = self._key(tenant_id)
-        redis_client = cast(Any, self._redis)
 
         try:
             # Serialize with sorted keys for deterministic bytes
             job_json = json.dumps(job_data, default=str, sort_keys=True)
-            await redis_client.rpush(key, job_json)
+            await redis_rpush_text(self._redis, key, job_json)
 
             logger.debug(
                 "Added crawl to pending queue",
@@ -181,7 +221,7 @@ class JobEnqueuer:
     """
 
     async def enqueue(
-        self, job_data: CrawlPendingJobData, tenant_id: UUID
+        self, job_data: PendingCrawlPayload, tenant_id: UUID
     ) -> CrawlEnqueueResult:
         """Enqueue a crawl job to ARQ using pre-created job record.
 
@@ -197,9 +237,11 @@ class JobEnqueuer:
             deterministic job id; failed means the pending payload could not be
             parsed or ARQ raised.
         """
-        # Parse job_id early for clean error handling
         try:
-            job_id = UUID(job_data["job_id"])
+            raw_job_id = job_data.get("job_id")
+            if not isinstance(raw_job_id, str):
+                raise TypeError("job_id is required")
+            job_id = UUID(raw_job_id)
         except (KeyError, ValueError, TypeError) as exc:
             logger.error(
                 "Invalid job_id in pending job data",
@@ -213,12 +255,26 @@ class JobEnqueuer:
             return CrawlEnqueueFailed(job_id=nil_job_id, error=exc)
 
         try:
-            user_id = UUID(job_data["user_id"])
-            website_id = UUID(job_data["website_id"])
-            run_id = UUID(job_data["run_id"])
-            url = job_data["url"]
-            download_files = job_data["download_files"]
-            crawl_type = CrawlType(job_data["crawl_type"])
+            raw_user_id = job_data.get("user_id")
+            raw_website_id = job_data.get("website_id")
+            raw_run_id = job_data.get("run_id")
+            url = job_data.get("url")
+            download_files = job_data.get("download_files")
+            raw_crawl_type = job_data.get("crawl_type")
+            if not (
+                isinstance(raw_user_id, str)
+                and isinstance(raw_website_id, str)
+                and isinstance(raw_run_id, str)
+                and isinstance(url, str)
+                and isinstance(download_files, bool)
+                and isinstance(raw_crawl_type, str)
+            ):
+                raise TypeError("pending crawl job data is incomplete")
+
+            user_id = UUID(raw_user_id)
+            website_id = UUID(raw_website_id)
+            run_id = UUID(raw_run_id)
+            crawl_type = CrawlType(raw_crawl_type)
         except (KeyError, ValueError, TypeError) as exc:
             logger.error(
                 "Invalid pending crawl job data",
@@ -258,8 +314,8 @@ class JobEnqueuer:
             extra={
                 "tenant_id": str(tenant_id),
                 "job_id": str(job_id),
-                "website_id": job_data["website_id"],
-                "url": job_data["url"],
+                "website_id": str(website_id),
+                "url": url,
             },
         )
         return result

@@ -81,6 +81,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Queue-boundary scout tranche: reject premature `WorkerAdapter`/one-file Redis protocol work and select a concrete typed crawl enqueue owner as the next ownership-collapse slice.
 - [x] Typed crawl enqueue owner tranche: add a concrete union-typed enqueue owner for already-created crawl jobs, reuse it from pending queue, manual direct handoff, and watchdog requeue paths, and stop watchdog from constructing `arq.jobs.Job` directly.
 - [x] Pending-feeder typed enqueue consumption tranche: remove the tuple-shaped pending enqueue compatibility edge, make `CrawlFeeder._process_tenant_queue` consume `CrawlEnqueueResult` exhaustively, and prove pending-entry, slot, and pre-acquired-flag invariants with behavior tests.
+- [x] Typed Redis feeder/queue boundary tranche: move Redis list, delete, expiry, and SCAN typing uncertainty to `worker/redis/client.py`, remove local Redis `Any`/`cast` usage from pending queue and feeder consumers, split strict producer payloads from lenient parsed payloads, and cover raw-byte LREM, cursor scanning, DLQ ordering, and source-ownership guard behavior.
 
 ## Non-Negotiable Principles
 

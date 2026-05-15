@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T119
+active_task: T121
 
 tasks:
   - id: T001
@@ -5770,7 +5770,7 @@ tasks:
   - id: T119
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Audit the roadmap after T118 and decide whether the active goal is provably complete or which single remaining slice is highest ROI."
     inputs:
@@ -5786,17 +5786,98 @@ tasks:
       - "complete | not_complete"
       - "Evidence for each remaining explicit open item"
       - "Next bounded task if not complete"
+    receipt:
+      result: not_complete
+      summary: "Claude and PM audit rejected goal completion after T118. The next highest-ROI bounded slice is the typed Redis list/scan/key boundary for feeder and pending queues, not WorkerAdapter, admin write controls, lifecycle rewrite, or frontend work."
+      evidence:
+        - ".codex/artifacts/claude-peer-loop-t119-roadmap-audit-next-slice-20260515T111404Z.md"
+        - "backend/src/intric/worker/crawl_feeder.py retained local Redis Any/cast sites before T120"
+        - "backend/src/intric/worker/feeder/queues.py retained local Redis Any/cast sites before T120"
+      spawned_tasks:
+        - T120
+  - id: T120
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Collapse remaining Redis list/scan/key typing seams in feeder and pending queue consumers behind the canonical worker.redis.client boundary without changing queue semantics."
+    allowed_files:
+      - "backend/src/intric/worker/redis/client.py"
+      - "backend/src/intric/worker/feeder/queues.py"
+      - "backend/src/intric/worker/crawl_feeder.py"
+      - "backend/tests/unittests/worker/test_redis_client.py"
+      - "backend/tests/unittests/worker/feeder/test_queues.py"
+      - "backend/tests/unittests/worker/test_crawl_feeder_process.py"
+      - "backend/tests/integration/test_crawl_feeder.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_redis_client.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/redis/client.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_redis_client.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/redis/client.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_redis_client.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/redis/client.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_redis_client.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+    stop_if:
+      - "Need WorkerAdapter, QueueAdapter, protocol, factory, base class, or generic manager."
+      - "Need to change pending queue key, JSON wire shape, slot pre-acquired flag semantics, or ARQ enqueue path."
+      - "Need to touch watchdog, Lua script ownership, frontend, or admin write controls."
+      - "Need new local Any/cast/type-ignore in feeder or queue consumers."
+      - "Need to stage unrelated .devcontainer dirt."
+    receipt:
+      result: done
+      summary: "Added typed Redis list, delete, expiry, and scan boundaries in worker.redis.client; removed local Redis Any/cast usage from PendingQueue and CrawlFeeder; split strict producer CrawlPendingJobData from lenient parsed PendingCrawlPayload; and covered raw-byte LREM, SCAN cursor handling, DLQ ordering, and source ownership guard behavior."
+      changed_files:
+        - "backend/src/intric/worker/redis/client.py"
+        - "backend/src/intric/worker/feeder/queues.py"
+        - "backend/src/intric/worker/crawl_feeder.py"
+        - "backend/tests/unittests/worker/test_redis_client.py"
+        - "backend/tests/unittests/worker/feeder/test_queues.py"
+        - "backend/tests/unittests/worker/test_crawl_feeder_process.py"
+      verification:
+        - "Red test: Redis boundary imports failed before helper implementation."
+        - "Red behavior check: stricter pending JSON parser failed existing integration tests, so semantics were restored."
+        - "cd backend && uv run pytest tests/unittests/worker/test_redis_client.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/redis/client.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_redis_client.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
+        - "cd backend && uv run ruff format --check src/intric/worker/redis/client.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_redis_client.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/redis/client.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_redis_client.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json"
+        - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t120-redis-boundary --phase verification --iteration 2 --require-green --required-min-score 8 ..."
+      claude:
+        - ".codex/artifacts/claude-peer-loop-t120-redis-boundary-implementation-review-20260515T113451Z.md returned changes_required with MIN_SCORE 6."
+        - ".codex/artifacts/claude-peer-loop-t120-redis-boundary-revision-review-20260515T114353Z.md returned green with MIN_SCORE 8."
+      follow_up_notes:
+        - "P3: revisit connection_pool_factory Any inside worker.redis.client as a separate Redis factory typing cleanup."
+        - "P3: consider a small WorkerRedis facade only after the remaining queue/status/slot ownership work justifies it."
+  - id: T121
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Audit the roadmap after T120 and decide whether the active goal is provably complete or which single remaining slice is highest ROI."
+    inputs:
+      - "T120 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "Current git diff after T120"
+    constraints:
+      - "Do not mark the goal complete unless every remaining roadmap requirement has current evidence."
+      - "Do not start WorkerAdapter, admin write controls, lifecycle rewrite, or frontend work without a bounded task decision."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "complete | not_complete"
+      - "Evidence for each remaining explicit open item"
+      - "Next bounded task if not complete"
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T118
+    task: T120
     commands:
-      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py tests/unittests/worker/feeder/test_queues.py -q"
-      - "cd backend && uv run ruff check src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py tests/unittests/worker/feeder/test_queues.py"
-      - "cd backend && uv run ruff format --check src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py tests/unittests/worker/feeder/test_queues.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py tests/unittests/worker/feeder/test_queues.py"
+      - "cd backend && uv run pytest tests/unittests/worker/test_redis_client.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/redis/client.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_redis_client.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/redis/client.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_redis_client.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/redis/client.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_redis_client.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
       - "cd backend && uv run pyright --project pyrightconfig.json"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t118-feeder-typed-enqueue-consumption --phase verification --iteration 2 --require-green --required-min-score 8 ..."
-    note: "T118 pending-feeder typed enqueue consumption passed red/green behavior tests for success, duplicate, and failure invariants, feeder integration smoke, ruff, format check, targeted and full strict Pyright, grep postconditions, and Claude green final verification."
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t120-redis-boundary --phase verification --iteration 2 --require-green --required-min-score 8 ..."
+    note: "T120 typed Redis boundary cleanup passed red/green behavior tests, feeder integration coverage, ruff, format check, targeted and full strict Pyright, source guard grep, and Claude green final verification."

@@ -16,14 +16,13 @@ Reuses existing concurrency infrastructure, no parallel permit system needed.
 import asyncio
 import socket
 from datetime import datetime, timedelta, timezone
-from typing import Any, assert_never, cast
+from typing import assert_never
 from uuid import UUID
 
 import redis.asyncio as aioredis
 
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
-from intric.redis.connection import build_redis_pool_kwargs
 from intric.tenants.crawler_settings_helper import get_crawler_setting
 from intric.worker.feeder.capacity import CapacityManager
 from intric.worker.feeder.crawl_enqueue import (
@@ -34,6 +33,14 @@ from intric.worker.feeder.crawl_enqueue import (
 from intric.worker.feeder.election import LeaderElection
 from intric.worker.feeder.queues import JobEnqueuer, PendingQueue
 from intric.worker.feeder.watchdog import OrphanWatchdog
+from intric.worker.redis.client import (
+    create_worker_redis_client,
+    redis_delete_keys,
+    redis_expire_key,
+    redis_lpush_bytes,
+    redis_ltrim_list,
+    redis_scan_match_bytes,
+)
 from intric.worker.redis.lua_scripts import LuaScripts
 
 logger = get_logger(__name__)
@@ -167,11 +174,12 @@ class CrawlFeeder:
         skipped_capacity = 0
         duplicate_count = 0
 
-        # raw_bytes preserved for exact LREM matching
-        redis_client_any: Any = redis_client
         for raw_bytes, job_data in pending_jobs:
             try:
-                job_id = UUID(job_data["job_id"])
+                raw_job_id = job_data.get("job_id")
+                if not isinstance(raw_job_id, str):
+                    raise TypeError("job_id is required")
+                job_id = UUID(raw_job_id)
             except (KeyError, ValueError, TypeError) as parse_exc:
                 logger.warning(
                     "Invalid job_id in pending job, removing poison entry",
@@ -186,9 +194,11 @@ class CrawlFeeder:
                 # Push to DLQ for forensics before removing
                 try:
                     dlq_key = f"tenant:{tenant_id}:crawl_pending:dlq"
-                    await redis_client_any.lpush(dlq_key, raw_bytes)
-                    await redis_client_any.ltrim(dlq_key, 0, DLQ_MAX_ENTRIES - 1)
-                    await redis_client_any.expire(dlq_key, DLQ_TTL_SECONDS)
+                    await redis_lpush_bytes(redis_client, dlq_key, raw_bytes)
+                    await redis_ltrim_list(
+                        redis_client, dlq_key, 0, DLQ_MAX_ENTRIES - 1
+                    )
+                    await redis_expire_key(redis_client, dlq_key, DLQ_TTL_SECONDS)
                 except Exception:
                     pass  # Best effort DLQ push
                 # Remove poison entry to prevent infinite retry loop
@@ -257,8 +267,8 @@ class CrawlFeeder:
                 case CrawlEnqueueFailed():
                     # Enqueue failed - rollback: delete flag and release slot
                     try:
-                        await redis_client_any.delete(
-                            LuaScripts.preacquired_slot_key(job_id)
+                        await redis_delete_keys(
+                            redis_client, LuaScripts.preacquired_slot_key(job_id)
                         )
                     except Exception as flag_exc:
                         logger.debug(
@@ -320,16 +330,7 @@ class CrawlFeeder:
 
         # Create own Redis client (long-running service manages its own lifecycle)
         try:
-            redis_url = f"redis://{self.settings.redis_host}:{self.settings.redis_port}"
-            redis_kwargs = build_redis_pool_kwargs(
-                self.settings,
-                decode_responses=False,
-            )
-
-            redis_client_factory: Any = aioredis.Redis
-            self._redis_client = cast(
-                aioredis.Redis, redis_client_factory.from_url(redis_url, **redis_kwargs)
-            )
+            self._redis_client = create_worker_redis_client(self.settings)
             redis_client: aioredis.Redis = self._redis_client
             self._pending_queue = PendingQueue(redis_client)
             self._capacity_manager = CapacityManager(redis_client, self.settings)
@@ -355,27 +356,17 @@ class CrawlFeeder:
                     pattern = "tenant:*:crawl_pending"
                     tenant_ids: set[UUID] = set()
 
-                    cursor = 0
-                    redis_client_any: Any = redis_client
-                    while True:
-                        scan_result = await redis_client_any.scan(
-                            cursor=cursor, match=pattern, count=100
-                        )
-                        cursor = int(scan_result[0])
-                        keys = cast(list[bytes], scan_result[1])
-
-                        for key_bytes in keys:
-                            key = key_bytes.decode()
-                            # Extract tenant_id from key: tenant:{uuid}:crawl_pending
-                            parts = key.split(":")
-                            if len(parts) >= 2:
-                                try:
-                                    tenant_ids.add(UUID(parts[1]))
-                                except ValueError:
-                                    continue
-
-                        if cursor == 0:
-                            break
+                    async for key_bytes in redis_scan_match_bytes(
+                        redis_client, pattern=pattern, count=100
+                    ):
+                        key = key_bytes.decode()
+                        # Extract tenant_id from key: tenant:{uuid}:crawl_pending
+                        parts = key.split(":")
+                        if len(parts) >= 2:
+                            try:
+                                tenant_ids.add(UUID(parts[1]))
+                            except ValueError:
+                                continue
 
                     # Process each tenant's pending queue
                     processed_any = False

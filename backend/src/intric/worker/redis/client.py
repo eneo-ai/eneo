@@ -1,13 +1,24 @@
 """Redis client connection management for worker operations."""
 
 import re
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from datetime import datetime, timezone
-from typing import Any, NamedTuple, Protocol, Self
+from typing import Any, NamedTuple, Protocol, Self, cast
 
 import redis.asyncio as aioredis
-from intric.main.config import get_settings
+from intric.main.config import Settings, get_settings
 from intric.redis.connection import build_redis_pool_kwargs
+
+
+def create_worker_redis_client(
+    settings: Settings, *, decode_responses: bool = False
+) -> aioredis.Redis:
+    """Create a worker Redis client through one typed redis-py boundary."""
+    redis_url = f"redis://{settings.redis_host}:{settings.redis_port}"
+    redis_kwargs = build_redis_pool_kwargs(settings, decode_responses=decode_responses)
+    connection_pool_factory: Any = aioredis.ConnectionPool
+    pool = connection_pool_factory.from_url(redis_url, **redis_kwargs)
+    return aioredis.Redis(connection_pool=pool)
 
 
 def _get_redis_connection() -> aioredis.Redis:
@@ -16,12 +27,7 @@ def _get_redis_connection() -> aioredis.Redis:
     Honors settings.redis_db to ensure health endpoint reads from the same
     Redis database as the worker/feeder.
     """
-    settings = get_settings()
-    redis_url = f"redis://{settings.redis_host}:{settings.redis_port}"
-    redis_kwargs = build_redis_pool_kwargs(settings, decode_responses=False)
-    connection_pool_factory: Any = aioredis.ConnectionPool
-    pool = connection_pool_factory.from_url(redis_url, **redis_kwargs)
-    return aioredis.Redis(connection_pool=pool)
+    return create_worker_redis_client(get_settings())
 
 
 # Initialize on first import
@@ -87,6 +93,106 @@ def redis_pipeline(
 ) -> RedisPipelineLike:
     """Create a Redis pipeline through the worker's typed boundary."""
     return redis.pipeline(transaction=transaction)
+
+
+async def redis_lrange_bytes(
+    redis: aioredis.Redis, key: str, start: int, stop: int
+) -> list[bytes]:
+    redis_client: Any = redis
+    raw_values: object = await redis_client.lrange(key, start, stop)
+    if not isinstance(raw_values, list | tuple):
+        raise TypeError(
+            f"Redis LRANGE returned {type(raw_values).__name__}, expected a sequence"
+        )
+
+    raw_sequence = cast(Sequence[object], raw_values)
+    values: list[bytes] = []
+    for raw_value in raw_sequence:
+        if not isinstance(raw_value, bytes):
+            raise TypeError(
+                "Redis LRANGE returned non-bytes value "
+                f"{type(raw_value).__name__}; decode_responses must stay disabled"
+            )
+        values.append(raw_value)
+    return values
+
+
+async def redis_lrem_exact(redis: aioredis.Redis, key: str, raw_bytes: bytes) -> int:
+    redis_client: Any = redis
+    return int(await redis_client.lrem(key, 1, raw_bytes))
+
+
+async def redis_rpush_text(redis: aioredis.Redis, key: str, value: str) -> int:
+    redis_client: Any = redis
+    return int(await redis_client.rpush(key, value))
+
+
+async def redis_lpush_bytes(redis: aioredis.Redis, key: str, raw_bytes: bytes) -> int:
+    redis_client: Any = redis
+    return int(await redis_client.lpush(key, raw_bytes))
+
+
+async def redis_ltrim_list(
+    redis: aioredis.Redis, key: str, start: int, stop: int
+) -> None:
+    redis_client: Any = redis
+    await redis_client.ltrim(key, start, stop)
+
+
+async def redis_expire_key(redis: aioredis.Redis, key: str, seconds: int) -> None:
+    redis_client: Any = redis
+    await redis_client.expire(key, seconds)
+
+
+async def redis_delete_keys(redis: aioredis.Redis, *keys: str) -> int:
+    redis_client: Any = redis
+    return int(await redis_client.delete(*keys))
+
+
+async def redis_scan_match_bytes(
+    redis: aioredis.Redis, *, pattern: str, count: int
+) -> AsyncIterator[bytes]:
+    """Yield Redis keys matching a pattern while owning SCAN cursor handling."""
+    redis_client: Any = redis
+    cursor = 0
+    while True:
+        raw_result: object = await redis_client.scan(
+            cursor=cursor, match=pattern, count=count
+        )
+        if not isinstance(raw_result, tuple | list):
+            raise TypeError(
+                f"Redis SCAN returned {type(raw_result).__name__}, expected pair"
+            )
+
+        raw_pair = cast(Sequence[object], raw_result)
+        if len(raw_pair) != 2:
+            raise TypeError(
+                f"Redis SCAN returned {type(raw_pair).__name__}, expected pair"
+            )
+        raw_cursor = raw_pair[0]
+        if not isinstance(raw_cursor, int | str | bytes):
+            raise TypeError(
+                f"Redis SCAN cursor was {type(raw_cursor).__name__}, expected scalar"
+            )
+        cursor = int(raw_cursor)
+        raw_keys = raw_pair[1]
+
+        if not isinstance(raw_keys, list | tuple):
+            raise TypeError(
+                f"Redis SCAN returned {type(raw_keys).__name__}, expected keys sequence"
+            )
+
+        raw_key_sequence = cast(Sequence[object], raw_keys)
+        for raw_key in raw_key_sequence:
+            if not isinstance(raw_key, bytes):
+                raise TypeError(
+                    "Redis SCAN returned non-bytes key "
+                    f"{type(raw_key).__name__}; decode_responses must stay disabled"
+                )
+            yield raw_key
+
+        if cursor == 0:
+            break
 
 
 class WorkerHealth(NamedTuple):

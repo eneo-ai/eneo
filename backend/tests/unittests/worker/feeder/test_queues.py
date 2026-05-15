@@ -10,6 +10,18 @@ from uuid import UUID, uuid4
 import pytest
 
 
+def _job_data() -> dict[str, object]:
+    return {
+        "job_id": str(uuid4()),
+        "user_id": str(uuid4()),
+        "website_id": str(uuid4()),
+        "run_id": str(uuid4()),
+        "url": "https://example.com",
+        "download_files": True,
+        "crawl_type": "crawl",
+    }
+
+
 class TestPendingQueueGetPending:
     """Tests for PendingQueue.get_pending method."""
 
@@ -32,7 +44,7 @@ class TestPendingQueueGetPending:
         from intric.worker.feeder.queues import PendingQueue
 
         tenant_id = uuid4()
-        job_data = {"job_id": str(uuid4()), "url": "https://example.com"}
+        job_data = _job_data()
         raw_bytes = json.dumps(job_data).encode()
 
         redis_mock = MagicMock()
@@ -51,7 +63,7 @@ class TestPendingQueueGetPending:
         from intric.worker.feeder.queues import PendingQueue
 
         tenant_id = uuid4()
-        valid_job = {"job_id": str(uuid4())}
+        valid_job = _job_data()
         valid_bytes = json.dumps(valid_job).encode()
         poison_bytes = b"not valid json {"
 
