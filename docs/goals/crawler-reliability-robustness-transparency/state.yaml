@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T113
+active_task: T115
 
 tasks:
   - id: T001
@@ -5452,7 +5452,7 @@ tasks:
   - id: T113
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Choose the next bounded roadmap slice after preemption extraction, with remaining Step 5 phase cleanup, typed reporting/timings, or a narrow admin transparency slice as candidates."
     inputs:
@@ -5468,7 +5468,92 @@ tasks:
     expected_output:
       - "Decision: next Step 5 extraction, typed reporting/timings, admin transparency slice, or roadmap split."
       - "Allowed files, red tests, verification commands, and stop_if conditions if another worker is selected."
-    receipt: null
+    receipt:
+      result: done
+      decision: "Activate one narrow completion-log extraction, then move the next task to WorkerAdapter scoping instead of continuing broad Step 5 line-count cleanup."
+      summary: "Claude rejected broad pass-through completion extraction and warned that continued micro-extractions have diminishing returns. The accepted slice was a narrowly-owned completion-log boundary that reuses `CrawlRunProcessingSummary`, protects retention metric math, and removes completion/performance log formatting from `crawl_tasks.py` without touching terminal state, audit, queue behavior, or admin writes."
+      claude:
+        verdict: changes_required
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t113-choose-next-crawler-slice-20260515T093713Z.md"
+        resolution: "Accepted Claude's narrow-A guidance: no generic reporting module, no duplicate summary concept, no terminal/audit extraction, and WorkerAdapter scoping next."
+      spawned_tasks:
+        - T114
+        - T115
+  - id: T114
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: low
+    objective: "Extract crawl completion and performance logging into a narrow completion-log boundary without duplicating processing-summary ownership."
+    inputs:
+      - "T113 receipt"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+    allowed_files:
+      - "backend/src/intric/worker/crawl/completion_log.py"
+      - "backend/src/intric/worker/crawl/__init__.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_completion_log.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Reuse CrawlRunProcessingSummary; do not introduce a parallel processing summary."
+      - "Do not change terminal commits, audit payloads, queue behavior, admin endpoints, or frontend code."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "emit_crawl_completion_logs(...) owns crawl completion summary and performance log formatting."
+      - "crawl_tasks.py derives the existing CrawlRunProcessingSummary and delegates logging."
+      - "Tests pin source-retained retention rate, structured skip metric keys, too-large file metrics, and partial termination reason visibility."
+    receipt:
+      result: done
+      summary: "Added worker/crawl/completion_log.py with emit_crawl_completion_logs(...), moved completion summary/performance log formatting out of crawl_tasks.py, and kept the canonical processing counters in CrawlRunProcessingSummary. The boundary exposes a typed CrawlCompletionTimings contract instead of stringly timing lookups at the call site. The tests cover source-retained-only retention math, structured hash/source/too-large metrics, partial termination reason text, and empty-summary zero-rate behavior."
+      changed_files:
+        - "backend/src/intric/worker/crawl/completion_log.py"
+        - "backend/src/intric/worker/crawl/__init__.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_completion_log.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      red_verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_completion_log.py -q failed before implementation with ModuleNotFoundError: No module named 'intric.worker.crawl.completion_log'."
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_completion_log.py -q -> 4 passed, 12 existing warnings"
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_completion_log.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py tests/unittests/worker/test_crawl_preemption.py -q -> 19 passed, 12 existing warnings"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/completion_log.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_completion_log.py -> passed"
+        - "cd backend && uv run ruff format --check src/intric/worker/crawl/completion_log.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_completion_log.py -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/completion_log.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_completion_log.py -> 0 errors"
+        - "cd backend && uv run pytest tests/unittests/worker -q -> 344 passed, 13 existing warnings"
+        - "cd backend && uv run pyright --project pyrightconfig.json -> 0 errors"
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t114-completion-log-extraction-commit-gate-20260515T094858Z.md"
+          - ".codex/artifacts/claude-peer-loop-t114-completion-log-extraction-revision-gate-20260515T095505Z.md"
+        resolution: "Claude approved the original extraction with GREEN_LIGHT yes and MIN_SCORE 8, then Codex addressed the highest-ROI non-blockers before commit: internal retention-rate naming, typed completion timings, None-based completed-vs-partial termination state, 0.0 return values, consistent file retained label, and an empty-summary edge test. The revision gate returned GREEN_LIGHT yes with MIN_SCORE 8; final P3 cleanup removed an unnecessary timing-sum helper, dropped the no-op dict conversion, and synced the receipt count."
+  - id: T115
+    type: scout
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Scope the next WorkerAdapter or queue-boundary reliability slice from current crawler ARQ/Redis/slot ownership without introducing an interface before it earns its existence."
+    inputs:
+      - "T091 receipt"
+      - "T113 receipt"
+      - "T114 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl_feeder.py"
+      - "backend/src/intric/websites/application/crawl_service.py"
+    constraints:
+      - "Read-only until a bounded implementation slice is selected."
+      - "Do not introduce WorkerAdapter, protocols, factories, or admin write controls during the scout."
+      - "Prefer deletion and ownership consolidation over a new interface if the interface is not yet earned."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Current direct ARQ/Redis/slot surfaces after recent cleanup."
+      - "Whether WorkerAdapter is now earned or another ownership-collapse slice should come first."
+      - "One bounded next worker task with allowed files, red test, verification, and stop conditions."
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"

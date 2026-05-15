@@ -77,6 +77,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Completion audit tranche: T105 and Claude both rejected marking the whole roadmap complete; remaining WorkerAdapter, admin write controls, lifecycle completion, OpenAPI regeneration, and phase-size/type cleanup remain explicit follow-up work.
 - [x] Static terminal-ownership guard tranche: add a source-level regression test that keeps crawler `CrawlRuns` terminal writes and crawler entrypoint job terminal mutations on the canonical `crawl_terminal.py` / `TerminalEvent` path.
 - [x] Typed Redis pipeline boundary tranche: move Redis pipeline result typing to `worker/redis/client.py` so `worker/crawl/heartbeat.py` and `worker/crawl/recovery.py` no longer need local `cast(...)` for pipeline results.
+- [x] Step 5 completion-log tranche: move crawl completion/performance logging into `worker/crawl/completion_log.py`, reuse `CrawlRunProcessingSummary`, and protect source-retained/hash-retained/too-large metric semantics with behavior tests.
 
 ## Non-Negotiable Principles
 
@@ -615,6 +616,7 @@ Work:
 - [x] Extract crawl slot acquire behavior into `acquire_crawl_slot(...)` with typed output and behavior tests for normal acquire, limit reached, pre-acquired reuse, tenant-injection discovery, tenant mismatch release, Redis read failures, invalid Redis state, TTL refresh failures, and mismatch release followed by limit reached.
 - [x] Extract website size recalculation into `update_website_size_after_crawl(...)` with a typed tenant-scoped SQL boundary and behavior test.
 - [x] Extract crawler job preemption detection into `is_job_preempted(...)` and reuse it from both heartbeat and final preemption checks.
+- [x] Extract completion/performance logging into `emit_crawl_completion_logs(...)` while keeping processing counters owned by `CrawlRunProcessingSummary`.
 - [ ] Each phase returns a typed output and does not write terminal state directly.
 - [ ] Keep Scrapy-specific behavior in `crawler.py` and `CrawlDiagnostics`.
 - [ ] Keep persistence retention behavior in `persist_batch()`.

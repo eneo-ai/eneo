@@ -25,6 +25,10 @@ from intric.worker.crawl.cleanup import (
     CleanupResult,
     cleanup_stale_blobs,
 )
+from intric.worker.crawl.completion_log import (
+    CrawlCompletionTimings,
+    emit_crawl_completion_logs,
+)
 from intric.worker.crawl.file_processing import (
     FileProcessingErrorRecorder,
     FileProcessingResult,
@@ -94,6 +98,9 @@ __all__ = [
     "CleanupDeleteCallback",
     "CleanupResult",
     "cleanup_stale_blobs",
+    # Completion log
+    "CrawlCompletionTimings",
+    "emit_crawl_completion_logs",
     # File processing
     "FileProcessingErrorRecorder",
     "FileProcessingResult",

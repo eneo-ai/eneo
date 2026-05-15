@@ -21,7 +21,10 @@ from intric.tenants.crawler_settings_helper import (
     TenantCrawlerSettings,
     get_crawler_setting,
 )
-from intric.websites.crawl_dependencies.crawl_models import CrawlTask
+from intric.websites.crawl_dependencies.crawl_models import (
+    CrawlTask,
+    derive_crawl_processing_summary,
+)
 from intric.websites.domain.crawl_cleanup_policy import cleanup_policy_for_outcome
 from intric.websites.domain.crawl_outcome import (
     CrawlOutcomeCode,
@@ -36,6 +39,7 @@ from intric.websites.domain.crawl_terminal import (
 )
 from intric.worker.crawl import (
     CrawlAuditPayload,
+    CrawlCompletionTimings,
     CrawlRunTerminalUpdate,
     CrawlSlotAcquireRequest,
     CrawlSlotReleaseRequest,
@@ -50,6 +54,7 @@ from intric.worker.crawl import (
     bootstrap_crawl,
     cleanup_stale_blobs,
     commit_terminal,
+    emit_crawl_completion_logs,
     execute_with_recovery,
     is_job_preempted,
     persist_batch,
@@ -835,8 +840,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             status_already_set=True,
             on_exception=_on_crawl_task_exception,
         ):
-            # Initialize timing tracking for performance analysis
-            timings = {
+            timings: CrawlCompletionTimings = {
                 "fetch_existing_titles": 0.0,
                 "crawl_and_parse": 0.0,
                 "process_pages": 0.0,
@@ -1374,69 +1378,25 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 tenant_id=crawl_context.tenant_id,
             )
 
-            # Calculate skip rates for performance analysis
-            total_page_source_count = num_pages + num_source_retained_pages
-            total_retained_pages = num_hash_retained_pages + num_source_retained_pages
-            page_skip_rate = (
-                (total_retained_pages / total_page_source_count * 100)
-                if total_page_source_count > 0
-                else 0
+            processing_summary = derive_crawl_processing_summary(
+                pages_crawled=num_pages,
+                files_downloaded=num_files,
+                pages_failed=num_failed_pages,
+                files_failed=num_failed_files,
+                pages_source_retained=num_source_retained_pages,
+                pages_hash_retained=num_hash_retained_pages,
+                files_hash_retained=num_hash_retained_files,
+                files_too_large_skipped=num_files_too_large_skipped,
             )
-            total_file_source_count = num_files + num_files_too_large_skipped
-            file_skip_rate = (
-                (
-                    (num_hash_retained_files + num_files_too_large_skipped)
-                    / total_file_source_count
-                    * 100
-                )
-                if total_file_source_count > 0
-                else 0
-            )
-
-            # Structured crawl summary for easy log scanning
-            status_label = (
-                f"CRAWL PARTIAL ({crawl_termination_reason})"
-                if crawl_is_partial
-                else "CRAWL FINISHED"
-            )
-            summary = [
-                "=" * 60,
-                f"{status_label}: {params.url}",
-                "-" * 60,
-                f"Pages:   {num_pages} fetched, {num_source_retained_pages} source-retained, {num_failed_pages} failed, {num_hash_retained_pages} hash-retained ({page_skip_rate:.1f}% retained)",
-                f"Files:   {num_files} downloaded, {num_failed_files} failed, {num_hash_retained_files} hash-retained, {num_files_too_large_skipped} too-large skipped ({file_skip_rate:.1f}%)",
-                f"Cleanup: {num_deleted_blobs} stale entries removed",
-            ]
-            if crawl_is_partial:
-                summary.append(f"Partial completion due to: {crawl_termination_reason}")
-            summary.append("=" * 60)
-            logger.info("\n".join(summary))
-
-            # Performance breakdown log for analysis
-            total_time = sum(timings.values())
-            logger.info(
-                f"Performance breakdown: "
-                f"fetch_existing={timings['fetch_existing_titles']:.2f}s, "
-                f"crawl_parse={timings['crawl_and_parse']:.2f}s, "
-                f"process_pages={timings['process_pages']:.2f}s, "
-                f"process_files={timings['process_files']:.2f}s, "
-                f"cleanup={timings['cleanup_deleted']:.2f}s, "
-                f"update_size={timings['update_size']:.2f}s, "
-                f"total_measured={total_time:.2f}s",
-                extra={
-                    "timings": timings,
-                    "pages_crawled": num_pages,
-                    "pages_source_retained": num_source_retained_pages,
-                    "pages_failed": num_failed_pages,
-                    "pages_hash_retained": num_hash_retained_pages,
-                    "page_skip_rate_percent": page_skip_rate,
-                    "files_crawled": num_files,
-                    "files_failed": num_failed_files,
-                    "files_hash_retained": num_hash_retained_files,
-                    "files_too_large_skipped": num_files_too_large_skipped,
-                    "file_skip_rate_percent": file_skip_rate,
-                    "blobs_deleted": num_deleted_blobs,
-                },
+            emit_crawl_completion_logs(
+                logger=logger,
+                url=params.url,
+                processing_summary=processing_summary,
+                blobs_deleted=num_deleted_blobs,
+                timings=timings,
+                crawl_termination_reason=(
+                    crawl_termination_reason if crawl_is_partial else None
+                ),
             )
 
             async def _do_preemption_check(sess: AsyncSession) -> bool:
