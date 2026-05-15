@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T097
+active_task: T101
 
 tasks:
   - id: T001
@@ -4726,7 +4726,7 @@ tasks:
   - id: T097
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Choose the next bounded crawler reliability/maintainability slice after T096, balancing typed SlotAcquireResult cleanup, remaining LuaScripts doc/key ownership, and manual CrawlService failure parity."
     inputs:
@@ -4747,6 +4747,178 @@ tasks:
       - "Decision: next Worker task, Scout task, or completion-audit task."
       - "Allowed files, red-test plan, verification commands, stop_if conditions, and non-goals."
       - "Evidence that the chosen slice advances crawler reliability, robustness, transparency, or maintainability."
+    receipt:
+      result: done
+      summary: "Claude rejected SlotAcquireResult as speculative and rejected manual CrawlService failure parity as a direct Worker because commit_terminal requires an AsyncSession while CrawlService does not own one. The next highest-ROI step is a Scout that decides terminal ownership/layering for manual CrawlService failure paths before implementation."
+      decision: "Activate T098 Scout to inventory manual CrawlService failure paths and recommend the session/UoW ownership design for A1/A2 terminal parity tranches."
+      artifacts:
+        - ".codex/artifacts/claude-peer-loop-t097-choose-next-crawler-roadmap-slice-20260515T070254Z.md"
+      rejected_options:
+        - "SlotAcquireResult as a Worker: no consumer reads slot_number; if needed later, prefer acquire_slot -> bool."
+        - "Manual CrawlService parity as an immediate Worker: would require an unresolved session/UoW/layering decision."
+        - "LuaScripts doc/key cleanup alone: too small unless bundled as a later janitorial tranche."
+      spawned_tasks:
+        - T098
+  - id: T098
+    type: scout
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Map manual CrawlService failure terminal ownership and recommend the clean session/UoW design before implementing typed terminal parity."
+    inputs:
+      - "backend/src/intric/websites/domain/crawl_service.py"
+      - "backend/src/intric/worker/crawl/terminal.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/jobs/task_service.py"
+      - "backend/src/intric/jobs/job_service.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+    constraints:
+      - "Read-only except writing a Scout note and board receipt."
+      - "Do not implement terminal parity during the Scout."
+      - "Do not deepen domain-to-worker imports casually."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Direct-call inventory of CrawlService job_service.fail_job sites with file:line."
+      - "Evidence for whether CrawlService owns or can access AsyncSession/UoW today."
+      - "Recommended canonical owner for manual terminal failure commits."
+      - "Split red-test plan for pending-queue failure and direct-ARQ enqueue failure."
+      - "Allowed files and stop_if proposal for the next Worker."
+    receipt:
+      result: done
+      summary: "Mapped manual CrawlService failure terminal ownership. The manual pending-queue and direct-ARQ failure paths are real terminal escape paths, but implementing parity directly would import worker terminal ownership into websites/domain. Recommended a behavior-preserving terminal ownership relocation first."
+      note: "docs/goals/crawler-reliability-robustness-transparency/notes/T098-manual-crawl-terminal-ownership-scout.md"
+      evidence:
+        - "backend/src/intric/websites/domain/crawl_service.py:204-228"
+        - "backend/src/intric/websites/domain/crawl_service.py:304-335"
+        - "backend/src/intric/worker/crawl/terminal.py:76-105"
+        - "backend/src/intric/websites/domain/crawl_run_repo.py:60-63"
+        - "backend/src/intric/server/dependencies/container.py:35-53"
+      recommendation: "Move TerminalEvent/commit_terminal ownership to a website-owned crawl terminal persistence boundary before manual CrawlService failure parity."
+      spawned_tasks:
+        - T099
+  - id: T099
+    type: judge
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Validate the T098 terminal ownership relocation plan and decide whether to activate a behavior-preserving Worker."
+    inputs:
+      - "docs/goals/crawler-reliability-robustness-transparency/notes/T098-manual-crawl-terminal-ownership-scout.md"
+      - "backend/src/intric/worker/crawl/terminal.py"
+      - "backend/src/intric/worker/crawl/__init__.py"
+      - "backend/tests/unittests/worker/test_crawl_terminal.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/feeder/watchdog.py"
+      - "backend/src/intric/websites/domain/crawl_service.py"
+    constraints:
+      - "Do not implement during the Judge task."
+      - "Prefer one canonical terminal owner over import shims that become permanent."
+      - "If a shim is necessary for reviewability, require a deletion path."
+      - "Do not touch manual failure behavior until terminal ownership is settled."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Decision: activate relocation Worker, narrow the Scout, or choose a different precursor."
+      - "Allowed files, red-test plan, verification commands, stop_if conditions, and non-goals."
+      - "Assessment of import direction, compatibility shim risk, and reviewability."
+    receipt:
+      result: done
+      summary: "Validated the terminal ownership relocation plan with Claude. The clean next slice is a behavior-preserving move of terminal event/commit ownership from worker/crawl/terminal.py to a website-owned crawl terminal persistence boundary, with worker package re-export only and no compatibility shim."
+      decision: "Activate T100 Worker to move TerminalEvent/commit_terminal ownership to backend/src/intric/websites/domain/crawl_terminal.py before manual CrawlService failure parity."
+      artifacts:
+        - ".codex/artifacts/claude-peer-loop-t099-terminal-ownership-relocation-plan-gate-20260515T071119Z.md"
+        - ".codex/artifacts/claude-peer-loop-t099-terminal-ownership-relocation-plan-verification-20260515T071421Z.md"
+      spawned_tasks:
+        - T100
+  - id: T100
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Move crawler terminal event and commit ownership to a website-owned persistence boundary without changing terminal write behavior."
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawl_terminal.py"
+      - "backend/src/intric/worker/crawl/terminal.py"
+      - "backend/src/intric/worker/crawl/__init__.py"
+      - "backend/tests/unittests/worker/test_crawl_terminal.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_terminal.py -q"
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run pytest tests/integration/test_phase0_zombie_reconciliation.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl src/intric/websites/domain/crawl_terminal.py tests/unittests/worker/test_crawl_terminal.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/crawl src/intric/websites/domain/crawl_terminal.py tests/unittests/worker/test_crawl_terminal.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py src/intric/worker/feeder/watchdog.py src/intric/websites/domain/crawl_terminal.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "! rg 'async def commit_terminal\\b|async def commit_terminal_batch\\b' backend/src/intric/worker/"
+      - "! rg 'from intric\\.worker\\.crawl\\.terminal' backend/src backend/tests"
+      - "rg 'from intric\\.websites\\.domain\\.crawl_terminal' backend/src/intric/worker/crawl/__init__.py"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t100-terminal-ownership-relocation --phase commit-gate --iteration 1 --require-green --required-min-score 8 ..."
+    stop_if:
+      - "Moving the module requires changing terminal write semantics."
+      - "Existing terminal tests need behavioral rewrites rather than import/ownership updates."
+      - "Need to touch manual CrawlService failure behavior, WorkerAdapter, admin UI, scheduler, or migrations."
+      - "Need to touch crawl_tasks.py or watchdog.py beyond import-path-only changes."
+      - "Need to introduce a protocol, factory, registry, session wrapper, UoW wrapper, Any, cast, or type ignore."
+      - "The old worker/crawl/terminal.py implementation file survives as a shim."
+    receipt:
+      result: done
+      summary: "Moved crawler terminal event and commit ownership from worker/crawl/terminal.py to the website-owned crawl terminal persistence boundary. The old worker-local implementation file was deleted, and worker/crawl/__init__.py now only re-exports the canonical names."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawl_terminal.py"
+        - "backend/src/intric/worker/crawl/__init__.py"
+        - "backend/src/intric/worker/crawl/terminal.py"
+        - "backend/tests/unittests/worker/test_crawl_terminal.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      red_verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_terminal.py -q -> failed with ModuleNotFoundError: No module named 'intric.websites.domain.crawl_terminal' before implementation."
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_terminal.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q -> 19 passed"
+        - "cd backend && uv run pytest tests/integration/test_phase0_zombie_reconciliation.py -q -> 8 passed"
+        - "cd backend && uv run ruff check src/intric/worker/crawl src/intric/websites/domain/crawl_terminal.py tests/unittests/worker/test_crawl_terminal.py -> passed"
+        - "cd backend && uv run ruff format --check src/intric/worker/crawl src/intric/websites/domain/crawl_terminal.py tests/unittests/worker/test_crawl_terminal.py -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py src/intric/worker/feeder/watchdog.py src/intric/websites/domain/crawl_terminal.py tests/unittests/worker/test_crawl_terminal.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -> 0 errors"
+        - "cd backend && uv run pyright --project pyrightconfig.json -> 0 errors"
+        - "! rg 'async def commit_terminal\\b|async def commit_terminal_batch\\b' backend/src/intric/worker/ -> passed"
+        - "! rg 'from intric\\.worker\\.crawl\\.terminal' backend frontend docs -> passed"
+        - "rg 'from intric\\.websites\\.domain\\.crawl_terminal' backend/src/intric/worker/crawl/__init__.py -> passed"
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t100-terminal-ownership-relocation-implementation-review-20260515T072441Z.md"
+          - ".codex/artifacts/claude-peer-loop-t100-terminal-ownership-relocation-final-verification-20260515T072730Z.md"
+      follow_up_candidates:
+        - "Migrate worker callers to import terminal names directly from intric.websites.domain.crawl_terminal, then remove terminal re-exports from worker/crawl/__init__.py."
+        - "Codify the no-worker-local terminal writer grep gate as a pytest invariant."
+        - "Implement manual CrawlService pending-queue failure terminal parity."
+        - "Implement manual CrawlService direct ARQ/pre-acquired flag enqueue failure terminal parity."
+      spawned_tasks:
+        - T101
+  - id: T101
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Choose the next manual CrawlService terminal parity slice now that terminal ownership is website-owned."
+    inputs:
+      - "T098 receipt"
+      - "T100 receipt"
+      - "backend/src/intric/websites/domain/crawl_service.py"
+      - "backend/src/intric/websites/domain/crawl_terminal.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/src/intric/jobs/task_service.py"
+      - "backend/src/intric/jobs/job_service.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+    constraints:
+      - "Read-only except board/roadmap updates."
+      - "Do not implement during the Judge task."
+      - "Prefer one terminal commit owner and one explicit transaction/session ownership story."
+      - "Do not reach through repository internals unless the Judge proves that is the least bad temporary path and records a deletion path."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Decision: pending-queue failure first, direct-ARQ enqueue failure first, import cleanup first, or a narrower Scout."
+      - "Allowed files, red-test plan, verification commands, stop_if conditions, and non-goals for the next Worker."
+      - "Assessment of session/UoW ownership, rollback ordering, and cleanup/slot-release ordering."
     receipt: null
 
 checks:

@@ -77,6 +77,7 @@ async def commit_terminal(
     session: AsyncSession,
     event: TerminalEvent,
 ) -> TerminalCommitResult:
+    """Commit only durable Job/CrawlRun terminal fields; post-terminal effects run elsewhere."""
     job_result = await session.execute(
         sa.update(Jobs)
         .where(Jobs.id == event.job_id)
@@ -109,6 +110,7 @@ async def commit_terminal_batch(
     session: AsyncSession,
     event: TerminalBatchEvent,
 ) -> TerminalCommitResult:
+    """Batch variant of commit_terminal for multi-row terminal commits; same invariant."""
     job_result = await session.execute(
         sa.update(Jobs)
         .where(Jobs.id.in_(event.job_ids))

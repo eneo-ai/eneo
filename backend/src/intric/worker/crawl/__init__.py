@@ -1,5 +1,13 @@
 """Crawler task utilities and lifecycle policies."""
 
+from intric.websites.domain.crawl_terminal import (
+    CrawlRunTerminalUpdate,
+    TerminalBatchEvent,
+    TerminalCommitResult,
+    TerminalEvent,
+    commit_terminal,
+    commit_terminal_batch,
+)
 from intric.worker.crawl.audit import CrawlAuditPayload, record_crawl_audit
 from intric.worker.crawl.bootstrap import (
     CrawlBootstrapResult,
@@ -60,14 +68,6 @@ from intric.worker.crawl.slot_release import (
     CrawlSlotReleaseRequest,
     CrawlSlotReleaseResult,
     release_crawl_slot_after_task,
-)
-from intric.worker.crawl.terminal import (
-    CrawlRunTerminalUpdate,
-    TerminalBatchEvent,
-    TerminalCommitResult,
-    TerminalEvent,
-    commit_terminal,
-    commit_terminal_batch,
 )
 from intric.worker.crawl.website_timestamps import (
     update_website_timestamps_after_crawl,

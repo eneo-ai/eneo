@@ -71,6 +71,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Redis slot Lua ownership tranche: delete duplicated slot Lua and raw slot-key ownership from `CrawlService`, route optimistic acquire/release through `LuaScripts`, and lock the canonical owner with behavior tests.
 - [x] Pending queue ownership tranche: make `PendingQueue.add` the typed canonical writer, remove raw queue key/serialization/rpush ownership from `CrawlService`, and preserve scheduled/manual rollback behavior with tests.
 - [x] Tenant limiter Lua ownership tranche: route `TenantConcurrencyLimiter` through `LuaScripts.acquire_slot/release_slot`, preserving circuit-breaker and fallback semantics while removing inline Redis slot eval ownership.
+- [x] Terminal ownership relocation tranche: move `TerminalEvent` / `commit_terminal(...)` to a website-owned crawl terminal persistence boundary and delete the worker-local implementation file.
 
 ## Non-Negotiable Principles
 
@@ -413,7 +414,7 @@ Work:
 - [x] Extract the website-crawl audit emission path into a typed post-commit reactor boundary.
 - [x] Extract the website-crawl circuit-breaker path into a typed post-commit reactor boundary.
 - [x] Add remaining post-commit reactors for website timestamps and slot release.
-- [ ] Replace direct terminal `sa.update(CrawlRuns)` and `sa.update(Jobs)` call sites in one vertical path at a time. Complete so far: duplicate crawl skip, zero-output terminal crawl, exception/shutdown outcomes, and normal/partial completion.
+- [ ] Replace direct terminal `sa.update(CrawlRuns)` and `sa.update(Jobs)` call sites in one vertical path at a time. Complete so far: worker crawl-task terminal branches, watchdog CrawlRun terminal branches, and terminal writer ownership relocation. Remaining known escape: manual `CrawlService` enqueue failure parity after the terminal owner is website-owned.
 - [x] Remove all direct `setattr(task_manager, "_job_already_handled", True)` call sites.
 - [x] Replace TaskManager private-flag coordination with an explicit public terminal-commit acknowledgement or remove TaskManager from crawler terminal ownership.
 

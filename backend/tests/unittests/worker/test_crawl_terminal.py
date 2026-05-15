@@ -6,18 +6,27 @@ import pytest
 
 from intric.main.models import Status
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode, FailureReason
-from intric.worker.crawl.terminal import (
+from intric.websites.domain.crawl_terminal import (
+    ACTIVE_TERMINAL_JOB_STATUSES,
     CrawlRunTerminalUpdate,
     TerminalBatchEvent,
     TerminalEvent,
     commit_terminal,
     commit_terminal_batch,
 )
+from intric.worker.crawl import TerminalEvent as WorkerTerminalEvent
+from intric.worker.crawl import commit_terminal as worker_commit_terminal
 
 
 class _ExecuteResult:
     def __init__(self, rowcount: int) -> None:
         self.rowcount = rowcount
+
+
+def test_worker_crawl_package_re_exports_canonical_terminal_boundary():
+    assert WorkerTerminalEvent is TerminalEvent
+    assert worker_commit_terminal is commit_terminal
+    assert ACTIVE_TERMINAL_JOB_STATUSES == (Status.QUEUED, Status.IN_PROGRESS)
 
 
 @pytest.mark.asyncio
