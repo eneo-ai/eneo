@@ -43,7 +43,6 @@ from intric.worker.crawl import (
     PageProcessingSuccess,
     PersistBatchResult,
     PreemptedPageProcessingAbort,
-    SessionHolder,
     TerminalEvent,
     acquire_crawl_slot,
     bootstrap_crawl,
@@ -584,14 +583,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
     # Track pre-acquired slot for guaranteed cleanup even if tenant injection fails
     preacquired_tenant_id: UUID | None = None
 
-    # Track sessions for cleanup (addresses session lifecycle leak on recovery)
-    # When we recover from invalid transaction, we create new sessions that must be
-    # closed in the finally block to prevent connection pool exhaustion
-    created_sessions: list[AsyncSession] = []
-    # Use mutable holder so page loop and heartbeat can access current session
-    # This allows session recovery to update the reference mid-processing
-    session_holder: SessionHolder = {"session": None, "uploader": None}
-
     try:
         redis_client = container.redis_client()
     except Exception as exc:
@@ -858,14 +849,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             # Get resources (these don't need a session)
             crawler = container.crawler()
-            uploader = container.text_processor()
-
-            # Initialize session holder for recovery support
-            # NOTE: Starts with None - sessions are created on-demand by execute_with_recovery
-            # This is the "sessionless container" pattern for long-running tasks
-            # Each DB operation creates its own short-lived session (~50-300ms)
-            session_holder["session"] = None
-            session_holder["uploader"] = uploader
 
             start = time.time()
             if tenant is None:
@@ -1110,8 +1093,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         )
 
                     await execute_with_recovery(
-                        session_holder=session_holder,
-                        created_sessions=created_sessions,
                         operation_name="terminal_zero_output_commit",
                         operation=_do_terminal_zero_output_commit,
                     )
@@ -1119,8 +1100,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     await apply_post_terminal_effects(
                         PostTerminalEffectInput(
                             recovery=PostTerminalRecoveryContext(
-                                session_holder=session_holder,
-                                created_sessions=created_sessions,
                                 execute_with_recovery=execute_with_recovery,
                             ),
                             audit_service=container.audit_service(),
@@ -1284,8 +1263,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         )
 
                     await execute_with_recovery(
-                        session_holder=session_holder,
-                        created_sessions=created_sessions,
                         operation_name=f"process_file_{filename}",
                         operation=_process_single_file,
                     )
@@ -1341,8 +1318,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     )
 
                 return await execute_with_recovery(
-                    session_holder=session_holder,
-                    created_sessions=created_sessions,
                     operation_name="stale_blob_cleanup",
                     operation=_do_stale_blob_cleanup,
                 )
@@ -1392,8 +1367,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 await sess.execute(stmt)
 
             await execute_with_recovery(
-                session_holder=session_holder,
-                created_sessions=created_sessions,
                 operation_name="website_size_update",
                 operation=_do_update_size,
             )
@@ -1411,8 +1384,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
 
             await execute_with_recovery(
-                session_holder=session_holder,
-                created_sessions=created_sessions,
                 operation_name="website_post_crawl_timestamps_update",
                 operation=_do_timestamp_update,
             )
@@ -1503,8 +1474,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 return result.scalar_one_or_none()
 
             job_status_value = await execute_with_recovery(
-                session_holder=session_holder,
-                created_sessions=created_sessions,
                 operation_name="suicide_check",
                 operation=_do_suicide_check,
             )
@@ -1577,8 +1546,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
 
             await execute_with_recovery(
-                session_holder=session_holder,
-                created_sessions=created_sessions,
                 operation_name="terminal_completion_commit",
                 operation=_do_terminal_completion_commit,
             )
@@ -1592,8 +1559,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             await apply_post_terminal_effects(
                 PostTerminalEffectInput(
                     recovery=PostTerminalRecoveryContext(
-                        session_holder=session_holder,
-                        created_sessions=created_sessions,
                         execute_with_recovery=execute_with_recovery,
                     ),
                     audit_service=container.audit_service(),
@@ -1701,31 +1666,3 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
             except Exception:
                 pass  # Best effort cleanup
-
-        # Clean up recovery sessions to prevent connection pool exhaustion
-        for recovery_session in created_sessions:
-            try:
-                await recovery_session.close()
-            except Exception:
-                pass  # Best effort cleanup
-
-        # Guaranteed close with rollback for main session
-        main_session = session_holder.get("session")
-        if main_session is not None:
-            try:
-                # Only rollback if there's an active transaction
-                if main_session.in_transaction():
-                    await main_session.rollback()
-            except Exception as rollback_exc:
-                # Log at debug level - may be expected if session already closed
-                logger.debug(
-                    "Session rollback in finally block (may be expected)",
-                    extra={"error": str(rollback_exc)},
-                )
-            try:
-                await main_session.close()
-            except Exception:
-                pass  # Best effort - connection may already be closed
-            finally:
-                # Clear session_holder to prevent reuse of closed session
-                session_holder["session"] = None

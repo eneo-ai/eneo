@@ -15,7 +15,6 @@ from intric.worker.crawl.post_terminal_effects import (
     PostTerminalRecoveryExecutor,
     apply_post_terminal_effects,
 )
-from intric.worker.crawl.recovery import SessionHolder
 
 
 class _FakeAuditService:
@@ -32,8 +31,6 @@ class _Recorder:
     async def execute_with_recovery(
         self,
         *,
-        session_holder: SessionHolder,
-        created_sessions: list[AsyncSession],
         operation_name: str,
         operation: Callable[[AsyncSession], Awaitable[None]],
     ) -> None:
@@ -67,8 +64,6 @@ def _recovery_context(
     execute_with_recovery: PostTerminalRecoveryExecutor,
 ) -> PostTerminalRecoveryContext:
     return PostTerminalRecoveryContext(
-        session_holder=SessionHolder(session=None, uploader=None),
-        created_sessions=[],
         execute_with_recovery=execute_with_recovery,
     )
 
@@ -175,8 +170,6 @@ async def test_apply_post_terminal_effects_propagates_circuit_breaker_failure(
 
     async def failing_execute_with_recovery(
         *,
-        session_holder: SessionHolder,
-        created_sessions: list[AsyncSession],
         operation_name: str,
         operation: Callable[[AsyncSession], Awaitable[None]],
     ) -> None:

@@ -345,7 +345,6 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
         *,
         operation_name: str,
         operation,
-        **_kwargs: object,
     ):
         operations.append(operation_name)
         recovery_session = _FakeRecoverySession()
@@ -514,7 +513,6 @@ async def test_sitemap_source_skip_cutoff_is_passed_to_crawler_when_enabled(
         *,
         operation_name: str,
         operation,
-        **_kwargs: object,
     ):
         operations.append(operation_name)
         recovery_session = _FakeRecoverySession()
@@ -653,9 +651,10 @@ async def test_sitemap_source_skip_kwargs_stay_empty_when_not_allowed(
 
     async def execute_with_recovery(
         *,
+        operation_name: str,
         operation,
-        **_kwargs: object,
     ):
+        assert operation_name
         return await operation(_FakeRecoverySession())
 
     async def persist_batch(**_kwargs: object) -> PersistBatchResult:

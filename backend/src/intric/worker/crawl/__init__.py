@@ -42,7 +42,6 @@ from intric.worker.crawl.persistence import (
     persist_batch,
 )
 from intric.worker.crawl.recovery import (
-    SessionHolder,
     calculate_exponential_backoff,
     execute_with_recovery,
     is_invalid_transaction_error,
@@ -114,7 +113,6 @@ __all__ = [
     "PersistBatchResult",
     "persist_batch",
     # Recovery - Main API
-    "SessionHolder",
     "calculate_exponential_backoff",
     "execute_with_recovery",
     "reset_tenant_retry_delay",

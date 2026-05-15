@@ -61,6 +61,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Step 5 post-terminal effects naming tranche: rename the post-terminal side-effect owner away from Twisted-conflicting reactor vocabulary and pass `AuditService` directly instead of routing audit emission through the DI container.
 - [x] Step 5 recovery executor container-trim tranche: remove the unused `Container` argument from the session-per-operation recovery executor and post-terminal recovery context without changing transaction semantics.
 - [x] Step 5 dead recovery deletion tranche: delete orphaned `recover_session(...)`, its public exports, and the tests that only covered that dead path.
+- [x] Step 5 recovery plumbing trim tranche: remove vestigial `SessionHolder`, `session_holder`, and `created_sessions` plumbing now that sessions are fully owned inside `execute_with_recovery(...)`.
 
 ## Non-Negotiable Principles
 
@@ -79,7 +80,7 @@ The current branch already improved skip-unchanged behavior, source-retained cou
 
 Important current friction:
 
-- `backend/src/intric/worker/crawl_tasks.py` is still too large at 1,731 lines, but bootstrap, page iteration, file processing, cleanup, audit, circuit breaker, website timestamps, slot acquire/release, terminal commits, and cleanup policy are now extracted behind typed boundaries.
+- `backend/src/intric/worker/crawl_tasks.py` is still too large at 1,668 lines, but bootstrap, page iteration, file processing, cleanup, audit, circuit breaker, website timestamps, slot acquire/release, terminal commits, and cleanup policy are now extracted behind typed boundaries.
 - `backend/src/intric/worker/crawl_tasks.py` now uses a public `TaskManager.acknowledge_terminal_commit(...)` seam. Duplicate crawl skips, zero-output crawls, exception/shutdown outcomes, normal/partial completion, max-age busy-wait abandonment, and pending-queue enqueue failure rollback go through `commit_terminal(...)`. Remaining terminal write ownership is now concentrated in watchdog cleanup.
 - `_get_primary_active_job_id(...)` now filters explicitly to crawl jobs and is backed by reversible PostgreSQL indexes on active crawl jobs and crawl-run website/job lookups. The migration test proves the duplicate-guard lookup changes from a crawl-run sequential scan before the migration to planner-visible index usage after it.
 - `backend/src/intric/worker/crawl_feeder.py` owns custom scheduling, Redis queues, leader election, tenant capacity, and pre-acquired slot protocol.

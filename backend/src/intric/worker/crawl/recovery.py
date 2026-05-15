@@ -20,11 +20,10 @@ import logging
 import random
 import time
 from collections.abc import Awaitable
-from typing import TYPE_CHECKING, Any, Callable, TypeVar, cast
+from typing import TYPE_CHECKING, Callable, TypeVar, cast
 from uuid import UUID
 
 from sqlalchemy.exc import InvalidRequestError, PendingRollbackError
-from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
     import redis.asyncio as aioredis
@@ -34,8 +33,6 @@ logger = logging.getLogger(__name__)
 TResult = TypeVar("TResult")
 
 __all__ = [
-    # Type definitions
-    "SessionHolder",
     # Public API
     "execute_with_recovery",
     "calculate_exponential_backoff",
@@ -44,17 +41,6 @@ __all__ = [
     "is_invalid_transaction_error",
     "is_invalid_transaction_error_msg",
 ]
-
-
-class SessionHolder(TypedDict):
-    """Mutable container for session reference across recovery.
-
-    Used to pass session by reference so recovery can update the caller's
-    reference without changing function signatures.
-    """
-
-    session: "AsyncSession | None"
-    uploader: Any  # TextProcessor
 
 
 def is_invalid_transaction_error(error: Exception) -> bool:
@@ -107,14 +93,12 @@ def is_invalid_transaction_error_msg(message: str | None) -> bool:
 
 
 async def execute_with_recovery(
-    session_holder: SessionHolder,
-    created_sessions: list["AsyncSession"],
+    *,
     operation_name: str,
     operation: Callable[["AsyncSession"], Awaitable[TResult]],
 ) -> TResult:
     """Execute a database operation with its own short-lived session.
 
-    NEW ARCHITECTURE (Session-per-Operation Pattern):
     Each call creates a fresh session, executes the operation, commits, and
     returns the session to the pool. This prevents DB pool exhaustion for
     long-running tasks like crawls (5-30 minutes).
@@ -126,8 +110,6 @@ async def execute_with_recovery(
     - Return any result needed by the caller
 
     Args:
-        session_holder: Dict updated with current session for legacy compatibility
-        created_sessions: List to track sessions for cleanup on error
         operation_name: Human-readable name for logging
         operation: Async callable that accepts (session) parameter
 
@@ -144,7 +126,7 @@ async def execute_with_recovery(
             # No commit needed - execute_with_recovery handles it
 
         result = await execute_with_recovery(
-            session_holder, created_sessions, "website_update", _do_update
+            operation_name="website_update", operation=_do_update
         )
     """
     from intric.database.database import sessionmanager
@@ -154,9 +136,6 @@ async def execute_with_recovery(
         # Create fresh session for this operation
         session = sessionmanager.create_session()
         await session.begin()
-
-        # Update session_holder for legacy code paths that read from it
-        session_holder["session"] = session
 
         # Execute operation with the session
         result = await operation(session)
@@ -197,8 +176,6 @@ async def execute_with_recovery(
             try:
                 retry_session = sessionmanager.create_session()
                 await retry_session.begin()
-                # NOTE: Don't add to created_sessions - we close immediately below
-                session_holder["session"] = retry_session
 
                 result = await operation(retry_session)
                 await retry_session.commit()
@@ -243,7 +220,7 @@ async def execute_with_recovery(
 
     finally:
         # Always close the primary session (retry session has its own finally block)
-        if session is not None and session not in created_sessions:
+        if session is not None:
             try:
                 await session.close()
             except Exception:

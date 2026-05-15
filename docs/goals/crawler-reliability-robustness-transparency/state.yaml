@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T079
+active_task: T080
 
 tasks:
   - id: T001
@@ -3774,7 +3774,7 @@ tasks:
   - id: T079
     type: worker
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Trim vestigial `session_holder` and `created_sessions` plumbing from `execute_with_recovery(...)`."
     inputs:
@@ -3820,19 +3820,92 @@ tasks:
       - "Removing the plumbing requires changing transaction retry behavior."
       - "Need files outside allowed_files."
       - "Strict Pyright regresses on touched backend files."
+    receipt:
+      result: done
+      summary: "Removed vestigial `SessionHolder`, `session_holder`, and `created_sessions` plumbing from the session-per-operation executor, post-terminal recovery context, crawl task call sites, and package exports. `execute_with_recovery(...)` now owns all session creation/cleanup internally and callers pass only `operation_name` plus `operation`."
+      changed_files:
+        - "backend/src/intric/worker/crawl/recovery.py"
+        - "backend/src/intric/worker/crawl/post_terminal_effects.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/src/intric/worker/crawl/__init__.py"
+        - "backend/tests/unittests/worker/test_recovery.py"
+        - "backend/tests/unittests/worker/test_crawl_post_terminal_effects.py"
+        - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      tdd_red:
+        - "cd backend && uv run pytest tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py -q -> 8 failed, 18 passed; failures were expected stale `SessionHolder`, `session_holder`, and `created_sessions` contract mismatches"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q -> 37 passed"
+        - "cd backend && uv run pytest tests/unittests/worker -q -> 320 passed"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/recovery.py src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py src/intric/worker/crawl/__init__.py tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -> passed"
+        - "cd backend && uv run ruff format --check src/intric/worker/crawl/recovery.py src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py src/intric/worker/crawl/__init__.py tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/recovery.py src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py src/intric/worker/crawl/__init__.py tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -> 0 errors"
+        - "rg -n \"session_holder|created_sessions|SessionHolder\" backend/src || true -> no output"
+        - "wc -l backend/src/intric/worker/crawl_tasks.py -> 1668"
+      claude:
+        verdict: green
+        artifact: ".codex/artifacts/claude-peer-loop-t079-recovery-plumbing-trim-implementation-review-20260515T035344Z.md"
+        min_score: 8
+      notes:
+        - "After Claude green, the optional P3 was applied: terminal outcome test fakes now use the exact `execute_with_recovery(*, operation_name, operation)` signature instead of permissive `**_kwargs`."
+        - "Remaining small follow-up: collapse one-field `PostTerminalRecoveryContext` and pass the executor directly through `PostTerminalEffectInput`."
+      spawned_tasks:
+        - T080
+  - id: T080
+    type: worker
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Collapse the one-field `PostTerminalRecoveryContext` wrapper into a direct post-terminal recovery executor field."
+    inputs:
+      - "T079 receipt"
+      - "backend/src/intric/worker/crawl/post_terminal_effects.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_post_terminal_effects.py"
+      - ".codex/artifacts/claude-peer-loop-t079-recovery-plumbing-trim-implementation-review-20260515T035344Z.md"
+    allowed_files:
+      - "backend/src/intric/worker/crawl/post_terminal_effects.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_post_terminal_effects.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "TDD: update post-terminal tests first so the current one-field wrapper fails before production changes."
+      - "Remove only the one-field wrapper; do not change audit payloads, circuit-breaker math, operation names, or transaction recovery."
+      - "Do not introduce a new alias/type wrapper just to replace the dataclass."
+      - "No broad session-management refactor, new abstractions, new `Any`, type ignores, or compatibility shims."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "`PostTerminalRecoveryContext` is deleted."
+      - "`PostTerminalEffectInput` carries the recovery executor directly."
+      - "Post-terminal call sites pass `recovery_executor=execute_with_recovery` or a similarly explicit field."
+      - "Post-terminal ordering tests still cover circuit breaker before audit and circuit-breaker failure propagation."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run pytest tests/unittests/worker -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_effects.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_effects.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_effects.py"
+      - "rg -n \"PostTerminalRecoveryContext|recovery=PostTerminalRecoveryContext\" backend/src backend/tests || true"
+    stop_if:
+      - "The wrapper grows a second real field or invariant before deletion."
+      - "Deleting it requires changing audit or circuit-breaker behavior."
+      - "Need files outside allowed_files."
+      - "Strict Pyright regresses on touched backend files."
     receipt: null
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T078
+    task: T079
     commands:
-      - "rg -n \"recover_session\" backend/src || true"
-      - "cd backend && uv run pytest tests/unittests/worker/test_recovery.py tests/unittests/worker/test_session_transaction_atomicity.py -q"
+      - "cd backend && uv run pytest tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
       - "cd backend && uv run pytest tests/unittests/worker -q"
-      - "cd backend && uv run ruff check src/intric/worker/crawl/recovery.py src/intric/worker/crawl/__init__.py tests/unittests/worker/test_recovery.py"
-      - "cd backend && uv run ruff format --check src/intric/worker/crawl/recovery.py src/intric/worker/crawl/__init__.py tests/unittests/worker/test_recovery.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/recovery.py src/intric/worker/crawl/__init__.py tests/unittests/worker/test_recovery.py"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t078-recover-session-delete --phase commit-gate --iteration 1 --require-green --required-min-score 8 ..."
-    note: "T078 recover_session deletion passed production grep, targeted recovery tests, full worker unit tests, ruff, format check, strict Pyright, and Claude green review."
+      - "cd backend && uv run ruff check src/intric/worker/crawl/recovery.py src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py src/intric/worker/crawl/__init__.py tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/crawl/recovery.py src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py src/intric/worker/crawl/__init__.py tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/recovery.py src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py src/intric/worker/crawl/__init__.py tests/unittests/worker/test_recovery.py tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "rg -n \"session_holder|created_sessions|SessionHolder\" backend/src || true"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t079-recovery-plumbing-trim --phase commit-gate --iteration 1 --require-green --required-min-score 8 ..."
+    note: "T079 recovery plumbing trim passed targeted worker tests, full worker unit tests, ruff, format check, strict Pyright, production residue grep, and Claude green review."

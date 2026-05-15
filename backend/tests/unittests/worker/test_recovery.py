@@ -38,6 +38,7 @@ class TestRecoveryModuleImports:
         assert callable(reset_tenant_retry_delay)
         assert callable(update_job_retry_stats)
         assert not hasattr(crawl_package, "recover_session")
+        assert not hasattr(crawl_package, "SessionHolder")
 
     def test_import_directly_from_recovery_module(self):
         """Recovery functions should be importable directly from recovery module."""
@@ -46,7 +47,9 @@ class TestRecoveryModuleImports:
 
         assert callable(execute_with_recovery)
         assert "recover_session" not in recovery_module.__all__
+        assert "SessionHolder" not in recovery_module.__all__
         assert not hasattr(recovery_module, "recover_session")
+        assert not hasattr(recovery_module, "SessionHolder")
 
 
 class TestIsInvalidTransactionError:
@@ -180,9 +183,6 @@ class TestExecuteWithRecovery:
             # Operation receives session from execute_with_recovery
             return "success"
 
-        session_holder = {"session": MagicMock(), "uploader": MagicMock()}
-        created_sessions = []
-
         # Mock session for session-per-operation pattern
         mock_session = MagicMock()
         mock_session.begin = AsyncMock()
@@ -194,8 +194,6 @@ class TestExecuteWithRecovery:
 
         with patch("intric.database.database.sessionmanager", mock_sessionmanager):
             result = await execute_with_recovery(
-                session_holder=session_holder,
-                created_sessions=created_sessions,
                 operation_name="test_op",
                 operation=successful_op,
             )
@@ -214,9 +212,6 @@ class TestExecuteWithRecovery:
         async def failing_op(session):
             raise ValueError("Not a transaction error")
 
-        session_holder = {"session": MagicMock(), "uploader": MagicMock()}
-        created_sessions = []
-
         # Mock session for session-per-operation pattern
         mock_session = MagicMock()
         mock_session.begin = AsyncMock()
@@ -229,8 +224,6 @@ class TestExecuteWithRecovery:
         with patch("intric.database.database.sessionmanager", mock_sessionmanager):
             with pytest.raises(ValueError, match="Not a transaction error"):
                 await execute_with_recovery(
-                    session_holder=session_holder,
-                    created_sessions=created_sessions,
                     operation_name="test_op",
                     operation=failing_op,
                 )
@@ -252,9 +245,6 @@ class TestExecuteWithRecovery:
                 raise PendingRollbackError("First call fails")
             return "success on retry"
 
-        session_holder = {"session": MagicMock(), "uploader": MagicMock()}
-        created_sessions = []
-
         # Mock primary session (fails on first call)
         primary_session = MagicMock()
         primary_session.begin = AsyncMock()
@@ -275,8 +265,6 @@ class TestExecuteWithRecovery:
 
         with patch("intric.database.database.sessionmanager", mock_sessionmanager):
             result = await execute_with_recovery(
-                session_holder=session_holder,
-                created_sessions=created_sessions,
                 operation_name="test_op",
                 operation=op_fails_then_succeeds,
             )
@@ -327,34 +315,3 @@ class TestResetTenantRetryDelay:
 
         # Should not raise
         await reset_tenant_retry_delay(tenant_id=uuid4(), redis_client=mock_redis)
-
-
-class TestSessionHolderTypedDict:
-    """Tests for SessionHolder TypedDict."""
-
-    def test_session_holder_can_be_created(self):
-        """SessionHolder should be creatable as a dict."""
-        from intric.worker.crawl.recovery import SessionHolder
-
-        holder: SessionHolder = {
-            "session": MagicMock(),
-            "uploader": MagicMock(),
-        }
-
-        assert "session" in holder
-        assert "uploader" in holder
-
-    def test_session_holder_is_mutable(self):
-        """SessionHolder should be mutable for recovery updates."""
-        from intric.worker.crawl.recovery import SessionHolder
-
-        holder: SessionHolder = {
-            "session": "old_session",
-            "uploader": "old_uploader",
-        }
-
-        holder["session"] = "new_session"
-        holder["uploader"] = "new_uploader"
-
-        assert holder["session"] == "new_session"
-        assert holder["uploader"] == "new_uploader"

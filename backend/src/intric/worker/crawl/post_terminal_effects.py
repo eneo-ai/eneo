@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from intric.worker.crawl.audit import CrawlAuditPayload, record_crawl_audit
 from intric.worker.crawl.circuit_breaker import update_crawl_circuit_breaker
-from intric.worker.crawl.recovery import SessionHolder
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,8 +15,6 @@ class PostTerminalRecoveryExecutor(Protocol):
     async def __call__(
         self,
         *,
-        session_holder: SessionHolder,
-        created_sessions: list["AsyncSession"],
         operation_name: str,
         operation: Callable[["AsyncSession"], Awaitable[None]],
     ) -> None: ...
@@ -25,8 +22,6 @@ class PostTerminalRecoveryExecutor(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class PostTerminalRecoveryContext:
-    session_holder: SessionHolder
-    created_sessions: list["AsyncSession"]
     execute_with_recovery: PostTerminalRecoveryExecutor
 
 
@@ -55,8 +50,6 @@ async def apply_post_terminal_effects(effect: PostTerminalEffectInput) -> None:
         )
 
     await recovery.execute_with_recovery(
-        session_holder=recovery.session_holder,
-        created_sessions=recovery.created_sessions,
         operation_name=effect.circuit_breaker_operation_name,
         operation=_do_circuit_breaker_update,
     )
