@@ -8,6 +8,7 @@ test("admin crawler load keeps settings available when diagnostics cannot be loa
   const getCrawler = vi.fn().mockResolvedValue(crawlerSettings);
   const activeInventory = vi.fn().mockRejectedValue(new Error("active unavailable"));
   const recentFailures = vi.fn().mockRejectedValue(new Error("diagnostics unavailable"));
+  const scheduledAggregate = vi.fn().mockRejectedValue(new Error("scheduled unavailable"));
   const depends = vi.fn();
 
   const result = await load({
@@ -15,7 +16,7 @@ test("admin crawler load keeps settings available when diagnostics cannot be loa
     parent: vi.fn().mockResolvedValue({
       intric: {
         settings: { getCrawler },
-        crawlerAdmin: { activeInventory, recentFailures }
+        crawlerAdmin: { activeInventory, recentFailures, scheduledAggregate }
       }
     })
   } as unknown as Parameters<typeof load>[0]);
@@ -23,16 +24,20 @@ test("admin crawler load keeps settings available when diagnostics cannot be loa
   expect(depends).toHaveBeenCalledWith("admin:crawler-settings");
   expect(depends).toHaveBeenCalledWith("admin:crawler-active-inventory");
   expect(depends).toHaveBeenCalledWith("admin:crawler-recent-failures");
+  expect(depends).toHaveBeenCalledWith("admin:crawler-scheduled");
   expect(getCrawler).toHaveBeenCalledOnce();
   expect(activeInventory).toHaveBeenCalledWith(CRAWLER_ACTIVE_INVENTORY_DEFAULTS);
   expect(recentFailures).toHaveBeenCalledWith(CRAWLER_RECENT_FAILURES_DEFAULTS);
+  expect(scheduledAggregate).toHaveBeenCalledOnce();
   expect(result).toEqual({
     crawlerSettings,
     crawlerActiveInventory: null,
     crawlerActiveInventoryLoadFailed: true,
     crawlerRecentFailuresWindowDays: CRAWLER_RECENT_FAILURES_DEFAULTS.days,
     crawlerRecentFailures: null,
-    crawlerRecentFailuresLoadFailed: true
+    crawlerRecentFailuresLoadFailed: true,
+    crawlerScheduledAggregate: null,
+    crawlerScheduledAggregateLoadFailed: true
   });
 });
 
@@ -92,25 +97,42 @@ test("admin crawler load returns crawler diagnostics when both diagnostics calls
   };
   const activeInventory = vi.fn().mockResolvedValue(crawlerActiveInventory);
   const recentFailures = vi.fn().mockResolvedValue(crawlerRecentFailures);
+  const crawlerScheduledAggregate = {
+    buckets: [
+      { update_interval: "daily", website_count: 2, total_size_bytes: 1_048_576 },
+      { update_interval: "every_other_day", website_count: 0, total_size_bytes: 0 },
+      { update_interval: "never", website_count: 1, total_size_bytes: 500 },
+      { update_interval: "weekly", website_count: 3, total_size_bytes: 1_536 }
+    ],
+    total_websites: 6,
+    total_size_bytes: 1_050_612,
+    unparseable_update_interval_website_count: 0,
+    unparseable_update_interval_total_size_bytes: 0,
+    tenant_id: "33333333-3333-4333-8333-333333333333"
+  };
+  const scheduledAggregate = vi.fn().mockResolvedValue(crawlerScheduledAggregate);
 
   const result = await load({
     depends: vi.fn(),
     parent: vi.fn().mockResolvedValue({
       intric: {
         settings: { getCrawler: vi.fn().mockResolvedValue(crawlerSettings) },
-        crawlerAdmin: { activeInventory, recentFailures }
+        crawlerAdmin: { activeInventory, recentFailures, scheduledAggregate }
       }
     })
   } as unknown as Parameters<typeof load>[0]);
 
   expect(activeInventory).toHaveBeenCalledWith(CRAWLER_ACTIVE_INVENTORY_DEFAULTS);
   expect(recentFailures).toHaveBeenCalledWith(CRAWLER_RECENT_FAILURES_DEFAULTS);
+  expect(scheduledAggregate).toHaveBeenCalledOnce();
   expect(result).toEqual({
     crawlerSettings,
     crawlerActiveInventory,
     crawlerActiveInventoryLoadFailed: false,
     crawlerRecentFailuresWindowDays: CRAWLER_RECENT_FAILURES_DEFAULTS.days,
     crawlerRecentFailures,
-    crawlerRecentFailuresLoadFailed: false
+    crawlerRecentFailuresLoadFailed: false,
+    crawlerScheduledAggregate,
+    crawlerScheduledAggregateLoadFailed: false
   });
 });

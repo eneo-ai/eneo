@@ -1,6 +1,7 @@
 /** @typedef {import('../client/client').IntricError} IntricError */
 /** @typedef {import('../types/resources').CrawlerActiveInventoryResponse} CrawlerActiveInventoryResponse */
 /** @typedef {import('../types/resources').CrawlerRecentFailuresResponse} CrawlerRecentFailuresResponse */
+/** @typedef {import('../types/resources').CrawlerScheduledAggregateResponse} CrawlerScheduledAggregateResponse */
 
 /**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
@@ -31,6 +32,18 @@ export function initCrawlerAdmin(client) {
       const res = await client.fetch("/api/v1/admin/crawler/recent-failures", {
         method: "get",
         params: { query: params }
+      });
+      return res;
+    },
+
+    /**
+     * Get scheduled crawler load grouped by update interval for the current tenant.
+     * @returns {Promise<CrawlerScheduledAggregateResponse>}
+     * @throws {IntricError}
+     */
+    scheduledAggregate: async () => {
+      const res = await client.fetch("/api/v1/admin/crawler/scheduled", {
+        method: "get"
       });
       return res;
     }

@@ -45,6 +45,14 @@
     getCrawlerRecentFailureWebsiteLabel,
     type CrawlerRecentFailuresResponse
   } from "$lib/features/admin/crawlerRecentFailures";
+  import {
+    formatCrawlerScheduledCount,
+    formatCrawlerScheduledIndexedSize,
+    getCrawlerScheduledAggregateTotalLabel,
+    getCrawlerScheduledIntervalLabel,
+    getCrawlerScheduledUnparseableLabel,
+    type CrawlerScheduledAggregateResponse
+  } from "$lib/features/admin/crawlerScheduledAggregate";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { ShieldCheck, TriangleAlert } from "lucide-svelte";
@@ -63,6 +71,8 @@
       crawlerRecentFailuresWindowDays: number;
       crawlerRecentFailures: CrawlerRecentFailuresResponse | null;
       crawlerRecentFailuresLoadFailed: boolean;
+      crawlerScheduledAggregate: CrawlerScheduledAggregateResponse | null;
+      crawlerScheduledAggregateLoadFailed: boolean;
     };
   } = $props();
 
@@ -399,6 +409,83 @@
                   {/each}
                 </Table.Body>
               </Table.Root>
+            </div>
+          {/if}
+        </Card.Content>
+      </Card.Root>
+
+      <Card.Root class="mb-14" aria-labelledby="crawler-scheduled-title">
+        <Card.Header>
+          <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+            <div class="flex min-w-0 flex-col gap-1">
+              <h2 id="crawler-scheduled-title" class="text-base leading-snug font-semibold">
+                {m.crawler_scheduled_title()}
+              </h2>
+              <Card.Description>{m.crawler_scheduled_description()}</Card.Description>
+            </div>
+            {#if data.crawlerScheduledAggregate}
+              <Badge variant="outline" class="shrink-0 tabular-nums">
+                {getCrawlerScheduledAggregateTotalLabel(data.crawlerScheduledAggregate)}
+              </Badge>
+            {/if}
+          </div>
+        </Card.Header>
+        <Card.Content class="pt-0">
+          {#if data.crawlerScheduledAggregateLoadFailed}
+            <Alert.Root variant="destructive">
+              <TriangleAlert aria-hidden="true" />
+              <Alert.Description>{m.crawler_scheduled_load_error()}</Alert.Description>
+            </Alert.Root>
+          {:else if !data.crawlerScheduledAggregate || data.crawlerScheduledAggregate.total_websites === 0}
+            <p class="text-muted-foreground text-sm">
+              {m.crawler_scheduled_empty()}
+            </p>
+          {:else}
+            {@const unparseableLabel = getCrawlerScheduledUnparseableLabel(
+              data.crawlerScheduledAggregate
+            )}
+            <div class="flex flex-col gap-3">
+              <div class="overflow-x-auto">
+                <Table.Root class="min-w-[34rem]">
+                  <Table.Caption class="sr-only">
+                    {m.crawler_scheduled_table_caption()}
+                  </Table.Caption>
+                  <Table.Header>
+                    <Table.Row>
+                      <Table.Head>{m.crawler_scheduled_column_interval()}</Table.Head>
+                      <Table.Head class="text-right">
+                        {m.crawler_scheduled_column_websites()}
+                      </Table.Head>
+                      <Table.Head class="text-right">
+                        {m.crawler_scheduled_column_size()}
+                      </Table.Head>
+                    </Table.Row>
+                  </Table.Header>
+                  <Table.Body>
+                    {#each data.crawlerScheduledAggregate.buckets as bucket (bucket.update_interval)}
+                      <Table.Row>
+                        <Table.Cell class="font-medium">
+                          {getCrawlerScheduledIntervalLabel(bucket.update_interval)}
+                        </Table.Cell>
+                        <Table.Cell class="text-right tabular-nums">
+                          {formatCrawlerScheduledCount(bucket.website_count)}
+                        </Table.Cell>
+                        <Table.Cell class="text-muted-foreground text-right tabular-nums">
+                          {formatCrawlerScheduledIndexedSize(bucket.total_size_bytes)}
+                        </Table.Cell>
+                      </Table.Row>
+                    {/each}
+                  </Table.Body>
+                </Table.Root>
+              </div>
+              {#if unparseableLabel}
+                <Alert.Root class="border-caution/35 bg-caution/8 dark:bg-caution/12">
+                  <TriangleAlert class="text-caution" aria-hidden="true" />
+                  <Alert.Description class="text-caution">
+                    {unparseableLabel}
+                  </Alert.Description>
+                </Alert.Root>
+              {/if}
             </div>
           {/if}
         </Card.Content>

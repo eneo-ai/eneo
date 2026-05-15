@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T140
+active_task: null
 
 tasks:
   - id: T001
@@ -6759,7 +6759,7 @@ tasks:
   - id: T140
     type: worker
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Consume the tenant scheduled crawler aggregate endpoint in the admin crawler page with shadcn components and explicit UX review gates."
     allowed_files:
@@ -6793,6 +6793,45 @@ tasks:
       - "The UI needs another backend endpoint or additional aggregate shape."
       - "The page starts requiring pagination, expensive per-website lists, or write controls."
       - "shadcn MCP/examples cannot be consulted for the chosen components."
+    receipt:
+      result: done
+      summary: "Consumed the tenant-scoped scheduled crawler aggregate endpoint in the admin crawler page. The page now has a bounded read-only shadcn summary card for scheduled crawler load, independent scheduled-load failure handling, typed feature-local presentation helpers, neutral localized copy, and locale-aware count/indexed-size formatting through TiB."
+      changed_files:
+        - "frontend/packages/intric-js/src/endpoints/crawler-admin.js"
+        - "frontend/apps/web/src/lib/features/admin/crawlerScheduledAggregate.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerScheduledAggregate.test.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerAdminPageLoad.test.ts"
+        - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.ts"
+        - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte"
+        - "frontend/apps/web/messages/en.json"
+        - "frontend/apps/web/messages/sv.json"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      red_evidence:
+        - "`cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerScheduledAggregate.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts` failed red because `crawlerScheduledAggregate.ts` did not exist."
+      validation:
+        - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerScheduledAggregate.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts"
+        - "cd frontend && bun run --filter @intric/web check"
+        - "cd frontend && bun run --filter @intric/web lint"
+        - "cd frontend/packages/intric-js && bun run lint"
+        - "rg formatCrawlerScheduledSize frontend"
+        - "git diff --check -- intended T140 files"
+      notes:
+        - "A parallel test/check/lint run caused a transient Paraglide `ENOTEMPTY` race and temporarily incomplete generated output. The generated Paraglide directory was regenerated and all validation was rerun sequentially; the sequential results are authoritative."
+        - "Frontend check still reports the pre-existing `ExtendExpirationDialog.svelte` warning and no errors."
+        - "The shadcn MCP item lookup and audit checklist were used; no new shadcn components or dependencies were required."
+        - "The requested critique/adapt/audit/polish/clarify/ui-ux-pro-max pass was applied as a code-level gate: no AI decorative patterns, no IntricUI additions, semantic table caption, explicit empty/error/legacy states, bounded responsive table, and plain operational copy."
+      claude:
+        verdict: green
+        min_score: 8
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t140-tenant-scheduled-crawler-admin-ui-20260515T171704Z.md"
+          - ".codex/artifacts/claude-peer-loop-t140-tenant-scheduled-crawler-admin-ui-revision-2-20260515T172129Z.md"
+        resolution: "Claude pass 1 found count-sensitive copy and MiB-only size formatting blockers. The revision switched to neutral count copy, added locale-aware counts and GiB/TiB size support, expanded tests, and received green light."
+      follow_up_notes:
+        - "Consider consolidating the existing generic `formatBytes` helper and the feature-local scheduled indexed-size formatter into one locale-aware IEC formatting owner in a separate cleanup."
+        - "Consider adding `satisfies PageLoad` to the admin crawler page load contract in a broader frontend typing cleanup."
+        - "Consider promoting the repeated caution Alert styling into a first-class shadcn Alert variant once design-system ownership is ready."
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"

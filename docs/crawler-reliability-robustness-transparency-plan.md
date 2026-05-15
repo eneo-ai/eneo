@@ -95,6 +95,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Tenant admin active crawler UI tranche: consume `/api/v1/admin/crawler/active` in the admin crawler page so admins can see current queued/running crawler jobs without sysadmin endpoints.
 - [x] Post-T137 roadmap reconciliation tranche: refresh stale plan evidence before starting another code slice, close baseline/phase-skeleton checklist drift against current code, and keep broader admin overview, WorkerAdapter, and write-control work as explicit follow-ups.
 - [x] Tenant-scoped scheduled crawler aggregate endpoint tranche: expose `/api/v1/admin/crawler/scheduled` through the existing tenant admin crawler router, split scheduled aggregate repository ownership into tenant/sysadmin entry points, and move the shared scheduled response model into the crawler admin presentation owner.
+- [x] Tenant admin scheduled crawler load UI tranche: consume `/api/v1/admin/crawler/scheduled` in the admin crawler page with a bounded shadcn summary card, independent load failure handling, locale-aware scheduled-count/size labels, and explicit shadcn plus UX review gates.
 
 ## Non-Negotiable Principles
 
