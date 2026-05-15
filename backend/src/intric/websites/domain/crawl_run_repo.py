@@ -6,7 +6,9 @@ import sqlalchemy as sa
 from sqlalchemy.orm import selectinload
 
 from intric.database.tables.job_table import Jobs
+from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.websites_table import CrawlRuns as CrawlRunsTable
+from intric.database.tables.websites_table import Websites
 from intric.jobs.job_models import Task
 from intric.main.exceptions import NotFoundException
 from intric.main.models import Status
@@ -140,9 +142,19 @@ class CrawlRunRepository:
             Jobs.status.in_([Status.QUEUED.value, Status.IN_PROGRESS.value]),
         ]
         if tenant_id is not None:
+            # Orphan queued jobs have no crawl run yet, so tenant-scoped views exclude them.
             active_conditions.append(CrawlRunsTable.tenant_id == tenant_id)
 
         base_from = sa.outerjoin(Jobs, CrawlRunsTable, Jobs.id == CrawlRunsTable.job_id)
+        rows_from = sa.outerjoin(
+            sa.outerjoin(
+                base_from,
+                Websites,
+                CrawlRunsTable.website_id == Websites.id,
+            ),
+            Tenants,
+            CrawlRunsTable.tenant_id == Tenants.id,
+        )
         total_stmt = (
             sa.select(sa.func.count(Jobs.id))
             .select_from(base_from)
@@ -158,7 +170,9 @@ class CrawlRunRepository:
                 Jobs.updated_at.label("job_updated_at"),
                 CrawlRunsTable.id.label("crawl_run_id"),
                 CrawlRunsTable.website_id.label("website_id"),
+                Websites.name.label("website_name"),
                 CrawlRunsTable.tenant_id.label("tenant_id"),
+                Tenants.display_name.label("tenant_display_name"),
                 CrawlRunsTable.created_at.label("crawl_run_created_at"),
                 CrawlRunsTable.pages_crawled.label("pages_crawled"),
                 CrawlRunsTable.files_downloaded.label("files_downloaded"),
@@ -169,7 +183,7 @@ class CrawlRunRepository:
                 CrawlRunsTable.files_hash_retained.label("files_hash_retained"),
                 CrawlRunsTable.files_too_large_skipped.label("files_too_large_skipped"),
             )
-            .select_from(base_from)
+            .select_from(rows_from)
             .where(*active_conditions)
             .order_by(Jobs.created_at.desc(), Jobs.id.asc())
             .limit(limit)
@@ -201,7 +215,9 @@ class CrawlRunRepository:
                     job_id=row["job_id"],
                     crawl_run_id=row["crawl_run_id"],
                     website_id=row["website_id"],
+                    website_name=row["website_name"],
                     tenant_id=row["tenant_id"],
+                    tenant_display_name=row["tenant_display_name"],
                     status=status,
                     lifecycle_state=lifecycle_state,
                     job_created_at=row["job_created_at"],

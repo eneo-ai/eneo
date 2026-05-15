@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T062
+active_task: T064
 
 tasks:
   - id: T001
@@ -2766,7 +2766,7 @@ tasks:
   - id: T062
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next highest-ROI tranche after the backend active crawler inventory endpoint."
     inputs:
@@ -2781,6 +2781,133 @@ tasks:
       - "Prefer the smallest slice that improves operator transparency or maintainability without write actions."
       - "Do not start WorkerAdapter unless the next worker slice can stay narrow and read-only."
       - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Decision: next worker tranche."
+      - "Allowed files."
+      - "TDD red-test story."
+      - "Verification commands."
+      - "Stop conditions."
+    receipt:
+      result: done
+      decision: "Activate T063 as a backend-only active-inventory name-resolution preparation slice before frontend wiring."
+      summary: "Claude rejected jumping directly to frontend because the active inventory response currently exposes UUIDs only and the generated OpenAPI type strategy remains unresolved. The smallest reliable next slice is to add `website_name` and `tenant_display_name` to the existing backend response via SQL joins, keeping frontend, generated types, WorkerAdapter, and admin mutations out of scope."
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t062-choose-next-crawler-reliability-tranche-20260515T000705Z.md"
+          - ".codex/artifacts/claude-peer-loop-t062-choose-next-crawler-reliability-tranche-iteration-2-20260515T001055Z.md"
+          - ".codex/artifacts/claude-peer-loop-t062-choose-next-crawler-reliability-tranche-iteration-3-20260515T001452Z.md"
+        min_score: 8
+      answered_questions:
+        - "Name resolution: backend response will include nullable website and tenant display names."
+        - "Generated types: defer until after backend response shape is stable; no hand-rolled frontend consumption in T063."
+        - "Lifecycle mismatch: do not add UI labels yet; T063 only enriches response shape."
+        - "Scope cap: target under 200 net lines."
+        - "Route: no frontend route in T063."
+        - "Tests: extend backend active-inventory integration coverage and targeted ruff/Pyright."
+        - "Stop if generated types, frontend, or broader overview become necessary."
+      spawned_tasks:
+        - T063
+  - id: T063
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Add backend name resolution to active crawler inventory so operator UI can show website and tenant labels without frontend UUID joins."
+    inputs:
+      - "T062 receipt"
+      - ".codex/artifacts/claude-peer-loop-t062-choose-next-crawler-reliability-tranche-20260515T000705Z.md"
+      - "backend/src/intric/websites/domain/crawler_active_inventory.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/src/intric/sysadmin/sysadmin_models.py"
+      - "backend/tests/integration/test_sysadmin_crawler_active_inventory.py"
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawler_active_inventory.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/src/intric/sysadmin/sysadmin_models.py"
+      - "backend/tests/integration/test_sysadmin_crawler_active_inventory.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Use TDD: extend integration test expectations before production changes."
+      - "Backend response enrichment only; no frontend, generated schema, router path changes, broader overview, write actions, WorkerAdapter, schema migration, or new indexes."
+      - "Use LEFT/outer SQL joins to existing `Websites` and `Tenants` tables; do not add frontend-side UUID lookups."
+      - "Keep the count query joined only on `Jobs` and `CrawlRuns`; do not add `Websites` or `Tenants` joins to the count path."
+      - "Fields are nullable for orphan queued jobs or deleted/legacy linked rows."
+      - "Do not broaden tenant fixtures; set `Tenants.display_name` directly in the integration test where a named tenant is needed."
+      - "No Any, casts, type ignores, pass-through services, broad helpers, or raw queue/Redis data."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Active inventory domain item includes `website_name` and `tenant_display_name`."
+      - "Repository query returns names for rows with crawl-run website/tenant links and null names for orphan queued jobs."
+      - "Sysadmin response model exposes the new nullable fields."
+      - "Integration test pins a linked row with `website_name` and `tenant_display_name` values."
+      - "Integration test separately pins orphan queued jobs as `website_name=None` and `tenant_display_name=None`."
+      - "Integration test separately pins linked rows where `Websites.name is None` and `Tenants.display_name is None`."
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_active_inventory.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py tests/integration/test_sysadmin_crawler_active_inventory.py"
+      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py tests/integration/test_sysadmin_crawler_active_inventory.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py tests/integration/test_sysadmin_crawler_active_inventory.py"
+      - "cd backend && uv run pytest tests/unittests tests/integration -q"
+    stop_if:
+      - "Need frontend or generated OpenAPI type changes."
+      - "Need a broader admin overview endpoint or website filtering."
+      - "Need schema migration or new index."
+      - "Need ARQ/Redis worker liveness or queue payload data."
+      - "Need admin write controls."
+      - "Need files outside allowed_files."
+    receipt:
+      result: done
+      summary: "Active crawler inventory now exposes nullable `website_name` and `tenant_display_name` from the existing website and tenant rows. The rows query uses LEFT joins while the count query remains scoped to Jobs plus CrawlRuns."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawler_active_inventory.py"
+        - "backend/src/intric/websites/domain/crawl_run_repo.py"
+        - "backend/src/intric/sysadmin/sysadmin_models.py"
+        - "backend/tests/integration/test_sysadmin_crawler_active_inventory.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      tdd:
+        red: "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_active_inventory.py -q failed with missing `website_name` keys before production changes."
+        green: "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_active_inventory.py -q passed after adding the domain/repository/response fields."
+      verification:
+        - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_active_inventory.py -q"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py tests/integration/test_sysadmin_crawler_active_inventory.py"
+        - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py tests/integration/test_sysadmin_crawler_active_inventory.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py tests/integration/test_sysadmin_crawler_active_inventory.py"
+      broad_verification:
+        command: "cd backend && uv run pytest tests/unittests tests/integration -q"
+        status: failed_outside_slice
+        summary: "2290 passed, 28 failed, 41 errors, 27 skipped, 35 deselected, 1 xfailed. Failures were in audit/rate-limit, timeout, multi-tenant encryption/federation, and unrelated integration areas; T063-targeted tests passed."
+      claude:
+        verdict: green
+        artifact: ".codex/artifacts/claude-peer-loop-t063-active-inventory-name-resolution-implementation-review-20260515T010009Z.md"
+        min_score: 8
+      notes:
+        - "The tenant filter intentionally excludes orphan queued jobs because they have no crawl-run tenant yet; the integration test pins that behavior."
+      spawned_tasks:
+        - T064
+  - id: T064
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next highest-ROI crawler reliability/transparency tranche after active-inventory name resolution."
+    inputs:
+      - "T063 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl_feeder.py"
+      - "backend/src/intric/worker/feeder/watchdog.py"
+      - "frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte"
+      - ".codex/artifacts/claude-peer-loop-t063-active-inventory-name-resolution-implementation-review-20260515T010009Z.md"
+    constraints:
+      - "Do not implement in this judge task."
+      - "Prefer the smallest slice that improves crawler reliability, maintainability, or operator transparency without broad frontend/generated-type churn."
+      - "Keep the user-deleted Celery re-evaluation gate out of scope."
+      - "Preserve unrelated .devcontainer dirt."
+      - "Account for the broad backend test-suite failures without broadening this goal into non-crawler audit/encryption/federation repairs."
     expected_output:
       - "Decision: next worker tranche."
       - "Allowed files."

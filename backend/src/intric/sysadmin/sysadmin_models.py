@@ -166,7 +166,9 @@ class CrawlerActiveInventoryItem(BaseModel):
     job_id: UUID
     crawl_run_id: UUID | None
     website_id: UUID | None
+    website_name: str | None
     tenant_id: UUID | None
+    tenant_display_name: str | None
     status: Status
     lifecycle_state: CrawlLifecycle
     job_created_at: datetime
@@ -189,7 +191,9 @@ class CrawlerActiveInventoryItem(BaseModel):
             job_id=item.job_id,
             crawl_run_id=item.crawl_run_id,
             website_id=item.website_id,
+            website_name=item.website_name,
             tenant_id=item.tenant_id,
+            tenant_display_name=item.tenant_display_name,
             status=item.status,
             lifecycle_state=item.lifecycle_state,
             job_created_at=item.job_created_at,

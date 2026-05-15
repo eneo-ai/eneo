@@ -13,7 +13,9 @@ class CrawlerActiveInventoryItem:
     job_id: UUID
     crawl_run_id: UUID | None
     website_id: UUID | None
+    website_name: str | None
     tenant_id: UUID | None
+    tenant_display_name: str | None
     status: Status
     lifecycle_state: CrawlLifecycle
     job_created_at: datetime

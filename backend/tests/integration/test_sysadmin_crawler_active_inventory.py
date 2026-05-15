@@ -141,8 +141,10 @@ async def test_sysadmin_crawler_active_inventory_lists_lifecycle_and_filters(
     async with db_session() as session:
         embedding_model_id = await _embedding_model_id(session)
         tenant = await tenant_factory(session, name="Crawler active tenant")
+        tenant.display_name = "Crawler Active Display"
         user = await user_factory(session, tenant_id=tenant.id)
         other_tenant = await tenant_factory(session, name="Other active tenant")
+        other_tenant.display_name = "Other Active Display"
         other_user = await user_factory(session, tenant_id=other_tenant.id)
         website = await _create_website(
             session,
@@ -264,10 +266,18 @@ async def test_sysadmin_crawler_active_inventory_lists_lifecycle_and_filters(
     by_job_id = {item["job_id"]: item for item in data["items"]}
     assert by_job_id[str(orphan_queued_job_id)]["crawl_run_id"] is None
     assert by_job_id[str(orphan_queued_job_id)]["tenant_id"] is None
+    assert by_job_id[str(orphan_queued_job_id)]["website_name"] is None
+    assert by_job_id[str(orphan_queued_job_id)]["tenant_display_name"] is None
     assert by_job_id[str(orphan_queued_job_id)]["lifecycle_state"] == (
         CrawlLifecycle.QUEUED.value
     )
     assert by_job_id[str(no_progress_job_id)]["crawl_run_id"] == str(no_progress_run_id)
+    assert by_job_id[str(no_progress_job_id)]["website_name"] == (
+        "Crawler active primary"
+    )
+    assert by_job_id[str(no_progress_job_id)]["tenant_display_name"] == (
+        "Crawler Active Display"
+    )
     assert by_job_id[str(no_progress_job_id)]["lifecycle_state"] == (
         CrawlLifecycle.RUNNING_NO_PROGRESS.value
     )
@@ -279,6 +289,16 @@ async def test_sysadmin_crawler_active_inventory_lists_lifecycle_and_filters(
     )
     assert by_job_id[str(with_progress_job_id)]["pages_crawled"] == 3
     assert by_job_id[str(with_progress_job_id)]["files_hash_retained"] == 1
+    assert by_job_id[str(with_progress_job_id)]["website_name"] == (
+        "Crawler active primary"
+    )
+    assert by_job_id[str(with_progress_job_id)]["tenant_display_name"] == (
+        "Crawler Active Display"
+    )
+    assert by_job_id[str(other_tenant_job_id)]["website_name"] == "Crawler active other"
+    assert by_job_id[str(other_tenant_job_id)]["tenant_display_name"] == (
+        "Other Active Display"
+    )
 
     tenant_response = await client.get(
         "/api/v1/sysadmin/crawler/active",
@@ -312,6 +332,59 @@ async def test_sysadmin_crawler_active_inventory_lists_lifecycle_and_filters(
         str(no_progress_job_id),
         str(with_progress_job_id),
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_sysadmin_crawler_active_inventory_preserves_null_linked_names(
+    client,
+    db_session,
+    tenant_factory,
+    user_factory,
+    super_admin_token,
+):
+    now = datetime(2026, 5, 14, 13, 0, tzinfo=timezone.utc)
+
+    async with db_session() as session:
+        embedding_model_id = await _embedding_model_id(session)
+        tenant = await tenant_factory(session, name="Crawler active null tenant")
+        user = await user_factory(session, tenant_id=tenant.id)
+        website = await _create_website(
+            session,
+            tenant_id=tenant.id,
+            user_id=user.id,
+            embedding_model_id=embedding_model_id,
+            url_suffix="null-name",
+        )
+        website.name = None
+        job = await _create_job(
+            session,
+            user_id=user.id,
+            task=Task.CRAWL,
+            status=Status.IN_PROGRESS,
+            created_at=now,
+        )
+        await _create_crawl_run(
+            session,
+            tenant_id=tenant.id,
+            website_id=website.id,
+            job_id=job.id,
+            created_at=job.created_at,
+            pages_crawled=1,
+        )
+        job_id = job.id
+        await session.commit()
+
+    response = await client.get(
+        "/api/v1/sysadmin/crawler/active",
+        params={"limit": 10, "offset": 0},
+        headers={"X-API-Key": super_admin_token},
+    )
+
+    assert response.status_code == 200
+    by_job_id = {item["job_id"]: item for item in response.json()["items"]}
+    assert by_job_id[str(job_id)]["website_name"] is None
+    assert by_job_id[str(job_id)]["tenant_display_name"] is None
 
 
 @pytest.mark.asyncio

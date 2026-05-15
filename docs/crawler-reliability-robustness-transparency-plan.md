@@ -53,6 +53,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Step 5 slot-acquire tranche: extract pre-acquired crawl slot discovery/reuse/mismatch handling into typed `worker/crawl/slot_acquire.py` boundaries while keeping ARQ retry and busy-wait policy in `crawl_tasks.py`.
 - [x] Redis slot-key ownership tranche: consolidate the pre-acquired crawl slot Redis key behind one canonical helper reused by acquire, release, feeder, capacity, heartbeat, and watchdog code.
 - [x] Admin active-crawler inventory tranche: add a read-only sysadmin endpoint for active/queued crawler jobs with typed lifecycle derivation, bounded pagination, tenant filtering, and orphan queued-job visibility.
+- [x] Admin active-crawler name-resolution tranche: enrich the active/queued crawler inventory response with nullable website and tenant labels through bounded LEFT joins while keeping the count query lean.
 
 ## Non-Negotiable Principles
 
