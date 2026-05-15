@@ -2496,6 +2496,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/crawler/websites/{website_id}/reset-circuit-breaker": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Reset crawler circuit breaker for one website in the current tenant */
+    post: operations["reset_current_tenant_crawler_circuit_breaker_api_v1_admin_crawler_websites__website_id__reset_circuit_breaker_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/credentials/{provider}": {
     parameters: {
       query?: never;
@@ -7155,6 +7172,7 @@ export interface components {
       | "website_deleted"
       | "website_crawled"
       | "website_crawl_aborted"
+      | "website_crawl_circuit_reset"
       | "website_transferred"
       | "group_chat_created"
       | "collection_created"
@@ -9925,7 +9943,7 @@ export interface components {
     };
     /**
      * CrawlerRecentFailuresResponse
-     * @description Canonical bounded terminal outcome feed for crawler admin pages.
+     * @description Canonical bounded outcome-filtered terminal feed for crawler admin pages.
      */
     CrawlerRecentFailuresResponse: {
       /** Items */
@@ -26409,6 +26427,42 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["CrawlerAbortConflictResponse"];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  reset_current_tenant_crawler_circuit_breaker_api_v1_admin_crawler_websites__website_id__reset_circuit_breaker_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        website_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Website not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Validation Error */
       422: {

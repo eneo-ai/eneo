@@ -23,6 +23,10 @@ from intric.websites.domain.crawl_abort import (
     CrawlAbortNotFound,
     CrawlAbortSucceeded,
 )
+from intric.websites.domain.crawl_circuit_reset import (
+    CrawlCircuitResetNotFound,
+    CrawlCircuitResetSucceeded,
+)
 from intric.websites.domain.crawl_run_repo import CrawlRunRepository
 from intric.websites.domain.website_admin_repo import WebsiteAdminRepository
 from intric.websites.presentation.crawler_admin_models import (
@@ -245,6 +249,65 @@ async def abort_current_tenant_queued_crawl(
                     extra={
                         "job_id": str(job_id),
                         "already_terminal": already,
+                    },
+                ),
+            )
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+    assert_never(result)
+
+
+@router.post(
+    "/websites/{website_id}/reset-circuit-breaker",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_404_NOT_FOUND: {"description": "Website not found"},
+    },
+    summary="Reset crawler circuit breaker for one website in the current tenant",
+)
+async def reset_current_tenant_crawler_circuit_breaker(
+    website_id: UUID,
+    current_user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    container: AdminContainer,
+) -> Response:
+    async with session.begin():
+        repo = WebsiteAdminRepository(session=session)
+        result = await repo.reset_crawl_circuit_breaker_for_tenant(
+            website_id=website_id,
+            tenant_id=current_user.tenant_id,
+        )
+
+    match result:
+        case CrawlCircuitResetNotFound():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Website not found",
+            )
+        case CrawlCircuitResetSucceeded(
+            website=website,
+            previous_state=previous_state,
+            previous_consecutive_failures=prev_failures,
+            previous_next_retry_at=prev_next_retry,
+        ):
+            audit_service = container.audit_service()
+            await audit_service.log_async(
+                tenant_id=current_user.tenant_id,
+                actor_id=current_user.id,
+                action=ActionType.WEBSITE_CRAWL_CIRCUIT_RESET,
+                entity_type=EntityType.WEBSITE,
+                entity_id=website.id,
+                description="Admin reset crawler circuit breaker",
+                metadata=AuditMetadata.standard(
+                    actor=current_user,
+                    target=website,
+                    extra={
+                        "prev_state": previous_state.value,
+                        "prev_consecutive_failures": prev_failures,
+                        "prev_next_retry_at": (
+                            prev_next_retry.isoformat()
+                            if prev_next_retry is not None
+                            else None
+                        ),
                     },
                 ),
             )

@@ -209,6 +209,14 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "name_sv": "Webbplats crawlad",
         "description_sv": "Loggar när en webbplats crawlas",
     },
+    ActionType.WEBSITE_CRAWL_ABORTED.value: {
+        "name_sv": "Crawl avbruten",
+        "description_sv": "Loggar när en administratör avbryter en köad crawl",
+    },
+    ActionType.WEBSITE_CRAWL_CIRCUIT_RESET.value: {
+        "name_sv": "Crawler-tillstånd återställt",
+        "description_sv": "Loggar när en administratör återställer crawler-tillståndet för en webbplats",
+    },
     ActionType.WEBSITE_TRANSFERRED.value: {
         "name_sv": "Webbplats överförd",
         "description_sv": "Loggar när en webbplats flyttas mellan Spaces",

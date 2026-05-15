@@ -94,6 +94,8 @@ CATEGORY_MAPPINGS = {
     ActionType.WEBSITE_UPDATED.value: "integration_events",
     ActionType.WEBSITE_DELETED.value: "integration_events",
     ActionType.WEBSITE_CRAWLED.value: "integration_events",
+    ActionType.WEBSITE_CRAWL_ABORTED.value: "integration_events",
+    ActionType.WEBSITE_CRAWL_CIRCUIT_RESET.value: "integration_events",
     ActionType.WEBSITE_TRANSFERRED.value: "integration_events",
     ActionType.MCP_SERVER_CREATED.value: "integration_events",
     ActionType.MCP_SERVER_UPDATED.value: "integration_events",

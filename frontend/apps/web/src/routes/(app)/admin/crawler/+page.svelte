@@ -52,6 +52,11 @@
     type CrawlerTenantFailureInventoryItem,
     type CrawlerTenantFailureInventoryResponse
   } from "$lib/features/admin/crawlerFailureInventory";
+  import {
+    getCrawlerCircuitBreakerResetCopy,
+    type CrawlerCircuitBreakerResetCandidate,
+    type CrawlerCircuitBreakerResetCopy
+  } from "$lib/features/admin/crawlerCircuitBreakerReset";
   import { formatCrawlerCount } from "$lib/features/admin/crawlerNumberFormat";
   import type { CrawlRunResultLabel } from "$lib/features/knowledge/crawlOutcomePresentation";
   import {
@@ -121,6 +126,10 @@
   let abortDialogOpen = $state(false);
   let abortCandidate = $state<CrawlerActiveInventoryItem | null>(null);
   let abortingJobId = $state<string | null>(null);
+
+  let circuitResetDialogOpen = $state(false);
+  let circuitResetCandidate = $state<CrawlerCircuitBreakerResetCandidate | null>(null);
+  let resettingCircuitWebsiteId = $state<string | null>(null);
 
   const fieldTextByKey: Record<string, () => string> = {
     crawler_hash_skip_title: () => m.crawler_hash_skip_title(),
@@ -339,6 +348,31 @@
   function openAbortDialog(item: CrawlerActiveInventoryItem) {
     abortCandidate = item;
     abortDialogOpen = true;
+  }
+
+  function openCircuitResetDialog(item: CrawlerCircuitBreakerResetCandidate) {
+    circuitResetCandidate = item;
+    circuitResetDialogOpen = true;
+  }
+
+  async function handleResetCircuitBreaker() {
+    const candidate = circuitResetCandidate;
+    if (candidate === null) return;
+
+    resettingCircuitWebsiteId = candidate.website_id;
+    const copy = getCrawlerCircuitBreakerResetCopy(candidate);
+
+    try {
+      await intric.crawlerAdmin.resetCircuitBreaker(candidate.website_id);
+      circuitResetDialogOpen = false;
+      circuitResetCandidate = null;
+      toast.success(copy.successMessage);
+      await invalidate("admin:crawler-failure-inventory");
+    } catch (error) {
+      toastError(error, copy.failureMessage);
+    } finally {
+      resettingCircuitWebsiteId = null;
+    }
   }
 
   async function handleAbortQueuedCrawler() {
@@ -568,10 +602,15 @@
                     <Table.Head class="text-right">
                       {m.crawler_failure_inventory_column_last_crawled()}
                     </Table.Head>
+                    <Table.Head class="text-right">
+                      {m.crawler_failure_inventory_column_action()}
+                    </Table.Head>
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
                   {#each data.crawlerFailureInventory.items as failureState (failureState.website_id)}
+                    {@const resetCopy = getCrawlerCircuitBreakerResetCopy(failureState)}
+                    {@const isResettingThis = resettingCircuitWebsiteId === failureState.website_id}
                     <Table.Row>
                       <Table.Cell class="max-w-64">
                         <span
@@ -598,6 +637,21 @@
                       </Table.Cell>
                       <Table.Cell class="text-muted-foreground text-right text-xs tabular-nums">
                         {getCrawlerFailureInventoryLastCrawledLabel(failureState)}
+                      </Table.Cell>
+                      <Table.Cell class="text-right">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          aria-label={resetCopy.ariaLabel}
+                          disabled={resettingCircuitWebsiteId !== null}
+                          onclick={() => openCircuitResetDialog(failureState)}
+                        >
+                          {isResettingThis
+                            ? resetCopy.busyLabel
+                            : failureState.state === "AUTO_DISABLED"
+                              ? m.crawler_circuit_breaker_reset_button_paused()
+                              : m.crawler_circuit_breaker_reset_button_backed_off()}
+                        </Button>
                       </Table.Cell>
                     </Table.Row>
                   {/each}
@@ -1107,5 +1161,38 @@
         {abortingJobId !== null ? m.crawler_abort_button_busy() : m.crawler_abort_dialog_confirm()}
       </AlertDialog.Action>
     </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
+
+<AlertDialog.Root bind:open={circuitResetDialogOpen}>
+  <AlertDialog.Content>
+    {#if circuitResetCandidate}
+      {@const resetCopy = getCrawlerCircuitBreakerResetCopy(
+        circuitResetCandidate
+      ) satisfies CrawlerCircuitBreakerResetCopy}
+      <AlertDialog.Header>
+        <AlertDialog.Title>{resetCopy.dialogTitle}</AlertDialog.Title>
+        <AlertDialog.Description>
+          {resetCopy.dialogDescription}
+        </AlertDialog.Description>
+      </AlertDialog.Header>
+      {#if resetCopy.followupHint}
+        <Alert.Root>
+          <TriangleAlert aria-hidden="true" />
+          <Alert.Description>{resetCopy.followupHint}</Alert.Description>
+        </Alert.Root>
+      {/if}
+      <AlertDialog.Footer>
+        <AlertDialog.Cancel disabled={resettingCircuitWebsiteId !== null}>
+          {resetCopy.cancelLabel}
+        </AlertDialog.Cancel>
+        <AlertDialog.Action
+          disabled={resettingCircuitWebsiteId !== null}
+          onclick={() => void handleResetCircuitBreaker()}
+        >
+          {resettingCircuitWebsiteId !== null ? resetCopy.busyLabel : resetCopy.confirmLabel}
+        </AlertDialog.Action>
+      </AlertDialog.Footer>
+    {/if}
   </AlertDialog.Content>
 </AlertDialog.Root>

@@ -103,6 +103,20 @@ export function initCrawlerAdmin(client) {
         method: "post",
         params: { path: { job_id: jobId } }
       });
+    },
+
+    /**
+     * Reset crawler circuit breaker counters for one website in the current tenant.
+     * Clears consecutive_failures and next_retry_at without touching update_interval.
+     * @param {string} websiteId
+     * @returns {Promise<void>}
+     * @throws {IntricError}
+     */
+    resetCircuitBreaker: async (websiteId) => {
+      await client.fetch("/api/v1/admin/crawler/websites/{website_id}/reset-circuit-breaker", {
+        method: "post",
+        params: { path: { website_id: websiteId } }
+      });
     }
   };
 }

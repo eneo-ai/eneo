@@ -5,6 +5,13 @@ import sqlalchemy as sa
 
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.websites_table import Websites as WebsitesTable
+from intric.websites.domain.crawl_circuit_reset import (
+    CrawlCircuitResetNotFound,
+    CrawlCircuitResetPreviousState,
+    CrawlCircuitResetResult,
+    CrawlCircuitResetSucceeded,
+    CrawlCircuitResetWebsite,
+)
 from intric.websites.domain.crawler_failure_inventory import (
     CrawlerFailureInventory,
     CrawlerFailureInventoryItem,
@@ -224,3 +231,84 @@ class WebsiteAdminRepository:
             ),
             tenant_id=tenant_id,
         )
+
+    async def reset_crawl_circuit_breaker_for_tenant(
+        self,
+        *,
+        website_id: UUID,
+        tenant_id: UUID,
+    ) -> CrawlCircuitResetResult:
+        """Clear circuit-breaker counters for one website inside the tenant scope.
+
+        Why: Operators currently recover from backed-off or auto-disabled websites
+        only by editing the database directly. This method commits the same fields
+        the worker reactor writes on a successful crawl, scoped strictly to one
+        tenant, so the caller can replace DB surgery with a typed audited action.
+        update_interval is intentionally untouched — a separate website-edit flow
+        owns scheduling decisions for previously auto-disabled rows.
+        """
+        select_stmt = (
+            sa.select(
+                WebsitesTable.id,
+                WebsitesTable.name,
+                WebsitesTable.url,
+                WebsitesTable.update_interval,
+                WebsitesTable.consecutive_failures,
+                WebsitesTable.next_retry_at,
+            )
+            .where(WebsitesTable.id == website_id)
+            .where(WebsitesTable.tenant_id == tenant_id)
+        )
+        row = (await self.session.execute(select_stmt)).first()
+        if row is None:
+            return CrawlCircuitResetNotFound(website_id=website_id)
+
+        previous_state = _classify_circuit_breaker_state(
+            update_interval=UpdateInterval(str(row.update_interval)),
+            consecutive_failures=int(row.consecutive_failures),
+            next_retry_at=row.next_retry_at,
+        )
+
+        update_stmt = (
+            sa.update(WebsitesTable)
+            .where(WebsitesTable.id == website_id)
+            .where(WebsitesTable.tenant_id == tenant_id)
+            .values(consecutive_failures=0, next_retry_at=None)
+        )
+        await self.session.execute(update_stmt)
+
+        display_name = row.name if row.name is not None else row.url
+        return CrawlCircuitResetSucceeded(
+            website=CrawlCircuitResetWebsite(
+                id=row.id,
+                name=str(display_name),
+            ),
+            previous_state=previous_state,
+            previous_consecutive_failures=int(row.consecutive_failures),
+            previous_next_retry_at=row.next_retry_at,
+        )
+
+
+def _classify_circuit_breaker_state(
+    *,
+    update_interval: UpdateInterval,
+    consecutive_failures: int,
+    next_retry_at: object | None,
+) -> CrawlCircuitResetPreviousState:
+    """Mirror the failure-inventory classifier so audit metadata matches the UI."""
+    is_auto_disabled = (
+        update_interval == UpdateInterval.NEVER
+        and consecutive_failures >= WEBSITE_AUTO_DISABLE_FAILURE_THRESHOLD
+    )
+    if is_auto_disabled:
+        return CrawlCircuitResetPreviousState.AUTO_DISABLED
+
+    is_backed_off = (
+        consecutive_failures > 0
+        and next_retry_at is not None
+        and update_interval != UpdateInterval.NEVER
+    )
+    if is_backed_off:
+        return CrawlCircuitResetPreviousState.BACKED_OFF
+
+    return CrawlCircuitResetPreviousState.HEALTHY
