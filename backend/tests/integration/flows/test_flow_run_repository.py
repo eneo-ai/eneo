@@ -26,6 +26,7 @@ from intric.flows import (
 from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from intric.flows.enums import FlowRunLifecycleSource
 from intric.flows.flow import FlowRunStatus, FlowStepAttemptStatus, FlowStepResultStatus
+from intric.flows.flow_run_error import FlowRunError
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.principal import FlowPrincipal
 
@@ -829,8 +830,11 @@ async def test_count_active_runs_counts_only_queued_and_running_statuses(
             tenant_id=admin_user.tenant_id,
             target_status=FlowRunStatus.CANCELLED,
             source=FlowRunLifecycleSource.USER_CANCEL,
-            error_code="user_cancelled",
-            error_message="Run cancelled by user.",
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.USER_CANCEL,
+                code="user_cancelled",
+                message="Run cancelled by user.",
+            ),
         )
         active_after_cancel = await run_repo.count_active_runs(
             tenant_id=admin_user.tenant_id
@@ -983,13 +987,17 @@ async def test_terminalization_is_idempotent_after_terminal_transition(
             ],
         )
         terminalizer = FlowRunTerminalizer(run_repo, run_repo.audit_outbox_repo)
+        expected_error = FlowRunError.from_source(
+            FlowRunLifecycleSource.USER_CANCEL,
+            code="user_cancelled",
+            message="Run cancelled by user.",
+        )
         cancelled = await terminalizer.terminalize_run(
             run_id=run.id,
             tenant_id=admin_user.tenant_id,
             target_status=FlowRunStatus.CANCELLED,
             source=FlowRunLifecycleSource.USER_CANCEL,
-            error_code="user_cancelled",
-            error_message="Run cancelled by user.",
+            error=expected_error,
         )
         completed_attempt = await terminalizer.terminalize_run(
             run_id=run.id,
@@ -1003,6 +1011,11 @@ async def test_terminalization_is_idempotent_after_terminal_transition(
         assert cancelled.did_transition is True
         assert completed_attempt.run.status.value == "cancelled"
         assert completed_attempt.did_transition is False
+        refetched = await run_repo.get(
+            run_id=run.id,
+            tenant_id=admin_user.tenant_id,
+        )
+        assert refetched.error == expected_error
 
 
 @pytest.mark.asyncio
@@ -1857,8 +1870,11 @@ async def test_cancel_terminalization_only_updates_pending_or_running_steps(
             tenant_id=admin_user.tenant_id,
             target_status=FlowRunStatus.CANCELLED,
             source=FlowRunLifecycleSource.USER_CANCEL,
-            error_code="user_cancelled",
-            error_message="cancelled in test",
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.USER_CANCEL,
+                code="user_cancelled",
+                message="cancelled in test",
+            ),
         )
 
         rows = (

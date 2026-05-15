@@ -32,6 +32,7 @@ from intric.flows.domain.flow import (
 )
 from intric.flows.enums import FlowRunLifecycleSource
 from intric.flows.flow_factory import FlowFactory
+from intric.flows.flow_run_error import FlowRunError
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
@@ -277,16 +278,22 @@ async def test_terminalization_fails_run_once_and_writes_one_outbox_event(
                 tenant_id=admin_user.tenant_id,
                 target_status=FlowRunStatus.FAILED,
                 source=FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
-                error_code="flow_worker_stalled",
-                error_message="flow_worker_stalled: stale run reconciled.",
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
+                    code="flow_worker_stalled",
+                    message="flow_worker_stalled: stale run reconciled.",
+                ),
             )
             second = await terminalizer.terminalize_run(
                 run_id=run.id,
                 tenant_id=admin_user.tenant_id,
                 target_status=FlowRunStatus.FAILED,
                 source=FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
-                error_code="flow_worker_stalled",
-                error_message="flow_worker_stalled: duplicate reconciliation.",
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
+                    code="flow_worker_stalled",
+                    message="flow_worker_stalled: duplicate reconciliation.",
+                ),
             )
 
         assert first.did_transition is True
@@ -450,8 +457,11 @@ async def test_terminalization_lost_race_emits_noop_event(
                 tenant_id=admin_user.tenant_id,
                 target_status=FlowRunStatus.FAILED,
                 source=FlowRunLifecycleSource.TASK_FAILURE,
-                error_code="flow_task_failure",
-                error_message="flow_task_failure: task failed.",
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.TASK_FAILURE,
+                    code="flow_task_failure",
+                    message="flow_task_failure: task failed.",
+                ),
             )
 
         assert result.did_transition is False
@@ -551,8 +561,11 @@ async def test_terminalization_rolls_back_when_audit_outbox_insert_fails(
                         tenant_id=admin_user.tenant_id,
                         target_status=FlowRunStatus.FAILED,
                         source=FlowRunLifecycleSource.TASK_FAILURE,
-                        error_code="flow_task_failure",
-                        error_message="flow_task_failure: task failed.",
+                        error=FlowRunError.from_source(
+                            FlowRunLifecycleSource.TASK_FAILURE,
+                            code="flow_task_failure",
+                            message="flow_task_failure: task failed.",
+                        ),
                     )
 
         run_row = await session.scalar(sa.select(FlowRuns).where(FlowRuns.id == run.id))

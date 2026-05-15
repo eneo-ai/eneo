@@ -32,6 +32,7 @@ from intric.flows.domain.flow import (
 )
 from intric.flows.enums import FlowRunLifecycleSource, FlowRunRerunOperationStatus
 from intric.flows.flow_factory import FlowFactory
+from intric.flows.flow_run_error import FlowRunError
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.published_definition import build_published_definition_json
@@ -370,8 +371,15 @@ async def test_late_output_after_terminalization_does_not_complete_attempt_or_we
                         if target_status == FlowRunStatus.CANCELLED
                         else FlowRunLifecycleSource.STALE_RUNNING_RECONCILER
                     ),
-                    error_code=f"terminalized_{target_status.value}",
-                    error_message=f"Run was terminalized as {target_status.value}.",
+                    error=FlowRunError.from_source(
+                        (
+                            FlowRunLifecycleSource.USER_CANCEL
+                            if target_status == FlowRunStatus.CANCELLED
+                            else FlowRunLifecycleSource.STALE_RUNNING_RECONCILER
+                        ),
+                        code=f"terminalized_{target_status.value}",
+                        message=f"Run was terminalized as {target_status.value}.",
+                    ),
                 )
                 await terminal_session.commit()
             return SimpleNamespace(
@@ -782,7 +790,10 @@ async def test_generic_step_failure_persists_failed_state_for_fresh_sessions(
 
     assert run_row is not None
     assert run_row.status == FlowRunStatus.FAILED.value
-    assert run_row.error_message == "Flow step 1 execution failed."
+    assert (
+        FlowRunError.model_validate(run_row.error_json).message
+        == "Flow step 1 execution failed."
+    )
     assert step_result_row is not None
     assert step_result_row.status == FlowStepResultStatus.FAILED.value
     assert step_result_row.error_message == "Flow step 1 execution failed."
@@ -855,7 +866,7 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
 
     assert run_row is not None
     assert run_row.status == FlowRunStatus.FAILED.value
-    assert "not valid JSON" in (run_row.error_message or "")
+    assert "not valid JSON" in FlowRunError.model_validate(run_row.error_json).message
     assert step_result_row is not None
     assert step_result_row.status == FlowStepResultStatus.FAILED.value
     assert step_result_row.error_message is not None
@@ -923,7 +934,10 @@ async def test_attempt_start_failure_persists_failed_state_for_fresh_sessions(
 
     assert run_row is not None
     assert run_row.status == FlowRunStatus.FAILED.value
-    assert run_row.error_message == "Flow step 1 execution failed."
+    assert (
+        FlowRunError.model_validate(run_row.error_json).message
+        == "Flow step 1 execution failed."
+    )
     assert step_result_row is not None
     assert step_result_row.status == FlowStepResultStatus.FAILED.value
     assert step_result_row.error_message == "Flow step 1 execution failed."
@@ -988,7 +1002,10 @@ async def test_webhook_delivery_failure_persists_failed_state_for_fresh_sessions
 
     assert run_row is not None
     assert run_row.status == FlowRunStatus.FAILED.value
-    assert run_row.error_message == "Webhook delivery failed: webhook unavailable"
+    assert (
+        FlowRunError.model_validate(run_row.error_json).message
+        == "Webhook delivery failed: webhook unavailable"
+    )
     assert step_result_row is not None
     assert step_result_row.status == FlowStepResultStatus.COMPLETED.value
     assert step_result_row.output_payload_json["webhook_delivered"] is False

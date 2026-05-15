@@ -1720,7 +1720,6 @@ async def test_complete_step_execution_tracks_inherited_citations_for_synthesis_
         num_tokens_input=None,
         num_tokens_output=None,
         status=FlowStepResultStatus.COMPLETED,
-        error_message=None,
         flow_step_execution_hash=None,
         created_at=run.created_at,
         updated_at=run.updated_at,

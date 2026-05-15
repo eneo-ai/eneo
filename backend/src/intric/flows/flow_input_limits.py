@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException
@@ -31,6 +31,18 @@ class FlowRuntimeUploadPolicy:
     seconds_per_mebibyte: int = 8
     max_timeout_seconds: int = 600
     idle_timeout_seconds: int = 120
+
+
+class FlowInputLimitsSource(Protocol):
+    async def get_flow_input_limits_resolved(self) -> FlowInputLimits: ...
+
+
+async def resolve_flow_input_limits_from_source(
+    source: FlowInputLimitsSource | None,
+) -> FlowInputLimits:
+    if source is not None:
+        return await source.get_flow_input_limits_resolved()
+    return resolve_flow_input_limits(None)
 
 
 def _default_limits(defaults: Any | None = None) -> FlowInputLimits:

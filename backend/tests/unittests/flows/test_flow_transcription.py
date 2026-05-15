@@ -48,7 +48,6 @@ def _run(*, user, payload: dict | None = None) -> FlowRun:
         cancelled_at=None,
         input_payload_json=payload or {"text": "hello"},
         output_payload_json=None,
-        error_message=None,
         job_id=None,
         created_at=now,
         updated_at=now,

@@ -10,6 +10,7 @@ from intric.flows.flow_review_expiry_policy import (
     FLOW_REVIEW_EXPIRED,
     FLOW_REVIEW_EXPIRED_TERMINAL_MESSAGE,
 )
+from intric.flows.flow_run_error import FlowRunError
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 
 
@@ -44,8 +45,11 @@ class FlowReviewExpiryReconciler:
                 tenant_id=tenant_id,
                 target_status=FlowRunStatus.CANCELLED,
                 source=FlowRunLifecycleSource.REVIEW_EXPIRED,
-                error_code=FLOW_REVIEW_EXPIRED,
-                error_message=FLOW_REVIEW_EXPIRED_TERMINAL_MESSAGE,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.REVIEW_EXPIRED,
+                    code=FLOW_REVIEW_EXPIRED,
+                    message=FLOW_REVIEW_EXPIRED_TERMINAL_MESSAGE,
+                ),
                 cancelled_at=datetime.now(timezone.utc),
             )
             if result.did_transition:

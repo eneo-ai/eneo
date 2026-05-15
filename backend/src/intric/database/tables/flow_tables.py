@@ -439,7 +439,7 @@ class FlowRuns(BasePublic):
     output_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
         JSONB, nullable=True
     )
-    error_message: Mapped[Optional[str]] = mapped_column(nullable=True)
+    error_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     job_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Jobs.id, ondelete="SET NULL"),
         nullable=True,

@@ -14,6 +14,7 @@ from intric.flows.api.flow_models import (
     FlowRunCreateRequest,
     FlowRunDebugAttempt,
     FlowRunEvidenceResponse,
+    FlowRunPublic,
     FlowRunRerunInvalidatedStepPublic,
     FlowRunRerunOperationPublic,
     FlowStepAttemptPublic,
@@ -30,11 +31,13 @@ from intric.flows.domain.flow import FlowRunReviewCheckpoint
 from intric.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
+    FlowRunLifecycleSource,
     FlowRunRerunOperationStatus,
     FlowRunReviewCheckpointState,
     FlowStepAttemptStatus,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode
+from intric.flows.flow_run_error import FlowRunError
 from intric.main.exceptions import BadRequestException
 
 
@@ -613,3 +616,51 @@ def test_http_test_response_parses_current_payload_shape() -> None:
 
     assert response.success is False
     assert response.error_code == "INVALID_CONFIG"
+
+
+def test_flow_run_public_exposes_structured_error_for_failed_runs() -> None:
+    run_id = uuid4()
+    flow_id = uuid4()
+    tenant_id = uuid4()
+    trace_id = uuid4()
+    now = datetime.now(timezone.utc)
+
+    run = FlowRunPublic.model_validate(
+        {
+            "id": run_id,
+            "flow_id": flow_id,
+            "flow_version": 20,
+            "user_id": None,
+            "tenant_id": tenant_id,
+            "trace_id": trace_id,
+            "revision": 1,
+            "status": "failed",
+            "cancelled_at": None,
+            "started_at": now,
+            "finished_at": now,
+            "input_payload_json": None,
+            "output_payload_json": None,
+            "result_files": [],
+            "token_usage": None,
+            "error": {
+                "schema_version": 1,
+                "code": "flow_review_policy_invalid",
+                "message": "Step 3 (Analysera bakgrund): review_policy is invalid.",
+                "source": "invalid_flow_definition",
+                "step_order": 3,
+                "details": {"step_description": "Analysera bakgrund"},
+            },
+            "job_id": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
+
+    assert run.error == FlowRunError(
+        code="flow_review_policy_invalid",
+        message="Step 3 (Analysera bakgrund): review_policy is invalid.",
+        source=FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
+        step_order=3,
+        details={"step_description": "Analysera bakgrund"},
+    )
+    assert not hasattr(run, "error_message")

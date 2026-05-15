@@ -4,12 +4,6 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.model_enums import (
-    ModelFamily,
-    ModelHostingLocation,
-    ModelOrg,
-    ModelStability,
-)
 from intric.database.tables.ai_models_table import TranscriptionModels
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.spaces_table import SpacesTranscriptionModels
@@ -52,10 +46,10 @@ async def _create_default_transcription_model(session, *, tenant_id, space_id):
         provider_id=provider.id,
         name="whisper-1",
         model_name="whisper-1",
-        family=ModelFamily.OPEN_AI.value,
-        hosting=ModelHostingLocation.USA.value,
-        stability=ModelStability.STABLE.value,
-        org=ModelOrg.OPENAI.value,
+        family="openai",
+        hosting="usa",
+        stability="stable",
+        org="OpenAI",
         base_url="https://api.openai.com/v1",
         is_enabled=True,
         is_default=True,

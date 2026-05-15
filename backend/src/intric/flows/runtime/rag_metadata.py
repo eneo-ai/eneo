@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from intric.flows.runtime.rag_reference_quality import choose_display_chunk
@@ -7,6 +8,14 @@ from intric.flows.source_display import (
     format_source_container_label,
     format_source_display_name,
 )
+
+
+def _empty_chunk_payloads() -> list[dict[str, Any]]:
+    return []
+
+
+def _empty_metadata() -> dict[str, Any]:
+    return {}
 
 
 def build_chunk_snippet(text: str, *, max_chars: int = 200) -> str:
@@ -17,15 +26,46 @@ def build_chunk_snippet(text: str, *, max_chars: int = 200) -> str:
     return normalized[start : start + max_chars]
 
 
+@dataclass
+class _RagReference:
+    id: str
+    id_short: str
+    title: str | None
+    source_title_raw: str | None
+    source_order: int
+    matched_chunk_count: int = 0
+    best_score: float = 0.0
+    chunks: list[dict[str, Any]] = field(default_factory=_empty_chunk_payloads)
+    display_candidates: list[dict[str, Any]] = field(
+        default_factory=_empty_chunk_payloads
+    )
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
+    usage_state: str = "retrieved_candidate"
+
+    def to_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "id": self.id,
+            "id_short": self.id_short,
+            "title": self.title,
+            "source_title_raw": self.source_title_raw,
+            "matched_chunk_count": self.matched_chunk_count,
+            "best_score": round(self.best_score, 4),
+            "chunks": self.chunks,
+            "usage_state": self.usage_state,
+        }
+        payload.update(self.metadata)
+        return payload
+
+
 def build_rag_references(
     info_blob_chunks: list[Any],
     *,
-    source_metadata_by_id: Mapping[str, Mapping[str, Any]] | None = None,
+    source_metadata_by_id: Mapping[str, Mapping[str, object]] | None = None,
     max_sources: int = 25,
     max_chunks_per_source: int = 5,
     snippet_chars: int = 200,
 ) -> tuple[list[dict[str, Any]], bool]:
-    references_by_source: dict[str, dict[str, Any]] = {}
+    references_by_source: dict[str, _RagReference] = {}
 
     for chunk_index, chunk in enumerate(info_blob_chunks):
         info_blob_id = getattr(chunk, "info_blob_id", None)
@@ -36,32 +76,28 @@ def build_rag_references(
         entry = references_by_source.get(source_id)
         if entry is None:
             source_metadata = (
-                source_metadata_by_id.get(source_id, {})
-                if source_metadata_by_id
-                else {}
+                source_metadata_by_id.get(source_id) if source_metadata_by_id else None
             )
-            reference_title = _truncate_title(
+            raw_reference_title = (
                 source_metadata.get("source_title")
-                or getattr(chunk, "info_blob_title", None)
+                if source_metadata is not None
+                else None
+            ) or getattr(chunk, "info_blob_title", None)
+            reference_title = _truncate_title(raw_reference_title)
+            entry = _RagReference(
+                id=source_id,
+                id_short=source_id[:8],
+                title=reference_title,
+                source_title_raw=reference_title,
+                source_order=chunk_index,
             )
-            entry = {
-                "id": source_id,
-                "id_short": source_id[:8],
-                "title": reference_title,
-                "source_title_raw": reference_title,
-                "matched_chunk_count": 0,
-                "best_score": 0.0,
-                "chunks": [],
-                "_display_candidates": [],
-                "_source_order": chunk_index,
-                "usage_state": "retrieved_candidate",
-            }
-            _attach_source_metadata(entry, source_metadata)
+            if source_metadata is not None:
+                _attach_source_metadata(entry, source_metadata)
             references_by_source[source_id] = entry
 
         score_value = _safe_score(getattr(chunk, "score", 0.0))
-        entry["matched_chunk_count"] += 1
-        entry["best_score"] = max(entry["best_score"], score_value)
+        entry.matched_chunk_count += 1
+        entry.best_score = max(entry.best_score, score_value)
 
         chunk_text = str(getattr(chunk, "text", "") or "")
         chunk_snippet = build_chunk_snippet(chunk_text, max_chars=snippet_chars)
@@ -74,12 +110,12 @@ def build_rag_references(
             "snippet": chunk_snippet,
             "text": chunk_text,
         }
-        entry["_display_candidates"].append(chunk_payload)
+        entry.display_candidates.append(chunk_payload)
 
-        if len(entry["chunks"]) >= max_chunks_per_source:
+        if len(entry.chunks) >= max_chunks_per_source:
             continue
 
-        entry["chunks"].append(
+        entry.chunks.append(
             {
                 "chunk_no": chunk_payload["chunk_no"],
                 "score": chunk_payload["score"],
@@ -90,25 +126,24 @@ def build_rag_references(
     references = list(references_by_source.values())
     references.sort(
         key=lambda reference: (
-            -int(reference["matched_chunk_count"]),
-            -float(reference["best_score"]),
-            int(reference["_source_order"]),
+            -reference.matched_chunk_count,
+            -reference.best_score,
+            reference.source_order,
         ),
     )
     references_truncated = len(references) > max_sources
     references = references[:max_sources]
 
+    reference_payloads: list[dict[str, Any]] = []
     for reference in references:
-        reference["best_score"] = round(float(reference["best_score"]), 4)
-        reference.pop("_source_order", None)
-        reference["chunks"].sort(
-            key=_chunk_sort_key,
-        )
-        display_chunk = choose_display_chunk(reference.pop("_display_candidates", []))
+        reference.chunks.sort(key=_chunk_sort_key)
+        payload = reference.to_payload()
+        display_chunk = choose_display_chunk(reference.display_candidates)
         if display_chunk is not None:
-            reference.update(display_chunk)
+            payload.update(display_chunk)
+        reference_payloads.append(payload)
 
-    return references, references_truncated
+    return reference_payloads, references_truncated
 
 
 def _chunk_sort_key(chunk: dict[str, Any]) -> tuple[float, int]:
@@ -125,7 +160,7 @@ def _safe_score(score: Any) -> float:
     return numeric
 
 
-def _truncate_title(title: Any, *, max_chars: int = 200) -> str | None:
+def _truncate_title(title: object, *, max_chars: int = 200) -> str | None:
     if title is None:
         return None
     text = str(title).strip()
@@ -137,15 +172,15 @@ def _truncate_title(title: Any, *, max_chars: int = 200) -> str | None:
 
 
 def _attach_source_metadata(
-    entry: dict[str, Any],
-    source_metadata: Mapping[str, Any],
+    entry: _RagReference,
+    source_metadata: Mapping[str, object],
 ) -> None:
     source_title = _truncate_title(source_metadata.get("source_title"))
     if source_title:
-        entry["source_title"] = source_title
-        entry["source_title_raw"] = source_title
-        entry["source_display_name"] = format_source_display_name(source_title)
-        entry["title"] = source_title
+        entry.title = source_title
+        entry.source_title_raw = source_title
+        entry.metadata["source_title"] = source_title
+        entry.metadata["source_display_name"] = format_source_display_name(source_title)
     for key in (
         "source_url",
         "source_kind",
@@ -155,7 +190,10 @@ def _attach_source_metadata(
     ):
         value = source_metadata.get(key)
         if isinstance(value, str) and value.strip():
-            entry[key] = value.strip()
+            stripped = value.strip()
+            entry.metadata[key] = stripped
             if key == "source_container_name":
-                entry["source_container_name_raw"] = value.strip()
-                entry["source_container_label"] = format_source_container_label(entry)
+                entry.metadata["source_container_name_raw"] = stripped
+                entry.metadata["source_container_label"] = (
+                    format_source_container_label(entry.to_payload())
+                )

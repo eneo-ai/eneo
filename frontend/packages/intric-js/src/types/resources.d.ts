@@ -66,6 +66,8 @@ export type FlowRuntimePolicy = components["schemas"]["FlowRuntimePolicyPublic"]
 export type FlowRuntimePolicyUpdate = components["schemas"]["FlowRuntimePolicyUpdate"];
 export type FlowEvidencePolicy = components["schemas"]["FlowEvidencePolicyPublic"];
 export type FlowRetentionPolicy = components["schemas"]["FlowRetentionPolicyPublic"];
+export type FlowRunStatusCapabilities = components["schemas"]["FlowRunStatusCapabilitiesPublic"];
+export type FlowRunStatusCapability = components["schemas"]["FlowRunStatusCapabilityPublic"];
 // SEAM: tracked in batch-5 journal; delete when schema.d.ts includes FlowDocumentRenderLimitsPublic.
 export type FlowDocumentRenderLimits = {
   max_source_chars: number;
@@ -164,6 +166,7 @@ export type AIBuilderModel = components["schemas"]["SessionModelOption"];
 export type AIBuilderSessionTelemetrySummary = components["schemas"]["SessionTelemetrySummary"];
 export type FlowRunResultFile = components["schemas"]["FlowRunStepResultFile"];
 export type FlowRunTokenUsage = components["schemas"]["FlowRunTokenUsagePublic"];
+export type FlowRunError = components["schemas"]["FlowRunError"];
 
 export type FlowRunOutputPayload = {
   text?: string;

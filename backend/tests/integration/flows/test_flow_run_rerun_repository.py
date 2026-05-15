@@ -289,7 +289,6 @@ async def _mark_run_completed(
             status=FlowRunStatus.COMPLETED.value,
             revision=1,
             output_payload_json={"answer": "complete"},
-            error_message="previous error is cleared by completion",
             started_at=now,
             finished_at=now,
             cancelled_at=now,
@@ -517,7 +516,7 @@ async def test_accept_rerun_operation_resets_run_results_and_records_invalidatio
         assert accepted.run.trace_id == run_before.trace_id
         assert accepted.run.input_payload_json == {"case_id": "case-123"}
         assert accepted.run.output_payload_json is None
-        assert accepted.run.error_message is None
+        assert accepted.run.error is None
         assert accepted.run.started_at is None
         assert accepted.run.finished_at is None
         assert accepted.run.cancelled_at is None

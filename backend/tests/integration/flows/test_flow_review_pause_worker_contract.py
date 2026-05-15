@@ -39,6 +39,7 @@ from intric.flows.enums import (
 )
 from intric.flows.flow_factory import FlowFactory
 from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
+from intric.flows.flow_run_error import FlowRunError
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
@@ -475,8 +476,15 @@ async def test_review_checkpoint_open_after_terminalization_returns_terminal_out
                         if target_status == FlowRunStatus.CANCELLED
                         else FlowRunLifecycleSource.STALE_RUNNING_RECONCILER
                     ),
-                    error_code=f"terminalized_{target_status.value}",
-                    error_message=f"Run was terminalized as {target_status.value}.",
+                    error=FlowRunError.from_source(
+                        (
+                            FlowRunLifecycleSource.USER_CANCEL
+                            if target_status == FlowRunStatus.CANCELLED
+                            else FlowRunLifecycleSource.STALE_RUNNING_RECONCILER
+                        ),
+                        code=f"terminalized_{target_status.value}",
+                        message=f"Run was terminalized as {target_status.value}.",
+                    ),
                 )
                 await terminal_session.commit()
             return await original_open(self, **kwargs)
@@ -725,8 +733,9 @@ async def test_review_checkpoint_snapshot_is_enough_to_render_consumer_review_ui
             celery_task_id=f"review-pause-json-{uuid4()}",
             retry_count=0,
         )
+        review_service = context.container.flow_run_review_checkpoint_service()
         checkpoint = (
-            await context.container.flow_run_service().get_active_review_checkpoint(
+            await review_service.get_active_review_checkpoint(
                 flow_id=context.flow_id,
                 run_id=context.run_id,
             )
@@ -743,7 +752,7 @@ async def test_review_checkpoint_snapshot_is_enough_to_render_consumer_review_ui
         )
 
         unchanged_checkpoint = (
-            await context.container.flow_run_service().get_active_review_checkpoint(
+            await review_service.get_active_review_checkpoint(
                 flow_id=context.flow_id,
                 run_id=context.run_id,
             )
@@ -829,8 +838,8 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
             celery_task_id=f"review-contract-pause-{uuid4()}",
             retry_count=0,
         )
-        run_service = context.container.flow_run_service()
-        checkpoint = await run_service.get_active_review_checkpoint(
+        review_service = context.container.flow_run_review_checkpoint_service()
+        checkpoint = await review_service.get_active_review_checkpoint(
             flow_id=context.flow_id,
             run_id=context.run_id,
         )
@@ -838,7 +847,7 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
         assert checkpoint.current_payload_json == original_payload
 
         with pytest.raises(TypedIOValidationException) as exc_info:
-            await run_service.edit_review_checkpoint(
+            await review_service.edit_review_checkpoint(
                 flow_id=context.flow_id,
                 run_id=context.run_id,
                 checkpoint_id=checkpoint.id,
@@ -847,7 +856,7 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
             )
 
         with pytest.raises(TypedIOValidationException) as missing_structured_exc:
-            await run_service.edit_review_checkpoint(
+            await review_service.edit_review_checkpoint(
                 flow_id=context.flow_id,
                 run_id=context.run_id,
                 checkpoint_id=checkpoint.id,
@@ -884,7 +893,7 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
         assert step_result_after_invalid.output_payload_json == original_payload
         assert outbox_actions_after_invalid == ["flow_run_review_checkpoint_opened"]
 
-        edited = await run_service.edit_review_checkpoint(
+        edited = await review_service.edit_review_checkpoint(
             flow_id=context.flow_id,
             run_id=context.run_id,
             checkpoint_id=checkpoint.id,
@@ -981,26 +990,26 @@ async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
             celery_task_id=f"review-pause-{uuid4()}",
             retry_count=0,
         )
-        run_service = context.container.flow_run_service()
-        checkpoint = await run_service.get_active_review_checkpoint(
+        review_service = context.container.flow_run_review_checkpoint_service()
+        checkpoint = await review_service.get_active_review_checkpoint(
             flow_id=context.flow_id,
             run_id=context.run_id,
         )
         assert checkpoint is not None
-        edited = await run_service.edit_review_checkpoint(
+        edited = await review_service.edit_review_checkpoint(
             flow_id=context.flow_id,
             run_id=context.run_id,
             checkpoint_id=checkpoint.id,
             expected_checkpoint_revision=checkpoint.revision,
             current_payload_json=edited_payload,
         )
-        approved = await run_service.approve_review_checkpoint(
+        approved = await review_service.approve_review_checkpoint(
             flow_id=context.flow_id,
             run_id=context.run_id,
             checkpoint_id=checkpoint.id,
             expected_checkpoint_revision=edited.revision,
         )
-        resumed = await run_service.resume_review_checkpoint(
+        resumed = await review_service.resume_review_checkpoint(
             flow_id=context.flow_id,
             run_id=context.run_id,
             checkpoint_id=checkpoint.id,
@@ -1137,26 +1146,26 @@ async def test_resume_last_step_review_terminalizes_completed_run(
             celery_task_id=f"review-last-step-pause-{uuid4()}",
             retry_count=0,
         )
-        run_service = context.container.flow_run_service()
-        checkpoint = await run_service.get_active_review_checkpoint(
+        review_service = context.container.flow_run_review_checkpoint_service()
+        checkpoint = await review_service.get_active_review_checkpoint(
             flow_id=context.flow_id,
             run_id=context.run_id,
         )
         assert checkpoint is not None
-        edited = await run_service.edit_review_checkpoint(
+        edited = await review_service.edit_review_checkpoint(
             flow_id=context.flow_id,
             run_id=context.run_id,
             checkpoint_id=checkpoint.id,
             expected_checkpoint_revision=checkpoint.revision,
             current_payload_json=edited_payload,
         )
-        approved = await run_service.approve_review_checkpoint(
+        approved = await review_service.approve_review_checkpoint(
             flow_id=context.flow_id,
             run_id=context.run_id,
             checkpoint_id=checkpoint.id,
             expected_checkpoint_revision=edited.revision,
         )
-        resumed = await run_service.resume_review_checkpoint(
+        resumed = await review_service.resume_review_checkpoint(
             flow_id=context.flow_id,
             run_id=context.run_id,
             checkpoint_id=checkpoint.id,

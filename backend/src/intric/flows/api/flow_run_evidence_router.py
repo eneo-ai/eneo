@@ -17,7 +17,7 @@ from intric.flows.api.flow_trace_audit import (
     build_flow_trace_error_payload,
     log_flow_trace_audit_or_deny,
 )
-from intric.flows.application.flow_run_service import FlowRunService
+from intric.flows.application.flow_run_evidence_service import FlowRunEvidenceService
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
 from intric.server.dependencies.container import get_container
@@ -64,8 +64,8 @@ _RAW_REASON_REQUIRED_MESSAGE: Final[str] = (
 )
 
 
-def _get_flow_run_service(container: Container) -> FlowRunService:
-    return container.flow_run_service()
+def _get_flow_run_evidence_service(container: Container) -> FlowRunEvidenceService:
+    return container.flow_run_evidence_service()
 
 
 @router.get(
@@ -120,13 +120,16 @@ async def get_flow_run_evidence_alias(
         allow_service_key_principals=True,
     )
     user = container.user()
-    run_service = _get_flow_run_service(container)
-    run = await run_service.get_run(
+    evidence_service = _get_flow_run_evidence_service(container)
+    run = await evidence_service.get_run(
         run_id=run_id,
         flow_id=id,
         access_kind="evidence_view",
     )
-    evidence = await run_service.get_evidence(run_id=run_id, run=run)
+    evidence = await evidence_service.get_redacted_evidence_bundle(
+        run_id=run_id,
+        run=run,
+    )
     audit_failure = await log_flow_trace_audit_or_deny(
         container=container,
         user=user,
@@ -137,7 +140,7 @@ async def get_flow_run_evidence_alias(
     )
     if audit_failure is not None:
         return audit_failure
-    return FlowRunEvidenceResponse.model_validate(evidence)
+    return FlowRunEvidenceResponse.model_validate(evidence.to_dict())
 
 
 @router.get(
@@ -251,13 +254,13 @@ async def export_flow_run_evidence_alias(
             ),
         )
     user = container.user()
-    run_service = _get_flow_run_service(container)
-    run = await run_service.get_run(
+    evidence_service = _get_flow_run_evidence_service(container)
+    run = await evidence_service.get_run(
         run_id=run_id,
         flow_id=id,
         access_kind=access_kind,
     )
-    export_payload = await run_service.export_evidence_json(
+    export_payload = await evidence_service.export_evidence_json(
         run_id=run_id,
         detail=detail,
         run=run,

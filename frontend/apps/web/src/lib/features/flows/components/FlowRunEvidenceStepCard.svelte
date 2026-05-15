@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { FlowRunResultFile, FlowRunStep, Intric } from "@intric/intric-js";
+  import type { FlowRunError, FlowRunResultFile, FlowRunStep, Intric } from "@intric/intric-js";
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import { IconCopy } from "@intric/icons/copy";
   import { IconCheck } from "@intric/icons/check";
@@ -43,6 +43,7 @@
     templateProvenance,
     stepRag,
     stepAttempts,
+    runError = null,
     reviewPolicyDefinitionSteps = [],
     copiedKey,
     expanded,
@@ -66,6 +67,7 @@
     templateProvenance: TemplateProvenanceSummary | null;
     stepRag: Record<string, unknown> | null;
     stepAttempts: Record<string, unknown>[];
+    runError?: FlowRunError | null;
     reviewPolicyDefinitionSteps?: readonly FlowReviewPolicyErrorStep[];
     copiedKey: string | null;
     expanded: boolean;
@@ -88,11 +90,7 @@
   const stepReviewPolicy = $derived(stepDef?.review_policy ?? null);
   const shouldShowStepError = $derived(
     result.error_message
-      ? isReviewPolicyRunErrorRelevantForStep(
-          result.error_message,
-          result.step_order,
-          stepReviewPolicy
-        )
+      ? isReviewPolicyRunErrorRelevantForStep(runError, result.step_order, stepReviewPolicy)
       : false
   );
 
@@ -399,6 +397,7 @@
 
         {#if result.error_message && shouldShowStepError}
           <FlowRunErrorAlert
+            error={runError}
             message={result.error_message}
             steps={reviewPolicyDefinitionSteps.filter(
               (step) => step.step_order === result.step_order

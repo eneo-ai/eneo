@@ -41,8 +41,8 @@ async def test_reconcile_next_expired_checkpoint_expires_checkpoint_then_cancels
     assert terminal_kwargs["tenant_id"] == tenant_id
     assert terminal_kwargs["target_status"] == FlowRunStatus.CANCELLED
     assert terminal_kwargs["source"] == FlowRunLifecycleSource.REVIEW_EXPIRED
-    assert terminal_kwargs["error_code"] == "flow_review_expired"
-    assert terminal_kwargs["error_message"].startswith("flow_review_expired:")
+    assert terminal_kwargs["error"].code == "flow_review_expired"
+    assert terminal_kwargs["error"].message.startswith("flow_review_expired:")
 
 
 @pytest.mark.asyncio

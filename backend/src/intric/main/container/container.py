@@ -107,8 +107,14 @@ from intric.flows.ai_builder.ai_builder_service import AIBuilderService
 from intric.flows.application.flow_review_expiry_reconciliation import (
     FlowReviewExpiryReconciler,
 )
+from intric.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from intric.flows.application.flow_run_audit_outbox_delivery import (
     FlowRunAuditOutboxDeliveryService,
+)
+from intric.flows.application.flow_run_evidence_service import FlowRunEvidenceService
+from intric.flows.application.flow_run_rerun_service import FlowRunRerunService
+from intric.flows.application.flow_run_review_checkpoint_service import (
+    FlowRunReviewCheckpointService,
 )
 from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from intric.flows.flow_file_upload_service import FlowFileUploadService
@@ -1150,6 +1156,14 @@ class Container(containers.DeclarativeContainer):
         encryption_service=encryption_service,
         space_service=space_service,
     )
+    flow_run_access_policy = providers.Factory(
+        FlowRunAccessPolicy,
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        space_service=space_service,
+        actor_manager=actor_manager,
+    )
     flow_run_service = providers.Factory(
         FlowRunService,
         user=user,
@@ -1160,8 +1174,33 @@ class Container(containers.DeclarativeContainer):
         file_repo=file_repo,
         settings_service=settings_service,
         execution_backend=flow_execution_backend,
-        space_service=space_service,
-        actor_manager=actor_manager,
+        access_policy=flow_run_access_policy,
+    )
+    flow_run_evidence_service = providers.Factory(
+        FlowRunEvidenceService,
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        file_repo=file_repo,
+        access_policy=flow_run_access_policy,
+    )
+    flow_run_rerun_service = providers.Factory(
+        FlowRunRerunService,
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        file_repo=file_repo,
+        settings_service=settings_service,
+        access_policy=flow_run_access_policy,
+    )
+    flow_run_review_checkpoint_service = providers.Factory(
+        FlowRunReviewCheckpointService,
+        user=user,
+        flow_run_repo=flow_run_repo,
+        access_policy=flow_run_access_policy,
+        flow_run_terminalizer=flow_run_terminalizer,
     )
     flow_template_asset_service = providers.Factory(
         FlowTemplateAssetService,

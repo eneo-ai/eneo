@@ -30,6 +30,7 @@ from intric.flows.domain.flow import (
 )
 from intric.flows.enums import FlowRunLifecycleSource
 from intric.flows.flow import FlowStepResultStatus
+from intric.flows.flow_run_error import FlowRunError
 from intric.flows.flow_run_step_result_file import FlowStepResultFileReference
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
@@ -583,8 +584,15 @@ async def test_late_step_result_save_after_terminalization_preserves_result_file
                 if target_status == FlowRunStatus.CANCELLED
                 else FlowRunLifecycleSource.STALE_RUNNING_RECONCILER
             ),
-            error_code=f"terminalized_{target_status.value}",
-            error_message=f"Run was terminalized as {target_status.value}.",
+            error=FlowRunError.from_source(
+                (
+                    FlowRunLifecycleSource.USER_CANCEL
+                    if target_status == FlowRunStatus.CANCELLED
+                    else FlowRunLifecycleSource.STALE_RUNNING_RECONCILER
+                ),
+                code=f"terminalized_{target_status.value}",
+                message=f"Run was terminalized as {target_status.value}.",
+            ),
         )
 
     async with sessionmanager.session() as late_session, late_session.begin():

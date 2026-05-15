@@ -4,7 +4,7 @@ import hashlib
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Mapping, cast
 from uuid import UUID
 
 import httpx
@@ -42,6 +42,7 @@ from intric.flows.enums import (
     FlowRunRerunInvalidationRole,
     is_terminal_flow_run_status,
 )
+from intric.flows.flow_run_error import FlowRunError, FlowRunErrorDetails
 from intric.flows.flow_run_provenance import (
     AttemptStartProvenance,
     FlowAttemptProvenance,
@@ -485,8 +486,11 @@ class FlowRunExecutor:
                 tenant_id=tenant_id,
                 target_status=FlowRunStatus.CANCELLED,
                 source=FlowRunLifecycleSource.FLOW_DELETED,
-                error_code="flow_deleted",
-                error_message=reason,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.FLOW_DELETED,
+                    code="flow_deleted",
+                    message=reason,
+                ),
             )
             await self._commit()
             return {"status": "cancelled", "reason": "flow_deleted"}
@@ -504,24 +508,31 @@ class FlowRunExecutor:
                 tenant_id=tenant_id,
                 target_status=FlowRunStatus.FAILED,
                 source=FlowRunLifecycleSource.DEFINITION_CHECKSUM_MISMATCH,
-                error_code="definition_checksum_mismatch",
-                error_message=str(exc),
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.DEFINITION_CHECKSUM_MISMATCH,
+                    code="definition_checksum_mismatch",
+                    message=str(exc),
+                ),
             )
             await self._commit()
             return {"status": "failed", "error": "definition_checksum_mismatch"}
         try:
             steps = self._parse_published_runtime_steps(version.definition_json)
         except BadRequestException as exc:
+            source = FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
             await self._terminalize_run(
                 run_id=run_id,
                 tenant_id=tenant_id,
                 target_status=FlowRunStatus.FAILED,
-                source=FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
-                error_code="invalid_flow_definition",
-                error_message=str(exc),
+                source=source,
+                error=self._run_error_from_bad_request(
+                    exc,
+                    source=source,
+                    default_code="invalid_flow_definition",
+                ),
             )
             await self._commit()
-            return {"status": "failed", "error": "invalid_flow_definition"}
+            return {"status": "failed", "error": exc.code or "invalid_flow_definition"}
         version_metadata = version.definition_json.get("metadata_json")
 
         persisted_results = await self.flow_run_repo.list_step_results(
@@ -545,8 +556,11 @@ class FlowRunExecutor:
                 tenant_id=tenant_id,
                 target_status=FlowRunStatus.FAILED,
                 source=FlowRunLifecycleSource.ASSISTANT_SNAPSHOT_DRIFT,
-                error_code="assistant_snapshot_drift",
-                error_message=str(exc),
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.ASSISTANT_SNAPSHOT_DRIFT,
+                    code="assistant_snapshot_drift",
+                    message=str(exc),
+                ),
             )
             await self._commit()
             return {"status": "failed", "error": "assistant_snapshot_drift"}
@@ -595,8 +609,12 @@ class FlowRunExecutor:
                     tenant_id=tenant_id,
                     target_status=FlowRunStatus.CANCELLED,
                     source=FlowRunLifecycleSource.FLOW_DELETED,
-                    error_code="flow_deleted",
-                    error_message=preclaim_decision.run_error_message,
+                    error=FlowRunError.from_source(
+                        FlowRunLifecycleSource.FLOW_DELETED,
+                        code="flow_deleted",
+                        message=preclaim_decision.run_error_message
+                        or "Flow was deleted during execution.",
+                    ),
                 )
                 await self._commit()
                 return preclaim_decision.result or {
@@ -638,8 +656,12 @@ class FlowRunExecutor:
                         tenant_id=tenant_id,
                         target_status=FlowRunStatus.FAILED,
                         source=FlowRunLifecycleSource.STEP_MISSING,
-                        error_code="step_missing",
-                        error_message=postclaim_decision.run_error_message,
+                        error=FlowRunError.from_source(
+                            FlowRunLifecycleSource.STEP_MISSING,
+                            code="step_missing",
+                            message=postclaim_decision.run_error_message
+                            or f"Missing step result for step {step.step_id}",
+                        ),
                     )
                     await self._commit()
                     return postclaim_decision.result or {
@@ -864,6 +886,17 @@ class FlowRunExecutor:
         if outcome.result_status == "skipped":
             return {"status": "skipped", "reason": outcome.reason}
 
+        run_error = (
+            FlowRunError.from_source(
+                FlowRunLifecycleSource.EXECUTOR_FAILED,
+                code=outcome.reason or FlowRunLifecycleSource.EXECUTOR_FAILED.value,
+                message=outcome.error_message
+                or outcome.reason
+                or "One or more flow steps failed.",
+            )
+            if outcome.flow_status != FlowRunStatus.COMPLETED.value
+            else None
+        )
         terminalization = await self._terminalize_run(
             run_id=run_id,
             tenant_id=tenant_id,
@@ -873,8 +906,7 @@ class FlowRunExecutor:
                 if outcome.flow_status == FlowRunStatus.COMPLETED.value
                 else FlowRunLifecycleSource.EXECUTOR_FAILED
             ),
-            error_code=outcome.reason,
-            error_message=outcome.error_message,
+            error=run_error,
             output_payload_json=outcome.output_payload_json,
         )
         await self._commit()
@@ -1155,7 +1187,8 @@ class FlowRunExecutor:
         if run.status == FlowRunStatus.CANCELLED:
             return {"status": "skipped", "reason": "run_cancelled"}
         if run.status == FlowRunStatus.FAILED:
-            return {"status": "failed", "error": run.error_message}
+            error_message = run.error.message if run.error is not None else "flow_run_failed"
+            return {"status": "failed", "error": error_message}
         raise RuntimeError(
             "Step result write was skipped, but the flow run is not terminal."
         )
@@ -1187,8 +1220,12 @@ class FlowRunExecutor:
             tenant_id=tenant_id,
             target_status=FlowRunStatus.FAILED,
             source=FlowRunLifecycleSource.EXECUTOR_FAILED,
-            error_code="step_attempt_start_failed",
-            error_message=failure_plan.run_error_message,
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.EXECUTOR_FAILED,
+                code="step_attempt_start_failed",
+                message=failure_plan.run_error_message,
+                step_order=step.step_order,
+            ),
         )
         await self._commit()
         return failure_plan.return_result
@@ -1292,8 +1329,12 @@ class FlowRunExecutor:
             tenant_id=tenant_id,
             target_status=FlowRunStatus.FAILED,
             source=FlowRunLifecycleSource.EXECUTOR_FAILED,
-            error_code=failure_plan.error_code,
-            error_message=failure_plan.run_error_message,
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.EXECUTOR_FAILED,
+                code=failure_plan.error_code,
+                message=failure_plan.run_error_message,
+                step_order=step.step_order,
+            ),
         )
         await self._commit()
         return failure_plan.return_result
@@ -1345,8 +1386,12 @@ class FlowRunExecutor:
             tenant_id=tenant_id,
             target_status=FlowRunStatus.FAILED,
             source=FlowRunLifecycleSource.EXECUTOR_FAILED,
-            error_code=failure_plan.error_code,
-            error_message=failure_plan.run_error_message,
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.EXECUTOR_FAILED,
+                code=failure_plan.error_code,
+                message=failure_plan.run_error_message,
+                step_order=step.step_order,
+            ),
         )
         await self._commit()
         return failure_plan.return_result
@@ -1524,8 +1569,12 @@ class FlowRunExecutor:
             tenant_id=tenant_id,
             target_status=FlowRunStatus.FAILED,
             source=FlowRunLifecycleSource.EXECUTOR_FAILED,
-            error_code="webhook_delivery_failed",
-            error_message=f"Webhook delivery failed: {error}",
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.EXECUTOR_FAILED,
+                code="webhook_delivery_failed",
+                message=f"Webhook delivery failed: {error}",
+                step_order=step.step_order,
+            ),
         )
         await self._commit()
         return {"status": "failed", "error": str(error)}
@@ -1863,12 +1912,12 @@ class FlowRunExecutor:
 
     @staticmethod
     def _parse_published_runtime_steps(
-        definition_json: dict[str, Any],
+        definition_json: Mapping[str, object],
     ) -> list[RuntimeStep]:
         return parse_published_runtime_steps(definition_json)
 
     @staticmethod
-    def _parse_runtime_steps(definition_json: dict[str, Any]) -> list[RuntimeStep]:
+    def _parse_runtime_steps(definition_json: Mapping[str, object]) -> list[RuntimeStep]:
         return parse_runtime_steps(definition_json)
 
     @staticmethod
@@ -1894,6 +1943,29 @@ class FlowRunExecutor:
         schema_version = definition_json.get("schema_version")
         return isinstance(schema_version, int) and schema_version >= 1
 
+    @staticmethod
+    def _run_error_from_bad_request(
+        exc: BadRequestException,
+        *,
+        source: FlowRunLifecycleSource,
+        default_code: str,
+    ) -> FlowRunError:
+        context = exc.context
+        step_order_value = context.get("step_order") if context is not None else None
+        step_order = (
+            step_order_value
+            if isinstance(step_order_value, int)
+            and not isinstance(step_order_value, bool)
+            else None
+        )
+        return FlowRunError.from_source(
+            source,
+            code=exc.code or default_code,
+            message=str(exc),
+            step_order=step_order,
+            details=FlowRunErrorDetails.from_bad_request_context(context),
+        )
+
     async def _terminalize_run(
         self,
         *,
@@ -1901,8 +1973,7 @@ class FlowRunExecutor:
         tenant_id: UUID,
         target_status: FlowRunStatus,
         source: FlowRunLifecycleSource,
-        error_code: str | None = None,
-        error_message: str | None = None,
+        error: FlowRunError | None = None,
         output_payload_json: JsonObject | None = None,
         cancelled_at: datetime | None = None,
     ) -> FlowRunTerminalizationResult:
@@ -1911,8 +1982,7 @@ class FlowRunExecutor:
             tenant_id=tenant_id,
             target_status=target_status,
             source=source,
-            error_code=error_code,
-            error_message=error_message,
+            error=error,
             output_payload_json=output_payload_json,
             cancelled_at=cancelled_at,
             principal=self.principal,

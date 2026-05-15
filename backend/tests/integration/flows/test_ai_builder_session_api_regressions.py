@@ -11,12 +11,6 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from intric.ai_models.model_enums import (
-    ModelFamily,
-    ModelHostingLocation,
-    ModelOrg,
-    ModelStability,
-)
 from intric.database.tables.ai_models_table import TranscriptionModels
 from intric.database.tables.flow_tables import BuilderSessions, Flows
 from intric.database.tables.model_providers_table import ModelProviders
@@ -219,10 +213,10 @@ async def _create_default_transcription_model(
             provider_id=provider.id,
             name="whisper-1",
             model_name="whisper-1",
-            family=ModelFamily.OPEN_AI.value,
-            hosting=ModelHostingLocation.USA.value,
-            stability=ModelStability.STABLE.value,
-            org=ModelOrg.OPENAI.value,
+            family="openai",
+            hosting="usa",
+            stability="stable",
+            org="OpenAI",
             base_url="https://api.openai.com/v1",
             is_enabled=True,
             is_default=True,

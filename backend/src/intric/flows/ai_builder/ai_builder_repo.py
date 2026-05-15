@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 from uuid import UUID
@@ -56,7 +56,7 @@ class AIBuilderRepository:
         self.session = session
 
     @contextlib.asynccontextmanager
-    async def _transaction(self) -> AsyncIterator[None]:
+    async def _transaction(self) -> AsyncGenerator[None, None]:
         """Ensure a transaction is active.
 
         Inside SSE generators the DI transaction has already committed,
@@ -70,7 +70,7 @@ class AIBuilderRepository:
                 yield
 
     @contextlib.asynccontextmanager
-    async def savepoint(self) -> AsyncIterator[None]:
+    async def savepoint(self) -> AsyncGenerator[None, None]:
         """Yield a SAVEPOINT-scoped nested transaction.
 
         Guarantees that writes performed inside the block either all
@@ -400,12 +400,14 @@ class AIBuilderRepository:
                     updated_at=datetime.now(timezone.utc),
                 )
             )
-            result = await self.session.execute(stmt)
-            if (
-                request_id is not None
-                and lock_token is not None
-                and result.rowcount == 0
-            ):
+            if request_id is not None and lock_token is not None:
+                updated_session_id = await self.session.scalar(
+                    stmt.returning(BuilderSessions.id)
+                )
+            else:
+                await self.session.execute(stmt)
+                updated_session_id = session_id
+            if updated_session_id is None:
                 raise BadRequestException(
                     "The AI Builder session lease was lost while updating session status.",
                     code="session_send_lease_lost",
@@ -442,12 +444,14 @@ class AIBuilderRepository:
                     updated_at=datetime.now(timezone.utc),
                 )
             )
-            result = await self.session.execute(stmt)
-            if (
-                request_id is not None
-                and lock_token is not None
-                and result.rowcount == 0
-            ):
+            if request_id is not None and lock_token is not None:
+                updated_session_id = await self.session.scalar(
+                    stmt.returning(BuilderSessions.id)
+                )
+            else:
+                await self.session.execute(stmt)
+                updated_session_id = session_id
+            if updated_session_id is None:
                 raise BadRequestException(
                     "The AI Builder session lease was lost while updating conversation state.",
                     code="session_send_lease_lost",
@@ -541,12 +545,14 @@ class AIBuilderRepository:
                     updated_at=datetime.now(timezone.utc),
                 )
             )
-            result = await self.session.execute(update_stmt)
-            if (
-                request_id is not None
-                and lock_token is not None
-                and result.rowcount == 0
-            ):
+            if request_id is not None and lock_token is not None:
+                updated_session_id = await self.session.scalar(
+                    update_stmt.returning(BuilderSessions.id)
+                )
+            else:
+                await self.session.execute(update_stmt)
+                updated_session_id = session_id
+            if updated_session_id is None:
                 raise BadRequestException(
                     "The AI Builder session lease was lost while saving conversation messages.",
                     code="session_send_lease_lost",
@@ -611,12 +617,14 @@ class AIBuilderRepository:
                     updated_at=datetime.now(timezone.utc),
                 )
             )
-            result = await self.session.execute(stmt)
-            if (
-                request_id is not None
-                and lock_token is not None
-                and result.rowcount == 0
-            ):
+            if request_id is not None and lock_token is not None:
+                updated_session_id = await self.session.scalar(
+                    stmt.returning(BuilderSessions.id)
+                )
+            else:
+                await self.session.execute(stmt)
+                updated_session_id = session_id
+            if updated_session_id is None:
                 raise BadRequestException(
                     "The AI Builder session lease was lost while recording the latest plan.",
                     code="session_send_lease_lost",

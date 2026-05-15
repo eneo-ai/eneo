@@ -8,6 +8,7 @@ from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 from referencing.jsonschema import DRAFT202012
 
+from intric.flows.api.flow_models import flow_run_status_capabilities_public
 from intric.flows.enums import RerunDependencyKind
 from intric.server.main import get_application
 from intric.settings.setting_service import FLOW_SETTINGS_INVALID_PAYLOAD_CODE
@@ -232,6 +233,7 @@ REQUIRED_PATHS: dict[str, set[str]] = {
     "/api/v1/flows/{id}/runs/{run_id}/cancel/": {"post"},
     "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/": {"post"},
     "/api/v1/flows/{id}/runs/{run_id}/redispatch/": {"post"},
+    "/api/v1/flows/runs/status-capabilities/": {"get"},
     "/api/v1/flows/{id}/runs/{run_id}/evidence/": {"get"},
     "/api/v1/flows/{id}/runs/{run_id}/evidence/export": {"get"},
     "/api/v1/flows/{id}/runs/{run_id}/steps/": {"get"},
@@ -267,6 +269,8 @@ REQUIRED_SCHEMAS = {
     "FlowRuntimeInputContractPublic",
     "FlowReviewStepContractPublic",
     "FlowRunStepPublic",
+    "FlowRunStatusCapabilitiesPublic",
+    "FlowRunStatusCapabilityPublic",
     "FlowInputLimitsPublic",
     "FlowTemplateAssetPublic",
     "FlowTemplateReadinessPublic",
@@ -330,6 +334,10 @@ REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
         "/api/v1/flows/{id}/runs/{run_id}/redispatch/",
         "post",
     ): "redispatch_flow_run_alias",
+    (
+        "/api/v1/flows/runs/status-capabilities/",
+        "get",
+    ): "get_flow_run_status_capabilities",
     (
         "/api/v1/flows/{id}/runs/{run_id}/evidence/",
         "get",
@@ -819,9 +827,9 @@ def test_openapi_flow_schema_examples_validate_against_schemas(
     openapi_spec: dict,
 ) -> None:
     failures: list[str] = []
-    for schema_name, schema in openapi_spec.get("components", {}).get(
-        "schemas", {}
-    ).items():
+    for schema_name, schema in (
+        openapi_spec.get("components", {}).get("schemas", {}).items()
+    ):
         if not isinstance(schema_name, str) or not schema_name.startswith("Flow"):
             continue
         if not isinstance(schema, dict):
@@ -1023,16 +1031,49 @@ def test_openapi_run_contract_guides_consumer_forms_uploads_and_review(
     assert "Review behavior" in review_step["review_mode"]["description"]
     assert "output contract" in review_step["output_contract"]["description"]
     assert "expires_after_seconds" in review_step
-    assert "Effective review window" in review_step["expires_after_seconds"][
-        "description"
-    ]
-    assert "before the run reaches awaiting_review" in review_step[
-        "expires_after_seconds"
-    ]["description"]
+    assert (
+        "Effective review window" in review_step["expires_after_seconds"]["description"]
+    )
+    assert (
+        "before the run reaches awaiting_review"
+        in review_step["expires_after_seconds"]["description"]
+    )
     assert "timeout" in upload_policy["min_timeout_seconds"]["description"].lower()
     assert "actual file size" in upload_policy["seconds_per_mebibyte"]["description"]
     assert "no-progress timeout" in upload_policy["max_timeout_seconds"]["description"]
     assert "progress" in upload_policy["idle_timeout_seconds"]["description"]
+
+
+def test_openapi_flow_run_status_capabilities_guides_consumer_lifecycle(
+    openapi_spec: dict,
+) -> None:
+    operation = _get_operation(
+        openapi_spec,
+        "/api/v1/flows/runs/status-capabilities/",
+        "get",
+    )
+    description = operation.get("description", "")
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    capability_schema = schemas.get("FlowRunStatusCapabilitiesPublic", {})
+    capabilities = capability_schema.get("properties", {})
+    row_schema = schemas.get("FlowRunStatusCapabilityPublic", {}).get("properties", {})
+
+    assert capability_schema.get(
+        "example"
+    ) == flow_run_status_capabilities_public().model_dump(mode="json")
+    assert "canonical Flow run status capability table" in description
+    assert "should_poll" in description
+    assert "can_request_redispatch" in description
+    assert "redispatched_count: 0" in description
+    assert "hard-coding status groups" in capabilities["statuses"]["description"]
+    assert "Recommended status filter order" in capabilities["filter_order"][
+        "description"
+    ]
+    assert "continue polling" in row_schema["should_poll"]["description"]
+    assert "cancel endpoint" in row_schema["is_cancellable"]["description"]
+    assert "server-gated by staleness" in row_schema["can_request_redispatch"][
+        "description"
+    ]
 
 
 def test_openapi_flow_step_review_policy_documents_authoring_contract(
@@ -1326,6 +1367,37 @@ def test_openapi_flow_public_run_and_step_expose_result_files(
         "properties", {}
     )
     assert "result_files" in evidence_properties
+
+
+def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    run_properties = schemas.get("FlowRunPublic", {}).get("properties", {})
+    assert "error_message" not in run_properties
+
+    error_property = run_properties.get("error", {})
+    error_options = error_property.get("anyOf") or error_property.get("oneOf") or []
+    structured_error_ref = next(
+        option
+        for option in error_options
+        if isinstance(option, dict) and option.get("type") != "null"
+    )
+    error_schema = _resolve_component_ref(openapi_spec, structured_error_ref)
+
+    assert error_schema.get("title") == "FlowRunError"
+    assert {"code", "message"}.issubset(set(error_schema.get("required", [])))
+    assert "Clients should branch on `code`" in error_schema.get("description", "")
+
+    details_property = error_schema.get("properties", {}).get("details", {})
+    details_options = details_property.get("anyOf") or details_property.get("oneOf") or []
+    structured_details_ref = next(
+        option
+        for option in details_options
+        if isinstance(option, dict) and option.get("type") != "null"
+    )
+    details_schema = _resolve_component_ref(openapi_spec, structured_details_ref)
+    assert details_schema.get("title") == "FlowRunErrorDetails"
+    assert details_schema.get("additionalProperties") is False
+    assert set(details_schema.get("properties", {})) == {"step_description"}
 
 
 def test_openapi_flow_run_evidence_response_exposes_rerun_lineage(

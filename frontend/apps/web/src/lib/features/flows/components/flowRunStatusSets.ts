@@ -1,64 +1,52 @@
-import type { FlowRun } from "@intric/intric-js";
+import { FLOW_RUN_STATUS_CAPABILITIES, FLOW_RUN_STATUS_FILTER_ORDER } from "@intric/intric-js";
+import type { FlowRun, FlowRunStatusCapability } from "@intric/intric-js";
 
 export type FlowRunStatus = FlowRun["status"];
 export type FlowRunStatusFilter = FlowRunStatus | null;
 
-export const FLOW_RUN_STATUS_FILTER_OPTIONS = [
-  "completed",
-  "failed",
-  "running",
-  "queued",
-  "awaiting_review",
-  "cancelled"
-] as const satisfies readonly FlowRunStatus[];
+type AssertNever<T extends never> = T;
+type CapabilityStatus = (typeof FLOW_RUN_STATUS_CAPABILITIES)[number]["status"];
 
-const ACTIVE_FLOW_RUN_STATUS_VALUES = [
-  "queued",
-  "running"
-] as const satisfies readonly FlowRunStatus[];
-const POLLING_FLOW_RUN_STATUS_VALUES = [
-  "queued",
-  "running",
-  "awaiting_review"
-] as const satisfies readonly FlowRunStatus[];
-const TERMINAL_FLOW_RUN_STATUS_VALUES = [
-  "completed",
-  "failed",
-  "cancelled"
-] as const satisfies readonly FlowRunStatus[];
-const CANCELLABLE_FLOW_RUN_STATUS_VALUES = [
-  "queued",
-  "running",
-  "awaiting_review"
-] as const satisfies readonly FlowRunStatus[];
-
-const ACTIVE_FLOW_RUN_STATUSES: ReadonlySet<string> = new Set(ACTIVE_FLOW_RUN_STATUS_VALUES);
-const POLLING_FLOW_RUN_STATUSES: ReadonlySet<string> = new Set(POLLING_FLOW_RUN_STATUS_VALUES);
-const TERMINAL_FLOW_RUN_STATUSES: ReadonlySet<string> = new Set(TERMINAL_FLOW_RUN_STATUS_VALUES);
-const CANCELLABLE_FLOW_RUN_STATUSES: ReadonlySet<string> = new Set(
-  CANCELLABLE_FLOW_RUN_STATUS_VALUES
+export const FLOW_RUN_STATUS_VALUES = FLOW_RUN_STATUS_CAPABILITIES.map(
+  (capability) => capability.status
 );
 
+export type FlowRunStatusCoverageCheck = AssertNever<Exclude<FlowRunStatus, CapabilityStatus>>;
+
+export const FLOW_RUN_STATUS_FILTER_OPTIONS = FLOW_RUN_STATUS_FILTER_ORDER;
+
+export type FlowRunStatusFilterCoverageCheck = AssertNever<
+  Exclude<FlowRunStatus, (typeof FLOW_RUN_STATUS_FILTER_OPTIONS)[number]>
+>;
+
+const FLOW_RUN_STATUS_CAPABILITY_BY_STATUS = new Map<string, FlowRunStatusCapability>(
+  FLOW_RUN_STATUS_CAPABILITIES.map((capability) => [capability.status, capability])
+);
+
+function getFlowRunStatusCapability(status: string): FlowRunStatusCapability | undefined {
+  return FLOW_RUN_STATUS_CAPABILITY_BY_STATUS.get(status);
+}
+
 export function isFlowRunActive(status: string): boolean {
-  return ACTIVE_FLOW_RUN_STATUSES.has(status);
+  return getFlowRunStatusCapability(status)?.is_active ?? false;
 }
 
 export function shouldPollFlowRunStatus(status: string): boolean {
-  return POLLING_FLOW_RUN_STATUSES.has(status);
+  return getFlowRunStatusCapability(status)?.should_poll ?? false;
 }
 
 export function isFlowRunTerminal(status: string): boolean {
-  return TERMINAL_FLOW_RUN_STATUSES.has(status);
+  return getFlowRunStatusCapability(status)?.is_terminal ?? false;
 }
 
 export function isFlowRunCancellable(status: string): boolean {
-  return CANCELLABLE_FLOW_RUN_STATUSES.has(status);
+  return getFlowRunStatusCapability(status)?.is_cancellable ?? false;
 }
 
 export function isFlowRunAwaitingReview(status: string): boolean {
-  return status === "awaiting_review";
+  return getFlowRunStatusCapability(status)?.is_awaiting_review ?? false;
 }
 
 export function canRedispatchFlowRun(status: string): boolean {
-  return status === "queued";
+  return getFlowRunStatusCapability(status)?.can_request_redispatch ?? false;
 }

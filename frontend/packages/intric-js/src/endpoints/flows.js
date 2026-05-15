@@ -506,6 +506,18 @@ export function initFlows(client) {
     },
 
     runs: {
+      statusCapabilities: {
+        /**
+         * Fetch canonical Flow run status capability metadata.
+         * @throws {IntricError}
+         */
+        get: async () => {
+          return _fetch("/api/v1/flows/runs/status-capabilities/", {
+            method: "get"
+          });
+        }
+      },
+
       /**
        * Create a flow run
        * @param {{

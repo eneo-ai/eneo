@@ -9,6 +9,7 @@ from intric.database.database import sessionmanager
 from intric.flows.domain.flow import FlowRunStatus
 from intric.flows.enums import FlowRunLifecycleSource
 from intric.flows.execution_backend import FlowExecutionBackend
+from intric.flows.flow_run_error import FlowRunError
 from intric.main.container.container import Container
 
 logger = logging.getLogger(__name__)
@@ -83,11 +84,14 @@ async def dispatch_flow_run_after_commit(
                     tenant_id=tenant_id,
                     target_status=FlowRunStatus.FAILED,
                     source=FlowRunLifecycleSource.DISPATCH_FAILURE,
-                    error_code="flow_dispatch_failed",
-                    error_message=(
-                        "flow_dispatch_failed: "
-                        "Flow dispatch failed before execution started. "
-                        "Retry creating a new run."
+                    error=FlowRunError.from_source(
+                        FlowRunLifecycleSource.DISPATCH_FAILURE,
+                        code="flow_dispatch_failed",
+                        message=(
+                            "flow_dispatch_failed: "
+                            "Flow dispatch failed before execution started. "
+                            "Retry creating a new run."
+                        ),
                     ),
                 )
 

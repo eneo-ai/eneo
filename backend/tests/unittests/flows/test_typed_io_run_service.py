@@ -99,6 +99,7 @@ async def test_create_run_rejects_reserved_input_payload_keys(user, reserved_key
     flow_version_repo = AsyncMock()
     flow = _flow(user)
     flow_repo.get = AsyncMock(return_value=flow)
+    flow_version_repo.get = AsyncMock(return_value=_version(user, flow))
 
     service = FlowRunService(
         user=user,
@@ -142,7 +143,6 @@ async def test_create_run_stores_step_inputs_without_top_level_file_ids(user):
         cancelled_at=None,
         input_payload_json=None,
         output_payload_json=None,
-        error_message=None,
         job_id=None,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -206,7 +206,6 @@ async def test_create_run_without_step_inputs_preserves_inline_payload(user):
         cancelled_at=None,
         input_payload_json={"text": "hello"},
         output_payload_json=None,
-        error_message=None,
         job_id=None,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),

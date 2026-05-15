@@ -360,10 +360,17 @@
   function getPrimaryResultFile(resultFiles: FlowRunResultFile[]): FlowRunResultFile | null {
     return resultFiles.find((file) => file.availability === "available") ?? resultFiles[0] ?? null;
   }
+
+  function getRunErrorMessage(run: FlowRun): string | null {
+    return run.error?.message ?? null;
+  }
 </script>
 
-{#snippet failedRunAlert(errorMessage: string)}
-  <FlowRunErrorAlert message={errorMessage} steps={flow.steps} />
+{#snippet failedRunAlert(run: FlowRun)}
+  {@const errorMessage = getRunErrorMessage(run)}
+  {#if errorMessage}
+    <FlowRunErrorAlert error={run.error} message={errorMessage} steps={flow.steps} />
+  {/if}
 {/snippet}
 
 <section class="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-3 py-4 sm:px-6 sm:py-6">
@@ -642,10 +649,10 @@
                   </div>
                 </Table.Cell>
               </Table.Row>
-              {#if run.status === "failed" && run.error_message}
+              {#if run.status === "failed" && getRunErrorMessage(run)}
                 <Table.Row class="border-default hover:bg-transparent">
                   <Table.Cell colspan={historyTableColumnCount} class="px-4 py-2">
-                    {@render failedRunAlert(run.error_message)}
+                    {@render failedRunAlert(run)}
                   </Table.Cell>
                 </Table.Row>
               {/if}
@@ -727,9 +734,9 @@
                 </div>
               </div>
             </button>
-            {#if run.status === "failed" && run.error_message}
+            {#if run.status === "failed" && getRunErrorMessage(run)}
               <div class="border-default border-t px-3 py-3">
-                {@render failedRunAlert(run.error_message)}
+                {@render failedRunAlert(run)}
               </div>
             {/if}
             {#if isFlowRunCancellable(run.status)}

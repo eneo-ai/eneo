@@ -15,6 +15,7 @@ from intric.flows.application.flow_run_lifecycle_events import (
 )
 from intric.flows.domain.flow import FlowRun, FlowRunStatus
 from intric.flows.enums import FlowRunLifecycleSource
+from intric.flows.flow_run_error import FlowRunError
 
 LIFECYCLE_LOGGER = "intric.flows.application.flow_run_lifecycle_events"
 
@@ -33,7 +34,11 @@ def _run() -> FlowRun:
         cancelled_at=None,
         input_payload_json={"question": "What happened?"},
         output_payload_json=None,
-        error_message="flow_worker_stalled: stale run reconciled.",
+        error=FlowRunError.from_source(
+            FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
+            code="flow_worker_stalled",
+            message="flow_worker_stalled: stale run reconciled.",
+        ),
         job_id=None,
         created_at=now,
         updated_at=now,

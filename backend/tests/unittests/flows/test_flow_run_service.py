@@ -16,18 +16,18 @@ from intric.authentication.auth_models import (
 )
 from intric.authentication.principal_types import PrincipalType
 from intric.files.file_models import FileType
+from intric.flows.application.flow_run_access_policy import FlowRunAccessPolicy
+from intric.flows.application.flow_run_evidence_service import FlowRunEvidenceService
 from intric.flows.application.flow_run_service import FlowRunService
 from intric.flows.domain.flow import (
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
-    FlowRunReviewCheckpoint,
     FlowRunTokenUsage,
 )
 from intric.flows.enums import (
     FlowRunLifecycleSource,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
-    FlowRunReviewCheckpointState,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
     RerunDependencyKind,
@@ -42,14 +42,9 @@ from intric.flows.flow import (
     FlowVersion,
 )
 from intric.flows.flow_run_provenance import FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
-from intric.flows.flow_run_rerun_request import (
-    FlowRunRerunRequestFingerprintInput,
-    build_rerun_request_fingerprint,
-)
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.flows.infrastructure.flow_run_repo import (
     FlowRunRerunCommandResult,
-    FlowRunReviewCheckpointResumeResult,
 )
 from intric.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
@@ -67,6 +62,23 @@ from intric.roles.permissions import Permission
 
 def _flow_repo() -> AsyncMock:
     return AsyncMock()
+
+
+def _access_policy(
+    *,
+    user,
+    flow_repo,
+    flow_run_repo,
+    space_service=None,
+    actor_manager=None,
+) -> FlowRunAccessPolicy:
+    return FlowRunAccessPolicy(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        space_service=space_service,
+        actor_manager=actor_manager,
+    )
 
 
 def _step(step_order: int = 1) -> FlowStep:
@@ -120,7 +132,6 @@ def _run(user, flow_id) -> FlowRun:
         cancelled_at=None,
         input_payload_json={"input": "value"},
         output_payload_json=None,
-        error_message=None,
         job_id=None,
         created_at=now,
         updated_at=now,
@@ -371,44 +382,6 @@ def _rerun_command_result(
         run=run,
         invalidated_steps=invalidated_steps,
         created=created,
-    )
-
-
-def _review_checkpoint(
-    user,
-    run: FlowRun,
-    *,
-    state: FlowRunReviewCheckpointState = FlowRunReviewCheckpointState.AWAITING_REVIEW,
-    revision: int = 1,
-    resume_idempotency_key: str | None = None,
-) -> FlowRunReviewCheckpoint:
-    now = datetime.now(timezone.utc)
-    return FlowRunReviewCheckpoint(
-        id=uuid4(),
-        tenant_id=user.tenant_id,
-        flow_id=run.flow_id,
-        flow_run_id=run.id,
-        step_id=uuid4(),
-        step_order=1,
-        attempt_no=1,
-        state=state,
-        revision=revision,
-        schema_version=1,
-        original_payload_json={"text": "Draft"},
-        current_payload_json={"text": "Draft"},
-        requester_user_id=user.id,
-        requester_principal_type=PrincipalType.USER,
-        decided_by_user_id=None,
-        decided_by_principal_type=None,
-        next_step_ids_json=[],
-        resume_idempotency_key=resume_idempotency_key,
-        edited_at=None,
-        approved_at=None,
-        rejected_at=None,
-        resumed_at=None,
-        cancelled_at=None,
-        created_at=now,
-        updated_at=now,
     )
 
 
@@ -1468,645 +1441,6 @@ async def test_create_run_rejects_runtime_step_input_mimetype(user):
     }
 
 
-@pytest.mark.asyncio
-async def test_rerun_step_builds_repository_command(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    file_repo = AsyncMock()
-    flow = _flow(
-        user=user,
-        published_version=3,
-        metadata_json={
-            "form_schema": {
-                "fields": [
-                    {"name": "case_id", "type": "text", "required": True, "order": 1}
-                ]
-            }
-        },
-    )
-    root_step = flow.steps[0].model_copy(
-        update={
-            "input_config": {
-                "runtime_input": {
-                    "enabled": True,
-                    "required": False,
-                    "max_files": 5,
-                    "input_format": "document",
-                }
-            }
-        }
-    )
-    downstream_step = flow.steps[1].model_copy(update={"input_source": "previous_step"})
-    flow = flow.model_copy(update={"steps": [root_step, downstream_step]})
-    run = _run(user=user, flow_id=flow.id).model_copy(
-        update={
-            "flow_version": 3,
-            "revision": 7,
-            "status": FlowRunStatus.COMPLETED,
-        }
-    )
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        file_repo=file_repo,
-        max_concurrent_runs=5,
-    )
-    flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = _runtime_version(
-        user=user, flow=flow, version=3
-    )
-    prior_root_attempt_id = uuid4()
-    flow_run_repo.get_latest_completed_attempt_id_for_step.return_value = (
-        prior_root_attempt_id
-    )
-    expected_result = _rerun_command_result(
-        user=user,
-        run=run,
-        rerun_step_id=root_step.id,
-        invalidated_step_ids=[root_step.id, downstream_step.id],
-    )
-    flow_run_repo.accept_or_replay_rerun_operation.return_value = expected_result
-    file_a_id = uuid4()
-    file_b_id = uuid4()
-    expected_file_ids = sorted({file_a_id, file_b_id}, key=str)
-    file_repo.get_list_by_id_and_user.return_value = [
-        SimpleNamespace(id=file_id, mimetype="application/pdf")
-        for file_id in expected_file_ids
-    ]
-
-    result = await service.rerun_step(
-        flow_id=flow.id,
-        run_id=run.id,
-        rerun_step_id=root_step.id,
-        expected_run_revision=7,
-        reason="  Corrected source  ",
-        input_payload_json={"case_id": 123},
-        step_inputs={root_step.id: {"file_ids": [file_b_id, file_a_id, file_b_id]}},
-    )
-
-    assert result == expected_result
-    flow_run_repo.get.assert_awaited_once_with(
-        run_id=run.id,
-        flow_id=flow.id,
-        tenant_id=user.tenant_id,
-    )
-    flow_version_repo.get.assert_awaited_once_with(
-        flow_id=flow.id,
-        version=3,
-        tenant_id=user.tenant_id,
-    )
-    flow_run_repo.get_latest_completed_attempt_id_for_step.assert_awaited_once_with(
-        run_id=run.id,
-        flow_id=flow.id,
-        tenant_id=user.tenant_id,
-        step_id=root_step.id,
-    )
-    file_repo.get_list_by_id_and_user.assert_awaited_once_with(
-        ids=expected_file_ids,
-        user_id=user.id,
-        include_transcription=False,
-    )
-    expected_fingerprint = build_rerun_request_fingerprint(
-        FlowRunRerunRequestFingerprintInput(
-            tenant_id=user.tenant_id,
-            requested_by_user_id=user.id,
-            flow_id=flow.id,
-            flow_run_id=run.id,
-            rerun_step_id=root_step.id,
-            expected_run_revision=7,
-            prior_root_attempt_id=prior_root_attempt_id,
-            input_payload_json={"case_id": "123"},
-            root_step_inputs={root_step.id: expected_file_ids},
-        )
-    )
-    kwargs = flow_run_repo.accept_or_replay_rerun_operation.await_args.kwargs
-    assert kwargs["tenant_id"] == user.tenant_id
-    assert kwargs["flow_id"] == flow.id
-    assert kwargs["flow_run_id"] == run.id
-    assert kwargs["rerun_step_id"] == root_step.id
-    assert kwargs["rerun_step_order"] == root_step.step_order
-    assert kwargs["request_fingerprint"] == expected_fingerprint
-    assert kwargs["expected_run_revision"] == 7
-    assert kwargs["reason"] == "Corrected source"
-    assert kwargs["input_payload_json"] == {"case_id": "123"}
-    assert kwargs["step_inputs_json"] == {
-        str(root_step.id): {"file_ids": [str(file_id) for file_id in expected_file_ids]}
-    }
-    assert kwargs["requested_by_user_id"] == user.id
-    invalidated_steps = kwargs["invalidated_steps"]
-    assert [
-        (step.step_id, step.step_order, step.dependency_kinds)
-        for step in invalidated_steps
-    ] == [
-        (root_step.id, root_step.step_order, ()),
-        (
-            downstream_step.id,
-            downstream_step.step_order,
-            (RerunDependencyKind.INPUT_SOURCE_PREVIOUS_STEP,),
-        ),
-    ]
-
-
-@pytest.mark.asyncio
-async def test_rerun_step_preserves_empty_root_step_inputs(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    flow = _flow(user=user, published_version=1)
-    root_step = flow.steps[0].model_copy(
-        update={
-            "input_config": {
-                "runtime_input": {
-                    "enabled": True,
-                    "required": False,
-                    "max_files": 5,
-                    "input_format": "document",
-                }
-            }
-        }
-    )
-    flow = flow.model_copy(update={"steps": [root_step]})
-    run = _run(user=user, flow_id=flow.id).model_copy(
-        update={"status": FlowRunStatus.COMPLETED, "revision": 3}
-    )
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-    flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
-    flow_run_repo.get_latest_completed_attempt_id_for_step.return_value = None
-    expected_result = _rerun_command_result(
-        user=user,
-        run=run,
-        rerun_step_id=root_step.id,
-        invalidated_step_ids=[root_step.id],
-    )
-    flow_run_repo.accept_or_replay_rerun_operation.return_value = expected_result
-
-    result = await service.rerun_step(
-        flow_id=flow.id,
-        run_id=run.id,
-        rerun_step_id=root_step.id,
-        expected_run_revision=3,
-        reason="Refresh answer",
-        step_inputs={root_step.id: {"file_ids": []}},
-    )
-
-    assert result == expected_result
-    expected_fingerprint = build_rerun_request_fingerprint(
-        FlowRunRerunRequestFingerprintInput(
-            tenant_id=user.tenant_id,
-            requested_by_user_id=user.id,
-            flow_id=flow.id,
-            flow_run_id=run.id,
-            rerun_step_id=root_step.id,
-            expected_run_revision=3,
-            prior_root_attempt_id=None,
-            input_payload_json=None,
-            root_step_inputs={root_step.id: []},
-        )
-    )
-    kwargs = flow_run_repo.accept_or_replay_rerun_operation.await_args.kwargs
-    assert kwargs["request_fingerprint"] == expected_fingerprint
-    assert kwargs["step_inputs_json"] == {str(root_step.id): {"file_ids": []}}
-
-
-@pytest.mark.asyncio
-async def test_rerun_step_fingerprint_uses_none_without_completed_root_attempt(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    flow = _flow(user=user, published_version=1)
-    flow = flow.model_copy(update={"steps": [flow.steps[0]]})
-    run = _run(user=user, flow_id=flow.id).model_copy(
-        update={"status": FlowRunStatus.COMPLETED, "revision": 4}
-    )
-    root_step = flow.steps[0]
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-    flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
-    flow_run_repo.get_latest_completed_attempt_id_for_step.return_value = None
-    expected_result = _rerun_command_result(
-        user=user,
-        run=run,
-        rerun_step_id=root_step.id,
-        invalidated_step_ids=[root_step.id],
-    )
-    flow_run_repo.accept_or_replay_rerun_operation.return_value = expected_result
-
-    result = await service.rerun_step(
-        flow_id=flow.id,
-        run_id=run.id,
-        rerun_step_id=root_step.id,
-        expected_run_revision=4,
-        reason="Refresh answer",
-    )
-
-    assert result == expected_result
-    expected_fingerprint = build_rerun_request_fingerprint(
-        FlowRunRerunRequestFingerprintInput(
-            tenant_id=user.tenant_id,
-            requested_by_user_id=user.id,
-            flow_id=flow.id,
-            flow_run_id=run.id,
-            rerun_step_id=root_step.id,
-            expected_run_revision=4,
-            prior_root_attempt_id=None,
-            input_payload_json=None,
-            root_step_inputs=None,
-        )
-    )
-    kwargs = flow_run_repo.accept_or_replay_rerun_operation.await_args.kwargs
-    assert kwargs["request_fingerprint"] == expected_fingerprint
-    assert kwargs["input_payload_json"] is None
-    assert kwargs["step_inputs_json"] is None
-
-
-@pytest.mark.asyncio
-async def test_rerun_step_returns_repository_replay_result(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    flow = _flow(user=user, published_version=1)
-    flow = flow.model_copy(update={"steps": [flow.steps[0]]})
-    root_step = flow.steps[0]
-    run = _run(user=user, flow_id=flow.id).model_copy(
-        update={"status": FlowRunStatus.COMPLETED, "revision": 2}
-    )
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-    flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
-    flow_run_repo.get_latest_completed_attempt_id_for_step.return_value = uuid4()
-    replayed_result = _rerun_command_result(
-        user=user,
-        run=run,
-        rerun_step_id=root_step.id,
-        invalidated_step_ids=[root_step.id],
-        created=False,
-    )
-    flow_run_repo.accept_or_replay_rerun_operation.return_value = replayed_result
-
-    result = await service.rerun_step(
-        flow_id=flow.id,
-        run_id=run.id,
-        rerun_step_id=root_step.id,
-        expected_run_revision=2,
-        reason="Refresh answer",
-    )
-
-    assert result == replayed_result
-    assert result.created is False
-
-
-@pytest.mark.asyncio
-async def test_rerun_step_rejects_empty_reason(user):
-    service = FlowRunService(
-        user=user,
-        flow_repo=_flow_repo(),
-        flow_run_repo=AsyncMock(),
-        flow_version_repo=AsyncMock(),
-        max_concurrent_runs=5,
-    )
-
-    with pytest.raises(BadRequestException) as exc_info:
-        await service.rerun_step(
-            flow_id=uuid4(),
-            run_id=uuid4(),
-            rerun_step_id=uuid4(),
-            expected_run_revision=1,
-            reason="  \n\t  ",
-        )
-
-    assert exc_info.value.code == "flow_run_rerun_reason_required"
-    service.flow_run_repo.get.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_rerun_step_rejects_too_long_reason(user):
-    flow_run_repo = AsyncMock()
-    service = FlowRunService(
-        user=user,
-        flow_repo=_flow_repo(),
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=AsyncMock(),
-        max_concurrent_runs=5,
-    )
-
-    with pytest.raises(BadRequestException) as exc_info:
-        await service.rerun_step(
-            flow_id=uuid4(),
-            run_id=uuid4(),
-            rerun_step_id=uuid4(),
-            expected_run_revision=1,
-            reason="x" * 1025,
-        )
-
-    assert exc_info.value.code == "flow_run_rerun_reason_too_long"
-    assert exc_info.value.context == {"max_length": 1024}
-    flow_run_repo.get.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_rerun_step_accepts_max_length_reason(user):
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    flow = _flow(user=user, published_version=1)
-    flow = flow.model_copy(update={"steps": [flow.steps[0]]})
-    root_step = flow.steps[0]
-    run = _run(user=user, flow_id=flow.id).model_copy(
-        update={"status": FlowRunStatus.COMPLETED, "revision": 1}
-    )
-    service = FlowRunService(
-        user=user,
-        flow_repo=_flow_repo(),
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-    flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
-    flow_run_repo.get_latest_completed_attempt_id_for_step.return_value = None
-    expected_result = _rerun_command_result(
-        user=user,
-        run=run,
-        rerun_step_id=root_step.id,
-        invalidated_step_ids=[root_step.id],
-    )
-    flow_run_repo.accept_or_replay_rerun_operation.return_value = expected_result
-    reason = "x" * 1024
-
-    result = await service.rerun_step(
-        flow_id=flow.id,
-        run_id=run.id,
-        rerun_step_id=root_step.id,
-        expected_run_revision=1,
-        reason=reason,
-    )
-
-    assert result == expected_result
-    kwargs = flow_run_repo.accept_or_replay_rerun_operation.await_args.kwargs
-    assert kwargs["reason"] == reason
-
-
-@pytest.mark.asyncio
-async def test_rerun_step_rejects_missing_published_root_step(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    flow = _flow(user=user, published_version=1)
-    flow = flow.model_copy(update={"steps": [flow.steps[0]]})
-    run = _run(user=user, flow_id=flow.id).model_copy(
-        update={"status": FlowRunStatus.COMPLETED}
-    )
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-    flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
-
-    with pytest.raises(BadRequestException) as exc_info:
-        await service.rerun_step(
-            flow_id=flow.id,
-            run_id=run.id,
-            rerun_step_id=uuid4(),
-            expected_run_revision=1,
-            reason="Refresh answer",
-        )
-
-    assert exc_info.value.code == "flow_run_rerun_step_not_found"
-    flow_run_repo.get_latest_completed_attempt_id_for_step.assert_not_awaited()
-    flow_run_repo.accept_or_replay_rerun_operation.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_rerun_step_rejects_downstream_step_inputs(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    flow = _flow(user=user, published_version=1)
-    root_step = flow.steps[0]
-    downstream_step = flow.steps[1].model_copy(update={"input_source": "previous_step"})
-    flow = flow.model_copy(update={"steps": [root_step, downstream_step]})
-    run = _run(user=user, flow_id=flow.id).model_copy(
-        update={"status": FlowRunStatus.COMPLETED}
-    )
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-    flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
-
-    with pytest.raises(BadRequestException) as exc_info:
-        await service.rerun_step(
-            flow_id=flow.id,
-            run_id=run.id,
-            rerun_step_id=root_step.id,
-            expected_run_revision=1,
-            reason="Refresh answer",
-            step_inputs={downstream_step.id: {"file_ids": []}},
-        )
-
-    assert exc_info.value.code == "flow_run_rerun_step_inputs_invalid"
-    assert exc_info.value.context == {"step_ids": [str(downstream_step.id)]}
-    flow_run_repo.get_latest_completed_attempt_id_for_step.assert_not_awaited()
-    flow_run_repo.accept_or_replay_rerun_operation.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_rerun_step_omitted_payload_does_not_require_form_fields(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    flow = _form_schema_flow(user)
-    root_step = flow.steps[0]
-    downstream_step = flow.steps[1].model_copy(update={"input_source": "previous_step"})
-    flow = flow.model_copy(update={"steps": [root_step, downstream_step]})
-    run = _run(user=user, flow_id=flow.id).model_copy(
-        update={"status": FlowRunStatus.COMPLETED}
-    )
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-    flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
-    flow_run_repo.get_latest_completed_attempt_id_for_step.return_value = None
-    expected_result = _rerun_command_result(
-        user=user,
-        run=run,
-        rerun_step_id=root_step.id,
-        invalidated_step_ids=[root_step.id, downstream_step.id],
-    )
-    flow_run_repo.accept_or_replay_rerun_operation.return_value = expected_result
-
-    result = await service.rerun_step(
-        flow_id=flow.id,
-        run_id=run.id,
-        rerun_step_id=root_step.id,
-        expected_run_revision=1,
-        reason="Refresh answer",
-    )
-
-    assert result == expected_result
-    assert (
-        flow_run_repo.accept_or_replay_rerun_operation.await_args.kwargs[
-            "input_payload_json"
-        ]
-        is None
-    )
-
-
-@pytest.mark.asyncio
-async def test_rerun_step_rejects_empty_payload_missing_required_form_field(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    flow = _form_schema_flow(user)
-    root_step = flow.steps[0]
-    downstream_step = flow.steps[1].model_copy(update={"input_source": "previous_step"})
-    flow = flow.model_copy(update={"steps": [root_step, downstream_step]})
-    run = _run(user=user, flow_id=flow.id).model_copy(
-        update={"status": FlowRunStatus.COMPLETED}
-    )
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-    flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
-
-    with pytest.raises(BadRequestException) as exc_info:
-        await service.rerun_step(
-            flow_id=flow.id,
-            run_id=run.id,
-            rerun_step_id=root_step.id,
-            expected_run_revision=1,
-            reason="Refresh answer",
-            input_payload_json={},
-        )
-
-    assert exc_info.value.code == "flow_input_required_field_missing"
-    assert exc_info.value.context == {
-        "field_name": "Namn på brukare",
-        "field_type": "text",
-    }
-    flow_run_repo.get_latest_completed_attempt_id_for_step.assert_not_awaited()
-    flow_run_repo.accept_or_replay_rerun_operation.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_rerun_step_rejects_malformed_published_form_schema(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    flow = _form_schema_flow(user).model_copy(
-        update={
-            "metadata_json": {
-                "form_schema": {"fields": [{"name": "case_id", "type": "unsupported"}]}
-            }
-        }
-    )
-    root_step = flow.steps[0]
-    downstream_step = flow.steps[1].model_copy(update={"input_source": "previous_step"})
-    flow = flow.model_copy(update={"steps": [root_step, downstream_step]})
-    run = _run(user=user, flow_id=flow.id).model_copy(
-        update={"status": FlowRunStatus.COMPLETED}
-    )
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-    flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
-
-    with pytest.raises(
-        BadRequestException, match="Published flow form schema is invalid"
-    ) as exc_info:
-        await service.rerun_step(
-            flow_id=flow.id,
-            run_id=run.id,
-            rerun_step_id=root_step.id,
-            expected_run_revision=1,
-            reason="Refresh answer",
-            input_payload_json={"case_id": "A-123"},
-        )
-
-    assert exc_info.value.code == FLOW_PUBLISHED_FORM_SCHEMA_INVALID
-    flow_run_repo.get_latest_completed_attempt_id_for_step.assert_not_awaited()
-    flow_run_repo.accept_or_replay_rerun_operation.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_rerun_step_rejects_reserved_payload_keys(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    flow = _flow(user=user, published_version=1)
-    flow = flow.model_copy(update={"steps": [flow.steps[0]]})
-    root_step = flow.steps[0]
-    run = _run(user=user, flow_id=flow.id).model_copy(
-        update={"status": FlowRunStatus.COMPLETED}
-    )
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-    flow_run_repo.get.return_value = run
-    flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
-
-    with pytest.raises(BadRequestException) as exc_info:
-        await service.rerun_step(
-            flow_id=flow.id,
-            run_id=run.id,
-            rerun_step_id=root_step.id,
-            expected_run_revision=1,
-            reason="Refresh answer",
-            input_payload_json={"expected_flow_version": 1},
-        )
-
-    assert exc_info.value.code == "flow_run_reserved_input_payload_key"
-    flow_run_repo.get_latest_completed_attempt_id_for_step.assert_not_awaited()
-    flow_run_repo.accept_or_replay_rerun_operation.assert_not_awaited()
-
 
 @pytest.mark.asyncio
 async def test_list_runs_delegates_to_repo(user):
@@ -2227,8 +1561,13 @@ async def test_list_runs_keeps_service_keys_scoped_even_with_space_admin_role(us
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
-        space_service=space_service,
-        actor_manager=actor_manager,
+        access_policy=_access_policy(
+            user=service_user,
+            flow_repo=flow_repo,
+            flow_run_repo=flow_run_repo,
+            space_service=space_service,
+            actor_manager=actor_manager,
+        ),
     )
 
     await service.list_runs(flow_id=flow.id)
@@ -2249,7 +1588,7 @@ async def test_get_evidence_rejects_service_key_even_for_own_run(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -2266,7 +1605,7 @@ async def test_get_evidence_rejects_service_key_even_for_own_run(user):
     flow_run_repo.get.return_value = run
 
     with pytest.raises(UnauthorizedException) as exc_info:
-        await service.get_evidence(run_id=run.id)
+        await service.get_redacted_evidence_bundle(run_id=run.id)
 
     assert exc_info.value.code == "flow_run_evidence_forbidden"
 
@@ -2297,14 +1636,14 @@ async def test_get_evidence_allows_service_key_with_view_capability(user):
     flow_version_repo.get.return_value = version.model_copy(
         update={"flow_id": run.flow_id}
     )
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
     )
 
-    evidence = await service.get_evidence(run_id=run.id)
+    evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
 
     assert evidence["run"]["id"] == str(run.id)
 
@@ -2337,7 +1676,7 @@ async def test_export_evidence_json_allows_service_key_redacted_export_with_writ
     flow_version_repo.get.return_value = version.model_copy(
         update={"flow_id": run.flow_id}
     )
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -2384,13 +1723,18 @@ async def test_export_evidence_json_rejects_service_key_raw_export_in_classifica
     flow_run_repo.list_step_results.return_value = []
     flow_run_repo.list_step_attempts.return_value = []
     flow_version_repo.get.return_value = version
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
-        space_service=space_service,
-        actor_manager=actor_manager,
+        access_policy=_access_policy(
+            user=service_user,
+            flow_repo=flow_repo,
+            flow_run_repo=flow_run_repo,
+            space_service=space_service,
+            actor_manager=actor_manager,
+        ),
     )
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -2413,7 +1757,7 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_by_de
     run = _run(user=user, flow_id=sensitive_flow.id)
     flow_run_repo.get.return_value = run
     flow_repo.get.return_value = sensitive_flow
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=_trace_user(user),
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -2455,7 +1799,7 @@ async def test_export_evidence_json_allows_sensitive_flow_redacted_export_when_p
             }
         )
     )
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=allowed_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -2490,13 +1834,18 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_s
     flow_run_repo.get.return_value = run
     flow_repo.get.return_value = sensitive_flow
     space_service.get_space.return_value = SimpleNamespace(id=sensitive_flow.space_id)
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
-        space_service=space_service,
-        actor_manager=actor_manager,
+        access_policy=_access_policy(
+            user=user,
+            flow_repo=flow_repo,
+            flow_run_repo=flow_run_repo,
+            space_service=space_service,
+            actor_manager=actor_manager,
+        ),
     )
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -2528,7 +1877,7 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_t
     )
     flow_run_repo.get.return_value = run
     flow_repo.get.return_value = sensitive_flow
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=admin_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -2558,7 +1907,7 @@ async def test_export_evidence_json_rechecks_sensitive_policy_when_run_is_inject
     flow_version_repo.get.return_value = version
     flow_run_repo.list_step_results.return_value = []
     flow_run_repo.list_step_attempts.return_value = []
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=_trace_user(user),
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -2591,7 +1940,7 @@ async def test_export_evidence_json_rejects_cross_tenant_injected_run_for_tenant
     flow_version_repo.get.return_value = version
     flow_run_repo.list_step_results.return_value = []
     flow_run_repo.list_step_attempts.return_value = []
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=admin_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -2664,8 +2013,13 @@ async def test_get_run_rejects_other_service_key_run_even_with_space_admin_role(
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
-        space_service=space_service,
-        actor_manager=actor_manager,
+        access_policy=_access_policy(
+            user=service_user,
+            flow_repo=flow_repo,
+            flow_run_repo=flow_run_repo,
+            space_service=space_service,
+            actor_manager=actor_manager,
+        ),
     )
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -2767,8 +2121,13 @@ async def test_get_run_allows_space_admin_to_view_other_users_run_status(user):
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
-        space_service=space_service,
-        actor_manager=actor_manager,
+        access_policy=_access_policy(
+            user=user,
+            flow_repo=flow_repo,
+            flow_run_repo=flow_run_repo,
+            space_service=space_service,
+            actor_manager=actor_manager,
+        ),
     )
 
     result = await service.get_run(run_id=run.id, flow_id=run.flow_id)
@@ -2797,8 +2156,13 @@ async def test_list_step_results_allows_space_admin_for_other_users_run_content(
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
-        space_service=space_service,
-        actor_manager=actor_manager,
+        access_policy=_access_policy(
+            user=user,
+            flow_repo=flow_repo,
+            flow_run_repo=flow_run_repo,
+            space_service=space_service,
+            actor_manager=actor_manager,
+        ),
     )
 
     result = await service.list_step_results(run_id=run.id, flow_id=run.flow_id)
@@ -2824,16 +2188,21 @@ async def test_get_evidence_allows_space_admin_for_other_users_run(user):
     flow_repo.get.return_value = flow
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
     space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
-        space_service=space_service,
-        actor_manager=actor_manager,
+        access_policy=_access_policy(
+            user=user,
+            flow_repo=flow_repo,
+            flow_run_repo=flow_run_repo,
+            space_service=space_service,
+            actor_manager=actor_manager,
+        ),
     )
 
-    evidence = await service.get_evidence(run_id=run.id)
+    evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
 
     assert evidence["run"]["id"] == str(run.id)
 
@@ -2859,13 +2228,18 @@ async def test_export_evidence_json_rejects_space_admin_raw_export_in_classifica
         id=flow.space_id,
         security_classification=SimpleNamespace(security_level=3),
     )
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
-        space_service=space_service,
-        actor_manager=actor_manager,
+        access_policy=_access_policy(
+            user=user,
+            flow_repo=flow_repo,
+            flow_run_repo=flow_run_repo,
+            space_service=space_service,
+            actor_manager=actor_manager,
+        ),
     )
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -2897,13 +2271,18 @@ async def test_export_evidence_json_allows_space_owner_raw_export_in_classificat
         id=flow.space_id,
         security_classification=SimpleNamespace(security_level=3),
     )
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
-        space_service=space_service,
-        actor_manager=actor_manager,
+        access_policy=_access_policy(
+            user=user,
+            flow_repo=flow_repo,
+            flow_run_repo=flow_run_repo,
+            space_service=space_service,
+            actor_manager=actor_manager,
+        ),
     )
 
     export = await service.export_evidence_json(run_id=run.id, detail="raw")
@@ -2944,13 +2323,18 @@ async def test_export_evidence_json_allows_run_owner_raw_export_in_classificatio
         id=flow.space_id,
         security_classification=SimpleNamespace(security_level=3),
     )
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=trace_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
-        space_service=space_service,
-        actor_manager=actor_manager,
+        access_policy=_access_policy(
+            user=trace_user,
+            flow_repo=flow_repo,
+            flow_run_repo=flow_run_repo,
+            space_service=space_service,
+            actor_manager=actor_manager,
+        ),
     )
 
     export = await service.export_evidence_json(run_id=run.id, detail="raw")
@@ -3265,8 +2649,8 @@ async def test_reconcile_stale_running_runs_marks_stale_runs_failed(user):
     flow_run_repo.list_stale_running_runs.assert_awaited_once()
     terminalizer.terminalize_stale_running_run.assert_awaited_once()
     terminal_kwargs = terminalizer.terminalize_stale_running_run.await_args.kwargs
-    assert terminal_kwargs["error_code"] == "flow_worker_stalled"
-    assert terminal_kwargs["error_message"] == (
+    assert terminal_kwargs["error"].code == "flow_worker_stalled"
+    assert terminal_kwargs["error"].message == (
         "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
     )
 
@@ -3467,283 +2851,6 @@ async def test_create_run_rejects_invalid_published_snapshot(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "method_name",
-    [
-        "edit_review_checkpoint",
-        "approve_review_checkpoint",
-        "reject_review_checkpoint",
-        "resume_review_checkpoint",
-    ],
-)
-async def test_review_mutations_allow_service_key_for_own_run(user, method_name):
-    service_user = _service_key_user(user)
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    terminalizer = AsyncMock()
-    service = FlowRunService(
-        user=service_user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        flow_run_terminalizer=terminalizer,
-        max_concurrent_runs=5,
-    )
-    method = getattr(service, method_name)
-    flow_id = uuid4()
-    run = _run(user=user, flow_id=flow_id).model_copy(
-        update={
-            "user_id": None,
-            "principal_type": PrincipalType.SERVICE_KEY.value,
-            "principal_user_id": None,
-            "principal_api_key_id": service_user.active_api_key.id,
-        }
-    )
-    checkpoint = _review_checkpoint(user, run).model_copy(
-        update={
-            "requester_user_id": None,
-            "requester_principal_type": PrincipalType.SERVICE_KEY,
-        }
-    )
-    flow_run_repo.get.return_value = run
-    flow_run_repo.get_review_checkpoint_for_edit.return_value = checkpoint
-    flow_run_repo.edit_review_checkpoint_payload.return_value = checkpoint
-    flow_run_repo.approve_review_checkpoint.return_value = checkpoint
-    flow_run_repo.reject_review_checkpoint.return_value = checkpoint
-    flow_run_repo.resume_review_checkpoint.return_value = (
-        FlowRunReviewCheckpointResumeResult(
-            checkpoint=checkpoint,
-            run=run,
-            accepted=True,
-        )
-    )
-    kwargs = {
-        "flow_id": flow_id,
-        "run_id": run.id,
-        "checkpoint_id": checkpoint.id,
-        "expected_checkpoint_revision": 1,
-    }
-    if method_name == "edit_review_checkpoint":
-        kwargs["current_payload_json"] = {"text": "Edited"}
-    if method_name == "reject_review_checkpoint":
-        kwargs["reason"] = "Reject the draft."
-    if method_name == "resume_review_checkpoint":
-        kwargs["idempotency_key"] = "resume-key"
-
-    result = await method(**kwargs)
-
-    if method_name == "resume_review_checkpoint":
-        assert result.checkpoint == checkpoint
-        awaited = flow_run_repo.resume_review_checkpoint.await_args.kwargs
-    else:
-        assert result == checkpoint
-        repo_method_name = (
-            "edit_review_checkpoint_payload"
-            if method_name == "edit_review_checkpoint"
-            else method_name
-        )
-        awaited = getattr(flow_run_repo, repo_method_name).await_args.kwargs
-    principal = awaited["principal"]
-    assert principal.principal_type == PrincipalType.SERVICE_KEY
-    assert principal.principal_api_key_id == service_user.active_api_key.id
-    flow_run_repo.get.assert_awaited()
-
-
-@pytest.mark.asyncio
-async def test_review_mutations_reject_service_key_for_run_owned_by_another_principal(user):
-    service_user = _service_key_user(user)
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    service = FlowRunService(
-        user=service_user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-    flow_id = uuid4()
-    run = _run(user=user, flow_id=flow_id)
-    flow_run_repo.get.return_value = run
-
-    with pytest.raises(UnauthorizedException) as exc_info:
-        await service.edit_review_checkpoint(
-            flow_id=flow_id,
-            run_id=run.id,
-            checkpoint_id=uuid4(),
-            expected_checkpoint_revision=1,
-            current_payload_json={"text": "Edited"},
-        )
-
-    assert exc_info.value.code == "flow_run_access_denied"
-    flow_run_repo.get_review_checkpoint_for_edit.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_resume_review_checkpoint_requires_idempotency_key(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-
-    with pytest.raises(BadRequestException) as exc_info:
-        await service.resume_review_checkpoint(
-            flow_id=uuid4(),
-            run_id=uuid4(),
-            checkpoint_id=uuid4(),
-            expected_checkpoint_revision=1,
-            idempotency_key=" ",
-        )
-
-    assert exc_info.value.code == "flow_review_idempotency_key_required"
-    flow_run_repo.get.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_reject_review_checkpoint_requires_reason(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-
-    with pytest.raises(BadRequestException) as exc_info:
-        await service.reject_review_checkpoint(
-            flow_id=uuid4(),
-            run_id=uuid4(),
-            checkpoint_id=uuid4(),
-            expected_checkpoint_revision=1,
-            reason=" ",
-        )
-
-    assert exc_info.value.code == "flow_review_reject_reason_required"
-    flow_run_repo.get.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_reject_review_checkpoint_rejects_too_long_reason(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-
-    with pytest.raises(BadRequestException) as exc_info:
-        await service.reject_review_checkpoint(
-            flow_id=uuid4(),
-            run_id=uuid4(),
-            checkpoint_id=uuid4(),
-            expected_checkpoint_revision=1,
-            reason="x" * 1025,
-        )
-
-    assert exc_info.value.code == "flow_review_reject_reason_too_long"
-    assert exc_info.value.context == {"max_length": 1024}
-    flow_run_repo.get.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_reject_review_checkpoint_terminalizes_run_with_review_source(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    terminalizer = AsyncMock()
-    run = _run(user=user, flow_id=uuid4()).model_copy(
-        update={"status": FlowRunStatus.AWAITING_REVIEW}
-    )
-    checkpoint = _review_checkpoint(user, run)
-    flow_run_repo.get.return_value = run
-    flow_run_repo.reject_review_checkpoint.return_value = checkpoint
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_run_terminalizer=terminalizer,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-
-    result = await service.reject_review_checkpoint(
-        flow_id=run.flow_id,
-        run_id=run.id,
-        checkpoint_id=checkpoint.id,
-        expected_checkpoint_revision=checkpoint.revision,
-        reason="Reject the draft.",
-    )
-
-    assert result == checkpoint
-    flow_run_repo.reject_review_checkpoint.assert_awaited_once()
-    terminalizer.terminalize_run.assert_awaited_once()
-    terminal_kwargs = terminalizer.terminalize_run.await_args.kwargs
-    assert terminal_kwargs["run_id"] == run.id
-    assert terminal_kwargs["target_status"] == FlowRunStatus.CANCELLED
-    assert terminal_kwargs["source"] == FlowRunLifecycleSource.REVIEW_REJECTED
-    assert terminal_kwargs["error_code"] == "flow_review_rejected"
-    assert terminal_kwargs["error_message"] == "Reject the draft."
-
-
-@pytest.mark.asyncio
-async def test_resume_review_checkpoint_normalizes_idempotency_key(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    run = _run(user=user, flow_id=uuid4()).model_copy(
-        update={"status": FlowRunStatus.AWAITING_REVIEW}
-    )
-    checkpoint = _review_checkpoint(
-        user,
-        run,
-        state=FlowRunReviewCheckpointState.RESUMED,
-        revision=2,
-        resume_idempotency_key="resume-key",
-    )
-    flow_run_repo.get.return_value = run
-    flow_run_repo.resume_review_checkpoint.return_value = (
-        FlowRunReviewCheckpointResumeResult(
-            checkpoint=checkpoint,
-            run=run,
-            accepted=False,
-        )
-    )
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-
-    result = await service.resume_review_checkpoint(
-        flow_id=run.flow_id,
-        run_id=run.id,
-        checkpoint_id=checkpoint.id,
-        expected_checkpoint_revision=1,
-        idempotency_key=" resume-key ",
-    )
-
-    assert result.accepted is False
-    resume_kwargs = flow_run_repo.resume_review_checkpoint.await_args.kwargs
-    assert resume_kwargs["resume_idempotency_key"] == "resume-key"
-
-
-@pytest.mark.asyncio
 async def test_cancel_run_marks_pending_steps_cancelled(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
@@ -3771,8 +2878,8 @@ async def test_cancel_run_marks_pending_steps_cancelled(user):
     terminal_kwargs = terminalizer.terminalize_run.await_args.kwargs
     assert terminal_kwargs["target_status"] == FlowRunStatus.CANCELLED
     assert terminal_kwargs["source"] == FlowRunLifecycleSource.USER_CANCEL
-    assert terminal_kwargs["error_code"] == "user_cancelled"
-    assert terminal_kwargs["error_message"] == "Run cancelled by user."
+    assert terminal_kwargs["error"].code == "user_cancelled"
+    assert terminal_kwargs["error"].message == "Run cancelled by user."
 
 
 @pytest.mark.asyncio
@@ -3973,15 +3080,14 @@ async def test_get_evidence_redacts_sensitive_values(user):
         )
     ]
 
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
     )
 
-    evidence = await service.get_evidence(run_id=run.id)
+    evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
 
     assert evidence["run"]["input_payload_json"]["api_key"] == "[REDACTED]"
     assert evidence["run"]["input_payload_json"]["api-key"] == "[REDACTED]"
@@ -4117,15 +3223,14 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
     ]
     flow_run_repo.list_step_attempts.return_value = []
 
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
     )
 
-    evidence = await service.get_evidence(run_id=run.id)
+    evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
 
     assert evidence["debug_export"]["steps"][0]["rag"]["status"] == "success"
     assert evidence["debug_export"]["steps"][0]["rag"]["chunks_retrieved"] == 5
@@ -4203,15 +3308,14 @@ async def test_get_evidence_includes_trace_id_and_attempts_in_debug_export(user)
         )
     ]
 
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
     )
 
-    evidence = await service.get_evidence(run_id=run.id)
+    evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
 
     assert evidence["debug_export"]["schema_version"] == "eneo.flow.debug-export.v2"
     assert evidence["debug_export"]["run"]["trace_id"] == str(run.trace_id)
@@ -4245,12 +3349,11 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
     flow_run_repo.list_step_results.return_value = []
     flow_run_repo.list_step_attempts.return_value = []
 
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
     )
 
     redacted_export = await service.export_evidence_json(run_id=run.id)
@@ -4326,15 +3429,14 @@ async def test_get_evidence_normalizes_attempt_provenance_payloads(user):
         )
     ]
 
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
     )
 
-    evidence = await service.get_evidence(run_id=run.id)
+    evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
 
     llm_provenance = evidence["step_attempts"][0]["provenance_json"]["llm"]
     assert llm_provenance["effective_prompt"]["truncated"] is True
@@ -4383,15 +3485,14 @@ async def test_get_evidence_sets_rag_to_null_when_metadata_missing(user):
     ]
     flow_run_repo.list_step_attempts.return_value = []
 
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
     )
 
-    evidence = await service.get_evidence(run_id=run.id)
+    evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
 
     assert evidence["debug_export"]["steps"][0]["rag"] is None
 
@@ -4431,15 +3532,14 @@ async def test_get_evidence_ignores_rag_metadata_when_step_order_is_boolean(user
     flow_run_repo.list_step_results.return_value = []
     flow_run_repo.list_step_attempts.return_value = []
 
-    service = FlowRunService(
+    service = FlowRunEvidenceService(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
     )
 
-    evidence = await service.get_evidence(run_id=run.id)
+    evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
 
     assert evidence["debug_export"]["steps"][0]["rag"] is None
 
@@ -4532,7 +3632,7 @@ def _artifact_service(user, file_repo=None, result_file=None, run=None):
         run = _run(user=user, flow_id=uuid4())
     flow_run_repo.get.return_value = run
     flow_run_repo.get_result_file.return_value = result_file
-    return FlowRunService(
+    return FlowRunEvidenceService(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,

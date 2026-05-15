@@ -55,6 +55,20 @@ describe("flows templates endpoint", () => {
     expect(fetch.mock.calls[0][1].method).toBe("get");
   });
 
+  it("loads canonical run status capabilities for client lifecycle logic", async () => {
+    const fetch = vi.fn(async () => ({
+      statuses: [],
+      filter_order: []
+    }));
+    const flows = initFlows({ fetch });
+
+    await flows.runs.statusCapabilities.get();
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/runs/status-capabilities/");
+    expect(fetch.mock.calls[0][1].method).toBe("get");
+  });
+
   it("generates template signed url from flow route", async () => {
     const fetch = vi.fn(async () => ({ url: "https://example.com" }));
     const flows = initFlows({ fetch });

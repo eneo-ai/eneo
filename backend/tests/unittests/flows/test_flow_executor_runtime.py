@@ -29,6 +29,7 @@ from intric.flows.flow import (
 from intric.flows.flow import (
     FlowVersion as FlowVersionModel,
 )
+from intric.flows.flow_run_error import FlowRunError
 from intric.flows.flow_run_provenance import (
     AttemptStartProvenance,
     ModelParameterSnapshot,
@@ -66,7 +67,6 @@ def _run(*, status: FlowRunStatus, user) -> FlowRun:
         cancelled_at=None,
         input_payload_json={"text": "hello"},
         output_payload_json=None,
-        error_message=None,
         job_id=None,
         created_at=now,
         updated_at=now,
@@ -168,7 +168,6 @@ def _claimed_step_result(
         num_tokens_input=None,
         num_tokens_output=None,
         status=FlowStepResultStatus.RUNNING,
-        error_message=None,
         flow_step_execution_hash=None,
         created_at=now,
         updated_at=now,
@@ -199,7 +198,6 @@ def _started_step_attempt(
         celery_task_id="task-1",
         status=FlowStepAttemptStatus.STARTED,
         error_code=None,
-        error_message=None,
         requested_model=None,
         response_model=None,
         provider=None,
@@ -1216,7 +1214,7 @@ async def test_step_execution_failure_marks_attempt_and_run_failed(user):
     assert finish_kwargs["error_message"] == "Flow step 1 execution failed."
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     update_kwargs = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
-    assert update_kwargs["error_message"] == "Flow step 1 execution failed."
+    assert update_kwargs["error"].message == "Flow step 1 execution failed."
     saved_result = flow_repo.save_step_result.await_args.args[1]
     assert saved_result.status == FlowStepResultStatus.FAILED
     assert saved_result.error_message == "Flow step 1 execution failed."
@@ -2155,7 +2153,11 @@ async def test_execute_returns_terminal_outcome_when_review_open_loses_run_race(
     failed_run = queued_run.model_copy(
         update={
             "status": FlowRunStatus.FAILED,
-            "error_message": "Run was terminalized as failed.",
+            "error": FlowRunError.from_source(
+                FlowRunLifecycleSource.EXECUTOR_FAILED,
+                code="flow_run_failed",
+                message="Run was terminalized as failed.",
+            ),
         }
     )
     step_id = uuid4()
@@ -2526,7 +2528,7 @@ async def test_execute_cancels_when_flow_deleted_after_first_step_and_keeps_comp
     update_kwargs = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
     assert update_kwargs["target_status"] == FlowRunStatus.CANCELLED
     assert update_kwargs["source"] == FlowRunLifecycleSource.FLOW_DELETED
-    assert update_kwargs["error_message"] == "Flow was deleted during execution."
+    assert update_kwargs["error"].message == "Flow was deleted during execution."
 
 
 def _runtime_step(
@@ -2572,7 +2574,6 @@ def _completed_step_result(
         num_tokens_input=1,
         num_tokens_output=1,
         status=FlowStepResultStatus.COMPLETED,
-        error_message=None,
         flow_step_execution_hash="hash",
         created_at=now,
         updated_at=now,
@@ -2834,7 +2835,7 @@ async def test_execute_fails_run_when_definition_snapshot_is_invalid(user):
         retry_count=0,
     )
 
-    assert result == {"status": "failed", "error": "invalid_flow_definition"}
+    assert result == {"status": "failed", "error": "flow_definition_steps_invalid"}
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     assert (
         executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
@@ -2842,6 +2843,35 @@ async def test_execute_fails_run_when_definition_snapshot_is_invalid(user):
         ]
         == FlowRunStatus.FAILED
     )
+    run_error = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
+        "error"
+    ]
+    assert run_error.code == "flow_definition_steps_invalid"
+    assert run_error.source == FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
+
+
+def test_run_error_from_bad_request_sanitizes_context(user) -> None:
+    executor, _, _, _ = _build_executor(user)
+
+    error = executor._run_error_from_bad_request(
+        BadRequestException(
+            "Step review_policy is invalid.",
+            code="flow_review_policy_invalid",
+            context={
+                "step_order": 3,
+                "step_description": "Analysera bakgrund",
+                "secret_token": "must not leak",
+            },
+        ),
+        source=FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
+        default_code="invalid_flow_definition",
+    )
+
+    assert error.step_order == 3
+    assert error.details is not None
+    assert error.details.model_dump(exclude_none=True) == {
+        "step_description": "Analysera bakgrund"
+    }
 
 
 def test_parse_runtime_steps_rejects_invalid_output_mode(user):
@@ -2861,6 +2891,34 @@ def test_parse_runtime_steps_rejects_invalid_output_mode(user):
                 ]
             }
         )
+
+
+def test_parse_runtime_steps_scopes_invalid_step_identifier(user):
+    executor, _, _, _ = _build_executor(user)
+
+    with pytest.raises(BadRequestException) as exc_info:
+        executor._parse_runtime_steps(
+            {
+                "steps": [
+                    {
+                        "step_id": "not-a-uuid",
+                        "step_order": 1,
+                        "assistant_id": str(uuid4()),
+                        "user_description": "Analysera bakgrund",
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                    }
+                ]
+            }
+        )
+
+    assert str(exc_info.value) == (
+        "Step 1 (Analysera bakgrund): Invalid step identifiers in flow snapshot."
+    )
+    assert exc_info.value.context == {
+        "step_order": 1,
+        "step_description": "Analysera bakgrund",
+    }
 
 
 def test_parse_runtime_steps_rejects_invalid_input_type(user):
@@ -3136,7 +3194,6 @@ def test_run_execution_state_append_completed():
         num_tokens_input=1,
         num_tokens_output=1,
         status=FlowStepResultStatus.COMPLETED,
-        error_message=None,
         flow_step_execution_hash="h",
         created_at=now,
         updated_at=now,
@@ -3176,7 +3233,6 @@ def test_run_execution_state_all_previous_text_before_accumulates():
             num_tokens_input=1,
             num_tokens_output=1,
             status=FlowStepResultStatus.COMPLETED,
-            error_message=None,
             flow_step_execution_hash="h",
             created_at=now,
             updated_at=now,

@@ -217,10 +217,11 @@ def test_execute_flow_run_marks_failed_when_user_id_is_missing(monkeypatch):
     assert terminalize_failure.await_args.kwargs["source"] == (
         FlowRunLifecycleSource.MISSING_PRINCIPAL
     )
-    assert terminalize_failure.await_args.kwargs["error_code"] == (
+    error = terminalize_failure.await_args.kwargs["error"]
+    assert error.code == (
         "flow_missing_principal"
     )
-    assert terminalize_failure.await_args.kwargs["error_message"] == (
+    assert error.message == (
         "flow_missing_principal: Flow run execution skipped because run has no execution principal."
     )
 
@@ -284,8 +285,9 @@ def test_execute_flow_run_handles_timeout_and_marks_run_failed(monkeypatch):
     assert terminalize_failure.await_args.kwargs["source"] == (
         FlowRunLifecycleSource.TASK_TIMEOUT
     )
-    assert terminalize_failure.await_args.kwargs["error_code"] == "flow_task_timeout"
-    assert terminalize_failure.await_args.kwargs["error_message"] == (
+    error = terminalize_failure.await_args.kwargs["error"]
+    assert error.code == "flow_task_timeout"
+    assert error.message == (
         "flow_task_timeout: Flow execution timed out before task completion."
     )
 
@@ -341,11 +343,12 @@ def test_execute_flow_run_handles_generic_exception(monkeypatch):
     assert terminalize_failure.await_args.kwargs["source"] == (
         FlowRunLifecycleSource.TASK_FAILURE
     )
-    assert terminalize_failure.await_args.kwargs["error_code"] == "flow_task_failure"
-    assert terminalize_failure.await_args.kwargs["error_message"] == (
+    error = terminalize_failure.await_args.kwargs["error"]
+    assert error.code == "flow_task_failure"
+    assert error.message == (
         "flow_task_failure: Flow execution task failed before run completion."
     )
-    assert "boom" not in terminalize_failure.await_args.kwargs["error_message"]
+    assert "boom" not in error.message
 
 
 def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
@@ -403,7 +406,7 @@ def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
     assert result["reconciled"] == 2
     assert terminalizer.terminalize_stale_running_run.await_count == 2
     assert {
-        call.kwargs["error_code"]
+        call.kwargs["error"].code
         for call in terminalizer.terminalize_stale_running_run.await_args_list
     } == {"flow_worker_stalled"}
 

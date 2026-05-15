@@ -19,6 +19,7 @@ from intric.flows.api.flow_graph import (
     enrich_nodes_with_run_results,
 )
 from intric.flows.api.flow_models import FlowRunStepPublic, GraphResponse
+from intric.flows.application.flow_run_evidence_service import FlowRunEvidenceService
 from intric.flows.application.flow_run_service import FlowRunService
 from intric.flows.application.flow_service import FlowService
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
@@ -67,6 +68,10 @@ Service-key principals are supported for their own runtime artifacts in v1.
 
 def _get_flow_run_service(container: Container) -> FlowRunService:
     return container.flow_run_service()
+
+
+def _get_flow_run_evidence_service(container: Container) -> FlowRunEvidenceService:
+    return container.flow_run_evidence_service()
 
 
 def _get_flow_service(container: Container) -> FlowService:
@@ -307,11 +312,11 @@ async def generate_flow_run_artifact_signed_url(
         required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
-    run_service = _get_flow_run_service(container)
+    evidence_service = _get_flow_run_evidence_service(container)
     user = container.user()
     actor_kwargs = audit_actor_kwargs(user)
 
-    file = await run_service.get_run_artifact_file(
+    file = await evidence_service.get_run_artifact_file(
         run_id=run_id,
         flow_id=id,
         file_id=file_id,

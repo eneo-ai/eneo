@@ -4,7 +4,14 @@ from datetime import datetime
 from typing import Any, Optional, Self, TypeAlias
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from intric.authentication.principal_types import PrincipalType
 from intric.flows.enums import (
@@ -24,6 +31,7 @@ from intric.flows.enums import (
     RerunDependencyKind,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
+from intric.flows.flow_run_error import FlowRunError
 
 JsonObject: TypeAlias = dict[str, Any]
 
@@ -160,7 +168,10 @@ class FlowRun(BaseModel):
     finished_at: Optional[datetime] = None
     input_payload_json: JsonObject | None = None
     output_payload_json: JsonObject | None = None
-    error_message: Optional[str] = None
+    error: FlowRunError | None = Field(
+        default=None,
+        validation_alias=AliasChoices("error", "error_json"),
+    )
     job_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime

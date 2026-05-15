@@ -13,7 +13,8 @@ import {
   isReviewPolicyInvalidRunError,
   isReviewPolicyRunErrorRelevantForStep,
   isReviewPolicyRunErrorStepExact,
-  reviewPolicyRunErrorStepOrder
+  reviewPolicyRunErrorStepOrder,
+  type FlowRunError
 } from "./flowRuntimeErrorMapping";
 
 describe("flowRuntimeErrorMapping", () => {
@@ -194,47 +195,45 @@ describe("review policy run error helpers", () => {
     }
   ];
 
-  it.each([
-    ["Step 1: review_policy is invalid.", 1],
-    ["Step 1 (Draft review): review_policy is invalid.", 1],
-    ["Step 10: review_policy is invalid.", 10]
-  ])("extracts the backend step prefix from %s", (message, expected) => {
-    expect(reviewPolicyRunErrorStepOrder(message)).toBe(expected);
+  const reviewPolicyError = (overrides: Partial<FlowRunError> = {}): FlowRunError => ({
+    schema_version: 1,
+    code: "flow_review_policy_invalid",
+    message: "Step 10 (Final review): review_policy is invalid.",
+    source: "invalid_flow_definition",
+    step_order: 10,
+    details: { step_description: "Final review" },
+    ...overrides
   });
 
-  it.each(["Step abc: review_policy is invalid.", "This step is invalid."])(
-    "returns null when the message has no numeric backend step prefix",
-    (message) => {
-      expect(reviewPolicyRunErrorStepOrder(message)).toBeNull();
-    }
-  );
+  it("reads the affected step order from the structured run error", () => {
+    expect(reviewPolicyRunErrorStepOrder(reviewPolicyError({ step_order: 1 }))).toBe(1);
+    expect(reviewPolicyRunErrorStepOrder(reviewPolicyError({ step_order: null }))).toBeNull();
+  });
 
   it("detects the review policy invalid run error token", () => {
-    expect(isReviewPolicyInvalidRunError("Step 1: review_policy is invalid.")).toBe(true);
-    expect(isReviewPolicyInvalidRunError("This step is invalid.")).toBe(false);
+    expect(isReviewPolicyInvalidRunError(reviewPolicyError())).toBe(true);
+    expect(
+      isReviewPolicyInvalidRunError(
+        reviewPolicyError({ code: "invalid_flow_definition", step_order: null })
+      )
+    ).toBe(false);
   });
 
   it("returns the exact affected step when the backend message carries a step order", () => {
-    expect(
-      getReviewPolicyAffectedStepsFromRunError(
-        "Step 10 (Final review): review_policy is invalid.",
-        reviewSteps
-      )
-    ).toEqual([{ step_order: 10, user_description: "Final review" }]);
+    expect(getReviewPolicyAffectedStepsFromRunError(reviewPolicyError(), reviewSteps)).toEqual([
+      { step_order: 10, user_description: "Final review" }
+    ]);
   });
 
   it("preserves the backend step order when the current flow draft cannot label it", () => {
     expect(
-      getReviewPolicyAffectedStepsFromRunError("Step 3: review_policy is invalid.", reviewSteps)
+      getReviewPolicyAffectedStepsFromRunError(reviewPolicyError({ step_order: 3 }), reviewSteps)
     ).toEqual([{ step_order: 3, user_description: null }]);
   });
 
-  it("falls back to all current review steps for old generic review policy errors", () => {
+  it("falls back to all current review steps when the structured error has no step order", () => {
     expect(
-      getReviewPolicyAffectedStepsFromRunError(
-        "Some failure (review_policy is invalid)",
-        reviewSteps
-      )
+      getReviewPolicyAffectedStepsFromRunError(reviewPolicyError({ step_order: null }), reviewSteps)
     ).toEqual([
       { step_order: 1, user_description: "Draft review" },
       { step_order: 10, user_description: "Final review" }
@@ -242,40 +241,47 @@ describe("review policy run error helpers", () => {
   });
 
   it("returns no affected steps for unrelated errors", () => {
-    expect(getReviewPolicyAffectedStepsFromRunError("This step is invalid.", reviewSteps)).toEqual(
-      []
-    );
+    expect(
+      getReviewPolicyAffectedStepsFromRunError(
+        reviewPolicyError({ code: "invalid_flow_definition" }),
+        reviewSteps
+      )
+    ).toEqual([]);
   });
 
   it("marks exact review policy run errors separately from candidate fallback errors", () => {
-    expect(isReviewPolicyRunErrorStepExact("Step 10: review_policy is invalid.")).toBe(true);
-    expect(isReviewPolicyRunErrorStepExact("Some failure (review_policy is invalid)")).toBe(false);
+    expect(isReviewPolicyRunErrorStepExact(reviewPolicyError())).toBe(true);
+    expect(isReviewPolicyRunErrorStepExact(reviewPolicyError({ step_order: null }))).toBe(false);
   });
 
   it("keeps generic review policy errors on review steps only", () => {
     expect(
-      isReviewPolicyRunErrorRelevantForStep("Some failure (review_policy is invalid)", 1, {
+      isReviewPolicyRunErrorRelevantForStep(reviewPolicyError({ step_order: null }), 1, {
         mode: "view"
       })
     ).toBe(true);
     expect(
-      isReviewPolicyRunErrorRelevantForStep("Some failure (review_policy is invalid)", 2, null)
+      isReviewPolicyRunErrorRelevantForStep(reviewPolicyError({ step_order: null }), 2, null)
     ).toBe(false);
   });
 
   it("keeps exact review policy errors on the backend-reported step only", () => {
+    expect(isReviewPolicyRunErrorRelevantForStep(reviewPolicyError(), 10, null)).toBe(true);
     expect(
-      isReviewPolicyRunErrorRelevantForStep("Step 10: review_policy is invalid.", 10, null)
-    ).toBe(true);
-    expect(
-      isReviewPolicyRunErrorRelevantForStep("Step 10: review_policy is invalid.", 1, {
+      isReviewPolicyRunErrorRelevantForStep(reviewPolicyError(), 1, {
         mode: "view"
       })
     ).toBe(false);
   });
 
   it("keeps unrelated errors visible for any step", () => {
-    expect(isReviewPolicyRunErrorRelevantForStep("Provider timeout.", 1, null)).toBe(true);
+    expect(
+      isReviewPolicyRunErrorRelevantForStep(
+        reviewPolicyError({ code: "provider_timeout", step_order: null }),
+        1,
+        null
+      )
+    ).toBe(true);
   });
 
   it("reads review policy step metadata from a definition snapshot", () => {

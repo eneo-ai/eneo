@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum
+from types import MappingProxyType
+from typing import Mapping
 
 
 class FlowInputSource(str, Enum):
@@ -106,25 +109,100 @@ class FlowRunRerunInvalidationRole(str, Enum):
     DOWNSTREAM = "downstream"
 
 
-ACTIVE_FLOW_RUN_STATUSES = frozenset(
+@dataclass(frozen=True)
+class FlowRunStatusCapability:
+    status: FlowRunStatus
+    is_active: bool
+    should_poll: bool
+    is_terminal: bool
+    is_cancellable: bool
+    is_awaiting_review: bool
+    can_request_redispatch: bool
+
+
+FLOW_RUN_STATUS_CAPABILITIES: Mapping[
+    FlowRunStatus, FlowRunStatusCapability
+] = MappingProxyType(
     {
-        FlowRunStatus.QUEUED,
-        FlowRunStatus.RUNNING,
+        FlowRunStatus.QUEUED: FlowRunStatusCapability(
+            status=FlowRunStatus.QUEUED,
+            is_active=True,
+            should_poll=True,
+            is_terminal=False,
+            is_cancellable=True,
+            is_awaiting_review=False,
+            can_request_redispatch=True,
+        ),
+        FlowRunStatus.RUNNING: FlowRunStatusCapability(
+            status=FlowRunStatus.RUNNING,
+            is_active=True,
+            should_poll=True,
+            is_terminal=False,
+            is_cancellable=True,
+            is_awaiting_review=False,
+            can_request_redispatch=False,
+        ),
+        FlowRunStatus.AWAITING_REVIEW: FlowRunStatusCapability(
+            status=FlowRunStatus.AWAITING_REVIEW,
+            is_active=False,
+            should_poll=True,
+            is_terminal=False,
+            is_cancellable=True,
+            is_awaiting_review=True,
+            can_request_redispatch=False,
+        ),
+        FlowRunStatus.COMPLETED: FlowRunStatusCapability(
+            status=FlowRunStatus.COMPLETED,
+            is_active=False,
+            should_poll=False,
+            is_terminal=True,
+            is_cancellable=False,
+            is_awaiting_review=False,
+            can_request_redispatch=False,
+        ),
+        FlowRunStatus.FAILED: FlowRunStatusCapability(
+            status=FlowRunStatus.FAILED,
+            is_active=False,
+            should_poll=False,
+            is_terminal=True,
+            is_cancellable=False,
+            is_awaiting_review=False,
+            can_request_redispatch=False,
+        ),
+        FlowRunStatus.CANCELLED: FlowRunStatusCapability(
+            status=FlowRunStatus.CANCELLED,
+            is_active=False,
+            should_poll=False,
+            is_terminal=True,
+            is_cancellable=False,
+            is_awaiting_review=False,
+            can_request_redispatch=False,
+        ),
     }
+)
+FLOW_RUN_STATUS_FILTER_ORDER = (
+    FlowRunStatus.COMPLETED,
+    FlowRunStatus.FAILED,
+    FlowRunStatus.RUNNING,
+    FlowRunStatus.QUEUED,
+    FlowRunStatus.AWAITING_REVIEW,
+    FlowRunStatus.CANCELLED,
+)
+
+ACTIVE_FLOW_RUN_STATUSES = frozenset(
+    status
+    for status, capability in FLOW_RUN_STATUS_CAPABILITIES.items()
+    if capability.is_active
 )
 TERMINAL_FLOW_RUN_STATUSES = frozenset(
-    {
-        FlowRunStatus.COMPLETED,
-        FlowRunStatus.FAILED,
-        FlowRunStatus.CANCELLED,
-    }
+    status
+    for status, capability in FLOW_RUN_STATUS_CAPABILITIES.items()
+    if capability.is_terminal
 )
 CANCELLABLE_FLOW_RUN_STATUSES = frozenset(
-    {
-        FlowRunStatus.QUEUED,
-        FlowRunStatus.RUNNING,
-        FlowRunStatus.AWAITING_REVIEW,
-    }
+    status
+    for status, capability in FLOW_RUN_STATUS_CAPABILITIES.items()
+    if capability.is_cancellable
 )
 
 

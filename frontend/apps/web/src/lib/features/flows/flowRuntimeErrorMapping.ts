@@ -1,4 +1,5 @@
 import { IntricError } from "@intric/intric-js";
+import type { FlowRunError as FlowRunErrorContract } from "@intric/intric-js";
 import { m } from "$lib/paraglide/messages";
 
 export const FLOW_API_ERROR_CODES = [
@@ -60,6 +61,8 @@ export type FlowReviewPolicyAffectedStep = {
   step_order: number;
   user_description: string | null;
 };
+
+export type FlowRunError = FlowRunErrorContract;
 
 const FLOW_API_ERROR_CODE_SET = new Set<string>(FLOW_API_ERROR_CODES);
 
@@ -167,25 +170,24 @@ function messageKeyForCode(code: FlowApiErrorCode): FlowApiErrorMessageKey {
   return `flow_error_${code}`;
 }
 
-export function isReviewPolicyInvalidRunError(message: string | null | undefined): boolean {
-  return message?.includes("review_policy is invalid") === true;
+export function isReviewPolicyInvalidRunError(error: FlowRunError | null | undefined): boolean {
+  return error?.code === "flow_review_policy_invalid";
 }
 
-export function reviewPolicyRunErrorStepOrder(message: string): number | null {
-  const match = /^Step\s+(\d+)(?:\s|\(|:)/.exec(message);
-  if (!match) return null;
-
-  const stepOrder = Number(match[1]);
-  return Number.isFinite(stepOrder) ? stepOrder : null;
+export function reviewPolicyRunErrorStepOrder(
+  error: FlowRunError | null | undefined
+): number | null {
+  const stepOrder = error?.step_order;
+  return typeof stepOrder === "number" && Number.isFinite(stepOrder) ? stepOrder : null;
 }
 
 export function getReviewPolicyAffectedStepsFromRunError(
-  message: string,
+  error: FlowRunError | null | undefined,
   steps: readonly FlowReviewPolicyErrorStep[]
 ): FlowReviewPolicyAffectedStep[] {
-  if (!isReviewPolicyInvalidRunError(message)) return [];
+  if (!isReviewPolicyInvalidRunError(error)) return [];
 
-  const stepOrder = reviewPolicyRunErrorStepOrder(message);
+  const stepOrder = reviewPolicyRunErrorStepOrder(error);
   if (stepOrder !== null) {
     const step = steps.find((candidate) => candidate.step_order === stepOrder);
     return [
@@ -204,18 +206,18 @@ export function getReviewPolicyAffectedStepsFromRunError(
     }));
 }
 
-export function isReviewPolicyRunErrorStepExact(message: string): boolean {
-  return reviewPolicyRunErrorStepOrder(message) !== null;
+export function isReviewPolicyRunErrorStepExact(error: FlowRunError | null | undefined): boolean {
+  return reviewPolicyRunErrorStepOrder(error) !== null;
 }
 
 export function isReviewPolicyRunErrorRelevantForStep(
-  message: string,
+  error: FlowRunError | null | undefined,
   stepOrder: number,
   reviewPolicy: unknown | null | undefined
 ): boolean {
-  if (!isReviewPolicyInvalidRunError(message)) return true;
+  if (!isReviewPolicyInvalidRunError(error)) return true;
 
-  const affectedStepOrder = reviewPolicyRunErrorStepOrder(message);
+  const affectedStepOrder = reviewPolicyRunErrorStepOrder(error);
   if (affectedStepOrder !== null) return affectedStepOrder === stepOrder;
 
   return reviewPolicy != null;

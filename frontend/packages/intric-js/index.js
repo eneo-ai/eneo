@@ -7,3 +7,7 @@ export {
   resolveFlowRuntimeUploadIdleTimeoutMs,
   resolveFlowRuntimeUploadInitialTimeoutMs
 } from "./src/flows/runtime-upload-policy";
+export {
+  FLOW_RUN_STATUS_CAPABILITIES,
+  FLOW_RUN_STATUS_FILTER_ORDER
+} from "./src/flows/flow-run-status-capabilities";

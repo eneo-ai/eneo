@@ -38,8 +38,14 @@ from intric.flows.api.flow_models import (
     FlowRunReviewCheckpointRejectRequest,
     FlowRunReviewCheckpointResumeRequest,
     FlowRunReviewCheckpointResumeResponse,
+    FlowRunStatusCapabilitiesPublic,
     FlowRunStepRerunRequest,
     FlowRunStepRerunResponse,
+    flow_run_status_capabilities_public,
+)
+from intric.flows.application.flow_run_rerun_service import FlowRunRerunService
+from intric.flows.application.flow_run_review_checkpoint_service import (
+    FlowRunReviewCheckpointService,
 )
 from intric.flows.application.flow_run_service import FlowRunService
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
@@ -83,6 +89,25 @@ _FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE = (
     "so clients can immediately use the returned id or revision in the next "
     "poll/edit/approve/resume request."
 )
+
+_FLOW_RUN_STATUS_CAPABILITIES_DESCRIPTION = """
+Return the canonical Flow run status capability table.
+
+Use this endpoint when building run-history, polling, cancellation, redispatch, and
+human-review UI logic. The response describes what each `FlowRun.status` value means
+operationally, so clients do not need to hard-code status groups.
+
+Important semantics:
+- `should_poll` is true for `queued`, `running`, and `awaiting_review`.
+- `is_terminal` is true for `completed`, `failed`, and `cancelled`.
+- `is_cancellable` tells clients when the cancel endpoint is a valid action.
+- `can_request_redispatch` is true for `queued`, but redispatch remains server-gated by
+  staleness; a queued run that is not stale returns `redispatched_count: 0`.
+- `filter_order` is the recommended status filter order for run-history UIs.
+
+The table is flow-agnostic and stable across tenants. Fetch it once at application startup
+or generate equivalent constants from this OpenAPI schema.
+"""
 
 _FLOW_RUN_CREATE_DESCRIPTION = (
     """
@@ -370,6 +395,16 @@ def _get_flow_run_service(container: Container) -> FlowRunService:
     return container.flow_run_service()
 
 
+def _get_flow_run_review_checkpoint_service(
+    container: Container,
+) -> FlowRunReviewCheckpointService:
+    return container.flow_run_review_checkpoint_service()
+
+
+def _get_flow_run_rerun_service(container: Container) -> FlowRunRerunService:
+    return container.flow_run_rerun_service()
+
+
 @asynccontextmanager
 async def _commit_flow_runtime_write_before_response(
     container: Container,
@@ -386,6 +421,20 @@ def _result_files_by_run_id(
     for result_file in result_files:
         grouped.setdefault(result_file.flow_run_id, []).append(result_file)
     return grouped
+
+
+@router.get(
+    "/runs/status-capabilities/",
+    response_model=FlowRunStatusCapabilitiesPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="get_flow_run_status_capabilities",
+    summary="Get flow run status capabilities",
+    description=_FLOW_RUN_STATUS_CAPABILITIES_DESCRIPTION,
+)
+async def get_flow_run_status_capabilities(
+    _container: Container = Depends(get_container(with_user=True)),
+) -> FlowRunStatusCapabilitiesPublic:
+    return flow_run_status_capabilities_public()
 
 
 @router.post(
@@ -662,7 +711,7 @@ async def get_active_flow_run_review_checkpoint(
         required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
-    checkpoint = await _get_flow_run_service(container).get_active_review_checkpoint(
+    checkpoint = await _get_flow_run_review_checkpoint_service(container).get_active_review_checkpoint(
         flow_id=id,
         run_id=run_id,
     )
@@ -755,7 +804,7 @@ async def edit_flow_run_review_checkpoint(
             required_access=common.FlowApiAction.REVIEW,
             allow_service_key_principals=True,
         )
-        checkpoint = await _get_flow_run_service(container).edit_review_checkpoint(
+        checkpoint = await _get_flow_run_review_checkpoint_service(container).edit_review_checkpoint(
             flow_id=id,
             run_id=run_id,
             checkpoint_id=checkpoint_id,
@@ -829,7 +878,7 @@ async def approve_flow_run_review_checkpoint(
             required_access=common.FlowApiAction.REVIEW,
             allow_service_key_principals=True,
         )
-        checkpoint = await _get_flow_run_service(container).approve_review_checkpoint(
+        checkpoint = await _get_flow_run_review_checkpoint_service(container).approve_review_checkpoint(
             flow_id=id,
             run_id=run_id,
             checkpoint_id=checkpoint_id,
@@ -902,7 +951,7 @@ async def reject_flow_run_review_checkpoint(
             required_access=common.FlowApiAction.REVIEW,
             allow_service_key_principals=True,
         )
-        checkpoint = await _get_flow_run_service(container).reject_review_checkpoint(
+        checkpoint = await _get_flow_run_review_checkpoint_service(container).reject_review_checkpoint(
             flow_id=id,
             run_id=run_id,
             checkpoint_id=checkpoint_id,
@@ -985,8 +1034,8 @@ async def resume_flow_run_review_checkpoint(
             required_access=common.FlowApiAction.RESUME,
             allow_service_key_principals=True,
         )
-        run_service = _get_flow_run_service(container)
-        result = await run_service.resume_review_checkpoint(
+        review_service = _get_flow_run_review_checkpoint_service(container)
+        result = await review_service.resume_review_checkpoint(
             flow_id=id,
             run_id=run_id,
             checkpoint_id=checkpoint_id,
@@ -994,6 +1043,7 @@ async def resume_flow_run_review_checkpoint(
             idempotency_key=idempotency_key,
         )
         if result.accepted:
+            run_service = _get_flow_run_service(container)
             dispatch_request = run_service.build_dispatch_request(result.run)
     if dispatch_request is not None:
         background_tasks.add_task(
@@ -1108,7 +1158,8 @@ async def rerun_flow_run_step(
             required_access=common.FlowApiAction.RERUN,
         )
         run_service = _get_flow_run_service(container)
-        result = await run_service.rerun_step(
+        rerun_service = _get_flow_run_rerun_service(container)
+        result = await rerun_service.rerun_step(
             flow_id=id,
             run_id=run_id,
             rerun_step_id=step_id,

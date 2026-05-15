@@ -172,7 +172,6 @@ def _run(flow_id, tenant_id):
         cancelled_at=None,
         input_payload_json=None,
         output_payload_json=None,
-        error_message=None,
         job_id=None,
         created_at=now,
         updated_at=now,
@@ -442,6 +441,7 @@ class _ReviewCheckpointRouteContext:
     checkpoint: FlowRunReviewCheckpoint
     events: list[str]
     run_service: AsyncMock
+    review_service: AsyncMock
 
 
 def _enable_review_checkpoint_route_context(container) -> _ReviewCheckpointRouteContext:
@@ -458,9 +458,11 @@ def _enable_review_checkpoint_route_context(container) -> _ReviewCheckpointRoute
     events: list[str] = []
 
     run_service = AsyncMock()
+    review_service = AsyncMock()
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_run_service.return_value = run_service
+    container.flow_run_review_checkpoint_service.return_value = review_service
     container.flow_service.return_value = flow_service
     container.user.return_value = user
     _enable_space_access(container)
@@ -472,6 +474,7 @@ def _enable_review_checkpoint_route_context(container) -> _ReviewCheckpointRoute
         checkpoint=checkpoint,
         events=events,
         run_service=run_service,
+        review_service=review_service,
     )
 
 
@@ -632,7 +635,6 @@ async def test_test_flow_http_returns_typed_success_payload(monkeypatch):
             response_preview="ok",
             request_preview={"method": "POST", "url": "https://example.org/api"},
             error_code=None,
-            error_message=None,
         )
     )
     monkeypatch.setattr(flow_http_test_router_module, "execute_http_test", execute)
@@ -1088,7 +1090,8 @@ async def test_rerun_flow_run_step_calls_service_and_schedules_recoverable_dispa
     rerun_result = _rerun_result(run, step_id, invalidated_step_ids=(step_id, uuid4()))
     events: list[str] = []
     run_service = AsyncMock()
-    run_service.rerun_step.return_value = rerun_result
+    rerun_service = AsyncMock()
+    rerun_service.rerun_step.return_value = rerun_result
 
     def _build_dispatch_request(_run):
         events.append("build_dispatch_request")
@@ -1103,6 +1106,7 @@ async def test_rerun_flow_run_step_calls_service_and_schedules_recoverable_dispa
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_run_service.return_value = run_service
+    container.flow_run_rerun_service.return_value = rerun_service
     container.flow_service.return_value = flow_service
     container.user.return_value = user
     container.audit_service.return_value = AsyncMock()
@@ -1145,7 +1149,7 @@ async def test_rerun_flow_run_step_calls_service_and_schedules_recoverable_dispa
         step.step_id for step in rerun_result.invalidated_steps
     ]
     assert response.status == FlowRunRerunOperationStatus.QUEUED
-    run_service.rerun_step.assert_awaited_once_with(
+    rerun_service.rerun_step.assert_awaited_once_with(
         flow_id=flow_id,
         run_id=run.id,
         rerun_step_id=step_id,
@@ -1180,10 +1184,12 @@ async def test_rerun_flow_run_step_replay_does_not_schedule_dispatch(monkeypatch
         status=FlowRunRerunOperationStatus.COMPLETED,
     )
     run_service = AsyncMock()
-    run_service.rerun_step.return_value = rerun_result
+    rerun_service = AsyncMock()
+    rerun_service.rerun_step.return_value = rerun_result
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_run_service.return_value = run_service
+    container.flow_run_rerun_service.return_value = rerun_service
     container.flow_service.return_value = flow_service
     container.user.return_value = user
     container.audit_service.return_value = AsyncMock()
@@ -1211,6 +1217,7 @@ async def test_rerun_flow_run_step_replay_does_not_schedule_dispatch(monkeypatch
     assert response.status == FlowRunRerunOperationStatus.COMPLETED
     assert background_tasks.tasks == []
     run_service.build_dispatch_request.assert_not_called()
+    rerun_service.rerun_step.assert_awaited_once()
     container.audit_service.return_value.log_async.assert_not_awaited()
 
 
@@ -1241,7 +1248,8 @@ async def test_resume_review_checkpoint_schedules_dispatch_after_commit(monkeypa
         }
 
     run_service = AsyncMock()
-    run_service.resume_review_checkpoint.return_value = SimpleNamespace(
+    review_service = AsyncMock()
+    review_service.resume_review_checkpoint.return_value = SimpleNamespace(
         checkpoint=checkpoint,
         run=run,
         accepted=True,
@@ -1250,6 +1258,7 @@ async def test_resume_review_checkpoint_schedules_dispatch_after_commit(monkeypa
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_run_service.return_value = run_service
+    container.flow_run_review_checkpoint_service.return_value = review_service
     container.flow_service.return_value = flow_service
     container.user.return_value = user
     _enable_space_access(container)
@@ -1302,7 +1311,7 @@ async def test_edit_review_checkpoint_commits_before_response(monkeypatch):
         ctx.events.append("edit_review_checkpoint")
         return ctx.checkpoint
 
-    ctx.run_service.edit_review_checkpoint.side_effect = _edit_review_checkpoint
+    ctx.review_service.edit_review_checkpoint.side_effect = _edit_review_checkpoint
     _disable_flow_scope_filter(monkeypatch)
 
     response = await edit_flow_run_review_checkpoint(
@@ -1323,7 +1332,7 @@ async def test_edit_review_checkpoint_commits_before_response(monkeypatch):
         "edit_review_checkpoint",
         "transaction_exit",
     ]
-    ctx.run_service.edit_review_checkpoint.assert_awaited_once_with(
+    ctx.review_service.edit_review_checkpoint.assert_awaited_once_with(
         flow_id=ctx.flow_id,
         run_id=ctx.run.id,
         checkpoint_id=ctx.checkpoint.id,
@@ -1341,7 +1350,7 @@ async def test_approve_review_checkpoint_commits_before_response(monkeypatch):
         ctx.events.append("approve_review_checkpoint")
         return ctx.checkpoint
 
-    ctx.run_service.approve_review_checkpoint.side_effect = _approve_review_checkpoint
+    ctx.review_service.approve_review_checkpoint.side_effect = _approve_review_checkpoint
     _disable_flow_scope_filter(monkeypatch)
 
     response = await approve_flow_run_review_checkpoint(
@@ -1361,7 +1370,7 @@ async def test_approve_review_checkpoint_commits_before_response(monkeypatch):
         "approve_review_checkpoint",
         "transaction_exit",
     ]
-    ctx.run_service.approve_review_checkpoint.assert_awaited_once_with(
+    ctx.review_service.approve_review_checkpoint.assert_awaited_once_with(
         flow_id=ctx.flow_id,
         run_id=ctx.run.id,
         checkpoint_id=ctx.checkpoint.id,
@@ -1378,7 +1387,7 @@ async def test_reject_review_checkpoint_commits_before_response(monkeypatch):
         ctx.events.append("reject_review_checkpoint")
         return ctx.checkpoint
 
-    ctx.run_service.reject_review_checkpoint.side_effect = _reject_review_checkpoint
+    ctx.review_service.reject_review_checkpoint.side_effect = _reject_review_checkpoint
     _disable_flow_scope_filter(monkeypatch)
 
     response = await reject_flow_run_review_checkpoint(
@@ -1399,7 +1408,7 @@ async def test_reject_review_checkpoint_commits_before_response(monkeypatch):
         "reject_review_checkpoint",
         "transaction_exit",
     ]
-    ctx.run_service.reject_review_checkpoint.assert_awaited_once_with(
+    ctx.review_service.reject_review_checkpoint.assert_awaited_once_with(
         flow_id=ctx.flow_id,
         run_id=ctx.run.id,
         checkpoint_id=ctx.checkpoint.id,
@@ -1418,13 +1427,15 @@ async def test_rerun_flow_run_step_stale_revision_does_not_schedule_dispatch(
     step_id = uuid4()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
     run_service = AsyncMock()
-    run_service.rerun_step.side_effect = BadRequestException(
+    rerun_service = AsyncMock()
+    rerun_service.rerun_step.side_effect = BadRequestException(
         "Flow run revision is stale.",
         code="flow_run_rerun_stale_revision",
     )
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_run_service.return_value = run_service
+    container.flow_run_rerun_service.return_value = rerun_service
     container.flow_service.return_value = flow_service
     container.user.return_value = user
     _enable_space_access(container, user_permissions=[Permission.FLOWS_MANAGE])
@@ -1452,6 +1463,7 @@ async def test_rerun_flow_run_step_stale_revision_does_not_schedule_dispatch(
     assert exc_info.value.code == "flow_run_rerun_stale_revision"
     assert background_tasks.tasks == []
     run_service.build_dispatch_request.assert_not_called()
+    rerun_service.rerun_step.assert_awaited_once()
 
 
 @pytest.mark.parametrize(
@@ -1476,9 +1488,9 @@ async def test_rerun_flow_run_step_permission_matrix_denies_non_managers(
     flow.owner_user_id = user.id
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
-    run_service = AsyncMock()
+    rerun_service = AsyncMock()
     container.flow_service.return_value = flow_service
-    container.flow_run_service.return_value = run_service
+    container.flow_run_rerun_service.return_value = rerun_service
     container.user.return_value = user
     _enable_space_access(container, user_permissions=permissions)
     monkeypatch.setattr(
@@ -1502,7 +1514,7 @@ async def test_rerun_flow_run_step_permission_matrix_denies_non_managers(
         )
 
     assert exc_info.value.code == expected_code
-    run_service.rerun_step.assert_not_awaited()
+    rerun_service.rerun_step.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1519,9 +1531,9 @@ async def test_rerun_flow_run_step_permission_matrix_denies_service_key_principa
     )
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
-    run_service = AsyncMock()
+    rerun_service = AsyncMock()
     container.flow_service.return_value = flow_service
-    container.flow_run_service.return_value = run_service
+    container.flow_run_rerun_service.return_value = rerun_service
     container.user.return_value = user
     _enable_space_access(container, user_permissions=[Permission.FLOWS_MANAGE])
     monkeypatch.setattr(
@@ -1545,7 +1557,7 @@ async def test_rerun_flow_run_step_permission_matrix_denies_service_key_principa
         )
 
     assert exc_info.value.code == "flow_service_key_principal_not_supported"
-    run_service.rerun_step.assert_not_awaited()
+    rerun_service.rerun_step.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1896,7 +1908,8 @@ async def test_dispatch_flow_run_after_commit_marks_failed_on_dispatch_error(
     assert kwargs["run_id"] == run_id
     assert kwargs["tenant_id"] == tenant_id
     assert kwargs["target_status"] == FlowRunStatus.FAILED
-    assert kwargs["error_message"] == (
+    assert kwargs["error"].code == "flow_dispatch_failed"
+    assert kwargs["error"].message == (
         "flow_dispatch_failed: Flow dispatch failed before execution started. "
         "Retry creating a new run."
     )
@@ -2540,6 +2553,7 @@ async def test_flow_run_alias_endpoints_delegate_to_run_service(monkeypatch):
     run_service.list_runs.return_value = [run]
     run_service.get_run.return_value = run
     run_service.list_result_files_for_runs.return_value = [result_file]
+    run_service.list_token_usage_for_runs.return_value = {}
     run_service.list_step_results_with_files.return_value = SimpleNamespace(
         step_results=[],
         result_files=[],
@@ -2833,7 +2847,7 @@ async def test_flow_run_alias_redispatch_propagates_dispatch_failure(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_flow_run_alias_evidence_delegates_to_run_service(monkeypatch):
+async def test_flow_run_alias_evidence_delegates_to_evidence_service(monkeypatch):
     container = MagicMock()
     flow_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4())
@@ -2872,8 +2886,8 @@ async def test_flow_run_alias_evidence_delegates_to_run_service(monkeypatch):
     }
     run_service = AsyncMock()
     run_service.get_run.return_value = run
-    run_service.get_evidence.return_value = evidence
-    container.flow_run_service.return_value = run_service
+    run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(to_dict=lambda: evidence)
+    container.flow_run_evidence_service.return_value = run_service
     container.audit_service.return_value = AsyncMock()
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
@@ -2902,7 +2916,7 @@ async def test_flow_run_alias_evidence_delegates_to_run_service(monkeypatch):
         flow_id=flow_id,
         access_kind="evidence_view",
     )
-    run_service.get_evidence.assert_awaited_once_with(run_id=run.id, run=run)
+    run_service.get_redacted_evidence_bundle.assert_awaited_once_with(run_id=run.id, run=run)
     container.audit_service.return_value.log_async.assert_awaited_once()
     assert (
         container.audit_service.return_value.log_async.await_args.kwargs["action"]
@@ -2917,7 +2931,7 @@ async def test_flow_run_alias_evidence_requires_trace_permission(monkeypatch):
     run = _run(flow_id=flow_id, tenant_id=uuid4())
     run_service = AsyncMock()
     run_service.get_run.return_value = run
-    container.flow_run_service.return_value = run_service
+    container.flow_run_evidence_service.return_value = run_service
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_service.return_value = flow_service
@@ -2929,7 +2943,7 @@ async def test_flow_run_alias_evidence_requires_trace_permission(monkeypatch):
     )
     _enable_space_access(container, user_permissions=[Permission.FLOWS_VIEW])
 
-    run_service.get_evidence.side_effect = UnauthorizedException(
+    run_service.get_redacted_evidence_bundle.side_effect = UnauthorizedException(
         "You do not have permission to view flow trace.",
         code="insufficient_tenant_permission",
     )
@@ -2942,7 +2956,7 @@ async def test_flow_run_alias_evidence_requires_trace_permission(monkeypatch):
             container=container,
         )
 
-    run_service.get_evidence.assert_awaited_once()
+    run_service.get_redacted_evidence_bundle.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -2987,8 +3001,8 @@ async def test_flow_run_alias_evidence_allows_space_admin_without_trace_permissi
     }
     run_service = AsyncMock()
     run_service.get_run.return_value = run
-    run_service.get_evidence.return_value = evidence
-    container.flow_run_service.return_value = run_service
+    run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(to_dict=lambda: evidence)
+    container.flow_run_evidence_service.return_value = run_service
     container.audit_service.return_value = AsyncMock()
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
@@ -3010,7 +3024,7 @@ async def test_flow_run_alias_evidence_allows_space_admin_without_trace_permissi
     )
 
     assert response.run.id == run.id
-    run_service.get_evidence.assert_awaited_once()
+    run_service.get_redacted_evidence_bundle.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -3022,7 +3036,7 @@ async def test_flow_run_evidence_export_alias_returns_json_attachment(monkeypatc
     run_service = AsyncMock()
     run_service.get_run.return_value = run
     run_service.export_evidence_json.return_value = export_payload
-    container.flow_run_service.return_value = run_service
+    container.flow_run_evidence_service.return_value = run_service
     container.audit_service.return_value = AsyncMock()
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
@@ -3107,8 +3121,8 @@ async def test_flow_run_evidence_alias_fails_closed_when_audit_write_fails(monke
     }
     run_service = AsyncMock()
     run_service.get_run.return_value = run
-    run_service.get_evidence.return_value = evidence
-    container.flow_run_service.return_value = run_service
+    run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(to_dict=lambda: evidence)
+    container.flow_run_evidence_service.return_value = run_service
     audit_service = AsyncMock()
     audit_service.log_async.side_effect = RuntimeError("audit unavailable")
     container.audit_service.return_value = audit_service
@@ -3156,7 +3170,7 @@ async def test_flow_run_evidence_export_alias_fails_closed_when_audit_write_fail
     run_service = AsyncMock()
     run_service.get_run.return_value = run
     run_service.export_evidence_json.return_value = export_payload
-    container.flow_run_service.return_value = run_service
+    container.flow_run_evidence_service.return_value = run_service
     audit_service = AsyncMock()
     audit_service.log_async.side_effect = RuntimeError("audit unavailable")
     container.audit_service.return_value = audit_service
@@ -3205,7 +3219,7 @@ async def test_flow_run_evidence_export_alias_passes_raw_detail_and_reason(monke
     run_service = AsyncMock()
     run_service.get_run.return_value = run
     run_service.export_evidence_json.return_value = export_payload
-    container.flow_run_service.return_value = run_service
+    container.flow_run_evidence_service.return_value = run_service
     container.audit_service.return_value = AsyncMock()
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
@@ -3263,7 +3277,7 @@ async def test_flow_run_evidence_export_alias_rejects_raw_invalid_reason(
     run = _run(flow_id=flow_id, tenant_id=uuid4())
     run_service = AsyncMock()
     run_service.get_run.return_value = run
-    container.flow_run_service.return_value = run_service
+    container.flow_run_evidence_service.return_value = run_service
     container.audit_service.return_value = AsyncMock()
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
@@ -3312,7 +3326,7 @@ async def test_flow_run_alias_control_endpoints_reject_scope_mismatch(monkeypatc
     run_service = AsyncMock()
     run_service.get_run.return_value = run
     run_service.cancel_run.return_value = run
-    run_service.get_evidence.return_value = {
+    run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(to_dict=lambda: {
         "run": run.model_dump(mode="json"),
         "definition_snapshot": {"steps": []},
         "step_results": [],
@@ -3341,8 +3355,9 @@ async def test_flow_run_alias_control_endpoints_reject_scope_mismatch(monkeypatc
                 "mcp_policy_field": "mcp_policy",
             },
         },
-    }
+    })
     container.flow_run_service.return_value = run_service
+    container.flow_run_evidence_service.return_value = run_service
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_service.return_value = flow_service
@@ -3386,7 +3401,7 @@ async def test_flow_run_alias_control_endpoints_reject_scope_mismatch(monkeypatc
 
     run_service.cancel_run.assert_not_awaited()
     run_service.redispatch_stale_queued_runs.assert_not_awaited()
-    run_service.get_evidence.assert_not_awaited()
+    run_service.get_redacted_evidence_bundle.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -3413,7 +3428,6 @@ async def test_flow_run_steps_alias_surfaces_diagnostics_dicts_only(monkeypatch)
                 output_payload_json={"text": "ok"},
                 num_tokens_input=10,
                 num_tokens_output=20,
-                error_message=None,
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
             )
@@ -3514,7 +3528,6 @@ async def test_flow_run_steps_alias_handles_non_list_diagnostics(monkeypatch):
                 output_payload_json={"text": "ok"},
                 num_tokens_input=10,
                 num_tokens_output=20,
-                error_message=None,
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
             ),
@@ -3528,7 +3541,6 @@ async def test_flow_run_steps_alias_handles_non_list_diagnostics(monkeypatch):
                 output_payload_json={"text": "ok"},
                 num_tokens_input=10,
                 num_tokens_output=20,
-                error_message=None,
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
             ),
@@ -3588,7 +3600,7 @@ async def test_artifact_signed_url_delegates_to_service_and_audits(monkeypatch):
     )
     run_service = AsyncMock()
     run_service.get_run_artifact_file.return_value = file_obj
-    container.flow_run_service.return_value = run_service
+    container.flow_run_evidence_service.return_value = run_service
     container.flow_service.return_value = AsyncMock()
     audit_service = AsyncMock()
     container.audit_service.return_value = audit_service
@@ -4437,6 +4449,7 @@ async def test_tenant_scoped_user_api_key_loads_space_membership_check(monkeypat
 
     run_service = AsyncMock()
     run_service.list_runs.return_value = [run]
+    run_service.list_token_usage_for_runs.return_value = {}
     container.flow_run_service.return_value = run_service
 
     monkeypatch.setattr(
@@ -4516,6 +4529,7 @@ async def test_space_scoped_api_key_matching_space_succeeds(monkeypatch):
 
     run_service = AsyncMock()
     run_service.list_runs.return_value = [run]
+    run_service.list_token_usage_for_runs.return_value = {}
     container.flow_run_service.return_value = run_service
 
     # Space-scoped key matching the flow's space

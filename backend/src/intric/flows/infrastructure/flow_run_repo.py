@@ -57,6 +57,7 @@ from intric.flows.flow_review_expiry_policy import (
     FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode
+from intric.flows.flow_run_error import FlowRunError, dump_flow_run_error
 from intric.flows.flow_run_provenance import (
     AttemptStartProvenance,
     FlowAttemptProvenance,
@@ -1475,7 +1476,7 @@ class FlowRunRepository:
                 status=FlowRunStatus.QUEUED.value,
                 revision=run_row.revision + 1,
                 output_payload_json=None,
-                error_message=None,
+                error_json=None,
                 started_at=None,
                 finished_at=None,
                 cancelled_at=None,
@@ -1685,7 +1686,7 @@ class FlowRunRepository:
         run_id: UUID,
         tenant_id: UUID,
         target_status: FlowRunStatus,
-        error_message: str | None = None,
+        error: FlowRunError | None = None,
         output_payload_json: JsonObject | None = None,
         cancelled_at: datetime | None = None,
         stale_before: datetime | None = None,
@@ -1695,7 +1696,7 @@ class FlowRunRepository:
 
         values: dict[str, Any] = {
             "status": target_status.value,
-            "error_message": error_message,
+            "error_json": dump_flow_run_error(error),
             "output_payload_json": output_payload_json,
             "finished_at": datetime.now(timezone.utc),
         }

@@ -6,21 +6,24 @@
     getReviewPolicyAffectedStepsFromRunError,
     isReviewPolicyInvalidRunError,
     isReviewPolicyRunErrorStepExact,
+    type FlowRunError,
     type FlowReviewPolicyAffectedStep,
     type FlowReviewPolicyErrorStep
   } from "$lib/features/flows/flowRuntimeErrorMapping";
 
   let {
+    error = null,
     message,
     steps = []
   }: {
+    error?: FlowRunError | null;
     message: string;
     steps?: readonly FlowReviewPolicyErrorStep[];
   } = $props();
 
-  const isReviewPolicyError = $derived(isReviewPolicyInvalidRunError(message));
-  const reviewPolicySteps = $derived(getReviewPolicyAffectedStepsFromRunError(message, steps));
-  const hasExactReviewPolicyStep = $derived(isReviewPolicyRunErrorStepExact(message));
+  const isReviewPolicyError = $derived(isReviewPolicyInvalidRunError(error));
+  const reviewPolicySteps = $derived(getReviewPolicyAffectedStepsFromRunError(error, steps));
+  const hasExactReviewPolicyStep = $derived(isReviewPolicyRunErrorStepExact(error));
   const affectedStepsLabel = $derived(
     hasExactReviewPolicyStep
       ? m.flow_run_error_affected_step()

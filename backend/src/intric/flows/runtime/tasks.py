@@ -27,6 +27,7 @@ from intric.flows.flow_input_limits import (
     DEFAULT_MAX_AUDIO_FILES_PER_RUN,
     resolve_flow_input_limits,
 )
+from intric.flows.flow_run_error import FlowRunError
 from intric.flows.flow_runtime_policy import resolve_flow_runtime_policy
 from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime.celery_app import celery_app
@@ -167,8 +168,7 @@ async def terminalize_flow_run_failure(
     run_id: UUID,
     tenant_id: UUID,
     source: FlowRunLifecycleSource,
-    error_code: str,
-    error_message: str,
+    error: FlowRunError,
 ) -> None:
     async with sessionmanager.session() as session:
         async with session.begin():
@@ -179,8 +179,7 @@ async def terminalize_flow_run_failure(
                 tenant_id=tenant_id,
                 target_status=FlowRunStatus.FAILED,
                 source=source,
-                error_code=error_code,
-                error_message=error_message,
+                error=error,
             )
 
 
@@ -255,10 +254,13 @@ def _execute_flow_run_task(
                 run_id=run_id_uuid,
                 tenant_id=tenant_id_uuid,
                 source=FlowRunLifecycleSource.MISSING_PRINCIPAL,
-                error_code="flow_missing_principal",
-                error_message=(
-                    "flow_missing_principal: "
-                    "Flow run execution skipped because run has no execution principal."
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.MISSING_PRINCIPAL,
+                    code="flow_missing_principal",
+                    message=(
+                        "flow_missing_principal: "
+                        "Flow run execution skipped because run has no execution principal."
+                    ),
                 ),
             ),
             loop,
@@ -307,8 +309,11 @@ def _execute_flow_run_task(
                 run_id=run_id_uuid,
                 tenant_id=tenant_id_uuid,
                 source=FlowRunLifecycleSource.TASK_TIMEOUT,
-                error_code="flow_task_timeout",
-                error_message=error_message,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.TASK_TIMEOUT,
+                    code="flow_task_timeout",
+                    message=error_message,
+                ),
             ),
             loop,
         ).result(timeout=10)
@@ -326,8 +331,11 @@ def _execute_flow_run_task(
                 run_id=run_id_uuid,
                 tenant_id=tenant_id_uuid,
                 source=FlowRunLifecycleSource.TASK_FAILURE,
-                error_code="flow_task_failure",
-                error_message=error_message,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.TASK_FAILURE,
+                    code="flow_task_failure",
+                    message=error_message,
+                ),
             ),
             loop,
         ).result(timeout=10)
@@ -359,10 +367,13 @@ async def _reconcile_stale_running_runs_all_tenants(
                 result = await terminalizer.terminalize_stale_running_run(
                     run_id=run.id,
                     tenant_id=run.tenant_id,
-                    error_code="flow_worker_stalled",
                     stale_before=stale_before,
-                    error_message=(
-                        "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
+                    error=FlowRunError.from_source(
+                        FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
+                        code="flow_worker_stalled",
+                        message=(
+                            "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
+                        ),
                     ),
                 )
                 if result.did_transition:

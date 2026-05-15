@@ -6,9 +6,12 @@ from typing import Any, Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic.config import JsonDict
 
 from intric.authentication.principal_types import PrincipalType
 from intric.flows.enums import (
+    FLOW_RUN_STATUS_CAPABILITIES,
+    FLOW_RUN_STATUS_FILTER_ORDER,
     FlowInputSource,
     FlowInputType,
     FlowMcpPolicy,
@@ -61,6 +64,7 @@ from intric.flows.flow_run_contract_models import (
 from intric.flows.flow_run_contract_models import (
     default_runtime_upload_policy_public as default_runtime_upload_policy_public,
 )
+from intric.flows.flow_run_error import FlowRunError
 from intric.flows.flow_run_evidence_export_manifest import EvidenceExportManifest
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.main.exceptions import BadRequestException
@@ -146,6 +150,28 @@ FLOW_RUNTIME_PUBLIC_EXAMPLE: dict[str, Any] = {
     },
 }
 
+def _flow_run_status_capabilities_public_example() -> JsonDict:
+    return {
+        "statuses": [
+            {
+                "status": capability.status.value,
+                "is_active": capability.is_active,
+                "should_poll": capability.should_poll,
+                "is_terminal": capability.is_terminal,
+                "is_cancellable": capability.is_cancellable,
+                "is_awaiting_review": capability.is_awaiting_review,
+                "can_request_redispatch": capability.can_request_redispatch,
+            }
+            for capability in FLOW_RUN_STATUS_CAPABILITIES.values()
+        ],
+        "filter_order": [status.value for status in FLOW_RUN_STATUS_FILTER_ORDER],
+    }
+
+
+FLOW_RUN_STATUS_CAPABILITIES_PUBLIC_EXAMPLE = (
+    _flow_run_status_capabilities_public_example()
+)
+
 FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "id": "00000000-0000-0000-0000-000000000301",
     "flow_id": "00000000-0000-0000-0000-000000000001",
@@ -162,7 +188,7 @@ FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "output_payload_json": None,
     "result_files": [],
     "token_usage": None,
-    "error_message": None,
+    "error": None,
     "job_id": "00000000-0000-0000-0000-000000000401",
     "created_at": "2026-03-17T10:05:00Z",
     "updated_at": "2026-03-17T10:05:00Z",
@@ -398,9 +424,7 @@ HTTP_TEST_REQUEST_EXAMPLE: dict[str, Any] = {
             "mode": "json_template",
             "template": '{"event":"flow.test","status":"ok"}',
         },
-        "custom_headers": [
-            {"name": "X-Eneo-Test", "value": "true", "secret": False}
-        ],
+        "custom_headers": [{"name": "X-Eneo-Test", "value": "true", "secret": False}],
         "response_format": "json",
     },
     "test_variables": {},
@@ -840,6 +864,80 @@ class FlowRunTokenUsagePublic(BaseModel):
     )
 
 
+class FlowRunStatusCapabilityPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    status: FlowRunStatus = Field(
+        description="Flow run status value this capability row describes."
+    )
+    is_active: bool = Field(
+        description=(
+            "True for statuses where the worker is expected to continue execution "
+            "without waiting for human review."
+        )
+    )
+    should_poll: bool = Field(
+        description=(
+            "True for statuses where client applications should continue polling "
+            "for the next run state. Includes `awaiting_review` so review UIs can "
+            "detect edits, approvals, expiries, and resumes."
+        )
+    )
+    is_terminal: bool = Field(
+        description=(
+            "True when the run lifecycle is complete and normal polling can stop."
+        )
+    )
+    is_cancellable: bool = Field(
+        description=(
+            "True when the cancel endpoint "
+            "`POST /flows/{id}/runs/{run_id}/cancel/` is valid."
+        )
+    )
+    is_awaiting_review: bool = Field(
+        description=(
+            "True only for `awaiting_review`, where clients should load the active "
+            "review checkpoint before resuming the run."
+        )
+    )
+    can_request_redispatch: bool = Field(
+        description=(
+            "True when clients may show a redispatch action for this status. "
+            "Redispatch is still server-gated by staleness; a queued run that is "
+            "not stale returns `redispatched_count: 0`."
+        )
+    )
+
+
+class FlowRunStatusCapabilitiesPublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_RUN_STATUS_CAPABILITIES_PUBLIC_EXAMPLE}
+    )
+
+    statuses: list[FlowRunStatusCapabilityPublic] = Field(
+        description=(
+            "Canonical status capability table. API consumers should branch on "
+            "these booleans instead of hard-coding status groups."
+        )
+    )
+    filter_order: list[FlowRunStatus] = Field(
+        description=(
+            "Recommended status filter order for run-history UIs. Contains every "
+            "FlowRunStatus exactly once."
+        )
+    )
+
+
+def flow_run_status_capabilities_public() -> FlowRunStatusCapabilitiesPublic:
+    return FlowRunStatusCapabilitiesPublic(
+        statuses=[
+            FlowRunStatusCapabilityPublic.model_validate(capability)
+            for capability in FLOW_RUN_STATUS_CAPABILITIES.values()
+        ],
+        filter_order=list(FLOW_RUN_STATUS_FILTER_ORDER),
+    )
+
+
 class FlowRunPublic(BaseModel):
     model_config = ConfigDict(
         from_attributes=True, json_schema_extra={"example": FLOW_RUN_PUBLIC_EXAMPLE}
@@ -874,7 +972,13 @@ class FlowRunPublic(BaseModel):
             "run. Null when the run has not produced token-metered model usage."
         ),
     )
-    error_message: str | None = None
+    error: FlowRunError | None = Field(
+        default=None,
+        description=(
+            "Structured terminal run error. API consumers should branch on "
+            "`error.code`; null means the run has no terminal run-level error."
+        ),
+    )
     job_id: UUID | None = None
     created_at: datetime
     updated_at: datetime
@@ -1035,7 +1139,9 @@ class FlowRunReviewCheckpointRejectRequest(BaseModel):
 class FlowRunReviewCheckpointResumeRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
-        json_schema_extra={"example": FLOW_RUN_REVIEW_CHECKPOINT_RESUME_REQUEST_EXAMPLE},
+        json_schema_extra={
+            "example": FLOW_RUN_REVIEW_CHECKPOINT_RESUME_REQUEST_EXAMPLE
+        },
     )
 
     expected_checkpoint_revision: int = Field(

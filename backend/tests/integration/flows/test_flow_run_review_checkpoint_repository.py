@@ -45,6 +45,7 @@ from intric.flows.flow_review_expiry_policy import (
     FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
+from intric.flows.flow_run_error import FlowRunError
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime import tasks as flow_runtime_tasks
@@ -1181,8 +1182,11 @@ async def test_awaiting_review_run_cancels_active_checkpoint_by_terminalizer(
             tenant_id=scenario.tenant_id,
             target_status=FlowRunStatus.CANCELLED,
             source=FlowRunLifecycleSource.USER_CANCEL,
-            error_code="user_cancelled",
-            error_message="cancelled in test",
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.USER_CANCEL,
+                code="user_cancelled",
+                message="cancelled in test",
+            ),
         )
         checkpoint_row = await session.scalar(
             sa.select(FlowRunReviewCheckpoints).where(
@@ -1300,7 +1304,11 @@ async def test_reconcile_expired_review_checkpoint_cancels_run_with_audit_trail(
             checkpoint_row.expired_at if checkpoint_row is not None else None
         )
         run_status = run_row.status if run_row is not None else None
-        run_error_message = run_row.error_message if run_row is not None else None
+        run_error_message = (
+            FlowRunError.model_validate(run_row.error_json).message
+            if run_row is not None
+            else None
+        )
         checkpoint_outbox_actions = [row.action for row in checkpoint_outbox_rows]
         terminal_outbox_action = (
             terminal_outbox_row.action if terminal_outbox_row is not None else None
@@ -1658,8 +1666,11 @@ async def test_reject_review_checkpoint_does_not_add_cancelled_checkpoint_outbox
             tenant_id=scenario.tenant_id,
             target_status=FlowRunStatus.CANCELLED,
             source=FlowRunLifecycleSource.REVIEW_REJECTED,
-            error_code="flow_review_rejected",
-            error_message="Rejected during repository test.",
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.REVIEW_REJECTED,
+                code="flow_review_rejected",
+                message="Rejected during repository test.",
+            ),
             principal=FlowPrincipal.from_user(admin_user),
         )
         checkpoint_outbox_rows = (

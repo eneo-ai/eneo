@@ -325,6 +325,7 @@
         templateProvenance={getTemplateProvenanceSummary(result.output_payload_json)}
         stepRag={getStepRag(result.step_order)}
         stepAttempts={getStepAttempts(result.step_order)}
+        runError={evidence.run.error ?? null}
         {reviewPolicyDefinitionSteps}
         {copiedKey}
         expanded={expandedSteps.includes(result.step_order)}

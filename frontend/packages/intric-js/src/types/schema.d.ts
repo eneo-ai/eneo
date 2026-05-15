@@ -4076,6 +4076,41 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/runs/status-capabilities/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get flow run status capabilities
+     * @description Return the canonical Flow run status capability table.
+     *
+     *     Use this endpoint when building run-history, polling, cancellation, redispatch, and
+     *     human-review UI logic. The response describes what each `FlowRun.status` value means
+     *     operationally, so clients do not need to hard-code status groups.
+     *
+     *     Important semantics:
+     *     - `should_poll` is true for `queued`, `running`, and `awaiting_review`.
+     *     - `is_terminal` is true for `completed`, `failed`, and `cancelled`.
+     *     - `is_cancellable` tells clients when the cancel endpoint is a valid action.
+     *     - `can_request_redispatch` is true for `queued`, but redispatch remains server-gated by
+     *       staleness; a queued run that is not stale returns `redispatched_count: 0`.
+     *     - `filter_order` is the recommended status filter order for run-history UIs.
+     *
+     *     The table is flow-agnostic and stable across tenants. Fetch it once at application startup
+     *     or generate equivalent constants from this OpenAPI schema.
+     */
+    get: operations["get_flow_run_status_capabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/{id}/runs/": {
     parameters: {
       query?: never;
@@ -13410,6 +13445,51 @@ export interface components {
       attempts?: components["schemas"]["FlowRunDebugAttempt"][];
     };
     /**
+     * FlowRunError
+     * @description Structured terminal run error. Clients should branch on `code`, not on the human-readable message.
+     */
+    FlowRunError: {
+      /**
+       * Schema Version
+       * @description Schema version for the structured run error payload.
+       * @default 1
+       * @constant
+       */
+      schema_version?: 1;
+      /**
+       * Code
+       * @description Stable machine-readable run error code.
+       */
+      code: string;
+      /**
+       * Message
+       * @description Human-readable technical detail for logs, support and fallback UI. This text is not a stable client contract.
+       */
+      message: string;
+      /** @description Flow runtime lifecycle source that terminalized the run. */
+      source?: components["schemas"]["FlowRunLifecycleSource"] | null;
+      /**
+       * Step Id
+       * @description Step id when the terminal error is tied to one step.
+       */
+      step_id?: string | null;
+      /**
+       * Step Order
+       * @description Step order when the terminal error is tied to one step.
+       */
+      step_order?: number | null;
+      /** @description Small, API-safe context for diagnostics and UI guidance. */
+      details?: components["schemas"]["FlowRunErrorDetails"] | null;
+    };
+    /** FlowRunErrorDetails */
+    FlowRunErrorDetails: {
+      /**
+       * Step Description
+       * @description Human label for the affected step, truncated to a small public diagnostic budget.
+       */
+      step_description?: string | null;
+    };
+    /**
      * FlowRunEvidenceExportResponse
      * @example {
      *       "bundle": {
@@ -14146,6 +14226,33 @@ export interface components {
       debug_export: components["schemas"]["FlowRunDebugExport"];
     };
     /**
+     * FlowRunLifecycleSource
+     * @enum {string}
+     */
+    FlowRunLifecycleSource:
+      | "executor_completed"
+      | "executor_failed"
+      | "flow_deleted"
+      | "definition_checksum_mismatch"
+      | "invalid_flow_definition"
+      | "assistant_snapshot_drift"
+      | "step_missing"
+      | "task_timeout"
+      | "task_failure"
+      | "missing_principal"
+      | "stale_running_reconciler"
+      | "user_cancel"
+      | "dispatch_failure"
+      | "review_rejected"
+      | "review_checkpoint_opened"
+      | "review_checkpoint_edited"
+      | "review_checkpoint_approved"
+      | "review_checkpoint_rejected"
+      | "review_checkpoint_resumed"
+      | "review_checkpoint_cancelled"
+      | "review_expired"
+      | "review_checkpoint_expired";
+    /**
      * FlowRunPublic
      * @example {
      *       "created_at": "2026-03-17T10:05:00Z",
@@ -14215,8 +14322,8 @@ export interface components {
       result_files?: components["schemas"]["FlowRunStepResultFile"][];
       /** @description Aggregated provider-reported token usage for model attempts in this run. Null when the run has not produced token-metered model usage. */
       token_usage?: components["schemas"]["FlowRunTokenUsagePublic"] | null;
-      /** Error Message */
-      error_message?: string | null;
+      /** @description Structured terminal run error. API consumers should branch on `error.code`; null means the run has no terminal run-level error. */
+      error?: components["schemas"]["FlowRunError"] | null;
       /** Job Id */
       job_id?: string | null;
       /**
@@ -14851,6 +14958,122 @@ export interface components {
      * @enum {string}
      */
     FlowRunStatus: "queued" | "running" | "awaiting_review" | "completed" | "failed" | "cancelled";
+    /**
+     * FlowRunStatusCapabilitiesPublic
+     * @example {
+     *       "filter_order": [
+     *         "completed",
+     *         "failed",
+     *         "running",
+     *         "queued",
+     *         "awaiting_review",
+     *         "cancelled"
+     *       ],
+     *       "statuses": [
+     *         {
+     *           "can_request_redispatch": true,
+     *           "is_active": true,
+     *           "is_awaiting_review": false,
+     *           "is_cancellable": true,
+     *           "is_terminal": false,
+     *           "should_poll": true,
+     *           "status": "queued"
+     *         },
+     *         {
+     *           "can_request_redispatch": false,
+     *           "is_active": true,
+     *           "is_awaiting_review": false,
+     *           "is_cancellable": true,
+     *           "is_terminal": false,
+     *           "should_poll": true,
+     *           "status": "running"
+     *         },
+     *         {
+     *           "can_request_redispatch": false,
+     *           "is_active": false,
+     *           "is_awaiting_review": true,
+     *           "is_cancellable": true,
+     *           "is_terminal": false,
+     *           "should_poll": true,
+     *           "status": "awaiting_review"
+     *         },
+     *         {
+     *           "can_request_redispatch": false,
+     *           "is_active": false,
+     *           "is_awaiting_review": false,
+     *           "is_cancellable": false,
+     *           "is_terminal": true,
+     *           "should_poll": false,
+     *           "status": "completed"
+     *         },
+     *         {
+     *           "can_request_redispatch": false,
+     *           "is_active": false,
+     *           "is_awaiting_review": false,
+     *           "is_cancellable": false,
+     *           "is_terminal": true,
+     *           "should_poll": false,
+     *           "status": "failed"
+     *         },
+     *         {
+     *           "can_request_redispatch": false,
+     *           "is_active": false,
+     *           "is_awaiting_review": false,
+     *           "is_cancellable": false,
+     *           "is_terminal": true,
+     *           "should_poll": false,
+     *           "status": "cancelled"
+     *         }
+     *       ]
+     *     }
+     */
+    FlowRunStatusCapabilitiesPublic: {
+      /**
+       * Statuses
+       * @description Canonical status capability table. API consumers should branch on these booleans instead of hard-coding status groups.
+       */
+      statuses: components["schemas"]["FlowRunStatusCapabilityPublic"][];
+      /**
+       * Filter Order
+       * @description Recommended status filter order for run-history UIs. Contains every FlowRunStatus exactly once.
+       */
+      filter_order: components["schemas"]["FlowRunStatus"][];
+    };
+    /** FlowRunStatusCapabilityPublic */
+    FlowRunStatusCapabilityPublic: {
+      /** @description Flow run status value this capability row describes. */
+      status: components["schemas"]["FlowRunStatus"];
+      /**
+       * Is Active
+       * @description True for statuses where the worker is expected to continue execution without waiting for human review.
+       */
+      is_active: boolean;
+      /**
+       * Should Poll
+       * @description True for statuses where client applications should continue polling for the next run state. Includes `awaiting_review` so review UIs can detect edits, approvals, expiries, and resumes.
+       */
+      should_poll: boolean;
+      /**
+       * Is Terminal
+       * @description True when the run lifecycle is complete and normal polling can stop.
+       */
+      is_terminal: boolean;
+      /**
+       * Is Cancellable
+       * @description True when the cancel endpoint `POST /flows/{id}/runs/{run_id}/cancel/` is valid.
+       */
+      is_cancellable: boolean;
+      /**
+       * Is Awaiting Review
+       * @description True only for `awaiting_review`, where clients should load the active review checkpoint before resuming the run.
+       */
+      is_awaiting_review: boolean;
+      /**
+       * Can Request Redispatch
+       * @description True when clients may show a redispatch action for this status. Redispatch is still server-gated by staleness; a queued run that is not stale returns `redispatched_count: 0`.
+       */
+      can_request_redispatch: boolean;
+    };
     /**
      * FlowRunStepPublic
      * @example {
@@ -36942,6 +37165,26 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_flow_run_status_capabilities: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunStatusCapabilitiesPublic"];
         };
       };
     };
