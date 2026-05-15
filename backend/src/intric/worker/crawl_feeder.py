@@ -16,7 +16,7 @@ Reuses existing concurrency infrastructure, no parallel permit system needed.
 import asyncio
 import socket
 from datetime import datetime, timedelta, timezone
-from typing import Any, cast
+from typing import Any, assert_never, cast
 from uuid import UUID
 
 import redis.asyncio as aioredis
@@ -26,6 +26,11 @@ from intric.main.logging import get_logger
 from intric.redis.connection import build_redis_pool_kwargs
 from intric.tenants.crawler_settings_helper import get_crawler_setting
 from intric.worker.feeder.capacity import CapacityManager
+from intric.worker.feeder.crawl_enqueue import (
+    CrawlEnqueued,
+    CrawlEnqueueDuplicate,
+    CrawlEnqueueFailed,
+)
 from intric.worker.feeder.election import LeaderElection
 from intric.worker.feeder.queues import JobEnqueuer, PendingQueue
 from intric.worker.feeder.watchdog import OrphanWatchdog
@@ -162,12 +167,9 @@ class CrawlFeeder:
         skipped_capacity = 0
         duplicate_count = 0
 
-        # pending_jobs is list of (raw_bytes, job_data) tuples
         # raw_bytes preserved for exact LREM matching
         redis_client_any: Any = redis_client
         for raw_bytes, job_data in pending_jobs:
-            # Extract job_id early for flag operations
-            # Why: Need job_id before enqueue to mark flag first
             try:
                 job_id = UUID(job_data["job_id"])
             except (KeyError, ValueError, TypeError) as parse_exc:
@@ -235,43 +237,39 @@ class CrawlFeeder:
                 failed_count += 1
                 continue
 
-            # Enqueue to ARQ
-            success, is_duplicate, _returned_job_id = await self._job_enqueuer.enqueue(
-                job_data, tenant_id
-            )
+            enqueue_result = await self._job_enqueuer.enqueue(job_data, tenant_id)
 
-            if success:
-                # Remove from pending queue using exact raw bytes
-                await self._pending_queue.remove(tenant_id, raw_bytes)
+            match enqueue_result:
+                case CrawlEnqueued():
+                    # Remove from pending queue using exact raw bytes
+                    await self._pending_queue.remove(tenant_id, raw_bytes)
+                    enqueued_count += 1
 
-                if is_duplicate:
-                    # Duplicate: job already in ARQ, release the slot we acquired
-                    # The original enqueue already holds a slot, so we must release
-                    # ours to avoid slot counter inflation.
-                    #
-                    # IMPORTANT: Do NOT delete the slot_preacquired flag!
-                    # The flag belongs to the original enqueue. If we delete it,
-                    # the worker will acquire a new slot (thinking none was pre-acquired)
-                    # and the original slot will leak. The flag must remain so the
-                    # worker knows to skip slot acquisition and release the original.
+                case CrawlEnqueueDuplicate():
+                    # Remove from pending queue using exact raw bytes
+                    await self._pending_queue.remove(tenant_id, raw_bytes)
+                    # Duplicate: job already in ARQ, release the slot we acquired.
+                    # The pre-acquired flag belongs to the original enqueue and must
+                    # remain so the worker skips acquisition and releases that slot.
                     await self._capacity_manager.release_slot(tenant_id)
                     duplicate_count += 1
-                    # Don't increment enqueued_count - job wasn't newly enqueued
-                else:
-                    enqueued_count += 1
-            else:
-                # Enqueue failed - rollback: delete flag and release slot
-                try:
-                    await redis_client_any.delete(
-                        LuaScripts.preacquired_slot_key(job_id)
-                    )
-                except Exception as flag_exc:
-                    logger.debug(
-                        "Failed to delete slot_preacquired flag during rollback",
-                        extra={"job_id": str(job_id), "error": str(flag_exc)},
-                    )
-                await self._capacity_manager.release_slot(tenant_id)
-                failed_count += 1
+
+                case CrawlEnqueueFailed():
+                    # Enqueue failed - rollback: delete flag and release slot
+                    try:
+                        await redis_client_any.delete(
+                            LuaScripts.preacquired_slot_key(job_id)
+                        )
+                    except Exception as flag_exc:
+                        logger.debug(
+                            "Failed to delete slot_preacquired flag during rollback",
+                            extra={"job_id": str(job_id), "error": str(flag_exc)},
+                        )
+                    await self._capacity_manager.release_slot(tenant_id)
+                    failed_count += 1
+
+                case _:
+                    assert_never(enqueue_result)
 
         if (
             enqueued_count > 0

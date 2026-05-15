@@ -227,13 +227,9 @@ class TestJobEnqueuerEnqueue:
             "intric.worker.feeder.queues.enqueue_crawl_job",
             new=AsyncMock(return_value=CrawlEnqueued(job_id=job_id)),
         ) as enqueue_crawl_job:
-            success, is_duplicate, returned_id = await JobEnqueuer().enqueue(
-                job_data, uuid4()
-            )
+            result = await JobEnqueuer().enqueue(job_data, uuid4())
 
-        assert success is True
-        assert is_duplicate is False
-        assert returned_id == job_id
+        assert result == CrawlEnqueued(job_id=job_id)
         enqueue_crawl_job.assert_awaited_once_with(
             job_id=job_id,
             user_id=user_id,
@@ -246,7 +242,7 @@ class TestJobEnqueuerEnqueue:
 
     @pytest.mark.asyncio
     async def test_returns_success_on_successful_enqueue(self):
-        """Should return (True, False, job_id) on successful enqueue."""
+        """Should preserve the typed successful enqueue result."""
         from intric.worker.feeder.crawl_enqueue import (
             CrawlEnqueued,
         )
@@ -269,13 +265,9 @@ class TestJobEnqueuerEnqueue:
             new=AsyncMock(return_value=CrawlEnqueued(job_id=job_id)),
         ) as enqueue_crawl_job:
             enqueuer = JobEnqueuer()
-            success, is_duplicate, returned_id = await enqueuer.enqueue(
-                job_data, tenant_id
-            )
+            result = await enqueuer.enqueue(job_data, tenant_id)
 
-        assert success is True
-        assert is_duplicate is False
-        assert returned_id == job_id
+        assert result == CrawlEnqueued(job_id=job_id)
         enqueue_crawl_job.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -302,41 +294,37 @@ class TestJobEnqueuerEnqueue:
             new=AsyncMock(return_value=CrawlEnqueueDuplicate(job_id=job_id)),
         ):
             enqueuer = JobEnqueuer()
-            success, is_duplicate, returned_id = await enqueuer.enqueue(
-                job_data, uuid4()
-            )
+            result = await enqueuer.enqueue(job_data, uuid4())
 
-        assert success is True
-        assert is_duplicate is True
-        assert returned_id == job_id
+        assert result == CrawlEnqueueDuplicate(job_id=job_id)
 
     @pytest.mark.asyncio
     async def test_returns_failure_on_invalid_job_id(self):
-        """Should return (False, False, nil_uuid) when job_id is invalid."""
+        """Should return a typed failure when job_id is invalid."""
+        from intric.worker.feeder.crawl_enqueue import CrawlEnqueueFailed
         from intric.worker.feeder.queues import JobEnqueuer
 
         job_data = {"job_id": "not-a-uuid"}
 
         enqueuer = JobEnqueuer()
-        success, is_duplicate, returned_id = await enqueuer.enqueue(job_data, uuid4())
+        result = await enqueuer.enqueue(job_data, uuid4())
 
-        assert success is False
-        assert is_duplicate is False
-        assert returned_id == UUID("00000000-0000-0000-0000-000000000000")
+        assert isinstance(result, CrawlEnqueueFailed)
+        assert result.job_id == UUID("00000000-0000-0000-0000-000000000000")
 
     @pytest.mark.asyncio
     async def test_returns_failure_on_missing_job_id(self):
-        """Should return (False, False, nil_uuid) when job_id is missing."""
+        """Should return a typed failure when job_id is missing."""
+        from intric.worker.feeder.crawl_enqueue import CrawlEnqueueFailed
         from intric.worker.feeder.queues import JobEnqueuer
 
         job_data = {"url": "https://example.com"}
 
         enqueuer = JobEnqueuer()
-        success, is_duplicate, returned_id = await enqueuer.enqueue(job_data, uuid4())
+        result = await enqueuer.enqueue(job_data, uuid4())
 
-        assert success is False
-        assert is_duplicate is False
-        assert returned_id == UUID("00000000-0000-0000-0000-000000000000")
+        assert isinstance(result, CrawlEnqueueFailed)
+        assert result.job_id == UUID("00000000-0000-0000-0000-000000000000")
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -352,6 +340,7 @@ class TestJobEnqueuerEnqueue:
         self, field: str, value: object
     ):
         """Invalid payload fields fail before the typed enqueue owner is called."""
+        from intric.worker.feeder.crawl_enqueue import CrawlEnqueueFailed
         from intric.worker.feeder.queues import JobEnqueuer
 
         job_id = uuid4()
@@ -370,13 +359,10 @@ class TestJobEnqueuerEnqueue:
             "intric.worker.feeder.queues.enqueue_crawl_job",
             new=AsyncMock(),
         ) as enqueue_crawl_job:
-            success, is_duplicate, returned_id = await JobEnqueuer().enqueue(
-                job_data, uuid4()
-            )
+            result = await JobEnqueuer().enqueue(job_data, uuid4())
 
-        assert success is False
-        assert is_duplicate is False
-        assert returned_id == job_id
+        assert isinstance(result, CrawlEnqueueFailed)
+        assert result.job_id == job_id
         enqueue_crawl_job.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -409,17 +395,13 @@ class TestJobEnqueuerEnqueue:
             ),
         ):
             enqueuer = JobEnqueuer()
-            success, is_duplicate, returned_id = await enqueuer.enqueue(
-                job_data, uuid4()
-            )
+            result = await enqueuer.enqueue(job_data, uuid4())
 
-        assert success is False
-        assert is_duplicate is False
-        assert returned_id == job_id
+        assert result == CrawlEnqueueFailed(job_id=job_id, error=enqueue_error)
 
     @pytest.mark.asyncio
     async def test_returns_failure_on_real_error(self):
-        """Should return (False, False, job_id) on non-duplicate errors."""
+        """Should preserve typed failures on non-duplicate errors."""
         from intric.worker.feeder.crawl_enqueue import (
             CrawlEnqueueFailed,
         )
@@ -447,13 +429,9 @@ class TestJobEnqueuerEnqueue:
             ),
         ):
             enqueuer = JobEnqueuer()
-            success, is_duplicate, returned_id = await enqueuer.enqueue(
-                job_data, uuid4()
-            )
+            result = await enqueuer.enqueue(job_data, uuid4())
 
-        assert success is False
-        assert is_duplicate is False
-        assert returned_id == job_id
+        assert result == CrawlEnqueueFailed(job_id=job_id, error=enqueue_error)
 
 
 class TestJobEnqueuerDuplicateDetection:
@@ -501,9 +479,8 @@ class TestJobEnqueuerDuplicateDetection:
             ),
         ):
             enqueuer = JobEnqueuer()
-            success, is_duplicate, _ = await enqueuer.enqueue(job_data, uuid4())
+            result = await enqueuer.enqueue(job_data, uuid4())
 
-        assert success is False, f"Should not swallow '{error_message}'"
-        assert is_duplicate is False, (
-            f"'{error_message}' should not be marked as duplicate"
+        assert result == CrawlEnqueueFailed(job_id=job_id, error=enqueue_error), (
+            f"Should not swallow '{error_message}'"
         )

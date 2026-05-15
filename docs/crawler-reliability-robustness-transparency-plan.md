@@ -80,6 +80,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Step 5 completion-log tranche: move crawl completion/performance logging into `worker/crawl/completion_log.py`, reuse `CrawlRunProcessingSummary`, and protect source-retained/hash-retained/too-large metric semantics with behavior tests.
 - [x] Queue-boundary scout tranche: reject premature `WorkerAdapter`/one-file Redis protocol work and select a concrete typed crawl enqueue owner as the next ownership-collapse slice.
 - [x] Typed crawl enqueue owner tranche: add a concrete union-typed enqueue owner for already-created crawl jobs, reuse it from pending queue, manual direct handoff, and watchdog requeue paths, and stop watchdog from constructing `arq.jobs.Job` directly.
+- [x] Pending-feeder typed enqueue consumption tranche: remove the tuple-shaped pending enqueue compatibility edge, make `CrawlFeeder._process_tenant_queue` consume `CrawlEnqueueResult` exhaustively, and prove pending-entry, slot, and pre-acquired-flag invariants with behavior tests.
 
 ## Non-Negotiable Principles
 

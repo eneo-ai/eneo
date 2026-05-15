@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T117
+active_task: T119
 
 tasks:
   - id: T001
@@ -5669,7 +5669,7 @@ tasks:
   - id: T117
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Audit the roadmap after T116 and decide whether the active goal is provably complete or which single remaining slice is highest ROI."
     inputs:
@@ -5685,18 +5685,118 @@ tasks:
       - "complete | not_complete"
       - "Evidence for each remaining explicit open item"
       - "Next bounded task if not complete"
+    receipt:
+      result: not_complete
+      summary: "Roadmap is not complete. Explicit open items remain across baseline metrics, phase typing, OpenAPI generation, lifecycle deferrals, WorkerAdapter/abort/idempotency, and admin write controls. Claude selected the highest-ROI next bounded slice: remove the remaining tuple shim between pending-feeder enqueue and the T116 typed CrawlEnqueueResult union."
+      evidence:
+        - "docs/crawler-reliability-robustness-transparency-plan.md unchecked items"
+        - "backend/src/intric/worker/feeder/queues.py JobEnqueuer.enqueue tuple return"
+        - "backend/src/intric/worker/crawl_feeder.py _process_tenant_queue tuple branch"
+      decision: "Activate T118 to make CrawlFeeder._process_tenant_queue consume CrawlEnqueueResult behavior directly and prove slot/flag/pending-entry invariants with red tests."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t117-roadmap-audit-next-slice-20260515T104404Z.md"
+      spawned_tasks:
+        - T118
+  - id: T118
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Remove the pending-feeder tuple enqueue shim by consuming CrawlEnqueueResult directly in CrawlFeeder._process_tenant_queue while preserving slot, flag, and pending-entry invariants."
+    inputs:
+      - "T117 receipt"
+      - "backend/src/intric/worker/crawl_feeder.py"
+      - "backend/src/intric/worker/feeder/queues.py"
+      - "backend/src/intric/worker/feeder/crawl_enqueue.py"
+      - "backend/tests/unittests/worker/test_crawl_feeder_process.py"
+      - "backend/tests/integration/test_crawl_feeder.py"
+      - "backend/tests/unittests/worker/feeder/test_queues.py"
+    allowed_files:
+      - "backend/src/intric/worker/crawl_feeder.py"
+      - "backend/src/intric/worker/feeder/queues.py"
+      - "backend/tests/unittests/worker/test_crawl_feeder_process.py"
+      - "backend/tests/integration/test_crawl_feeder.py"
+      - "backend/tests/unittests/worker/feeder/test_queues.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "No WorkerAdapter interface, protocol, factory, base class, or generic manager."
+      - "No TaskService.queue_crawl, CrawlService, watchdog, terminal, admin, frontend, Redis key, or pending queue JSON wire-shape changes."
+      - "Preserve duplicate invariant: release slot, keep slot_preacquired flag, remove pending entry by raw bytes."
+      - "Preserve failed enqueue invariant: release slot, delete slot_preacquired flag, keep pending entry for retry."
+      - "Preserve successful enqueue invariant: remove pending entry by raw bytes, retain slot/flag for running worker."
+      - "Do not stage unrelated .devcontainer dirt."
+    red_test_plan:
+      - "Behavior test: CrawlEnqueueDuplicate from pending processing releases slot, does not delete slot_preacquired flag, and removes the exact raw pending bytes."
+      - "Behavior test: CrawlEnqueueFailed releases slot, deletes slot_preacquired flag, and keeps the pending entry for retry."
+      - "Behavior test: CrawlEnqueued removes the exact raw pending bytes and does not release slot or delete the flag."
+      - "Optional behavior test: invalid pending payload is kept/released according to existing failure policy without deleting unrelated state."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py tests/unittests/worker/feeder/test_queues.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py tests/unittests/worker/feeder/test_queues.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py tests/unittests/worker/feeder/test_queues.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py tests/unittests/worker/feeder/test_queues.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+    stop_if:
+      - "Need to change pre-acquired slot ordering, pending queue Redis key, pending queue JSON shape, terminal outcomes, admin/frontend behavior, or TaskService.queue_crawl."
+      - "Need new Any, cast, type ignore, broad helper module, WorkerAdapter, or generic interface."
+    receipt:
+      result: done
+      summary: "Removed the tuple-shaped pending-feeder enqueue compatibility edge. JobEnqueuer.enqueue now returns CrawlEnqueueResult, and CrawlFeeder._process_tenant_queue consumes CrawlEnqueued, CrawlEnqueueDuplicate, and CrawlEnqueueFailed through an exhaustive match with assert_never. Unit behavior tests prove successful enqueue keeps the slot/flag and removes pending bytes, duplicate enqueue releases the extra slot while preserving the pre-acquired flag and removing pending bytes, and failed enqueue releases the slot, deletes the pre-acquired flag, and leaves pending bytes for retry."
+      changed_files:
+        - "backend/src/intric/worker/crawl_feeder.py"
+        - "backend/src/intric/worker/feeder/queues.py"
+        - "backend/tests/unittests/worker/test_crawl_feeder_process.py"
+        - "backend/tests/unittests/worker/feeder/test_queues.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "Red test: duplicate typed enqueue result failed against old tuple-unpacking code with TypeError: cannot unpack non-iterable CrawlEnqueueDuplicate object."
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py tests/unittests/worker/feeder/test_queues.py -q -> 47 passed"
+        - "cd backend && uv run ruff check src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py tests/unittests/worker/feeder/test_queues.py -> passed"
+        - "cd backend && uv run ruff format --check src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py tests/unittests/worker/feeder/test_queues.py -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py tests/unittests/worker/feeder/test_queues.py -> 0 errors"
+        - "cd backend && uv run pyright --project pyrightconfig.json -> 0 errors"
+        - "rg confirmed no remaining JobEnqueuer tuple-shape consumer in crawler feeder/queue production code."
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t118-feeder-typed-enqueue-consumption-20260515T105810Z.md"
+        - ".codex/artifacts/claude-peer-loop-t118-feeder-typed-enqueue-consumption-revision-20260515T110439Z.md"
+      claude:
+        verdict: green
+        min_score: 8
+        resolution: "Iteration 1 requested assert_never exhaustiveness, a stronger duplicate flag assertion, stale docstring cleanup, and moving fake-based tests out of integration. Iteration 2 returned GREEN_LIGHT yes."
+      follow_up_notes:
+        - "Future low-priority test cleanup: type repetitive JobEnqueuer test literals as CrawlPendingJobData."
+  - id: T119
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Audit the roadmap after T118 and decide whether the active goal is provably complete or which single remaining slice is highest ROI."
+    inputs:
+      - "T118 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "Current git diff after T118"
+    constraints:
+      - "Do not mark the goal complete unless every remaining roadmap requirement has current evidence."
+      - "Do not start WorkerAdapter, admin write controls, lifecycle rewrite, or frontend work without a bounded task decision."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "complete | not_complete"
+      - "Evidence for each remaining explicit open item"
+      - "Next bounded task if not complete"
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T096
+    task: T118
     commands:
-      - "cd backend && uv run pytest tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency_lua_ownership.py -q"
-      - "cd backend && uv run pytest tests/integration/test_crawl_feeder.py -q"
-      - "cd backend && uv run ruff check src/intric/worker/tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency_lua_ownership.py"
-      - "cd backend && uv run ruff format --check src/intric/worker/tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency_lua_ownership.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency_lua_ownership.py"
-      - "cd backend && bash -lc '! rg -n ... src/intric/worker/tenant_concurrency.py'"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t096-tenant-limiter-lua-ownership --phase verification --iteration 2 --require-green --required-min-score 8 ..."
-    note: "T096 tenant limiter Lua ownership passed red/green behavior tests, feeder integration smoke, ruff, format check, targeted strict Pyright, grep postconditions, synthetic guard check, and Claude green final verification."
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py tests/unittests/worker/feeder/test_queues.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py tests/unittests/worker/feeder/test_queues.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py tests/unittests/worker/feeder/test_queues.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl_feeder.py src/intric/worker/feeder/queues.py tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py tests/unittests/worker/feeder/test_queues.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t118-feeder-typed-enqueue-consumption --phase verification --iteration 2 --require-green --required-min-score 8 ..."
+    note: "T118 pending-feeder typed enqueue consumption passed red/green behavior tests for success, duplicate, and failure invariants, feeder integration smoke, ruff, format check, targeted and full strict Pyright, grep postconditions, and Claude green final verification."

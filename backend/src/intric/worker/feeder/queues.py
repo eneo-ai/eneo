@@ -17,6 +17,7 @@ from intric.websites.domain.crawl_run import CrawlType
 from intric.worker.feeder.crawl_enqueue import (
     CrawlEnqueueDuplicate,
     CrawlEnqueueFailed,
+    CrawlEnqueueResult,
     enqueue_crawl_job,
 )
 
@@ -181,7 +182,7 @@ class JobEnqueuer:
 
     async def enqueue(
         self, job_data: CrawlPendingJobData, tenant_id: UUID
-    ) -> tuple[bool, bool, UUID]:
+    ) -> CrawlEnqueueResult:
         """Enqueue a crawl job to ARQ using pre-created job record.
 
         Job and CrawlRun records are already created by the scheduler.
@@ -192,9 +193,9 @@ class JobEnqueuer:
             tenant_id: Tenant identifier.
 
         Returns:
-            Tuple of (success: bool, is_duplicate: bool, job_id: UUID).
-            is_duplicate=True when ARQ reports an existing deterministic job id.
-            Returns nil UUID on invalid job_id.
+            A typed enqueue outcome. Duplicate means ARQ reported an existing
+            deterministic job id; failed means the pending payload could not be
+            parsed or ARQ raised.
         """
         # Parse job_id early for clean error handling
         try:
@@ -208,7 +209,8 @@ class JobEnqueuer:
                     "error": str(exc),
                 },
             )
-            return False, False, UUID("00000000-0000-0000-0000-000000000000")
+            nil_job_id = UUID("00000000-0000-0000-0000-000000000000")
+            return CrawlEnqueueFailed(job_id=nil_job_id, error=exc)
 
         try:
             user_id = UUID(job_data["user_id"])
@@ -226,7 +228,7 @@ class JobEnqueuer:
                     "error": str(exc),
                 },
             )
-            return False, False, job_id
+            return CrawlEnqueueFailed(job_id=job_id, error=exc)
 
         result = await enqueue_crawl_job(
             job_id=job_id,
@@ -239,7 +241,7 @@ class JobEnqueuer:
         )
 
         if isinstance(result, CrawlEnqueueDuplicate):
-            return True, True, job_id
+            return result
         if isinstance(result, CrawlEnqueueFailed):
             logger.error(
                 "Failed to enqueue crawl job from feeder",
@@ -249,7 +251,7 @@ class JobEnqueuer:
                     "error": str(result.error),
                 },
             )
-            return False, False, job_id
+            return result
 
         logger.debug(
             "Enqueued crawl job from feeder",
@@ -260,4 +262,4 @@ class JobEnqueuer:
                 "url": job_data["url"],
             },
         )
-        return True, False, job_id  # success, not duplicate
+        return result
