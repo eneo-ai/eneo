@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T066
+active_task: T068
 
 tasks:
   - id: T001
@@ -3009,7 +3009,7 @@ tasks:
   - id: T066
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next highest-ROI crawler reliability/transparency tranche after active and failure inventory endpoints."
     inputs:
@@ -3034,17 +3034,133 @@ tasks:
       - "TDD red-test story."
       - "Verification commands."
       - "Stop conditions."
+    receipt:
+      result: done
+      decision: "Activate T067 as a backend-only read-only sysadmin recent-failures inventory endpoint over terminal typed crawl-run failures."
+      summary: "Claude selected recent terminal failures as the next narrow operator-transparency slice. It should live on CrawlRunRepository, reuse typed CrawlOutcomeCode and FailureReason boundaries, stay backend-only, and avoid frontend/generated-type/schema/worker churn."
+      claude:
+        verdict: green
+        artifact: ".codex/artifacts/claude-peer-loop-t066-choose-next-crawler-reliability-tranche-20260515T013016Z.md"
+        min_score: 8
+      spawned_tasks:
+        - T067
+  - id: T067
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Add a read-only sysadmin recent-failures inventory endpoint exposing terminal failed crawl runs within a bounded window."
+    inputs:
+      - "T065 receipt"
+      - "T066 receipt"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/src/intric/websites/domain/crawl_outcome.py"
+      - "backend/src/intric/worker/crawl/persistence.py"
+      - "backend/src/intric/sysadmin/sysadmin_router.py"
+      - "backend/src/intric/sysadmin/sysadmin_models.py"
+      - ".codex/artifacts/claude-peer-loop-t066-choose-next-crawler-reliability-tranche-20260515T013016Z.md"
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawler_recent_failures.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/src/intric/sysadmin/sysadmin_models.py"
+      - "backend/src/intric/sysadmin/sysadmin_router.py"
+      - "backend/tests/integration/test_sysadmin_crawler_recent_failures.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "TDD: write integration tests first; the route must fail with 404 before production code lands."
+      - "Backend-only. No frontend, generated OpenAPI type, schema migration, new index, Redis/ARQ, worker write-path, watchdog, feeder, or crawl_tasks changes."
+      - "Add the query to `CrawlRunRepository`; do not create another admin repository or shared inventory abstraction."
+      - "Use strict `CrawlOutcomeCode` parsing for normal typed rows; do not reintroduce lenient parsing into the new-row path."
+      - "`failure_summary` uses typed `FailureReason` internally and only serializes to string keys at the API boundary."
+      - "Default `days=7`, cap `days <= 30`; default `limit=50`, cap `limit <= 200`; `offset >= 0`."
+      - "Terminal failure predicate is explicit: finished_at is not null, outcome_code is not null, and outcome_code is not COMPLETED_SUCCESS."
+      - "Count query must not join Websites or Tenants."
+      - "Order rows by finished_at DESC, crawl_run id DESC."
+      - "No Any, casts, type ignores, broad helpers, pass-through services, or utils/manager/processor/common modules."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "`GET /api/v1/sysadmin/crawler/recent-failures` returns a paginated response of terminal failed crawl runs in the requested window."
+      - "Response items include crawl_run_id, job_id, website_id, website_name, tenant_id, tenant_display_name, outcome_code, failure_summary, finished_at, and processing counters."
+      - "Empty windows return an empty page."
+      - "Completed success and in-progress rows are excluded."
+      - "Tenant filter scopes by crawl-run tenant."
+      - "Pagination keeps `total` independent from limit/offset."
+      - "Nullable website/tenant labels remain null."
+      - "`days=31` and `limit=201` return 422."
+      - "Missing super API key returns 401/403."
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_recent_failures.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_recent_failures.py"
+      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_recent_failures.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_recent_failures.py"
+    stop_if:
+      - "Need frontend, generated OpenAPI type, schema migration, new index, Redis/ARQ, or worker write-path changes."
+      - "Need to touch `crawl_tasks.py`, `circuit_breaker.py`, `watchdog.py`, `crawl_feeder.py`, or feeder code."
+      - "Need a new `*_admin_repo` module or shared inventory abstraction."
+      - "`failure_summary` cannot be exposed as typed `FailureReason` counts without files outside allowed_files."
+      - "Net diff exceeds roughly 300 lines."
+      - "Need files outside allowed_files."
+    receipt:
+      result: done
+      summary: "Added a read-only sysadmin recent-failures endpoint over terminal failed crawl runs. The query lives on CrawlRunRepository, uses a bounded [since, until) window, strict typed failure outcomes, lean count query, LEFT-joined labels only for rows, and existing lenient failure_summary parsing for historical buckets."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawler_recent_failures.py"
+        - "backend/src/intric/websites/domain/crawl_run_repo.py"
+        - "backend/src/intric/sysadmin/sysadmin_models.py"
+        - "backend/src/intric/sysadmin/sysadmin_router.py"
+        - "backend/tests/integration/test_sysadmin_crawler_recent_failures.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+      verification:
+        - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_recent_failures.py -q"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_recent_failures.py"
+        - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_recent_failures.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_recent_failures.py"
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t067-recent-crawler-failures-implementation-review-20260515T014359Z.md"
+          - ".codex/artifacts/claude-peer-loop-t067-recent-crawler-failures-implementation-review-iteration-2-20260515T014740Z.md"
+        min_score: 8
+      notes:
+        - "The endpoint echoes `since` and `until` so operators can see the exact resolved window."
+        - "A future index migration for `jobs.finished_at` and `crawl_runs.outcome_code` is worth considering if this endpoint becomes dashboard-polled at scale."
+      spawned_tasks:
+        - T068
+  - id: T068
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next highest-ROI crawler reliability/transparency tranche after the recent-failures endpoint."
+    inputs:
+      - "T067 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "Current dirty diff"
+    constraints:
+      - "Read-only except board/roadmap updates."
+      - "Prefer long-term reliability and maintainability over quick fixes."
+      - "Preserve unrelated .devcontainer files."
+      - "Do not broaden into non-crawler audit/encryption/federation test failures."
+      - "Do not activate a Worker without allowed files, verification commands, and stop conditions."
+    expected_output:
+      - "Decision: next worker tranche or final audit."
+      - "Allowed files."
+      - "TDD red-test story."
+      - "Verification commands."
+      - "Stop conditions."
     receipt: null
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T061
+    task: T067
     commands:
-      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_active_inventory.py -q"
-      - "cd backend && uv run ruff check src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_active_inventory.py"
-      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_active_inventory.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_active_inventory.py"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-reliability-t060-next-tranche --title 'T061 active crawler inventory implementation review-iteration-3' --phase verification --iteration 3 --require-green --required-min-score 8 ..."
-    note: "T061 backend active/queued crawler inventory endpoint passed targeted integration tests, ruff, format check, Pyright, and Claude green review after addressing iteration-2 blockers."
+      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_recent_failures.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_recent_failures.py"
+      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_recent_failures.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_recent_failures.py"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t067-recent-failures --title 'T067 recent crawler failures implementation review iteration 2' --phase verification --iteration 2 --require-green --required-min-score 8 ..."
+    note: "T067 backend recent-failures inventory endpoint passed targeted integration tests, ruff, format check, Pyright, and Claude green review after adding lower-bound window coverage."

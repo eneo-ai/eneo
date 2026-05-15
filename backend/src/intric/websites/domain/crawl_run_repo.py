@@ -16,6 +16,8 @@ from intric.websites.domain.crawl_lifecycle import derive_crawl_lifecycle_from_c
 from intric.websites.domain.crawl_outcome import (
     CrawlOutcomeCode,
     parse_crawl_outcome_code_strict,
+    parse_failure_summary_lenient,
+    report_legacy_failure_summary_key_dropped,
 )
 from intric.websites.domain.crawl_run import CrawlRun
 from intric.websites.domain.crawler_active_inventory import (
@@ -26,6 +28,11 @@ from intric.websites.domain.crawler_baseline import (
     CrawlerBaselineMetrics,
     CrawlerBaselineProcessingTotals,
     CrawlOutcomeBucket,
+)
+from intric.websites.domain.crawler_recent_failures import (
+    RECENT_FAILURE_OUTCOME_CODES,
+    CrawlerRecentFailureItem,
+    CrawlerRecentFailures,
 )
 
 if TYPE_CHECKING:
@@ -232,6 +239,111 @@ class CrawlRunRepository:
             total=total,
             limit=limit,
             offset=offset,
+        )
+
+    async def recent_failures(
+        self,
+        *,
+        since: datetime,
+        until: datetime,
+        days: int,
+        limit: int,
+        offset: int,
+        tenant_id: UUID | None,
+    ) -> CrawlerRecentFailures:
+        recent_failure_conditions = [
+            Jobs.finished_at.is_not(None),
+            Jobs.finished_at >= since,
+            Jobs.finished_at < until,
+            CrawlRunsTable.outcome_code.in_(
+                [code.value for code in RECENT_FAILURE_OUTCOME_CODES]
+            ),
+        ]
+        if tenant_id is not None:
+            recent_failure_conditions.append(CrawlRunsTable.tenant_id == tenant_id)
+
+        base_from = sa.join(CrawlRunsTable, Jobs, CrawlRunsTable.job_id == Jobs.id)
+        rows_from = sa.outerjoin(
+            sa.outerjoin(
+                base_from,
+                Websites,
+                CrawlRunsTable.website_id == Websites.id,
+            ),
+            Tenants,
+            CrawlRunsTable.tenant_id == Tenants.id,
+        )
+        total_stmt = (
+            sa.select(sa.func.count(CrawlRunsTable.id))
+            .select_from(base_from)
+            .where(*recent_failure_conditions)
+        )
+        total = int(await self.session.scalar(total_stmt) or 0)
+
+        rows_stmt = (
+            sa.select(
+                CrawlRunsTable.id.label("crawl_run_id"),
+                CrawlRunsTable.job_id.label("job_id"),
+                CrawlRunsTable.website_id.label("website_id"),
+                Websites.name.label("website_name"),
+                CrawlRunsTable.tenant_id.label("tenant_id"),
+                Tenants.display_name.label("tenant_display_name"),
+                CrawlRunsTable.outcome_code.label("outcome_code"),
+                CrawlRunsTable.failure_summary.label("failure_summary"),
+                Jobs.finished_at.label("finished_at"),
+                CrawlRunsTable.pages_crawled.label("pages_crawled"),
+                CrawlRunsTable.files_downloaded.label("files_downloaded"),
+                CrawlRunsTable.pages_failed.label("pages_failed"),
+                CrawlRunsTable.files_failed.label("files_failed"),
+                CrawlRunsTable.pages_source_retained.label("pages_source_retained"),
+                CrawlRunsTable.pages_hash_retained.label("pages_hash_retained"),
+                CrawlRunsTable.files_hash_retained.label("files_hash_retained"),
+                CrawlRunsTable.files_too_large_skipped.label("files_too_large_skipped"),
+            )
+            .select_from(rows_from)
+            .where(*recent_failure_conditions)
+            .order_by(Jobs.finished_at.desc(), CrawlRunsTable.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self.session.execute(rows_stmt)
+
+        items: list[CrawlerRecentFailureItem] = []
+        for row in result.mappings():
+            items.append(
+                CrawlerRecentFailureItem(
+                    crawl_run_id=row["crawl_run_id"],
+                    job_id=row["job_id"],
+                    website_id=row["website_id"],
+                    website_name=row["website_name"],
+                    tenant_id=row["tenant_id"],
+                    tenant_display_name=row["tenant_display_name"],
+                    outcome_code=parse_crawl_outcome_code_strict(row["outcome_code"]),
+                    failure_summary=parse_failure_summary_lenient(
+                        row["failure_summary"],
+                        on_unknown_key=report_legacy_failure_summary_key_dropped,
+                    ),
+                    finished_at=row["finished_at"],
+                    pages_crawled=_optional_int(row["pages_crawled"]),
+                    files_downloaded=_optional_int(row["files_downloaded"]),
+                    pages_failed=_optional_int(row["pages_failed"]),
+                    files_failed=_optional_int(row["files_failed"]),
+                    pages_source_retained=_optional_int(row["pages_source_retained"]),
+                    pages_hash_retained=_optional_int(row["pages_hash_retained"]),
+                    files_hash_retained=_optional_int(row["files_hash_retained"]),
+                    files_too_large_skipped=_optional_int(
+                        row["files_too_large_skipped"]
+                    ),
+                )
+            )
+
+        return CrawlerRecentFailures(
+            items=tuple(items),
+            total=total,
+            limit=limit,
+            offset=offset,
+            days=days,
+            since=since,
+            until=until,
         )
 
     async def aggregate_baseline(
