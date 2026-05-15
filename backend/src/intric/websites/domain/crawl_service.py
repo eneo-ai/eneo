@@ -15,7 +15,6 @@ from uuid import UUID
 
 import redis.asyncio as aioredis
 
-from intric.jobs.job_manager import job_manager
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.main.models import Status
@@ -25,6 +24,10 @@ from intric.websites.domain.crawl_terminal import (
     TerminalEvent,
     crawl_direct_enqueue_failure_message,
     crawl_pending_queue_enqueue_failure_message,
+)
+from intric.worker.feeder.crawl_enqueue import (
+    CrawlEnqueueFailed,
+    enqueue_crawl_job,
 )
 from intric.worker.feeder.queues import (
     CrawlPendingJobData,
@@ -249,10 +252,8 @@ class CrawlService:
         run_id: UUID,
     ) -> None:
         """Enqueue crawl job directly to ARQ."""
-        from intric.jobs.job_models import Task
-        from intric.websites.crawl_dependencies.crawl_models import CrawlTask
-
-        params = CrawlTask(
+        result = await enqueue_crawl_job(
+            job_id=job_id,
             user_id=website.user_id,
             website_id=website.id,
             run_id=run_id,
@@ -260,12 +261,8 @@ class CrawlService:
             download_files=website.download_files,
             crawl_type=website.crawl_type,
         )
-
-        await job_manager.enqueue(
-            task=Task.CRAWL,
-            job_id=job_id,
-            params=params,
-        )
+        if isinstance(result, CrawlEnqueueFailed):
+            raise result.error
 
     async def crawl(self, website: "CrawlableWebsite") -> CrawlRun:
         """Start a crawl for a website with optimistic slot acquisition.

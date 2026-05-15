@@ -26,8 +26,10 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Protocol, cast
 from uuid import UUID
 
+from arq.jobs import JobStatus
 from typing_extensions import TypedDict
 
+from intric.jobs.job_manager import job_manager
 from intric.jobs.job_models import Task
 from intric.main.config import Settings
 from intric.main.logging import get_logger
@@ -35,6 +37,12 @@ from intric.main.models import Status
 from intric.websites.domain.crawl_lifecycle import (
     CrawlLifecycle,
     derive_crawl_lifecycle_from_counters,
+)
+from intric.websites.domain.crawl_run import CrawlType
+from intric.worker.feeder.crawl_enqueue import (
+    CrawlEnqueueDuplicate,
+    CrawlEnqueueFailed,
+    enqueue_crawl_job,
 )
 from intric.worker.redis.lua_scripts import LuaScripts
 
@@ -784,18 +792,17 @@ class OrphanWatchdog:
         Returns:
             True if job was re-queued, False if skipped.
         """
-        from arq.jobs import Job, JobStatus
-
-        from intric.jobs.job_manager import job_manager
-        from intric.jobs.job_models import Task
-        from intric.websites.crawl_dependencies.crawl_models import CrawlTask
-        from intric.websites.domain.crawl_run import CrawlType
-
-        # Check ARQ status first
-        arq_job = Job(job_id=str(job_id), redis=self._redis)
         try:
-            status = await arq_job.status()
-        except Exception:
+            status = await job_manager.get_job_status(job_id)
+        except Exception as exc:
+            logger.warning(
+                "Could not query ARQ job status before watchdog re-queue; assuming missing",
+                extra={
+                    "job_id": str(job_id),
+                    "tenant_id": str(tenant_id),
+                    "error": str(exc),
+                },
+            )
             status = JobStatus.not_found
 
         if status != JobStatus.not_found:
@@ -805,7 +812,8 @@ class OrphanWatchdog:
             )
             return False
 
-        params = CrawlTask(
+        result = await enqueue_crawl_job(
+            job_id=job_id,
             user_id=user_id,
             website_id=website_id,
             run_id=run_id,
@@ -814,17 +822,14 @@ class OrphanWatchdog:
             crawl_type=CrawlType(crawl_type),
         )
 
-        enqueued = await job_manager.enqueue(
-            task=Task.CRAWL,
-            job_id=job_id,
-            params=params,
-        )
-        if not enqueued:
+        if isinstance(result, CrawlEnqueueDuplicate):
             logger.info(
                 "Job appeared in ARQ during re-queue attempt",
                 extra={"job_id": str(job_id), "tenant_id": str(tenant_id)},
             )
             return False
+        if isinstance(result, CrawlEnqueueFailed):
+            raise result.error
 
         logger.info(
             "Re-queued stuck job to ARQ",

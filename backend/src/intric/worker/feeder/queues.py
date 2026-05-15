@@ -12,8 +12,13 @@ from uuid import UUID
 
 from typing_extensions import TypedDict
 
-from intric.jobs.job_manager import job_manager
 from intric.main.logging import get_logger
+from intric.websites.domain.crawl_run import CrawlType
+from intric.worker.feeder.crawl_enqueue import (
+    CrawlEnqueueDuplicate,
+    CrawlEnqueueFailed,
+    enqueue_crawl_job,
+)
 
 if TYPE_CHECKING:
     import redis.asyncio as aioredis
@@ -206,55 +211,53 @@ class JobEnqueuer:
             return False, False, UUID("00000000-0000-0000-0000-000000000000")
 
         try:
-            from intric.jobs.job_models import Task
-            from intric.websites.crawl_dependencies.crawl_models import CrawlTask
-            from intric.websites.domain.crawl_run import CrawlType
-
-            params = CrawlTask(
-                user_id=UUID(job_data["user_id"]),
-                website_id=UUID(job_data["website_id"]),
-                run_id=UUID(job_data["run_id"]),
-                url=job_data["url"],
-                download_files=job_data["download_files"],
-                crawl_type=CrawlType(job_data["crawl_type"]),
-            )
-
-            enqueued = await job_manager.enqueue(
-                task=Task.CRAWL,
-                job_id=job_id,
-                params=params,
-            )
-            if not enqueued:
-                return True, True, job_id
-
-            logger.debug(
-                "Enqueued crawl job from feeder",
+            user_id = UUID(job_data["user_id"])
+            website_id = UUID(job_data["website_id"])
+            run_id = UUID(job_data["run_id"])
+            url = job_data["url"]
+            download_files = job_data["download_files"]
+            crawl_type = CrawlType(job_data["crawl_type"])
+        except (KeyError, ValueError, TypeError) as exc:
+            logger.error(
+                "Invalid pending crawl job data",
                 extra={
                     "tenant_id": str(tenant_id),
-                    "job_id": str(job_id),
-                    "website_id": job_data["website_id"],
-                    "url": job_data["url"],
+                    "job_data": job_data,
+                    "error": str(exc),
                 },
             )
-            return True, False, job_id  # success, not duplicate
+            return False, False, job_id
 
-        except Exception as exc:
-            return self._handle_enqueue_error(exc, job_id, job_data, tenant_id)
+        result = await enqueue_crawl_job(
+            job_id=job_id,
+            user_id=user_id,
+            website_id=website_id,
+            run_id=run_id,
+            url=url,
+            download_files=download_files,
+            crawl_type=crawl_type,
+        )
 
-    def _handle_enqueue_error(
-        self,
-        exc: Exception,
-        job_id: UUID,
-        job_data: CrawlPendingJobData,
-        tenant_id: UUID,
-    ) -> tuple[bool, bool, UUID]:
-        """Handle enqueue errors without inferring ARQ state from text."""
-        logger.error(
-            "Failed to enqueue crawl job from feeder",
+        if isinstance(result, CrawlEnqueueDuplicate):
+            return True, True, job_id
+        if isinstance(result, CrawlEnqueueFailed):
+            logger.error(
+                "Failed to enqueue crawl job from feeder",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "job_data": job_data,
+                    "error": str(result.error),
+                },
+            )
+            return False, False, job_id
+
+        logger.debug(
+            "Enqueued crawl job from feeder",
             extra={
                 "tenant_id": str(tenant_id),
-                "job_data": job_data,
-                "error": str(exc),
+                "job_id": str(job_id),
+                "website_id": job_data["website_id"],
+                "url": job_data["url"],
             },
         )
-        return False, False, job_id  # failed, not duplicate
+        return True, False, job_id  # success, not duplicate

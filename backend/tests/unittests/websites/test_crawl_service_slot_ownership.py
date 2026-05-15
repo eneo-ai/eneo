@@ -20,6 +20,11 @@ from intric.websites.domain.crawl_terminal import (
     TerminalEvent,
 )
 from intric.websites.domain.website import UpdateInterval, WebsiteSparse
+from intric.worker.feeder.crawl_enqueue import (
+    CrawlEnqueued,
+    CrawlEnqueueFailed,
+    CrawlEnqueueResult,
+)
 from intric.worker.redis.lua_scripts import LuaScripts
 
 if TYPE_CHECKING:
@@ -129,6 +134,16 @@ class TaskServiceStub:
         )
 
 
+class AsyncCrawlEnqueueStub:
+    def __init__(self, result: CrawlEnqueueResult) -> None:
+        self.result = result
+        self.calls: list[dict[str, object]] = []
+
+    async def __call__(self, **kwargs: object) -> CrawlEnqueueResult:
+        self.calls.append(kwargs)
+        return self.result
+
+
 def _make_service(
     *,
     redis_client: RecordingRedis,
@@ -209,11 +224,17 @@ async def test_crawl_enqueue_rollback_uses_canonical_slot_lua_and_keys(
     )
     website = _make_website(user_id=user_id, tenant_id=tenant_id)
 
-    async def fail_enqueue(*, task: Task, job_id: UUID, params: object) -> bool:
-        del task, job_id, params
-        raise RuntimeError("enqueue failed")
-
-    monkeypatch.setattr(crawl_service_module.job_manager, "enqueue", fail_enqueue)
+    enqueue_error = RuntimeError("enqueue failed")
+    monkeypatch.setattr(
+        crawl_service_module,
+        "enqueue_crawl_job",
+        AsyncCrawlEnqueueStub(
+            CrawlEnqueueFailed(
+                job_id=job_id,
+                error=enqueue_error,
+            )
+        ),
+    )
 
     with pytest.raises(RuntimeError, match="enqueue failed"):
         await service.crawl(website)
@@ -267,11 +288,17 @@ async def test_crawl_enqueue_rollback_orders_resource_release_before_terminal_co
     )
     website = _make_website(user_id=user_id, tenant_id=tenant_id)
 
-    async def fail_enqueue(*, task: Task, job_id: UUID, params: object) -> bool:
-        del task, job_id, params
-        raise RuntimeError("enqueue failed")
-
-    monkeypatch.setattr(crawl_service_module.job_manager, "enqueue", fail_enqueue)
+    enqueue_error = RuntimeError("enqueue failed")
+    monkeypatch.setattr(
+        crawl_service_module,
+        "enqueue_crawl_job",
+        AsyncCrawlEnqueueStub(
+            CrawlEnqueueFailed(
+                job_id=job_id,
+                error=enqueue_error,
+            )
+        ),
+    )
 
     with pytest.raises(RuntimeError, match="enqueue failed"):
         await service.crawl(website)
@@ -302,11 +329,17 @@ async def test_crawl_enqueue_failure_preserves_original_error_when_terminal_comm
         del kwargs
         warnings.append(message)
 
-    async def fail_enqueue(*, task: Task, job_id: UUID, params: object) -> bool:
-        del task, job_id, params
-        raise RuntimeError("enqueue failed")
-
-    monkeypatch.setattr(crawl_service_module.job_manager, "enqueue", fail_enqueue)
+    enqueue_error = RuntimeError("enqueue failed")
+    monkeypatch.setattr(
+        crawl_service_module,
+        "enqueue_crawl_job",
+        AsyncCrawlEnqueueStub(
+            CrawlEnqueueFailed(
+                job_id=job_id,
+                error=enqueue_error,
+            )
+        ),
+    )
     monkeypatch.setattr(crawl_service_module.logger, "warning", record_warning)
 
     with pytest.raises(RuntimeError, match="enqueue failed"):
@@ -335,11 +368,16 @@ async def test_mark_slot_preacquired_failure_rolls_back_slot_and_commits_termina
     )
     website = _make_website(user_id=user_id, tenant_id=tenant_id)
 
-    async def unexpected_enqueue(*, task: Task, job_id: UUID, params: object) -> bool:
-        del task, job_id, params
-        raise AssertionError("enqueue should not run when pre-acquired flag fails")
-
-    monkeypatch.setattr(crawl_service_module.job_manager, "enqueue", unexpected_enqueue)
+    unexpected_enqueue = AsyncCrawlEnqueueStub(
+        CrawlEnqueued(
+            job_id=job_id,
+        )
+    )
+    monkeypatch.setattr(
+        crawl_service_module,
+        "enqueue_crawl_job",
+        unexpected_enqueue,
+    )
 
     with pytest.raises(RuntimeError, match="preacquired flag failed"):
         await service.crawl(website)
@@ -358,6 +396,7 @@ async def test_mark_slot_preacquired_failure_rolls_back_slot_and_commits_termina
     assert repo.terminal_events[0].outcome_code == (
         CrawlOutcomeCode.CRAWL_DIRECT_ENQUEUE_FAILED
     )
+    assert unexpected_enqueue.calls == []
 
 
 def test_crawl_service_does_not_own_slot_lua_or_slot_key_literals() -> None:

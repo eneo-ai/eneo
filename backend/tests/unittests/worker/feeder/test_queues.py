@@ -201,8 +201,55 @@ class TestJobEnqueuerEnqueue:
     """Tests for JobEnqueuer.enqueue method."""
 
     @pytest.mark.asyncio
+    async def test_delegates_pending_payload_to_typed_crawl_enqueue(self):
+        """Pending queue JSON stays at the edge before typed enqueue."""
+        from intric.websites.domain.crawl_run import CrawlType
+        from intric.worker.feeder.crawl_enqueue import (
+            CrawlEnqueued,
+        )
+        from intric.worker.feeder.queues import JobEnqueuer
+
+        job_id = uuid4()
+        user_id = uuid4()
+        website_id = uuid4()
+        run_id = uuid4()
+        job_data = {
+            "job_id": str(job_id),
+            "user_id": str(user_id),
+            "website_id": str(website_id),
+            "run_id": str(run_id),
+            "url": "https://example.com",
+            "download_files": True,
+            "crawl_type": "sitemap",
+        }
+
+        with patch(
+            "intric.worker.feeder.queues.enqueue_crawl_job",
+            new=AsyncMock(return_value=CrawlEnqueued(job_id=job_id)),
+        ) as enqueue_crawl_job:
+            success, is_duplicate, returned_id = await JobEnqueuer().enqueue(
+                job_data, uuid4()
+            )
+
+        assert success is True
+        assert is_duplicate is False
+        assert returned_id == job_id
+        enqueue_crawl_job.assert_awaited_once_with(
+            job_id=job_id,
+            user_id=user_id,
+            website_id=website_id,
+            run_id=run_id,
+            url="https://example.com",
+            download_files=True,
+            crawl_type=CrawlType.SITEMAP,
+        )
+
+    @pytest.mark.asyncio
     async def test_returns_success_on_successful_enqueue(self):
         """Should return (True, False, job_id) on successful enqueue."""
+        from intric.worker.feeder.crawl_enqueue import (
+            CrawlEnqueued,
+        )
         from intric.worker.feeder.queues import JobEnqueuer
 
         job_id = uuid4()
@@ -217,27 +264,26 @@ class TestJobEnqueuerEnqueue:
             "crawl_type": "crawl",
         }
 
-        with (
-            patch("intric.worker.feeder.queues.job_manager") as mock_manager,
-            patch("intric.jobs.job_models.Task"),
-            patch("intric.websites.crawl_dependencies.crawl_models.CrawlTask"),
-            patch("intric.websites.crawl_dependencies.crawl_models.CrawlType"),
-        ):
-            mock_manager.enqueue = AsyncMock(return_value=True)
-
+        with patch(
+            "intric.worker.feeder.queues.enqueue_crawl_job",
+            new=AsyncMock(return_value=CrawlEnqueued(job_id=job_id)),
+        ) as enqueue_crawl_job:
             enqueuer = JobEnqueuer()
             success, is_duplicate, returned_id = await enqueuer.enqueue(
                 job_data, tenant_id
             )
 
-            assert success is True
-            assert is_duplicate is False
-            assert returned_id == job_id
-            mock_manager.enqueue.assert_called_once()
+        assert success is True
+        assert is_duplicate is False
+        assert returned_id == job_id
+        enqueue_crawl_job.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_treats_native_arq_duplicate_return_as_duplicate(self):
         """Should mark duplicate when ARQ returns None for an existing job id."""
+        from intric.worker.feeder.crawl_enqueue import (
+            CrawlEnqueueDuplicate,
+        )
         from intric.worker.feeder.queues import JobEnqueuer
 
         job_id = uuid4()
@@ -251,22 +297,18 @@ class TestJobEnqueuerEnqueue:
             "crawl_type": "crawl",
         }
 
-        with (
-            patch("intric.worker.feeder.queues.job_manager") as mock_manager,
-            patch("intric.jobs.job_models.Task"),
-            patch("intric.websites.crawl_dependencies.crawl_models.CrawlTask"),
-            patch("intric.websites.crawl_dependencies.crawl_models.CrawlType"),
+        with patch(
+            "intric.worker.feeder.queues.enqueue_crawl_job",
+            new=AsyncMock(return_value=CrawlEnqueueDuplicate(job_id=job_id)),
         ):
-            mock_manager.enqueue = AsyncMock(return_value=False)
-
             enqueuer = JobEnqueuer()
             success, is_duplicate, returned_id = await enqueuer.enqueue(
                 job_data, uuid4()
             )
 
-            assert success is True
-            assert is_duplicate is True
-            assert returned_id == job_id
+        assert success is True
+        assert is_duplicate is True
+        assert returned_id == job_id
 
     @pytest.mark.asyncio
     async def test_returns_failure_on_invalid_job_id(self):
@@ -297,8 +339,19 @@ class TestJobEnqueuerEnqueue:
         assert returned_id == UUID("00000000-0000-0000-0000-000000000000")
 
     @pytest.mark.asyncio
-    async def test_does_not_parse_duplicate_exceptions_as_success(self):
-        """Only JobManager.enqueue(False) is a duplicate signal."""
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("user_id", "not-a-uuid"),
+            ("website_id", "not-a-uuid"),
+            ("run_id", "not-a-uuid"),
+            ("crawl_type", "not-a-crawl-type"),
+        ],
+    )
+    async def test_returns_failure_on_invalid_pending_payload_fields(
+        self, field: str, value: object
+    ):
+        """Invalid payload fields fail before the typed enqueue owner is called."""
         from intric.worker.feeder.queues import JobEnqueuer
 
         job_id = uuid4()
@@ -311,32 +364,69 @@ class TestJobEnqueuerEnqueue:
             "download_files": False,
             "crawl_type": "crawl",
         }
+        job_data[field] = value
 
-        with (
-            patch("intric.worker.feeder.queues.job_manager") as mock_manager,
-            patch("intric.jobs.job_models.Task"),
-            patch("intric.websites.crawl_dependencies.crawl_models.CrawlTask"),
-            patch("intric.websites.crawl_dependencies.crawl_models.CrawlType"),
-        ):
-            mock_manager.enqueue = AsyncMock(
-                side_effect=Exception("Job already exists")
+        with patch(
+            "intric.worker.feeder.queues.enqueue_crawl_job",
+            new=AsyncMock(),
+        ) as enqueue_crawl_job:
+            success, is_duplicate, returned_id = await JobEnqueuer().enqueue(
+                job_data, uuid4()
             )
 
+        assert success is False
+        assert is_duplicate is False
+        assert returned_id == job_id
+        enqueue_crawl_job.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_does_not_parse_duplicate_exceptions_as_success(self):
+        """Only JobManager.enqueue(False) is a duplicate signal."""
+        from intric.worker.feeder.crawl_enqueue import (
+            CrawlEnqueueFailed,
+        )
+        from intric.worker.feeder.queues import JobEnqueuer
+
+        job_id = uuid4()
+        enqueue_error = Exception("Job already exists")
+        job_data = {
+            "job_id": str(job_id),
+            "user_id": str(uuid4()),
+            "website_id": str(uuid4()),
+            "run_id": str(uuid4()),
+            "url": "https://example.com",
+            "download_files": False,
+            "crawl_type": "crawl",
+        }
+
+        with patch(
+            "intric.worker.feeder.queues.enqueue_crawl_job",
+            new=AsyncMock(
+                return_value=CrawlEnqueueFailed(
+                    job_id=job_id,
+                    error=enqueue_error,
+                )
+            ),
+        ):
             enqueuer = JobEnqueuer()
             success, is_duplicate, returned_id = await enqueuer.enqueue(
                 job_data, uuid4()
             )
 
-            assert success is False
-            assert is_duplicate is False
-            assert returned_id == job_id
+        assert success is False
+        assert is_duplicate is False
+        assert returned_id == job_id
 
     @pytest.mark.asyncio
     async def test_returns_failure_on_real_error(self):
         """Should return (False, False, job_id) on non-duplicate errors."""
+        from intric.worker.feeder.crawl_enqueue import (
+            CrawlEnqueueFailed,
+        )
         from intric.worker.feeder.queues import JobEnqueuer
 
         job_id = uuid4()
+        enqueue_error = Exception("Connection refused")
         job_data = {
             "job_id": str(job_id),
             "user_id": str(uuid4()),
@@ -347,24 +437,23 @@ class TestJobEnqueuerEnqueue:
             "crawl_type": "crawl",
         }
 
-        with (
-            patch("intric.worker.feeder.queues.job_manager") as mock_manager,
-            patch("intric.jobs.job_models.Task"),
-            patch("intric.websites.crawl_dependencies.crawl_models.CrawlTask"),
-            patch("intric.websites.crawl_dependencies.crawl_models.CrawlType"),
+        with patch(
+            "intric.worker.feeder.queues.enqueue_crawl_job",
+            new=AsyncMock(
+                return_value=CrawlEnqueueFailed(
+                    job_id=job_id,
+                    error=enqueue_error,
+                )
+            ),
         ):
-            mock_manager.enqueue = AsyncMock(
-                side_effect=Exception("Connection refused")
-            )
-
             enqueuer = JobEnqueuer()
             success, is_duplicate, returned_id = await enqueuer.enqueue(
                 job_data, uuid4()
             )
 
-            assert success is False
-            assert is_duplicate is False
-            assert returned_id == job_id
+        assert success is False
+        assert is_duplicate is False
+        assert returned_id == job_id
 
 
 class TestJobEnqueuerDuplicateDetection:
@@ -385,9 +474,13 @@ class TestJobEnqueuerDuplicateDetection:
         self, error_message
     ):
         """Wrapped queue errors must stay visible instead of becoming duplicates."""
+        from intric.worker.feeder.crawl_enqueue import (
+            CrawlEnqueueFailed,
+        )
         from intric.worker.feeder.queues import JobEnqueuer
 
         job_id = uuid4()
+        enqueue_error = Exception(error_message)
         job_data = {
             "job_id": str(job_id),
             "user_id": str(uuid4()),
@@ -398,18 +491,19 @@ class TestJobEnqueuerDuplicateDetection:
             "crawl_type": "crawl",
         }
 
-        with (
-            patch("intric.worker.feeder.queues.job_manager") as mock_manager,
-            patch("intric.jobs.job_models.Task"),
-            patch("intric.websites.crawl_dependencies.crawl_models.CrawlTask"),
-            patch("intric.websites.crawl_dependencies.crawl_models.CrawlType"),
+        with patch(
+            "intric.worker.feeder.queues.enqueue_crawl_job",
+            new=AsyncMock(
+                return_value=CrawlEnqueueFailed(
+                    job_id=job_id,
+                    error=enqueue_error,
+                )
+            ),
         ):
-            mock_manager.enqueue = AsyncMock(side_effect=Exception(error_message))
-
             enqueuer = JobEnqueuer()
             success, is_duplicate, _ = await enqueuer.enqueue(job_data, uuid4())
 
-            assert success is False, f"Should not swallow '{error_message}'"
-            assert is_duplicate is False, (
-                f"'{error_message}' should not be marked as duplicate"
-            )
+        assert success is False, f"Should not swallow '{error_message}'"
+        assert is_duplicate is False, (
+            f"'{error_message}' should not be marked as duplicate"
+        )

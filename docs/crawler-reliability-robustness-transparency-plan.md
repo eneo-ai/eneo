@@ -79,6 +79,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Typed Redis pipeline boundary tranche: move Redis pipeline result typing to `worker/redis/client.py` so `worker/crawl/heartbeat.py` and `worker/crawl/recovery.py` no longer need local `cast(...)` for pipeline results.
 - [x] Step 5 completion-log tranche: move crawl completion/performance logging into `worker/crawl/completion_log.py`, reuse `CrawlRunProcessingSummary`, and protect source-retained/hash-retained/too-large metric semantics with behavior tests.
 - [x] Queue-boundary scout tranche: reject premature `WorkerAdapter`/one-file Redis protocol work and select a concrete typed crawl enqueue owner as the next ownership-collapse slice.
+- [x] Typed crawl enqueue owner tranche: add a concrete union-typed enqueue owner for already-created crawl jobs, reuse it from pending queue, manual direct handoff, and watchdog requeue paths, and stop watchdog from constructing `arq.jobs.Job` directly.
 
 ## Non-Negotiable Principles
 
