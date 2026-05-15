@@ -191,6 +191,26 @@
     }
   },
   {
+    "name": "direct_enqueue_failed_stored",
+    "input": {
+      "status": "failed",
+      "result_location": "Failed to enqueue crawl directly: ARQ unavailable",
+      "failure_summary": null,
+      "pages_failed": null,
+      "files_failed": null,
+      "pages_source_retained": null,
+      "outcome_code": "CRAWL_DIRECT_ENQUEUE_FAILED"
+    },
+    "expected": {
+      "code": "CRAWL_DIRECT_ENQUEUE_FAILED",
+      "severity": "error",
+      "message_key": "crawl_outcome_direct_enqueue_failed",
+      "detail": "Failed to enqueue crawl directly: ARQ unavailable",
+      "affected_count": null,
+      "samples": []
+    }
+  },
+  {
     "name": "runtime_timeout_stored",
     "input": {
       "status": "failed",

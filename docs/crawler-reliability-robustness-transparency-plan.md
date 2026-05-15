@@ -73,6 +73,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Tenant limiter Lua ownership tranche: route `TenantConcurrencyLimiter` through `LuaScripts.acquire_slot/release_slot`, preserving circuit-breaker and fallback semantics while removing inline Redis slot eval ownership.
 - [x] Terminal ownership relocation tranche: move `TerminalEvent` / `commit_terminal(...)` to a website-owned crawl terminal persistence boundary and delete the worker-local implementation file.
 - [x] Manual pending-queue terminal parity tranche: route `CrawlService` pending queue add failures through `TerminalEvent(CRAWL_QUEUE_ENQUEUE_FAILED)`, share the bounded enqueue-failure message helper with scheduled crawls, and keep the original `PendingQueueAddError` authoritative when terminal commit fails.
+- [x] Manual direct-enqueue terminal parity tranche: route `CrawlService` direct ARQ/pre-acquired rollback failures through `TerminalEvent(CRAWL_DIRECT_ENQUEUE_FAILED)`, preserve flag-delete/slot-release/terminal-commit ordering, and expose the distinct typed outcome through backend/frontend presentation.
 
 ## Non-Negotiable Principles
 
@@ -92,7 +93,7 @@ The current branch already improved skip-unchanged behavior, source-retained cou
 Important current friction:
 
 - `backend/src/intric/worker/crawl_tasks.py` is still too large at 1,663 lines, but bootstrap, page iteration, file processing, cleanup, audit, circuit breaker, website timestamps, slot acquire/release, terminal commits, and cleanup policy are now extracted behind typed boundaries.
-- `backend/src/intric/worker/crawl_tasks.py` now uses a public `TaskManager.acknowledge_terminal_commit(...)` seam. Duplicate crawl skips, zero-output crawls, exception/shutdown outcomes, normal/partial completion, max-age busy-wait abandonment, and pending-queue enqueue failure rollback go through `commit_terminal(...)`. Remaining terminal write ownership is now concentrated in watchdog cleanup.
+- `backend/src/intric/worker/crawl_tasks.py` now uses a public `TaskManager.acknowledge_terminal_commit(...)` seam. Duplicate crawl skips, zero-output crawls, exception/shutdown outcomes, normal/partial completion, max-age busy-wait abandonment, pending-queue enqueue failure rollback, and manual `CrawlService` pending/direct enqueue failures go through `commit_terminal(...)`.
 - `_get_primary_active_job_id(...)` now filters explicitly to crawl jobs and is backed by reversible PostgreSQL indexes on active crawl jobs and crawl-run website/job lookups. The migration test proves the duplicate-guard lookup changes from a crawl-run sequential scan before the migration to planner-visible index usage after it.
 - `backend/src/intric/worker/crawl_feeder.py` owns custom scheduling, Redis queues, leader election, tenant capacity, and pre-acquired slot protocol.
 - `backend/src/intric/worker/feeder/watchdog.py` owns rescue/reconciliation logic that overlaps with worker lifecycle state. Its Phase 3.5 early-zombie behavior and Phase 3 long-running behavior must remain distinct lifecycle concepts.
@@ -415,7 +416,7 @@ Work:
 - [x] Extract the website-crawl audit emission path into a typed post-commit reactor boundary.
 - [x] Extract the website-crawl circuit-breaker path into a typed post-commit reactor boundary.
 - [x] Add remaining post-commit reactors for website timestamps and slot release.
-- [ ] Replace direct terminal `sa.update(CrawlRuns)` and `sa.update(Jobs)` call sites in one vertical path at a time. Complete so far: worker crawl-task terminal branches, watchdog CrawlRun terminal branches, terminal writer ownership relocation, and manual pending-queue failure parity. Remaining known escape: manual `CrawlService` direct-ARQ/pre-acquired rollback failure parity, which needs a separate ordering-sensitive slice because flag deletion and slot release currently happen before terminal failure commit.
+- [x] Replace direct terminal `sa.update(CrawlRuns)` and `sa.update(Jobs)` call sites in one vertical path at a time. Complete so far: worker crawl-task terminal branches, watchdog CrawlRun terminal branches, terminal writer ownership relocation, manual pending-queue failure parity, and manual direct-ARQ/pre-acquired rollback parity. Remaining generic `TaskManager.job_service.fail_job(...)` fallback is outside crawler terminal row ownership and should be reassessed only if crawler code starts relying on it again.
 - [x] Remove all direct `setattr(task_manager, "_job_already_handled", True)` call sites.
 - [x] Replace TaskManager private-flag coordination with an explicit public terminal-commit acknowledgement or remove TaskManager from crawler terminal ownership.
 

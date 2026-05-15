@@ -879,6 +879,7 @@
   "crawl_outcome_max_age_exceeded": "The crawl waited too long and was stopped",
   "crawl_outcome_runtime_timeout": "The crawl ran too long and was stopped",
   "crawl_outcome_queue_enqueue_failed": "Crawl could not be queued",
+  "crawl_outcome_direct_enqueue_failed": "Crawl could not be handed to the worker",
   "crawl_outcome_source_retention_only": "No page downloads were needed",
   "crawl_outcome_all_unchanged": "All content was unchanged",
   "crawl_outcome_files_too_large_only": "Files were too large to download",

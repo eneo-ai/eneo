@@ -23,7 +23,8 @@ from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.websites.domain.crawl_run import CrawlRun
 from intric.websites.domain.crawl_terminal import (
     TerminalEvent,
-    crawl_queue_enqueue_failure_message,
+    crawl_direct_enqueue_failure_message,
+    crawl_pending_queue_enqueue_failure_message,
 )
 from intric.worker.feeder.queues import (
     CrawlPendingJobData,
@@ -130,7 +131,7 @@ class CrawlService:
         )
 
     async def _release_slot(self, tenant_id: UUID) -> None:
-        """Release a previously acquired slot (used when enqueue fails)."""
+        """Release a previously acquired slot after direct handoff setup fails."""
         ttl = self.settings.tenant_worker_semaphore_ttl_seconds
 
         try:
@@ -165,7 +166,8 @@ class CrawlService:
                 },
             )
 
-        # Delete pre-acquired flag (harmless if doesn't exist)
+        # Preemption handles an already-terminal job, so slot release can run before
+        # flag deletion without a worker racing this handoff path.
         flag_key = LuaScripts.preacquired_slot_key(job_id)
         try:
             await self.redis_client.delete(flag_key)
@@ -209,7 +211,7 @@ class CrawlService:
                 },
             )
         except PendingQueueAddError as exc:
-            failure_message = crawl_queue_enqueue_failure_message(exc)
+            failure_message = crawl_pending_queue_enqueue_failure_message(exc)
             logger.error(
                 failure_message,
                 extra={
@@ -315,7 +317,9 @@ class CrawlService:
                         },
                     )
                 except Exception as exc:
-                    # Rollback: delete flag (if it was set) and release slot
+                    failure_message = crawl_direct_enqueue_failure_message(exc)
+                    # Rollback capacity before terminal commit so a failed DB write
+                    # cannot leave future crawls blocked by a leaked slot.
                     try:
                         await self.redis_client.delete(
                             LuaScripts.preacquired_slot_key(crawl_job.id)
@@ -327,18 +331,34 @@ class CrawlService:
                         )
                     await self._release_slot(website.tenant_id)
 
-                    # Fail the job to prevent orphaned DB records
-                    # This prevents "Crawl already in progress" blocking future crawls
-                    # Note: CrawlRun.status derives from Job.status (no status column on CrawlRuns)
                     try:
-                        await self.task_service.job_service.fail_job(
-                            crawl_job.id, error_message=f"Enqueue failed: {exc}"
+                        await self.repo.commit_terminal(
+                            TerminalEvent(
+                                crawl_run_id=crawl_run.id,
+                                job_id=crawl_job.id,
+                                job_status=Status.FAILED,
+                                outcome_code=(
+                                    CrawlOutcomeCode.CRAWL_DIRECT_ENQUEUE_FAILED
+                                ),
+                                finished_at=datetime.now(timezone.utc),
+                                result_location=failure_message,
+                            )
                         )
-                    except Exception:
-                        pass  # Best effort - will be cleaned up by orphan cleanup
+                        logger.info(
+                            "Committed crawl terminal failure after direct enqueue failure",
+                            extra={"job_id": str(crawl_job.id)},
+                        )
+                    except Exception as terminal_exc:
+                        logger.warning(
+                            "Terminal commit after direct crawl enqueue failure failed",
+                            extra={
+                                "job_id": str(crawl_job.id),
+                                "error": str(terminal_exc),
+                            },
+                        )
 
                     logger.error(
-                        "Failed to enqueue crawl, rolled back slot and failed job",
+                        "Failed to enqueue crawl directly and rolled back slot",
                         extra={
                             "job_id": str(crawl_job.id),
                             "crawl_run_id": str(crawl_run.id),

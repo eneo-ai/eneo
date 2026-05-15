@@ -878,6 +878,7 @@
   "crawl_outcome_max_age_exceeded": "Indexeringen väntade för länge och stoppades",
   "crawl_outcome_runtime_timeout": "Indexeringen körde för länge och stoppades",
   "crawl_outcome_queue_enqueue_failed": "Indexeringen kunde inte köas",
+  "crawl_outcome_direct_enqueue_failed": "Indexeringen kunde inte lämnas över till workern",
   "crawl_outcome_source_retention_only": "Inga sidnedladdningar behövdes",
   "crawl_outcome_all_unchanged": "Allt innehåll var oförändrat",
   "crawl_outcome_files_too_large_only": "Filerna var för stora att ladda ner",

@@ -16,6 +16,7 @@ RECENT_FAILURE_OUTCOME_CODES: frozenset[CrawlOutcomeCode] = frozenset(
         CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED,
         CrawlOutcomeCode.CRAWL_RUNTIME_TIMEOUT,
         CrawlOutcomeCode.CRAWL_QUEUE_ENQUEUE_FAILED,
+        CrawlOutcomeCode.CRAWL_DIRECT_ENQUEUE_FAILED,
         CrawlOutcomeCode.CRAWL_PARTIAL_TIMEOUT,
         CrawlOutcomeCode.CRAWL_SHUTDOWN_ERROR,
         CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES,

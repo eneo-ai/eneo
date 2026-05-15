@@ -28,6 +28,7 @@ const outcomeLabelsByCode = {
   CRAWL_MAX_AGE_EXCEEDED: () => m.crawl_outcome_max_age_exceeded(),
   CRAWL_RUNTIME_TIMEOUT: () => m.crawl_outcome_runtime_timeout(),
   CRAWL_QUEUE_ENQUEUE_FAILED: () => m.crawl_outcome_queue_enqueue_failed(),
+  CRAWL_DIRECT_ENQUEUE_FAILED: () => m.crawl_outcome_direct_enqueue_failed(),
   CRAWL_SOURCE_RETENTION_ONLY: () => m.crawl_outcome_source_retention_only(),
   CRAWL_ALL_UNCHANGED: () => m.crawl_outcome_all_unchanged(),
   CRAWL_FILES_TOO_LARGE_ONLY: () => m.crawl_outcome_files_too_large_only(),

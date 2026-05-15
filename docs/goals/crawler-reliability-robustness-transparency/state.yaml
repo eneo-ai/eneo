@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T103
+active_task: T105
 
 tasks:
   - id: T001
@@ -4997,7 +4997,7 @@ tasks:
   - id: T103
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Choose the next ordering-safe slice after manual pending-queue terminal parity, with special attention to the remaining CrawlService direct-ARQ/pre-acquired rollback failure path and the broader unchecked roadmap items."
     inputs:
@@ -5016,6 +5016,139 @@ tasks:
       - "Decision: direct-ARQ/pre-acquired rollback parity, completion audit, WorkerAdapter scoping, or another narrower Scout."
       - "Allowed files, red-test plan, verification commands, stop_if conditions, and non-goals for the next Worker."
       - "Evidence for whether the plan can be marked complete after the next slice or still has explicit unfinished requirements."
+    receipt:
+      result: done
+      summary: "Selected direct ARQ/pre-acquired rollback terminal parity as the next worker slice. Claude green-lit the revised decision after locking a distinct CRAWL_DIRECT_ENQUEUE_FAILED outcome, pending/direct-specific enqueue failure helpers, an exact flag_delete/slot_release/terminal_commit ordering test, and narrow generated schema handling."
+      decision: "Activate T104 to remove the final job_service.fail_job escape from CrawlService and route direct ARQ/pre-acquired rollback failures through TerminalEvent(CRAWL_DIRECT_ENQUEUE_FAILED)."
+      artifacts:
+        - ".codex/artifacts/claude-peer-loop-t103-choose-direct-arq-terminal-parity-slice-20260515T075758Z.md"
+        - ".codex/artifacts/claude-peer-loop-t103-choose-direct-arq-terminal-parity-slice-revised-20260515T080435Z.md"
+      spawned_tasks:
+        - T104
+  - id: T104
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Route CrawlService direct ARQ/pre-acquired rollback failures through the canonical terminal commit path with a distinct typed outcome."
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawl_service.py"
+      - "backend/src/intric/websites/domain/crawl_terminal.py"
+      - "backend/src/intric/websites/domain/crawl_outcome.py"
+      - "backend/src/intric/websites/domain/crawl_cleanup_policy.py"
+      - "backend/src/intric/websites/domain/crawler_recent_failures.py"
+      - "backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/fixtures/crawl_outcome_parity.json"
+      - "backend/tests/unittests/websites/test_crawl_service_pending_queue_ownership.py"
+      - "backend/tests/unittests/websites/test_crawl_service_slot_ownership.py"
+      - "backend/tests/unittests/websites/test_crawl_outcome.py"
+      - "backend/tests/unittests/websites/test_crawl_cleanup_policy.py"
+      - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+      - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/websites/test_crawl_service_slot_ownership.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/websites/test_crawl_outcome.py tests/unittests/websites/test_crawl_cleanup_policy.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run ruff check <touched backend paths>"
+      - "cd backend && uv run ruff format --check <touched backend paths>"
+      - "cd backend && uv run pyright --project pyrightconfig.json <touched backend paths>"
+      - "cd backend && bash -lc '! rg \"job_service\\.fail_job\" src/intric/websites/domain/crawl_service.py'"
+      - "cd backend && bash -lc '! rg \"crawl_queue_enqueue_failure_message\" src tests'"
+      - "cd backend && rg \"crawl_pending_queue_enqueue_failure_message|crawl_direct_enqueue_failure_message\" src/intric/websites/domain/crawl_terminal.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd frontend && bun test src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+      - "cd frontend && bun run --filter @intric/web check"
+      - "If OpenAPI regeneration is too broad, verify schema.d.ts only adds the CRAWL_DIRECT_ENQUEUE_FAILED enum literal."
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t104-direct-arq-terminal-parity --phase commit-gate --iteration 1 --require-green --required-min-score 8 ..."
+    stop_if:
+      - "Need to introduce WorkerAdapter, a protocol, factory, UoW wrapper, Any, cast, or type ignore."
+      - "Need to reach through repo.session from CrawlService."
+      - "Need schema migration/backfill for historical rows."
+      - "Need to change pending queue behavior beyond helper rename."
+      - "Need to change ARQ enqueue semantics, duplicate job behavior, slot acquisition semantics, or partial enqueue race behavior."
+      - "Need to move _mark_slot_preacquired outside the rollback try-block."
+      - "Normal OpenAPI regeneration produces broad unrelated schema drift; keep generated schema edit to the one enum literal or stop."
+      - "Need to stage unrelated .devcontainer drift."
+    expected_output:
+      - "Direct ARQ/pre-acquired rollback path commits TerminalEvent(CRAWL_DIRECT_ENQUEUE_FAILED) after flag delete and slot release, then re-raises the original exception."
+      - "A shared event-order test asserts exactly ['flag_delete', 'slot_release', 'terminal_commit']."
+      - "No job_service.fail_job call remains in CrawlService."
+      - "Pending and direct enqueue failure helper names and messages are unambiguous."
+      - "Backend/frontend presentation and cleanup/admin-failure inventory include the new outcome."
+      - "T104 receipt records follow-up candidates for exhaustive _crawl_outcome_from_code branch testing and optional _rollback_preacquired extraction."
+    receipt:
+      result: done
+      summary: "Removed the final CrawlService job_service.fail_job escape by routing direct ARQ/pre-acquired rollback failures through TerminalEvent(CRAWL_DIRECT_ENQUEUE_FAILED). The implementation preserves flag-delete, slot-release, terminal-commit ordering, keeps original mark/enqueue exceptions authoritative, adds pending/direct-specific bounded message helpers, and exposes the distinct outcome through backend presentation, cleanup policy, recent-failure inventory, generated frontend enum, frontend labels, and i18n messages."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawl_service.py"
+        - "backend/src/intric/websites/domain/crawl_terminal.py"
+        - "backend/src/intric/websites/domain/crawl_outcome.py"
+        - "backend/src/intric/websites/domain/crawl_cleanup_policy.py"
+        - "backend/src/intric/websites/domain/crawler_recent_failures.py"
+        - "backend/src/intric/websites/crawl_dependencies/crawl_models.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/fixtures/crawl_outcome_parity.json"
+        - "backend/tests/unittests/websites/test_crawl_service_pending_queue_ownership.py"
+        - "backend/tests/unittests/websites/test_crawl_service_slot_ownership.py"
+        - "backend/tests/unittests/websites/test_crawl_outcome.py"
+        - "backend/tests/unittests/websites/test_crawl_cleanup_policy.py"
+        - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "frontend/packages/intric-js/src/types/schema.d.ts"
+        - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.ts"
+        - "frontend/apps/web/src/lib/features/knowledge/crawlOutcomePresentation.test.ts"
+        - "frontend/apps/web/messages/en.json"
+        - "frontend/apps/web/messages/sv.json"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      red_verification:
+        - "Backend tests failed before implementation with AttributeError: CRAWL_DIRECT_ENQUEUE_FAILED and ImportError for crawl_direct_enqueue_failure_message."
+        - "Frontend crawlOutcomePresentation test failed before i18n regeneration because m.crawl_outcome_direct_enqueue_failed was undefined."
+      verification:
+        - "cd backend && uv run pytest tests/unittests/websites/test_crawl_service_slot_ownership.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/websites/test_crawl_outcome.py tests/unittests/websites/test_crawl_cleanup_policy.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q -> 82 passed"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawl_service.py src/intric/websites/domain/crawl_terminal.py src/intric/websites/domain/crawl_outcome.py src/intric/websites/domain/crawl_cleanup_policy.py src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/crawl_dependencies/crawl_models.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/websites/test_crawl_service_slot_ownership.py tests/unittests/websites/test_crawl_outcome.py tests/unittests/websites/test_crawl_cleanup_policy.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -> passed"
+        - "cd backend && uv run ruff format --check <same backend paths> -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json <same backend paths> -> 0 errors"
+        - "cd backend && uv run pyright --project pyrightconfig.json -> 0 errors"
+        - "cd backend && bash -lc '! rg \"job_service\\.fail_job\" src/intric/websites/domain/crawl_service.py' -> passed"
+        - "cd backend && bash -lc '! rg \"crawl_queue_enqueue_failure_message\" src tests' -> passed"
+        - "cd backend && rg \"crawl_pending_queue_enqueue_failure_message|crawl_direct_enqueue_failure_message\" src/intric/websites/domain/crawl_terminal.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -> passed"
+        - "cd frontend/apps/web && bun test src/lib/features/knowledge/crawlOutcomePresentation.test.ts -> 22 passed"
+        - "cd frontend && bun run --filter @intric/web check -> 0 errors, 1 unrelated warning in api-keys/ExtendExpirationDialog.svelte"
+        - "git diff -- frontend/packages/intric-js/src/types/schema.d.ts contains exactly one added enum literal: CRAWL_DIRECT_ENQUEUE_FAILED"
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t104-direct-arq-terminal-parity-implementation-review-20260515T081656Z.md"
+      follow_up_candidates:
+        - "Extract a private _rollback_preacquired_capacity helper in CrawlService if another change touches the direct handoff rollback block."
+        - "Add exhaustive presentation-branch coverage for _crawl_outcome_from_code instead of relying on per-new-outcome tests."
+        - "Have a Swedish copy owner review the crawl_outcome_direct_enqueue_failed translation."
+      spawned_tasks:
+        - T105
+  - id: T105
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Audit the roadmap after closing CrawlService terminal parity and choose whether the goal can be completed, needs a final documentation/verification tranche, or needs another bounded worker slice."
+    inputs:
+      - "T104 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "Current git status and grep verification"
+    constraints:
+      - "Read-only except board/roadmap updates."
+      - "Do not mark the goal complete unless current evidence proves every explicit roadmap requirement is complete or intentionally deferred as non-goal/follow-up."
+      - "Preserve unrelated .devcontainer dirt."
+      - "Prefer a small final cleanup or verification slice over claiming completion from weak evidence."
+    expected_output:
+      - "Requirement-by-requirement completion audit against the roadmap and current board."
+      - "Decision: complete goal, activate a final worker, or update roadmap to split true future epics from this branch's completed scope."
+      - "If another worker is needed, provide allowed files, red tests, verification commands, and stop_if conditions."
     receipt: null
 
 checks:

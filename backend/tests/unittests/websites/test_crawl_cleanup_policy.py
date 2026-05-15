@@ -48,6 +48,10 @@ def test_success_without_diagnostic_outcome_allows_cleanup():
             CleanupPolicy.CLEANUP_NOT_REACHED,
         ),
         (
+            CrawlOutcomeCode.CRAWL_DIRECT_ENQUEUE_FAILED,
+            CleanupPolicy.CLEANUP_NOT_REACHED,
+        ),
+        (
             CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY,
             CleanupPolicy.CLEANUP_ALLOWED,
         ),

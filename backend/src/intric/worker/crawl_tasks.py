@@ -31,7 +31,9 @@ from intric.websites.domain.crawl_outcome import (
     classify_crawl_outcome,
 )
 from intric.websites.domain.crawl_run import CrawlType
-from intric.websites.domain.crawl_terminal import crawl_queue_enqueue_failure_message
+from intric.websites.domain.crawl_terminal import (
+    crawl_pending_queue_enqueue_failure_message,
+)
 from intric.worker.crawl import (
     CrawlAuditPayload,
     CrawlRunTerminalUpdate,
@@ -469,8 +471,10 @@ async def queue_website_crawls(container: Container):
                                     },
                                 )
                             except PendingQueueAddError as redis_exc:
-                                failure_message = crawl_queue_enqueue_failure_message(
-                                    redis_exc
+                                failure_message = (
+                                    crawl_pending_queue_enqueue_failure_message(
+                                        redis_exc
+                                    )
                                 )
                                 # Redis push failed; commit one terminal event so the UI
                                 # has a typed reason and no orphaned job remains.

@@ -378,6 +378,14 @@ def _crawl_outcome_from_code(
             detail=detail,
         )
 
+    if code == CrawlOutcomeCode.CRAWL_DIRECT_ENQUEUE_FAILED:
+        return CrawlOutcomePublic(
+            code=code,
+            severity=CrawlOutcomeSeverity.ERROR,
+            message_key="crawl_outcome_direct_enqueue_failed",
+            detail=detail,
+        )
+
     if code == CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY:
         return CrawlOutcomePublic(
             code=code,

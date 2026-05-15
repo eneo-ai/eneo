@@ -22,7 +22,10 @@ from intric.websites.domain.crawl_outcome import (
     CrawlTerminationReason,
 )
 from intric.websites.domain.crawl_run import CrawlType
-from intric.websites.domain.crawl_terminal import crawl_queue_enqueue_failure_message
+from intric.websites.domain.crawl_terminal import (
+    crawl_direct_enqueue_failure_message,
+    crawl_pending_queue_enqueue_failure_message,
+)
 from intric.worker import crawl_tasks
 from intric.worker.crawl import CrawlSlotReleasePath, CrawlSlotReleaseResult
 from intric.worker.task_manager import TaskManager
@@ -45,11 +48,22 @@ def test_terminal_zero_output_message_includes_scrapy_diagnostics() -> None:
     )
 
 
-def test_crawl_queue_enqueue_failure_message_is_bounded_and_specific() -> None:
-    message = crawl_queue_enqueue_failure_message(RuntimeError("Redis unavailable"))
+def test_pending_queue_enqueue_failure_message_is_bounded_and_specific() -> None:
+    message = crawl_pending_queue_enqueue_failure_message(
+        RuntimeError("Redis unavailable")
+    )
 
     assert message == "Failed to add crawl to pending queue: Redis unavailable"
-    assert len(crawl_queue_enqueue_failure_message(RuntimeError("x" * 600))) == 512
+    assert (
+        len(crawl_pending_queue_enqueue_failure_message(RuntimeError("x" * 600))) == 512
+    )
+
+
+def test_direct_enqueue_failure_message_is_bounded_and_specific() -> None:
+    message = crawl_direct_enqueue_failure_message(RuntimeError("ARQ unavailable"))
+
+    assert message == "Failed to enqueue crawl directly: ARQ unavailable"
+    assert len(crawl_direct_enqueue_failure_message(RuntimeError("x" * 600))) == 512
 
 
 @dataclass

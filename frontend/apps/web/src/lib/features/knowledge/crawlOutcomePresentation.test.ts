@@ -95,6 +95,19 @@ test("queue enqueue failure outcome has a localized label", () => {
   ).toBe("Crawl could not be queued");
 });
 
+test("direct enqueue failure outcome has a localized label", () => {
+  expect(
+    getCrawlOutcomeLabel(
+      {
+        code: "CRAWL_DIRECT_ENQUEUE_FAILED",
+        severity: "error",
+        message_key: "crawl_outcome_direct_enqueue_failed"
+      },
+      "fallback"
+    )
+  ).toBe("Crawl could not be handed to the worker");
+});
+
 test("runtime timeout outcome has a localized label", () => {
   expect(
     getCrawlOutcomeLabel(

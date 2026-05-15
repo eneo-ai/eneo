@@ -73,12 +73,26 @@ class TerminalCommitResult:
     crawl_run_rows_updated: int
 
 
-def crawl_queue_enqueue_failure_message(exc: BaseException) -> str:
+def _bounded_enqueue_failure_message(prefix: str, exc: BaseException) -> str:
     """Bound text to the legacy job/result storage limit before terminal commit."""
     message = str(exc).strip()
     if not message:
         message = type(exc).__name__
-    return f"Failed to add crawl to pending queue: {message}"[:512]
+    return f"{prefix}: {message}"[:512]
+
+
+def crawl_pending_queue_enqueue_failure_message(exc: BaseException) -> str:
+    return _bounded_enqueue_failure_message(
+        "Failed to add crawl to pending queue",
+        exc,
+    )
+
+
+def crawl_direct_enqueue_failure_message(exc: BaseException) -> str:
+    return _bounded_enqueue_failure_message(
+        "Failed to enqueue crawl directly",
+        exc,
+    )
 
 
 async def commit_terminal(

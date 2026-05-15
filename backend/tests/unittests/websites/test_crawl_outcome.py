@@ -506,6 +506,23 @@ def test_stored_queue_enqueue_failure_outcome_has_specific_error_message():
     assert outcome.message_key == "crawl_outcome_queue_enqueue_failed"
 
 
+def test_stored_direct_enqueue_failure_outcome_has_specific_error_message():
+    outcome = derive_crawl_outcome(
+        status=Status.FAILED,
+        result_location="Failed to enqueue crawl directly: ARQ unavailable",
+        failure_summary=None,
+        pages_failed=None,
+        files_failed=None,
+        pages_source_retained=None,
+        outcome_code=CrawlOutcomeCode.CRAWL_DIRECT_ENQUEUE_FAILED,
+    )
+
+    assert outcome is not None
+    assert outcome.code == CrawlOutcomeCode.CRAWL_DIRECT_ENQUEUE_FAILED
+    assert outcome.severity == CrawlOutcomeSeverity.ERROR
+    assert outcome.message_key == "crawl_outcome_direct_enqueue_failed"
+
+
 def test_stored_source_retention_outcome_is_informational():
     outcome = derive_crawl_outcome(
         status=Status.COMPLETE,
