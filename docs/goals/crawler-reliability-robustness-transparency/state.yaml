@@ -6098,7 +6098,7 @@ tasks:
   - id: T127
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Audit the roadmap after T126 and choose the next single highest-ROI remaining slice without marking the full goal complete unless current evidence proves every requirement."
     inputs:
@@ -6114,19 +6114,104 @@ tasks:
       - "complete | not_complete"
       - "Evidence for remaining explicit open items"
       - "Next bounded task if not complete"
+    receipt:
+      result: not_complete
+      summary: "Roadmap audit rejected goal completion and selected generated crawler sysadmin OpenAPI contract sync as the next bounded transparency slice before building more admin UI."
+      changed_files: []
+      verification:
+        - "Plan checkbox count before T128: 118 checked, 39 open."
+        - "State audit before T128: T127 active after 127 completed tasks."
+        - "curl http://localhost:8123/openapi.json returned no /sysadmin/crawler paths, proving the local runtime was stale for this branch."
+        - "Direct backend app.openapi() generation included all seven /api/v1/sysadmin/crawler paths."
+        - "Unsorted app.openapi() plus openapi-typescript produced a bounded schema diff; sort_keys=True was identified as the broad-diff operator error to avoid."
+        - "An isolated openapi-typescript v7.13.0 reproduction showed JSON Schema propertyNames is emitted as [key: string], so enum-keyed failure_summary is a generator follow-up rather than a frontend shim."
+      claude:
+        verdict: green
+        min_score: 8
+        artifact: ".codex/artifacts/claude-peer-loop-crawler-t127-roadmap-audit-next-slice-iteration-2-20260515T133143Z.md"
+        follow_up_notes:
+          - "Do not use the stale localhost runtime for this branch's OpenAPI generation."
+          - "Record the exact app.openapi() and openapi-typescript commands in the T128 receipt."
+          - "Do not add hand-written frontend API shims for propertyNames."
+  - id: T128
+    type: worker
+    assignee: Codex
+    status: done
+    reasoning_hint: medium
+    objective: "Synchronize generated frontend crawler sysadmin OpenAPI contracts from the current backend schema and protect the seven response and operation types with a type-level frontend test."
+    allowed_files:
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "frontend/apps/web/src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd frontend && bun run --filter @intric/web check"
+      - "cd frontend && bun run --filter @intric/web test:unit"
+      - "cd frontend && bun run --filter @intric/web lint"
+      - "cd frontend/packages/intric-js && bun run lint"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+    stop_if:
+      - "Regeneration touches backend production code, frontend UI routes, hand-authored endpoint wrappers, or hand-written API shims."
+      - "Regeneration produces broad schema changes beyond the seven sysadmin crawler paths, their component schemas, FailureReason, CrawlLifecycle, and matching operations."
+      - "Need to stage unrelated .devcontainer dirt or frontend icon generated ordering drift."
+    receipt:
+      result: done
+      summary: "Regenerated @intric/intric-js schema types from the current backend app.openapi() snapshot, added generated contracts for seven sysadmin crawler endpoints, and added a type-level frontend test that fails when those response, representative field, path, or operation types are absent."
+      changed_files:
+        - "frontend/packages/intric-js/src/types/schema.d.ts"
+        - "frontend/apps/web/src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "Red test: cd frontend && bun run --filter @intric/web check failed before regeneration because CrawlerBaselineResponse, CrawlerActiveInventoryResponse, CrawlerFailureInventoryResponse, CrawlerRecentFailuresResponse, CrawlerWatchdogStatusResponse, CrawlerWebsiteProcessingAggregateResponse, CrawlerScheduledAggregateResponse, and their operations/paths were missing from schema.d.ts."
+        - "Schema source command: cd backend && uv run python - <<'PY' > /tmp/eneocrawler-branch-openapi-unsorted.json; import json; from intric.server.main import app; print(json.dumps(app.openapi())); PY"
+        - "Generator command: cd frontend/packages/intric-js && bun x openapi-typescript /tmp/eneocrawler-branch-openapi-unsorted.json -o src/types/schema.d.ts --default-non-nullable=false && bun x prettier --write src/types/schema.d.ts --config .prettierrc"
+        - "cd frontend && bun run --filter @intric/web check"
+        - "cd frontend && bun run --filter @intric/web test:unit"
+        - "cd frontend && bun run --filter @intric/web lint"
+        - "cd frontend/packages/intric-js && bun run lint"
+        - "cd backend && uv run pyright --project pyrightconfig.json"
+        - "git diff -- frontend/packages/intric-js/src/types/schema.d.ts showed eight hunks: seven sysadmin crawler paths, crawler lifecycle/outcome bucket and crawler component schemas, FailureReason, and seven matching operations."
+        - "The final type-level test pins seven response schemas, seven path-operation mappings, and fourteen representative public fields including outcome_counts, processing_totals, lifecycle_state, state, failure_summary, metrics, recent_interventions, pages_hash_retained, buckets, and update_interval."
+        - "Final frontend unit run after replacing the placeholder runtime assertion with test.todo: 18 files passed, 1 skipped; 151 tests passed, 1 todo."
+      claude:
+        verdict: green
+        min_score: 9
+        artifact: ".codex/artifacts/claude-peer-loop-t128-openapi-contract-sync-final-gate-20260515T135451Z.md"
+        follow_up_notes:
+          - "openapi-typescript v7.13.0 does not preserve backend OpenAPI propertyNames as enum-keyed TypeScript records; failure_summary remains { [key: string]: number } until a future generator customization or post-process."
+          - "The stale localhost update.js path is a follow-up; this tranche used current backend app.openapi() to avoid runtime drift."
+          - "frontend/packages/ui/src/icons/types.d.ts may be reordered by frontend checks; keep that generated drift out of this commit."
+  - id: T129
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Audit the roadmap after T128 and choose the next single highest-ROI remaining slice without marking the full goal complete unless current evidence proves every requirement."
+    inputs:
+      - "T128 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "Current git diff after T128"
+    constraints:
+      - "Do not mark the goal complete unless every remaining roadmap requirement has current evidence."
+      - "Preserve unrelated .devcontainer dirt and frontend icon generated ordering drift."
+      - "Prefer the first typed admin UI consumer or another bounded canonical-owner slice over broad rewrites."
+    expected_output:
+      - "complete | not_complete"
+      - "Evidence for remaining explicit open items"
+      - "Next bounded task if not complete"
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T126
+    task: T128
     commands:
-      - "cd backend && uv run pytest tests/unittests/worker/feeder/test_crawl_status.py tests/unittests/worker/feeder/test_watchdog.py -q"
-      - "cd backend && uv run pytest tests/unittests/jobs/test_job_manager.py tests/unittests/worker/feeder/test_crawl_enqueue.py tests/unittests/worker/feeder/test_crawl_status.py tests/unittests/worker/feeder/test_watchdog.py tests/integration/test_orphan_cleanup.py -q"
-      - "cd backend && uv run ruff check src/intric/worker/feeder/crawl_status.py src/intric/worker/feeder/watchdog.py tests/unittests/worker/feeder/test_crawl_status.py tests/unittests/worker/feeder/test_watchdog.py"
-      - "cd backend && uv run ruff format --check src/intric/worker/feeder/crawl_status.py src/intric/worker/feeder/watchdog.py tests/unittests/worker/feeder/test_crawl_status.py tests/unittests/worker/feeder/test_watchdog.py"
+      - "cd frontend && bun run --filter @intric/web check"
+      - "cd frontend && bun run --filter @intric/web test:unit"
+      - "cd frontend && bun run --filter @intric/web lint"
+      - "cd frontend/packages/intric-js && bun run lint"
       - "cd backend && uv run pyright --project pyrightconfig.json"
-      - "cd backend && rg -n \"from arq\\.jobs import|import arq\\.jobs|from arq import jobs\" src/intric/worker -g '*.py'"
-      - "cd backend && rg -n \"get_job_status\\(\" src/intric tests -g '*.py'"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t126-typed-crawl-job-status --phase review --iteration 2 --required-min-score 8 ..."
-    note: "T126 typed crawl job-status owner passed red/green worker tests, enqueue/watchdog/orphan regressions, ruff, format check, full strict Pyright, ownership greps, and Claude green final verification."
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t128-openapi-contract-sync --phase commit-gate --iteration 3 --require-green --required-min-score 8 ..."
+    note: "T128 generated crawler sysadmin OpenAPI contract sync passed red/green frontend typecheck, full frontend unit tests, frontend lint, intric-js lint, backend strict Pyright, and final Claude commit gate."

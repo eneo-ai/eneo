@@ -85,6 +85,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Watchdog/capacity Redis SCAN boundary tranche: route watchdog Phase 0 active-counter scanning and capacity pending-queue scanning through `redis_scan_match_bytes(...)`, remove local Redis `Any`/raw SCAN ownership, and protect the boundary with behavior plus AST source-guard tests.
 - [x] Sysadmin watchdog-status tranche: add a read-only `/sysadmin/crawler/watchdog-status` endpoint that exposes the canonical Redis watchdog snapshot, bounded watchdog-driven interventions, tenant filtering, pagination, malformed-snapshot degradation, and shared producer/healthz key ownership.
 - [x] Typed crawl job-status owner tranche: move ARQ `JobStatus` behind `worker/feeder/crawl_status.py`, make watchdog requeue consume crawler-domain status, and guard the worker tree against direct `arq.jobs` imports.
+- [x] Generated crawler sysadmin OpenAPI contract tranche: regenerate `@intric/intric-js` schema types from the current backend OpenAPI snapshot and add type-level coverage for the seven sysadmin crawler response and operation contracts.
 
 ## Non-Negotiable Principles
 
@@ -472,21 +473,24 @@ Work:
 - [x] Remove frontend dependence on legacy result strings.
 - [x] Type backend `failure_summary` through `FailureReason` internally while preserving existing string-keyed JSON storage and public JSON output.
 - [x] Emit a structured metric when historical `failure_summary` rows contain unknown buckets that must be dropped by the lenient read path.
-- [ ] Regenerate frontend API types through the normal OpenAPI flow.
+- [x] Regenerate frontend API types through the normal OpenAPI flow.
 - [x] Remove narrow frontend outcome type shims once generated types include the fields.
 
 Generated-type cleanup note: the crawler outcome aliases now use the generated
-schema contracts directly, but a full `intric-js` OpenAPI regeneration against
-the currently running local backend produced a broad out-of-scope schema diff.
-Do not mark the normal regeneration item complete until it can be run against a
-clean, intended backend snapshot and reviewed as its own generated-contract
-change.
+schema contracts directly. The crawler sysadmin contract regeneration used the
+current backend `app.openapi()` snapshot instead of the stale local
+`localhost:8123` runtime, preserved OpenAPI path order, and produced a bounded
+generated diff containing the seven sysadmin crawler paths, their component
+schemas, `FailureReason`, `CrawlLifecycle`, and matching operations.
 
-Failure-summary schema note: `CrawlRunPublic` and `CrawlRunUpdate` now describe
-`failure_summary` as a JSON object whose property names are constrained to the
-`FailureReason` enum. Runtime JSON remains the same string-keyed object, but the
-next generated-type slice should expect the OpenAPI schema to include that
-`propertyNames` constraint.
+Failure-summary schema note: `CrawlRunPublic`, `CrawlRunUpdate`, and sysadmin
+crawler failure rows now describe `failure_summary` as a JSON object whose
+property names are constrained to the `FailureReason` enum in backend OpenAPI.
+Runtime JSON remains the same string-keyed object. `openapi-typescript` v7.13.0
+does not preserve JSON Schema `propertyNames` as a TypeScript key constraint, so
+the generated type remains `{ [key: string]: number }`; preserving enum-keyed
+maps would require a later generator customization or post-process, not a
+hand-written frontend shim.
 
 Raw-result-location cleanup note: website crawl status, crawl-run result
 presentation, and the generic job dropdown no longer render raw

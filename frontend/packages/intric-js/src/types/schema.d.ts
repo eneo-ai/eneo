@@ -5853,6 +5853,125 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/sysadmin/crawler/baseline": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get crawler reliability baseline metrics */
+    get: operations["get_crawler_baseline_api_v1_sysadmin_crawler_baseline_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/sysadmin/crawler/active": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get cross-tenant active and queued crawler inventory */
+    get: operations["get_crawler_active_inventory_api_v1_sysadmin_crawler_active_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/sysadmin/crawler/failure-inventory": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get crawler websites currently in failure states */
+    get: operations["get_crawler_failure_inventory_api_v1_sysadmin_crawler_failure_inventory_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/sysadmin/crawler/recent-failures": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get recently failed crawler runs */
+    get: operations["get_crawler_recent_failures_api_v1_sysadmin_crawler_recent_failures_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/sysadmin/crawler/watchdog-status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get crawler watchdog status and recent watchdog interventions */
+    get: operations["get_crawler_watchdog_status_api_v1_sysadmin_crawler_watchdog_status_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/sysadmin/crawler/website-processing": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get crawler processing aggregate by website */
+    get: operations["get_crawler_website_processing_aggregate_api_v1_sysadmin_crawler_website_processing_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/sysadmin/crawler/scheduled": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get scheduled crawler aggregate by update interval */
+    get: operations["get_crawler_scheduled_aggregate_api_v1_sysadmin_crawler_scheduled_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/sysadmin/observability/oidc-debug/": {
     parameters: {
       query?: never;
@@ -9288,6 +9407,20 @@ export interface components {
       questions: number;
     };
     /**
+     * CrawlLifecycle
+     * @enum {string}
+     */
+    CrawlLifecycle: "queued" | "running_no_progress" | "running_with_progress" | "terminal";
+    /** CrawlOutcomeBucket */
+    CrawlOutcomeBucket: {
+      code: components["schemas"]["CrawlOutcomeCode"];
+      /**
+       * Count
+       * @description Terminal crawl runs with this strict typed outcome code.
+       */
+      count: number;
+    };
+    /**
      * CrawlOutcomeCode
      * @enum {string}
      */
@@ -9384,6 +9517,65 @@ export interface components {
      * @enum {string}
      */
     CrawlType: "crawl" | "sitemap";
+    /** CrawlerActiveInventoryItem */
+    CrawlerActiveInventoryItem: {
+      /**
+       * Job Id
+       * Format: uuid
+       */
+      job_id: string;
+      /** Crawl Run Id */
+      crawl_run_id: string | null;
+      /** Website Id */
+      website_id: string | null;
+      /** Website Name */
+      website_name: string | null;
+      /** Tenant Id */
+      tenant_id: string | null;
+      /** Tenant Display Name */
+      tenant_display_name: string | null;
+      status: components["schemas"]["Status"];
+      lifecycle_state: components["schemas"]["CrawlLifecycle"];
+      /**
+       * Job Created At
+       * Format: date-time
+       */
+      job_created_at: string;
+      /**
+       * Job Updated At
+       * Format: date-time
+       */
+      job_updated_at: string;
+      /** Crawl Run Created At */
+      crawl_run_created_at: string | null;
+      /** Pages Crawled */
+      pages_crawled: number | null;
+      /** Files Downloaded */
+      files_downloaded: number | null;
+      /** Pages Failed */
+      pages_failed: number | null;
+      /** Files Failed */
+      files_failed: number | null;
+      /** Pages Source Retained */
+      pages_source_retained: number | null;
+      /** Pages Hash Retained */
+      pages_hash_retained: number | null;
+      /** Files Hash Retained */
+      files_hash_retained: number | null;
+      /** Files Too Large Skipped */
+      files_too_large_skipped: number | null;
+    };
+    /** CrawlerActiveInventoryResponse */
+    CrawlerActiveInventoryResponse: {
+      /** Items */
+      items: components["schemas"]["CrawlerActiveInventoryItem"][];
+      /** Total */
+      total: number;
+      /** Limit */
+      limit: number;
+      /** Offset */
+      offset: number;
+    };
     /**
      * CrawlerActivity
      * @description Real-time crawler activity from multiple sources.
@@ -9404,6 +9596,120 @@ export interface components {
       /** Delta */
       delta?: number | null;
     };
+    /** CrawlerBaselineProcessingTotals */
+    CrawlerBaselineProcessingTotals: {
+      /** Pages Crawled */
+      pages_crawled: number;
+      /** Files Downloaded */
+      files_downloaded: number;
+      /** Pages Hash Retained */
+      pages_hash_retained: number;
+      /** Files Hash Retained */
+      files_hash_retained: number;
+      /** Pages Source Retained */
+      pages_source_retained: number;
+      /** Files Too Large Skipped */
+      files_too_large_skipped: number;
+      /** Pages Failed */
+      pages_failed: number;
+      /** Files Failed */
+      files_failed: number;
+    };
+    /** CrawlerBaselineResponse */
+    CrawlerBaselineResponse: {
+      /** Window Days */
+      window_days: number;
+      /**
+       * Since
+       * Format: date-time
+       */
+      since: string;
+      /**
+       * Until
+       * Format: date-time
+       */
+      until: string;
+      /** Tenant Id */
+      tenant_id: string | null;
+      /** Total Runs */
+      total_runs: number;
+      /** Terminal Runs */
+      terminal_runs: number;
+      /** Failed Runs */
+      failed_runs: number;
+      /** Failed Runs Without Typed Outcome */
+      failed_runs_without_typed_outcome: number;
+      /** Typed Failed Runs */
+      typed_failed_runs: number;
+      /** Typed Unknown Failed Runs */
+      typed_unknown_failed_runs: number;
+      /** Typed Unknown Failed Rate Percent */
+      typed_unknown_failed_rate_percent: number;
+      /**
+       * Legacy Null Outcome Runs
+       * @description Terminal crawl runs that still have no typed outcome code.
+       */
+      legacy_null_outcome_runs: number;
+      /**
+       * Unparseable Outcome Runs
+       * @description Terminal crawl runs with an outcome code that is not in the current closed enum.
+       */
+      unparseable_outcome_runs: number;
+      /**
+       * Outcome Counts
+       * @description Terminal crawl runs grouped by strict typed outcome code.
+       */
+      outcome_counts: components["schemas"]["CrawlOutcomeBucket"][];
+      processing_totals: components["schemas"]["CrawlerBaselineProcessingTotals"];
+    };
+    /** CrawlerFailureInventoryItem */
+    CrawlerFailureInventoryItem: {
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Website Url */
+      website_url: string;
+      /** Website Name */
+      website_name: string | null;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Tenant Display Name */
+      tenant_display_name: string | null;
+      state: components["schemas"]["CrawlerFailureState"];
+      update_interval: components["schemas"]["UpdateInterval"];
+      /** Consecutive Failures */
+      consecutive_failures: number;
+      /** Next Retry At */
+      next_retry_at: string | null;
+      /** Last Crawled At */
+      last_crawled_at: string | null;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /** CrawlerFailureInventoryResponse */
+    CrawlerFailureInventoryResponse: {
+      /** Items */
+      items: components["schemas"]["CrawlerFailureInventoryItem"][];
+      /** Total */
+      total: number;
+      /** Limit */
+      limit: number;
+      /** Offset */
+      offset: number;
+    };
+    /**
+     * CrawlerFailureState
+     * @enum {string}
+     */
+    CrawlerFailureState: "AUTO_DISABLED" | "BACKED_OFF";
     /**
      * CrawlerHealthResponse
      * @description Crawler health status with operator-friendly signals.
@@ -9427,6 +9733,102 @@ export interface components {
       pending?: components["schemas"]["PendingQueueSummary"];
       thresholds: components["schemas"]["HealthThresholds"];
       debug?: components["schemas"]["DebugInfo"];
+    };
+    /** CrawlerRecentFailureItem */
+    CrawlerRecentFailureItem: {
+      /**
+       * Crawl Run Id
+       * Format: uuid
+       */
+      crawl_run_id: string;
+      /** Job Id */
+      job_id: string | null;
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Website Name */
+      website_name: string | null;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Tenant Display Name */
+      tenant_display_name: string | null;
+      outcome_code: components["schemas"]["CrawlOutcomeCode"];
+      /** Failure Summary */
+      failure_summary: {
+        [key: string]: number;
+      } | null;
+      /**
+       * Finished At
+       * Format: date-time
+       */
+      finished_at: string;
+      /** Pages Crawled */
+      pages_crawled: number | null;
+      /** Files Downloaded */
+      files_downloaded: number | null;
+      /** Pages Failed */
+      pages_failed: number | null;
+      /** Files Failed */
+      files_failed: number | null;
+      /** Pages Source Retained */
+      pages_source_retained: number | null;
+      /** Pages Hash Retained */
+      pages_hash_retained: number | null;
+      /** Files Hash Retained */
+      files_hash_retained: number | null;
+      /** Files Too Large Skipped */
+      files_too_large_skipped: number | null;
+    };
+    /** CrawlerRecentFailuresResponse */
+    CrawlerRecentFailuresResponse: {
+      /** Items */
+      items: components["schemas"]["CrawlerRecentFailureItem"][];
+      /** Total */
+      total: number;
+      /** Limit */
+      limit: number;
+      /** Offset */
+      offset: number;
+      /** Days */
+      days: number;
+      /**
+       * Since
+       * Format: date-time
+       */
+      since: string;
+      /**
+       * Until
+       * Format: date-time
+       */
+      until: string;
+    };
+    /** CrawlerScheduledAggregateResponse */
+    CrawlerScheduledAggregateResponse: {
+      /** Buckets */
+      buckets: components["schemas"]["CrawlerScheduledIntervalBucket"][];
+      /** Total Websites */
+      total_websites: number;
+      /** Total Size Bytes */
+      total_size_bytes: number;
+      /** Unparseable Update Interval Website Count */
+      unparseable_update_interval_website_count: number;
+      /** Unparseable Update Interval Total Size Bytes */
+      unparseable_update_interval_total_size_bytes: number;
+      /** Tenant Id */
+      tenant_id: string | null;
+    };
+    /** CrawlerScheduledIntervalBucket */
+    CrawlerScheduledIntervalBucket: {
+      update_interval: components["schemas"]["UpdateInterval"];
+      /** Website Count */
+      website_count: number;
+      /** Total Size Bytes */
+      total_size_bytes: number;
     };
     /** CrawlerSettingSpecPublic */
     CrawlerSettingSpecPublic: {
@@ -9625,6 +10027,109 @@ export interface components {
        * @description Enable trusted sitemap lastmod values to retain unchanged URL pages without downloading them
        */
       crawl_sitemap_lastmod_skip_enabled?: boolean | null;
+    };
+    /** CrawlerWatchdogLifecycleObserved */
+    CrawlerWatchdogLifecycleObserved: {
+      /** Queued */
+      queued: number;
+      /** Running No Progress */
+      running_no_progress: number;
+      /** Running With Progress */
+      running_with_progress: number;
+      /** Terminal */
+      terminal: number;
+    };
+    /** CrawlerWatchdogMetricsResponse */
+    CrawlerWatchdogMetricsResponse: {
+      /**
+       * Observed At
+       * Format: date-time
+       */
+      observed_at: string;
+      /** Zombies Reconciled */
+      zombies_reconciled: number;
+      /** Expired Killed */
+      expired_killed: number;
+      /** Rescued */
+      rescued: number;
+      /** Early Zombies Failed */
+      early_zombies_failed: number;
+      /** Long Running Failed */
+      long_running_failed: number;
+      /** Slots Released */
+      slots_released: number;
+      lifecycle_observed: components["schemas"]["CrawlerWatchdogLifecycleObserved"];
+    };
+    /** CrawlerWatchdogStatusResponse */
+    CrawlerWatchdogStatusResponse: {
+      /** Last Cleanup At */
+      last_cleanup_at: string | null;
+      metrics: components["schemas"]["CrawlerWatchdogMetricsResponse"] | null;
+      recent_interventions: components["schemas"]["CrawlerRecentFailuresResponse"];
+    };
+    /** CrawlerWebsiteProcessingAggregateItem */
+    CrawlerWebsiteProcessingAggregateItem: {
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Website Name */
+      website_name: string | null;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Tenant Display Name */
+      tenant_display_name: string | null;
+      /** Total Runs */
+      total_runs: number;
+      /** Terminal Runs */
+      terminal_runs: number;
+      /** Failed Runs */
+      failed_runs: number;
+      /** Pages Crawled */
+      pages_crawled: number;
+      /** Files Downloaded */
+      files_downloaded: number;
+      /** Pages Hash Retained */
+      pages_hash_retained: number;
+      /** Files Hash Retained */
+      files_hash_retained: number;
+      /** Pages Source Retained */
+      pages_source_retained: number;
+      /** Files Too Large Skipped */
+      files_too_large_skipped: number;
+      /** Pages Failed */
+      pages_failed: number;
+      /** Files Failed */
+      files_failed: number;
+    };
+    /** CrawlerWebsiteProcessingAggregateResponse */
+    CrawlerWebsiteProcessingAggregateResponse: {
+      /** Items */
+      items: components["schemas"]["CrawlerWebsiteProcessingAggregateItem"][];
+      /** Total */
+      total: number;
+      /** Limit */
+      limit: number;
+      /** Offset */
+      offset: number;
+      /** Days */
+      days: number;
+      /**
+       * Since
+       * Format: date-time
+       */
+      since: string;
+      /**
+       * Until
+       * Format: date-time
+       */
+      until: string;
+      /** Tenant Id */
+      tenant_id: string | null;
     };
     /** CreateGroupRequest */
     CreateGroupRequest: {
@@ -10686,6 +11191,19 @@ export interface components {
        */
       expires_at: string;
     };
+    /**
+     * FailureReason
+     * @enum {string}
+     */
+    FailureReason:
+      | "EMPTY_CONTENT"
+      | "NO_CHUNKS"
+      | "EMBEDDING_TIMEOUT"
+      | "EMBEDDING_ERROR"
+      | "EMBEDDING_BATCH_LIMIT"
+      | "DB_ERROR"
+      | "NO_EMBEDDING_MODEL"
+      | "MISSING_PROVIDER";
     /**
      * FavoriteProvidersUpdate
      * @description Request model for updating tenant's favorite provider types.
@@ -33881,6 +34399,238 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+    };
+  };
+  get_crawler_baseline_api_v1_sysadmin_crawler_baseline_get: {
+    parameters: {
+      query?: {
+        days?: number;
+        tenant_id?: string | null;
+        until?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerBaselineResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_crawler_active_inventory_api_v1_sysadmin_crawler_active_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+        tenant_id?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerActiveInventoryResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_crawler_failure_inventory_api_v1_sysadmin_crawler_failure_inventory_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+        tenant_id?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerFailureInventoryResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_crawler_recent_failures_api_v1_sysadmin_crawler_recent_failures_get: {
+    parameters: {
+      query?: {
+        days?: number;
+        limit?: number;
+        offset?: number;
+        tenant_id?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerRecentFailuresResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_crawler_watchdog_status_api_v1_sysadmin_crawler_watchdog_status_get: {
+    parameters: {
+      query?: {
+        days?: number;
+        limit?: number;
+        offset?: number;
+        tenant_id?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerWatchdogStatusResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_crawler_website_processing_aggregate_api_v1_sysadmin_crawler_website_processing_get: {
+    parameters: {
+      query?: {
+        days?: number;
+        limit?: number;
+        offset?: number;
+        tenant_id?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerWebsiteProcessingAggregateResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_crawler_scheduled_aggregate_api_v1_sysadmin_crawler_scheduled_get: {
+    parameters: {
+      query?: {
+        tenant_id?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerScheduledAggregateResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
