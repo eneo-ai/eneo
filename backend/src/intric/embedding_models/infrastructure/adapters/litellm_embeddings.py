@@ -61,19 +61,6 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
     @override
     async def get_embeddings(self, chunks: list["InfoBlobChunk"]) -> ChunkEmbeddingList:
         chunk_embedding_list = ChunkEmbeddingList()
-        batch_size = getattr(self.model, "max_batch_size", None) or 32
-        total_chunks = len(chunks)
-        total_batches = (
-            (total_chunks + batch_size - 1) // batch_size if total_chunks else 0
-        )
-        logger.debug(
-            "[LiteLLM] Model %s (family=%s) batching %s chunks into %s batches (size=%s)",
-            self.model.name,
-            self.model.family,
-            total_chunks,
-            total_batches,
-            batch_size,
-        )
 
         for chunked_chunks in self._chunk_chunks(chunks):
             # Add "passage:" prefix for E5 models, use text directly for others

@@ -1,6 +1,7 @@
 import abc
 import math
 from abc import abstractmethod
+from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 from intric.files.chunk_embedding_list import ChunkEmbeddingList
@@ -27,42 +28,37 @@ class EmbeddingModelAdapter(abc.ABC):
         super().__init__()
         self.model = model
 
-    def _chunk_chunks(self, chunks: list["InfoBlobChunk"]):
-        """
-        Group chunks into batches for embedding API requests.
-
-        Uses max_batch_size (item count limit) instead of cumulative character length.
-        max_input is a per-item limit (enforced during chunking), not a batch limit.
-
-        Args:
-            chunks: List of InfoBlobChunk objects to batch
-
-        Yields:
-            Batches of chunks (up to max_batch_size items each)
-        """
-        configured_batch_size = getattr(self.model, "max_batch_size", None)
-        batch_size = configured_batch_size if configured_batch_size else 32
+    def _effective_batch_size(self) -> int:
+        configured_batch_size = self.model.max_batch_size
 
         if configured_batch_size is not None and configured_batch_size < 1:
             logger.warning(
                 "[EmbeddingBatch] Invalid batch size %s for model %s; falling back to 32",
                 configured_batch_size,
-                getattr(self.model, "name", "<unknown>"),
+                self.model.name,
             )
-            batch_size = 32
+            return 32
+
+        return configured_batch_size or 32
+
+    def _chunk_chunks(
+        self, chunks: list["InfoBlobChunk"]
+    ) -> Iterator[list["InfoBlobChunk"]]:
+        """Yield non-empty batches no larger than the effective batch size."""
+        batch_size = self._effective_batch_size()
 
         total_chunks = len(chunks)
         if total_chunks == 0:
             logger.debug(
                 "[EmbeddingBatch] Model %s received no chunks to process",
-                getattr(self.model, "name", "<unknown>"),
+                self.model.name,
             )
             return
 
         total_batches = math.ceil(total_chunks / batch_size)
         logger.info(
             "[EmbeddingBatch] Model %s starting batch run: chunks=%s batch_size=%s batches=%s",
-            getattr(self.model, "name", "<unknown>"),
+            self.model.name,
             total_chunks,
             batch_size,
             total_batches,
@@ -72,7 +68,7 @@ class EmbeddingModelAdapter(abc.ABC):
             batch = chunks[start : start + batch_size]
             logger.debug(
                 "[EmbeddingBatch] Model %s batch %s/%s size=%s",
-                getattr(self.model, "name", "<unknown>"),
+                self.model.name,
                 index,
                 total_batches,
                 len(batch),
@@ -81,7 +77,7 @@ class EmbeddingModelAdapter(abc.ABC):
 
         logger.info(
             "[EmbeddingBatch] Model %s completed batch run: batches=%s",
-            getattr(self.model, "name", "<unknown>"),
+            self.model.name,
             total_batches,
         )
 

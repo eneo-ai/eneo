@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T088
+active_task: T090
 
 tasks:
   - id: T001
@@ -4268,7 +4268,7 @@ tasks:
   - id: T088
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Choose the next bounded crawler reliability/maintainability slice after T087 from current plan evidence and Claude follow-up notes."
     inputs:
@@ -4284,20 +4284,119 @@ tasks:
       - "Decision: next Worker task or completion-audit task."
       - "Allowed files, verification commands, and stop conditions."
       - "Explicit non-goals and why lower-priority plan items remain deferred."
+    receipt:
+      result: done
+      summary: "Selected a bounded adapter batch-size ownership slice after discovering CrawlAdminDetail is not production code yet and after Claude rejected the first two underspecified briefs."
+      decision: "Activate T089 to make EmbeddingModelAdapter the single owner of effective embedding batch-size resolution and remove defensive self.model getattr reads in embedding adapters."
+      rationale:
+        - "Phase enum work is deferred because CrawlAdminDetail only exists in the roadmap document, not production code."
+        - "The adapter slice closes a concrete typed-contract inconsistency left after T087 and has exact red-test and grep postconditions."
+      evidence:
+        - ".codex/artifacts/claude-peer-loop-t088-choose-next-crawler-roadmap-slice-20260515T052455Z.md"
+        - ".codex/artifacts/claude-peer-loop-t088-choose-next-crawler-roadmap-slice-revised-20260515T052956Z.md"
+        - ".codex/artifacts/claude-peer-loop-t088-choose-next-crawler-roadmap-slice-final-20260515T053325Z.md"
+        - "backend/src/intric/embedding_models/infrastructure/adapters/base.py"
+        - "backend/src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py"
+      spawned_tasks:
+        - T089
+  - id: T089
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Make EmbeddingModelAdapter the single owner of effective embedding batch-size resolution and remove defensive self.model getattr reads in embedding adapters."
+    allowed_files:
+      - "backend/src/intric/embedding_models/infrastructure/adapters/base.py"
+      - "backend/src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py"
+      - "backend/tests/unittests/embedding_models/test_embedding_model_adapter_batching.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/embedding_models/test_embedding_model_adapter_batching.py -q"
+      - "cd backend && uv run pytest tests/unittests/embedding_models/test_create_embeddings_service.py tests/unittests/embedding_models/test_embedding_model_adapter_batching.py -q"
+      - "cd backend && uv run ruff check src/intric/embedding_models/infrastructure/adapters/base.py src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py tests/unittests/embedding_models/test_embedding_model_adapter_batching.py"
+      - "cd backend && uv run ruff format --check src/intric/embedding_models/infrastructure/adapters/base.py src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py tests/unittests/embedding_models/test_embedding_model_adapter_batching.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/embedding_models/infrastructure/adapters/base.py src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py tests/unittests/embedding_models/test_embedding_model_adapter_batching.py"
+      - "rg -n \"getattr\\(self\\.model\" backend/src/intric/embedding_models/infrastructure/adapters || true"
+      - "rg -n \"max_batch_size|total_batches\" backend/src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py || true"
+    stop_if:
+      - "Need to edit files outside allowed_files."
+      - "Need to change EmbeddingModelLike, EmbeddingModelSpec, provider credential types, or adapter public API."
+      - "Need to add a module-level utility/helper or a generic abstraction."
+      - "Need to keep the duplicate LiteLLM batch log for an external consumer that cannot be verified locally."
+      - "Need to change LiteLLM request semantics, actual embedding calls, retry policy, chunk text formatting, E5/no-prefix per-batch logs, or pyright-ignore lines."
+      - "Need to stage unrelated .devcontainer changes."
+      - "Verification fails twice for the same reason."
+    non_goals:
+      - "No Phase enum or CrawlAdminDetail work until that production owner exists or is separately scoped."
+      - "No WorkerAdapter or ARQ work."
+      - "No broader dict[str, Any] credential tightening."
+      - "No frontend or admin changes."
+      - "No EmbeddingModelLike relocation."
+      - "No real LiteLLM smoke test."
+      - "No T087 test sentinel cleanup unless this new test file would otherwise depend on it."
+    receipt:
+      result: done
+      summary: "Centralized embedding batch-size normalization in EmbeddingModelAdapter, removed defensive self.model getattr reads, deleted duplicate LiteLLM batch-count logging, and added behavior tests for effective batch size and chunk batching."
+      changed_files:
+        - "backend/src/intric/embedding_models/infrastructure/adapters/base.py"
+        - "backend/src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py"
+        - "backend/tests/unittests/embedding_models/test_embedding_model_adapter_batching.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/embedding_models/test_embedding_model_adapter_batching.py -q -> 10 passed"
+        - "cd backend && uv run pytest tests/unittests/embedding_models/test_create_embeddings_service.py tests/unittests/embedding_models/test_embedding_model_adapter_batching.py -q -> 21 passed, 1 warning"
+        - "cd backend && uv run ruff check src/intric/embedding_models/infrastructure/adapters/base.py src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py tests/unittests/embedding_models/test_embedding_model_adapter_batching.py -> passed"
+        - "cd backend && uv run ruff format --check src/intric/embedding_models/infrastructure/adapters/base.py src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py tests/unittests/embedding_models/test_embedding_model_adapter_batching.py -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/embedding_models/infrastructure/adapters/base.py src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py tests/unittests/embedding_models/test_embedding_model_adapter_batching.py -> 0 errors"
+        - "rg -n \"getattr\\(self\\.model\" backend/src/intric/embedding_models/infrastructure/adapters || true -> no matches"
+        - "rg -n \"max_batch_size|total_batches\" backend/src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py || true -> no matches"
+        - "rg -n \"model\\.max_batch_size\" backend/src/intric/embedding_models/infrastructure/adapters || true -> one match in base.py _effective_batch_size"
+      tdd:
+        red: "New batching tests initially failed 5 cases because _effective_batch_size did not exist."
+        green: "Batching tests passed after adding _effective_batch_size, annotating _chunk_chunks, deleting duplicate LiteLLM batch logic, and adapting warning-count capture to the project's structured logger seam."
+      claude:
+        verdict: green
+        artifact: ".codex/artifacts/claude-peer-loop-t089-adapter-batch-size-ownership-implementation-review-20260515T053930Z.md"
+      follow_up_candidates:
+        - "Consider a _DEFAULT_BATCH_SIZE constant if this code is touched again."
+        - "Drop quoted InfoBlobChunk forward references in _chunk_chunks if adjacent typing work touches the method."
+      spawned_tasks:
+        - T090
+  - id: T090
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Choose the next bounded crawler reliability/maintainability slice after T089 using current roadmap evidence."
+    inputs:
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - ".codex/artifacts/claude-peer-loop-t089-adapter-batch-size-ownership-implementation-review-20260515T053930Z.md"
+    constraints:
+      - "Prefer roadmap-central work over polishing already-green adapter code unless the adapter issue blocks later crawler work."
+      - "Do not open WorkerAdapter/ARQ implementation without a fresh bounded Scout/Judge decision."
+      - "Do not stage unrelated .devcontainer changes."
+    expected_output:
+      - "Decision: next Worker task, Scout task, or completion-audit task."
+      - "Allowed files, verification commands, stop_if conditions, and non-goals."
+      - "Evidence that the chosen slice advances crawler reliability, robustness, transparency, or maintainability."
     receipt: null
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T087
+    task: T089
     commands:
-      - "cd backend && uv run pytest tests/unittests/embedding_models/test_create_embeddings_service.py -q"
-      - "cd backend && uv run pytest tests/unittests/embedding_models/test_create_embeddings_service.py --collect-only -q"
-      - "cd backend && uv run ruff check src/intric/embedding_models/infrastructure/create_embeddings_service.py tests/unittests/embedding_models/test_create_embeddings_service.py"
-      - "cd backend && uv run ruff format --check src/intric/embedding_models/infrastructure/create_embeddings_service.py tests/unittests/embedding_models/test_create_embeddings_service.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/embedding_models/infrastructure/create_embeddings_service.py tests/unittests/embedding_models/test_create_embeddings_service.py"
-      - "rg -n \"getattr\\(model|hasattr\\(model\" backend/src/intric/embedding_models/infrastructure/create_embeddings_service.py || true"
-      - "rg is_pre_resolved backend/src backend/tests/unittests/embedding_models/test_create_embeddings_service.py"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t087-embedding-model-contract --phase verification --iteration 2 --require-green --required-min-score 8 ..."
-    note: "T087 typed pre-resolved embedding contract passed behavior tests, collection check, ruff, format check, targeted strict Pyright, grep postconditions, production import check, and Claude green re-review."
+      - "cd backend && uv run pytest tests/unittests/embedding_models/test_embedding_model_adapter_batching.py -q"
+      - "cd backend && uv run pytest tests/unittests/embedding_models/test_create_embeddings_service.py tests/unittests/embedding_models/test_embedding_model_adapter_batching.py -q"
+      - "cd backend && uv run ruff check src/intric/embedding_models/infrastructure/adapters/base.py src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py tests/unittests/embedding_models/test_embedding_model_adapter_batching.py"
+      - "cd backend && uv run ruff format --check src/intric/embedding_models/infrastructure/adapters/base.py src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py tests/unittests/embedding_models/test_embedding_model_adapter_batching.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/embedding_models/infrastructure/adapters/base.py src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py tests/unittests/embedding_models/test_embedding_model_adapter_batching.py"
+      - "rg -n \"getattr\\(self\\.model\" backend/src/intric/embedding_models/infrastructure/adapters || true"
+      - "rg -n \"max_batch_size|total_batches\" backend/src/intric/embedding_models/infrastructure/adapters/litellm_embeddings.py || true"
+      - "rg -n \"model\\.max_batch_size\" backend/src/intric/embedding_models/infrastructure/adapters || true"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t089-adapter-batch-size --phase commit-gate --iteration 1 --require-green --required-min-score 8 ..."
+    note: "T089 adapter batch-size ownership passed red/green behavior tests, T087 regression tests, ruff, format check, targeted strict Pyright, grep postconditions, and Claude green commit-gate."
