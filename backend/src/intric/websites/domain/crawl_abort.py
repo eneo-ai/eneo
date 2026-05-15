@@ -3,10 +3,17 @@ from enum import StrEnum
 from typing import TypeAlias
 from uuid import UUID
 
+from intric.main.models import Status
+
 
 class CrawlAbortConflictCode(StrEnum):
     RUNNING_ABORT_NOT_IMPLEMENTED = "RUNNING_ABORT_NOT_IMPLEMENTED"
     CRAWL_NOT_ABORTABLE = "CRAWL_NOT_ABORTABLE"
+
+
+def is_queued_crawl_abortable_status(status: Status) -> bool:
+    """Return statuses currently accepted by the queued-abort path."""
+    return status == Status.QUEUED
 
 
 @dataclass(frozen=True, slots=True)

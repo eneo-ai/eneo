@@ -9617,6 +9617,8 @@ export interface components {
       tenant_display_name: string | null;
       status: components["schemas"]["Status"];
       lifecycle_state: components["schemas"]["CrawlLifecycle"];
+      /** Is Abortable */
+      is_abortable: boolean;
       /**
        * Job Created At
        * Format: date-time

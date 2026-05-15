@@ -50,7 +50,7 @@ export function getCrawlerActiveInventoryStatusLabel(item: CrawlerActiveInventor
 }
 
 export function canAbortCrawlerActiveInventoryItem(item: CrawlerActiveInventoryItem): boolean {
-  return item.lifecycle_state === "queued";
+  return item.is_abortable;
 }
 
 export function getCrawlerAbortConflictMessage(error: unknown): string | null {

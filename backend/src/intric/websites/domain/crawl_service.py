@@ -26,6 +26,7 @@ from intric.websites.domain.crawl_abort import (
     CrawlAbortResult,
     CrawlAbortSucceeded,
     CrawlAbortWebsite,
+    is_queued_crawl_abortable_status,
 )
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.websites.domain.crawl_run import CrawlRun
@@ -263,7 +264,7 @@ class CrawlService:
                 code=CrawlAbortConflictCode.RUNNING_ABORT_NOT_IMPLEMENTED,
             )
 
-        if target.status != Status.QUEUED:
+        if not is_queued_crawl_abortable_status(target.status):
             return CrawlAbortConflict(
                 job_id=job_id,
                 code=CrawlAbortConflictCode.CRAWL_NOT_ABORTABLE,

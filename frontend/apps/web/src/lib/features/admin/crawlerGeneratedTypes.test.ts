@@ -49,6 +49,10 @@ type _CrawlerActiveLifecycleStateField = AssertHasKey<
   components["schemas"]["CrawlerActiveInventoryItem"],
   "lifecycle_state"
 >;
+type _CrawlerActiveIsAbortableField = AssertHasKey<
+  components["schemas"]["CrawlerActiveInventoryItem"],
+  "is_abortable"
+>;
 type _CrawlerFailureInventoryItemsField = AssertHasKey<
   components["schemas"]["CrawlerFailureInventoryResponse"],
   "items"

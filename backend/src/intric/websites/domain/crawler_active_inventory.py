@@ -18,6 +18,7 @@ class CrawlerActiveInventoryItem:
     tenant_display_name: str | None
     status: Status
     lifecycle_state: CrawlLifecycle
+    is_abortable: bool
     job_created_at: datetime
     job_updated_at: datetime
     crawl_run_created_at: datetime | None

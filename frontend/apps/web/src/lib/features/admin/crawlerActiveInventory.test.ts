@@ -22,6 +22,7 @@ const baseActiveItem: CrawlerActiveInventoryItem = {
   tenant_display_name: "Tenant",
   status: "in progress",
   lifecycle_state: "running_with_progress",
+  is_abortable: false,
   job_created_at: "2026-05-12T14:14:32.000Z",
   job_updated_at: "2026-05-12T14:14:50.000Z",
   crawl_run_created_at: "2026-05-12T14:14:33.000Z",
@@ -91,11 +92,12 @@ test("queued orphan-like item falls back to job id when website is absent", () =
   ).toBe("Crawler job 11111111");
 });
 
-test("only queued crawler jobs are abortable from the admin inventory", () => {
+test("abortability follows backend is_abortable flag, not lifecycle state", () => {
   expect(
     canAbortCrawlerActiveInventoryItem({
       ...baseActiveItem,
-      lifecycle_state: "queued"
+      lifecycle_state: "queued",
+      is_abortable: true
     })
   ).toBe(true);
   expect(canAbortCrawlerActiveInventoryItem(baseActiveItem)).toBe(false);
@@ -109,6 +111,13 @@ test("only queued crawler jobs are abortable from the admin inventory", () => {
     canAbortCrawlerActiveInventoryItem({
       ...baseActiveItem,
       lifecycle_state: "running_no_progress"
+    })
+  ).toBe(false);
+  expect(
+    canAbortCrawlerActiveInventoryItem({
+      ...baseActiveItem,
+      lifecycle_state: "queued",
+      is_abortable: false
     })
   ).toBe(false);
 });

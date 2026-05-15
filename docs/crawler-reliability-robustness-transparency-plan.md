@@ -99,6 +99,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Step 6 ARQ abort primitive tranche: add `JobManager.abort_job(...)` as the narrow ARQ-native abort owner while deferring crawler-domain abort terminal/cleanup/slot/admin semantics until a production caller exists.
 - [x] Step 6 queued-only abort tranche: add the first real tenant admin abort caller for queued crawl jobs, write a typed terminal abort outcome, and prevent pending-queue resurrection while explicitly deferring running abort.
 - [x] Tenant admin queued abort UI tranche: expose queued-only crawler cancellation from the admin crawler page with shadcn confirmation, canonical typed 409 handling, generated OpenAPI coverage, localized `CRAWL_ABORTED` presentation, and audit metadata that preserves the website label.
+- [x] Backend-owned active-inventory abortability tranche: expose `is_abortable` on active crawler inventory from the shared queued-abort predicate, so frontend action visibility no longer derives from lifecycle presentation state.
 
 ## Non-Negotiable Principles
 

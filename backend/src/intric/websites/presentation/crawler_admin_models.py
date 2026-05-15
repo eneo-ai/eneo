@@ -42,6 +42,7 @@ class CrawlerActiveInventoryItem(BaseModel):
     tenant_display_name: str | None
     status: Status
     lifecycle_state: CrawlLifecycle
+    is_abortable: bool
     job_created_at: datetime
     job_updated_at: datetime
     crawl_run_created_at: datetime | None
@@ -67,6 +68,7 @@ class CrawlerActiveInventoryItem(BaseModel):
             tenant_display_name=item.tenant_display_name,
             status=item.status,
             lifecycle_state=item.lifecycle_state,
+            is_abortable=item.is_abortable,
             job_created_at=item.job_created_at,
             job_updated_at=item.job_updated_at,
             crawl_run_created_at=item.crawl_run_created_at,

@@ -191,11 +191,24 @@ async def test_admin_crawler_active_inventory_is_scoped_to_current_tenant(
             pages_crawled=3,
             files_hash_retained=1,
         )
+        own_queued_job = await _create_job(
+            session,
+            user_id=admin_user.id,
+            status=Status.QUEUED,
+            created_at=now - timedelta(minutes=3),
+        )
+        own_queued_run = await _create_crawl_run(
+            session,
+            tenant_id=admin_user.tenant_id,
+            website_id=own_website.id,
+            job_id=own_queued_job.id,
+            created_at=own_queued_job.created_at,
+        )
         other_job = await _create_job(
             session,
             user_id=other_user.id,
             status=Status.IN_PROGRESS,
-            created_at=now - timedelta(minutes=3),
+            created_at=now - timedelta(minutes=4),
         )
         await _create_crawl_run(
             session,
@@ -209,8 +222,8 @@ async def test_admin_crawler_active_inventory_is_scoped_to_current_tenant(
             session,
             user_id=admin_user.id,
             status=Status.COMPLETE,
-            created_at=now - timedelta(minutes=4),
-            finished_at=now - timedelta(minutes=3),
+            created_at=now - timedelta(minutes=5),
+            finished_at=now - timedelta(minutes=4),
         )
         await _create_crawl_run(
             session,
@@ -225,13 +238,15 @@ async def test_admin_crawler_active_inventory_is_scoped_to_current_tenant(
             user_id=admin_user.id,
             task=Task.UPLOAD_FILE,
             status=Status.IN_PROGRESS,
-            created_at=now - timedelta(minutes=5),
+            created_at=now - timedelta(minutes=6),
         )
 
         own_no_progress_job_id = own_no_progress_job.id
         own_no_progress_run_id = own_no_progress_run.id
         own_with_progress_job_id = own_with_progress_job.id
         own_with_progress_run_id = own_with_progress_run.id
+        own_queued_job_id = own_queued_job.id
+        own_queued_run_id = own_queued_run.id
         other_job_id = other_job.id
         await session.commit()
 
@@ -243,10 +258,11 @@ async def test_admin_crawler_active_inventory_is_scoped_to_current_tenant(
 
     assert response.status_code == 200
     data = response.json()
-    assert data["total"] == 2
+    assert data["total"] == 3
     assert [item["job_id"] for item in data["items"]] == [
         str(own_no_progress_job_id),
         str(own_with_progress_job_id),
+        str(own_queued_job_id),
     ]
 
     by_job_id = {item["job_id"]: item for item in data["items"]}
@@ -257,6 +273,7 @@ async def test_admin_crawler_active_inventory_is_scoped_to_current_tenant(
     assert (
         no_progress_item["lifecycle_state"] == CrawlLifecycle.RUNNING_NO_PROGRESS.value
     )
+    assert no_progress_item["is_abortable"] is False
 
     with_progress_item = by_job_id[str(own_with_progress_job_id)]
     assert with_progress_item["crawl_run_id"] == str(own_with_progress_run_id)
@@ -265,6 +282,11 @@ async def test_admin_crawler_active_inventory_is_scoped_to_current_tenant(
     )
     assert with_progress_item["pages_crawled"] == 3
     assert with_progress_item["files_hash_retained"] == 1
+
+    queued_item = by_job_id[str(own_queued_job_id)]
+    assert queued_item["crawl_run_id"] == str(own_queued_run_id)
+    assert queued_item["lifecycle_state"] == CrawlLifecycle.QUEUED.value
+    assert queued_item["is_abortable"] is True
     assert str(other_job_id) not in by_job_id
 
 
