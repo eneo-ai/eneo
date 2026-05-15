@@ -1,6 +1,10 @@
 from datetime import datetime
 from enum import Enum
 
+import sqlalchemy as sa
+from sqlalchemy.orm import InstrumentedAttribute
+from sqlalchemy.sql import ColumnElement
+
 from intric.main.models import Status
 from intric.websites.domain.crawl_run import CrawlRun
 
@@ -94,3 +98,34 @@ def _has_recorded_progress(
             files_too_large_skipped,
         )
     )
+
+
+def has_no_page_progress(*, pages_crawled: int | None) -> bool:
+    """Domain rule: a running crawl has not recorded page progress when the
+    page counter is unset or zero.
+
+    Why: Watchdog Phase 3.5 uses this predicate to detect early zombies —
+    crawls that flipped to IN_PROGRESS but crashed before any page item was
+    counted. Naming the predicate inside the domain module keeps the
+    watchdog SQL from drifting from the operational definition and lets a
+    second consumer (lifecycle observation, admin diagnostics) share one
+    canonical source.
+
+    Note: This is intentionally narrower than `RUNNING_NO_PROGRESS`. The
+    lifecycle enum considers any non-page counter as progress; this fact
+    isolates the page-level signal that the crawler reports first.
+    """
+    return pages_crawled is None or pages_crawled == 0
+
+
+def no_page_progress_sql_predicate(
+    pages_crawled_column: InstrumentedAttribute[int | None],
+) -> ColumnElement[bool]:
+    """SQL counterpart of `has_no_page_progress` for WHERE clauses.
+
+    Use this from any SQL `SELECT` that needs to mirror the watchdog Phase
+    3.5 early-zombie detection rule. Compiling identical SQL across the two
+    is the whole point of relocating the predicate from inline `or_(...)`
+    expressions into one named owner.
+    """
+    return sa.or_(pages_crawled_column.is_(None), pages_crawled_column == 0)

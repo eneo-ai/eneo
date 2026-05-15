@@ -38,6 +38,7 @@ from intric.main.models import Status
 from intric.websites.domain.crawl_lifecycle import (
     CrawlLifecycle,
     derive_crawl_lifecycle_from_counters,
+    no_page_progress_sql_predicate,
 )
 from intric.websites.domain.crawl_run import CrawlType
 from intric.worker.feeder.crawl_enqueue import (
@@ -866,7 +867,7 @@ class OrphanWatchdog:
         Returns:
             Phase3_5Result with jobs to release slots for.
         """
-        from sqlalchemy import and_, or_, select
+        from sqlalchemy import and_, select
 
         from intric.database.tables.job_table import Jobs
         from intric.database.tables.websites_table import CrawlRuns
@@ -910,10 +911,7 @@ class OrphanWatchdog:
                     Jobs.task == Task.CRAWL.value,
                     Jobs.status == Status.IN_PROGRESS,
                     Jobs.updated_at < startup_cutoff,
-                    # Compound condition: no progress ever made (NULL or 0)
-                    or_(
-                        CrawlRuns.pages_crawled.is_(None), CrawlRuns.pages_crawled == 0
-                    ),
+                    no_page_progress_sql_predicate(CrawlRuns.pages_crawled),
                 )
             )
         )
