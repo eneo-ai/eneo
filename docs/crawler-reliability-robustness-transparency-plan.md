@@ -613,6 +613,7 @@ Work:
 - [x] Extract downloaded-file processing into `process_files(...)` with typed output and behavior tests for retention, changed-file processing, per-file failures, missing embedding model diagnostics, and cleanup bookkeeping.
 - [x] Extract stale cleanup into `cleanup_stale_blobs(...)` with typed output and behavior tests for cleanup policy, ordered stale titles, empty cleanup, delete-callback failures, and report/action consistency.
 - [x] Extract crawl slot acquire behavior into `acquire_crawl_slot(...)` with typed output and behavior tests for normal acquire, limit reached, pre-acquired reuse, tenant-injection discovery, tenant mismatch release, Redis read failures, invalid Redis state, TTL refresh failures, and mismatch release followed by limit reached.
+- [x] Extract website size recalculation into `update_website_size_after_crawl(...)` with a typed tenant-scoped SQL boundary and behavior test.
 - [ ] Each phase returns a typed output and does not write terminal state directly.
 - [ ] Keep Scrapy-specific behavior in `crawler.py` and `CrawlDiagnostics`.
 - [ ] Keep persistence retention behavior in `persist_batch()`.

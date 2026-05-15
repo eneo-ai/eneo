@@ -69,6 +69,7 @@ from intric.worker.crawl.slot_release import (
     CrawlSlotReleaseResult,
     release_crawl_slot_after_task,
 )
+from intric.worker.crawl.website_size import update_website_size_after_crawl
 from intric.worker.crawl.website_timestamps import (
     update_website_timestamps_after_crawl,
 )
@@ -136,6 +137,7 @@ __all__ = [
     "TerminalEvent",
     "commit_terminal_batch",
     "commit_terminal",
-    # Website timestamps
+    # Website post-crawl updates
+    "update_website_size_after_crawl",
     "update_website_timestamps_after_crawl",
 ]

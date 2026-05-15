@@ -56,6 +56,7 @@ from intric.worker.crawl import (
     process_pages,
     release_crawl_slot_after_task,
     update_job_retry_stats,
+    update_website_size_after_crawl,
     update_website_timestamps_after_crawl,
 )
 from intric.worker.crawl.persistence import CrawlPageData
@@ -1333,30 +1334,14 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
             timings["cleanup_deleted"] = time.time() - cleanup_start
 
-            # Measure website size update with recovery wrapper
             update_start = time.time()
 
             async def _do_update_size(sess: AsyncSession) -> None:
-                # Session provided by execute_with_recovery (session-per-operation pattern)
-                # NOTE: Use crawl_context primitives, NOT detached ORM website object
-                from intric.database.tables.info_blobs_table import (
-                    InfoBlobs as InfoBlobsTable,
+                await update_website_size_after_crawl(
+                    sess,
+                    website_id=crawl_context.website_id,
+                    tenant_id=crawl_context.tenant_id,
                 )
-                from intric.database.tables.websites_table import (
-                    Websites as WebsitesTable,
-                )
-
-                update_size_stmt = (
-                    sa.select(sa.func.coalesce(sa.func.sum(InfoBlobsTable.size), 0))
-                    .where(InfoBlobsTable.website_id == crawl_context.website_id)
-                    .scalar_subquery()
-                )
-                stmt = (
-                    sa.update(WebsitesTable)
-                    .where(WebsitesTable.id == crawl_context.website_id)
-                    .values(size=update_size_stmt)
-                )
-                await sess.execute(stmt)
 
             await execute_with_recovery(
                 operation_name="website_size_update",

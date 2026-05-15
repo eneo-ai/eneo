@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T109
+active_task: T111
 
 tasks:
   - id: T001
@@ -5288,7 +5288,7 @@ tasks:
   - id: T109
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Choose the next bounded roadmap slice after Redis pipeline type-boundary cleanup, with roadmap split still the leading candidate before larger WorkerAdapter/admin-write epics."
     inputs:
@@ -5304,6 +5304,88 @@ tasks:
       - "Preserve unrelated .devcontainer dirt."
     expected_output:
       - "Decision: roadmap split, finalize extraction, another typed-boundary cleanup, or a narrower admin transparency slice."
+      - "Allowed files, red tests, verification commands, and stop_if conditions if another worker is selected."
+    receipt:
+      result: done
+      decision: "Activate T110 website-size extraction as the next Step 5 slice. Reject broad finalize-tail extraction for now because it would mix website-size SQL, preemption checks, reporting, terminal commit, and post-terminal effects into one module with multiple reasons to change."
+      summary: "Claude reviewed the T109 options and returned changes_required because Codex had not selected one slice and the broad finalize option was too diffuse. The selected slice follows the existing website_timestamps.py pattern: move only website-size recalculation SQL behind a canonical worker/crawl/website_size.py owner, with stop conditions preventing terminal, preemption, or reporting changes."
+      claude:
+        verdict: changes_required
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t109-choose-next-crawler-roadmap-slice-20260515T090820Z.md"
+      spawned_tasks:
+        - T110
+        - T111
+  - id: T110
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: low
+    objective: "Extract website size recalculation from crawl_tasks.py into a canonical typed crawl phase boundary."
+    inputs:
+      - "T109 receipt"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl/website_timestamps.py"
+    allowed_files:
+      - "backend/src/intric/worker/crawl/website_size.py"
+      - "backend/src/intric/worker/crawl/__init__.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_website_size.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Do not change terminal commit code."
+      - "Do not change preemption/suicide-check code."
+      - "Do not change summary or performance reporting code."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Website size SQL is owned by worker/crawl/website_size.py."
+      - "crawl_tasks.py calls update_website_size_after_crawl(...) through the existing recovery wrapper."
+      - "The update is tenant-scoped and preserves the coalesced sum behavior."
+    receipt:
+      result: done
+      summary: "Moved the post-crawl website size recalculation into update_website_size_after_crawl(...). The function mirrors the existing website timestamp boundary shape, keeps the session/recovery owner in crawl_tasks.py, and adds tenant predicates to both the info_blob sum and website update."
+      changed_files:
+        - "backend/src/intric/worker/crawl/website_size.py"
+        - "backend/src/intric/worker/crawl/__init__.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_website_size.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      red_verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_website_size.py -q failed before implementation with ModuleNotFoundError: No module named 'intric.worker.crawl.website_size'. The test file was later convention-renamed to test_crawl_website_size.py."
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_website_size.py -q -> 1 passed, 12 existing warnings"
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_website_size.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q -> 13 passed, 12 existing warnings"
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_website_size.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py tests/unit/test_crawler_terminal_ownership.py -q -> 15 passed, 12 existing warnings"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/website_size.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_website_size.py -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/website_size.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_website_size.py -> 0 errors"
+        - "cd backend && uv run pyright --project pyrightconfig.json -> 0 errors"
+        - "rg confirmed no stale website-size comment and only website_size.py owns the InfoBlobsTable.size sum."
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t110-website-size-extraction-commit-gate-20260515T091553Z.md"
+          - ".codex/artifacts/claude-peer-loop-t110-website-size-extraction-revision-gate-20260515T091856Z.md"
+        resolution: "Claude first required a missing info_blobs tenant predicate assertion and stale-comment cleanup. The revision added the assertion, renamed the test file to the crawl-specific convention, removed the stale comment, clarified the export group, and received GREEN_LIGHT yes with MIN_SCORE 9."
+  - id: T111
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Choose the next bounded roadmap slice after website-size extraction, with preemption guard extraction and broader Step 5 phase cleanup as leading candidates."
+    inputs:
+      - "T109 receipt"
+      - "T110 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "Current git status and verification"
+    constraints:
+      - "Do not mark the goal complete."
+      - "Do not start WorkerAdapter or admin write controls without a fresh plan gate."
+      - "Prefer one canonical owner and one red test over broad tail extraction."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Decision: preemption guard extraction, another small Step 5 typed boundary, admin transparency slice, or roadmap split."
       - "Allowed files, red tests, verification commands, and stop_if conditions if another worker is selected."
     receipt: null
 
