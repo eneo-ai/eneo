@@ -65,6 +65,7 @@ from intric.sysadmin.sysadmin_models import (
     CrawlerBaselineResponse,
     CrawlerFailureInventoryResponse,
     CrawlerRecentFailuresResponse,
+    CrawlerScheduledAggregateResponse,
 )
 from intric.sysadmin.sysadmin_service import SysAdminService
 from intric.tenants.tenant import (
@@ -561,6 +562,22 @@ async def get_crawler_recent_failures(
             tenant_id=tenant_id,
         )
     return CrawlerRecentFailuresResponse.from_domain(failures)
+
+
+@router.get(
+    "/crawler/scheduled",
+    response_model=CrawlerScheduledAggregateResponse,
+    summary="Get scheduled crawler aggregate by update interval",
+)
+async def get_crawler_scheduled_aggregate(
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+    tenant_id: Annotated[UUID | None, Query()] = None,
+) -> CrawlerScheduledAggregateResponse:
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        repo = WebsiteAdminRepository(session=session)
+        aggregate = await repo.scheduled_aggregate(tenant_id=tenant_id)
+    return CrawlerScheduledAggregateResponse.from_domain(aggregate)
 
 
 def _mask_actor_label() -> str:

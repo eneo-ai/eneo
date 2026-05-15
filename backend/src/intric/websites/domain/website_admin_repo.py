@@ -10,6 +10,10 @@ from intric.websites.domain.crawler_failure_inventory import (
     CrawlerFailureInventoryItem,
     CrawlerFailureState,
 )
+from intric.websites.domain.crawler_scheduled_aggregate import (
+    CrawlerScheduledAggregate,
+    CrawlerScheduledIntervalBucket,
+)
 from intric.websites.domain.website import (
     WEBSITE_AUTO_DISABLE_FAILURE_THRESHOLD,
     UpdateInterval,
@@ -113,4 +117,70 @@ class WebsiteAdminRepository:
             total=total,
             limit=limit,
             offset=offset,
+        )
+
+    async def scheduled_aggregate(
+        self,
+        *,
+        tenant_id: UUID | None,
+    ) -> CrawlerScheduledAggregate:
+        stmt = (
+            sa.select(
+                WebsitesTable.update_interval.label("update_interval"),
+                sa.func.count(WebsitesTable.id).label("website_count"),
+                sa.func.coalesce(sa.func.sum(WebsitesTable.size), 0).label(
+                    "total_size_bytes"
+                ),
+            )
+            .select_from(WebsitesTable)
+            .group_by(WebsitesTable.update_interval)
+        )
+        if tenant_id is not None:
+            stmt = stmt.where(WebsitesTable.tenant_id == tenant_id)
+
+        result = await self.session.execute(stmt)
+
+        counts_by_interval = {update_interval: 0 for update_interval in UpdateInterval}
+        sizes_by_interval = {update_interval: 0 for update_interval in UpdateInterval}
+        unparseable_update_interval_website_count = 0
+        unparseable_update_interval_total_size_bytes = 0
+        for row in result.mappings():
+            website_count = int(row["website_count"])
+            total_size_bytes = int(row["total_size_bytes"])
+            try:
+                update_interval = UpdateInterval(str(row["update_interval"]))
+            except ValueError:
+                unparseable_update_interval_website_count += website_count
+                unparseable_update_interval_total_size_bytes += total_size_bytes
+                continue
+
+            counts_by_interval[update_interval] = website_count
+            sizes_by_interval[update_interval] = total_size_bytes
+
+        buckets = tuple(
+            CrawlerScheduledIntervalBucket(
+                update_interval=update_interval,
+                website_count=counts_by_interval[update_interval],
+                total_size_bytes=sizes_by_interval[update_interval],
+            )
+            for update_interval in sorted(UpdateInterval, key=lambda item: item.value)
+        )
+
+        return CrawlerScheduledAggregate(
+            buckets=buckets,
+            total_websites=(
+                sum(bucket.website_count for bucket in buckets)
+                + unparseable_update_interval_website_count
+            ),
+            total_size_bytes=(
+                sum(bucket.total_size_bytes for bucket in buckets)
+                + unparseable_update_interval_total_size_bytes
+            ),
+            unparseable_update_interval_website_count=(
+                unparseable_update_interval_website_count
+            ),
+            unparseable_update_interval_total_size_bytes=(
+                unparseable_update_interval_total_size_bytes
+            ),
+            tenant_id=tenant_id,
         )

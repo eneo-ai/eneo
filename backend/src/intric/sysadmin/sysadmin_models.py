@@ -35,6 +35,12 @@ from intric.websites.domain.crawler_recent_failures import (
 from intric.websites.domain.crawler_recent_failures import (
     CrawlerRecentFailures as DomainCrawlerRecentFailures,
 )
+from intric.websites.domain.crawler_scheduled_aggregate import (
+    CrawlerScheduledAggregate as DomainCrawlerScheduledAggregate,
+)
+from intric.websites.domain.crawler_scheduled_aggregate import (
+    CrawlerScheduledIntervalBucket as DomainCrawlerScheduledIntervalBucket,
+)
 from intric.websites.domain.website import UpdateInterval
 
 
@@ -366,4 +372,49 @@ class CrawlerRecentFailuresResponse(BaseModel):
             days=failures.days,
             since=failures.since,
             until=failures.until,
+        )
+
+
+class CrawlerScheduledIntervalBucket(BaseModel):
+    update_interval: UpdateInterval
+    website_count: int = Field(ge=0)
+    total_size_bytes: int = Field(ge=0)
+
+    @classmethod
+    def from_domain(
+        cls, bucket: DomainCrawlerScheduledIntervalBucket
+    ) -> "CrawlerScheduledIntervalBucket":
+        return cls(
+            update_interval=bucket.update_interval,
+            website_count=bucket.website_count,
+            total_size_bytes=bucket.total_size_bytes,
+        )
+
+
+class CrawlerScheduledAggregateResponse(BaseModel):
+    buckets: list[CrawlerScheduledIntervalBucket]
+    total_websites: int = Field(ge=0)
+    total_size_bytes: int = Field(ge=0)
+    unparseable_update_interval_website_count: int = Field(ge=0)
+    unparseable_update_interval_total_size_bytes: int = Field(ge=0)
+    tenant_id: UUID | None
+
+    @classmethod
+    def from_domain(
+        cls, aggregate: DomainCrawlerScheduledAggregate
+    ) -> "CrawlerScheduledAggregateResponse":
+        return cls(
+            buckets=[
+                CrawlerScheduledIntervalBucket.from_domain(bucket)
+                for bucket in aggregate.buckets
+            ],
+            total_websites=aggregate.total_websites,
+            total_size_bytes=aggregate.total_size_bytes,
+            unparseable_update_interval_website_count=(
+                aggregate.unparseable_update_interval_website_count
+            ),
+            unparseable_update_interval_total_size_bytes=(
+                aggregate.unparseable_update_interval_total_size_bytes
+            ),
+            tenant_id=aggregate.tenant_id,
         )

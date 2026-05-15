@@ -56,6 +56,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Admin active-crawler name-resolution tranche: enrich the active/queued crawler inventory response with nullable website and tenant labels through bounded LEFT joins while keeping the count query lean.
 - [x] Admin crawler failure-inventory tranche: add a read-only sysadmin endpoint for auto-disabled and backed-off crawler websites from durable circuit-breaker state.
 - [x] Admin recent-failures inventory tranche: add a read-only sysadmin endpoint for terminal failed crawl runs with typed outcomes, bounded pagination, tenant filtering, failure-summary parsing, and explicit `since`/`until` windows.
+- [x] Admin scheduled-crawler aggregate tranche: add a read-only sysadmin endpoint grouped by `UpdateInterval`, with zero buckets, typed totals, tenant filtering, and unparseable legacy interval accounting.
 
 ## Non-Negotiable Principles
 
@@ -668,7 +669,7 @@ Work:
 - [x] Add read-only admin endpoints for crawler active/queued inventory.
 - [ ] Add read-only admin endpoints for broader crawler overview.
 - [ ] Show active and queued crawls with age, tenant/space/website, worker state, and lifecycle state.
-- [ ] Show scheduled crawls grouped by interval and approximate content size.
+- [x] Show scheduled crawls grouped by interval and approximate content size.
 - [ ] Show high-cost websites by a defined score: `schedule_frequency_weight * indexed_content_count * (1 - retention_rate)`, with embedding spend added when reliable cost data exists.
 - [x] Expose recent terminal failed crawler runs by typed `CrawlOutcomeCode` through a bounded sysadmin endpoint.
 - [ ] Show too-large file counts and capped samples.

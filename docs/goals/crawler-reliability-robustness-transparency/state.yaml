@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T068
+active_task: T070
 
 tasks:
   - id: T001
@@ -3130,7 +3130,7 @@ tasks:
   - id: T068
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next highest-ROI crawler reliability/transparency tranche after the recent-failures endpoint."
     inputs:
@@ -3150,17 +3150,129 @@ tasks:
       - "TDD red-test story."
       - "Verification commands."
       - "Stop conditions."
+    receipt:
+      result: done
+      decision: "Activate T069 as a narrow scheduled-crawler aggregate endpoint over Websites grouped by typed UpdateInterval."
+      summary: "Claude chose scheduled crawler aggregate as the next highest-ROI operator-transparency slice. Index migration is real but should follow concrete query-shape evidence across active, recent-failure, and scheduled endpoints; admin overview composition and high-cost scoring are deferred until this aggregate exists."
+      claude:
+        verdict: green
+        artifact: ".codex/artifacts/claude-peer-loop-t068-choose-next-crawler-reliability-tranche-20260515T015424Z.md"
+        min_score: 8
+      spawned_tasks:
+        - T069
+  - id: T069
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Add a read-only sysadmin scheduled-crawler aggregate endpoint grouped by typed update interval."
+    inputs:
+      - "T068 receipt"
+      - "backend/src/intric/websites/domain/website_admin_repo.py"
+      - "backend/src/intric/websites/domain/website.py"
+      - "backend/src/intric/database/tables/websites_table.py"
+      - "backend/src/intric/sysadmin/sysadmin_router.py"
+      - "backend/src/intric/sysadmin/sysadmin_models.py"
+      - ".codex/artifacts/claude-peer-loop-t068-choose-next-crawler-reliability-tranche-20260515T015424Z.md"
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawler_scheduled_aggregate.py"
+      - "backend/src/intric/websites/domain/website_admin_repo.py"
+      - "backend/src/intric/sysadmin/sysadmin_models.py"
+      - "backend/src/intric/sysadmin/sysadmin_router.py"
+      - "backend/tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "TDD: integration tests must fail with 404 before production code lands."
+      - "Read-only backend endpoint only; no frontend, generated OpenAPI type, schema migration, new index, worker, ARQ, Redis, Scrapy, or crawl task changes."
+      - "Use `WebsiteAdminRepository`; do not create another admin repository or shared inventory abstraction."
+      - "Group Websites by existing typed `UpdateInterval`; return every enum bucket including `NEVER` with explicit zero counts and zero sizes when empty."
+      - "Use `coalesce(sum(Websites.size), 0)` and convert totals to int."
+      - "Do not join collections, embedding_models, crawl_runs, Jobs, Redis, or ARQ."
+      - "Do not calculate high-cost score, retention rate, failure rate, or schedule weights in this slice."
+      - "No Any, casts, type ignores, broad helpers, pass-through services, or utils/manager/processor/common modules."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "`GET /api/v1/sysadmin/crawler/scheduled` returns typed buckets grouped by update interval."
+      - "Empty websites table returns every `UpdateInterval` bucket with zero counts and sizes."
+      - "Mixed websites aggregate count and total_size_bytes per interval."
+      - "`UpdateInterval.NEVER` appears as its own bucket."
+      - "Tenant filter scopes rows while preserving zero buckets for intervals without rows."
+      - "Ordering is deterministic by `UpdateInterval` enum value."
+      - "Missing super API key returns 401/403."
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_scheduled_aggregate.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawler_scheduled_aggregate.py src/intric/websites/domain/website_admin_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
+      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_scheduled_aggregate.py src/intric/websites/domain/website_admin_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_scheduled_aggregate.py src/intric/websites/domain/website_admin_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
+    stop_if:
+      - "Need to join `collections`, `embedding_models`, `crawl_runs`, `Jobs`, Redis, or ARQ."
+      - "Need to define a schedule-frequency weighting formula, high-cost score, retention rate, or failure-rate metric."
+      - "Need frontend, generated OpenAPI type, schema migration, new index, Scrapy, worker, watchdog, feeder, task_manager, or crawl_tasks changes."
+      - "Need a new admin repository module separate from `WebsiteAdminRepository`."
+      - "`update_interval` cannot be returned as typed `UpdateInterval` without files outside allowed_files."
+      - "Net diff exceeds roughly 300 lines."
+      - "Need files outside allowed_files."
+    receipt:
+      result: done
+      summary: "Added `GET /api/v1/sysadmin/crawler/scheduled` as a read-only scheduled-crawler aggregate grouped by typed `UpdateInterval`. The endpoint returns every interval bucket with zero defaults, supports tenant filtering, keeps query shape to `Websites` only, and separately reports unparseable legacy interval rows instead of failing the endpoint."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawler_scheduled_aggregate.py"
+        - "backend/src/intric/websites/domain/website_admin_repo.py"
+        - "backend/src/intric/sysadmin/sysadmin_models.py"
+        - "backend/src/intric/sysadmin/sysadmin_router.py"
+        - "backend/tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+      verification:
+        - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_scheduled_aggregate.py -q"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawler_scheduled_aggregate.py src/intric/websites/domain/website_admin_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
+        - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_scheduled_aggregate.py src/intric/websites/domain/website_admin_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_scheduled_aggregate.py src/intric/websites/domain/website_admin_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t069-scheduled-crawler-aggregate-implementation-review-20260515T020145Z.md"
+          - ".codex/artifacts/claude-peer-loop-t069-scheduled-crawler-aggregate-implementation-review-iteration-2-20260515T020625Z.md"
+        min_score: 8
+      notes:
+        - "The query intentionally avoids joins and does not calculate schedule weights or cost scoring; those need a separate product formula."
+        - "Unparseable update intervals are counted in separate fields so legacy bad data is visible without breaking admin visibility."
+      spawned_tasks:
+        - T070
+  - id: T070
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next highest-ROI crawler reliability/transparency tranche after the scheduled aggregate endpoint."
+    inputs:
+      - "T069 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "Current dirty diff after T069 commit"
+    constraints:
+      - "Read-only except board/roadmap updates."
+      - "Prefer long-term reliability, maintainability, scalability, and reviewability over quick fixes."
+      - "Preserve unrelated .devcontainer files."
+      - "Do not broaden into non-crawler audit/encryption/federation test failures."
+      - "Do not activate a Worker without allowed files, verification commands, and stop conditions."
+    expected_output:
+      - "Decision: next worker tranche or final audit."
+      - "Allowed files."
+      - "TDD red-test story."
+      - "Verification commands."
+      - "Stop conditions."
     receipt: null
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T067
+    task: T069
     commands:
-      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_recent_failures.py -q"
-      - "cd backend && uv run ruff check src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_recent_failures.py"
-      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_recent_failures.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_recent_failures.py"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t067-recent-failures --title 'T067 recent crawler failures implementation review iteration 2' --phase verification --iteration 2 --require-green --required-min-score 8 ..."
-    note: "T067 backend recent-failures inventory endpoint passed targeted integration tests, ruff, format check, Pyright, and Claude green review after adding lower-bound window coverage."
+      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_scheduled_aggregate.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawler_scheduled_aggregate.py src/intric/websites/domain/website_admin_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
+      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawler_scheduled_aggregate.py src/intric/websites/domain/website_admin_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawler_scheduled_aggregate.py src/intric/websites/domain/website_admin_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_scheduled_aggregate.py"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t069-scheduled-aggregate --title 'T069 scheduled crawler aggregate implementation review iteration 2' --phase verification --iteration 2 --require-green --required-min-score 8 ..."
+    note: "T069 backend scheduled-crawler aggregate endpoint passed targeted integration tests, ruff, format check, Pyright, and Claude green review after adding legacy unparseable interval handling."
