@@ -60,6 +60,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Admin per-website processing aggregate tranche: add a read-only sysadmin endpoint grouped by website, with bounded windowing, tenant filtering, stable throughput ordering, orphan-job preservation, and retained/failed/too-large counters.
 - [x] Step 5 post-terminal effects naming tranche: rename the post-terminal side-effect owner away from Twisted-conflicting reactor vocabulary and pass `AuditService` directly instead of routing audit emission through the DI container.
 - [x] Step 5 recovery executor container-trim tranche: remove the unused `Container` argument from the session-per-operation recovery executor and post-terminal recovery context without changing transaction semantics.
+- [x] Step 5 dead recovery deletion tranche: delete orphaned `recover_session(...)`, its public exports, and the tests that only covered that dead path.
 
 ## Non-Negotiable Principles
 

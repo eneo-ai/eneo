@@ -21,33 +21,32 @@ class TestRecoveryModuleImports:
 
     def test_import_from_crawl_package(self):
         """Recovery functions should be importable from intric.worker.crawl."""
+        import intric.worker.crawl as crawl_package
         from intric.worker.crawl import (
             calculate_exponential_backoff,
             execute_with_recovery,
             is_invalid_transaction_error,
             is_invalid_transaction_error_msg,
-            recover_session,
             reset_tenant_retry_delay,
             update_job_retry_stats,
         )
 
         assert callable(execute_with_recovery)
-        assert callable(recover_session)
         assert callable(is_invalid_transaction_error)
         assert callable(is_invalid_transaction_error_msg)
         assert callable(calculate_exponential_backoff)
         assert callable(reset_tenant_retry_delay)
         assert callable(update_job_retry_stats)
+        assert not hasattr(crawl_package, "recover_session")
 
     def test_import_directly_from_recovery_module(self):
         """Recovery functions should be importable directly from recovery module."""
-        from intric.worker.crawl.recovery import (
-            execute_with_recovery,
-            recover_session,
-        )
+        import intric.worker.crawl.recovery as recovery_module
+        from intric.worker.crawl.recovery import execute_with_recovery
 
         assert callable(execute_with_recovery)
-        assert callable(recover_session)
+        assert "recover_session" not in recovery_module.__all__
+        assert not hasattr(recovery_module, "recover_session")
 
 
 class TestIsInvalidTransactionError:
@@ -159,132 +158,6 @@ class TestIsInvalidTransactionErrorMsg:
 
         assert is_invalid_transaction_error_msg("INVALID TRANSACTION") is True
         assert is_invalid_transaction_error_msg("Pending Rollback") is True
-
-
-class TestRecoverSession:
-    """Tests for recover_session function.
-
-    NOTE: sessionmanager is imported INSIDE recover_session() to avoid circular imports.
-    We must patch at the source module: intric.database.database.sessionmanager
-    """
-
-    @pytest.mark.asyncio
-    async def test_creates_new_session_from_sessionmanager(self):
-        """Should create a fresh session via sessionmanager.create_session()."""
-        from intric.worker.crawl.recovery import recover_session
-
-        # Mock old session
-        old_session = MagicMock()
-        old_session.rollback = AsyncMock()
-        old_session.close = AsyncMock()
-
-        # Mock new session
-        new_session = MagicMock()
-        new_session.begin = AsyncMock()
-
-        # Mock container
-        mock_container = MagicMock()
-        mock_container.session = MagicMock()
-        mock_container.text_processor = MagicMock(return_value="new_uploader")
-
-        # Mock sessionmanager - patch at source module where it's imported FROM
-        mock_sessionmanager = MagicMock()
-        mock_sessionmanager.create_session = MagicMock(return_value=new_session)
-
-        created_sessions = []
-        logger = MagicMock()
-
-        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
-            result_session, result_uploader = await recover_session(
-                container=mock_container,
-                old_session=old_session,
-                created_sessions=created_sessions,
-                logger_instance=logger,
-            )
-
-        # Verify new session was created
-        mock_sessionmanager.create_session.assert_called_once()
-        assert result_session is new_session
-        assert result_uploader == "new_uploader"
-
-        # Verify session was tracked for cleanup
-        assert new_session in created_sessions
-
-        # Verify container was updated
-        mock_container.session.override.assert_called_once()
-
-        # Verify transaction was started
-        new_session.begin.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_cleans_up_old_session_with_timeout(self):
-        """Should clean up old session with rollback and close timeouts."""
-        from intric.worker.crawl.recovery import recover_session
-
-        # Mock old session
-        old_session = MagicMock()
-        old_session.expunge_all = MagicMock()
-        old_session.rollback = AsyncMock()
-        old_session.close = AsyncMock()
-
-        # Mock new session
-        new_session = MagicMock()
-        new_session.begin = AsyncMock()
-
-        # Mock container
-        mock_container = MagicMock()
-        mock_container.text_processor = MagicMock(return_value="uploader")
-
-        # Mock sessionmanager - patch at source module
-        mock_sessionmanager = MagicMock()
-        mock_sessionmanager.create_session = MagicMock(return_value=new_session)
-
-        created_sessions = []
-        logger = MagicMock()
-
-        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
-            await recover_session(
-                container=mock_container,
-                old_session=old_session,
-                created_sessions=created_sessions,
-                logger_instance=logger,
-            )
-
-        # Verify cleanup sequence
-        old_session.expunge_all.assert_called_once()
-        old_session.rollback.assert_called_once()
-        old_session.close.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_handles_none_old_session(self):
-        """Should handle None old_session gracefully."""
-        from intric.worker.crawl.recovery import recover_session
-
-        # Mock new session
-        new_session = MagicMock()
-        new_session.begin = AsyncMock()
-
-        # Mock container
-        mock_container = MagicMock()
-        mock_container.text_processor = MagicMock(return_value="uploader")
-
-        # Mock sessionmanager - patch at source module
-        mock_sessionmanager = MagicMock()
-        mock_sessionmanager.create_session = MagicMock(return_value=new_session)
-
-        created_sessions = []
-        logger = MagicMock()
-
-        with patch("intric.database.database.sessionmanager", mock_sessionmanager):
-            result_session, _ = await recover_session(
-                container=mock_container,
-                old_session=None,
-                created_sessions=created_sessions,
-                logger_instance=logger,
-            )
-
-        # Should still create new session
-        assert result_session is new_session
 
 
 class TestExecuteWithRecovery:

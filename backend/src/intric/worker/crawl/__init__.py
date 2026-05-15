@@ -47,7 +47,6 @@ from intric.worker.crawl.recovery import (
     execute_with_recovery,
     is_invalid_transaction_error,
     is_invalid_transaction_error_msg,
-    recover_session,
     reset_tenant_retry_delay,
     update_job_retry_stats,
 )
@@ -120,10 +119,9 @@ __all__ = [
     "execute_with_recovery",
     "reset_tenant_retry_delay",
     "update_job_retry_stats",
-    # Recovery - Helpers (used for inline recovery patterns)
+    # Recovery - Helpers
     "is_invalid_transaction_error",
     "is_invalid_transaction_error_msg",
-    "recover_session",
     # Slot release
     "CrawlSlotAcquirePath",
     "CrawlSlotAcquireRequest",

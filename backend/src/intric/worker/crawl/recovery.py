@@ -1,15 +1,9 @@
-"""Session recovery and retry utilities for crawler workers.
+"""Transaction detection, session-per-operation execution, and retry utilities.
 
 This module provides:
-1. SQLAlchemy session recovery from transaction corruption
+1. SQLAlchemy transaction-state detection
 2. Exponential backoff calculation with full jitter
 3. Redis-based job retry statistics tracking
-
-The session recovery pattern handles SQLAlchemy transaction corruption by:
-- Detecting invalid transaction state via exception type and message
-- Aggressively cleaning up corrupted sessions with timeouts
-- Creating fresh sessions from the session manager
-- Updating DI container overrides
 
 Usage:
     from intric.worker.crawl.recovery import (
@@ -29,15 +23,12 @@ from collections.abc import Awaitable
 from typing import TYPE_CHECKING, Any, Callable, TypeVar, cast
 from uuid import UUID
 
-from dependency_injector import providers
 from sqlalchemy.exc import InvalidRequestError, PendingRollbackError
 from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
     import redis.asyncio as aioredis
     from sqlalchemy.ext.asyncio import AsyncSession
-
-    from intric.main.container.container import Container
 
 logger = logging.getLogger(__name__)
 TResult = TypeVar("TResult")
@@ -50,10 +41,8 @@ __all__ = [
     "calculate_exponential_backoff",
     "update_job_retry_stats",
     "reset_tenant_retry_delay",
-    # Semi-public helpers (used directly in crawl_tasks.py for inline recovery)
     "is_invalid_transaction_error",
     "is_invalid_transaction_error_msg",
-    "recover_session",
 ]
 
 
@@ -115,82 +104,6 @@ def is_invalid_transaction_error_msg(message: str | None) -> bool:
         or "autobegin is disabled" in msg_lower  # Session lost transaction state
         or "another operation is in progress" in msg_lower  # asyncpg connection busy
     )
-
-
-async def recover_session(
-    container: "Container",
-    old_session: "AsyncSession",
-    created_sessions: list["AsyncSession"],
-    logger_instance: logging.Logger,
-) -> tuple["AsyncSession", Any]:
-    """Recover from an invalid transaction by creating a new session.
-
-    CRITICAL: Aggressively cleans up old session to prevent
-    'InterfaceError: another operation is in progress' from leaking into the new session.
-
-    This function handles SQLAlchemy transaction corruption by:
-    1. Expunging all objects to prevent accidental stale access
-    2. Rolling back and closing the corrupted session (with timeouts)
-    3. Creating a fresh session from the session manager
-    4. Tracking the new session for cleanup in the finally block
-    5. Updating the container to use the new session
-
-    Args:
-        container: DI container to update
-        old_session: The corrupted session to clean up
-        created_sessions: List to track sessions for cleanup
-        logger_instance: Logger instance for metrics/debugging
-
-    Returns:
-        Tuple of (new_session, new_uploader) for continued processing
-    """
-    # Import here to avoid circular imports - this pattern is intentional
-    from intric.database.database import sessionmanager
-
-    # 1. Aggressive Cleanup with timeouts to prevent hanging on wedged connections
-    try:
-        if old_session:
-            # Detach all objects first to prevent accidental access to stale data
-            old_session.expunge_all()
-            try:
-                # Attempt rollback with timeout to free locks
-                await asyncio.wait_for(old_session.rollback(), timeout=2.0)
-            except Exception:
-                pass  # Rollback may fail if connection is truly broken
-
-            # Close session with timeout - may return poisoned connection to pool
-            try:
-                await asyncio.wait_for(old_session.close(), timeout=2.0)
-            except Exception:
-                pass  # Close may hang if socket is wedged
-    except Exception as cleanup_exc:
-        logger_instance.warning(
-            f"Error cleaning up old session during recovery: {cleanup_exc}"
-        )
-
-    # 2. Create fresh session via explicit factory (no context manager)
-    # This avoids orphaned async generator that causes GC-triggered session.close()
-    new_session = sessionmanager.create_session()
-
-    # 3. Explicitly start transaction - required since autobegin=False
-    await new_session.begin()
-
-    # Track for cleanup in finally block
-    created_sessions.append(new_session)
-
-    # 4. Update container to use new session
-    session_provider: Any = container.session
-    session_provider.override(providers.Object(new_session))
-
-    # Get fresh uploader with new session
-    new_uploader = container.text_processor()
-
-    logger_instance.info(
-        "Session recovered and initialized",
-        extra={"metric_name": "crawl.session.recovered", "metric_value": 1},
-    )
-
-    return new_session, new_uploader
 
 
 async def execute_with_recovery(
