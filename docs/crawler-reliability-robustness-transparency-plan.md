@@ -64,6 +64,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Step 5 recovery plumbing trim tranche: remove vestigial `SessionHolder`, `session_holder`, and `created_sessions` plumbing now that sessions are fully owned inside `execute_with_recovery(...)`.
 - [x] Step 5 post-terminal recovery-context collapse tranche: delete the one-field `PostTerminalRecoveryContext` wrapper and pass the typed recovery executor directly through `PostTerminalEffectInput`.
 - [x] Step 5 post-terminal operation-name coverage tranche: cover both post-terminal circuit-breaker operation-name literals while keeping the recovery fake behavior-focused and signature-exact.
+- [x] Step 5 crawler TaskManager result-location trim tranche: remove normal-completion dependence on generic `TaskManager.result_location` while preserving the terminal job result URL.
 
 ## Non-Negotiable Principles
 

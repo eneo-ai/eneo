@@ -24,6 +24,7 @@ from intric.websites.domain.crawl_outcome import (
 from intric.websites.domain.crawl_run import CrawlType
 from intric.worker import crawl_tasks
 from intric.worker.crawl import CrawlSlotReleasePath, CrawlSlotReleaseResult
+from intric.worker.task_manager import TaskManager
 
 
 def test_terminal_zero_output_message_includes_scrapy_diagnostics() -> None:
@@ -633,6 +634,9 @@ async def test_sitemap_source_skip_kwargs_stay_empty_when_not_allowed(
         audit_service=audit_service,
         crawler=crawler,
     )
+    original_task_manager = crawl_tasks.TaskManager
+    created_task_managers: list[TaskManager] = []
+    recovery_sessions: list[_FakeRecoverySession] = []
 
     @asynccontextmanager
     async def session_scope() -> AsyncIterator[_FakeBootstrapSession]:
@@ -655,16 +659,24 @@ async def test_sitemap_source_skip_kwargs_stay_empty_when_not_allowed(
         operation,
     ):
         assert operation_name
-        return await operation(_FakeRecoverySession())
+        recovery_session = _FakeRecoverySession()
+        recovery_sessions.append(recovery_session)
+        return await operation(recovery_session)
 
     async def persist_batch(**_kwargs: object) -> PersistBatchResult:
         return PersistBatchResult(persisted_urls=(page_url,))
+
+    def create_task_manager(*args: object, **kwargs: object) -> TaskManager:
+        task_manager = original_task_manager(*args, **kwargs)
+        created_task_managers.append(task_manager)
+        return task_manager
 
     monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
     monkeypatch.setattr(
         crawl_tasks, "_get_primary_active_job_id", primary_active_job_id
     )
     monkeypatch.setattr(crawl_tasks, "execute_with_recovery", execute_with_recovery)
+    monkeypatch.setattr(crawl_tasks, "TaskManager", create_task_manager)
     monkeypatch.setattr(crawl_tasks, "persist_batch", persist_batch)
     monkeypatch.setattr(
         crawl_tasks,
@@ -692,6 +704,17 @@ async def test_sitemap_source_skip_kwargs_stay_empty_when_not_allowed(
     crawl_stats = audit_service.metadata["crawl_stats"]
     assert isinstance(crawl_stats, dict)
     assert crawl_stats["outcome_code"] is None
+    terminal_job_locations = [
+        _compiled_params(stmt).get("result_location")
+        for session in recovery_sessions
+        for stmt in session.executed
+        if "jobs" in str(stmt).lower() and "result_location" in str(stmt)
+    ]
+    assert terminal_job_locations == [
+        f"/api/v1/websites/{website.id}/info-blobs/",
+    ]
+    assert len(created_task_managers) == 1
+    assert created_task_managers[0].result_location is None
     assert audit_service.calls
     audit_call = audit_service.calls[-1]
     assert audit_call["tenant_id"] == tenant.id

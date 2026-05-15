@@ -1506,9 +1506,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 files_failed=num_failed_files,
             )
 
-            task_manager.result_location = (
-                f"/api/v1/websites/{params.website_id}/info-blobs/"
-            )
+            result_location = f"/api/v1/websites/{params.website_id}/info-blobs/"
             terminal_finished_at = datetime.now(timezone.utc)
 
             async def _do_terminal_completion_commit(sess: AsyncSession) -> None:
@@ -1522,7 +1520,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         job_status=JobStatus.COMPLETE,
                         outcome_code=crawl_run_outcome_code,
                         finished_at=terminal_finished_at,
-                        result_location=task_manager.result_location,
+                        result_location=result_location,
                         crawl_run_update=CrawlRunTerminalUpdate(
                             pages_crawled=num_pages,
                             files_downloaded=num_files,

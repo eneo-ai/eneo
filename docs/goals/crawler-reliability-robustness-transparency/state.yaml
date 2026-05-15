@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T082
+active_task: T084
 
 tasks:
   - id: T001
@@ -3982,7 +3982,7 @@ tasks:
   - id: T082
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Audit the remaining roadmap and choose the next safe bounded implementation slice after post-terminal recovery seam cleanup."
     inputs:
@@ -4002,18 +4002,120 @@ tasks:
       - "Evidence from roadmap/code."
       - "Allowed files, verification commands, and stop conditions for the next task."
       - "Explicit non-goals."
+    receipt:
+      result: done
+      decision: "Activate T083 to remove crawler normal-completion dependence on `TaskManager.result_location`."
+      summary: "Claude green-lit the proposed next slice with one test-shape refinement: use a real TaskManager and assert `task_manager.result_location is None` after normal completion, while also asserting the terminal SQL job update keeps the info-blobs URL. This removes the last crawler-side use of generic TaskManager result-location state as scratch payload."
+      evidence:
+        - "backend/src/intric/worker/crawl_tasks.py:1509-1525 mutates `task_manager.result_location` only to feed `TerminalEvent.result_location`."
+        - "backend/src/intric/worker/task_manager.py:172-174 short-circuits generic completion when crawler acknowledges a terminal commit."
+        - ".codex/artifacts/claude-peer-loop-t082-choose-next-crawler-reliability-slice-20260515T041618Z.md"
+      claude:
+        verdict: green
+        artifact: ".codex/artifacts/claude-peer-loop-t082-choose-next-crawler-reliability-slice-20260515T041618Z.md"
+        min_score: 8
+      spawned_tasks:
+        - T083
+  - id: T083
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Remove crawler normal-completion dependence on `TaskManager.result_location` while preserving the terminal job result URL."
+    inputs:
+      - "T082 receipt"
+      - ".codex/artifacts/claude-peer-loop-t082-choose-next-crawler-reliability-slice-20260515T041618Z.md"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/task_manager.py"
+      - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+    allowed_files:
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "TDD: add normal-completion coverage first. The red assertion must prove `TaskManager.result_location` is currently mutated by crawler completion."
+      - "Use a real `TaskManager`; do not add a fake setter that only asserts private mechanics."
+      - "Preserve the terminal job `result_location` value `/api/v1/websites/{website_id}/info-blobs/`."
+      - "Do not touch `TaskManager.result_location`, `commit_terminal(...)`, `TerminalEvent`, non-crawler tasks, or generic worker completion behavior."
+      - "No new comments, abstractions, `Any`, casts, or compatibility shims."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Crawler normal completion uses a local result-location value when constructing `TerminalEvent`."
+      - "`TaskManager.result_location` remains `None` after crawler terminal acknowledgement."
+      - "Terminal job update still stores the info-blobs URL."
+      - "Generic TaskManager result-location property remains untouched for non-crawler jobs."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_task_terminal_outcomes.py tests/unittests/worker/test_task_manager.py tests/unittests/worker/test_crawl_terminal.py -q"
+      - "cd backend && uv run pytest tests/unittests/worker -q"
+      - "cd backend && uv run ruff check src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+    stop_if:
+      - "Need to alter `TaskManager.result_location` public surface."
+      - "Need to change `commit_terminal(...)` or `TerminalEvent` field types."
+      - "The test can only assert private setter mechanics instead of observable crawler completion behavior."
+      - "Strict Pyright regresses on touched files."
+      - "Second consecutive verification failure for the same reason."
+    receipt:
+      result: done
+      summary: "Removed crawler normal-completion dependence on generic `TaskManager.result_location`. The info-blobs URL is now a local value passed directly into `TerminalEvent.result_location`, while the test proves the terminal job update still stores that URL and the real crawler-created `TaskManager` remains result-location empty after terminal acknowledgement."
+      changed_files:
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      tdd_red:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q -> 2 failed, 9 passed; both parameterized normal-completion cases failed because crawler completion still mutated the real `TaskManager.result_location` to the info-blobs URL"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_task_terminal_outcomes.py tests/unittests/worker/test_task_manager.py tests/unittests/worker/test_crawl_terminal.py -q -> 20 passed"
+        - "cd backend && uv run pytest tests/unittests/worker -q -> 321 passed"
+        - "cd backend && uv run ruff check src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -> passed"
+        - "cd backend && uv run ruff format --check src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -> 0 errors, 0 warnings, 0 informations"
+        - "rg -n \"task_manager\\.result_location\" backend/src backend/tests -> only non-crawler upload/usage/worker consumers remain"
+      claude:
+        verdict: green
+        artifact: ".codex/artifacts/claude-peer-loop-t083-crawler-taskmanager-result-location-trim-implementation-review-20260515T042239Z.md"
+        min_score: 8
+      notes:
+        - "After Claude green, its P3 test typing note was applied: the captured TaskManager list is typed as `list[TaskManager]` and asserts `.result_location` directly."
+      spawned_tasks:
+        - T084
+  - id: T084
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next highest-ROI bounded crawler maintainability/reliability slice after removing crawler TaskManager result-location coupling."
+    inputs:
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "T083 receipt"
+      - "Current git status and remaining unchecked roadmap items"
+    constraints:
+      - "Read-only except updating this state file and the plan with the selected next task."
+      - "Prefer a small TDD-friendly slice that moves the remaining roadmap toward typed phase outputs, clearer lifecycle ownership, or lower brittleness."
+      - "Do not start WorkerAdapter, admin action UX, or broad phase refactors without a fresh Claude plan gate."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Decision: next bounded Worker task or completion audit."
+      - "Evidence from remaining roadmap/code."
+      - "Allowed files, verification commands, and stop conditions for the next task."
+      - "Explicit non-goals."
     receipt: null
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T081
+    task: T083
     commands:
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_task_terminal_outcomes.py tests/unittests/worker/test_task_manager.py tests/unittests/worker/test_crawl_terminal.py -q"
       - "cd backend && uv run pytest tests/unittests/worker -q"
-      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
-      - "cd backend && uv run ruff check tests/unittests/worker/test_crawl_post_terminal_effects.py"
-      - "cd backend && uv run ruff format --check tests/unittests/worker/test_crawl_post_terminal_effects.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json tests/unittests/worker/test_crawl_post_terminal_effects.py"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t081-post-terminal-operation-name-test --phase verification --iteration 2 --require-green --required-min-score 8 ..."
-    note: "T081 post-terminal operation-name coverage passed targeted worker tests, full worker unit tests, ruff, format check, strict Pyright, and Claude green review."
+      - "cd backend && uv run ruff check src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py"
+      - "rg -n \"task_manager\\.result_location\" backend/src backend/tests"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t083-task-manager-result-location-trim --phase commit-gate --iteration 1 --require-green --required-min-score 8 ..."
+    note: "T083 crawler TaskManager result-location trim passed targeted worker tests, full worker unit tests, ruff, format check, strict Pyright, grep for remaining crawler result-location usage, and Claude green review."
