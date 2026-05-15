@@ -107,6 +107,18 @@ type _CrawlerRecentFailuresPathExists = AssertTrue<
     ? true
     : false
 >;
+type _AdminCrawlerRecentFailuresPathExists = AssertTrue<
+  paths["/api/v1/admin/crawler/recent-failures"]["get"] extends operations["get_current_tenant_crawler_recent_failures_api_v1_admin_crawler_recent_failures_get"]
+    ? true
+    : false
+>;
+type _AdminCrawlerRecentFailuresQueryHasNoTenantId = AssertTrue<
+  "tenant_id" extends keyof NonNullable<
+    operations["get_current_tenant_crawler_recent_failures_api_v1_admin_crawler_recent_failures_get"]["parameters"]["query"]
+  >
+    ? false
+    : true
+>;
 type _CrawlerWatchdogStatusPathExists = AssertTrue<
   paths["/api/v1/sysadmin/crawler/watchdog-status"]["get"] extends operations["get_crawler_watchdog_status_api_v1_sysadmin_crawler_watchdog_status_get"]
     ? true

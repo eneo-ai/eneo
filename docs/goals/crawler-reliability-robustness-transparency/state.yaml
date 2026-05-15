@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T131
+active_task: T133
 
 tasks:
   - id: T001
@@ -6264,7 +6264,7 @@ tasks:
   - id: T131
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Audit the roadmap after T130 and choose the next single highest-ROI remaining slice without marking the full goal complete unless current evidence proves every requirement."
     inputs:
@@ -6280,16 +6280,121 @@ tasks:
       - "complete | not_complete"
       - "Evidence for remaining explicit open items"
       - "Next bounded task if not complete"
+    receipt:
+      result: not_complete
+      summary: "Roadmap audit rejected goal completion. The next bounded transparency slice is a tenant-scoped admin recent-failures endpoint, because browser/admin UI must not consume super-API-key sysadmin crawler endpoints directly."
+      changed_files: []
+      verification:
+        - "Plan audit after T130 still found open Step 0 metrics, Step 5 phase cleanup, Step 6 WorkerAdapter/abort/idempotency, Step 7 admin visibility, and Step 8 admin write-control requirements."
+        - "T129 Claude already identified direct browser consumption of /sysadmin/crawler/* as unsafe because those endpoints require authenticate_super_api_key."
+        - "The selected slice exposes only /api/v1/admin/crawler/recent-failures and deliberately has no tenant_id query parameter."
+      claude:
+        verdict: changes_required
+        min_score: 7
+        artifact: ".codex/artifacts/claude-peer-loop-t131-roadmap-audit-next-slice-20260515T142152Z.md"
+        follow_up_notes:
+          - "Move the shared recent-failures response model out of sysadmin models before adding the admin route."
+          - "Do not add tenant_id as a query parameter to the tenant-scoped admin endpoint."
+          - "Keep this slice to one read endpoint; do not mirror all sysadmin crawler endpoints yet."
+  - id: T132
+    type: worker
+    assignee: Codex
+    status: done
+    reasoning_hint: medium
+    objective: "Add a tenant-scoped admin crawler recent-failures endpoint without exposing tenant_id or requiring the browser to call super-API-key sysadmin endpoints."
+    allowed_files:
+      - "backend/src/intric/admin/crawler_admin_router.py"
+      - "backend/src/intric/server/routers.py"
+      - "backend/src/intric/sysadmin/sysadmin_models.py"
+      - "backend/src/intric/websites/presentation/crawler_admin_models.py"
+      - "backend/tests/integration/test_admin_crawler_recent_failures.py"
+      - "frontend/apps/web/src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_admin_crawler_recent_failures.py tests/integration/test_sysadmin_crawler_recent_failures.py -q"
+      - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/server/routers.py src/intric/sysadmin/sysadmin_models.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_recent_failures.py"
+      - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/server/routers.py src/intric/sysadmin/sysadmin_models.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_recent_failures.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+      - "./scripts/check-intric-js-openapi-schema.sh"
+      - "cd frontend && bun run --filter @intric/web check"
+      - "cd frontend && bun run --filter @intric/web test:unit"
+      - "cd frontend && bun run --filter @intric/web lint && cd packages/intric-js && bun run lint"
+    stop_if:
+      - "Need to expose tenant_id on the new admin endpoint."
+      - "Need browser/admin UI consumption of /sysadmin/crawler/*."
+      - "Need to mirror additional sysadmin crawler endpoints before the first tenant-scoped endpoint is proven."
+      - "Need to stage unrelated .devcontainer dirt or frontend icon generated ordering drift."
+    receipt:
+      result: done
+      summary: "Added /api/v1/admin/crawler/recent-failures as the first tenant-scoped admin crawler diagnostics endpoint. The route uses CrawlRunRepository.recent_failures_for_tenant with tenant_id=current_user.tenant_id, while sysadmin uses recent_failures_for_sysadmin for optional cross-tenant filtering. The response model is shared from a websites presentation owner, sysadmin behavior remains intact, and the checked-in OpenAPI client schema is regenerated."
+      changed_files:
+        - "backend/src/intric/admin/crawler_admin_router.py"
+        - "backend/src/intric/server/routers.py"
+        - "backend/src/intric/sysadmin/sysadmin_models.py"
+        - "backend/src/intric/sysadmin/sysadmin_router.py"
+        - "backend/src/intric/websites/domain/crawl_run_repo.py"
+        - "backend/src/intric/websites/presentation/crawler_admin_models.py"
+        - "backend/tests/integration/test_admin_crawler_recent_failures.py"
+        - "frontend/apps/web/src/lib/features/admin/crawlerGeneratedTypes.test.ts"
+        - "frontend/packages/intric-js/src/types/schema.d.ts"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "Red test: cd backend && uv run pytest tests/integration/test_admin_crawler_recent_failures.py -q failed with 404/KeyError before the route existed."
+        - "cd backend && uv run pytest tests/integration/test_admin_crawler_recent_failures.py tests/integration/test_sysadmin_crawler_recent_failures.py -q"
+        - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/server/routers.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_recent_failures.py"
+        - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/server/routers.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_recent_failures.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json"
+        - "./scripts/check-intric-js-openapi-schema.sh"
+        - "cd frontend && bun run --filter @intric/web check"
+        - "cd frontend && bun run --filter @intric/web test:unit"
+        - "cd frontend && bun run --filter @intric/web lint && cd packages/intric-js && bun run lint"
+        - "The new integration test proves empty default window, current-tenant scoping, non-admin rejection, and no tenant_id query parameter in OpenAPI."
+        - "The generated type test pins the admin recent-failures path and proves tenant_id is absent from the generated operation query type."
+        - "Claude iteration 1 returned green with a P2 recommendation to split the repository method by tenant contract; Codex implemented recent_failures_for_tenant and recent_failures_for_sysadmin before commit."
+        - "rg -n \"recent_failures\\(|recent_failures_for_\" backend/src backend/tests -g '*.py' confirms no generic recent_failures(...) caller remains."
+      claude:
+        verdict: green
+        min_score: 9
+        artifact: ".codex/artifacts/claude-peer-loop-t132-tenant-scoped-admin-recent-failures-revision-gate-20260515T144316Z.md"
+        follow_up_notes:
+          - "Optional follow-up: rename watchdog_interventions to watchdog_interventions_for_sysadmin for symmetry."
+          - "Optional follow-up: add admin-boundary pagination/ordering tests when the UI starts consuming this endpoint."
+          - "Claude iteration 1 artifact: .codex/artifacts/claude-peer-loop-t132-tenant-scoped-admin-recent-failures-commit-gate-20260515T143944Z.md"
+  - id: T133
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Audit the roadmap after T132 and choose the next single highest-ROI remaining slice without marking the full goal complete unless current evidence proves every requirement."
+    inputs:
+      - "T132 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "Current git diff after T132"
+    constraints:
+      - "Do not mark the goal complete unless every remaining roadmap requirement has current evidence."
+      - "Preserve unrelated .devcontainer dirt."
+      - "Prefer proving one tenant-scoped admin read path before broader admin UI or mutation controls."
+    expected_output:
+      - "complete | not_complete"
+      - "Evidence for remaining explicit open items"
+      - "Next bounded task if not complete"
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T130
+    task: T132
     commands:
-      - "bash -n scripts/check-intric-js-openapi-schema.sh"
+      - "cd backend && uv run pytest tests/integration/test_admin_crawler_recent_failures.py tests/integration/test_sysadmin_crawler_recent_failures.py -q"
+      - "cd backend && uv run ruff check src/intric/admin/crawler_admin_router.py src/intric/server/routers.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_recent_failures.py"
+      - "cd backend && uv run ruff format --check src/intric/admin/crawler_admin_router.py src/intric/server/routers.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_recent_failures.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
       - "./scripts/check-intric-js-openapi-schema.sh"
-      - "cd /tmp && /Users/ccimen/eneo/eneocrawlerupdate/scripts/check-intric-js-openapi-schema.sh"
-      - "INTRIC_JS_SCHEMA_PATH=<temp drifted schema> ./scripts/check-intric-js-openapi-schema.sh"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t130-openapi-freshness-guard --phase verification --iteration 2 --require-green --required-min-score 8 ..."
-    note: "T130 OpenAPI freshness guard passed shell syntax, green up-to-date path, cwd-independence path, deliberate temp-schema drift failure with a unified diff, and final Claude green revision gate."
+      - "cd frontend && bun run --filter @intric/web check"
+      - "cd frontend && bun run --filter @intric/web test:unit"
+      - "cd frontend && bun run --filter @intric/web lint && cd packages/intric-js && bun run lint"
+    note: "T132 tenant-scoped admin recent-failures endpoint passed integration, sysadmin regression, Ruff, strict Pyright, OpenAPI freshness, frontend generated-type checks, and Claude revision gate. Frontend check still reports the pre-existing ExtendExpirationDialog.svelte warning."

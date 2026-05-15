@@ -2377,6 +2377,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/crawler/recent-failures": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get recently failed crawler runs for the current tenant */
+    get: operations["get_current_tenant_crawler_recent_failures_api_v1_admin_crawler_recent_failures_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/credentials/{provider}": {
     parameters: {
       query?: never;
@@ -25906,6 +25923,39 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  get_current_tenant_crawler_recent_failures_api_v1_admin_crawler_recent_failures_get: {
+    parameters: {
+      query?: {
+        days?: number;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerRecentFailuresResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

@@ -87,6 +87,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Typed crawl job-status owner tranche: move ARQ `JobStatus` behind `worker/feeder/crawl_status.py`, make watchdog requeue consume crawler-domain status, and guard the worker tree against direct `arq.jobs` imports.
 - [x] Generated crawler sysadmin OpenAPI contract tranche: regenerate `@intric/intric-js` schema types from the current backend OpenAPI snapshot and add type-level coverage for the seven sysadmin crawler response and operation contracts.
 - [x] OpenAPI freshness guard tranche: add a CI-backed regenerate-and-diff check that compares checked-in `@intric/intric-js` schema types with the current backend `app.openapi()` output.
+- [x] Tenant-scoped admin recent-failures tranche: add `/admin/crawler/recent-failures` as the first browser/admin-callable crawler diagnostics endpoint, scoped to the current admin's tenant without exposing `tenant_id`, and split repository entry points into tenant-required vs sysadmin-optional methods.
 
 ## Non-Negotiable Principles
 
@@ -671,7 +672,9 @@ Tests:
 
 ### Step 6: WorkerAdapter For ARQ, Idempotency, Abort, And Health
 
-Status: not started.
+Status: in progress. Sysadmin read APIs exist for the main crawler inventory
+views, and the first tenant-scoped admin diagnostics endpoint now exists for
+recent crawler failures.
 
 Purpose: isolate ARQ queue/runtime behavior behind a typed crawler-facing seam.
 
@@ -721,6 +724,7 @@ Work:
 - [x] Expose per-website processing totals for pages, files, retained content, too-large files, and failed items over a bounded window.
 - [ ] Show high-cost websites by a defined score: `schedule_frequency_weight * indexed_content_count * (1 - retention_rate)`, with embedding spend added when reliable cost data exists.
 - [x] Expose recent terminal failed crawler runs by typed `CrawlOutcomeCode` through a bounded sysadmin endpoint.
+- [x] Expose recent terminal failed crawler runs through a bounded tenant-scoped admin endpoint without a `tenant_id` query parameter.
 - [ ] Show too-large file counts and capped samples.
 - [ ] Show hash-retained/source-retained/file-retained counts and rates.
 - [ ] Show watchdog interventions and circuit breaker state.

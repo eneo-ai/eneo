@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from intric.admin.admin_router import router as admin_router
+from intric.admin.crawler_admin_router import router as crawler_admin_router
 from intric.ai_models.ai_models_router import router as ai_models_router
 from intric.allowed_origins.allowed_origin_router import (
     router as allowed_origins_router,
@@ -293,6 +294,12 @@ router.include_router(
 router.include_router(
     admin_router,
     prefix="/admin",
+    tags=["admin"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    crawler_admin_router,
+    prefix="/admin/crawler",
     tags=["admin"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )

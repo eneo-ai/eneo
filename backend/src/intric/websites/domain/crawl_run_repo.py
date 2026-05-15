@@ -255,7 +255,27 @@ class CrawlRunRepository:
             offset=offset,
         )
 
-    async def recent_failures(
+    async def recent_failures_for_tenant(
+        self,
+        *,
+        since: datetime,
+        until: datetime,
+        days: int,
+        limit: int,
+        offset: int,
+        tenant_id: UUID,
+    ) -> CrawlerRecentFailures:
+        return await self._recent_terminal_outcomes(
+            since=since,
+            until=until,
+            days=days,
+            limit=limit,
+            offset=offset,
+            tenant_id=tenant_id,
+            outcome_codes=RECENT_FAILURE_OUTCOME_CODES,
+        )
+
+    async def recent_failures_for_sysadmin(
         self,
         *,
         since: datetime,

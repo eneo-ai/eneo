@@ -556,7 +556,7 @@ async def get_crawler_recent_failures(
     session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = CrawlRunRepository(session=session)
-        failures = await repo.recent_failures(
+        failures = await repo.recent_failures_for_sysadmin(
             since=since,
             until=until,
             days=days,
