@@ -40,12 +40,19 @@
     type FlowRunStatus,
     type FlowRunStatusFilter
   } from "./flowRunStatusSets";
-  import { shouldHandleFlowRunsReload } from "./flowRunsReload";
   import { getActiveFlowRunId, shouldAutoFocusFlowRun } from "./flowRunsFocus";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import type { FlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
   import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
   import FlowRunErrorAlert from "./FlowRunErrorAlert.svelte";
+  import {
+    createFlowRunHistoryState,
+    destroyFlowRunHistoryPolling,
+    loadFlowRunHistory,
+    syncFlowRunHistoryFlow,
+    syncFlowRunHistoryPolling,
+    syncFlowRunHistoryReload
+  } from "./flowRunHistoryState";
 
   let {
     flow,
@@ -67,9 +74,7 @@
     onOptimisticRunsConfirmed?: (runIds: string[]) => void;
   } = $props();
 
-  let runs: FlowRun[] = $state([]);
-  let loading = $state(true);
-  let loadError: string | null = $state(null);
+  let history = $state(createFlowRunHistoryState());
   let selectedRunId: string | null = $state(null);
 
   type SortKey = "started" | "duration" | "status";
@@ -94,7 +99,7 @@
       awaiting_review: 0,
       cancelled: 0
     };
-    for (const r of runs) {
+    for (const r of history.runs) {
       counts[r.status]++;
     }
     return counts;
@@ -124,7 +129,9 @@
   }
 
   const visibleRuns = $derived.by(() => {
-    const filtered = statusFilter ? runs.filter((r) => r.status === statusFilter) : runs;
+    const filtered = statusFilter
+      ? history.runs.filter((r) => r.status === statusFilter)
+      : history.runs;
     const sorted = [...filtered].sort((a, b) => {
       let cmp = 0;
       if (sortKey === "started") {
@@ -144,10 +151,10 @@
   // mergeOptimisticFlowRuns returns the original array when no merge is needed, which keeps
   // this self-writing effect from looping after the backend list catches up.
   $effect(() => {
-    const nextRuns = mergeOptimisticFlowRuns(runs, optimisticRuns);
-    if (nextRuns === runs) return;
+    const nextRuns = mergeOptimisticFlowRuns(history.runs, optimisticRuns);
+    if (nextRuns === history.runs) return;
 
-    runs = nextRuns;
+    history.runs = nextRuns;
     const newestOptimisticRun = optimisticRuns[0];
     if (shouldAutoFocusOptimisticFlowRun(newestOptimisticRun, lastOptimisticAutoFocusedRunId)) {
       selectedRunId = newestOptimisticRun.id;
@@ -169,38 +176,34 @@
     if (sortKey !== key) return "none";
     return sortDir === "asc" ? "ascending" : "descending";
   }
-  let lastLoadedFlowId: string | null = $state(null);
-  let isInitialLoad = $state(true);
-  let lastHandledReloadTrigger = $state(0);
   let redispatchingRunId: string | null = $state(null);
   let cancellingRunId: string | null = $state(null);
   let showCancelConfirm = $state(false);
   let pendingCancelRunId: string | null = $state(null);
   let progressSnapshotsByRunId = $state<Record<string, FlowRunProgressSnapshot>>({});
-  let isRunListPolling = $state(false);
   let lastAutoFocusedRunId: string | null = $state(null);
   let lastOptimisticAutoFocusedRunId: string | null = $state(null);
 
   async function loadRuns() {
-    if (isRunListPolling) return;
-    isRunListPolling = true;
-    if (!flow?.id) {
-      runs = [];
-      loading = false;
-      isRunListPolling = false;
-      return;
-    }
-    if (isInitialLoad) loading = true;
-    loadError = null;
-    try {
-      const result = await eneo.flows.runs.list({ flowId: flow.id });
-      const nextRuns = (result.items ?? result) as FlowRun[];
-      runs = nextRuns;
+    const result = await loadFlowRunHistory(history, {
+      flowId: flow?.id,
+      listRuns: async (flowId) => eneo.flows.runs.list({ flowId }),
+      getErrorMessage: (error) =>
+        error instanceof IntricError
+          ? getFlowRuntimeErrorMessage(error, error.getReadableMessage())
+          : error instanceof Error
+            ? error.message
+            : m.flow_history_load_failed_desc()
+    });
+
+    if (result.kind === "loaded") {
+      const nextRuns = result.runs;
       const confirmedOptimisticRunIds = getConfirmedOptimisticFlowRunIds(nextRuns, optimisticRuns);
       if (confirmedOptimisticRunIds.length > 0) {
         onOptimisticRunsConfirmed?.(confirmedOptimisticRunIds);
       }
-      latestRunPayload = runs.length > 0 ? (runs[0].input_payload_json ?? null) : null;
+      latestRunPayload =
+        history.runs.length > 0 ? (history.runs[0].input_payload_json ?? null) : null;
       const activeRunId = getActiveFlowRunId(nextRuns);
       if (
         activeRunId &&
@@ -214,64 +217,38 @@
         selectedRunId = activeRunId;
         lastAutoFocusedRunId = activeRunId;
       }
-      isInitialLoad = false;
-    } catch (error) {
-      console.error("Error loading flow runs", error);
-      loadError =
-        error instanceof IntricError
-          ? getFlowRuntimeErrorMessage(error, error.getReadableMessage())
-          : error instanceof Error
-            ? error.message
-            : m.flow_history_load_failed_desc();
-    } finally {
-      loading = false;
-      isRunListPolling = false;
+    } else if (result.kind === "failed") {
+      console.error("Error loading flow runs", result.error);
     }
   }
 
   $effect(() => {
-    if (flow?.id && flow.id !== lastLoadedFlowId) {
-      lastLoadedFlowId = flow.id;
+    if (syncFlowRunHistoryFlow(history, flow?.id)) {
       void loadRuns();
-    } else if (!flow?.id) {
-      lastLoadedFlowId = null;
-      loading = false;
     }
   });
 
   $effect(() => {
-    if (shouldHandleFlowRunsReload(reloadTrigger, lastHandledReloadTrigger)) {
-      lastHandledReloadTrigger = reloadTrigger;
+    if (syncFlowRunHistoryReload(history, reloadTrigger)) {
       untrack(() => {
         void loadRuns();
       });
     }
   });
 
-  let pollTimeout: ReturnType<typeof setTimeout> | null = null;
-  let hasRunsToPoll = $derived(runs.some((r) => shouldPollFlowRunStatus(r.status)));
+  let hasRunsToPoll = $derived(history.runs.some((r) => shouldPollFlowRunStatus(r.status)));
 
   $effect(() => {
-    if (hasRunsToPoll && !pollTimeout && visible) {
-      const scheduleNextPoll = () => {
-        pollTimeout = setTimeout(async () => {
-          await loadRuns();
-          pollTimeout = null;
-          if (hasRunsToPoll && visible) {
-            scheduleNextPoll();
-          }
-        }, 5000);
-      };
-      scheduleNextPoll();
-    } else if ((!hasRunsToPoll || !visible) && pollTimeout) {
-      clearTimeout(pollTimeout);
-      pollTimeout = null;
-    }
+    syncFlowRunHistoryPolling(history, {
+      visible: () => visible,
+      hasRunsToPoll: () => hasRunsToPoll,
+      loadRuns
+    });
   });
 
   $effect(() => {
     return () => {
-      if (pollTimeout) clearTimeout(pollTimeout);
+      destroyFlowRunHistoryPolling(history);
     };
   });
 
@@ -385,17 +362,17 @@
     </div>
   </header>
 
-  {#if loading}
+  {#if history.loading}
     <div class="text-muted flex items-center justify-center gap-2 py-10 text-sm">
       <IconLoadingSpinner class="size-4 animate-spin" />
       {m.flow_loading()}
     </div>
-  {:else if loadError}
+  {:else if history.loadError}
     <Alert.Root variant="destructive">
       <Alert.Title>{m.flow_history_load_failed_title()}</Alert.Title>
       <Alert.Description>
         <span>{m.flow_history_load_failed_desc()}</span>
-        <span class="mt-1 block text-xs break-words opacity-80">{loadError}</span>
+        <span class="mt-1 block text-xs break-words opacity-80">{history.loadError}</span>
       </Alert.Description>
       <Alert.Action>
         <Button variant="outline" size="sm" onclick={loadRuns}>
@@ -403,7 +380,7 @@
         </Button>
       </Alert.Action>
     </Alert.Root>
-  {:else if runs.length === 0}
+  {:else if history.runs.length === 0}
     <div
       class="border-default bg-primary rounded-xl border py-14 text-center"
       aria-label={m.flow_no_runs_yet()}
@@ -423,7 +400,7 @@
           onclick={() => (statusFilter = null)}
         >
           {m.all_categories()}
-          <span class="text-muted tabular-nums">{runs.length}</span>
+          <span class="text-muted tabular-nums">{history.runs.length}</span>
         </button>
         {#each FLOW_RUN_STATUS_FILTER_OPTIONS as status (status)}
           {@const count = statusCounts[status] ?? 0}

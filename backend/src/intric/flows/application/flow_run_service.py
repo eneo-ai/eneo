@@ -18,6 +18,7 @@ from intric.flows.application.flow_run_recovery_policy import (
 )
 from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from intric.flows.domain.flow import (
+    Flow,
     FlowRun,
     FlowRunStatus,
     FlowRunTokenUsage,
@@ -52,7 +53,10 @@ from intric.flows.infrastructure.flow_run_repo import (
 )
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.principal import FlowPrincipal
-from intric.flows.published_definition import parse_published_definition
+from intric.flows.published_definition import (
+    PublishedFlowDefinition,
+    parse_published_definition,
+)
 from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
@@ -76,6 +80,21 @@ class FlowRunDispatchRequest(TypedDict, total=False):
     principal_type: str
     principal_user_id: UUID | None
     principal_api_key_id: UUID | None
+
+
+@dataclass(frozen=True)
+class _PublishedRunDefinition:
+    flow: Flow
+    flow_version: int
+    definition: PublishedFlowDefinition
+
+
+@dataclass(frozen=True)
+class _PreparedRunCreation:
+    input_payload_json: JsonObject | None
+    preseed_steps: list[PreseedStep]
+    step_input_files: list[StepInputFileProjection]
+    request_fingerprint: str
 
 
 class FlowRunService:
@@ -167,6 +186,41 @@ class FlowRunService:
     ) -> FlowRun:
         idempotency_key = self._validate_idempotency_key(idempotency_key)
         principal = self._principal()
+        published = await self._load_published_run_definition(
+            flow_id=flow_id,
+            expected_flow_version=expected_flow_version,
+        )
+        prepared = await self._prepare_run_creation(
+            flow_id=flow_id,
+            flow=published.flow,
+            flow_version=published.flow_version,
+            definition=published.definition,
+            principal=principal,
+            input_payload_json=input_payload_json,
+            step_inputs=step_inputs,
+        )
+        existing_run = await self._find_idempotent_run_or_enforce_creation_limits(
+            flow_id=flow_id,
+            idempotency_key=idempotency_key,
+            principal=principal,
+            request_fingerprint=prepared.request_fingerprint,
+        )
+        if existing_run is not None:
+            return existing_run
+        return await self._create_persisted_run(
+            flow=published.flow,
+            flow_version=published.flow_version,
+            principal=principal,
+            prepared=prepared,
+            idempotency_key=idempotency_key,
+        )
+
+    async def _load_published_run_definition(
+        self,
+        *,
+        flow_id: UUID,
+        expected_flow_version: int | None,
+    ) -> _PublishedRunDefinition:
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
         if flow.published_version is None:
             raise BadRequestException(
@@ -187,29 +241,46 @@ class FlowRunService:
                     "published_flow_version": flow.published_version,
                 },
             )
+        flow_version = flow.published_version
 
         runtime_version = await self.flow_version_repo.get(
             flow_id=flow_id,
-            version=flow.published_version,
+            version=flow_version,
             tenant_id=self.user.tenant_id,
         )
         published_definition = parse_published_definition(
             runtime_version.definition_json
         )
-        definition_json = published_definition.definition_json
+        return _PublishedRunDefinition(
+            flow=flow,
+            flow_version=flow_version,
+            definition=published_definition,
+        )
+
+    async def _prepare_run_creation(
+        self,
+        *,
+        flow_id: UUID,
+        flow: Flow,
+        flow_version: int,
+        definition: PublishedFlowDefinition,
+        principal: FlowPrincipal,
+        input_payload_json: dict[str, Any] | None,
+        step_inputs: dict[UUID, dict[str, list[UUID]]] | None,
+    ) -> _PreparedRunCreation:
         normalized_inline_payload = normalize_and_validate_flow_run_payload(
-            metadata=published_definition.metadata(),
+            metadata=definition.metadata(),
             payload=input_payload_json,
         )
         reject_reserved_input_payload_keys(normalized_inline_payload)
         normalized_step_inputs = normalize_step_inputs_payload(step_inputs)
         preseed_steps = self._build_preseed_steps(
-            definition_json=definition_json,
+            definition_json=definition.definition_json,
             fallback_steps=flow.steps,
         )
         step_input_file_projections: list[StepInputFileProjection] = []
-        if step_inputs is not None or published_definition.has_required_runtime_input():
-            runtime_steps = published_definition.runtime_steps()
+        if step_inputs is not None or definition.has_required_runtime_input():
+            runtime_steps = definition.runtime_steps()
             limits = await self._resolve_flow_input_limits()
             runtime_specs = build_runtime_step_input_specs(
                 steps=runtime_steps, limits=limits
@@ -236,25 +307,39 @@ class FlowRunService:
                 if file_ids
             ]
         effective_payload = dict(normalized_inline_payload or {})
-        effective_payload["expected_flow_version"] = flow.published_version
+        effective_payload["expected_flow_version"] = flow_version
         if normalized_step_inputs:
             effective_payload["step_inputs"] = serialize_step_inputs_payload(
                 normalized_step_inputs
             )
-        input_payload_json = effective_payload or None
+        prepared_payload = effective_payload or None
         request_fingerprint = self._build_idempotency_fingerprint(
             tenant_id=self.user.tenant_id,
             principal=principal,
             flow_id=flow_id,
-            flow_version=flow.published_version,
-            input_payload_json=input_payload_json,
+            flow_version=flow_version,
+            input_payload_json=prepared_payload,
         )
 
         ensure_inline_payload_size_allowed(
             flow_id=flow_id,
-            input_payload_json=input_payload_json,
+            input_payload_json=prepared_payload,
+        )
+        return _PreparedRunCreation(
+            input_payload_json=prepared_payload,
+            preseed_steps=preseed_steps,
+            step_input_files=step_input_file_projections,
+            request_fingerprint=request_fingerprint,
         )
 
+    async def _find_idempotent_run_or_enforce_creation_limits(
+        self,
+        *,
+        flow_id: UUID,
+        idempotency_key: str | None,
+        principal: FlowPrincipal,
+        request_fingerprint: str,
+    ) -> FlowRun | None:
         # Serialize run creation per tenant to prevent concurrency-limit race conditions.
         await self.flow_run_repo.acquire_tenant_run_creation_lock(
             tenant_id=self.user.tenant_id
@@ -283,26 +368,36 @@ class FlowRunService:
                 code="flow_run_concurrency_limit_reached",
                 context={"max_concurrent_runs": self.max_concurrent_runs},
             )
+        return None
+
+    async def _create_persisted_run(
+        self,
+        *,
+        flow: Flow,
+        flow_version: int,
+        principal: FlowPrincipal,
+        prepared: _PreparedRunCreation,
+        idempotency_key: str | None,
+    ) -> FlowRun:
         if flow.id is None:
             raise BadRequestException(
                 "Flow id missing for run creation.",
                 code="flow_id_missing",
             )
-        created = await self.flow_run_repo.create(
+        return await self.flow_run_repo.create(
             flow_id=flow.id,
-            flow_version=flow.published_version,
+            flow_version=flow_version,
             user_id=principal.legacy_user_id,
             principal_type=principal.principal_type.value,
             principal_user_id=principal.principal_user_id,
             principal_api_key_id=principal.principal_api_key_id,
             tenant_id=self.user.tenant_id,
-            input_payload_json=input_payload_json,
-            preseed_steps=preseed_steps,
-            step_input_files=step_input_file_projections,
+            input_payload_json=prepared.input_payload_json,
+            preseed_steps=prepared.preseed_steps,
+            step_input_files=prepared.step_input_files,
             idempotency_key=idempotency_key,
-            request_fingerprint=request_fingerprint,
+            request_fingerprint=prepared.request_fingerprint,
         )
-        return created
 
     async def _resolve_flow_input_limits(self) -> FlowInputLimits:
         return await resolve_flow_input_limits_from_source(self.settings_service)
@@ -364,11 +459,7 @@ class FlowRunService:
     ) -> list[FlowRun]:
         principal = self._principal()
         is_tenant_admin = self.access_policy.is_tenant_admin()
-        if (
-            not is_tenant_admin
-            and not principal.is_service_key
-            and flow_id is not None
-        ):
+        if not is_tenant_admin and not principal.is_service_key and flow_id is not None:
             if await self.access_policy.can_list_all_runs_in_flow(flow_id=flow_id):
                 return await self.flow_run_repo.list_runs(
                     tenant_id=self.user.tenant_id,

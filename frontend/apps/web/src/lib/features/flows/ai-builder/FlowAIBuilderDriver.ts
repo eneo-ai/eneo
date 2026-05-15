@@ -26,6 +26,7 @@ import type {
   RequirementsSummary,
   TargetKind
 } from "./protocol";
+import { isStaleApplyError, parseAIBuilderApplyError } from "./flowAIBuilderApplyError";
 
 interface AIBuilderStreamHandlers {
   onMessage: (event: AIBuilderStreamEvent) => void;
@@ -538,14 +539,11 @@ export class FlowAIBuilderDriver {
       await this.refreshSession();
       return result;
     } catch (e: unknown) {
-      const parsed = this.#parseApplyError(e);
-      if (parsed) {
-        this.#state.applyError = parsed;
-        this.#state.isConflict = parsed.code === "stale_revision";
-        this.#state.error = null;
-      } else {
-        this.#state.error = e instanceof Error ? e.message : "Failed to apply plan";
-      }
+      const parsed = parseAIBuilderApplyError(e);
+      this.#state.applyError = parsed;
+      this.#state.isConflict = isStaleApplyError(parsed);
+      this.#state.error =
+        parsed.code === "unknown" || parsed.code === "network" ? parsed.message : null;
       this.#notify();
       await this.refreshSession();
       throw e;
@@ -577,19 +575,17 @@ export class FlowAIBuilderDriver {
     try {
       return await this.applyPlan(expectedRevision);
     } catch (e) {
-      const parsedApplyError = this.#parseApplyError(e);
+      const parsedApplyError = parseAIBuilderApplyError(e);
       this.#state.applyError = {
         code: "flow_unpublished_apply_failed",
-        message:
-          parsedApplyError?.message ??
-          (e instanceof Error ? e.message : "Failed to apply plan after unpublishing"),
+        message: parsedApplyError.message,
         context: {
           flow_id: flowId,
-          original_code: parsedApplyError?.code ?? null,
-          original_context: parsedApplyError?.context ?? {}
+          original_code: parsedApplyError.code,
+          original_context: parsedApplyError.context
         }
       };
-      this.#state.isConflict = parsedApplyError?.code === "stale_revision";
+      this.#state.isConflict = isStaleApplyError(parsedApplyError);
       this.#state.error = null;
       this.#notify();
       throw e;
@@ -615,33 +611,13 @@ export class FlowAIBuilderDriver {
     }
   }
 
-  #parseApplyError(e: unknown): ApplyError | null {
-    if (typeof e !== "object" || e === null) return null;
-
-    // Check for response body with error code
-    const body = "body" in e ? (e as { body?: unknown }).body : null;
-    if (typeof body === "object" && body !== null && "code" in body) {
-      const parsed = body as { code?: string; message?: string; context?: Record<string, unknown> };
-      if (parsed.code) {
-        return {
-          code: parsed.code,
-          message: parsed.message ?? "Unknown error",
-          context: parsed.context ?? {}
-        };
-      }
-    }
-
-    // Fallback: check HTTP status for known codes
-    const status = "status" in e ? (e as { status?: number }).status : undefined;
-    if (status === 409) {
-      return { code: "stale_revision", message: "Flow was modified", context: {} };
-    }
-
-    return null;
-  }
-
   #publishedApplyFlowId(): string | null {
-    const contextFlowId = this.#state.applyError?.context?.flow_id;
+    const applyError = this.#state.applyError;
+    const contextFlowId =
+      applyError?.code === "flow_is_published" ||
+      applyError?.code === "flow_unpublished_apply_failed"
+        ? applyError.context.flow_id
+        : null;
     if (typeof contextFlowId === "string" && contextFlowId.length > 0) {
       return contextFlowId;
     }

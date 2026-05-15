@@ -709,6 +709,41 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.session?.status).toBe("awaiting_approval");
   });
 
+  it("stores unknown apply failures as typed errors and keeps the message visible", async () => {
+    const unexpectedError = {
+      status: 400,
+      response: {
+        code: "unexpected_backend_code",
+        message: "Unexpected apply failure",
+        context: { retryable: false }
+      }
+    };
+    const fetch = vi
+      .fn()
+      .mockRejectedValueOnce(unexpectedError)
+      .mockResolvedValueOnce(makeSession({ status: "awaiting_approval", latest_plan_id: "plan-1" }))
+      .mockResolvedValueOnce(makePlan({ status: "approved" }));
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: makeSession({ status: "awaiting_approval", latest_plan_id: "plan-1" }),
+      currentPlan: makePlan({ status: "approved" })
+    });
+
+    await expect(driver.applyPlan()).rejects.toBe(unexpectedError);
+
+    expect(driver.state.applyError).toEqual({
+      code: "unknown",
+      message: "Unexpected apply failure",
+      context: {
+        retryable: false,
+        status: 400,
+        original_code: "unexpected_backend_code"
+      }
+    });
+    expect(driver.state.error).toBe("Unexpected apply failure");
+    expect(driver.state.isConflict).toBe(false);
+  });
+
   it("unpublishes a published flow before retrying plan apply", async () => {
     const fetch = vi
       .fn()

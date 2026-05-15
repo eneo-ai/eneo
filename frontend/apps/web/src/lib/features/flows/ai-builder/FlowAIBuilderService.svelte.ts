@@ -50,7 +50,10 @@ export class FlowAIBuilderService {
   );
 
   constructor(intric: Intric, spaceId: string, flowId: string | null) {
-    const transport = intric.client as unknown as AIBuilderClientTransport;
+    const transport: AIBuilderClientTransport = {
+      fetch: intric.client.fetch as AIBuilderClientTransport["fetch"],
+      stream: intric.client.stream as AIBuilderClientTransport["stream"]
+    };
     this.#driver = new FlowAIBuilderDriver(transport, spaceId, flowId, (state) => {
       this.#stateVersion += 1;
       this.#updatePlanSeenLatch(state);

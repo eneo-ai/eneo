@@ -128,11 +128,65 @@ export type ProposedPlan = Omit<GeneratedAIBuilderPlanResponse, keyof GeneratedP
 
 export type IncomingProposedPlan = Omit<ProposedPlan, "status"> & { status?: PlanStatus };
 
-export interface ApplyError {
-  code: string;
-  message: string;
-  context: Record<string, unknown>;
-}
+export type ApplyError =
+  | {
+      code: "stale_revision";
+      message: string;
+      context: Record<string, unknown>;
+    }
+  | {
+      code: "flow_is_published";
+      message: string;
+      context: { flow_id?: string; published_version?: number } & Record<string, unknown>;
+    }
+  | {
+      code: "invalid_existing_step_ref";
+      message: string;
+      context: Record<string, unknown>;
+    }
+  | {
+      code: "transcription_model_required";
+      message: string;
+      context: Record<string, unknown>;
+    }
+  | {
+      code: "flow_space_mismatch";
+      message: string;
+      context: Record<string, unknown>;
+    }
+  | {
+      code: "insufficient_scope";
+      message: string;
+      context: Record<string, unknown>;
+    }
+  | {
+      code: "not_found";
+      message: string;
+      context: Record<string, unknown>;
+    }
+  | {
+      code: "flow_unpublished_apply_failed";
+      message: string;
+      context: {
+        flow_id: string;
+        original_code: ApplyError["code"];
+        original_context: Record<string, unknown>;
+      };
+    }
+  | {
+      code: "network";
+      message: string;
+      context: { status: 0; stage?: string };
+    }
+  | {
+      code: "unknown";
+      message: string;
+      context: {
+        status?: number;
+        original_code?: string;
+        stage?: string;
+      } & Record<string, unknown>;
+    };
 
 export type PlanRevisionType = components["schemas"]["RevisePlanRequest"]["type"];
 

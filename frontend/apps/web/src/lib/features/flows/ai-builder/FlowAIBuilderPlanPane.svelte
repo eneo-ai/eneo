@@ -54,7 +54,9 @@
     service.applyError?.code === "flow_unpublished_apply_failed"
   );
   const publishedVersion = $derived(
-    isPublishedError ? (service.applyError?.context?.published_version as number | null) : null
+    service.applyError?.code === "flow_is_published"
+      ? (service.applyError.context.published_version ?? null)
+      : null
   );
 
   function resolveModelName(ref: string | null): string | null {

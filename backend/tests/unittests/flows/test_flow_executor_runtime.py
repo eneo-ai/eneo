@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 
+import intric.flows.runtime.executor as executor_module
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.outcome import Outcome
 from intric.flows.assistant_execution_snapshot import (
@@ -2874,298 +2875,6 @@ def test_run_error_from_bad_request_sanitizes_context(user) -> None:
     }
 
 
-def test_parse_runtime_steps_rejects_invalid_output_mode(user):
-    executor, _, _, _ = _build_executor(user)
-
-    with pytest.raises(BadRequestException, match="Unsupported output mode"):
-        executor._parse_runtime_steps(
-            {
-                "steps": [
-                    {
-                        "step_id": str(uuid4()),
-                        "step_order": 1,
-                        "assistant_id": str(uuid4()),
-                        "input_source": "flow_input",
-                        "output_mode": "invalid_mode",
-                    }
-                ]
-            }
-        )
-
-
-def test_parse_runtime_steps_scopes_invalid_step_identifier(user):
-    executor, _, _, _ = _build_executor(user)
-
-    with pytest.raises(BadRequestException) as exc_info:
-        executor._parse_runtime_steps(
-            {
-                "steps": [
-                    {
-                        "step_id": "not-a-uuid",
-                        "step_order": 1,
-                        "assistant_id": str(uuid4()),
-                        "user_description": "Analysera bakgrund",
-                        "input_source": "flow_input",
-                        "output_mode": "pass_through",
-                    }
-                ]
-            }
-        )
-
-    assert str(exc_info.value) == (
-        "Step 1 (Analysera bakgrund): Invalid step identifiers in flow snapshot."
-    )
-    assert exc_info.value.context == {
-        "step_order": 1,
-        "step_description": "Analysera bakgrund",
-    }
-
-
-def test_parse_runtime_steps_rejects_invalid_input_type(user):
-    executor, _, _, _ = _build_executor(user)
-
-    with pytest.raises(BadRequestException, match="Unsupported input type"):
-        executor._parse_runtime_steps(
-            {
-                "steps": [
-                    {
-                        "step_id": str(uuid4()),
-                        "step_order": 1,
-                        "assistant_id": str(uuid4()),
-                        "input_source": "flow_input",
-                        "input_type": "banana",
-                        "output_mode": "pass_through",
-                    }
-                ]
-            }
-        )
-
-
-def test_parse_runtime_steps_rejects_invalid_output_type(user):
-    executor, _, _, _ = _build_executor(user)
-
-    with pytest.raises(BadRequestException, match="Unsupported output type"):
-        executor._parse_runtime_steps(
-            {
-                "steps": [
-                    {
-                        "step_id": str(uuid4()),
-                        "step_order": 1,
-                        "assistant_id": str(uuid4()),
-                        "input_source": "flow_input",
-                        "output_mode": "pass_through",
-                        "output_type": "banana",
-                    }
-                ]
-            }
-        )
-
-
-def test_parse_runtime_steps_accepts_transcribe_only_output_mode(user):
-    executor, _, _, _ = _build_executor(user)
-
-    parsed = executor._parse_runtime_steps(
-        {
-            "steps": [
-                {
-                    "step_id": str(uuid4()),
-                    "step_order": 1,
-                    "assistant_id": str(uuid4()),
-                    "input_source": "flow_input",
-                    "input_type": "audio",
-                    "output_type": "text",
-                    "output_mode": "transcribe_only",
-                }
-            ]
-        }
-    )
-
-    assert len(parsed) == 1
-    assert parsed[0].output_mode == "transcribe_only"
-
-
-def test_parse_runtime_steps_accepts_step_timeout(user):
-    executor, _, _, _ = _build_executor(user)
-
-    parsed = executor._parse_runtime_steps(
-        {
-            "steps": [
-                {
-                    "step_id": str(uuid4()),
-                    "step_order": 1,
-                    "assistant_id": str(uuid4()),
-                    "input_source": "flow_input",
-                    "output_mode": "pass_through",
-                    "timeout_seconds": 1800,
-                }
-            ]
-        }
-    )
-
-    assert parsed[0].timeout_seconds == 1800
-
-
-def test_parse_runtime_steps_rejects_boolean_step_timeout(user):
-    executor, _, _, _ = _build_executor(user)
-
-    with pytest.raises(BadRequestException, match="timeout_seconds must be an integer"):
-        executor._parse_runtime_steps(
-            {
-                "steps": [
-                    {
-                        "step_id": str(uuid4()),
-                        "step_order": 1,
-                        "assistant_id": str(uuid4()),
-                        "input_source": "flow_input",
-                        "output_mode": "pass_through",
-                        "timeout_seconds": True,
-                    }
-                ]
-            }
-        )
-
-
-def test_parse_runtime_steps_rejects_non_object_webhook_headers(user):
-    executor, _, _, _ = _build_executor(user)
-
-    with pytest.raises(
-        BadRequestException, match="output_config.headers must be an object"
-    ):
-        executor._parse_runtime_steps(
-            {
-                "steps": [
-                    {
-                        "step_id": str(uuid4()),
-                        "step_order": 1,
-                        "assistant_id": str(uuid4()),
-                        "input_source": "flow_input",
-                        "output_mode": "http_post",
-                        "output_config": {
-                            "url": "https://example.org",
-                            "headers": "not-an-object",
-                        },
-                    }
-                ]
-            }
-        )
-
-
-def test_parse_runtime_steps_rejects_all_previous_steps_json_input(user):
-    executor, _, _, _ = _build_executor(user)
-
-    with pytest.raises(
-        BadRequestException, match="incompatible with input_source 'all_previous_steps'"
-    ):
-        executor._parse_runtime_steps(
-            {
-                "steps": [
-                    {
-                        "step_id": str(uuid4()),
-                        "step_order": 1,
-                        "assistant_id": str(uuid4()),
-                        "input_source": "flow_input",
-                        "input_type": "text",
-                        "output_type": "text",
-                        "output_mode": "pass_through",
-                    },
-                    {
-                        "step_id": str(uuid4()),
-                        "step_order": 2,
-                        "assistant_id": str(uuid4()),
-                        "input_source": "all_previous_steps",
-                        "input_type": "json",
-                        "output_type": "text",
-                        "output_mode": "pass_through",
-                    },
-                ]
-            }
-        )
-
-
-def test_parse_runtime_steps_rejects_incompatible_previous_step_chain(user):
-    executor, _, _, _ = _build_executor(user)
-
-    with pytest.raises(BadRequestException, match="incompatible type chain"):
-        executor._parse_runtime_steps(
-            {
-                "steps": [
-                    {
-                        "step_id": str(uuid4()),
-                        "step_order": 1,
-                        "assistant_id": str(uuid4()),
-                        "input_source": "flow_input",
-                        "input_type": "text",
-                        "output_type": "docx",
-                        "output_mode": "pass_through",
-                    },
-                    {
-                        "step_id": str(uuid4()),
-                        "step_order": 2,
-                        "assistant_id": str(uuid4()),
-                        "input_source": "previous_step",
-                        "input_type": "json",
-                        "output_type": "text",
-                        "output_mode": "pass_through",
-                    },
-                ]
-            }
-        )
-
-
-def test_parse_runtime_steps_rejects_duplicate_step_orders(user):
-    executor, _, _, _ = _build_executor(user)
-
-    with pytest.raises(BadRequestException, match="Duplicate step_order detected"):
-        executor._parse_runtime_steps(
-            {
-                "steps": [
-                    {
-                        "step_id": str(uuid4()),
-                        "step_order": 1,
-                        "assistant_id": str(uuid4()),
-                        "input_source": "flow_input",
-                        "output_mode": "pass_through",
-                    },
-                    {
-                        "step_id": str(uuid4()),
-                        "step_order": 1,
-                        "assistant_id": str(uuid4()),
-                        "input_source": "flow_input",
-                        "output_mode": "pass_through",
-                    },
-                ]
-            }
-        )
-
-
-def test_parse_runtime_steps_rejects_non_contiguous_step_orders(user):
-    executor, _, _, _ = _build_executor(user)
-
-    with pytest.raises(
-        BadRequestException, match="Step order must be contiguous and start at 1"
-    ):
-        executor._parse_runtime_steps(
-            {
-                "steps": [
-                    {
-                        "step_id": str(uuid4()),
-                        "step_order": 1,
-                        "assistant_id": str(uuid4()),
-                        "input_source": "flow_input",
-                        "output_mode": "pass_through",
-                    },
-                    {
-                        "step_id": str(uuid4()),
-                        "step_order": 3,
-                        "assistant_id": str(uuid4()),
-                        "input_source": "previous_step",
-                        "output_mode": "pass_through",
-                    },
-                ]
-            }
-        )
-
-
 # --- RunExecutionState ---
 
 
@@ -3879,7 +3588,9 @@ async def test_execute_fails_before_claim_when_assistant_snapshot_drifted(user):
 
 
 @pytest.mark.asyncio
-async def test_execute_fails_before_parse_when_definition_checksum_drifted(user):
+async def test_execute_fails_before_parse_when_definition_checksum_drifted(
+    user, monkeypatch
+):
     executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
     step_id = uuid4()
@@ -3889,7 +3600,12 @@ async def test_execute_fails_before_parse_when_definition_checksum_drifted(user)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.list_step_results = AsyncMock()
     flow_run_repo.claim_step_result = AsyncMock()
-    executor._parse_runtime_steps = MagicMock()
+    parse_published_runtime_steps = MagicMock()
+    monkeypatch.setattr(
+        executor_module,
+        "parse_published_runtime_steps",
+        parse_published_runtime_steps,
+    )
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -3922,7 +3638,7 @@ async def test_execute_fails_before_parse_when_definition_checksum_drifted(user)
     )
 
     assert result == {"status": "failed", "error": "definition_checksum_mismatch"}
-    executor._parse_runtime_steps.assert_not_called()
+    parse_published_runtime_steps.assert_not_called()
     flow_run_repo.list_step_results.assert_not_awaited()
     flow_run_repo.claim_step_result.assert_not_awaited()
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()

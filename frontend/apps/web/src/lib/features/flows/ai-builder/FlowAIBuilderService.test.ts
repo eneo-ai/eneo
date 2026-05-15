@@ -83,7 +83,7 @@ describe("FlowAIBuilderService", () => {
     ];
     const currentPlan = makePlan({ status: "approved" });
     const applyError: ApplyError = {
-      code: "validation_error",
+      code: "invalid_existing_step_ref",
       message: "Plan changed",
       context: {}
     };

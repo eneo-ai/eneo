@@ -4,7 +4,7 @@ import hashlib
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Mapping, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 import httpx
@@ -118,7 +118,6 @@ from intric.flows.runtime.step_attempt_runtime import (
     build_step_success_plan,
     build_typed_failure_plan,
 )
-from intric.flows.runtime.step_definition_parser import parse_runtime_steps
 from intric.flows.runtime.step_execution_runtime import (
     FlowStepCancelledError,
     StepExecutionRuntimeDeps,
@@ -517,7 +516,7 @@ class FlowRunExecutor:
             await self._commit()
             return {"status": "failed", "error": "definition_checksum_mismatch"}
         try:
-            steps = self._parse_published_runtime_steps(version.definition_json)
+            steps = parse_published_runtime_steps(version.definition_json)
         except BadRequestException as exc:
             source = FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
             await self._terminalize_run(
@@ -1187,7 +1186,9 @@ class FlowRunExecutor:
         if run.status == FlowRunStatus.CANCELLED:
             return {"status": "skipped", "reason": "run_cancelled"}
         if run.status == FlowRunStatus.FAILED:
-            error_message = run.error.message if run.error is not None else "flow_run_failed"
+            error_message = (
+                run.error.message if run.error is not None else "flow_run_failed"
+            )
             return {"status": "failed", "error": error_message}
         raise RuntimeError(
             "Step result write was skipped, but the flow run is not terminal."
@@ -1909,16 +1910,6 @@ class FlowRunExecutor:
         step: RuntimeStep,
     ) -> tuple[str, list[UUID]]:
         return await self._apply_output_cap(text=text, run=run, step=step)
-
-    @staticmethod
-    def _parse_published_runtime_steps(
-        definition_json: Mapping[str, object],
-    ) -> list[RuntimeStep]:
-        return parse_published_runtime_steps(definition_json)
-
-    @staticmethod
-    def _parse_runtime_steps(definition_json: Mapping[str, object]) -> list[RuntimeStep]:
-        return parse_runtime_steps(definition_json)
 
     @staticmethod
     def _validate_definition_checksum(*, version: FlowVersion, run_id: UUID) -> None:
