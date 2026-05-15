@@ -78,6 +78,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Static terminal-ownership guard tranche: add a source-level regression test that keeps crawler `CrawlRuns` terminal writes and crawler entrypoint job terminal mutations on the canonical `crawl_terminal.py` / `TerminalEvent` path.
 - [x] Typed Redis pipeline boundary tranche: move Redis pipeline result typing to `worker/redis/client.py` so `worker/crawl/heartbeat.py` and `worker/crawl/recovery.py` no longer need local `cast(...)` for pipeline results.
 - [x] Step 5 completion-log tranche: move crawl completion/performance logging into `worker/crawl/completion_log.py`, reuse `CrawlRunProcessingSummary`, and protect source-retained/hash-retained/too-large metric semantics with behavior tests.
+- [x] Queue-boundary scout tranche: reject premature `WorkerAdapter`/one-file Redis protocol work and select a concrete typed crawl enqueue owner as the next ownership-collapse slice.
 
 ## Non-Negotiable Principles
 
@@ -658,6 +659,7 @@ Purpose: isolate ARQ queue/runtime behavior behind a typed crawler-facing seam.
 Work:
 
 - [ ] Add a narrow `WorkerAdapter` Interface for enqueue, duplicate detection, status, abort, worker health, and slot release.
+- [ ] First collapse repeated crawl enqueue/status ownership into a concrete typed owner before introducing a `WorkerAdapter` interface.
 - [ ] Implement `ArqWorkerAdapter`.
 - [ ] Move `slot_preacquired` protocol behind the adapter.
 - [ ] Define retry semantics for crawl jobs explicitly.

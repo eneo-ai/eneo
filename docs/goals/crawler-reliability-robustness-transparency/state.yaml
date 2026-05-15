@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T115
+active_task: T116
 
 tasks:
   - id: T001
@@ -5534,7 +5534,7 @@ tasks:
   - id: T115
     type: scout
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Scope the next WorkerAdapter or queue-boundary reliability slice from current crawler ARQ/Redis/slot ownership without introducing an interface before it earns its existence."
     inputs:
@@ -5554,6 +5554,81 @@ tasks:
       - "Current direct ARQ/Redis/slot surfaces after recent cleanup."
       - "Whether WorkerAdapter is now earned or another ownership-collapse slice should come first."
       - "One bounded next worker task with allowed files, red test, verification, and stop conditions."
+    receipt:
+      result: done
+      summary: "Mapped the current post-slot-cleanup queue boundary. Claude rejected a one-file Redis list protocol and rejected introducing WorkerAdapter now. The next reliable slice is a concrete typed crawl enqueue owner for already-created crawl jobs, plus reusing existing JobManager.get_job_status from watchdog instead of constructing arq.jobs.Job directly."
+      decision: "Activate T116 to collapse repeated crawl enqueue/status ownership without introducing WorkerAdapter."
+      evidence:
+        - "docs/goals/crawler-reliability-robustness-transparency/notes/T115-queue-boundary-scout.md"
+        - ".codex/artifacts/claude-peer-loop-t115-queue-boundary-next-slice-scout-20260515T100427Z.md"
+        - "backend/src/intric/jobs/job_manager.py"
+        - "backend/src/intric/redis/connection.py"
+        - "backend/src/intric/worker/feeder/queues.py"
+        - "backend/src/intric/worker/feeder/watchdog.py"
+        - "backend/src/intric/websites/domain/crawl_service.py"
+      local_verification:
+        - "rg confirmed CrawlTask(...) construction in TaskService.queue_crawl plus three already-created-job enqueue paths: JobEnqueuer, CrawlService, and watchdog."
+        - "JobManager.get_job_status already owns arq.jobs.Job status construction."
+        - "build_arq_redis_settings(...) and build_redis_pool_kwargs(...) both honor settings.redis_db."
+      claude:
+        verdict: changes_required
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t115-queue-boundary-next-slice-scout-20260515T100427Z.md"
+        resolution: "Accepted Claude's refined-C recommendation: no WorkerAdapter yet, no one-file Redis protocol, reuse JobManager.get_job_status, and collapse already-created crawl-job enqueue semantics behind a concrete typed owner."
+      spawned_tasks:
+        - T116
+  - id: T116
+    type: worker
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Create one concrete typed owner for enqueueing already-created crawl jobs into ARQ and reuse JobManager.get_job_status from watchdog."
+    inputs:
+      - "T115 receipt"
+      - "docs/goals/crawler-reliability-robustness-transparency/notes/T115-queue-boundary-scout.md"
+      - "backend/src/intric/worker/feeder/queues.py"
+      - "backend/src/intric/worker/feeder/watchdog.py"
+      - "backend/src/intric/websites/domain/crawl_service.py"
+      - "backend/src/intric/jobs/job_manager.py"
+    allowed_files:
+      - "backend/src/intric/worker/feeder/queues.py"
+      - "backend/src/intric/worker/feeder/watchdog.py"
+      - "backend/src/intric/websites/domain/crawl_service.py"
+      - "backend/src/intric/worker/feeder/crawl_enqueue.py"
+      - "backend/tests/unittests/worker/feeder/test_queues.py"
+      - "backend/tests/unittests/worker/feeder/test_watchdog_enqueue.py"
+      - "backend/tests/unittests/websites/test_crawl_service_slot_ownership.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "docs/goals/crawler-reliability-robustness-transparency/notes/T115-queue-boundary-scout.md"
+    constraints:
+      - "No WorkerAdapter interface, protocol, factory, base class, or generic manager."
+      - "Do not change slot acquire/release, pre-acquired flag, pending queue key, pending queue JSON wire shape, terminal outcome, admin, frontend, or TaskService.queue_crawl semantics."
+      - "Do not stage unrelated .devcontainer dirt."
+      - "Keep CrawlPendingJobData as the Redis serialization shape; parse it at the edge and delegate typed values to the enqueue owner."
+      - "Use JobManager.get_job_status from watchdog instead of constructing arq.jobs.Job directly."
+    expected_output:
+      - "One typed crawl enqueue owner for already-created crawl jobs."
+      - "Typed enqueue outcome instead of tuple-shaped success/is_duplicate returns at the canonical boundary."
+      - "JobEnqueuer pending-queue path, CrawlService direct handoff, and watchdog requeue path reuse the same owner."
+      - "watchdog.py no longer imports arq.jobs.Job directly."
+    red_test_plan:
+      - "Behavior test: typed enqueue returns ENQUEUED when job_manager.enqueue returns True."
+      - "Behavior test: typed enqueue returns DUPLICATE when job_manager.enqueue returns False."
+      - "Behavior test: typed enqueue preserves the existing failure policy on exceptions without text-based duplicate inference."
+      - "Behavior test: enqueue_from_pending parses CrawlPendingJobData and delegates to typed enqueue; invalid job_id remains a clean failed outcome."
+      - "Behavior test: watchdog requeue uses JobManager.get_job_status and the typed enqueue owner, and does not construct arq.jobs.Job directly."
+      - "Source guard: backend/src/intric/worker/feeder/watchdog.py does not import arq.jobs.Job."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/feeder/test_watchdog_enqueue.py tests/unittests/websites/test_crawl_service_slot_ownership.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/feeder/queues.py src/intric/worker/feeder/watchdog.py src/intric/worker/feeder/crawl_enqueue.py src/intric/websites/domain/crawl_service.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/feeder/test_watchdog_enqueue.py tests/unittests/websites/test_crawl_service_slot_ownership.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/feeder/queues.py src/intric/worker/feeder/watchdog.py src/intric/worker/feeder/crawl_enqueue.py src/intric/websites/domain/crawl_service.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/feeder/test_watchdog_enqueue.py tests/unittests/websites/test_crawl_service_slot_ownership.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/feeder/queues.py src/intric/worker/feeder/watchdog.py src/intric/worker/feeder/crawl_enqueue.py src/intric/websites/domain/crawl_service.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/feeder/test_watchdog_enqueue.py tests/unittests/websites/test_crawl_service_slot_ownership.py"
+    stop_if:
+      - "Need to change pre-acquired slot rollback ordering."
+      - "CrawlService duplicate policy differs from feeder/watchdog and cannot be represented without changing behavior."
+      - "The typed enqueue owner starts owning terminal commits, slot release, or pending queue serialization."
+      - "Need broad changes to TaskService.queue_crawl or generic non-crawl job enqueueing."
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
