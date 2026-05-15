@@ -52,5 +52,18 @@ class JobManager:
 
         return await job.status()
 
+    async def abort_job(
+        self,
+        job_id: UUID,
+        *,
+        timeout: float | None = None,
+        poll_delay: float = 0.5,
+    ) -> bool:
+        if self._redis is None:
+            raise NotReadyException("Job manager is not initialized!")
+        job = Job(job_id=str(job_id), redis=self._redis)
+
+        return await job.abort(timeout=timeout, poll_delay=poll_delay)
+
 
 job_manager = JobManager()

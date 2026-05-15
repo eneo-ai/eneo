@@ -6832,16 +6832,67 @@ tasks:
         - "Consider consolidating the existing generic `formatBytes` helper and the feature-local scheduled indexed-size formatter into one locale-aware IEC formatting owner in a separate cleanup."
         - "Consider adding `satisfies PageLoad` to the admin crawler page load contract in a broader frontend typing cleanup."
         - "Consider promoting the repeated caution Alert styling into a first-class shadcn Alert variant once design-system ownership is ready."
+  - id: T141
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Add the missing low-level ARQ abort primitive to `JobManager` without introducing a no-caller crawler abort abstraction or broad WorkerAdapter interface yet."
+    allowed_files:
+      - "backend/src/intric/jobs/job_manager.py"
+      - "backend/tests/unittests/jobs/test_job_manager.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Use ARQ's native `Job.abort(timeout=..., poll_delay=...)` behavior; do not simulate abort with Redis key deletion."
+      - "Do not introduce a crawler-domain abort result until the same slice adds its first production caller and terminal/slot/cleanup semantics."
+      - "Do not introduce the full `WorkerAdapter` interface in this slice; this is the low-level ARQ primitive first."
+      - "Do not add admin write endpoints or frontend abort controls in this slice."
+      - "Do not change terminal cleanup policy, audit behavior, slot release behavior, or running crawl cancellation handling yet."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/jobs/test_job_manager.py -q"
+      - "cd backend && uv run ruff check src/intric/jobs/job_manager.py tests/unittests/jobs/test_job_manager.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/jobs/job_manager.py tests/unittests/jobs/test_job_manager.py"
+    red_tests:
+      - "JobManager delegates abort to `arq.jobs.Job.abort(...)` with timeout and poll_delay."
+      - "JobManager abort fails loudly when Redis is not initialized."
+    stop_if:
+      - "Implementing abort requires changing crawler terminal events, cleanup policy, admin write controls, or slot release in the same slice."
+      - "ARQ's installed `Job.abort(...)` signature differs from the documented `(timeout=None, poll_delay=0.5)` form."
+      - "Strict Pyright requires broad casts, `Any`, or type ignores."
+    receipt:
+      result: done
+      summary: "Added `JobManager.abort_job(...)` as the low-level ARQ abort primitive. The method delegates to `arq.jobs.Job.abort(...)`, preserves ARQ's timeout/poll-delay behavior, returns ARQ's boolean abort result, and fails through the existing `NotReadyException` guard when Redis is not initialized. No crawler-domain abort result, admin write endpoint, terminal policy, cleanup behavior, or slot-release behavior was introduced before a production caller exists."
+      changed_files:
+        - "backend/src/intric/jobs/job_manager.py"
+        - "backend/tests/unittests/jobs/test_job_manager.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      red_evidence:
+        - "Initial T141 red work proved the missing abort boundary, but Claude rejected the first no-caller crawler-domain wrapper as premature. The implemented slice was narrowed to the ARQ primitive and covered with behavior tests for explicit options, default options, false abort result propagation, and uninitialized manager failure."
+      validation:
+        - "cd backend && uv run pytest tests/unittests/jobs/test_job_manager.py -q"
+        - "cd backend && uv run ruff check src/intric/jobs/job_manager.py tests/unittests/jobs/test_job_manager.py"
+        - "cd backend && uv run ruff format --check src/intric/jobs/job_manager.py tests/unittests/jobs/test_job_manager.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/jobs/job_manager.py tests/unittests/jobs/test_job_manager.py"
+      claude:
+        verdict: green
+        min_score: 8
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t141-arq-abort-primitive-revision-2-20260515T173652Z.md"
+        resolution: "Claude rejected the broader crawler-abort wrapper because it had no caller and would create premature semantics. The revised slice keeps ownership in `JobManager`, uses ARQ's native `Job.abort`, and defers terminal/slot/cleanup/admin behavior until the first real abort caller."
+      follow_up_notes:
+        - "The next abort-related slice should start from a production caller and define queued/running terminal semantics, cleanup policy, slot release, and audit behavior in the same bounded change."
+        - "Do not introduce a full WorkerAdapter until there is enough direct ARQ leakage left to justify the abstraction."
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T137
+    task: T141
     commands:
-      - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerActiveInventory.test.ts src/lib/features/admin/crawlerAdminPageLoad.test.ts src/lib/features/admin/crawlerRecentFailures.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts"
-      - "cd frontend && bun run --filter @intric/web check"
-      - "cd frontend && bun run --filter @intric/web lint"
-      - "cd frontend/packages/intric-js && bun run lint"
-      - "git diff --check on intended T137 files"
-    note: "T137 tenant admin active-crawler UI passed focused unit tests, frontend check, app lint, intric-js lint, diff whitespace check, shadcn/UX review, and Claude revision gate. Frontend check still reports the pre-existing ExtendExpirationDialog.svelte warning."
+      - "cd backend && uv run pytest tests/unittests/jobs/test_job_manager.py -q"
+      - "cd backend && uv run ruff check src/intric/jobs/job_manager.py tests/unittests/jobs/test_job_manager.py"
+      - "cd backend && uv run ruff format --check src/intric/jobs/job_manager.py tests/unittests/jobs/test_job_manager.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/jobs/job_manager.py tests/unittests/jobs/test_job_manager.py"
+    note: "T141 passed focused JobManager behavior tests, Ruff check, Ruff format check, strict Pyright, and Claude review. It intentionally adds only the low-level ARQ abort primitive; production caller semantics remain deferred."

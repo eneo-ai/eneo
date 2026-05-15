@@ -96,6 +96,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Post-T137 roadmap reconciliation tranche: refresh stale plan evidence before starting another code slice, close baseline/phase-skeleton checklist drift against current code, and keep broader admin overview, WorkerAdapter, and write-control work as explicit follow-ups.
 - [x] Tenant-scoped scheduled crawler aggregate endpoint tranche: expose `/api/v1/admin/crawler/scheduled` through the existing tenant admin crawler router, split scheduled aggregate repository ownership into tenant/sysadmin entry points, and move the shared scheduled response model into the crawler admin presentation owner.
 - [x] Tenant admin scheduled crawler load UI tranche: consume `/api/v1/admin/crawler/scheduled` in the admin crawler page with a bounded shadcn summary card, independent load failure handling, locale-aware scheduled-count/size labels, and explicit shadcn plus UX review gates.
+- [x] Step 6 ARQ abort primitive tranche: add `JobManager.abort_job(...)` as the narrow ARQ-native abort owner while deferring crawler-domain abort terminal/cleanup/slot/admin semantics until a production caller exists.
 
 ## Non-Negotiable Principles
 

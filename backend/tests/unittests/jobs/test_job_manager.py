@@ -1,10 +1,12 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
 import pytest
+from arq.connections import ArqRedis
 
 from intric.jobs.job_manager import JobManager
 from intric.jobs.job_models import Task
+from intric.main.exceptions import NotReadyException
 from intric.websites.crawl_dependencies.crawl_models import CrawlTask
 from intric.websites.domain.crawl_run import CrawlType
 
@@ -51,3 +53,55 @@ async def test_enqueue_returns_false_when_arq_reports_duplicate_job_id():
     )
 
     assert enqueued is False
+
+
+@pytest.mark.asyncio
+async def test_abort_job_delegates_to_arq_job_abort():
+    job_id = uuid4()
+    manager = JobManager()
+    redis = AsyncMock(spec=ArqRedis)
+    manager._redis = redis
+
+    arq_job = Mock()
+    arq_job.abort = AsyncMock(return_value=True)
+    with patch(
+        "intric.jobs.job_manager.Job",
+        return_value=arq_job,
+    ) as job_cls:
+        aborted = await manager.abort_job(
+            job_id,
+            timeout=12.0,
+            poll_delay=0.25,
+        )
+
+    assert aborted is True
+    job_cls.assert_called_once_with(job_id=str(job_id), redis=redis)
+    arq_job.abort.assert_awaited_once_with(timeout=12.0, poll_delay=0.25)
+
+
+@pytest.mark.asyncio
+async def test_abort_job_uses_arq_default_abort_options():
+    job_id = uuid4()
+    manager = JobManager()
+    redis = AsyncMock(spec=ArqRedis)
+    manager._redis = redis
+
+    arq_job = Mock()
+    arq_job.abort = AsyncMock(return_value=False)
+    with patch(
+        "intric.jobs.job_manager.Job",
+        return_value=arq_job,
+    ) as job_cls:
+        aborted = await manager.abort_job(job_id)
+
+    assert aborted is False
+    job_cls.assert_called_once_with(job_id=str(job_id), redis=redis)
+    arq_job.abort.assert_awaited_once_with(timeout=None, poll_delay=0.5)
+
+
+@pytest.mark.asyncio
+async def test_abort_job_requires_initialized_job_manager():
+    manager = JobManager()
+
+    with pytest.raises(NotReadyException):
+        await manager.abort_job(uuid4())
