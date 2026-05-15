@@ -7145,20 +7145,69 @@ tasks:
         - "If sysadmin abort controls are added later, revisit orphan queued rows because sysadmin active inventory can expose queued jobs without crawl runs."
         - "A future abortability reason union can replace the boolean only when product needs to explain disabled actions."
         - "Running abort remains deferred; extending `is_queued_crawl_abortable_status(...)` alone is insufficient while `abort_queued_crawl(...)` still returns `RUNNING_ABORT_NOT_IMPLEMENTED` for in-progress jobs."
+  - id: T145
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Harden sysadmin active crawler inventory so orphan queued jobs stay visible but are not advertised as abortable."
+    allowed_files:
+      - "backend/src/intric/websites/domain/crawl_abort.py"
+      - "backend/src/intric/websites/domain/crawl_run_repo.py"
+      - "backend/tests/integration/test_admin_crawler_abort.py"
+      - "backend/tests/integration/test_sysadmin_crawler_active_inventory.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Keep sysadmin orphan queued jobs visible for operational transparency."
+      - "Do not expose an abort action for jobs the queued-abort endpoint cannot address."
+      - "Do not implement sysadmin orphan abort, running abort, or a new error contract in this slice."
+      - "Preserve tenant admin abort behavior for queued jobs that have a `CrawlRun`."
+    verify:
+      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_active_inventory.py tests/integration/test_admin_crawler_active_inventory.py tests/integration/test_admin_crawler_abort.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py tests/integration/test_sysadmin_crawler_active_inventory.py tests/integration/test_admin_crawler_abort.py"
+      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py tests/integration/test_sysadmin_crawler_active_inventory.py tests/integration/test_admin_crawler_abort.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py tests/integration/test_sysadmin_crawler_active_inventory.py tests/integration/test_admin_crawler_abort.py"
+    red_tests:
+      - "Sysadmin active-inventory regression failed because an orphan queued crawl job was visible with `is_abortable=true` even though it had no `crawl_run_id`."
+    stop_if:
+      - "The fix requires hiding orphan queued jobs from sysadmin inventory."
+      - "The fix requires making the abort endpoint accept jobs without crawl runs."
+      - "Strict Pyright requires broad casts, `Any`, or type ignores."
+    receipt:
+      result: done
+      summary: "Changed active crawler inventory abortability from status-only to target-aware. Orphan queued crawl jobs remain visible in sysadmin inventory, but they now return `is_abortable=false` because the queued-abort path is `CrawlRun` backed. Queued jobs with crawl runs remain abortable, and the tenant abort endpoint now has explicit integration coverage proving orphan queued jobs return 404 without calling ARQ abort or emitting abort audit logs."
+      changed_files:
+        - "backend/src/intric/websites/domain/crawl_abort.py"
+        - "backend/src/intric/websites/domain/crawl_run_repo.py"
+        - "backend/tests/integration/test_admin_crawler_abort.py"
+        - "backend/tests/integration/test_sysadmin_crawler_active_inventory.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      validation:
+        - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_active_inventory.py -q"
+        - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_active_inventory.py tests/integration/test_admin_crawler_active_inventory.py tests/integration/test_admin_crawler_abort.py -q"
+        - "cd backend && uv run ruff check src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py tests/integration/test_sysadmin_crawler_active_inventory.py tests/integration/test_admin_crawler_abort.py"
+        - "cd backend && uv run ruff format --check src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py tests/integration/test_sysadmin_crawler_active_inventory.py tests/integration/test_admin_crawler_abort.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py tests/integration/test_sysadmin_crawler_active_inventory.py tests/integration/test_admin_crawler_abort.py"
+      claude:
+        verdict: green
+        min_score: 8
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t145-sysadmin-orphan-abortability-20260515T192939Z.md"
+        resolution: "Claude green-lit the target-aware abortability shape with MIN_SCORE 8. Non-blocking suggestions for a CrawlRun-backed docstring and an orphan-abort endpoint regression test were applied before commit."
+      follow_up_notes:
+        - "If a sysadmin abort endpoint is later designed to accept orphan queued jobs, revisit `is_queued_crawl_abortable_target(...)` and the inventory contract deliberately."
+        - "Sysadmin frontend rows with `is_abortable=false` should continue to render without an abort affordance."
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T144
+    task: T145
     commands:
-      - "cd backend && uv run pytest tests/integration/test_admin_crawler_active_inventory.py tests/integration/test_admin_crawler_abort.py -q"
-      - "cd backend && uv run ruff check src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_active_inventory.py"
-      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_active_inventory.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawler_active_inventory.py src/intric/websites/domain/crawl_run_repo.py src/intric/websites/domain/crawl_service.py src/intric/websites/presentation/crawler_admin_models.py tests/integration/test_admin_crawler_active_inventory.py"
-      - "cd frontend && bun run --filter @intric/web test:unit -- src/lib/features/admin/crawlerActiveInventory.test.ts src/lib/features/admin/crawlerGeneratedTypes.test.ts"
-      - "cd frontend && bun run --filter @intric/web check"
-      - "cd frontend && bun run --filter @intric/web lint"
-      - "cd frontend/packages/intric-js && bun run lint"
-      - "./scripts/check-intric-js-openapi-schema.sh"
-    note: "T144 passed backend active-inventory and abort integration coverage, generated OpenAPI freshness, frontend helper/type coverage, frontend check/lint, focused Ruff, and focused strict Pyright. Admin UI abortability is now backend-owned through `is_abortable`."
+      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_active_inventory.py tests/integration/test_admin_crawler_active_inventory.py tests/integration/test_admin_crawler_abort.py -q"
+      - "cd backend && uv run ruff check src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py tests/integration/test_sysadmin_crawler_active_inventory.py tests/integration/test_admin_crawler_abort.py"
+      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py tests/integration/test_sysadmin_crawler_active_inventory.py tests/integration/test_admin_crawler_abort.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_abort.py src/intric/websites/domain/crawl_run_repo.py tests/integration/test_sysadmin_crawler_active_inventory.py tests/integration/test_admin_crawler_abort.py"
+    note: "T145 passed backend sysadmin active-inventory and abort integration coverage, focused Ruff/format, focused strict Pyright, and Claude review. Orphan queued jobs remain visible but are no longer advertised as abortable unless they have a `CrawlRun` target."

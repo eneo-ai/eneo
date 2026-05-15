@@ -13,7 +13,7 @@ from intric.database.tables.websites_table import Websites
 from intric.jobs.job_models import Task
 from intric.main.exceptions import NotFoundException
 from intric.main.models import Status
-from intric.websites.domain.crawl_abort import is_queued_crawl_abortable_status
+from intric.websites.domain.crawl_abort import is_queued_crawl_abortable_target
 from intric.websites.domain.crawl_lifecycle import derive_crawl_lifecycle_from_counters
 from intric.websites.domain.crawl_outcome import (
     CrawlOutcomeCode,
@@ -324,7 +324,10 @@ class CrawlRunRepository:
                     tenant_display_name=row["tenant_display_name"],
                     status=status,
                     lifecycle_state=lifecycle_state,
-                    is_abortable=is_queued_crawl_abortable_status(status),
+                    is_abortable=is_queued_crawl_abortable_target(
+                        status=status,
+                        has_crawl_run=row["crawl_run_id"] is not None,
+                    ),
                     job_created_at=row["job_created_at"],
                     job_updated_at=row["job_updated_at"],
                     crawl_run_created_at=row["crawl_run_created_at"],

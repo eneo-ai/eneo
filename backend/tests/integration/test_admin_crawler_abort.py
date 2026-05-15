@@ -449,6 +449,50 @@ async def test_admin_abort_unknown_crawl_returns_not_found(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_admin_abort_orphan_queued_crawl_returns_not_found_without_arq_abort(
+    client,
+    db_session,
+    admin_user,
+    admin_user_api_key,
+    monkeypatch,
+):
+    abort_called = False
+    audit_calls = _install_audit_recorder(monkeypatch)
+
+    async def record_abort(
+        self: JobManager,
+        job_id: UUID,
+        *,
+        timeout: float | None = None,
+        poll_delay: float = 0.5,
+    ) -> bool:
+        nonlocal abort_called
+        abort_called = True
+        return True
+
+    monkeypatch.setattr(JobManager, "abort_job", record_abort)
+
+    async with db_session() as session:
+        job = await _create_crawl_job(
+            session,
+            user_id=admin_user.id,
+            status=Status.QUEUED,
+        )
+        job_id = job.id
+        await session.commit()
+
+    response = await client.post(
+        f"/api/v1/admin/crawler/jobs/{job_id}/abort",
+        headers={"X-API-Key": admin_user_api_key.key},
+    )
+
+    assert response.status_code == 404
+    assert abort_called is False
+    assert _abort_audit_calls(audit_calls) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_admin_abort_already_aborted_crawl_is_idempotent_and_retries_cleanup(
     client,
     db_session,

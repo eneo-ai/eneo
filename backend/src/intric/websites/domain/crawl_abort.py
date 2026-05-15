@@ -16,6 +16,11 @@ def is_queued_crawl_abortable_status(status: Status) -> bool:
     return status == Status.QUEUED
 
 
+def is_queued_crawl_abortable_target(*, status: Status, has_crawl_run: bool) -> bool:
+    """Return whether a queued job can be addressed by the CrawlRun-backed abort path."""
+    return has_crawl_run and is_queued_crawl_abortable_status(status)
+
+
 @dataclass(frozen=True, slots=True)
 class CrawlAbortWebsite:
     id: UUID

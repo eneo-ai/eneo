@@ -168,6 +168,20 @@ async def test_sysadmin_crawler_active_inventory_lists_lifecycle_and_filters(
             status=Status.QUEUED,
             created_at=now,
         )
+        queued_with_run_job = await _create_job(
+            session,
+            user_id=user.id,
+            task=Task.CRAWL,
+            status=Status.QUEUED,
+            created_at=now - timedelta(seconds=30),
+        )
+        queued_with_run = await _create_crawl_run(
+            session,
+            tenant_id=tenant.id,
+            website_id=website.id,
+            job_id=queued_with_run_job.id,
+            created_at=queued_with_run_job.created_at,
+        )
         no_progress_job = await _create_job(
             session,
             user_id=user.id,
@@ -239,6 +253,8 @@ async def test_sysadmin_crawler_active_inventory_lists_lifecycle_and_filters(
             created_at=now - timedelta(minutes=5),
         )
         orphan_queued_job_id = orphan_queued_job.id
+        queued_with_run_job_id = queued_with_run_job.id
+        queued_with_run_id = queued_with_run.id
         no_progress_job_id = no_progress_job.id
         no_progress_run_id = no_progress_run.id
         with_progress_job_id = with_progress_job.id
@@ -255,9 +271,10 @@ async def test_sysadmin_crawler_active_inventory_lists_lifecycle_and_filters(
 
     assert response.status_code == 200
     data = response.json()
-    assert data["total"] == 4
+    assert data["total"] == 5
     assert [item["job_id"] for item in data["items"]] == [
         str(orphan_queued_job_id),
+        str(queued_with_run_job_id),
         str(no_progress_job_id),
         str(with_progress_job_id),
         str(other_tenant_job_id),
@@ -271,6 +288,14 @@ async def test_sysadmin_crawler_active_inventory_lists_lifecycle_and_filters(
     assert by_job_id[str(orphan_queued_job_id)]["lifecycle_state"] == (
         CrawlLifecycle.QUEUED.value
     )
+    assert by_job_id[str(orphan_queued_job_id)]["is_abortable"] is False
+    assert by_job_id[str(queued_with_run_job_id)]["crawl_run_id"] == str(
+        queued_with_run_id
+    )
+    assert by_job_id[str(queued_with_run_job_id)]["lifecycle_state"] == (
+        CrawlLifecycle.QUEUED.value
+    )
+    assert by_job_id[str(queued_with_run_job_id)]["is_abortable"] is True
     assert by_job_id[str(no_progress_job_id)]["crawl_run_id"] == str(no_progress_run_id)
     assert by_job_id[str(no_progress_job_id)]["website_name"] == (
         "Crawler active primary"
@@ -308,8 +333,9 @@ async def test_sysadmin_crawler_active_inventory_lists_lifecycle_and_filters(
 
     assert tenant_response.status_code == 200
     tenant_data = tenant_response.json()
-    assert tenant_data["total"] == 2
+    assert tenant_data["total"] == 3
     assert [item["job_id"] for item in tenant_data["items"]] == [
+        str(queued_with_run_job_id),
         str(no_progress_job_id),
         str(with_progress_job_id),
     ]
@@ -325,12 +351,12 @@ async def test_sysadmin_crawler_active_inventory_lists_lifecycle_and_filters(
 
     assert page_response.status_code == 200
     page_data = page_response.json()
-    assert page_data["total"] == 4
+    assert page_data["total"] == 5
     assert page_data["limit"] == 2
     assert page_data["offset"] == 1
     assert [item["job_id"] for item in page_data["items"]] == [
+        str(queued_with_run_job_id),
         str(no_progress_job_id),
-        str(with_progress_job_id),
     ]
 
 
