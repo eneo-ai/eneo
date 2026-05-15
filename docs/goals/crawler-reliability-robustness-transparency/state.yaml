@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T081
+active_task: T082
 
 tasks:
   - id: T001
@@ -3923,7 +3923,7 @@ tasks:
   - id: T081
     type: worker
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Cover both post-terminal circuit-breaker operation-name literals without broadening production behavior."
     inputs:
@@ -3955,18 +3955,65 @@ tasks:
       - "Need production files beyond `post_terminal_effects.py` to make the test pass."
       - "The test would only assert private implementation details instead of behavior."
       - "Strict Pyright regresses on touched files."
+    receipt:
+      result: done
+      summary: "Hardened the post-terminal tests so both allowed circuit-breaker operation-name literals are exercised. The recovery fake now records operation names with the exact keyword-only executor signature, while each test owns its operation-name expectation."
+      changed_files:
+        - "backend/tests/unittests/worker/test_crawl_post_terminal_effects.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      tdd_red:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_post_terminal_effects.py -q -> 1 failed, 3 passed; failure was expected because `_Recorder.execute_with_recovery(...)` hard-coded `operation_name == \"circuit_breaker_update\"` before the new terminal-operation test"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_post_terminal_effects.py -q -> 4 passed"
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q -> 15 passed"
+        - "cd backend && uv run pytest tests/unittests/worker -q -> 321 passed"
+        - "cd backend && uv run ruff check tests/unittests/worker/test_crawl_post_terminal_effects.py -> passed"
+        - "cd backend && uv run ruff format --check tests/unittests/worker/test_crawl_post_terminal_effects.py -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json tests/unittests/worker/test_crawl_post_terminal_effects.py -> 0 errors"
+      claude:
+        verdict: green
+        artifact: ".codex/artifacts/claude-peer-loop-t081-post-terminal-operation-name-test-hardening-final-20260515T040944Z.md"
+        min_score: 9
+      notes:
+        - "Claude iteration 1 green-lit the initial test-only change and suggested two P3 readability refinements; iteration 2 green-lit the final file after both refinements landed."
+      spawned_tasks:
+        - T082
+  - id: T082
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Audit the remaining roadmap and choose the next safe bounded implementation slice after post-terminal recovery seam cleanup."
+    inputs:
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "T080 receipt"
+      - "T081 receipt"
+      - "Current git diff/status"
+    constraints:
+      - "Read-only except updating this state file and the plan with the selected next task."
+      - "Prefer the highest ROI maintainability/reliability slice that is small enough for TDD and strict Pyright."
+      - "Do not broaden into unrelated feature work or large UI/admin changes without a fresh worker card."
+      - "Preserve unrelated .devcontainer dirt."
+      - "Use Claude peer-loop if the candidate touches runtime lifecycle, public API, DB schema, admin UX, or queue semantics."
+    expected_output:
+      - "Decision: next bounded Worker task or completion audit."
+      - "Evidence from roadmap/code."
+      - "Allowed files, verification commands, and stop conditions for the next task."
+      - "Explicit non-goals."
+    receipt: null
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T080
+    task: T081
     commands:
-      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
       - "cd backend && uv run pytest tests/unittests/worker -q"
-      - "cd backend && uv run ruff check src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_effects.py"
-      - "cd backend && uv run ruff format --check src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_effects.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/post_terminal_effects.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_post_terminal_effects.py"
-      - "rg -n \"PostTerminalRecoveryContext|recovery=PostTerminalRecoveryContext\" backend/src backend/tests || true"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t080-post-terminal-recovery-context-collapse --phase commit-gate --iteration 1 --require-green --required-min-score 8 ..."
-    note: "T080 post-terminal recovery-context collapse passed targeted worker tests, full worker unit tests, ruff, format check, strict Pyright, stale-reference grep, and Claude green review."
+      - "cd backend && uv run pytest tests/unittests/worker/test_crawl_post_terminal_effects.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py -q"
+      - "cd backend && uv run ruff check tests/unittests/worker/test_crawl_post_terminal_effects.py"
+      - "cd backend && uv run ruff format --check tests/unittests/worker/test_crawl_post_terminal_effects.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json tests/unittests/worker/test_crawl_post_terminal_effects.py"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t081-post-terminal-operation-name-test --phase verification --iteration 2 --require-green --required-min-score 8 ..."
+    note: "T081 post-terminal operation-name coverage passed targeted worker tests, full worker unit tests, ruff, format check, strict Pyright, and Claude green review."

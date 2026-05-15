@@ -22,6 +22,7 @@ class _FakeAuditService:
 class _Recorder:
     def __init__(self) -> None:
         self.events: list[str] = []
+        self.operation_names: list[str] = []
         self.circuit_breaker_success_values: list[bool] = []
         self.audit_services: list[AuditService] = []
         self.audit_payloads: list[CrawlAuditPayload] = []
@@ -32,7 +33,7 @@ class _Recorder:
         operation_name: str,
         operation: Callable[[AsyncSession], Awaitable[None]],
     ) -> None:
-        assert operation_name == "circuit_breaker_update"
+        self.operation_names.append(operation_name)
         self.events.append("circuit-breaker")
         await operation(cast(AsyncSession, object()))
 
@@ -114,6 +115,7 @@ async def test_apply_post_terminal_effects_records_success_before_audit(
     )
 
     assert recorder.events == ["circuit-breaker", "audit"]
+    assert recorder.operation_names == ["circuit_breaker_update"]
     assert recorder.circuit_breaker_success_values == [True]
     assert recorder.audit_services == [audit_service]
     assert recorder.audit_payloads == [payload]
@@ -143,6 +145,7 @@ async def test_apply_post_terminal_effects_records_failure_before_audit(
     )
 
     assert recorder.events == ["circuit-breaker", "audit"]
+    assert recorder.operation_names == ["circuit_breaker_update"]
     assert recorder.circuit_breaker_success_values == [False]
     assert recorder.audit_services == [audit_service]
     assert recorder.audit_payloads == [payload]
@@ -150,6 +153,32 @@ async def test_apply_post_terminal_effects_records_failure_before_audit(
         CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED
     )
     assert recorder.audit_payloads[0].successful is False
+
+
+@pytest.mark.asyncio
+async def test_apply_post_terminal_effects_accepts_terminal_operation_name(
+    recorder: _Recorder,
+) -> None:
+    audit_service = _FakeAuditService()
+    payload = _payload(
+        successful=False,
+        outcome_code=CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED,
+    )
+
+    await apply_post_terminal_effects(
+        PostTerminalEffectInput(
+            recovery_executor=recorder.execute_with_recovery,
+            audit_service=audit_service,
+            audit_payload=payload,
+            circuit_breaker_operation_name="terminal_circuit_breaker_update",
+        )
+    )
+
+    assert recorder.events == ["circuit-breaker", "audit"]
+    assert recorder.operation_names == ["terminal_circuit_breaker_update"]
+    assert recorder.circuit_breaker_success_values == [False]
+    assert recorder.audit_services == [audit_service]
+    assert recorder.audit_payloads == [payload]
 
 
 @pytest.mark.asyncio
