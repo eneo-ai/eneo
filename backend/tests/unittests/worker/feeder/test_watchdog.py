@@ -4,6 +4,7 @@ Tests the 5-phase orphan job cleanup with transaction-safe slot release.
 Following TDD approach - tests define expected behavior before implementation.
 """
 
+import ast
 import json
 import re
 from collections.abc import Mapping
@@ -42,6 +43,27 @@ def _executed_statement_params_containing(
             return params
 
     raise AssertionError(f"No executed statement contained parameter {param_name!r}")
+
+
+def _source_tree(relative_path: str) -> ast.Module:
+    source_path = Path(__file__).parents[4] / relative_path
+    return ast.parse(source_path.read_text())
+
+
+def _imports_name(tree: ast.AST, *, module: str, name: str) -> bool:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == module:
+            if any(alias.name == name for alias in node.names):
+                return True
+    return False
+
+
+def _calls_attribute(tree: ast.AST, attribute_name: str) -> bool:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr == attribute_name:
+                return True
+    return False
 
 
 class TestWatchdogRequeue:
@@ -149,6 +171,65 @@ class TestWatchdogRequeue:
 class TestWatchdogPhase0ZombieReconciliation:
     """Tests for Phase 0: Zombie counter reconciliation."""
 
+    def test_phase0_redis_boundary_is_canonical(self):
+        tree = _source_tree("src/intric/worker/feeder/watchdog.py")
+
+        assert not _imports_name(tree, module="typing", name="Any")
+        assert not _calls_attribute(tree, "scan_iter")
+        assert _imports_name(
+            tree,
+            module="intric.worker.redis.client",
+            name="redis_scan_match_bytes",
+        )
+
+    @pytest.mark.asyncio
+    async def test_phase0_uses_typed_scan_boundary(self):
+        from intric.worker.feeder import watchdog as watchdog_module
+        from intric.worker.feeder.watchdog import OrphanWatchdog
+
+        tenant_a = uuid4()
+        tenant_b = uuid4()
+        keys = [
+            f"tenant:{tenant_a}:active_jobs".encode(),
+            f"tenant:{tenant_b}:active_jobs".encode(),
+        ]
+        scanned_patterns: list[tuple[object, str, int]] = []
+
+        async def scan_keys(redis: object, *, pattern: str, count: int):
+            scanned_patterns.append((redis, pattern, count))
+            for key in keys:
+                yield key
+
+        redis_mock = MagicMock()
+        settings_mock = MagicMock()
+        session_mock = MagicMock()
+        watchdog = OrphanWatchdog(redis_mock, settings_mock)
+        reconcile_results = iter(
+            [
+                {"reconciled": True},
+                {"reconciled": False},
+            ]
+        )
+        reconciled_keys: list[bytes] = []
+
+        async def reconcile_counter(session: object, key: bytes):
+            assert session is session_mock
+            reconciled_keys.append(key)
+            return next(reconcile_results)
+
+        watchdog._reconcile_single_counter = reconcile_counter
+
+        with patch.object(
+            watchdog_module,
+            "redis_scan_match_bytes",
+            scan_keys,
+        ):
+            result = await watchdog._run_phase0_reconciliation(session_mock)
+
+        assert result == {"reconciled_count": 1}
+        assert scanned_patterns == [(redis_mock, "tenant:*:active_jobs", 100)]
+        assert reconciled_keys == keys
+
     @pytest.mark.asyncio
     async def test_reconciles_inflated_redis_counter(self):
         """Should reset Redis counter when it exceeds actual DB active jobs."""
@@ -156,10 +237,6 @@ class TestWatchdogPhase0ZombieReconciliation:
 
         tenant_id = uuid4()
         redis_mock = MagicMock()
-        # Redis says 5 active, but DB only has 2
-        redis_mock.scan_iter = AsyncMock(
-            return_value=[f"tenant:{tenant_id}:active_jobs".encode()]
-        )
         redis_mock.get = AsyncMock(return_value=b"5")
 
         settings_mock = MagicMock()

@@ -6,7 +6,7 @@ Uses Lua scripts for atomic Redis operations to prevent race conditions.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from intric.main.config import Settings, get_settings
@@ -15,6 +15,7 @@ from intric.tenants.crawler_settings_helper import (
     TenantCrawlerSettings,
     get_crawler_setting,
 )
+from intric.worker.redis.client import redis_scan_match_bytes
 from intric.worker.redis.lua_scripts import LuaScripts
 
 if TYPE_CHECKING:
@@ -276,28 +277,18 @@ class CapacityManager:
         tenant_ids: list[UUID] = []
 
         try:
-            redis_client_any: Any = self._redis
-            cursor = 0
-            while True:
-                scan_result = await redis_client_any.scan(
-                    cursor=cursor, match=pattern, count=100
-                )
-                cursor = int(scan_result[0])
-                keys = scan_result[1]
-                for key_bytes in keys:
-                    key = (
-                        key_bytes.decode()
-                        if isinstance(key_bytes, bytes)
-                        else key_bytes
-                    )
-                    parts = key.split(":")
-                    if len(parts) >= 2:
-                        try:
-                            tenant_ids.append(UUID(parts[1]))
-                        except ValueError:
-                            continue
-                if cursor == 0:
-                    break
+            async for key_bytes in redis_scan_match_bytes(
+                self._redis,
+                pattern=pattern,
+                count=100,
+            ):
+                key = key_bytes.decode("utf-8")
+                parts = key.split(":")
+                if len(parts) >= 2:
+                    try:
+                        tenant_ids.append(UUID(parts[1]))
+                    except ValueError:
+                        continue
         except Exception as exc:
             logger.warning(
                 "Failed to scan tenant queues for interval calculation",

@@ -23,12 +23,15 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 from uuid import UUID
 
 from arq.jobs import JobStatus
+from sqlalchemy import func, select
 from typing_extensions import TypedDict
 
+from intric.database.tables.job_table import Jobs
+from intric.database.tables.websites_table import CrawlRuns
 from intric.jobs.job_manager import job_manager
 from intric.jobs.job_models import Task
 from intric.main.config import Settings
@@ -44,6 +47,7 @@ from intric.worker.feeder.crawl_enqueue import (
     CrawlEnqueueFailed,
     enqueue_crawl_job,
 )
+from intric.worker.redis.client import redis_scan_match_bytes
 from intric.worker.redis.lua_scripts import LuaScripts
 
 if TYPE_CHECKING:
@@ -332,28 +336,25 @@ class OrphanWatchdog:
         Returns:
             Dict with reconciliation stats.
         """
-        from sqlalchemy import func, select
-
-        from intric.database.tables.job_table import Jobs
-        from intric.database.tables.websites_table import CrawlRuns
-        from intric.main.models import Status
-
         reconciled_count = 0
-        redis_client: Any = self._redis
 
         try:
-            async for key in redis_client.scan_iter(match="tenant:*:active_jobs"):
+            async for key in redis_scan_match_bytes(
+                self._redis,
+                pattern="tenant:*:active_jobs",
+                count=100,
+            ):
                 try:
-                    key_bytes = cast(bytes, key)
-                    result = await self._reconcile_single_counter(
-                        session, key_bytes, Jobs, CrawlRuns, Status, func, select
-                    )
+                    result = await self._reconcile_single_counter(session, key)
                     if result.get("reconciled"):
                         reconciled_count += 1
                 except Exception as key_exc:
                     logger.debug(
                         "Phase 0 reconciliation error for key",
-                        extra={"key": str(key), "error": str(key_exc)},
+                        extra={
+                            "key": key.decode("utf-8", errors="replace"),
+                            "error": str(key_exc),
+                        },
                     )
                     continue
 
@@ -375,11 +376,6 @@ class OrphanWatchdog:
         self,
         session: AsyncSession,
         key: bytes,
-        Jobs: Any,
-        CrawlRuns: Any,
-        Status: Any,
-        func: Any,
-        select: Any,
     ) -> CounterReconciliationResult:
         """Reconcile a single tenant's zombie counter."""
         key_str = key.decode("utf-8")

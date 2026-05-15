@@ -3,12 +3,35 @@
 Tests per-tenant slot management and settings retrieval.
 """
 
+import ast
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 from intric.worker.redis.lua_scripts import LuaScripts
+
+
+def _source_tree(relative_path: str) -> ast.Module:
+    source_path = Path(__file__).parents[4] / relative_path
+    return ast.parse(source_path.read_text())
+
+
+def _imports_name(tree: ast.AST, *, module: str, name: str) -> bool:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == module:
+            if any(alias.name == name for alias in node.names):
+                return True
+    return False
+
+
+def _calls_attribute(tree: ast.AST, attribute_name: str) -> bool:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr == attribute_name:
+                return True
+    return False
 
 
 @pytest.fixture
@@ -590,6 +613,52 @@ class TestGetMinimumFeederInterval:
 
     # --- Core Contract Tests ---
 
+    def test_interval_scan_uses_canonical_redis_boundary(self):
+        tree = _source_tree("src/intric/worker/feeder/capacity.py")
+
+        assert not _imports_name(tree, module="typing", name="Any")
+        assert _imports_name(
+            tree,
+            module="intric.worker.redis.client",
+            name="redis_scan_match_bytes",
+        )
+        assert not _calls_attribute(tree, "scan")
+
+    @pytest.mark.asyncio
+    async def test_interval_scan_consumes_typed_redis_boundary(
+        self, mock_settings, mock_crawler_setting_passthrough
+    ):
+        from intric.worker.feeder import capacity as capacity_module
+        from intric.worker.feeder.capacity import CapacityManager
+
+        tenant_id = uuid4()
+        redis_mock = MagicMock()
+        scanned_patterns: list[tuple[object, str, int]] = []
+
+        async def scan_keys(redis: object, *, pattern: str, count: int):
+            scanned_patterns.append((redis, pattern, count))
+            yield f"tenant:{tenant_id}:crawl_pending".encode()
+
+        manager = CapacityManager(redis_mock, settings=mock_settings)
+
+        async def mock_get_settings(tid):
+            assert tid == tenant_id
+            return {"crawl_feeder_interval_seconds": 5}
+
+        manager.get_tenant_settings = mock_get_settings
+
+        with (
+            patch.object(capacity_module, "redis_scan_match_bytes", scan_keys),
+            patch(
+                "intric.worker.feeder.capacity.get_crawler_setting",
+                side_effect=mock_crawler_setting_passthrough,
+            ),
+        ):
+            result = await manager.get_minimum_feeder_interval()
+
+        assert result == 5
+        assert scanned_patterns == [(redis_mock, "tenant:*:crawl_pending", 100)]
+
     @pytest.mark.asyncio
     async def test_returns_default_when_no_pending_queues(self, mock_settings):
         """Should return global default when no tenant queues found."""
@@ -873,10 +942,10 @@ class TestGetMinimumFeederInterval:
         assert result == 6
 
     @pytest.mark.asyncio
-    async def test_handles_string_keys_from_redis(
+    async def test_returns_default_for_string_keys_from_misconfigured_redis(
         self, mock_settings, mock_crawler_setting_passthrough
     ):
-        """Should work with both bytes and string keys from Redis."""
+        """The canonical Redis boundary requires decode_responses to stay disabled."""
         from intric.worker.feeder.capacity import CapacityManager
 
         tenant_id = uuid4()
@@ -899,7 +968,7 @@ class TestGetMinimumFeederInterval:
         ):
             result = await manager.get_minimum_feeder_interval()
 
-        assert result == 9
+        assert result == 10
 
     @pytest.mark.asyncio
     async def test_handles_null_tenant_settings(

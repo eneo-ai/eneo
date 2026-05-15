@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T121
+active_task: T123
 
 tasks:
   - id: T001
@@ -5851,7 +5851,7 @@ tasks:
   - id: T121
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Audit the roadmap after T120 and decide whether the active goal is provably complete or which single remaining slice is highest ROI."
     inputs:
@@ -5867,17 +5867,98 @@ tasks:
       - "complete | not_complete"
       - "Evidence for each remaining explicit open item"
       - "Next bounded task if not complete"
+    receipt:
+      result: not_complete
+      summary: "Claude and PM audit rejected goal completion after T120. The next highest-ROI bounded slice is watchdog Phase 0 and capacity Redis SCAN/type-boundary cleanup, not WorkerAdapter, admin write controls, lifecycle rewrite, or frontend work."
+      evidence:
+        - ".codex/artifacts/claude-peer-loop-t121-roadmap-audit-next-slice-20260515T115410Z.md"
+        - "docs/crawler-reliability-robustness-transparency-plan.md still has explicit unchecked work in Steps 0, 1, 3, 4, 5, 6, 7, and 8."
+        - "backend/src/intric/worker/feeder/watchdog.py retained local Redis Any/scan_iter and _reconcile_single_counter Any parameter fanout after T120."
+        - "backend/src/intric/worker/feeder/capacity.py retained local Redis Any/raw scan loop after T120."
+      spawned_tasks:
+        - T122
+  - id: T122
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Collapse watchdog Phase 0 and capacity SCAN typing seams behind the canonical worker.redis.client boundary without changing reconciliation or feeder interval semantics."
+    allowed_files:
+      - "backend/src/intric/worker/feeder/watchdog.py"
+      - "backend/src/intric/worker/feeder/capacity.py"
+      - "backend/src/intric/worker/redis/client.py"
+      - "backend/tests/unittests/worker/feeder/test_watchdog.py"
+      - "backend/tests/unittests/worker/feeder/test_capacity.py"
+      - "backend/tests/integration/test_orphan_cleanup.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/feeder/test_watchdog.py tests/unittests/worker/feeder/test_capacity.py tests/integration/test_orphan_cleanup.py tests/integration/test_crawl_feeder.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/feeder/watchdog.py src/intric/worker/feeder/capacity.py src/intric/worker/redis/client.py tests/unittests/worker/feeder/test_watchdog.py tests/unittests/worker/feeder/test_capacity.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/feeder/watchdog.py src/intric/worker/feeder/capacity.py src/intric/worker/redis/client.py tests/unittests/worker/feeder/test_watchdog.py tests/unittests/worker/feeder/test_capacity.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/feeder/watchdog.py src/intric/worker/feeder/capacity.py src/intric/worker/redis/client.py tests/unittests/worker/feeder/test_watchdog.py tests/unittests/worker/feeder/test_capacity.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+    stop_if:
+      - "Need WorkerAdapter, admin write controls, lifecycle rewrite, frontend, migrations, or broad crawl_tasks changes."
+      - "Need to change watchdog Phase 0 reconciliation semantics, capacity interval semantics, Redis key shape, or Lua slot ownership."
+      - "Need new local Any/cast/type-ignore in watchdog.py or capacity.py."
+      - "Need to touch unrelated .devcontainer dirt."
+    receipt:
+      result: done
+      summary: "Routed watchdog Phase 0 active-counter scanning and capacity pending-queue scanning through the canonical redis_scan_match_bytes boundary, removed local Redis Any/raw SCAN ownership from both consumers, and tightened the tests to guard the boundary without string-fragile source checks."
+      changed_files:
+        - "backend/src/intric/worker/feeder/watchdog.py"
+        - "backend/src/intric/worker/feeder/capacity.py"
+        - "backend/tests/unittests/worker/feeder/test_watchdog.py"
+        - "backend/tests/unittests/worker/feeder/test_capacity.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "Red test: watchdog/capacity unittest run failed 4 tests before implementation because canonical scan imports were missing and local Any/raw scan ownership remained."
+        - "cd backend && uv run pytest tests/unittests/worker/feeder/test_watchdog.py tests/unittests/worker/feeder/test_capacity.py -q"
+        - "cd backend && uv run pytest tests/unittests/worker/feeder/test_watchdog.py tests/unittests/worker/feeder/test_capacity.py tests/integration/test_orphan_cleanup.py tests/integration/test_crawl_feeder.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/feeder/watchdog.py src/intric/worker/feeder/capacity.py src/intric/worker/redis/client.py tests/unittests/worker/feeder/test_watchdog.py tests/unittests/worker/feeder/test_capacity.py"
+        - "cd backend && uv run ruff format --check src/intric/worker/feeder/watchdog.py src/intric/worker/feeder/capacity.py src/intric/worker/redis/client.py tests/unittests/worker/feeder/test_watchdog.py tests/unittests/worker/feeder/test_capacity.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/feeder/watchdog.py src/intric/worker/feeder/capacity.py src/intric/worker/redis/client.py tests/unittests/worker/feeder/test_watchdog.py tests/unittests/worker/feeder/test_capacity.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json"
+        - "rg -n \"from typing import.*\\bAny\\b|\\bAny\\b|scan_iter\\(|\\.scan\\(|redis_client_any|Jobs: Any|CrawlRuns: Any|Status: Any|func: Any|select: Any\" backend/src/intric/worker/feeder/watchdog.py backend/src/intric/worker/feeder/capacity.py"
+      claude:
+        verdict: green
+        min_score: 8
+        artifact: ".codex/artifacts/claude-peer-loop-t122-watchdog-capacity-redis-boundary-implementation-20260515T120712Z.md"
+        follow_up_notes:
+          - "Consider a future bounded watchdog import-symmetry slice if local phase imports remain noisy."
+          - "Consider a startup-time Redis decode_responses invariant guard if string-key misconfiguration appears in production."
+  - id: T123
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Audit the roadmap after T122 and decide whether the active goal is provably complete or which single remaining slice is highest ROI."
+    inputs:
+      - "T122 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "Current git diff after T122"
+    constraints:
+      - "Do not mark the goal complete unless every remaining roadmap requirement has current evidence."
+      - "Do not start WorkerAdapter, admin write controls, lifecycle rewrite, or frontend work without a bounded task decision."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "complete | not_complete"
+      - "Evidence for each remaining explicit open item"
+      - "Next bounded task if not complete"
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T120
+    task: T122
     commands:
-      - "cd backend && uv run pytest tests/unittests/worker/test_redis_client.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py tests/integration/test_crawl_feeder.py -q"
-      - "cd backend && uv run ruff check src/intric/worker/redis/client.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_redis_client.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
-      - "cd backend && uv run ruff format --check src/intric/worker/redis/client.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_redis_client.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/redis/client.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_feeder.py tests/unittests/worker/test_redis_client.py tests/unittests/worker/feeder/test_queues.py tests/unittests/worker/test_crawl_feeder_process.py"
+      - "cd backend && uv run pytest tests/unittests/worker/feeder/test_watchdog.py tests/unittests/worker/feeder/test_capacity.py tests/integration/test_orphan_cleanup.py tests/integration/test_crawl_feeder.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/feeder/watchdog.py src/intric/worker/feeder/capacity.py src/intric/worker/redis/client.py tests/unittests/worker/feeder/test_watchdog.py tests/unittests/worker/feeder/test_capacity.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/feeder/watchdog.py src/intric/worker/feeder/capacity.py src/intric/worker/redis/client.py tests/unittests/worker/feeder/test_watchdog.py tests/unittests/worker/feeder/test_capacity.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/feeder/watchdog.py src/intric/worker/feeder/capacity.py src/intric/worker/redis/client.py tests/unittests/worker/feeder/test_watchdog.py tests/unittests/worker/feeder/test_capacity.py"
       - "cd backend && uv run pyright --project pyrightconfig.json"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t120-redis-boundary --phase verification --iteration 2 --require-green --required-min-score 8 ..."
-    note: "T120 typed Redis boundary cleanup passed red/green behavior tests, feeder integration coverage, ruff, format check, targeted and full strict Pyright, source guard grep, and Claude green final verification."
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t122-watchdog-capacity-redis-boundary --phase commit-gate --iteration 1 --require-green --required-min-score 8 ..."
+    note: "T122 watchdog/capacity Redis SCAN boundary cleanup passed red/green behavior tests, feeder/watchdog integration coverage, ruff, format check, targeted and full strict Pyright, source guard grep, and Claude green final verification."
