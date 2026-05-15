@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from intric.worker.redis.lua_scripts import LuaScripts
 from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
 
 
@@ -75,6 +76,90 @@ async def test_limit_disabled_when_max_zero():
     for _ in range(5):
         assert await limiter.acquire(tenant_id) is True
     assert redis._store == {}
+
+
+@pytest.mark.asyncio
+async def test_acquire_routes_through_lua_scripts_acquire_slot(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    redis = FakeRedis()
+    limiter = TenantConcurrencyLimiter(redis=redis, max_concurrent=2, ttl_seconds=60)
+    tenant_id = uuid4()
+    calls: list[tuple[object, object, int, int]] = []
+
+    async def record_acquire(
+        redis_client: object,
+        tenant: object,
+        limit: int,
+        ttl_seconds: int,
+    ) -> int:
+        calls.append((redis_client, tenant, limit, ttl_seconds))
+        return 1
+
+    monkeypatch.setattr(LuaScripts, "acquire_slot", record_acquire)
+
+    assert await limiter.acquire(tenant_id) is True
+    assert calls == [(redis, tenant_id, 2, 60)]
+
+
+@pytest.mark.asyncio
+async def test_release_routes_through_lua_scripts_release_slot(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    redis = FakeRedis()
+    limiter = TenantConcurrencyLimiter(redis=redis, max_concurrent=2, ttl_seconds=60)
+    tenant_id = uuid4()
+    calls: list[tuple[object, object, int]] = []
+
+    assert await limiter.acquire(tenant_id) is True
+
+    async def record_release(
+        redis_client: object,
+        tenant: object,
+        ttl_seconds: int,
+    ) -> int:
+        calls.append((redis_client, tenant, ttl_seconds))
+        return 0
+
+    monkeypatch.setattr(LuaScripts, "release_slot", record_release)
+
+    await limiter.release(tenant_id)
+
+    assert calls == [(redis, tenant_id, 60)]
+
+
+@pytest.mark.asyncio
+async def test_circuit_opens_when_lua_scripts_acquire_raises(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    redis = FakeRedis()
+    limiter = TenantConcurrencyLimiter(
+        redis=redis,
+        max_concurrent=2,
+        ttl_seconds=60,
+        circuit_break_seconds=5,
+    )
+    tenant_id = uuid4()
+    now = 100.0
+
+    async def fail_acquire(
+        redis_client: object,
+        tenant: object,
+        limit: int,
+        ttl_seconds: int,
+    ) -> int:
+        raise RuntimeError("Redis connection failed")
+
+    monkeypatch.setattr(LuaScripts, "acquire_slot", fail_acquire)
+    monkeypatch.setattr(time, "monotonic", lambda: now)
+
+    assert await limiter.acquire(tenant_id) is True
+    assert limiter._is_circuit_open(now) is True
+
+    task = asyncio.current_task()
+    fallback_map = getattr(task, "_tenant_limiter_fallback", None)
+    assert fallback_map is not None
+    assert fallback_map.get(tenant_id) is True
 
 
 # ============================================================================

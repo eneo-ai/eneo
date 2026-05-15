@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T095
+active_task: T097
 
 tasks:
   - id: T001
@@ -4629,7 +4629,7 @@ tasks:
   - id: T095
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Choose the next bounded crawler reliability/maintainability slice after T094 with emphasis on closing typed failure parity or remaining Redis/Lua eval evasions."
     inputs:
@@ -4650,19 +4650,116 @@ tasks:
       - "Decision: next Worker task, Scout task, or completion-audit task."
       - "Allowed files, red-test plan, verification commands, stop_if conditions, and non-goals."
       - "Evidence that the chosen slice advances crawler reliability, robustness, transparency, or maintainability."
+    receipt:
+      result: done
+      summary: "Claude selected the Redis/Lua ownership cleanup as the next bounded slice. Manual CrawlService failure parity is real but deferred because it needs a terminal ownership/layering decision and should be split into pending-queue failure and direct-ARQ failure tranches."
+      decision: "Activate T096 to route TenantConcurrencyLimiter through LuaScripts.acquire_slot/release_slot without changing circuit-breaker, fallback, or slot semantics."
+      artifacts:
+        - ".codex/artifacts/claude-peer-loop-t095-choose-next-crawler-roadmap-slice-20260515T064427Z.md"
+      evidence:
+        - "backend/src/intric/worker/tenant_concurrency.py currently invokes LuaScripts.ACQUIRE_SLOT/RELEASE_SLOT through raw eval."
+        - "backend/src/intric/worker/redis/lua_scripts.py already owns acquire_slot/release_slot helpers."
+        - "backend/src/intric/websites/domain/crawl_service.py already consumes LuaScripts helpers for slot acquire/release."
+      non_goals:
+        - "No manual CrawlService terminal parity in this tranche."
+        - "No WorkerAdapter."
+        - "No LuaScripts signature or script-text changes."
+      spawned_tasks:
+        - T096
+  - id: T096
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Route TenantConcurrencyLimiter through LuaScripts.acquire_slot/release_slot so LuaScripts remains the canonical Redis slot Lua/eval owner."
+    allowed_files:
+      - "backend/src/intric/worker/tenant_concurrency.py"
+      - "backend/tests/unittests/worker/test_tenant_concurrency.py"
+      - "backend/tests/unittests/worker/test_tenant_concurrency_lua_ownership.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency_lua_ownership.py -q"
+      - "cd backend && uv run pytest tests/integration/test_crawl_feeder.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency_lua_ownership.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency_lua_ownership.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency_lua_ownership.py"
+      - "! rg -n 'getattr\\(self\\.redis, \"ev\" \\+ \"al\"\\)|await run_script\\(\\s*LuaScripts\\.(ACQUIRE|RELEASE)_SLOT' backend/src/intric/worker/tenant_concurrency.py"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t096-tenant-limiter-lua-ownership --phase commit-gate --iteration 1 --require-green --required-min-score 8 ..."
+    stop_if:
+      - "Need to change LuaScripts.acquire_slot/release_slot signatures or script text."
+      - "Need to change tenant limiter circuit-breaker, local fallback, or task fallback flag semantics."
+      - "Need to touch CrawlService, crawl_tasks, queues, terminal, watchdog, WorkerAdapter, admin, or frontend code."
+      - "Need new Any, cast, type ignore, or broad dict bag to typecheck."
+      - "Existing tenant concurrency or crawl feeder integration behavior regresses."
+    receipt:
+      result: done
+      summary: "TenantConcurrencyLimiter now consumes LuaScripts.acquire_slot/release_slot instead of owning inline Redis slot eval. Circuit-breaker, local fallback, task fallback flags, and feeder integration behavior were preserved."
+      changed_files:
+        - "backend/src/intric/worker/tenant_concurrency.py"
+        - "backend/tests/unittests/worker/test_tenant_concurrency.py"
+        - "backend/tests/unittests/worker/test_tenant_concurrency_lua_ownership.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      red_verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency_lua_ownership.py -q -> 4 failed, 10 passed before implementation"
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency_lua_ownership.py -q -> 14 passed"
+        - "cd backend && uv run pytest tests/integration/test_crawl_feeder.py -q -> 19 passed, 18 existing warnings"
+        - "cd backend && uv run ruff check src/intric/worker/tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency_lua_ownership.py -> passed"
+        - "cd backend && uv run ruff format --check src/intric/worker/tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency_lua_ownership.py -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency_lua_ownership.py -> 0 errors"
+        - "cd backend && bash -lc '! rg -n ... src/intric/worker/tenant_concurrency.py' -> passed"
+        - "python3 synthetic guard check for LuaScripts.ACQUIRE_SLOT regression sample -> passed"
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t096-tenant-limiter-lua-ownership-implementation-review-20260515T065209Z.md"
+          - ".codex/artifacts/claude-peer-loop-t096-tenant-limiter-lua-ownership-final-verification-20260515T065537Z.md"
+      follow_up_candidates:
+        - "Introduce typed SlotAcquireResult and migrate CrawlService plus TenantConcurrencyLimiter consumers."
+        - "Tighten LuaScripts docstring so it no longer showcases raw eval usage."
+        - "Remove or redirect TenantConcurrencyLimiter._key once tests no longer need duplicated slot key ownership."
+        - "Plan manual CrawlService failure parity as split A1/A2 after a terminal ownership/layering decision."
+      spawned_tasks:
+        - T097
+  - id: T097
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Choose the next bounded crawler reliability/maintainability slice after T096, balancing typed SlotAcquireResult cleanup, remaining LuaScripts doc/key ownership, and manual CrawlService failure parity."
+    inputs:
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - ".codex/artifacts/claude-peer-loop-t095-choose-next-crawler-roadmap-slice-20260515T064427Z.md"
+      - ".codex/artifacts/claude-peer-loop-t096-tenant-limiter-lua-ownership-final-verification-20260515T065537Z.md"
+      - "backend/src/intric/worker/redis/lua_scripts.py"
+      - "backend/src/intric/worker/tenant_concurrency.py"
+      - "backend/src/intric/websites/domain/crawl_service.py"
+      - "backend/src/intric/worker/crawl/terminal.py"
+    constraints:
+      - "Prefer a narrow slice with a real deletion/ownership target and behavior tests."
+      - "Do not start WorkerAdapter, admin write controls, or broad lifecycle refactors without a fresh bounded plan gate."
+      - "Manual CrawlService failure parity may require a terminal ownership/layering precursor; do not deepen bad imports casually."
+      - "Do not stage unrelated .devcontainer changes."
+    expected_output:
+      - "Decision: next Worker task, Scout task, or completion-audit task."
+      - "Allowed files, red-test plan, verification commands, stop_if conditions, and non-goals."
+      - "Evidence that the chosen slice advances crawler reliability, robustness, transparency, or maintainability."
     receipt: null
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T094
+    task: T096
     commands:
-      - "cd backend && uv run pytest tests/unittests/worker/feeder/test_queues.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/websites/test_crawl_service_slot_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency_lua_ownership.py -q"
       - "cd backend && uv run pytest tests/integration/test_crawl_feeder.py -q"
-      - "cd backend && uv run ruff check src/intric/websites/domain/crawl_service.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/feeder/test_queues.py"
-      - "cd backend && uv run ruff format --check src/intric/websites/domain/crawl_service.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/feeder/test_queues.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/websites/domain/crawl_service.py src/intric/worker/feeder/queues.py src/intric/worker/crawl_tasks.py tests/unittests/websites/test_crawl_service_pending_queue_ownership.py tests/unittests/worker/feeder/test_queues.py"
-      - "bash -lc '! rg -n ... backend/src/intric/websites/domain/crawl_service.py backend/src/intric/worker/crawl_tasks.py'"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t094-pending-queue-ownership --phase commit-gate --iteration 1 --require-green --required-min-score 8 ..."
-    note: "T094 pending-queue ownership passed red/green behavior tests, feeder integration smoke, ruff, format check, targeted strict Pyright, grep postconditions, and Claude green commit-gate."
+      - "cd backend && uv run ruff check src/intric/worker/tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency_lua_ownership.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency_lua_ownership.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency.py tests/unittests/worker/test_tenant_concurrency_lua_ownership.py"
+      - "cd backend && bash -lc '! rg -n ... src/intric/worker/tenant_concurrency.py'"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t096-tenant-limiter-lua-ownership --phase verification --iteration 2 --require-green --required-min-score 8 ..."
+    note: "T096 tenant limiter Lua ownership passed red/green behavior tests, feeder integration smoke, ruff, format check, targeted strict Pyright, grep postconditions, synthetic guard check, and Claude green final verification."

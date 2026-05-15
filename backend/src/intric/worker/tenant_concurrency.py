@@ -175,8 +175,6 @@ class TenantConcurrencyLimiter:
             # Limit disabled – always allow execution
             return True
 
-        key = self._key(tenant_id)
-
         now = time.monotonic()
         if self._is_circuit_open(now):
             allowed = await self._fallback_acquire(tenant_id, now)
@@ -185,21 +183,15 @@ class TenantConcurrencyLimiter:
             return allowed
 
         try:
-            # Use centralized Lua script for atomic slot acquisition
-            run_script = getattr(self.redis, "ev" + "al")
-            result = await run_script(
-                LuaScripts.ACQUIRE_SLOT,
-                1,
-                key,
-                str(self.max_concurrent),
-                str(self.ttl_seconds),
+            result = await LuaScripts.acquire_slot(
+                self.redis,
+                tenant_id,
+                self.max_concurrent,
+                self.ttl_seconds,
             )
             await self._close_circuit()
 
-            if isinstance(result, bytes):
-                result = int(result)
-
-            allowed = bool(result and int(result) > 0)
+            allowed = result > 0
             if not allowed:
                 logger.warning(
                     "Per-tenant concurrency limit reached",
@@ -229,15 +221,7 @@ class TenantConcurrencyLimiter:
             return allowed
 
     async def release(self, tenant_id: UUID) -> None:
-        """Release a previously acquired slot for the given tenant.
-
-        This method implements two distinct release paths:
-        1. Fallback path: If the slot was acquired via local in-memory fallback,
-           release it from local memory only. No Redis interaction needed.
-        2. Redis path: If the slot was acquired via Redis, we MUST attempt to
-           release it from Redis, regardless of the circuit breaker's state.
-           The breaker's state is for acquisition, not for releasing already-held slots.
-        """
+        """Release a previously acquired slot for the given tenant."""
 
         if self.max_concurrent <= 0:
             return
@@ -255,16 +239,8 @@ class TenantConcurrencyLimiter:
         # from Redis, regardless of the circuit breaker's state. The breaker's
         # state is for acquisition, not for releasing an already-held slot.
         # If we don't release here, we leak the Redis semaphore until TTL expires.
-        key = self._key(tenant_id)
         try:
-            # Use centralized Lua script for atomic slot release
-            run_script = getattr(self.redis, "ev" + "al")
-            await run_script(
-                LuaScripts.RELEASE_SLOT,
-                1,
-                key,
-                str(self.ttl_seconds),
-            )
+            await LuaScripts.release_slot(self.redis, tenant_id, self.ttl_seconds)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.warning(
                 "Failed to release tenant semaphore, re-opening circuit",
