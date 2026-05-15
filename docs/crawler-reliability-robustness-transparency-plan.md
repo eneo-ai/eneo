@@ -86,6 +86,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Sysadmin watchdog-status tranche: add a read-only `/sysadmin/crawler/watchdog-status` endpoint that exposes the canonical Redis watchdog snapshot, bounded watchdog-driven interventions, tenant filtering, pagination, malformed-snapshot degradation, and shared producer/healthz key ownership.
 - [x] Typed crawl job-status owner tranche: move ARQ `JobStatus` behind `worker/feeder/crawl_status.py`, make watchdog requeue consume crawler-domain status, and guard the worker tree against direct `arq.jobs` imports.
 - [x] Generated crawler sysadmin OpenAPI contract tranche: regenerate `@intric/intric-js` schema types from the current backend OpenAPI snapshot and add type-level coverage for the seven sysadmin crawler response and operation contracts.
+- [x] OpenAPI freshness guard tranche: add a CI-backed regenerate-and-diff check that compares checked-in `@intric/intric-js` schema types with the current backend `app.openapi()` output.
 
 ## Non-Negotiable Principles
 
@@ -491,6 +492,14 @@ does not preserve JSON Schema `propertyNames` as a TypeScript key constraint, so
 the generated type remains `{ [key: string]: number }`; preserving enum-keyed
 maps would require a later generator customization or post-process, not a
 hand-written frontend shim.
+
+OpenAPI freshness guard note: CI now runs
+`scripts/check-intric-js-openapi-schema.sh`, which imports the current backend
+FastAPI app, writes `app.openapi()` to a temporary file, regenerates
+`frontend/packages/intric-js/src/types/schema.d.ts` into a temporary file, and
+diffs that output against the checked-in generated schema. This protects the
+generated crawler contracts without requiring a running local backend or a
+browser-callable sysadmin auth path.
 
 Raw-result-location cleanup note: website crawl status, crawl-run result
 presentation, and the generic job dropdown no longer render raw

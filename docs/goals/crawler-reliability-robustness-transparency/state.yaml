@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T123
+active_task: T131
 
 tasks:
   - id: T001
@@ -6185,7 +6185,7 @@ tasks:
   - id: T129
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Audit the roadmap after T128 and choose the next single highest-ROI remaining slice without marking the full goal complete unless current evidence proves every requirement."
     inputs:
@@ -6201,17 +6201,95 @@ tasks:
       - "complete | not_complete"
       - "Evidence for remaining explicit open items"
       - "Next bounded task if not complete"
+    receipt:
+      result: not_complete
+      summary: "Roadmap audit rejected goal completion and rejected the first admin UI consumer as the next slice because existing sysadmin crawler endpoints are super-API-key-only, not browser-admin-callable. Selected an OpenAPI regenerate-and-diff guard as the next bounded contract-freshness slice."
+      changed_files: []
+      verification:
+        - "Plan audit after T128 still found open Step 0 metrics, Step 5 phase extraction, Step 6 WorkerAdapter/abort/idempotency, Step 7 admin visibility, and Step 8 admin write-control requirements."
+        - "Current frontend admin crawler page only loads tenant crawler settings and has no sysadmin endpoint client."
+        - "backend/src/intric/sysadmin/sysadmin_router.py gates /sysadmin/crawler/* behind authenticate_super_api_key, so direct browser admin UI consumption would require a separate auth architecture decision."
+        - "Existing T128 type-level test proves checked-in generated types compile but cannot prove the generated file is fresh against current backend app.openapi()."
+      claude:
+        verdict: changes_required
+        min_score: 5
+        artifact: ".codex/artifacts/claude-peer-loop-t129-roadmap-audit-next-slice-20260515T140040Z.md"
+        follow_up_notes:
+          - "Do not wire the super-API-key sysadmin endpoints directly into the browser admin crawler page."
+          - "Before admin UI consumption, decide between tenant-scoped admin crawler endpoints and a server-side super-key proxy; tenant-scoped endpoints are the cleaner default."
+          - "Add a CI regenerate-and-diff guard for schema.d.ts freshness before broader admin UI work."
+  - id: T130
+    type: worker
+    assignee: Codex
+    status: done
+    reasoning_hint: medium
+    objective: "Add a CI-backed regenerate-and-diff guard that fails when frontend/packages/intric-js/src/types/schema.d.ts drifts from the current backend app.openapi() output."
+    allowed_files:
+      - "scripts/check-intric-js-openapi-schema.sh"
+      - ".github/workflows/ci.yml"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "./scripts/check-intric-js-openapi-schema.sh"
+      - "INTRIC_JS_SCHEMA_PATH=<temp drifted schema> ./scripts/check-intric-js-openapi-schema.sh"
+      - "git diff --check -- scripts/check-intric-js-openapi-schema.sh .github/workflows/ci.yml docs/crawler-reliability-robustness-transparency-plan.md docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    stop_if:
+      - "Guard requires a running backend server instead of importing the current backend app.openapi()."
+      - "Guard mutates frontend/packages/intric-js/src/types/schema.d.ts during CI check mode."
+      - "Guard requires browser access to super-API-key sysadmin endpoints."
+    receipt:
+      result: done
+      summary: "Added scripts/check-intric-js-openapi-schema.sh and wired it into CI as an OpenAPI contract job. The guard generates backend app.openapi() into a temp file, regenerates schema.d.ts into a temp file, diffs against the checked-in schema, and fails with regeneration instructions on drift."
+      changed_files:
+        - "scripts/check-intric-js-openapi-schema.sh"
+        - ".github/workflows/ci.yml"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "./scripts/check-intric-js-openapi-schema.sh passed and reported generated schema types are up to date."
+        - "Red drift check: copied schema.d.ts to a temp file, appended a deliberate drift marker, ran INTRIC_JS_SCHEMA_PATH=<temp> ./scripts/check-intric-js-openapi-schema.sh, and confirmed it exited 1 with a unified diff and regeneration instructions."
+        - "The CI job installs backend dependencies, installs frontend dependencies, and runs the same script; the final CI gate now includes the OpenAPI contract job result."
+        - "Claude P1 fix: app.openapi() is written to OPENAPI_JSON from inside Python instead of using shell stdout redirection, so import-time logs cannot corrupt the JSON file."
+        - "State bookkeeping fix: top-level active_task now matches the single status: active task, T131."
+        - "Robustness check: running the script from /tmp still resolves the repository root from the script path and passes."
+      claude:
+        verdict: green
+        min_score: 8
+        artifact: ".codex/artifacts/claude-peer-loop-t130-openapi-freshness-guard-revision-20260515T141445Z.md"
+        follow_up_notes:
+          - "T129 Claude selected this slice after rejecting browser admin UI consumption of super-API-key sysadmin endpoints."
+          - "A later follow-up can collapse update.js and the guard into a single check/write owner to avoid regeneration-command duplication."
+          - "Codex kept the explicit Prettier config because generated temp files live outside frontend/packages/intric-js, where Prettier cannot auto-discover that package config."
+          - "Claude iteration 1 artifact: .codex/artifacts/claude-peer-loop-t130-openapi-freshness-guard-implementation-20260515T141044Z.md"
+  - id: T131
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Audit the roadmap after T130 and choose the next single highest-ROI remaining slice without marking the full goal complete unless current evidence proves every requirement."
+    inputs:
+      - "T130 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "Current git diff after T130"
+    constraints:
+      - "Do not mark the goal complete unless every remaining roadmap requirement has current evidence."
+      - "Preserve unrelated .devcontainer dirt."
+      - "Do not start browser admin UI consumption of /sysadmin/crawler/* until the auth owner is decided."
+    expected_output:
+      - "complete | not_complete"
+      - "Evidence for remaining explicit open items"
+      - "Next bounded task if not complete"
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T128
+    task: T130
     commands:
-      - "cd frontend && bun run --filter @intric/web check"
-      - "cd frontend && bun run --filter @intric/web test:unit"
-      - "cd frontend && bun run --filter @intric/web lint"
-      - "cd frontend/packages/intric-js && bun run lint"
-      - "cd backend && uv run pyright --project pyrightconfig.json"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t128-openapi-contract-sync --phase commit-gate --iteration 3 --require-green --required-min-score 8 ..."
-    note: "T128 generated crawler sysadmin OpenAPI contract sync passed red/green frontend typecheck, full frontend unit tests, frontend lint, intric-js lint, backend strict Pyright, and final Claude commit gate."
+      - "bash -n scripts/check-intric-js-openapi-schema.sh"
+      - "./scripts/check-intric-js-openapi-schema.sh"
+      - "cd /tmp && /Users/ccimen/eneo/eneocrawlerupdate/scripts/check-intric-js-openapi-schema.sh"
+      - "INTRIC_JS_SCHEMA_PATH=<temp drifted schema> ./scripts/check-intric-js-openapi-schema.sh"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t130-openapi-freshness-guard --phase verification --iteration 2 --require-green --required-min-score 8 ..."
+    note: "T130 OpenAPI freshness guard passed shell syntax, green up-to-date path, cwd-independence path, deliberate temp-schema drift failure with a unified diff, and final Claude green revision gate."
