@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T086
+active_task: T088
 
 tasks:
   - id: T001
@@ -4181,7 +4181,7 @@ tasks:
   - id: T086
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next highest-ROI bounded crawler roadmap slice after T085, using current evidence and Claude's remaining notes."
     inputs:
@@ -4198,20 +4198,106 @@ tasks:
       - "Decision: next bounded Worker task or completion audit."
       - "Allowed files, verification commands, and stop conditions."
       - "Explicit non-goals and rationale."
+    receipt:
+      result: done
+      summary: "Claude selected the next bounded slice as a typed pre-resolved embedding model contract in CreateEmbeddingsService using PreResolvedEmbeddingModelLike plus TypeGuard, with strict stop conditions excluding crawler phase, watchdog, sysadmin, and producer DTO edits."
+      decision: "Activate T087 to replace stringly pre-resolved embedding model detection with a typed TypeGuard contract and behavior tests."
+      evidence:
+        - ".codex/artifacts/claude-peer-loop-t086-choose-next-crawler-roadmap-slice-iteration-2-20260515T050115Z.md"
+        - "backend/src/intric/embedding_models/infrastructure/create_embeddings_service.py"
+        - "backend/src/intric/worker/crawl_context.py"
+      spawned_tasks:
+        - T087
+  - id: T087
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: medium
+    objective: "Replace stringly pre-resolved embedding model detection with PreResolvedEmbeddingModelLike plus TypeGuard in CreateEmbeddingsService."
+    allowed_files:
+      - "backend/src/intric/embedding_models/infrastructure/create_embeddings_service.py"
+      - "backend/tests/unittests/embedding_models/test_create_embeddings_service.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/embedding_models/test_create_embeddings_service.py -q"
+      - "cd backend && uv run ruff check src/intric/embedding_models/infrastructure/create_embeddings_service.py tests/unittests/embedding_models/test_create_embeddings_service.py"
+      - "cd backend && uv run ruff format --check src/intric/embedding_models/infrastructure/create_embeddings_service.py tests/unittests/embedding_models/test_create_embeddings_service.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/embedding_models/infrastructure/create_embeddings_service.py tests/unittests/embedding_models/test_create_embeddings_service.py"
+      - "rg -n \"getattr\\(model|hasattr\\(model\" backend/src/intric/embedding_models/infrastructure/create_embeddings_service.py"
+    stop_if:
+      - "Need to edit backend/src/intric/worker/crawl_context.py or change EmbeddingModelSpec field types."
+      - "Need to edit crawl_tasks.py, persistence.py, watchdog.py, crawl_service.py, sysadmin, server dependency, or container override code."
+      - "Need to change local imports inside _get_adapter beyond removing redundant defensive checks."
+      - "Need to change actual provider credential resolution behavior instead of preserving semantics under typed contracts."
+      - "Verification fails twice for the same reason."
+      - "Need to stage unrelated .devcontainer changes."
+    non_goals:
+      - "No WorkerAdapter or watchdog Any cleanup."
+      - "No lifecycle/admin UI/API work."
+      - "No changes to crawler persistence or skip semantics."
+      - "No broader embedding credential shape refactor beyond dict[str, Any] already present in EmbeddingModelSpec."
+      - "No CrawlableWebsite alias cleanup."
+      - "No override_user migration."
+    receipt:
+      result: done
+      summary: "Replaced inline getattr/hasattr pre-resolved embedding model detection with a named PreResolvedEmbeddingModelLike protocol and is_pre_resolved TypeGuard, preserving DB provider lookup failures and no-DB pre-resolved adapter construction."
+      changed_files:
+        - "backend/src/intric/embedding_models/infrastructure/create_embeddings_service.py"
+        - "backend/tests/unittests/embedding_models/test_create_embeddings_service.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/embedding_models/test_create_embeddings_service.py -q -> 11 passed, 1 warning"
+        - "cd backend && uv run pytest tests/unittests/embedding_models/test_create_embeddings_service.py --collect-only -q -> 11 tests collected"
+        - "cd backend && uv run ruff check src/intric/embedding_models/infrastructure/create_embeddings_service.py tests/unittests/embedding_models/test_create_embeddings_service.py -> passed"
+        - "cd backend && uv run ruff format --check src/intric/embedding_models/infrastructure/create_embeddings_service.py tests/unittests/embedding_models/test_create_embeddings_service.py -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/embedding_models/infrastructure/create_embeddings_service.py tests/unittests/embedding_models/test_create_embeddings_service.py -> 0 errors"
+        - "rg -n \"getattr\\(model|hasattr\\(model\" backend/src/intric/embedding_models/infrastructure/create_embeddings_service.py || true -> no matches"
+        - "rg is_pre_resolved backend/src backend/tests/unittests/embedding_models/test_create_embeddings_service.py -> no production import outside create_embeddings_service.py"
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t087-typed-pre-resolved-embedding-contract-implementation-review-20260515T051502Z.md"
+          - ".codex/artifacts/claude-peer-loop-t087-typed-pre-resolved-embedding-contract-re-review-20260515T051838Z.md"
+      follow_up_candidates:
+        - "Remove defensive getattr defaults in EmbeddingModelAdapter._chunk_chunks now that EmbeddingModelLike guarantees the model attributes."
+        - "Tighten the new test helper sentinel/cast if the embedding-model test file grows beyond this narrow contract test."
+      spawned_tasks:
+        - T088
+  - id: T088
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Choose the next bounded crawler reliability/maintainability slice after T087 from current plan evidence and Claude follow-up notes."
+    inputs:
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - ".codex/artifacts/claude-peer-loop-t087-typed-pre-resolved-embedding-contract-re-review-20260515T051838Z.md"
+      - "backend/src/intric/embedding_models/infrastructure/adapters/base.py"
+    constraints:
+      - "Prefer long-term maintainability and strict typed contracts over quick cleanup."
+      - "Keep the next worker slice bounded, behavior-tested, and reviewable."
+      - "Do not stage unrelated .devcontainer changes."
+    expected_output:
+      - "Decision: next Worker task or completion-audit task."
+      - "Allowed files, verification commands, and stop conditions."
+      - "Explicit non-goals and why lower-priority plan items remain deferred."
     receipt: null
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T085
+    task: T087
     commands:
-      - "cd backend && uv run pytest tests/unittests/main/test_container_overrides.py -q"
-      - "cd backend && uv run pytest tests/unittests/main/test_container_overrides.py tests/unittests/worker/test_crawl_task_terminal_outcomes.py tests/unittests/worker/test_persist_batch_logic.py tests/unittests/worker/test_persistence.py -q"
-      - "cd backend && uv run pytest tests/unittests/worker -q"
-      - "cd backend && uv run ruff check src/intric/main/container/container_overrides.py src/intric/embedding_models/infrastructure/create_embeddings_service.py src/intric/websites/domain/crawl_service.py src/intric/worker/crawl_tasks.py src/intric/worker/crawl/persistence.py tests/unittests/main/test_container_overrides.py"
-      - "cd backend && uv run ruff format --check src/intric/main/container/container_overrides.py src/intric/embedding_models/infrastructure/create_embeddings_service.py src/intric/websites/domain/crawl_service.py src/intric/worker/crawl_tasks.py src/intric/worker/crawl/persistence.py tests/unittests/main/test_container_overrides.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/main/container/container_overrides.py src/intric/embedding_models/infrastructure/create_embeddings_service.py src/intric/websites/domain/crawl_service.py src/intric/worker/crawl_tasks.py src/intric/worker/crawl/persistence.py tests/unittests/main/test_container_overrides.py"
-      - "rg -n \"cast\\(Any, container\\.(user|tenant|session)|container\\.(user|tenant|session)\\.override\\(\" backend/src/intric/worker backend/src/intric/main/container"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t085-container-overrides --phase verification --iteration 2 --require-green --required-min-score 8 ..."
-    note: "T085 container override seam passed behavior tests, full worker unit tests, ruff, format check, targeted strict Pyright, grep postconditions, and Claude green review."
+      - "cd backend && uv run pytest tests/unittests/embedding_models/test_create_embeddings_service.py -q"
+      - "cd backend && uv run pytest tests/unittests/embedding_models/test_create_embeddings_service.py --collect-only -q"
+      - "cd backend && uv run ruff check src/intric/embedding_models/infrastructure/create_embeddings_service.py tests/unittests/embedding_models/test_create_embeddings_service.py"
+      - "cd backend && uv run ruff format --check src/intric/embedding_models/infrastructure/create_embeddings_service.py tests/unittests/embedding_models/test_create_embeddings_service.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/embedding_models/infrastructure/create_embeddings_service.py tests/unittests/embedding_models/test_create_embeddings_service.py"
+      - "rg -n \"getattr\\(model|hasattr\\(model\" backend/src/intric/embedding_models/infrastructure/create_embeddings_service.py || true"
+      - "rg is_pre_resolved backend/src backend/tests/unittests/embedding_models/test_create_embeddings_service.py"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t087-embedding-model-contract --phase verification --iteration 2 --require-green --required-min-score 8 ..."
+    note: "T087 typed pre-resolved embedding contract passed behavior tests, collection check, ruff, format check, targeted strict Pyright, grep postconditions, production import check, and Claude green re-review."

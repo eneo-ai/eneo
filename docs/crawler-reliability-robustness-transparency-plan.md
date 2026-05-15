@@ -66,6 +66,7 @@ Goal: make crawler runs cheaper, more reliable, easier to reason about, easier t
 - [x] Step 5 post-terminal operation-name coverage tranche: cover both post-terminal circuit-breaker operation-name literals while keeping the recovery fake behavior-focused and signature-exact.
 - [x] Step 5 crawler TaskManager result-location trim tranche: remove normal-completion dependence on generic `TaskManager.result_location` while preserving the terminal job result URL.
 - [x] Step 5 container override seam tranche: centralize crawler dependency-injector override casts behind `container_overrides.py`, add scoped restoration tests, and remove worker `Any`/`cast` imports from `crawl_tasks.py` and `persistence.py`.
+- [x] Step 5 pre-resolved embedding contract tranche: replace stringly pre-resolved embedding model detection with `PreResolvedEmbeddingModelLike` plus a TypeGuard, preserving provider failure semantics and proving no-DB credential/config pass-through behavior.
 
 ## Non-Negotiable Principles
 

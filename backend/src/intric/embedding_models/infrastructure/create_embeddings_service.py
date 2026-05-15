@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Optional, Protocol, TypeGuard, runtime_checkable
 from uuid import UUID
 
 from intric.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
@@ -55,6 +55,40 @@ class EmbeddingModelLike(Protocol):
     def open_source(self) -> bool: ...
 
 
+@runtime_checkable
+class _PotentialPreResolvedEmbeddingModelLike(EmbeddingModelLike, Protocol):
+    @property
+    def provider_type(self) -> str | None: ...
+
+    @property
+    def provider_credentials(self) -> dict[str, Any] | None: ...
+
+    @property
+    def provider_config(self) -> dict[str, Any] | None: ...
+
+
+class PreResolvedEmbeddingModelLike(EmbeddingModelLike, Protocol):
+    """Embedding model whose provider data is already loaded."""
+
+    @property
+    def provider_type(self) -> str: ...
+
+    @property
+    def provider_credentials(self) -> dict[str, Any]: ...
+
+    @property
+    def provider_config(self) -> dict[str, Any] | None: ...
+
+
+def is_pre_resolved(model: object) -> TypeGuard[PreResolvedEmbeddingModelLike]:
+    """Return true when an embedding model can build an adapter without DB lookup."""
+
+    if not isinstance(model, _PotentialPreResolvedEmbeddingModelLike):
+        return False
+
+    return bool(model.provider_type) and model.provider_credentials is not None
+
+
 class CreateEmbeddingsService:
     def __init__(
         self,
@@ -79,28 +113,18 @@ class CreateEmbeddingsService:
         1. Pre-resolved: If model carries provider_type/provider_credentials
            (e.g. EmbeddingModelSpec from crawl bootstrap), skip DB lookup.
         2. DB lookup: Load provider from database using provider_id + session.
-
-        Args:
-            model: Either an EmbeddingModel ORM object or EmbeddingModelSpec DTO.
-                   Both satisfy the EmbeddingModelLike protocol.
         """
         from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
             TenantModelCredentialResolver,
         )
 
-        # All models must have provider_id
-        if not hasattr(model, "provider_id") or not model.provider_id:
+        if not model.provider_id:
             raise ValueError(
                 f"Model '{model.name}' is missing required provider_id. "
                 "All models must be associated with a ModelProvider."
             )
 
-        # Check if provider data is pre-resolved on the model (e.g. from crawl bootstrap)
-        provider_type = getattr(model, "provider_type", None)
-        provider_credentials = getattr(model, "provider_credentials", None)
-        provider_config = getattr(model, "provider_config", None)
-
-        if provider_type and provider_credentials is not None:
+        if is_pre_resolved(model):
             # Pre-resolved path: no DB session needed
             if self.encryption_service is None:
                 raise ValueError(
@@ -108,12 +132,13 @@ class CreateEmbeddingsService:
                 )
             credential_resolver = TenantModelCredentialResolver(
                 provider_id=model.provider_id,
-                provider_type=provider_type,
-                credentials=provider_credentials,
-                config=provider_config or {},
+                provider_type=model.provider_type,
+                credentials=model.provider_credentials,
+                config=model.provider_config or {},
                 encryption_service=self.encryption_service,
             )
-            litellm_model_name = f"{provider_type}/{model.name}"
+            litellm_model_name = f"{model.provider_type}/{model.name}"
+            provider_type = model.provider_type
         else:
             # DB lookup path: requires active session
             import sqlalchemy as sa
@@ -124,7 +149,7 @@ class CreateEmbeddingsService:
                 logger.error(
                     "Model requires database session but none available",
                     extra={
-                        "model_id": str(model.id) if hasattr(model, "id") else None,
+                        "model_id": str(model.id),
                         "model_name": model.name,
                         "provider_id": str(model.provider_id),
                         "tenant_id": str(self.tenant.id) if self.tenant else None,
@@ -170,7 +195,7 @@ class CreateEmbeddingsService:
         logger.info(
             f"Using LiteLLMEmbeddingAdapter for model '{model.name}'",
             extra={
-                "model_id": str(model.id) if hasattr(model, "id") else None,
+                "model_id": str(model.id),
                 "model_name": model.name,
                 "provider_id": str(model.provider_id),
                 "provider_type": provider_type,
@@ -190,12 +215,7 @@ class CreateEmbeddingsService:
         model: EmbeddingModelLike,
         chunks: list[InfoBlobChunk],
     ) -> ChunkEmbeddingList:
-        """Generate embeddings for text chunks.
-
-        Args:
-            model: Either an EmbeddingModel ORM object or EmbeddingModelSpec DTO.
-            chunks: List of InfoBlobChunk objects to embed.
-        """
+        """Generate embeddings for text chunks."""
         adapter = await self._get_adapter(model)
         return await adapter.get_embeddings(chunks)
 
@@ -204,11 +224,6 @@ class CreateEmbeddingsService:
         model: EmbeddingModelLike,
         query: str,
     ) -> list[float]:
-        """Generate embedding for a search query.
-
-        Args:
-            model: Either an EmbeddingModel ORM object or EmbeddingModelSpec DTO.
-            query: Search query string to embed.
-        """
+        """Generate embedding for a search query."""
         adapter = await self._get_adapter(model)
         return await adapter.get_embedding_for_query(query)
