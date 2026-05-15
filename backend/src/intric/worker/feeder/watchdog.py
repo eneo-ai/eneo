@@ -26,13 +26,11 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Protocol, cast
 from uuid import UUID
 
-from arq.jobs import JobStatus
 from sqlalchemy import func, select
 from typing_extensions import TypedDict
 
 from intric.database.tables.job_table import Jobs
 from intric.database.tables.websites_table import CrawlRuns
-from intric.jobs.job_manager import job_manager
 from intric.jobs.job_models import Task
 from intric.main.config import Settings
 from intric.main.logging import get_logger
@@ -46,6 +44,11 @@ from intric.worker.feeder.crawl_enqueue import (
     CrawlEnqueueDuplicate,
     CrawlEnqueueFailed,
     enqueue_crawl_job,
+)
+from intric.worker.feeder.crawl_status import (
+    CrawlJobStatus,
+    CrawlJobStatusLookupFailed,
+    get_crawl_job_status,
 )
 from intric.worker.redis.client import (
     WATCHDOG_LAST_METRICS_KEY,
@@ -792,23 +795,26 @@ class OrphanWatchdog:
         Returns:
             True if job was re-queued, False if skipped.
         """
-        try:
-            status = await job_manager.get_job_status(job_id)
-        except Exception as exc:
+        status_result = await get_crawl_job_status(job_id)
+        if isinstance(status_result, CrawlJobStatusLookupFailed):
             logger.warning(
                 "Could not query ARQ job status before watchdog re-queue; assuming missing",
                 extra={
                     "job_id": str(job_id),
                     "tenant_id": str(tenant_id),
-                    "error": str(exc),
+                    "error": str(status_result.error),
                 },
             )
-            status = JobStatus.not_found
+            status = CrawlJobStatus.NOT_FOUND
+        else:
+            status = status_result.status
 
-        if status != JobStatus.not_found:
+        # Safe fallback: ARQ deduplicates by job_id, while not re-enqueueing can leave
+        # a genuinely missing crawl stuck indefinitely.
+        if status != CrawlJobStatus.NOT_FOUND:
             logger.info(
                 "Job already in ARQ, skipping re-queue",
-                extra={"job_id": str(job_id), "arq_status": status.value},
+                extra={"job_id": str(job_id), "crawl_job_status": status.value},
             )
             return False
 

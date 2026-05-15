@@ -2,7 +2,7 @@ from uuid import UUID
 
 from arq import create_pool
 from arq.connections import ArqRedis
-from arq.jobs import Job
+from arq.jobs import Job, JobStatus
 
 from intric.jobs.job_models import Task
 from intric.jobs.task_models import TaskParams
@@ -45,7 +45,7 @@ class JobManager:
         assert self._redis is not None
         await self._redis.enqueue_job(task)
 
-    async def get_job_status(self, job_id: UUID):
+    async def get_job_status(self, job_id: UUID) -> JobStatus:
         if self._redis is None:
             raise NotReadyException("Job manager is not initialized!")
         job = Job(job_id=str(job_id), redis=self._redis)

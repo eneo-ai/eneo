@@ -66,6 +66,29 @@ def _calls_attribute(tree: ast.AST, attribute_name: str) -> bool:
     return False
 
 
+def test_worker_runtime_arq_jobs_imports_stay_behind_typed_boundaries() -> None:
+    worker_root = Path(__file__).parents[4] / "src/intric/worker"
+    allowed = {
+        worker_root / "feeder/crawl_status.py",
+    }
+    offenders: list[str] = []
+    for source_path in worker_root.rglob("*.py"):
+        if source_path in allowed:
+            continue
+        tree = ast.parse(source_path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "arq.jobs":
+                offenders.append(str(source_path.relative_to(worker_root)))
+            elif isinstance(node, ast.ImportFrom) and node.module == "arq":
+                if any(alias.name == "jobs" for alias in node.names):
+                    offenders.append(str(source_path.relative_to(worker_root)))
+            elif isinstance(node, ast.Import):
+                if any(alias.name == "arq.jobs" for alias in node.names):
+                    offenders.append(str(source_path.relative_to(worker_root)))
+
+    assert offenders == []
+
+
 class TestWatchdogRequeue:
     """Tests for watchdog requeue idempotency boundaries."""
 
@@ -77,11 +100,13 @@ class TestWatchdogRequeue:
         assert not re.search(r"\bJob\(job_id=str\(", source)
 
     @pytest.mark.asyncio
-    async def test_requeue_uses_job_manager_status_and_typed_enqueue_owner(self):
-        from arq.jobs import JobStatus
-
+    async def test_requeue_uses_typed_status_and_enqueue_owners(self):
         from intric.worker.feeder.crawl_enqueue import (
             CrawlEnqueued,
+        )
+        from intric.worker.feeder.crawl_status import (
+            CrawlJobStatus,
+            CrawlJobStatusKnown,
         )
         from intric.worker.feeder.watchdog import OrphanWatchdog
 
@@ -95,9 +120,14 @@ class TestWatchdogRequeue:
 
         with (
             patch(
-                "intric.worker.feeder.watchdog.job_manager.get_job_status",
-                new=AsyncMock(return_value=JobStatus.not_found),
-            ) as get_job_status,
+                "intric.worker.feeder.watchdog.get_crawl_job_status",
+                new=AsyncMock(
+                    return_value=CrawlJobStatusKnown(
+                        job_id=job_id,
+                        status=CrawlJobStatus.NOT_FOUND,
+                    )
+                ),
+            ) as get_crawl_job_status,
             patch(
                 "intric.worker.feeder.watchdog.enqueue_crawl_job",
                 new=AsyncMock(return_value=CrawlEnqueued(job_id=job_id)),
@@ -115,7 +145,7 @@ class TestWatchdogRequeue:
             )
 
         assert requeued is True
-        get_job_status.assert_awaited_once_with(job_id)
+        get_crawl_job_status.assert_awaited_once_with(job_id)
         enqueue_crawl_job.assert_awaited_once()
         call_kwargs = enqueue_crawl_job.await_args.kwargs
         assert call_kwargs["job_id"] == job_id
@@ -124,12 +154,56 @@ class TestWatchdogRequeue:
         assert call_kwargs["website_id"] == website_id
 
     @pytest.mark.asyncio
+    async def test_requeue_skips_when_typed_status_owner_sees_existing_arq_job(self):
+        from intric.worker.feeder.crawl_status import (
+            CrawlJobStatus,
+            CrawlJobStatusKnown,
+        )
+        from intric.worker.feeder.watchdog import OrphanWatchdog
+
+        redis_mock = MagicMock()
+        settings_mock = MagicMock()
+        watchdog = OrphanWatchdog(redis_mock, settings_mock)
+        job_id = uuid4()
+
+        with (
+            patch(
+                "intric.worker.feeder.watchdog.get_crawl_job_status",
+                new=AsyncMock(
+                    return_value=CrawlJobStatusKnown(
+                        job_id=job_id,
+                        status=CrawlJobStatus.QUEUED,
+                    )
+                ),
+            ),
+            patch(
+                "intric.worker.feeder.watchdog.enqueue_crawl_job",
+                new=AsyncMock(),
+            ) as enqueue_crawl_job,
+        ):
+            requeued = await watchdog._requeue_job(
+                job_id=job_id,
+                user_id=uuid4(),
+                run_id=uuid4(),
+                tenant_id=uuid4(),
+                website_id=uuid4(),
+                url="https://example.com",
+                download_files=False,
+                crawl_type="crawl",
+            )
+
+        assert requeued is False
+        enqueue_crawl_job.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_requeue_does_not_parse_duplicate_exception_text(self):
         """ARQ duplicates are represented by enqueue(False), not exception text."""
-        from arq.jobs import JobStatus
-
         from intric.worker.feeder.crawl_enqueue import (
             CrawlEnqueueFailed,
+        )
+        from intric.worker.feeder.crawl_status import (
+            CrawlJobStatus,
+            CrawlJobStatusKnown,
         )
         from intric.worker.feeder.watchdog import OrphanWatchdog
 
@@ -140,8 +214,13 @@ class TestWatchdogRequeue:
 
         with (
             patch(
-                "intric.worker.feeder.watchdog.job_manager.get_job_status",
-                new=AsyncMock(return_value=JobStatus.not_found),
+                "intric.worker.feeder.watchdog.get_crawl_job_status",
+                new=AsyncMock(
+                    return_value=CrawlJobStatusKnown(
+                        job_id=uuid4(),
+                        status=CrawlJobStatus.NOT_FOUND,
+                    )
+                ),
             ),
             patch(
                 "intric.worker.feeder.watchdog.enqueue_crawl_job",

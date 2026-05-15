@@ -6010,7 +6010,7 @@ tasks:
   - id: T125
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Audit the roadmap after T124 and choose the next single highest-ROI remaining slice without marking the full goal complete unless current evidence proves every requirement."
     inputs:
@@ -6026,17 +6026,107 @@ tasks:
       - "complete | not_complete"
       - "Evidence for remaining explicit open items"
       - "Next bounded task if not complete"
+    receipt:
+      result: not_complete
+      summary: "Roadmap audit rejected goal completion and selected a typed crawl job-status owner as the next bounded ownership-collapse slice before any broader WorkerAdapter abstraction."
+      changed_files: []
+      verification:
+        - "Plan checkbox count before T126: 117 checked, 39 open."
+        - "State audit before T126: T125 active after 125 completed tasks."
+        - "Claude review selected a concrete typed crawl job-status owner, explicitly deferring broad WorkerAdapter, admin write controls, frontend OpenAPI regeneration, lifecycle rewrites, and crawl_tasks restructuring."
+      claude:
+        verdict: green
+        min_score: 8
+        artifact: ".codex/artifacts/claude-peer-loop-crawler-t125-roadmap-audit-next-slice-20260515T125815Z.md"
+        follow_up_notes:
+          - "Use a static guard to keep direct arq.jobs imports out of worker runtime code except the typed boundary."
+          - "Keep the slice limited to job status ownership; do not introduce the broader WorkerAdapter yet."
+  - id: T126
+    type: worker
+    assignee: Codex
+    status: done
+    reasoning_hint: medium
+    objective: "Collapse ARQ crawl job-status vocabulary behind a typed crawler owner and make watchdog requeue consume crawler-domain status."
+    allowed_files:
+      - "backend/src/intric/jobs/job_manager.py"
+      - "backend/src/intric/worker/feeder/crawl_status.py"
+      - "backend/src/intric/worker/feeder/watchdog.py"
+      - "backend/tests/unittests/worker/feeder/test_crawl_status.py"
+      - "backend/tests/unittests/worker/feeder/test_watchdog.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/worker/feeder/test_crawl_status.py tests/unittests/worker/feeder/test_watchdog.py -q"
+      - "cd backend && uv run pytest tests/unittests/jobs/test_job_manager.py tests/unittests/worker/feeder/test_crawl_enqueue.py tests/unittests/worker/feeder/test_crawl_status.py tests/unittests/worker/feeder/test_watchdog.py tests/integration/test_orphan_cleanup.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/feeder/crawl_status.py src/intric/worker/feeder/watchdog.py tests/unittests/worker/feeder/test_crawl_status.py tests/unittests/worker/feeder/test_watchdog.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/feeder/crawl_status.py src/intric/worker/feeder/watchdog.py tests/unittests/worker/feeder/test_crawl_status.py tests/unittests/worker/feeder/test_watchdog.py"
+      - "cd backend && uv run pyright --project pyrightconfig.json"
+      - "cd backend && rg -n \"from arq\\.jobs import|import arq\\.jobs|from arq import jobs\" src/intric/worker -g '*.py'"
+      - "cd backend && rg -n \"get_job_status\\(\" src/intric tests -g '*.py'"
+    stop_if:
+      - "Need WorkerAdapter, admin write controls, frontend OpenAPI regeneration, lifecycle rewrite, or broad crawl_tasks changes."
+      - "Need direct arq.jobs imports in worker runtime modules outside worker/feeder/crawl_status.py."
+      - "Need to stage unrelated .devcontainer dirt."
+    receipt:
+      result: done
+      summary: "Added a typed crawl job-status boundary that maps ARQ JobStatus to CrawlJobStatus, returns typed lookup failures for Redis/job-manager/mapping errors, makes watchdog requeue consume the crawler-domain status instead of ARQ status directly, and guards the worker tree against future direct arq.jobs imports."
+      changed_files:
+        - "backend/src/intric/jobs/job_manager.py"
+        - "backend/src/intric/worker/feeder/crawl_status.py"
+        - "backend/src/intric/worker/feeder/watchdog.py"
+        - "backend/tests/unittests/worker/feeder/test_crawl_status.py"
+        - "backend/tests/unittests/worker/feeder/test_watchdog.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      verification:
+        - "Red test: cd backend && uv run pytest tests/unittests/worker/feeder/test_crawl_status.py tests/unittests/worker/feeder/test_watchdog.py -q failed before implementation because intric.worker.feeder.crawl_status did not exist."
+        - "cd backend && uv run pytest tests/unittests/worker/feeder/test_crawl_status.py tests/unittests/worker/feeder/test_watchdog.py -q"
+        - "cd backend && uv run pytest tests/unittests/jobs/test_job_manager.py tests/unittests/worker/feeder/test_crawl_enqueue.py tests/unittests/worker/feeder/test_crawl_status.py tests/unittests/worker/feeder/test_watchdog.py tests/integration/test_orphan_cleanup.py -q"
+        - "cd backend && uv run ruff check src/intric/worker/feeder/crawl_status.py src/intric/worker/feeder/watchdog.py tests/unittests/worker/feeder/test_crawl_status.py tests/unittests/worker/feeder/test_watchdog.py"
+        - "cd backend && uv run ruff format --check src/intric/worker/feeder/crawl_status.py src/intric/worker/feeder/watchdog.py tests/unittests/worker/feeder/test_crawl_status.py tests/unittests/worker/feeder/test_watchdog.py"
+        - "cd backend && uv run pyright --project pyrightconfig.json"
+        - "cd backend && rg -n \"from arq\\.jobs import|import arq\\.jobs|from arq import jobs\" src/intric/worker -g '*.py' returned only src/intric/worker/feeder/crawl_status.py."
+        - "cd backend && rg -n \"get_job_status\\(\" src/intric tests -g '*.py' returned only src/intric/jobs/job_manager.py and src/intric/worker/feeder/crawl_status.py."
+      claude:
+        verdict: green
+        min_score: 8
+        artifact: ".codex/artifacts/claude-peer-loop-crawler-t126-typed-crawl-job-status-iteration-2-20260515T131356Z.md"
+        follow_up_notes:
+          - "Use explicit git add paths so unrelated .devcontainer dirt stays out of the commit."
+          - "Optional future cleanup: collapse the result union if no second caller needs the retained exception detail."
+          - "Optional future cleanup: use an exhaustive match/assert-never mapping if ARQ status drift becomes a concern."
+  - id: T127
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Audit the roadmap after T126 and choose the next single highest-ROI remaining slice without marking the full goal complete unless current evidence proves every requirement."
+    inputs:
+      - "T126 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      - "Current git diff after T126"
+    constraints:
+      - "Do not mark the goal complete unless every remaining roadmap requirement has current evidence."
+      - "Preserve unrelated .devcontainer dirt."
+      - "Prefer bounded canonical-owner or admin transparency slices over broad rewrites."
+    expected_output:
+      - "complete | not_complete"
+      - "Evidence for remaining explicit open items"
+      - "Next bounded task if not complete"
 
 checks:
   dirty_fingerprint: "unrelated .devcontainer files are dirty; do not stage"
   last_verification:
     result: passed
-    task: T124
+    task: T126
     commands:
-      - "cd backend && uv run pytest tests/integration/test_sysadmin_crawler_watchdog_status.py tests/integration/test_sysadmin_crawler_recent_failures.py tests/integration/test_sysadmin_crawler_baseline.py -q"
-      - "cd backend && uv run ruff check src/intric/worker/redis/client.py src/intric/worker/feeder/watchdog.py src/intric/server/main.py src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_watchdog_status.py"
-      - "cd backend && uv run ruff format --check src/intric/worker/redis/client.py src/intric/worker/feeder/watchdog.py src/intric/server/main.py src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_watchdog_status.py"
-      - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/redis/client.py src/intric/worker/feeder/watchdog.py src/intric/server/main.py src/intric/websites/domain/crawler_recent_failures.py src/intric/websites/domain/crawl_run_repo.py src/intric/sysadmin/sysadmin_models.py src/intric/sysadmin/sysadmin_router.py tests/integration/test_sysadmin_crawler_watchdog_status.py"
+      - "cd backend && uv run pytest tests/unittests/worker/feeder/test_crawl_status.py tests/unittests/worker/feeder/test_watchdog.py -q"
+      - "cd backend && uv run pytest tests/unittests/jobs/test_job_manager.py tests/unittests/worker/feeder/test_crawl_enqueue.py tests/unittests/worker/feeder/test_crawl_status.py tests/unittests/worker/feeder/test_watchdog.py tests/integration/test_orphan_cleanup.py -q"
+      - "cd backend && uv run ruff check src/intric/worker/feeder/crawl_status.py src/intric/worker/feeder/watchdog.py tests/unittests/worker/feeder/test_crawl_status.py tests/unittests/worker/feeder/test_watchdog.py"
+      - "cd backend && uv run ruff format --check src/intric/worker/feeder/crawl_status.py src/intric/worker/feeder/watchdog.py tests/unittests/worker/feeder/test_crawl_status.py tests/unittests/worker/feeder/test_watchdog.py"
       - "cd backend && uv run pyright --project pyrightconfig.json"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t124-watchdog-status-endpoint --phase review --iteration 2 --required-min-score 8 ..."
-    note: "T124 sysadmin watchdog-status endpoint passed red/green integration tests, recent-failures/baseline regressions, ruff, format check, targeted and full strict Pyright, canonical Redis key grep, and Claude green final verification."
+      - "cd backend && rg -n \"from arq\\.jobs import|import arq\\.jobs|from arq import jobs\" src/intric/worker -g '*.py'"
+      - "cd backend && rg -n \"get_job_status\\(\" src/intric tests -g '*.py'"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session crawler-t126-typed-crawl-job-status --phase review --iteration 2 --required-min-score 8 ..."
+    note: "T126 typed crawl job-status owner passed red/green worker tests, enqueue/watchdog/orphan regressions, ruff, format check, full strict Pyright, ownership greps, and Claude green final verification."
