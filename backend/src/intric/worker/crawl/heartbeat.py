@@ -13,6 +13,7 @@ import time
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from intric.worker.crawl.preemption import is_job_preempted
 from intric.worker.redis.client import redis_pipeline, redis_pipeline_items
 from intric.worker.redis.lua_scripts import LuaScripts
 
@@ -219,15 +220,10 @@ class HeartbeatMonitor:
         """
         try:
             from intric.database.database import sessionmanager
-            from intric.jobs.job_repo import JobRepository
-            from intric.main.models import Status as JobStatus
 
             async with sessionmanager.session() as session:
                 async with session.begin():
-                    job_repo = JobRepository(session=session)
-                    job = await job_repo.get_job(self._job_id)
-
-                    if job and job.status == JobStatus.FAILED:
+                    if await is_job_preempted(session, job_id=self._job_id):
                         logger.warning(
                             "Detected job preemption during heartbeat",
                             extra={"job_id": str(self._job_id)},

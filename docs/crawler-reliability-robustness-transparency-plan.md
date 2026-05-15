@@ -614,6 +614,7 @@ Work:
 - [x] Extract stale cleanup into `cleanup_stale_blobs(...)` with typed output and behavior tests for cleanup policy, ordered stale titles, empty cleanup, delete-callback failures, and report/action consistency.
 - [x] Extract crawl slot acquire behavior into `acquire_crawl_slot(...)` with typed output and behavior tests for normal acquire, limit reached, pre-acquired reuse, tenant-injection discovery, tenant mismatch release, Redis read failures, invalid Redis state, TTL refresh failures, and mismatch release followed by limit reached.
 - [x] Extract website size recalculation into `update_website_size_after_crawl(...)` with a typed tenant-scoped SQL boundary and behavior test.
+- [x] Extract crawler job preemption detection into `is_job_preempted(...)` and reuse it from both heartbeat and final preemption checks.
 - [ ] Each phase returns a typed output and does not write terminal state directly.
 - [ ] Keep Scrapy-specific behavior in `crawler.py` and `CrawlDiagnostics`.
 - [ ] Keep persistence retention behavior in `persist_batch()`.

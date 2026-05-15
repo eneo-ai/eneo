@@ -6,13 +6,14 @@ These tests verify that the fix for the session recovery anti-pattern works:
 - Only _do_complete_job() should commit (final operation)
 
 Bug context: Previously _do_timestamp_update() committed mid-flow, which closed
-the context manager's transaction. Subsequent operations like _do_suicide_check()
+the context manager's transaction. Subsequent operations like _do_preemption_check()
 would fail with "Can't operate on closed transaction inside context manager",
 triggering unnecessary session recovery on every successful crawl.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 import sqlalchemy as sa
 
 
@@ -108,7 +109,7 @@ class TestTransactionFlowIntegrity:
     async def test_sequential_operations_share_transaction(self):
         """Multiple _do_* operations should share the same transaction state.
 
-        Simulates the flow: _do_update_size → _do_timestamp_update → _do_suicide_check
+        Simulates the flow: _do_update_size → _do_timestamp_update → _do_preemption_check
         All should run within the same transaction without intermediate commits.
         """
         mock_session = AsyncMock()
@@ -129,20 +130,20 @@ class TestTransactionFlowIntegrity:
             )
             # No commit - fixed behavior
 
-        async def _do_suicide_check():
-            operations_executed.append("suicide_check")
+        async def _do_preemption_check():
+            operations_executed.append("preemption_check")
             await mock_session.execute(sa.text("SELECT status FROM jobs"))
 
         # Execute operations in sequence
         await _do_update_size()
         await _do_timestamp_update()
-        await _do_suicide_check()
+        await _do_preemption_check()
 
         # All operations should have run
         assert operations_executed == [
             "update_size",
             "timestamp_update",
-            "suicide_check",
+            "preemption_check",
         ]
 
         # Execute should have been called 3 times (once per operation)
@@ -197,14 +198,14 @@ class TestRecoveryNotTriggeredOnHappyPath:
         mock_session.execute = AsyncMock()
 
         # Simulate operations that would trigger recovery if transaction was closed
-        async def _do_suicide_check():
+        async def _do_preemption_check():
             sess = mock_session
             # This check would trigger recovery if transaction was closed
             if not sess.in_transaction():
                 await mock_recover_session()
             await sess.execute(sa.text("SELECT status FROM jobs"))
 
-        await _do_suicide_check()
+        await _do_preemption_check()
 
         # Recovery should NOT have been called
         assert not recovery_called

@@ -21,7 +21,7 @@ agents:
   worker: installed
   judge: installed
 
-active_task: T111
+active_task: T113
 
 tasks:
   - id: T001
@@ -5371,7 +5371,7 @@ tasks:
   - id: T111
     type: judge
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Choose the next bounded roadmap slice after website-size extraction, with preemption guard extraction and broader Step 5 phase cleanup as leading candidates."
     inputs:
@@ -5386,6 +5386,87 @@ tasks:
       - "Preserve unrelated .devcontainer dirt."
     expected_output:
       - "Decision: preemption guard extraction, another small Step 5 typed boundary, admin transparency slice, or roadmap split."
+      - "Allowed files, red tests, verification commands, and stop_if conditions if another worker is selected."
+    receipt:
+      result: done
+      decision: "Activate T112 preemption detection extraction as the next Step 5 slice. The existing final preemption SQL and heartbeat preemption query represent the same externally-marked-failed concept, so the selected slice creates one canonical owner instead of a second parallel guard."
+      summary: "Selected a bounded Step 5 extraction after T110. The slice avoids WorkerAdapter/admin write controls, does not touch terminal commits, and focuses on one owner for job preemption observation."
+      spawned_tasks:
+        - T112
+        - T113
+  - id: T112
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: low
+    objective: "Extract crawler job preemption detection into a canonical typed crawl boundary and reuse it from heartbeat and final checks."
+    inputs:
+      - "T111 receipt"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/src/intric/worker/crawl/heartbeat.py"
+    allowed_files:
+      - "backend/src/intric/worker/crawl/preemption.py"
+      - "backend/src/intric/worker/crawl/heartbeat.py"
+      - "backend/src/intric/worker/crawl/__init__.py"
+      - "backend/src/intric/worker/crawl_tasks.py"
+      - "backend/tests/unittests/worker/test_crawl_preemption.py"
+      - "backend/tests/unittests/worker/test_session_transaction_atomicity.py"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+    constraints:
+      - "Do not change terminal commit code."
+      - "Do not change reporting or completion outcome classification."
+      - "Do not start WorkerAdapter or admin write controls."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "is_job_preempted(...) owns the database status check for externally failed jobs."
+      - "crawl_tasks.py final preemption check uses the canonical boundary through execute_with_recovery."
+      - "Heartbeat preemption detection reuses the same boundary while keeping heartbeat-owned session and logging behavior."
+    receipt:
+      result: done
+      summary: "Added worker/crawl/preemption.py with is_job_preempted(...), replaced the final inline Jobs.status query in crawl_tasks.py, and changed HeartbeatMonitor._check_preemption to reuse the same preemption boundary instead of a separate JobRepository lookup. The recovery operation name was updated from suicide_check to preemption_check, and the older transaction atomicity test wording was renamed to match the domain language."
+      changed_files:
+        - "backend/src/intric/worker/crawl/preemption.py"
+        - "backend/src/intric/worker/crawl/heartbeat.py"
+        - "backend/src/intric/worker/crawl/__init__.py"
+        - "backend/src/intric/worker/crawl_tasks.py"
+        - "backend/tests/unittests/worker/test_crawl_preemption.py"
+        - "backend/tests/unittests/worker/test_session_transaction_atomicity.py"
+        - "docs/crawler-reliability-robustness-transparency-plan.md"
+        - "docs/goals/crawler-reliability-robustness-transparency/state.yaml"
+      red_verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_preemption.py -q failed before implementation with ModuleNotFoundError: No module named 'intric.worker.crawl.preemption'."
+      verification:
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_preemption.py -q -> 3 passed, 12 existing warnings"
+        - "cd backend && uv run pytest tests/unittests/worker/test_crawl_preemption.py tests/unittests/worker/test_heartbeat.py tests/unittests/worker/test_crawl_page_processing.py tests/unittests/worker/test_session_transaction_atomicity.py -q -> 25 passed, 12 existing warnings"
+        - "cd backend && uv run ruff check src/intric/worker/crawl/preemption.py src/intric/worker/crawl/heartbeat.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_preemption.py tests/unittests/worker/test_session_transaction_atomicity.py -> passed"
+        - "cd backend && uv run ruff format --check src/intric/worker/crawl/preemption.py src/intric/worker/crawl/heartbeat.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_preemption.py tests/unittests/worker/test_session_transaction_atomicity.py -> passed"
+        - "cd backend && uv run pyright --project pyrightconfig.json src/intric/worker/crawl/preemption.py src/intric/worker/crawl/heartbeat.py src/intric/worker/crawl/__init__.py src/intric/worker/crawl_tasks.py tests/unittests/worker/test_crawl_preemption.py tests/unittests/worker/test_session_transaction_atomicity.py -> 0 errors"
+        - "cd backend && uv run pyright --project pyrightconfig.json -> 0 errors"
+        - "cd backend && uv run pytest tests/unittests/worker -q -> 340 passed, 13 existing warnings"
+      claude:
+        verdict: green
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t112-preemption-extraction-commit-gate-20260515T093144Z.md"
+        resolution: "Claude approved the slice with GREEN_LIGHT yes and MIN_SCORE 8. A short domain docstring was added after review to clarify that crawler preemption means an external FAILED job state."
+  - id: T113
+    type: judge
+    assignee: PM
+    status: active
+    reasoning_hint: medium
+    objective: "Choose the next bounded roadmap slice after preemption extraction, with remaining Step 5 phase cleanup, typed reporting/timings, or a narrow admin transparency slice as candidates."
+    inputs:
+      - "T111 receipt"
+      - "T112 receipt"
+      - "docs/crawler-reliability-robustness-transparency-plan.md"
+      - "Current git status and verification"
+    constraints:
+      - "Do not mark the goal complete."
+      - "Do not start WorkerAdapter or admin write controls without a fresh plan gate."
+      - "Prefer one canonical owner and one red test over broad tail extraction."
+      - "Preserve unrelated .devcontainer dirt."
+    expected_output:
+      - "Decision: next Step 5 extraction, typed reporting/timings, admin transparency slice, or roadmap split."
       - "Allowed files, red tests, verification commands, and stop_if conditions if another worker is selected."
     receipt: null
 

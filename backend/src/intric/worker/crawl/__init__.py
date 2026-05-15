@@ -49,6 +49,7 @@ from intric.worker.crawl.persistence import (
     PersistBatchResult,
     persist_batch,
 )
+from intric.worker.crawl.preemption import is_job_preempted
 from intric.worker.crawl.recovery import (
     calculate_exponential_backoff,
     execute_with_recovery,
@@ -113,6 +114,8 @@ __all__ = [
     "ExistingBlobState",
     "PersistBatchResult",
     "persist_batch",
+    # Preemption
+    "is_job_preempted",
     # Recovery - Main API
     "calculate_exponential_backoff",
     "execute_with_recovery",

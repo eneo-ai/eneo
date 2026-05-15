@@ -51,6 +51,7 @@ from intric.worker.crawl import (
     cleanup_stale_blobs,
     commit_terminal,
     execute_with_recovery,
+    is_job_preempted,
     persist_batch,
     process_files,
     process_pages,
@@ -1438,24 +1439,15 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 },
             )
 
-            # Preemption check: Verify job wasn't marked FAILED while we were crawling.
-            # If preempted, don't write results - a new crawl is already running.
-            from intric.database.tables.job_table import Jobs
-            from intric.main.models import Status as JobStatus
+            async def _do_preemption_check(sess: AsyncSession) -> bool:
+                return await is_job_preempted(sess, job_id=job_id)
 
-            async def _do_suicide_check(sess: AsyncSession) -> str | None:
-                # Session provided by execute_with_recovery (session-per-operation pattern)
-                result = await sess.execute(
-                    sa.select(Jobs.status).where(Jobs.id == job_id)
-                )
-                return result.scalar_one_or_none()
-
-            job_status_value = await execute_with_recovery(
-                operation_name="suicide_check",
-                operation=_do_suicide_check,
+            job_was_preempted = await execute_with_recovery(
+                operation_name="preemption_check",
+                operation=_do_preemption_check,
             )
 
-            if job_status_value == JobStatus.FAILED.value:
+            if job_was_preempted:
                 logger.warning(
                     "Crawl job was preempted during execution - aborting without writing results",
                     extra={
