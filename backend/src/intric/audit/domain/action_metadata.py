@@ -221,6 +221,10 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "name_sv": "Crawl-intervall ändrat",
         "description_sv": "Loggar när en administratör ändrar uppdateringsintervallet för en webbplats",
     },
+    ActionType.WEBSITE_CRAWL_RETRY_REQUESTED.value: {
+        "name_sv": "Crawl begärd omedelbart",
+        "description_sv": "Loggar när en administratör begär en omedelbar omkörning av en crawl",
+    },
     ActionType.WEBSITE_TRANSFERRED.value: {
         "name_sv": "Webbplats överförd",
         "description_sv": "Loggar när en webbplats flyttas mellan Spaces",
