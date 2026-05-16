@@ -123,22 +123,11 @@ test("abortability follows backend is_abortable flag, not lifecycle state", () =
 });
 
 test("abort conflict messages use typed backend conflict codes", () => {
-  expect(
-    getCrawlerAbortConflictMessage(
-      new IntricError(
-        "Conflict",
-        "RESPONSE",
-        409,
-        0,
-        {
-          error_code: "RUNNING_ABORT_NOT_IMPLEMENTED",
-          detail: "Running crawl abort is not implemented yet."
-        },
-        { endpoint: "POST@/api/v1/admin/crawler/jobs/id/abort" }
-      )
-    )
-  ).toBe("Running crawls cannot be cancelled from this page yet.");
-
+  // Running aborts no longer return RUNNING_ABORT_NOT_IMPLEMENTED — the
+  // backend now commits a terminal CRAWL_ABORTED event for queued and
+  // running crawls alike. Only CRAWL_NOT_ABORTABLE remains as a typed
+  // conflict (job finished or transitioned to a non-abortable status
+  // between status check and terminal commit).
   expect(
     getCrawlerAbortConflictMessage(
       new IntricError(

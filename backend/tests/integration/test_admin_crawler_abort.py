@@ -373,14 +373,20 @@ async def test_admin_abort_pending_crawl_does_not_release_unowned_tenant_slot(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_admin_abort_running_crawl_returns_typed_conflict_without_arq_abort(
+async def test_admin_abort_running_crawl_commits_terminal_and_signals_arq(
     client,
     db_session,
     admin_user,
     admin_user_api_key,
     monkeypatch,
 ):
-    abort_called = False
+    """Running aborts mark the job FAILED + outcome CRAWL_ABORTED so the
+    worker's heartbeat preemption check observes the abort and exits via the
+    slot-release reactor without running unsafe stale cleanup. The admin
+    endpoint also signals ARQ abort with timeout=0 (signal-only, no wait)
+    so the HTTP request does not block on worker unwind."""
+    aborted_job_ids: list[UUID] = []
+    arq_abort_timeouts: list[float | None] = []
     audit_calls = _install_audit_recorder(monkeypatch)
 
     async def record_abort(
@@ -390,8 +396,94 @@ async def test_admin_abort_running_crawl_returns_typed_conflict_without_arq_abor
         timeout: float | None = None,
         poll_delay: float = 0.5,
     ) -> bool:
-        nonlocal abort_called
-        abort_called = True
+        aborted_job_ids.append(job_id)
+        arq_abort_timeouts.append(timeout)
+        return True
+
+    monkeypatch.setattr(JobManager, "abort_job", record_abort)
+
+    async with db_session() as session:
+        embedding_model_id = await _embedding_model_id(session)
+        website = await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+        )
+        job = await _create_crawl_job(
+            session,
+            user_id=admin_user.id,
+            status=Status.IN_PROGRESS,
+        )
+        crawl_run = await _create_crawl_run(
+            session,
+            tenant_id=admin_user.tenant_id,
+            website_id=website.id,
+            job_id=job.id,
+        )
+        job_id = job.id
+        crawl_run_id = crawl_run.id
+        website_id = website.id
+        await session.commit()
+
+    response = await client.post(
+        f"/api/v1/admin/crawler/jobs/{job_id}/abort",
+        headers={"X-API-Key": admin_user_api_key.key},
+    )
+
+    assert response.status_code == 204
+    assert aborted_job_ids == [job_id]
+
+    async with db_session() as session:
+        persisted_status, persisted_finished_at = (
+            await session.execute(
+                sa.select(Jobs.status, Jobs.finished_at).where(Jobs.id == job_id)
+            )
+        ).one()
+        persisted_outcome_code = await session.scalar(
+            sa.select(CrawlRuns.outcome_code).where(CrawlRuns.id == crawl_run_id)
+        )
+
+    assert persisted_status == Status.FAILED.value
+    assert persisted_finished_at is not None
+    assert persisted_outcome_code == CrawlOutcomeCode.CRAWL_ABORTED.value
+    assert arq_abort_timeouts == [0]
+    _assert_abort_audit_call(
+        audit_calls,
+        tenant_id=admin_user.tenant_id,
+        user_id=admin_user.id,
+        job_id=job_id,
+        website_id=website_id,
+        website_name="Abortable queued website",
+        already_terminal=False,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_admin_abort_running_crawl_does_not_release_worker_owned_slot(
+    client,
+    db_session,
+    admin_user,
+    admin_user_api_key,
+    redis_client,
+    monkeypatch,
+):
+    """A running worker holds the tenant slot and decrements it on the way
+    out via the slot-release reactor. The admin abort path must NOT decrement
+    the counter or delete the preacquired flag, otherwise the worker's own
+    release on exit double-decrements the counter and lets a future crawl
+    exceed the configured concurrency limit. Regression test against the
+    finding raised by codex peer review of the running-abort tranche."""
+    _install_audit_recorder(monkeypatch)
+
+    async def record_abort(
+        self: JobManager,
+        job_id: UUID,
+        *,
+        timeout: float | None = None,
+        poll_delay: float = 0.5,
+    ) -> bool:
         return True
 
     monkeypatch.setattr(JobManager, "abort_job", record_abort)
@@ -418,15 +510,23 @@ async def test_admin_abort_running_crawl_returns_typed_conflict_without_arq_abor
         job_id = job.id
         await session.commit()
 
+    # Simulate a healthy running worker: the preacquired flag is still in
+    # Redis (only deleted on the worker's way out by slot_release.py) and
+    # the tenant counter reflects the running crawl plus one other tenant
+    # crawl running on the same worker pool.
+    flag_key = LuaScripts.preacquired_slot_key(job_id)
+    await redis_client.set(flag_key, str(admin_user.tenant_id))
+    counter_key = f"tenant:{admin_user.tenant_id}:active_jobs"
+    await redis_client.set(counter_key, 2)
+
     response = await client.post(
         f"/api/v1/admin/crawler/jobs/{job_id}/abort",
         headers={"X-API-Key": admin_user_api_key.key},
     )
 
-    assert response.status_code == 409
-    assert response.json()["error_code"] == "RUNNING_ABORT_NOT_IMPLEMENTED"
-    assert abort_called is False
-    assert _abort_audit_calls(audit_calls) == []
+    assert response.status_code == 204
+    assert await redis_client.get(counter_key) == b"2"
+    assert await redis_client.get(flag_key) == str(admin_user.tenant_id).encode()
 
 
 @pytest.mark.asyncio

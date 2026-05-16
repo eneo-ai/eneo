@@ -9548,7 +9548,7 @@ export interface components {
      * CrawlAbortConflictCode
      * @enum {string}
      */
-    CrawlAbortConflictCode: "RUNNING_ABORT_NOT_IMPLEMENTED" | "CRAWL_NOT_ABORTABLE";
+    CrawlAbortConflictCode: "CRAWL_NOT_ABORTABLE";
     /** CrawlFileTooLargeSamplePublic */
     CrawlFileTooLargeSamplePublic: {
       /** Url */

@@ -38,6 +38,7 @@
     getCrawlerActiveInventoryResultLabels,
     getCrawlerActiveInventoryStatusLabel,
     getCrawlerActiveInventoryWebsiteLabel,
+    isCrawlerActiveInventoryItemRunning,
     type CrawlerActiveInventoryItem,
     type CrawlerActiveInventoryResponse
   } from "$lib/features/admin/crawlerActiveInventory";
@@ -375,17 +376,20 @@
     }
   }
 
-  async function handleAbortQueuedCrawler() {
+  async function handleAbortCrawl() {
     const candidate = abortCandidate;
     if (candidate === null) return;
 
     abortingJobId = candidate.job_id;
+    const wasRunning = isCrawlerActiveInventoryItemRunning(candidate);
 
     try {
-      await intric.crawlerAdmin.abortQueuedJob(candidate.job_id);
+      await intric.crawlerAdmin.abortCrawl(candidate.job_id);
       abortDialogOpen = false;
       abortCandidate = null;
-      toast.success(m.crawler_abort_success());
+      toast.success(
+        wasRunning ? m.crawler_abort_success_running() : m.crawler_abort_success_queued()
+      );
       await Promise.all([
         invalidate("admin:crawler-active-inventory"),
         invalidate("admin:crawler-recent-failures")
@@ -534,13 +538,18 @@
                       </Table.Cell>
                       <Table.Cell class="text-right">
                         {#if canAbortCrawlerActiveInventoryItem(activeItem)}
+                          {@const ariaLabel = isCrawlerActiveInventoryItemRunning(activeItem)
+                            ? m.crawler_abort_button_aria_running({
+                                website: getCrawlerActiveInventoryWebsiteLabel(activeItem)
+                              })
+                            : m.crawler_abort_button_aria_queued({
+                                website: getCrawlerActiveInventoryWebsiteLabel(activeItem)
+                              })}
                           <Button
                             variant="destructive"
                             size="sm"
                             disabled={abortingJobId !== null}
-                            aria-label={m.crawler_abort_button_aria({
-                              website: getCrawlerActiveInventoryWebsiteLabel(activeItem)
-                            })}
+                            aria-label={ariaLabel}
                             onclick={() => openAbortDialog(activeItem)}
                           >
                             <CircleX data-icon="inline-start" aria-hidden="true" />
@@ -1141,26 +1150,36 @@
 
 <AlertDialog.Root bind:open={abortDialogOpen}>
   <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>{m.crawler_abort_dialog_title()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {#if abortCandidate}
-          {m.crawler_abort_dialog_description({
-            website: getCrawlerActiveInventoryWebsiteLabel(abortCandidate)
-          })}
-        {/if}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={abortingJobId !== null}>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action
-        variant="destructive"
-        disabled={abortingJobId !== null || abortCandidate === null}
-        onclick={() => void handleAbortQueuedCrawler()}
-      >
-        {abortingJobId !== null ? m.crawler_abort_button_busy() : m.crawler_abort_dialog_confirm()}
-      </AlertDialog.Action>
-    </AlertDialog.Footer>
+    {#if abortCandidate}
+      {@const candidateIsRunning = isCrawlerActiveInventoryItemRunning(abortCandidate)}
+      {@const candidateWebsite = getCrawlerActiveInventoryWebsiteLabel(abortCandidate)}
+      <AlertDialog.Header>
+        <AlertDialog.Title>
+          {candidateIsRunning
+            ? m.crawler_abort_dialog_title_running()
+            : m.crawler_abort_dialog_title_queued()}
+        </AlertDialog.Title>
+        <AlertDialog.Description>
+          {candidateIsRunning
+            ? m.crawler_abort_dialog_description_running({ website: candidateWebsite })
+            : m.crawler_abort_dialog_description_queued({ website: candidateWebsite })}
+        </AlertDialog.Description>
+      </AlertDialog.Header>
+      <AlertDialog.Footer>
+        <AlertDialog.Cancel disabled={abortingJobId !== null}>{m.cancel()}</AlertDialog.Cancel>
+        <AlertDialog.Action
+          variant="destructive"
+          disabled={abortingJobId !== null}
+          onclick={() => void handleAbortCrawl()}
+        >
+          {abortingJobId !== null
+            ? m.crawler_abort_button_busy()
+            : candidateIsRunning
+              ? m.crawler_abort_dialog_confirm_running()
+              : m.crawler_abort_dialog_confirm_queued()}
+        </AlertDialog.Action>
+      </AlertDialog.Footer>
+    {/if}
   </AlertDialog.Content>
 </AlertDialog.Root>
 

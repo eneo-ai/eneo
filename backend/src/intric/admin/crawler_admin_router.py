@@ -49,8 +49,6 @@ AdminContainer = Annotated[Container, Depends(get_container(with_user=True))]
 
 def _abort_conflict_detail(code: CrawlAbortConflictCode) -> str:
     match code:
-        case CrawlAbortConflictCode.RUNNING_ABORT_NOT_IMPLEMENTED:
-            return "Running crawl abort is not implemented yet."
         case CrawlAbortConflictCode.CRAWL_NOT_ABORTABLE:
             return "The crawl job is no longer abortable."
     assert_never(code)
@@ -214,7 +212,7 @@ async def abort_current_tenant_queued_crawl(
     container: AdminContainer,
 ) -> Response:
     crawl_service = container.crawl_service()
-    result = await crawl_service.abort_queued_crawl(
+    result = await crawl_service.abort_crawl(
         job_id=job_id,
         tenant_id=current_user.tenant_id,
     )

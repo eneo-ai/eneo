@@ -105,7 +105,17 @@ async def commit_terminal(
     session: AsyncSession,
     event: TerminalEvent,
 ) -> TerminalCommitResult:
-    """Commit only durable Job/CrawlRun terminal fields; post-terminal effects run elsewhere."""
+    """Commit only durable Job/CrawlRun terminal fields; post-terminal effects run elsewhere.
+
+    Why the CrawlRun update is gated on the Job update succeeding: the Jobs
+    UPDATE is the optimistic concurrency token. When it matches zero rows
+    (the worker has already committed a terminal state from another path)
+    the CrawlRun must not be overwritten with this caller's outcome. Without
+    this gate, a race between the worker writing COMPLETE and an admin
+    aborting could leave Jobs.status=COMPLETE while CrawlRuns.outcome_code
+    flipped to CRAWL_ABORTED — terminal state corruption discovered during
+    codex peer review of the running-abort tranche.
+    """
     job_result = await session.execute(
         sa.update(Jobs)
         .where(Jobs.id == event.job_id)
@@ -121,6 +131,12 @@ async def commit_terminal(
             result_location=event.result_location,
         )
     )
+    if job_result.rowcount == 0:
+        return TerminalCommitResult(
+            job_rows_updated=0,
+            crawl_run_rows_updated=0,
+        )
+
     crawl_run_stmt = sa.update(CrawlRuns).where(CrawlRuns.id == event.crawl_run_id)
     if event.only_set_crawl_outcome_if_missing:
         crawl_run_stmt = crawl_run_stmt.where(CrawlRuns.outcome_code.is_(None))

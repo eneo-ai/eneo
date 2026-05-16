@@ -26,7 +26,7 @@ from intric.websites.domain.crawl_abort import (
     CrawlAbortResult,
     CrawlAbortSucceeded,
     CrawlAbortWebsite,
-    is_queued_crawl_abortable_status,
+    is_crawl_abortable_status,
 )
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.websites.domain.crawl_run import CrawlRun
@@ -200,19 +200,48 @@ class CrawlService:
                 extra={"job_id": str(job_id), "error": str(flag_exc)},
             )
 
-    async def _cleanup_aborted_queued_job(self, job_id: UUID, tenant_id: UUID) -> None:
+    async def _cleanup_aborted_crawl_job(
+        self,
+        job_id: UUID,
+        tenant_id: UUID,
+        *,
+        lifecycle_was_running: bool,
+    ) -> None:
+        """Best-effort post-terminal cleanup for a tenant-aborted crawl.
+
+        Why the running/queued split: a running worker owns the tenant slot
+        and decrements it on its way out via the slot-release reactor.
+        Releasing again from this helper double-decrements the counter and
+        lets a future crawl exceed the configured concurrency limit. For
+        queued aborts the slot may have been pre-acquired by the feeder but
+        no worker has consumed it; releasing then is correct and gated on
+        the preacquired flag's presence.
+
+        Why ARQ abort is signal-only (`timeout=0`): `Job.abort` with
+        `timeout=None` waits for the worker to fully unwind, which can take
+        10+ minutes for a long crawl, blocking the admin HTTP request. The
+        canonical preemption signal is the terminal Jobs.status=FAILED
+        already committed; ARQ abort is defense in depth for unresponsive
+        workers, not the primary path.
+        """
         await PendingQueue(self.redis_client).remove_by_job_id(tenant_id, job_id)
         try:
-            await job_manager.abort_job(job_id)
+            await job_manager.abort_job(job_id, timeout=0)
         except Exception as exc:
             logger.warning(
-                "Failed to abort queued crawl in ARQ after terminal commit",
+                "Failed to signal ARQ abort after crawl terminal commit",
                 extra={
                     "job_id": str(job_id),
                     "tenant_id": str(tenant_id),
                     "error": str(exc),
                 },
             )
+
+        if lifecycle_was_running:
+            # Worker holds the slot and will release it on its way out via
+            # the slot-release reactor. Double-release here would corrupt
+            # the tenant counter.
+            return
 
         flag_key = LuaScripts.preacquired_slot_key(job_id)
         try:
@@ -233,12 +262,30 @@ class CrawlService:
         if has_preacquired_slot:
             await self.release_job_resources(job_id, tenant_id)
 
-    async def abort_queued_crawl(
+    async def abort_crawl(
         self,
         *,
         job_id: UUID,
         tenant_id: UUID,
     ) -> CrawlAbortResult:
+        """Abort a tenant-owned crawl regardless of whether it is queued or running.
+
+        The canonical signal is the same — write a terminal CRAWL_ABORTED
+        event so `is_job_preempted` observes FAILED. Cleanup semantics
+        diverge by status:
+
+        - Queued: the slot may have been pre-acquired by the feeder but no
+          worker holds it yet, so the admin endpoint releases the slot only
+          when the preacquired flag is still set. ARQ abort is signal-only
+          (`timeout=0`) so the admin HTTP request doesn't block waiting for
+          the queued slot to drain.
+        - Running: the worker holds the slot and will decrement it on its
+          way out via the slot-release reactor. Releasing from the admin
+          endpoint would double-decrement the tenant counter and let a
+          future crawl exceed the configured concurrency limit. ARQ abort
+          is signal-only so the admin HTTP request doesn't wait for the
+          worker to fully unwind (can be 10+ minutes for a long crawl).
+        """
         target = await self.repo.abort_target_for_tenant(
             job_id=job_id,
             tenant_id=tenant_id,
@@ -250,7 +297,9 @@ class CrawlService:
             target.status == Status.FAILED
             and target.outcome_code == CrawlOutcomeCode.CRAWL_ABORTED
         ):
-            await self._cleanup_aborted_queued_job(job_id, tenant_id)
+            await self._cleanup_aborted_crawl_job(
+                job_id, tenant_id, lifecycle_was_running=False
+            )
             return CrawlAbortSucceeded(
                 job_id=job_id,
                 crawl_run_id=target.crawl_run_id,
@@ -258,17 +307,13 @@ class CrawlService:
                 already_terminal=True,
             )
 
-        if target.status == Status.IN_PROGRESS:
-            return CrawlAbortConflict(
-                job_id=job_id,
-                code=CrawlAbortConflictCode.RUNNING_ABORT_NOT_IMPLEMENTED,
-            )
-
-        if not is_queued_crawl_abortable_status(target.status):
+        if not is_crawl_abortable_status(target.status):
             return CrawlAbortConflict(
                 job_id=job_id,
                 code=CrawlAbortConflictCode.CRAWL_NOT_ABORTABLE,
             )
+
+        lifecycle_was_running = target.status == Status.IN_PROGRESS
 
         result = await self.repo.commit_terminal(
             TerminalEvent(
@@ -278,7 +323,7 @@ class CrawlService:
                 outcome_code=CrawlOutcomeCode.CRAWL_ABORTED,
                 finished_at=datetime.now(timezone.utc),
                 result_location="Crawl aborted by tenant admin",
-                allowed_current_job_statuses=(Status.QUEUED,),
+                allowed_current_job_statuses=(Status.QUEUED, Status.IN_PROGRESS),
             )
         )
         if result.job_rows_updated == 0:
@@ -287,7 +332,9 @@ class CrawlService:
                 code=CrawlAbortConflictCode.CRAWL_NOT_ABORTABLE,
             )
 
-        await self._cleanup_aborted_queued_job(job_id, tenant_id)
+        await self._cleanup_aborted_crawl_job(
+            job_id, tenant_id, lifecycle_was_running=lifecycle_was_running
+        )
         return CrawlAbortSucceeded(
             job_id=job_id,
             crawl_run_id=target.crawl_run_id,

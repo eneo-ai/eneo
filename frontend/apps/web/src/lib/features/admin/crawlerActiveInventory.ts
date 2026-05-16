@@ -64,8 +64,6 @@ export function getCrawlerAbortConflictMessage(error: unknown): string | null {
   }
 
   switch (conflict.error_code) {
-    case "RUNNING_ABORT_NOT_IMPLEMENTED":
-      return m.crawler_abort_conflict_running();
     case "CRAWL_NOT_ABORTABLE":
       return m.crawler_abort_conflict_not_abortable();
     default: {
@@ -73,6 +71,13 @@ export function getCrawlerAbortConflictMessage(error: unknown): string | null {
       return exhaustive;
     }
   }
+}
+
+export function isCrawlerActiveInventoryItemRunning(item: CrawlerActiveInventoryItem): boolean {
+  return (
+    item.lifecycle_state === "running_no_progress" ||
+    item.lifecycle_state === "running_with_progress"
+  );
 }
 
 function readCrawlerAbortConflict(value: unknown): CrawlerAbortConflictResponse | null {
@@ -102,7 +107,6 @@ function readObject(value: unknown): Record<string, unknown> | null {
 }
 
 const crawlAbortConflictCodes = {
-  RUNNING_ABORT_NOT_IMPLEMENTED: true,
   CRAWL_NOT_ABORTABLE: true
 } satisfies Record<CrawlerAbortConflictCode, true>;
 

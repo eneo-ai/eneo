@@ -93,12 +93,14 @@ export function initCrawlerAdmin(client) {
     },
 
     /**
-     * Abort a queued crawler job for the current tenant.
+     * Abort a queued or running crawler job for the current tenant. The backend
+     * commits a terminal CRAWL_ABORTED event the worker observes via its
+     * heartbeat preemption check.
      * @param {string} jobId
      * @returns {Promise<void>}
      * @throws {IntricError}
      */
-    abortQueuedJob: async (jobId) => {
+    abortCrawl: async (jobId) => {
       await client.fetch("/api/v1/admin/crawler/jobs/{job_id}/abort", {
         method: "post",
         params: { path: { job_id: jobId } }

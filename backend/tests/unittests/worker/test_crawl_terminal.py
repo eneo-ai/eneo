@@ -57,6 +57,38 @@ async def test_commit_terminal_updates_job_and_crawl_run_once():
 
 
 @pytest.mark.asyncio
+async def test_commit_terminal_skips_crawl_run_when_job_gate_loses_race():
+    """Regression: if the Jobs UPDATE matches zero rows because the worker
+    has already committed a different terminal state from another path, the
+    CrawlRun must not be overwritten with this caller's outcome. Otherwise
+    we end up with Jobs.status=COMPLETE while CrawlRuns.outcome_code flipped
+    to a contradictory CRAWL_ABORTED — terminal state corruption that
+    codex peer review caught on the running-abort tranche."""
+    session = AsyncMock()
+    session.execute = AsyncMock(
+        side_effect=[
+            _ExecuteResult(rowcount=0),
+        ]
+    )
+    event = TerminalEvent(
+        crawl_run_id=uuid4(),
+        job_id=uuid4(),
+        job_status=Status.FAILED,
+        outcome_code=CrawlOutcomeCode.CRAWL_ABORTED,
+        finished_at=datetime.now(timezone.utc),
+        result_location="Crawl aborted by tenant admin",
+        allowed_current_job_statuses=(Status.QUEUED, Status.IN_PROGRESS),
+    )
+
+    result = await commit_terminal(session, event)
+
+    assert result.job_rows_updated == 0
+    assert result.crawl_run_rows_updated == 0
+    # Only the Jobs UPDATE should run; the CrawlRun UPDATE must be skipped.
+    assert session.execute.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_commit_terminal_can_update_zero_output_crawl_run_counts():
     session = AsyncMock()
     session.execute = AsyncMock(

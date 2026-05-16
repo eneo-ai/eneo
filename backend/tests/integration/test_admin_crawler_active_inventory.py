@@ -273,7 +273,10 @@ async def test_admin_crawler_active_inventory_is_scoped_to_current_tenant(
     assert (
         no_progress_item["lifecycle_state"] == CrawlLifecycle.RUNNING_NO_PROGRESS.value
     )
-    assert no_progress_item["is_abortable"] is False
+    # Running crawls are abortable: the admin endpoint commits a terminal
+    # CRAWL_ABORTED event that the worker's heartbeat preemption observes,
+    # exiting via the slot-release reactor without unsafe stale cleanup.
+    assert no_progress_item["is_abortable"] is True
 
     with_progress_item = by_job_id[str(own_with_progress_job_id)]
     assert with_progress_item["crawl_run_id"] == str(own_with_progress_run_id)
@@ -282,6 +285,7 @@ async def test_admin_crawler_active_inventory_is_scoped_to_current_tenant(
     )
     assert with_progress_item["pages_crawled"] == 3
     assert with_progress_item["files_hash_retained"] == 1
+    assert with_progress_item["is_abortable"] is True
 
     queued_item = by_job_id[str(own_queued_job_id)]
     assert queued_item["crawl_run_id"] == str(own_queued_run_id)

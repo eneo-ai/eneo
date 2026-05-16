@@ -46,6 +46,7 @@ from intric.worker.crawl import (
     ExistingBlobState,
     HeartbeatFailedPageProcessingAbort,
     HeartbeatMonitor,
+    JobPreemptedError,
     PageProcessingSuccess,
     PersistBatchResult,
     PreemptedPageProcessingAbort,
@@ -1308,6 +1309,32 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             # Cleanup phase: delete stale blobs (batch for performance)
             cleanup_start = time.time()
+
+            # Why a pre-cleanup preemption check: heartbeat polling runs on an
+            # interval (configurable, default 5min) and is paused during
+            # synchronous SQL phases. A tenant admin who aborts a crawl while
+            # the worker is between heartbeats would otherwise see the worker
+            # complete cleanup before observing FAILED. Checking here keeps
+            # the "safe-cleanup skip" guarantee promised by the running-abort
+            # tranche.
+            async def _do_pre_cleanup_preemption_check(sess: AsyncSession) -> bool:
+                return await is_job_preempted(sess, job_id=job_id)
+
+            pre_cleanup_preempted = await execute_with_recovery(
+                operation_name="pre_cleanup_preemption_check",
+                operation=_do_pre_cleanup_preemption_check,
+            )
+            if pre_cleanup_preempted:
+                logger.warning(
+                    "Crawl job preempted before cleanup phase - skipping stale-blob cleanup",
+                    extra={
+                        "job_id": str(job_id),
+                        "website_id": str(params.website_id),
+                        "tenant_id": str(crawl_context.tenant_id),
+                    },
+                )
+                raise JobPreemptedError(job_id)
+
             # Exclude failed_titles - their original data was preserved by transaction rollback
             # Crawler-level outcome is the cleanup signal; final outcome classification
             # happens after cleanup and includes persistence/file processing failures.
