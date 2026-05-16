@@ -17,7 +17,11 @@ from intric.jobs.job_models import Task
 from intric.main.exceptions import NotFoundException
 from intric.main.models import Status
 from intric.websites.domain.crawl_abort import is_crawl_abortable_target
-from intric.websites.domain.crawl_lifecycle import derive_crawl_lifecycle_from_counters
+from intric.websites.domain.crawl_lifecycle import (
+    CrawlLifecycle,
+    derive_crawl_lifecycle_from_counters,
+    lifecycle_predicate_for_active_query,
+)
 from intric.websites.domain.crawl_outcome import (
     CrawlOutcomeCode,
     parse_crawl_outcome_code_lenient,
@@ -236,11 +240,13 @@ class CrawlRunRepository:
         limit: int,
         offset: int,
         tenant_id: UUID,
+        lifecycle_filter: CrawlLifecycle | None = None,
     ) -> CrawlerActiveInventory:
         return await self._active_inventory(
             limit=limit,
             offset=offset,
             tenant_id=tenant_id,
+            lifecycle_filter=lifecycle_filter,
         )
 
     async def active_inventory_for_sysadmin(
@@ -249,11 +255,13 @@ class CrawlRunRepository:
         limit: int,
         offset: int,
         tenant_id: UUID | None,
+        lifecycle_filter: CrawlLifecycle | None = None,
     ) -> CrawlerActiveInventory:
         return await self._active_inventory(
             limit=limit,
             offset=offset,
             tenant_id=tenant_id,
+            lifecycle_filter=lifecycle_filter,
         )
 
     async def _active_inventory(
@@ -262,11 +270,31 @@ class CrawlRunRepository:
         limit: int,
         offset: int,
         tenant_id: UUID | None,
+        lifecycle_filter: CrawlLifecycle | None = None,
     ) -> CrawlerActiveInventory:
         active_conditions = [
             Jobs.task == Task.CRAWL.value,
             Jobs.status.in_([Status.QUEUED.value, Status.IN_PROGRESS.value]),
         ]
+        if lifecycle_filter is not None:
+            # The SQL classifier mirrors `derive_crawl_lifecycle_from_counters`
+            # so the filter agrees with the row-rendered lifecycle_state.
+            active_conditions.append(
+                lifecycle_predicate_for_active_query(
+                    job_status_column=Jobs.status,
+                    pages_crawled_column=CrawlRunsTable.pages_crawled,
+                    files_downloaded_column=CrawlRunsTable.files_downloaded,
+                    pages_failed_column=CrawlRunsTable.pages_failed,
+                    files_failed_column=CrawlRunsTable.files_failed,
+                    pages_source_retained_column=CrawlRunsTable.pages_source_retained,
+                    pages_hash_retained_column=CrawlRunsTable.pages_hash_retained,
+                    files_hash_retained_column=CrawlRunsTable.files_hash_retained,
+                    files_too_large_skipped_column=(
+                        CrawlRunsTable.files_too_large_skipped
+                    ),
+                    lifecycle=lifecycle_filter,
+                )
+            )
         if tenant_id is not None:
             # Orphan queued jobs have no crawl run yet; filtering on the
             # outer-joined crawl run tenant column intentionally excludes them.

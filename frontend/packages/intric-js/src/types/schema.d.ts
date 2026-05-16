@@ -26250,6 +26250,7 @@ export interface operations {
       query?: {
         limit?: number;
         offset?: number;
+        lifecycle_status?: components["schemas"]["CrawlLifecycle"] | null;
       };
       header?: never;
       path?: never;

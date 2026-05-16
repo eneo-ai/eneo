@@ -100,6 +100,65 @@ def _has_recorded_progress(
     )
 
 
+def lifecycle_predicate_for_active_query(
+    *,
+    job_status_column: InstrumentedAttribute[str],
+    pages_crawled_column: InstrumentedAttribute[int | None],
+    files_downloaded_column: InstrumentedAttribute[int | None],
+    pages_failed_column: InstrumentedAttribute[int | None],
+    files_failed_column: InstrumentedAttribute[int | None],
+    pages_source_retained_column: InstrumentedAttribute[int | None],
+    pages_hash_retained_column: InstrumentedAttribute[int | None],
+    files_hash_retained_column: InstrumentedAttribute[int | None],
+    files_too_large_skipped_column: InstrumentedAttribute[int | None],
+    lifecycle: CrawlLifecycle,
+) -> ColumnElement[bool]:
+    """SQL counterpart of `derive_crawl_lifecycle_from_counters` for the
+    active-inventory query path. Returns a WHERE-clause expression that
+    matches rows in the requested lifecycle bucket.
+
+    Why this lives in the domain module: the active-inventory endpoint
+    accepts a `lifecycle_status` filter that must agree exactly with the
+    Python derivation applied to the SELECT result rows. Centralizing
+    the predicate keeps the SQL filter and the Python classifier from
+    drifting — a regression where the filter and the row-rendered
+    lifecycle disagree would silently hide rows from operators.
+
+    `TERMINAL` is accepted but never matches active-inventory rows
+    (the endpoint's primary WHERE filter excludes `Jobs.status` outside
+    QUEUED/IN_PROGRESS and `Jobs.finished_at` is null). Returning a
+    false-literal lets the API render an empty result cleanly rather
+    than rejecting a valid `CrawlLifecycle` enum value.
+    """
+    progress_counters: tuple[InstrumentedAttribute[int | None], ...] = (
+        pages_crawled_column,
+        files_downloaded_column,
+        pages_failed_column,
+        files_failed_column,
+        pages_source_retained_column,
+        pages_hash_retained_column,
+        files_hash_retained_column,
+        files_too_large_skipped_column,
+    )
+    has_any_progress = sa.or_(
+        *(sa.func.coalesce(column, 0) > 0 for column in progress_counters)
+    )
+    if lifecycle is CrawlLifecycle.QUEUED:
+        return job_status_column == Status.QUEUED.value
+    if lifecycle is CrawlLifecycle.RUNNING_WITH_PROGRESS:
+        return sa.and_(
+            job_status_column == Status.IN_PROGRESS.value,
+            has_any_progress,
+        )
+    if lifecycle is CrawlLifecycle.RUNNING_NO_PROGRESS:
+        return sa.and_(
+            job_status_column == Status.IN_PROGRESS.value,
+            sa.not_(has_any_progress),
+        )
+    # CrawlLifecycle.TERMINAL: never matches active-inventory rows.
+    return sa.false()
+
+
 def has_no_page_progress(*, pages_crawled: int | None) -> bool:
     """Domain rule: a running crawl has not recorded page progress when the
     page counter is unset or zero.

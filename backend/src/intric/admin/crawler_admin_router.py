@@ -33,6 +33,7 @@ from intric.websites.domain.crawl_interval_change import (
     CrawlIntervalChangeNotFound,
     CrawlIntervalChangeUnchanged,
 )
+from intric.websites.domain.crawl_lifecycle import CrawlLifecycle
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.websites.domain.crawl_run_repo import CrawlRunRepository
 from intric.websites.domain.crawler_failure_inventory import CrawlerFailureState
@@ -77,6 +78,7 @@ async def get_current_tenant_crawler_active_inventory(
     session: Annotated[AsyncSession, Depends(get_session)],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    lifecycle_status: Annotated[CrawlLifecycle | None, Query()] = None,
 ) -> CrawlerActiveInventoryResponse:
     async with session.begin():
         repo = CrawlRunRepository(session=session)
@@ -84,6 +86,7 @@ async def get_current_tenant_crawler_active_inventory(
             limit=limit,
             offset=offset,
             tenant_id=current_user.tenant_id,
+            lifecycle_filter=lifecycle_status,
         )
     return CrawlerActiveInventoryResponse.from_domain(inventory)
 
@@ -167,7 +170,10 @@ async def get_current_tenant_crawler_watchdog_interventions(
     until = datetime.now(timezone.utc)
     since = until - timedelta(days=days)
 
-    if outcome_code is not None and outcome_code not in WATCHDOG_INTERVENTION_OUTCOME_CODES:
+    if (
+        outcome_code is not None
+        and outcome_code not in WATCHDOG_INTERVENTION_OUTCOME_CODES
+    ):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
