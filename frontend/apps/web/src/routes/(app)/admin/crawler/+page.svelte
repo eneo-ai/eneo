@@ -102,6 +102,8 @@
     getCrawlerWebsiteProcessingRetainedLabel,
     getCrawlerWebsiteProcessingTotalLabel,
     getCrawlerWebsiteProcessingWebsiteLabel,
+    isCrawlerWebsiteProcessingLowRetention,
+    isCrawlerWebsiteProcessingSourceSkipDrift,
     type CrawlerTenantWebsiteProcessingAggregateResponse
   } from "$lib/features/admin/crawlerWebsiteProcessing";
   import { m } from "$lib/paraglide/messages";
@@ -1004,12 +1006,32 @@
                         {getCrawlerWebsiteProcessingFetchedLabel(processingItem)}
                       </Table.Cell>
                       <Table.Cell>
-                        <Badge
-                          variant="outline"
-                          class="border-accent-default/35 text-accent-default"
-                        >
-                          {getCrawlerWebsiteProcessingRetainedLabel(processingItem)}
-                        </Badge>
+                        <div class="flex flex-wrap items-center gap-1.5">
+                          <Badge
+                            variant="outline"
+                            class="border-accent-default/35 text-accent-default"
+                          >
+                            {getCrawlerWebsiteProcessingRetainedLabel(processingItem)}
+                          </Badge>
+                          {#if isCrawlerWebsiteProcessingLowRetention(processingItem)}
+                            <Badge
+                              variant="outline"
+                              class="border-caution/40 bg-caution/8 text-caution"
+                              title={m.crawler_website_processing_low_retention_tooltip()}
+                            >
+                              {m.crawler_website_processing_low_retention_badge()}
+                            </Badge>
+                          {/if}
+                          {#if isCrawlerWebsiteProcessingSourceSkipDrift(processingItem)}
+                            <Badge
+                              variant="outline"
+                              class="border-caution/40 bg-caution/8 text-caution"
+                              title={m.crawler_website_processing_source_skip_drift_tooltip()}
+                            >
+                              {m.crawler_website_processing_source_skip_drift_badge()}
+                            </Badge>
+                          {/if}
+                        </div>
                       </Table.Cell>
                       <Table.Cell>
                         {#if failureLabel}

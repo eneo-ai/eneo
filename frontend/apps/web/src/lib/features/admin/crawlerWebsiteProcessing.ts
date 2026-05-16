@@ -82,3 +82,51 @@ export function getCrawlerWebsiteProcessingFailureLabel(
     items: formatCrawlerCount(failedItems)
   });
 }
+
+/**
+ * Token-efficiency drift threshold below which a website's retention rate is
+ * flagged as wasteful. A retention rate of 0.5 means at least half of the
+ * indexed content was re-fetched and re-embedded rather than retained, which
+ * is the operator-visible signal that the hash gate or sitemap source-skip
+ * either isn't trusted or is regressing. Kept as a constant rather than a
+ * per-tenant setting so the operator vocabulary stays stable across tenants.
+ */
+export const CRAWLER_LOW_RETENTION_THRESHOLD = 0.5;
+
+/**
+ * Drift signal: the row's retention rate is below the operator-visible
+ * waste threshold. Indexed work without retention is the cost the
+ * token-efficiency tranche is meant to surface — operators sorting by
+ * cost_pressure_score already see expensive websites at the top; this
+ * lets them spot which ones are expensive *because* retention dropped.
+ *
+ * Rows with no indexed work (indexed_content_count == 0) are not low
+ * retention; they're idle. Returning false keeps the UI from flagging
+ * cold websites as wasteful.
+ */
+export function isCrawlerWebsiteProcessingLowRetention(
+  item: CrawlerTenantWebsiteProcessingAggregateItem
+): boolean {
+  if (item.indexed_content_count <= 0) return false;
+  return item.retention_rate < CRAWLER_LOW_RETENTION_THRESHOLD;
+}
+
+/**
+ * Drift signal: source-skip (sitemap lastmod) appears to have stopped
+ * helping this website. A high indexed_content_count with zero
+ * pages_source_retained over a multi-day window is the operator
+ * signal that the sitemap is either lying about lastmod or the
+ * source-skip feature isn't being applied for this website. Cheap
+ * websites (low indexed_content_count) aren't flagged — the signal
+ * is only meaningful when there's enough work to compare.
+ */
+export const CRAWLER_SOURCE_SKIP_DRIFT_MIN_INDEXED = 50;
+
+export function isCrawlerWebsiteProcessingSourceSkipDrift(
+  item: CrawlerTenantWebsiteProcessingAggregateItem
+): boolean {
+  if (item.indexed_content_count < CRAWLER_SOURCE_SKIP_DRIFT_MIN_INDEXED) {
+    return false;
+  }
+  return item.pages_source_retained === 0;
+}

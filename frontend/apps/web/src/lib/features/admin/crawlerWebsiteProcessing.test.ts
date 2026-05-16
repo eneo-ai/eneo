@@ -6,12 +6,16 @@ import type {
   CrawlerTenantWebsiteProcessingAggregateResponse
 } from "./crawlerWebsiteProcessing";
 import {
+  CRAWLER_LOW_RETENTION_THRESHOLD,
+  CRAWLER_SOURCE_SKIP_DRIFT_MIN_INDEXED,
   getCrawlerWebsiteProcessingCostLabel,
   getCrawlerWebsiteProcessingFailureLabel,
   getCrawlerWebsiteProcessingFetchedLabel,
   getCrawlerWebsiteProcessingRetainedLabel,
   getCrawlerWebsiteProcessingTotalLabel,
-  getCrawlerWebsiteProcessingWebsiteLabel
+  getCrawlerWebsiteProcessingWebsiteLabel,
+  isCrawlerWebsiteProcessingLowRetention,
+  isCrawlerWebsiteProcessingSourceSkipDrift
 } from "./crawlerWebsiteProcessing";
 
 overwriteGetLocale(() => "en");
@@ -83,4 +87,61 @@ test("website processing labels handle unnamed and healthy websites", () => {
       cost_pressure_score: 0
     })
   ).toBe("Unknown schedule · score 0 · 96% retained");
+});
+
+test("low-retention drift signal flags websites below the operator-visible waste threshold", () => {
+  // Healthy retention (96%) stays unflagged so operators don't drown in
+  // false positives on well-behaving websites.
+  expect(isCrawlerWebsiteProcessingLowRetention(item)).toBe(false);
+
+  // Cold websites with no indexed work are idle, not wasteful.
+  expect(
+    isCrawlerWebsiteProcessingLowRetention({
+      ...item,
+      indexed_content_count: 0,
+      retention_rate: 0
+    })
+  ).toBe(false);
+
+  // Just below the threshold flags as wasteful.
+  expect(
+    isCrawlerWebsiteProcessingLowRetention({
+      ...item,
+      retention_rate: CRAWLER_LOW_RETENTION_THRESHOLD - 0.01
+    })
+  ).toBe(true);
+
+  // At threshold is not "below threshold" — the operator copy says
+  // "below 50%" so the threshold itself is acceptable.
+  expect(
+    isCrawlerWebsiteProcessingLowRetention({
+      ...item,
+      retention_rate: CRAWLER_LOW_RETENTION_THRESHOLD
+    })
+  ).toBe(false);
+});
+
+test("source-skip drift signal flags busy websites where sitemap lastmod stopped helping", () => {
+  // Busy + retained pages via source-skip = healthy.
+  expect(isCrawlerWebsiteProcessingSourceSkipDrift(item)).toBe(false);
+
+  // Busy + zero source-retained = drift.
+  expect(
+    isCrawlerWebsiteProcessingSourceSkipDrift({
+      ...item,
+      indexed_content_count: CRAWLER_SOURCE_SKIP_DRIFT_MIN_INDEXED,
+      pages_source_retained: 0
+    })
+  ).toBe(true);
+
+  // Quiet websites with zero source-retained are not drift — there
+  // isn't enough work to compare. Avoids noisy flags on barely-used
+  // websites that the operator can't act on anyway.
+  expect(
+    isCrawlerWebsiteProcessingSourceSkipDrift({
+      ...item,
+      indexed_content_count: CRAWLER_SOURCE_SKIP_DRIFT_MIN_INDEXED - 1,
+      pages_source_retained: 0
+    })
+  ).toBe(false);
 });
