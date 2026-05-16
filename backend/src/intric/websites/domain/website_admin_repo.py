@@ -12,6 +12,13 @@ from intric.websites.domain.crawl_circuit_reset import (
     CrawlCircuitResetSucceeded,
     CrawlCircuitResetWebsite,
 )
+from intric.websites.domain.crawl_interval_change import (
+    CrawlIntervalChangeApplied,
+    CrawlIntervalChangeNotFound,
+    CrawlIntervalChangeResult,
+    CrawlIntervalChangeUnchanged,
+    CrawlIntervalChangeWebsite,
+)
 from intric.websites.domain.crawler_failure_inventory import (
     CrawlerFailureInventory,
     CrawlerFailureInventoryItem,
@@ -286,6 +293,98 @@ class WebsiteAdminRepository:
             previous_state=previous_state,
             previous_consecutive_failures=int(row.consecutive_failures),
             previous_next_retry_at=row.next_retry_at,
+        )
+
+    async def set_crawl_update_interval_for_tenant(
+        self,
+        *,
+        website_id: UUID,
+        tenant_id: UUID,
+        new_update_interval: UpdateInterval,
+    ) -> CrawlIntervalChangeResult:
+        """Change one website's crawler update_interval inside a tenant scope.
+
+        Why this is its own method rather than going through
+        `WebsiteCRUDService.update_website`: the tenant admin route does not
+        navigate through a Space actor — admin permission applies tenant-wide,
+        not space-wide — so the space-based authorization in the CRUD service
+        is the wrong gate. Constraining the SQL to `WHERE id = :id AND
+        tenant_id = :tenant_id` is the canonical tenant-safe alternative.
+
+        The method is idempotent: when the requested interval matches the
+        stored value, no UPDATE runs and no audit row is written. Callers
+        that need to record idempotent operator clicks should do so via a
+        separate audit action; the audit trail for interval *changes* keeps
+        signal-to-noise high.
+
+        Auto-disable resume side effect: when an admin resumes a paused
+        website (previous=NEVER + counters ≥ threshold + new=recurring),
+        this method also clears `consecutive_failures` and `next_retry_at`
+        in the same UPDATE. Without that side effect the next crawl failure
+        would immediately re-trip auto-disable, leaving operators with no
+        recovery path short of calling `/reset-circuit-breaker` as well.
+        The cleared side effect is surfaced through `failure_state_cleared`
+        on `CrawlIntervalChangeApplied` so audit metadata records the
+        change honestly. The narrow gating (only NEVER → recurring at the
+        threshold) preserves the distinction between "change schedule" and
+        "reset circuit breaker" for non-auto-disable interval changes.
+        """
+        select_stmt = (
+            sa.select(
+                WebsitesTable.id,
+                WebsitesTable.name,
+                WebsitesTable.url,
+                WebsitesTable.update_interval,
+                WebsitesTable.consecutive_failures,
+            )
+            .where(WebsitesTable.id == website_id)
+            .where(WebsitesTable.tenant_id == tenant_id)
+        )
+        row = (await self.session.execute(select_stmt)).first()
+        if row is None:
+            return CrawlIntervalChangeNotFound(website_id=website_id)
+
+        previous_interval = UpdateInterval(str(row.update_interval))
+        previous_consecutive_failures = int(row.consecutive_failures)
+        display_name = row.name if row.name is not None else row.url
+        website = CrawlIntervalChangeWebsite(
+            id=row.id,
+            name=str(display_name),
+        )
+
+        if previous_interval == new_update_interval:
+            return CrawlIntervalChangeUnchanged(
+                website=website,
+                update_interval=previous_interval,
+            )
+
+        is_auto_disabled_resume = (
+            previous_interval == UpdateInterval.NEVER
+            and previous_consecutive_failures >= WEBSITE_AUTO_DISABLE_FAILURE_THRESHOLD
+            and new_update_interval != UpdateInterval.NEVER
+        )
+
+        update_values: dict[str, object] = {
+            "update_interval": new_update_interval.value
+        }
+        if is_auto_disabled_resume:
+            update_values["consecutive_failures"] = 0
+            update_values["next_retry_at"] = None
+
+        update_stmt = (
+            sa.update(WebsitesTable)
+            .where(WebsitesTable.id == website_id)
+            .where(WebsitesTable.tenant_id == tenant_id)
+            .values(**update_values)
+        )
+        await self.session.execute(update_stmt)
+
+        return CrawlIntervalChangeApplied(
+            website=website,
+            previous_update_interval=previous_interval,
+            new_update_interval=new_update_interval,
+            failure_state_cleared=is_auto_disabled_resume,
+            previous_consecutive_failures=previous_consecutive_failures,
         )
 
 

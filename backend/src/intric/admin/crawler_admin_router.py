@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
@@ -27,7 +28,13 @@ from intric.websites.domain.crawl_circuit_reset import (
     CrawlCircuitResetNotFound,
     CrawlCircuitResetSucceeded,
 )
+from intric.websites.domain.crawl_interval_change import (
+    CrawlIntervalChangeApplied,
+    CrawlIntervalChangeNotFound,
+    CrawlIntervalChangeUnchanged,
+)
 from intric.websites.domain.crawl_run_repo import CrawlRunRepository
+from intric.websites.domain.website import UpdateInterval
 from intric.websites.domain.website_admin_repo import WebsiteAdminRepository
 from intric.websites.presentation.crawler_admin_models import (
     CrawlerAbortConflictResponse,
@@ -306,6 +313,71 @@ async def reset_current_tenant_crawler_circuit_breaker(
                             if prev_next_retry is not None
                             else None
                         ),
+                    },
+                ),
+            )
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+    assert_never(result)
+
+
+class _UpdateIntervalRequest(BaseModel):
+    update_interval: UpdateInterval
+
+
+@router.patch(
+    "/websites/{website_id}/update-interval",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_404_NOT_FOUND: {"description": "Website not found"},
+    },
+    summary="Change the scheduled crawl interval for one website in the current tenant",
+)
+async def set_current_tenant_crawler_update_interval(
+    website_id: UUID,
+    body: _UpdateIntervalRequest,
+    current_user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    container: AdminContainer,
+) -> Response:
+    async with session.begin():
+        repo = WebsiteAdminRepository(session=session)
+        result = await repo.set_crawl_update_interval_for_tenant(
+            website_id=website_id,
+            tenant_id=current_user.tenant_id,
+            new_update_interval=body.update_interval,
+        )
+
+    match result:
+        case CrawlIntervalChangeNotFound():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Website not found",
+            )
+        case CrawlIntervalChangeUnchanged():
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        case CrawlIntervalChangeApplied(
+            website=website,
+            previous_update_interval=previous_interval,
+            new_update_interval=new_interval,
+            failure_state_cleared=failure_state_cleared,
+            previous_consecutive_failures=previous_consecutive_failures,
+        ):
+            audit_service = container.audit_service()
+            await audit_service.log_async(
+                tenant_id=current_user.tenant_id,
+                actor_id=current_user.id,
+                action=ActionType.WEBSITE_CRAWL_INTERVAL_CHANGED,
+                entity_type=EntityType.WEBSITE,
+                entity_id=website.id,
+                description="Admin changed crawler update interval",
+                metadata=AuditMetadata.standard(
+                    actor=current_user,
+                    target=website,
+                    extra={
+                        "previous_update_interval": previous_interval.value,
+                        "new_update_interval": new_interval.value,
+                        "failure_state_cleared": failure_state_cleared,
+                        "previous_consecutive_failures": previous_consecutive_failures,
                     },
                 ),
             )

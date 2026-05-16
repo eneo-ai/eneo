@@ -59,6 +59,7 @@ class ActionType(str, Enum):
     WEBSITE_CRAWLED = "website_crawled"
     WEBSITE_CRAWL_ABORTED = "website_crawl_aborted"
     WEBSITE_CRAWL_CIRCUIT_RESET = "website_crawl_circuit_reset"
+    WEBSITE_CRAWL_INTERVAL_CHANGED = "website_crawl_interval_changed"
     WEBSITE_TRANSFERRED = "website_transferred"
     GROUP_CHAT_CREATED = "group_chat_created"
     COLLECTION_CREATED = "collection_created"

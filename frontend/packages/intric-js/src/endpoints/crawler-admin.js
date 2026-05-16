@@ -4,6 +4,7 @@
 /** @typedef {import('../types/resources').CrawlerRecentFailuresResponse} CrawlerRecentFailuresResponse */
 /** @typedef {import('../types/resources').CrawlerScheduledAggregateResponse} CrawlerScheduledAggregateResponse */
 /** @typedef {import('../types/resources').CrawlerTenantWebsiteProcessingAggregateResponse} CrawlerTenantWebsiteProcessingAggregateResponse */
+/** @typedef {import('../types/schema').components["schemas"]["UpdateInterval"]} CrawlerUpdateInterval */
 
 /**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
@@ -118,6 +119,26 @@ export function initCrawlerAdmin(client) {
       await client.fetch("/api/v1/admin/crawler/websites/{website_id}/reset-circuit-breaker", {
         method: "post",
         params: { path: { website_id: websiteId } }
+      });
+    },
+
+    /**
+     * Change the scheduled crawl interval for one website in the current tenant.
+     * Setting `never` pauses the recurring schedule; any other value resumes it.
+     * @param {string} websiteId
+     * @param {CrawlerUpdateInterval} updateInterval
+     * @returns {Promise<void>}
+     * @throws {IntricError}
+     */
+    setUpdateInterval: async (websiteId, updateInterval) => {
+      await client.fetch("/api/v1/admin/crawler/websites/{website_id}/update-interval", {
+        method: "patch",
+        params: { path: { website_id: websiteId } },
+        requestBody: {
+          "application/json": {
+            update_interval: updateInterval
+          }
+        }
       });
     }
   };

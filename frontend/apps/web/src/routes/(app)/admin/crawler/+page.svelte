@@ -13,6 +13,7 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import { Page, Settings } from "$lib/components/layout";
@@ -58,6 +59,13 @@
     type CrawlerCircuitBreakerResetCandidate,
     type CrawlerCircuitBreakerResetCopy
   } from "$lib/features/admin/crawlerCircuitBreakerReset";
+  import {
+    CRAWLER_UPDATE_INTERVAL_OPTIONS,
+    getCrawlerUpdateIntervalLabel,
+    isPausingTransition,
+    isResumingTransition,
+    type CrawlerUpdateInterval
+  } from "$lib/features/admin/crawlerUpdateInterval";
   import { formatCrawlerCount } from "$lib/features/admin/crawlerNumberFormat";
   import type { CrawlRunResultLabel } from "$lib/features/knowledge/crawlOutcomePresentation";
   import {
@@ -131,6 +139,11 @@
   let circuitResetDialogOpen = $state(false);
   let circuitResetCandidate = $state<CrawlerCircuitBreakerResetCandidate | null>(null);
   let resettingCircuitWebsiteId = $state<string | null>(null);
+
+  let intervalDialogOpen = $state(false);
+  let intervalCandidate = $state<CrawlerTenantFailureInventoryItem | null>(null);
+  let intervalDraft = $state<CrawlerUpdateInterval>("never");
+  let savingIntervalWebsiteId = $state<string | null>(null);
 
   const fieldTextByKey: Record<string, () => string> = {
     crawler_hash_skip_title: () => m.crawler_hash_skip_title(),
@@ -354,6 +367,43 @@
   function openCircuitResetDialog(item: CrawlerCircuitBreakerResetCandidate) {
     circuitResetCandidate = item;
     circuitResetDialogOpen = true;
+  }
+
+  function openIntervalDialog(item: CrawlerTenantFailureInventoryItem) {
+    intervalCandidate = item;
+    intervalDraft = item.update_interval as CrawlerUpdateInterval;
+    intervalDialogOpen = true;
+  }
+
+  async function handleSaveUpdateInterval() {
+    const candidate = intervalCandidate;
+    if (candidate === null) return;
+    const currentInterval = candidate.update_interval as CrawlerUpdateInterval;
+    const nextInterval = intervalDraft;
+    if (currentInterval === nextInterval) {
+      intervalDialogOpen = false;
+      intervalCandidate = null;
+      return;
+    }
+
+    savingIntervalWebsiteId = candidate.website_id;
+    const websiteLabel = candidate.website_name?.trim() || candidate.website_url;
+
+    try {
+      await intric.crawlerAdmin.setUpdateInterval(candidate.website_id, nextInterval);
+      intervalDialogOpen = false;
+      intervalCandidate = null;
+      toast.success(m.crawler_update_interval_success({ website: websiteLabel }));
+      await Promise.all([
+        invalidate("admin:crawler-failure-inventory"),
+        invalidate("admin:crawler-scheduled"),
+        invalidate("admin:crawler-website-processing")
+      ]);
+    } catch (error) {
+      toastError(error, m.crawler_update_interval_failed());
+    } finally {
+      savingIntervalWebsiteId = null;
+    }
   }
 
   async function handleResetCircuitBreaker() {
@@ -648,19 +698,34 @@
                         {getCrawlerFailureInventoryLastCrawledLabel(failureState)}
                       </Table.Cell>
                       <Table.Cell class="text-right">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          aria-label={resetCopy.ariaLabel}
-                          disabled={resettingCircuitWebsiteId !== null}
-                          onclick={() => openCircuitResetDialog(failureState)}
-                        >
-                          {isResettingThis
-                            ? resetCopy.busyLabel
-                            : failureState.state === "AUTO_DISABLED"
-                              ? m.crawler_circuit_breaker_reset_button_paused()
-                              : m.crawler_circuit_breaker_reset_button_backed_off()}
-                        </Button>
+                        <div class="flex flex-wrap items-center justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            aria-label={m.crawler_update_interval_button_aria({
+                              website: getCrawlerFailureInventoryWebsiteLabel(failureState)
+                            })}
+                            disabled={savingIntervalWebsiteId !== null}
+                            onclick={() => openIntervalDialog(failureState)}
+                          >
+                            {savingIntervalWebsiteId === failureState.website_id
+                              ? m.crawler_update_interval_dialog_busy()
+                              : m.crawler_update_interval_button()}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            aria-label={resetCopy.ariaLabel}
+                            disabled={resettingCircuitWebsiteId !== null}
+                            onclick={() => openCircuitResetDialog(failureState)}
+                          >
+                            {isResettingThis
+                              ? resetCopy.busyLabel
+                              : failureState.state === "AUTO_DISABLED"
+                                ? m.crawler_circuit_breaker_reset_button_paused()
+                                : m.crawler_circuit_breaker_reset_button_backed_off()}
+                          </Button>
+                        </div>
                       </Table.Cell>
                     </Table.Row>
                   {/each}
@@ -1210,6 +1275,66 @@
           onclick={() => void handleResetCircuitBreaker()}
         >
           {resettingCircuitWebsiteId !== null ? resetCopy.busyLabel : resetCopy.confirmLabel}
+        </AlertDialog.Action>
+      </AlertDialog.Footer>
+    {/if}
+  </AlertDialog.Content>
+</AlertDialog.Root>
+
+<AlertDialog.Root bind:open={intervalDialogOpen}>
+  <AlertDialog.Content>
+    {#if intervalCandidate}
+      {@const intervalCurrent = intervalCandidate.update_interval as CrawlerUpdateInterval}
+      {@const intervalWebsite =
+        intervalCandidate.website_name?.trim() || intervalCandidate.website_url}
+      {@const intervalSaving = savingIntervalWebsiteId !== null}
+      {@const pausing = isPausingTransition(intervalCurrent, intervalDraft)}
+      {@const resuming = isResumingTransition(intervalCurrent, intervalDraft)}
+      <AlertDialog.Header>
+        <AlertDialog.Title>{m.crawler_update_interval_dialog_title()}</AlertDialog.Title>
+        <AlertDialog.Description>
+          {m.crawler_update_interval_dialog_description({ website: intervalWebsite })}
+        </AlertDialog.Description>
+      </AlertDialog.Header>
+      <div class="flex flex-col gap-3 py-2">
+        <p class="text-muted-foreground text-xs">
+          {m.crawler_update_interval_current({
+            interval: getCrawlerUpdateIntervalLabel(intervalCurrent)
+          })}
+        </p>
+        <Select.Root
+          type="single"
+          value={intervalDraft}
+          onValueChange={(value) => {
+            if (value) intervalDraft = value as CrawlerUpdateInterval;
+          }}
+          disabled={intervalSaving}
+        >
+          <Select.Trigger aria-label={m.crawler_update_interval_dialog_label()}>
+            {getCrawlerUpdateIntervalLabel(intervalDraft)}
+          </Select.Trigger>
+          <Select.Content>
+            {#each CRAWLER_UPDATE_INTERVAL_OPTIONS as option (option)}
+              <Select.Item value={option}>
+                {getCrawlerUpdateIntervalLabel(option)}
+              </Select.Item>
+            {/each}
+          </Select.Content>
+        </Select.Root>
+      </div>
+      <AlertDialog.Footer>
+        <AlertDialog.Cancel disabled={intervalSaving}>{m.cancel()}</AlertDialog.Cancel>
+        <AlertDialog.Action
+          disabled={intervalSaving || intervalDraft === intervalCurrent}
+          onclick={() => void handleSaveUpdateInterval()}
+        >
+          {intervalSaving
+            ? m.crawler_update_interval_dialog_busy()
+            : pausing
+              ? m.crawler_update_interval_dialog_confirm_pause()
+              : resuming
+                ? m.crawler_update_interval_dialog_confirm_resume()
+                : m.crawler_update_interval_dialog_confirm()}
         </AlertDialog.Action>
       </AlertDialog.Footer>
     {/if}

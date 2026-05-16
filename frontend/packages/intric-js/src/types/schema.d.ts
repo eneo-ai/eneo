@@ -2513,6 +2513,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/crawler/websites/{website_id}/update-interval": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Change the scheduled crawl interval for one website in the current tenant */
+    patch: operations["set_current_tenant_crawler_update_interval_api_v1_admin_crawler_websites__website_id__update_interval_patch"];
+    trace?: never;
+  };
   "/api/v1/admin/credentials/{provider}": {
     parameters: {
       query?: never;
@@ -7173,6 +7190,7 @@ export interface components {
       | "website_crawled"
       | "website_crawl_aborted"
       | "website_crawl_circuit_reset"
+      | "website_crawl_interval_changed"
       | "website_transferred"
       | "group_chat_created"
       | "collection_created"
@@ -17390,6 +17408,10 @@ export interface components {
      * @enum {string}
      */
     WizardType: "attachments" | "groups";
+    /** _UpdateIntervalRequest */
+    _UpdateIntervalRequest: {
+      update_interval: components["schemas"]["UpdateInterval"];
+    };
     /**
      * CredentialInfo
      * @description Information about a configured credential.
@@ -26449,6 +26471,46 @@ export interface operations {
       cookie?: never;
     };
     requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Website not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  set_current_tenant_crawler_update_interval_api_v1_admin_crawler_websites__website_id__update_interval_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        website_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["_UpdateIntervalRequest"];
+      };
+    };
     responses: {
       /** @description Successful Response */
       204: {
