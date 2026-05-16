@@ -8,7 +8,6 @@ from pathlib import Path
 from uuid import UUID
 
 import redis.asyncio as aioredis
-import sqlalchemy as sa
 from arq import Retry
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,6 +65,7 @@ from intric.worker.crawl import (
     update_website_size_after_crawl,
     update_website_timestamps_after_crawl,
 )
+from intric.worker.crawl.duplicate_guard import try_duplicate_skip
 from intric.worker.crawl.persistence import CrawlPageData
 from intric.worker.crawl.post_terminal_effects import (
     PostTerminalEffectInput,
@@ -98,34 +98,6 @@ _TERMINAL_ZERO_OUTPUT_MESSAGES: dict[CrawlOutcomeCode, str] = {
 
 class CrawlMaxAgeExceededError(RuntimeError):
     pass
-
-
-async def _get_primary_active_job_id(
-    session: AsyncSession,
-    *,
-    website_id: UUID,
-) -> UUID | None:
-    """Return the oldest active crawl job ID for a website.
-
-    Used to ensure newer duplicate crawl jobs yield to the earliest queued or
-    running job, preventing duplicate executions when schedules overlap.
-    """
-    from intric.database.tables.job_table import Jobs
-    from intric.database.tables.websites_table import CrawlRuns as CrawlRunsTable
-    from intric.jobs.job_models import Task
-    from intric.main.models import Status
-
-    active_statuses = [Status.QUEUED.value, Status.IN_PROGRESS.value]
-    stmt = (
-        sa.select(Jobs.id)
-        .join(CrawlRunsTable, CrawlRunsTable.job_id == Jobs.id)
-        .where(CrawlRunsTable.website_id == website_id)
-        .where(Jobs.task == Task.CRAWL.value)
-        .where(Jobs.status.in_(active_statuses))
-        .order_by(Jobs.created_at.asc())
-        .limit(1)
-    )
-    return await session.scalar(stmt)
 
 
 def _build_http_cache_dir(*, root_dir: Path, tenant_id: UUID, website_id: UUID) -> Path:
@@ -729,60 +701,16 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             )
             raise Retry(defer=retry_delay)
 
-    primary_job_id: UUID | None = None
     if tenant is not None:
         try:
-            async with Container.session_scope() as session:
-                primary_job_id = await _get_primary_active_job_id(
-                    session,
-                    website_id=params.website_id,
-                )
-
-                if primary_job_id and primary_job_id != job_id:
-                    from intric.main.models import Status
-
-                    skip_message = (
-                        f"Skipped duplicate crawl; active job {primary_job_id}"
-                    )
-                    result = await commit_terminal(
-                        session,
-                        TerminalEvent(
-                            crawl_run_id=params.run_id,
-                            job_id=job_id,
-                            job_status=Status.FAILED,
-                            outcome_code=CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED,
-                            finished_at=datetime.now(timezone.utc),
-                            result_location=skip_message,
-                        ),
-                    )
-                    if result.job_rows_updated == 0:
-                        logger.debug(
-                            "Duplicate crawl skip ignored; job status already changed",
-                            extra={
-                                "job_id": str(job_id),
-                                "website_id": str(params.website_id),
-                            },
-                        )
-
-            if primary_job_id and primary_job_id != job_id:
-                logger.warning(
-                    "Skipping duplicate crawl job; another active job exists",
-                    extra={
-                        "job_id": str(job_id),
-                        "primary_job_id": str(primary_job_id),
-                        "website_id": str(params.website_id),
-                        "url": params.url,
-                        "metric_name": "crawl.job.duplicate_skipped",
-                        "metric_value": 1,
-                    },
-                )
-                task_manager.acknowledge_terminal_commit(successful=True)
-                return {
-                    "status": "duplicate_skipped",
-                    "job_id": str(job_id),
-                    "primary_job_id": str(primary_job_id),
-                }
+            duplicate_decision = await try_duplicate_skip(
+                session_scope=Container.session_scope,
+                job_id=job_id,
+                run_id=params.run_id,
+                website_id=params.website_id,
+            )
         except Exception as exc:
+            duplicate_decision = None
             logger.warning(
                 "Failed to evaluate duplicate crawl guard; proceeding with crawl",
                 extra={
@@ -791,6 +719,25 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     "error": str(exc),
                 },
             )
+
+        if duplicate_decision is not None:
+            logger.warning(
+                "Skipping duplicate crawl job; another active job exists",
+                extra={
+                    "job_id": str(job_id),
+                    "primary_job_id": str(duplicate_decision.primary_job_id),
+                    "website_id": str(params.website_id),
+                    "url": params.url,
+                    "metric_name": "crawl.job.duplicate_skipped",
+                    "metric_value": 1,
+                },
+            )
+            task_manager.acknowledge_terminal_commit(successful=True)
+            return {
+                "status": "duplicate_skipped",
+                "job_id": str(job_id),
+                "primary_job_id": str(duplicate_decision.primary_job_id),
+            }
 
     try:
         # CRITICAL: Atomic status check to prevent worker resurrection

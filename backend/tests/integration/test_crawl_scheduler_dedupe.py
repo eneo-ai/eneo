@@ -14,7 +14,7 @@ from intric.main.models import Status
 from intric.websites.domain.crawl_run import CrawlType
 from intric.websites.domain.website import UpdateInterval
 from intric.websites.domain.website_sparse_repo import WebsiteSparseRepository
-from intric.worker.crawl_tasks import _get_primary_active_job_id
+from intric.worker.crawl.duplicate_guard import find_primary_active_job_id
 
 
 async def _create_scheduled_website(
@@ -305,7 +305,7 @@ async def test_primary_active_job_id_selects_oldest_active_job(
         job_1_id = job_1.id
 
     async with db_session() as session:
-        primary_job_id = await _get_primary_active_job_id(
+        primary_job_id = await find_primary_active_job_id(
             session,
             website_id=website_id,
         )

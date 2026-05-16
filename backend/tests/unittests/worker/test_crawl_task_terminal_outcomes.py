@@ -348,11 +348,14 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
     async def session_scope() -> AsyncIterator[_FakeBootstrapSession]:
         yield _FakeBootstrapSession(website)
 
-    async def primary_active_job_id(
-        _session: object,
+    async def try_duplicate_skip_fake(
         *,
+        session_scope: object,
+        job_id: UUID,
+        run_id: UUID,
         website_id: UUID,
     ) -> None:
+        del session_scope, job_id, run_id
         assert website_id == website.id
         return None
 
@@ -367,9 +370,7 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
         return await operation(recovery_session)
 
     monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
-    monkeypatch.setattr(
-        crawl_tasks, "_get_primary_active_job_id", primary_active_job_id
-    )
+    monkeypatch.setattr(crawl_tasks, "try_duplicate_skip", try_duplicate_skip_fake)
     monkeypatch.setattr(crawl_tasks, "execute_with_recovery", execute_with_recovery)
     monkeypatch.setattr(
         crawl_tasks,
@@ -516,11 +517,14 @@ async def test_sitemap_source_skip_cutoff_is_passed_to_crawler_when_enabled(
             rows=((retained_url, b"hash", embedding_model_id),),
         )
 
-    async def primary_active_job_id(
-        _session: object,
+    async def try_duplicate_skip_fake(
         *,
+        session_scope: object,
+        job_id: UUID,
+        run_id: UUID,
         website_id: UUID,
     ) -> None:
+        del session_scope, job_id, run_id
         assert website_id == website.id
         return None
 
@@ -535,9 +539,7 @@ async def test_sitemap_source_skip_cutoff_is_passed_to_crawler_when_enabled(
         return await operation(recovery_session)
 
     monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
-    monkeypatch.setattr(
-        crawl_tasks, "_get_primary_active_job_id", primary_active_job_id
-    )
+    monkeypatch.setattr(crawl_tasks, "try_duplicate_skip", try_duplicate_skip_fake)
     monkeypatch.setattr(crawl_tasks, "execute_with_recovery", execute_with_recovery)
     monkeypatch.setattr(
         crawl_tasks,
@@ -659,11 +661,14 @@ async def test_sitemap_source_skip_kwargs_stay_empty_when_not_allowed(
             rows=((page_url, b"hash", embedding_model_id),),
         )
 
-    async def primary_active_job_id(
-        _session: object,
+    async def try_duplicate_skip_fake(
         *,
+        session_scope: object,
+        job_id: UUID,
+        run_id: UUID,
         website_id: UUID,
     ) -> None:
+        del session_scope, job_id, run_id
         assert website_id == website.id
         return None
 
@@ -686,9 +691,7 @@ async def test_sitemap_source_skip_kwargs_stay_empty_when_not_allowed(
         return task_manager
 
     monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
-    monkeypatch.setattr(
-        crawl_tasks, "_get_primary_active_job_id", primary_active_job_id
-    )
+    monkeypatch.setattr(crawl_tasks, "try_duplicate_skip", try_duplicate_skip_fake)
     monkeypatch.setattr(crawl_tasks, "execute_with_recovery", execute_with_recovery)
     monkeypatch.setattr(crawl_tasks, "TaskManager", create_task_manager)
     monkeypatch.setattr(crawl_tasks, "persist_batch", persist_batch)

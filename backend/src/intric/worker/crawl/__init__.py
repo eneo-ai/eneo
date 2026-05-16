@@ -29,6 +29,11 @@ from intric.worker.crawl.completion_log import (
     CrawlCompletionTimings,
     emit_crawl_completion_logs,
 )
+from intric.worker.crawl.duplicate_guard import (
+    DuplicateSkipDecision,
+    find_primary_active_job_id,
+    try_duplicate_skip,
+)
 from intric.worker.crawl.file_processing import (
     FileProcessingErrorRecorder,
     FileProcessingResult,
@@ -101,6 +106,10 @@ __all__ = [
     # Completion log
     "CrawlCompletionTimings",
     "emit_crawl_completion_logs",
+    # Duplicate guard
+    "DuplicateSkipDecision",
+    "find_primary_active_job_id",
+    "try_duplicate_skip",
     # File processing
     "FileProcessingErrorRecorder",
     "FileProcessingResult",
