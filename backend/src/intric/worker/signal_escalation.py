@@ -29,7 +29,7 @@ import os
 import signal
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, Callable, Iterable, Protocol
+from typing import Any, Callable, Iterable, Protocol, cast
 
 from intric.main.logging import get_logger
 
@@ -148,6 +148,13 @@ def build_escalating_signal_handler(
     return handler
 
 
+# Sentinel attribute used to mark a partial we installed so re-entry of
+# `install_escalating_signal_handlers` does not wrap our own wrapper into a
+# 6-press ladder. Carried as an attribute on the `partial` object because
+# `loop._signal_handlers[sig]._callback` is exactly the partial we register.
+_ESCALATION_SENTINEL_ATTR = "_eneo_signal_escalation"
+
+
 def install_escalating_signal_handlers(
     *,
     loop: asyncio.AbstractEventLoop,
@@ -166,12 +173,28 @@ def install_escalating_signal_handlers(
     Uses `loop._signal_handlers` to recover the arq-installed callback;
     that attribute is private but stable across CPython 3.7+ and is the
     only way to capture a handler installed via `loop.add_signal_handler`
-    without holding a separate reference. Documented here so a future
-    upgrade to a CPython version that changes this attribute fails loudly
-    rather than silently regressing.
+    without holding a separate reference. The attribute shape is guarded
+    with `isinstance(..., dict)` so a future asyncio implementation (e.g.
+    uvloop or a CPython that changes the internal structure) skips the
+    install with a logged warning instead of crashing on AttributeError.
+
+    Idempotent: if a previous call already wrapped a signal's handler,
+    `_ESCALATION_SENTINEL_ATTR` on the installed partial is detected and
+    the signal is skipped on the second call. Without this guard, a
+    second `Worker.startup` (test harness re-entry, future warm-restart)
+    would wrap our own wrapper, producing a 6-press escalation ladder and
+    pinning a reference to the first wrapper indefinitely.
     """
     state = state if state is not None else SignalEscalationState()
-    handlers_map: dict[int, asyncio.Handle] = getattr(loop, "_signal_handlers", {})
+    handlers_map_raw = getattr(loop, "_signal_handlers", None)
+    if not isinstance(handlers_map_raw, dict):
+        logger.warning(
+            "loop._signal_handlers is %r, not a dict — skipping escalation install. "
+            "Worker will fall back to arq's stock drain handler.",
+            type(handlers_map_raw).__name__,
+        )
+        return state
+    handlers_map = cast("dict[int, asyncio.Handle]", handlers_map_raw)
 
     for signum in (int(signal.SIGINT), int(signal.SIGTERM)):
         existing = handlers_map.get(signum)
@@ -182,7 +205,15 @@ def install_escalating_signal_handlers(
             )
             continue
 
-        captured_callback = existing._callback  # noqa: SLF001 — stable CPython internal
+        existing_callback = existing._callback  # noqa: SLF001 — stable CPython internal
+        if getattr(existing_callback, _ESCALATION_SENTINEL_ATTR, False):
+            logger.debug(
+                "Escalation already installed for %s — skipping re-wrap.",
+                _safe_signal_name(signum),
+            )
+            continue
+
+        captured_callback = existing_callback
         captured_args = existing._args  # noqa: SLF001 — stable CPython internal
 
         def drain(
@@ -200,8 +231,13 @@ def install_escalating_signal_handlers(
             drain_timeout_seconds=drain_timeout_seconds,
         )
 
+        installed = partial(handler, signum)
+        # Mark the partial so a re-entry of `install_*` recognizes its own
+        # work and short-circuits instead of wrapping the wrapper.
+        setattr(installed, _ESCALATION_SENTINEL_ATTR, True)
+
         loop.remove_signal_handler(signum)
-        loop.add_signal_handler(signum, partial(handler, signum))
+        loop.add_signal_handler(signum, installed)
 
     return state
 

@@ -22,13 +22,14 @@ from __future__ import annotations
 
 import asyncio
 import signal
-from typing import Callable
+from typing import Callable, cast
 
 import pytest
 
 from intric.worker.signal_escalation import (
     SignalEscalationState,
     build_escalating_signal_handler,
+    install_escalating_signal_handlers,
 )
 
 
@@ -278,3 +279,135 @@ async def test_real_loop_smoke_cancels_real_pending_task() -> None:
     assert drain_called == [int(signal.SIGINT)]
     assert exit_called == []
     assert state.presses == 2
+
+
+@pytest.mark.asyncio
+async def test_install_wraps_existing_signal_handler_and_first_press_forwards() -> None:
+    """Codex AB-tier finding: the install path is the riskier surface
+    (private-attribute walk, wrap-of-real-handler, sentinel logic) and
+    was previously untested. Installing over a real `add_signal_handler`
+    and asserting the captured handler still fires on press 1 pins the
+    contract that the wrap is transparent for graceful drain.
+    """
+    loop = asyncio.get_running_loop()
+    drain_called: list[int] = []
+
+    def drain_handler(signum: int) -> None:
+        drain_called.append(signum)
+
+    # Install a stand-in "arq drain" handler so install_* has something
+    # to wrap. We pick SIGUSR1 to avoid colliding with pytest's own
+    # SIGINT plumbing.
+    loop.add_signal_handler(signal.SIGUSR1, drain_handler, int(signal.SIGUSR1))
+
+    try:
+        # The install routine only knows about SIGINT/SIGTERM. To exercise
+        # the wrap-of-real-handler path under SIGUSR1, we test the
+        # registration shape by hand: install over our pretend SIGINT.
+        loop.add_signal_handler(signal.SIGINT, drain_handler, int(signal.SIGINT))
+        state = install_escalating_signal_handlers(
+            loop=loop, drain_timeout_seconds=60.0
+        )
+
+        # Pull the freshly installed partial back out and invoke it as if
+        # the signal had fired. asyncio routes signals through the loop's
+        # selfpipe to this callable, so calling it directly is the same
+        # code path the OS would trigger.
+        handle = loop._signal_handlers[int(signal.SIGINT)]  # type: ignore[attr-defined]  # private attr, see signal_escalation.py
+        installed = handle._callback  # noqa: SLF001
+        installed()
+
+        assert state.presses == 1
+        assert drain_called == [int(signal.SIGINT)]
+    finally:
+        for sig in (signal.SIGINT, signal.SIGUSR1):
+            try:
+                loop.remove_signal_handler(sig)
+            except (NotImplementedError, ValueError):
+                pass
+
+
+@pytest.mark.asyncio
+async def test_install_with_no_existing_handler_leaves_state_pristine() -> None:
+    """If arq is constructed with `handle_signals=False` (e.g. in a
+    supervisor that owns signal handling), there will be no pre-existing
+    handler on the loop. Install must skip silently rather than invent
+    a drain behavior or raise."""
+    loop = asyncio.get_running_loop()
+    # Make sure no SIGINT handler exists on this loop.
+    try:
+        loop.remove_signal_handler(signal.SIGINT)
+    except (NotImplementedError, ValueError):
+        pass
+    try:
+        loop.remove_signal_handler(signal.SIGTERM)
+    except (NotImplementedError, ValueError):
+        pass
+
+    state = install_escalating_signal_handlers(loop=loop, drain_timeout_seconds=60.0)
+
+    # State counter untouched; signal handlers absent (the loop's
+    # `_signal_handlers` may not even register the key).
+    assert state.presses == 0
+    handlers_map = loop._signal_handlers  # type: ignore[attr-defined]
+    assert int(signal.SIGINT) not in handlers_map
+    assert int(signal.SIGTERM) not in handlers_map
+
+
+@pytest.mark.asyncio
+async def test_install_is_idempotent_under_double_invocation() -> None:
+    """Re-invoking `Worker.startup` (test harness re-entry, future
+    warm-restart, etc.) must NOT wrap our own wrapper. Without the
+    sentinel guard the second call would produce a 6-press ladder and
+    pin a reference to the first wrapper indefinitely."""
+    loop = asyncio.get_running_loop()
+    drain_called: list[int] = []
+
+    def drain_handler(signum: int) -> None:
+        drain_called.append(signum)
+
+    loop.add_signal_handler(signal.SIGINT, drain_handler, int(signal.SIGINT))
+
+    try:
+        first_state = install_escalating_signal_handlers(
+            loop=loop, drain_timeout_seconds=60.0
+        )
+        # Second install passes a fresh state — if the sentinel didn't
+        # short-circuit, the second wrap would route press 1 into the
+        # first wrapper (not the user's drain) and silently double the
+        # ladder.
+        second_state = install_escalating_signal_handlers(
+            loop=loop, drain_timeout_seconds=60.0
+        )
+
+        handle = loop._signal_handlers[int(signal.SIGINT)]  # type: ignore[attr-defined]
+        installed = handle._callback  # noqa: SLF001
+        installed()  # press 1
+
+        assert first_state.presses == 1
+        # The second call's state was never wired up — it never wraps
+        # because the sentinel short-circuits. presses==0 proves the
+        # second install did not register a new partial.
+        assert second_state.presses == 0
+        assert drain_called == [int(signal.SIGINT)]
+    finally:
+        try:
+            loop.remove_signal_handler(signal.SIGINT)
+        except (NotImplementedError, ValueError):
+            pass
+
+
+def test_install_with_non_dict_signal_handlers_skips_gracefully() -> None:
+    """On a non-CPython loop (uvloop variants, future asyncio refactor)
+    `_signal_handlers` may be a different shape. The installer must
+    skip with a logged warning instead of crashing on AttributeError
+    or returning a partially-installed escalation."""
+
+    class _FakeLoop:
+        _signal_handlers = "not a dict"  # type: ignore[assignment]
+
+    loop = _FakeLoop()
+    state = install_escalating_signal_handlers(
+        loop=cast(asyncio.AbstractEventLoop, loop), drain_timeout_seconds=60.0
+    )
+    assert state.presses == 0

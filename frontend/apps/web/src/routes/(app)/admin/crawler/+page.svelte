@@ -615,40 +615,6 @@
           </Tabs.Trigger>
         </Tabs.List>
 
-        <Tabs.Content value="settings" class="space-y-0">
-          <Card.Root class="mb-14" aria-labelledby="crawler-builtin-card-title">
-            <Card.Header>
-              <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-                <div class="flex min-w-0 flex-col gap-1">
-                  <h2 id="crawler-builtin-card-title" class="text-base leading-snug font-semibold">
-                    {m.crawler_builtin_card_title()}
-                  </h2>
-                  <Card.Description>{m.crawler_builtin_card_description()}</Card.Description>
-                </div>
-                <Badge variant="default" class="shrink-0">
-                  {m.crawler_built_in_badge()}
-                </Badge>
-              </div>
-            </Card.Header>
-            <Card.Content class="flex flex-col gap-2 pt-0">
-              {#each CRAWLER_SETTINGS_READ_ONLY_OPTIMIZATIONS as optimization (optimization.key)}
-                <div class="flex items-start gap-3">
-                  <ShieldCheck
-                    class="text-accent-default mt-0.5 size-5 shrink-0"
-                    aria-hidden="true"
-                  />
-                  <div class="flex min-w-0 flex-col gap-1">
-                    <h3 class="text-sm font-medium">{fieldText(optimization.titleKey)}</h3>
-                    <p class="text-muted-foreground text-sm leading-relaxed">
-                      {fieldText(optimization.descriptionKey)}
-                    </p>
-                  </div>
-                </div>
-              {/each}
-            </Card.Content>
-          </Card.Root>
-        </Tabs.Content>
-
         <Tabs.Content value="operations" class="space-y-0">
           <Card.Root class="mb-14" aria-labelledby="crawler-active-inventory-title">
             <Card.Header>
@@ -1015,6 +981,198 @@
               {/if}
             </Card.Content>
           </Card.Root>
+          <Card.Root class="mb-14" aria-labelledby="crawler-watchdog-interventions-title">
+            <Card.Header>
+              <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                <div class="flex min-w-0 flex-col gap-1">
+                  <h2
+                    id="crawler-watchdog-interventions-title"
+                    class="text-base leading-snug font-semibold"
+                  >
+                    {m.crawler_watchdog_interventions_title()}
+                  </h2>
+                  <Card.Description>
+                    {m.crawler_watchdog_interventions_description({
+                      days: data.crawlerWatchdogInterventionsWindowDays
+                    })}
+                  </Card.Description>
+                </div>
+                {#if data.crawlerWatchdogInterventions}
+                  <Badge variant="outline" class="shrink-0 tabular-nums">
+                    {m.crawler_watchdog_interventions_count({
+                      shown: data.crawlerWatchdogInterventions.items.length,
+                      total: data.crawlerWatchdogInterventions.total
+                    })}
+                  </Badge>
+                {/if}
+              </div>
+            </Card.Header>
+            <Card.Content class="pt-0">
+              {#if data.crawlerWatchdogInterventionsLoadFailed}
+                <Alert.Root variant="destructive">
+                  <TriangleAlert aria-hidden="true" />
+                  <Alert.Description
+                    >{m.crawler_watchdog_interventions_load_error()}</Alert.Description
+                  >
+                </Alert.Root>
+              {:else if !data.crawlerWatchdogInterventions || data.crawlerWatchdogInterventions.items.length === 0}
+                <p class="text-muted-foreground text-sm">
+                  {m.crawler_watchdog_interventions_empty({
+                    days: data.crawlerWatchdogInterventionsWindowDays
+                  })}
+                </p>
+              {:else}
+                <div class="overflow-x-auto">
+                  <Table.Root class="min-w-[56rem]">
+                    <Table.Caption class="sr-only">
+                      {m.crawler_watchdog_interventions_table_caption()}
+                    </Table.Caption>
+                    <Table.Header>
+                      <Table.Row>
+                        <Table.Head>{m.crawler_watchdog_interventions_column_website()}</Table.Head>
+                        <Table.Head>{m.crawler_watchdog_interventions_column_outcome()}</Table.Head>
+                        <Table.Head>{m.crawler_watchdog_interventions_column_activity()}</Table.Head
+                        >
+                        <Table.Head class="text-right">
+                          {m.crawler_watchdog_interventions_column_finished()}
+                        </Table.Head>
+                      </Table.Row>
+                    </Table.Header>
+                    <Table.Body>
+                      {#each data.crawlerWatchdogInterventions.items as intervention (intervention.crawl_run_id)}
+                        <Table.Row>
+                          <Table.Cell class="max-w-64">
+                            <span
+                              class="block truncate font-medium"
+                              title={getCrawlerWatchdogInterventionWebsiteLabel(intervention)}
+                            >
+                              {getCrawlerWatchdogInterventionWebsiteLabel(intervention)}
+                            </span>
+                          </Table.Cell>
+                          <Table.Cell class="max-w-72 whitespace-normal">
+                            <span class="text-sm">
+                              {getCrawlerWatchdogInterventionOutcomeLabel(intervention)}
+                            </span>
+                          </Table.Cell>
+                          <Table.Cell class="whitespace-normal">
+                            <div class="flex flex-wrap gap-1.5">
+                              {#each getCrawlerWatchdogInterventionResultLabels(intervention) as label (label.label)}
+                                <Badge
+                                  variant="outline"
+                                  class={resultBadgeClass(label.color)}
+                                  title={label.tooltip}
+                                >
+                                  {label.label}
+                                </Badge>
+                              {/each}
+                            </div>
+                          </Table.Cell>
+                          <Table.Cell class="text-muted-foreground text-right text-xs tabular-nums">
+                            {formatDateTime(intervention.finished_at)}
+                          </Table.Cell>
+                        </Table.Row>
+                      {/each}
+                    </Table.Body>
+                  </Table.Root>
+                </div>
+              {/if}
+            </Card.Content>
+          </Card.Root>
+
+          <Card.Root class="mb-14" aria-labelledby="crawler-recent-failures-title">
+            <Card.Header>
+              <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                <div class="flex min-w-0 flex-col gap-1">
+                  <h2
+                    id="crawler-recent-failures-title"
+                    class="text-base leading-snug font-semibold"
+                  >
+                    {m.crawler_recent_failures_title()}
+                  </h2>
+                  <Card.Description>
+                    {m.crawler_recent_failures_description({
+                      days: data.crawlerRecentFailuresWindowDays
+                    })}
+                  </Card.Description>
+                </div>
+                {#if data.crawlerRecentFailures}
+                  <Badge variant="outline" class="shrink-0 tabular-nums">
+                    {m.crawler_recent_failures_count({
+                      shown: data.crawlerRecentFailures.items.length,
+                      total: data.crawlerRecentFailures.total
+                    })}
+                  </Badge>
+                {/if}
+              </div>
+            </Card.Header>
+            <Card.Content class="pt-0">
+              {#if data.crawlerRecentFailuresLoadFailed}
+                <Alert.Root variant="destructive">
+                  <TriangleAlert aria-hidden="true" />
+                  <Alert.Description>{m.crawler_recent_failures_load_error()}</Alert.Description>
+                </Alert.Root>
+              {:else if !data.crawlerRecentFailures || data.crawlerRecentFailures.items.length === 0}
+                <p class="text-muted-foreground text-sm">
+                  {m.crawler_recent_failures_empty({
+                    days: data.crawlerRecentFailuresWindowDays
+                  })}
+                </p>
+              {:else}
+                <div class="overflow-x-auto">
+                  <Table.Root class="min-w-[56rem]">
+                    <Table.Caption class="sr-only">
+                      {m.crawler_recent_failures_table_caption()}
+                    </Table.Caption>
+                    <Table.Header>
+                      <Table.Row>
+                        <Table.Head>{m.crawler_recent_failures_column_website()}</Table.Head>
+                        <Table.Head>{m.crawler_recent_failures_column_outcome()}</Table.Head>
+                        <Table.Head>{m.crawler_recent_failures_column_activity()}</Table.Head>
+                        <Table.Head class="text-right">
+                          {m.crawler_recent_failures_column_finished()}
+                        </Table.Head>
+                      </Table.Row>
+                    </Table.Header>
+                    <Table.Body>
+                      {#each data.crawlerRecentFailures.items as failure (failure.crawl_run_id)}
+                        <Table.Row>
+                          <Table.Cell class="max-w-64">
+                            <span
+                              class="block truncate font-medium"
+                              title={getCrawlerRecentFailureWebsiteLabel(failure)}
+                            >
+                              {getCrawlerRecentFailureWebsiteLabel(failure)}
+                            </span>
+                          </Table.Cell>
+                          <Table.Cell class="max-w-72 whitespace-normal">
+                            <span class="text-sm"
+                              >{getCrawlerRecentFailureOutcomeLabel(failure)}</span
+                            >
+                          </Table.Cell>
+                          <Table.Cell class="whitespace-normal">
+                            <div class="flex flex-wrap gap-1.5">
+                              {#each getCrawlerRecentFailureResultLabels(failure) as label (label.label)}
+                                <Badge
+                                  variant="outline"
+                                  class={resultBadgeClass(label.color)}
+                                  title={label.tooltip}
+                                >
+                                  {label.label}
+                                </Badge>
+                              {/each}
+                            </div>
+                          </Table.Cell>
+                          <Table.Cell class="text-muted-foreground text-right text-xs tabular-nums">
+                            {formatDateTime(failure.finished_at)}
+                          </Table.Cell>
+                        </Table.Row>
+                      {/each}
+                    </Table.Body>
+                  </Table.Root>
+                </div>
+              {/if}
+            </Card.Content>
+          </Card.Root>
         </Tabs.Content>
 
         <Tabs.Content value="activity" class="space-y-0">
@@ -1229,202 +1387,39 @@
           </Card.Root>
         </Tabs.Content>
 
-        <Tabs.Content value="health" class="space-y-0">
-          <Card.Root class="mb-14" aria-labelledby="crawler-watchdog-interventions-title">
-            <Card.Header>
-              <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-                <div class="flex min-w-0 flex-col gap-1">
-                  <h2
-                    id="crawler-watchdog-interventions-title"
-                    class="text-base leading-snug font-semibold"
-                  >
-                    {m.crawler_watchdog_interventions_title()}
-                  </h2>
-                  <Card.Description>
-                    {m.crawler_watchdog_interventions_description({
-                      days: data.crawlerWatchdogInterventionsWindowDays
-                    })}
-                  </Card.Description>
-                </div>
-                {#if data.crawlerWatchdogInterventions}
-                  <Badge variant="outline" class="shrink-0 tabular-nums">
-                    {m.crawler_watchdog_interventions_count({
-                      shown: data.crawlerWatchdogInterventions.items.length,
-                      total: data.crawlerWatchdogInterventions.total
-                    })}
-                  </Badge>
-                {/if}
-              </div>
-            </Card.Header>
-            <Card.Content class="pt-0">
-              {#if data.crawlerWatchdogInterventionsLoadFailed}
-                <Alert.Root variant="destructive">
-                  <TriangleAlert aria-hidden="true" />
-                  <Alert.Description
-                    >{m.crawler_watchdog_interventions_load_error()}</Alert.Description
-                  >
-                </Alert.Root>
-              {:else if !data.crawlerWatchdogInterventions || data.crawlerWatchdogInterventions.items.length === 0}
-                <p class="text-muted-foreground text-sm">
-                  {m.crawler_watchdog_interventions_empty({
-                    days: data.crawlerWatchdogInterventionsWindowDays
-                  })}
-                </p>
-              {:else}
-                <div class="overflow-x-auto">
-                  <Table.Root class="min-w-[56rem]">
-                    <Table.Caption class="sr-only">
-                      {m.crawler_watchdog_interventions_table_caption()}
-                    </Table.Caption>
-                    <Table.Header>
-                      <Table.Row>
-                        <Table.Head>{m.crawler_watchdog_interventions_column_website()}</Table.Head>
-                        <Table.Head>{m.crawler_watchdog_interventions_column_outcome()}</Table.Head>
-                        <Table.Head>{m.crawler_watchdog_interventions_column_activity()}</Table.Head
-                        >
-                        <Table.Head class="text-right">
-                          {m.crawler_watchdog_interventions_column_finished()}
-                        </Table.Head>
-                      </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
-                      {#each data.crawlerWatchdogInterventions.items as intervention (intervention.crawl_run_id)}
-                        <Table.Row>
-                          <Table.Cell class="max-w-64">
-                            <span
-                              class="block truncate font-medium"
-                              title={getCrawlerWatchdogInterventionWebsiteLabel(intervention)}
-                            >
-                              {getCrawlerWatchdogInterventionWebsiteLabel(intervention)}
-                            </span>
-                          </Table.Cell>
-                          <Table.Cell class="max-w-72 whitespace-normal">
-                            <span class="text-sm">
-                              {getCrawlerWatchdogInterventionOutcomeLabel(intervention)}
-                            </span>
-                          </Table.Cell>
-                          <Table.Cell class="whitespace-normal">
-                            <div class="flex flex-wrap gap-1.5">
-                              {#each getCrawlerWatchdogInterventionResultLabels(intervention) as label (label.label)}
-                                <Badge
-                                  variant="outline"
-                                  class={resultBadgeClass(label.color)}
-                                  title={label.tooltip}
-                                >
-                                  {label.label}
-                                </Badge>
-                              {/each}
-                            </div>
-                          </Table.Cell>
-                          <Table.Cell class="text-muted-foreground text-right text-xs tabular-nums">
-                            {formatDateTime(intervention.finished_at)}
-                          </Table.Cell>
-                        </Table.Row>
-                      {/each}
-                    </Table.Body>
-                  </Table.Root>
-                </div>
-              {/if}
-            </Card.Content>
-          </Card.Root>
-
-          <Card.Root class="mb-14" aria-labelledby="crawler-recent-failures-title">
-            <Card.Header>
-              <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-                <div class="flex min-w-0 flex-col gap-1">
-                  <h2
-                    id="crawler-recent-failures-title"
-                    class="text-base leading-snug font-semibold"
-                  >
-                    {m.crawler_recent_failures_title()}
-                  </h2>
-                  <Card.Description>
-                    {m.crawler_recent_failures_description({
-                      days: data.crawlerRecentFailuresWindowDays
-                    })}
-                  </Card.Description>
-                </div>
-                {#if data.crawlerRecentFailures}
-                  <Badge variant="outline" class="shrink-0 tabular-nums">
-                    {m.crawler_recent_failures_count({
-                      shown: data.crawlerRecentFailures.items.length,
-                      total: data.crawlerRecentFailures.total
-                    })}
-                  </Badge>
-                {/if}
-              </div>
-            </Card.Header>
-            <Card.Content class="pt-0">
-              {#if data.crawlerRecentFailuresLoadFailed}
-                <Alert.Root variant="destructive">
-                  <TriangleAlert aria-hidden="true" />
-                  <Alert.Description>{m.crawler_recent_failures_load_error()}</Alert.Description>
-                </Alert.Root>
-              {:else if !data.crawlerRecentFailures || data.crawlerRecentFailures.items.length === 0}
-                <p class="text-muted-foreground text-sm">
-                  {m.crawler_recent_failures_empty({
-                    days: data.crawlerRecentFailuresWindowDays
-                  })}
-                </p>
-              {:else}
-                <div class="overflow-x-auto">
-                  <Table.Root class="min-w-[56rem]">
-                    <Table.Caption class="sr-only">
-                      {m.crawler_recent_failures_table_caption()}
-                    </Table.Caption>
-                    <Table.Header>
-                      <Table.Row>
-                        <Table.Head>{m.crawler_recent_failures_column_website()}</Table.Head>
-                        <Table.Head>{m.crawler_recent_failures_column_outcome()}</Table.Head>
-                        <Table.Head>{m.crawler_recent_failures_column_activity()}</Table.Head>
-                        <Table.Head class="text-right">
-                          {m.crawler_recent_failures_column_finished()}
-                        </Table.Head>
-                      </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
-                      {#each data.crawlerRecentFailures.items as failure (failure.crawl_run_id)}
-                        <Table.Row>
-                          <Table.Cell class="max-w-64">
-                            <span
-                              class="block truncate font-medium"
-                              title={getCrawlerRecentFailureWebsiteLabel(failure)}
-                            >
-                              {getCrawlerRecentFailureWebsiteLabel(failure)}
-                            </span>
-                          </Table.Cell>
-                          <Table.Cell class="max-w-72 whitespace-normal">
-                            <span class="text-sm"
-                              >{getCrawlerRecentFailureOutcomeLabel(failure)}</span
-                            >
-                          </Table.Cell>
-                          <Table.Cell class="whitespace-normal">
-                            <div class="flex flex-wrap gap-1.5">
-                              {#each getCrawlerRecentFailureResultLabels(failure) as label (label.label)}
-                                <Badge
-                                  variant="outline"
-                                  class={resultBadgeClass(label.color)}
-                                  title={label.tooltip}
-                                >
-                                  {label.label}
-                                </Badge>
-                              {/each}
-                            </div>
-                          </Table.Cell>
-                          <Table.Cell class="text-muted-foreground text-right text-xs tabular-nums">
-                            {formatDateTime(failure.finished_at)}
-                          </Table.Cell>
-                        </Table.Row>
-                      {/each}
-                    </Table.Body>
-                  </Table.Root>
-                </div>
-              {/if}
-            </Card.Content>
-          </Card.Root>
-        </Tabs.Content>
-
         <Tabs.Content value="settings" class="space-y-0">
+          <Card.Root class="mb-14" aria-labelledby="crawler-builtin-card-title">
+            <Card.Header>
+              <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                <div class="flex min-w-0 flex-col gap-1">
+                  <h2 id="crawler-builtin-card-title" class="text-base leading-snug font-semibold">
+                    {m.crawler_builtin_card_title()}
+                  </h2>
+                  <Card.Description>{m.crawler_builtin_card_description()}</Card.Description>
+                </div>
+                <Badge variant="default" class="shrink-0">
+                  {m.crawler_built_in_badge()}
+                </Badge>
+              </div>
+            </Card.Header>
+            <Card.Content class="flex flex-col gap-2 pt-0">
+              {#each CRAWLER_SETTINGS_READ_ONLY_OPTIMIZATIONS as optimization (optimization.key)}
+                <div class="flex items-start gap-3">
+                  <ShieldCheck
+                    class="text-accent-default mt-0.5 size-5 shrink-0"
+                    aria-hidden="true"
+                  />
+                  <div class="flex min-w-0 flex-col gap-1">
+                    <h3 class="text-sm font-medium">{fieldText(optimization.titleKey)}</h3>
+                    <p class="text-muted-foreground text-sm leading-relaxed">
+                      {fieldText(optimization.descriptionKey)}
+                    </p>
+                  </div>
+                </div>
+              {/each}
+            </Card.Content>
+          </Card.Root>
+
           <Settings.Group title={m.crawler_controls()}>
             <p class="text-secondary -mt-2 max-w-[64ch] pr-12 pl-2 text-sm leading-relaxed">
               {m.crawler_controls_subtitle()}
