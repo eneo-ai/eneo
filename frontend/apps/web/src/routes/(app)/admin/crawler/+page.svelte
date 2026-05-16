@@ -12,6 +12,7 @@
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
   import * as Pagination from "$lib/components/ui/pagination/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
@@ -187,6 +188,23 @@
     CRAWLER_ACTIVE_INVENTORY_DEFAULTS.limit
   );
   let activeInventoryPage = $state<number>(1);
+
+  // Free-text filter on the visible active inventory page. Client-side
+  // only — narrowing to the rows already on this page is the operator's
+  // primary need (cross-page search would need a backend query
+  // parameter and is deferred). Lowercased once when typed; rows
+  // compare against `website_name` only because the wire shape doesn't
+  // carry `website_url` on active rows.
+  let activeInventorySearch = $state<string>("");
+  const activeInventorySearchNormalized = $derived(activeInventorySearch.trim().toLowerCase());
+  const visibleActiveInventoryItems = $derived(
+    visibleActiveInventory && activeInventorySearchNormalized
+      ? visibleActiveInventory.items.filter((item) => {
+          const name = item.website_name?.toLowerCase() ?? "";
+          return name.includes(activeInventorySearchNormalized);
+        })
+      : (visibleActiveInventory?.items ?? [])
+  );
 
   type CrawlerAdminTab = "operations" | "health" | "activity" | "settings";
   let currentTab = $state<CrawlerAdminTab>("operations");
@@ -618,9 +636,73 @@
   </Page.Header>
   <Page.Main>
     <Settings.Page>
-      <p class="text-secondary -mt-4 mb-10 max-w-[64ch] pr-12 pl-2 text-[15px] leading-relaxed">
+      <p class="text-secondary -mt-4 mb-6 max-w-[64ch] pr-12 pl-2 text-[15px] leading-relaxed">
         {m.crawler_settings_subtitle()}
       </p>
+
+      <!--
+        KPI summary header: at-a-glance counts for the three load buckets
+        the admin cares about (running, needing attention, scheduled).
+        Each card is a button that switches to the matching tab so the
+        admin can drill in without scrolling. Numbers come from the same
+        SSR payloads the tabs already render — no extra network cost.
+        Static markup only (no message function calls that could trip
+        the toaster hydration fix landed earlier in the session).
+        -->
+      <div
+        class="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-3"
+        role="group"
+        aria-label={m.crawler_summary_aria()}
+      >
+        <button
+          type="button"
+          class="border-border bg-background hover:bg-muted focus-visible:ring-ring/50 flex flex-col items-start gap-1 rounded-lg border p-4 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
+          aria-current={currentTab === "operations" ? "page" : undefined}
+          onclick={() => (currentTab = "operations")}
+        >
+          <span class="text-muted-foreground text-xs tracking-wide uppercase">
+            {m.crawler_summary_running_label()}
+          </span>
+          <span class="text-2xl font-semibold tabular-nums">
+            {visibleActiveInventory ? visibleActiveInventory.total : 0}
+          </span>
+          <span class="text-muted-foreground text-xs">
+            {m.crawler_summary_running_hint()}
+          </span>
+        </button>
+        <button
+          type="button"
+          class="border-border bg-background hover:bg-muted focus-visible:ring-ring/50 flex flex-col items-start gap-1 rounded-lg border p-4 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
+          aria-current={currentTab === "health" ? "page" : undefined}
+          onclick={() => (currentTab = "health")}
+        >
+          <span class="text-muted-foreground text-xs tracking-wide uppercase">
+            {m.crawler_summary_failing_label()}
+          </span>
+          <span class="text-2xl font-semibold tabular-nums">
+            {data.crawlerFailureInventory ? data.crawlerFailureInventory.total : 0}
+          </span>
+          <span class="text-muted-foreground text-xs">
+            {m.crawler_summary_failing_hint()}
+          </span>
+        </button>
+        <button
+          type="button"
+          class="border-border bg-background hover:bg-muted focus-visible:ring-ring/50 flex flex-col items-start gap-1 rounded-lg border p-4 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
+          aria-current={currentTab === "activity" ? "page" : undefined}
+          onclick={() => (currentTab = "activity")}
+        >
+          <span class="text-muted-foreground text-xs tracking-wide uppercase">
+            {m.crawler_summary_scheduled_label()}
+          </span>
+          <span class="text-2xl font-semibold tabular-nums">
+            {data.crawlerScheduledAggregate ? data.crawlerScheduledAggregate.total_websites : 0}
+          </span>
+          <span class="text-muted-foreground text-xs">
+            {m.crawler_summary_scheduled_hint()}
+          </span>
+        </button>
+      </div>
 
       <Tabs.Root
         value={currentTab}
@@ -676,7 +758,7 @@
                   </Badge>
                 {/if}
               </div>
-              <div class="pt-3">
+              <div class="flex flex-wrap items-end gap-3 pt-3">
                 <ToggleGroup.Root
                   type="single"
                   variant="outline"
@@ -699,6 +781,13 @@
                     </ToggleGroup.Item>
                   {/each}
                 </ToggleGroup.Root>
+                <Input
+                  type="search"
+                  class="w-full sm:w-64"
+                  bind:value={activeInventorySearch}
+                  placeholder={m.crawler_active_inventory_search_placeholder()}
+                  aria-label={m.crawler_active_inventory_search_label()}
+                />
               </div>
             </Card.Header>
             <Card.Content class="pt-0">
@@ -714,6 +803,10 @@
               {:else if !visibleActiveInventory || visibleActiveInventory.items.length === 0}
                 <p class="text-muted-foreground text-sm">
                   {m.crawler_active_inventory_empty()}
+                </p>
+              {:else if visibleActiveInventoryItems.length === 0}
+                <p class="text-muted-foreground text-sm">
+                  {m.crawler_active_inventory_search_empty()}
                 </p>
               {:else}
                 <div class="overflow-x-auto">
@@ -737,7 +830,7 @@
                       </Table.Row>
                     </Table.Header>
                     <Table.Body>
-                      {#each visibleActiveInventory.items as activeItem (activeItem.job_id)}
+                      {#each visibleActiveInventoryItems as activeItem (activeItem.job_id)}
                         {@const sourceLabel = getCrawlerActiveInventorySourceLabel(activeItem)}
                         {@const startedByLabel =
                           getCrawlerActiveInventoryStartedByLabel(activeItem)}
