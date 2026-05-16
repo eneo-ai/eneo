@@ -966,6 +966,7 @@
   "crawler_failure_inventory_state_backed_off_tooltip": "Crawlern misslyckades nyligen och väntar till nästa retry-fönster.",
   "crawler_failure_inventory_state_paused": "Pausad efter fel",
   "crawler_failure_inventory_state_paused_tooltip": "Schemat är satt till endast manuellt efter upprepade fel. Granska de senaste felen innan du aktiverar ett återkommande intervall igen.",
+  "crawler_tenant_website_inventory_state_healthy": "Frisk",
   "crawler_failure_inventory_failures": "{count} fel i rad",
   "crawler_failure_inventory_next_step_retry_at": "Försöker igen {time}",
   "crawler_failure_inventory_next_step_review_settings": "Granska felen innan schemaläggning igen",

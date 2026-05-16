@@ -967,6 +967,7 @@
   "crawler_failure_inventory_state_backed_off_tooltip": "The crawler failed recently and is waiting until the next retry window.",
   "crawler_failure_inventory_state_paused": "Paused after failures",
   "crawler_failure_inventory_state_paused_tooltip": "The schedule is manual-only after repeated failures. Review recent failures before enabling a recurring interval again.",
+  "crawler_tenant_website_inventory_state_healthy": "Healthy",
   "crawler_failure_inventory_failures": "{count} consecutive failures",
   "crawler_failure_inventory_next_step_retry_at": "Retries {time}",
   "crawler_failure_inventory_next_step_review_settings": "Review errors before scheduling again",

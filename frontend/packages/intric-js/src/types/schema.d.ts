@@ -2479,6 +2479,35 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/crawler/websites": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List every website in the current tenant for governance + drill-down
+     * @description Tenant-scoped lens on every Website row + its attribution + state.
+     *
+     *     The Webbplatser admin tab needs a single read that returns *all*
+     *     websites in the tenant — not the active-inventory subset (queued +
+     *     running) or the failure-inventory subset (broken). Each filter is
+     *     optional; the default (no filters, sort=recent_crawl) shows the page
+     *     layout an admin lands on after clicking the tab.
+     *
+     *     No mutation, no audit row required. The router-level telemetry block
+     *     captures the "did the admin look at the inventory" signal.
+     */
+    get: operations["get_current_tenant_crawler_website_inventory_api_v1_admin_crawler_websites_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/crawler/jobs/{job_id}/abort": {
     parameters: {
       query?: never;
@@ -10316,6 +10345,81 @@ export interface components {
       /** Offset */
       offset: number;
     };
+    /**
+     * CrawlerTenantWebsiteInventoryItem
+     * @description Wire shape for one row of the tenant Webbplatser governance table.
+     *
+     *     Mirrors the domain `CrawlerTenantWebsiteInventoryItem` with one
+     *     rename: the domain `size_bytes` becomes `size` on the wire to match
+     *     the byte-count naming used by the scheduled aggregate and processing
+     *     aggregate responses. The `failure_state` field is nullable on the
+     *     wire: a website with no classifier match is healthy. Ownership
+     *     columns expose the website *creator* (the user who registered the
+     *     website), not the user who most recently triggered a crawl — that's
+     *     the active-inventory's job.
+     */
+    CrawlerTenantWebsiteInventoryItem: {
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Url */
+      url: string;
+      /** Name */
+      name: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      update_interval: components["schemas"]["UpdateInterval"];
+      failure_state: components["schemas"]["CrawlerFailureState"] | null;
+      /** Consecutive Failures */
+      consecutive_failures: number;
+      /** Next Retry At */
+      next_retry_at: string | null;
+      /** Last Crawled At */
+      last_crawled_at: string | null;
+      /** Size */
+      size: number;
+      /** Owner User Id */
+      owner_user_id: string | null;
+      /** Owner Email */
+      owner_email: string | null;
+      /** Space Id */
+      space_id: string | null;
+      /** Space Name */
+      space_name: string | null;
+      /** Collection Id */
+      collection_id: string | null;
+      /** Collection Name */
+      collection_name: string | null;
+    };
+    /** CrawlerTenantWebsiteInventoryResponse */
+    CrawlerTenantWebsiteInventoryResponse: {
+      /** Items */
+      items: components["schemas"]["CrawlerTenantWebsiteInventoryItem"][];
+      /** Total */
+      total: number;
+      /** Limit */
+      limit: number;
+      /** Offset */
+      offset: number;
+    };
+    /**
+     * CrawlerTenantWebsiteInventorySort
+     * @description Stable sort orders the admin UI can request.
+     *
+     *     Each value matches a deterministic SQL ORDER BY in the repository so a
+     *     page-2 fetch always lands on the rows the operator expects.
+     * @enum {string}
+     */
+    CrawlerTenantWebsiteInventorySort:
+      | "recent_crawl"
+      | "size_desc"
+      | "consecutive_failures"
+      | "url";
     /** CrawlerTenantWebsiteProcessingAggregateItem */
     CrawlerTenantWebsiteProcessingAggregateItem: {
       /**
@@ -26481,6 +26585,44 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CrawlerTenantWebsiteProcessingAggregateResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_current_tenant_crawler_website_inventory_api_v1_admin_crawler_websites_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+        search?: string | null;
+        update_interval?: components["schemas"]["UpdateInterval"] | null;
+        space_id?: string | null;
+        owner_user_id?: string | null;
+        failure_state?: components["schemas"]["CrawlerFailureState"] | null;
+        sort?: components["schemas"]["CrawlerTenantWebsiteInventorySort"];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerTenantWebsiteInventoryResponse"];
         };
       };
       /** @description Validation Error */

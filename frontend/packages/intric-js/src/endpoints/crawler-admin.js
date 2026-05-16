@@ -4,6 +4,9 @@
 /** @typedef {import('../types/resources').CrawlerRecentFailuresResponse} CrawlerRecentFailuresResponse */
 /** @typedef {import('../types/resources').CrawlerScheduledAggregateResponse} CrawlerScheduledAggregateResponse */
 /** @typedef {import('../types/resources').CrawlerTenantWebsiteProcessingAggregateResponse} CrawlerTenantWebsiteProcessingAggregateResponse */
+/** @typedef {import('../types/schema').components["schemas"]["CrawlerTenantWebsiteInventoryResponse"]} CrawlerTenantWebsiteInventoryResponse */
+/** @typedef {import('../types/schema').components["schemas"]["CrawlerTenantWebsiteInventorySort"]} CrawlerTenantWebsiteInventorySort */
+/** @typedef {import('../types/schema').components["schemas"]["CrawlerFailureState"]} CrawlerFailureState */
 /** @typedef {import('../types/schema').components["schemas"]["UpdateInterval"]} CrawlerUpdateInterval */
 
 /**
@@ -155,6 +158,33 @@ export function initCrawlerAdmin(client) {
         method: "post",
         params: { path: { website_id: websiteId } }
       });
+    },
+
+    /**
+     * List every website in the current tenant with consolidated governance
+     * attribution (space, collection, owner email, schedule, failure state).
+     * Powers the Webbplatser admin tab — search by URL/name/owner, filter by
+     * interval/space/owner/failure-state, sort, paginate. Tenant scope is
+     * implicit (`current_user.tenant_id` on the backend); admin role required.
+     * @param {{
+     *   limit?: number,
+     *   offset?: number,
+     *   search?: string,
+     *   update_interval?: CrawlerUpdateInterval,
+     *   space_id?: string,
+     *   owner_user_id?: string,
+     *   failure_state?: CrawlerFailureState,
+     *   sort?: CrawlerTenantWebsiteInventorySort
+     * }} [params]
+     * @returns {Promise<CrawlerTenantWebsiteInventoryResponse>}
+     * @throws {IntricError}
+     */
+    tenantWebsiteInventory: async (params) => {
+      const res = await client.fetch("/api/v1/admin/crawler/websites", {
+        method: "get",
+        params: { query: params }
+      });
+      return res;
     }
   };
 }
