@@ -1,6 +1,7 @@
 import { CRAWLER_ACTIVE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerActiveInventory";
 import { CRAWLER_FAILURE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerFailureInventory";
 import { CRAWLER_RECENT_FAILURES_DEFAULTS } from "$lib/features/admin/crawlerRecentFailures";
+import { CRAWLER_TENANT_WEBSITE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerTenantWebsiteInventory";
 import { CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS } from "$lib/features/admin/crawlerWatchdogInterventions";
 import { CRAWLER_WEBSITE_PROCESSING_DEFAULTS } from "$lib/features/admin/crawlerWebsiteProcessing";
 
@@ -13,6 +14,7 @@ export const load = async (event) => {
   event.depends("admin:crawler-watchdog-interventions");
   event.depends("admin:crawler-scheduled");
   event.depends("admin:crawler-website-processing");
+  event.depends("admin:crawler-tenant-website-inventory");
 
   const [
     crawlerSettings,
@@ -21,7 +23,8 @@ export const load = async (event) => {
     recentFailuresResult,
     watchdogInterventionsResult,
     scheduledAggregateResult,
-    websiteProcessingResult
+    websiteProcessingResult,
+    tenantWebsiteInventoryResult
   ] = await Promise.all([
     intric.settings.getCrawler(),
     intric.crawlerAdmin
@@ -50,6 +53,13 @@ export const load = async (event) => {
     intric.crawlerAdmin
       .websiteProcessingAggregate(CRAWLER_WEBSITE_PROCESSING_DEFAULTS)
       .then((crawlerWebsiteProcessing) => ({ ok: true as const, crawlerWebsiteProcessing }))
+      .catch(() => ({ ok: false as const })),
+    intric.crawlerAdmin
+      .tenantWebsiteInventory(CRAWLER_TENANT_WEBSITE_INVENTORY_DEFAULTS)
+      .then((crawlerTenantWebsiteInventory) => ({
+        ok: true as const,
+        crawlerTenantWebsiteInventory
+      }))
       .catch(() => ({ ok: false as const }))
   ]);
 
@@ -81,6 +91,10 @@ export const load = async (event) => {
     crawlerWebsiteProcessing: websiteProcessingResult.ok
       ? websiteProcessingResult.crawlerWebsiteProcessing
       : null,
-    crawlerWebsiteProcessingLoadFailed: !websiteProcessingResult.ok
+    crawlerWebsiteProcessingLoadFailed: !websiteProcessingResult.ok,
+    crawlerTenantWebsiteInventory: tenantWebsiteInventoryResult.ok
+      ? tenantWebsiteInventoryResult.crawlerTenantWebsiteInventory
+      : null,
+    crawlerTenantWebsiteInventoryLoadFailed: !tenantWebsiteInventoryResult.ok
   };
 };

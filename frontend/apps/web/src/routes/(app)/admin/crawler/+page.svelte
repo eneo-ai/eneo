@@ -117,6 +117,21 @@
     isCrawlerWebsiteProcessingSourceSkipDrift,
     type CrawlerTenantWebsiteProcessingAggregateResponse
   } from "$lib/features/admin/crawlerWebsiteProcessing";
+  import {
+    CRAWLER_TENANT_WEBSITE_INVENTORY_DEFAULTS,
+    CRAWLER_TENANT_WEBSITE_INVENTORY_PAGE_SIZES,
+    getCrawlerTenantWebsiteInventoryDisplayName,
+    getCrawlerTenantWebsiteInventoryOwnerLabel,
+    getCrawlerTenantWebsiteInventorySpaceLabel,
+    getCrawlerTenantWebsiteInventoryStatusLabel,
+    isCrawlerTenantWebsiteInventoryPageSize,
+    offsetFromCrawlerTenantWebsiteInventoryPage,
+    type CrawlerFailureState,
+    type CrawlerTenantWebsiteInventoryItem,
+    type CrawlerTenantWebsiteInventoryPageSize,
+    type CrawlerTenantWebsiteInventoryResponse,
+    type CrawlerTenantWebsiteInventorySort
+  } from "$lib/features/admin/crawlerTenantWebsiteInventory";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { CircleX, ShieldCheck, TriangleAlert } from "lucide-svelte";
@@ -145,6 +160,8 @@
       crawlerWebsiteProcessingWindowDays: number;
       crawlerWebsiteProcessing: CrawlerTenantWebsiteProcessingAggregateResponse | null;
       crawlerWebsiteProcessingLoadFailed: boolean;
+      crawlerTenantWebsiteInventory: CrawlerTenantWebsiteInventoryResponse | null;
+      crawlerTenantWebsiteInventoryLoadFailed: boolean;
     };
   } = $props();
 
@@ -240,8 +257,76 @@
     watchdogInterventionsOverride ?? data.crawlerWatchdogInterventions
   );
 
-  type CrawlerAdminTab = "operations" | "health" | "activity" | "settings";
+  type CrawlerAdminTab = "operations" | "websites" | "health" | "activity" | "settings";
   let currentTab = $state<CrawlerAdminTab>("operations");
+
+  // Webbplatser tab state — tenant-wide governance read powered by the
+  // /admin/crawler/websites endpoint. Page 1 + default sort matches the
+  // SSR payload; subsequent fetches land in `tenantWebsiteOverride` so a
+  // failure keeps the SSR rows visible. Filter values mirror the backend
+  // Query params 1:1 so the URL → state → SDK pipeline stays
+  // round-trippable.
+  let tenantWebsiteInventoryPage = $state<number>(1);
+  let tenantWebsiteInventoryPageSize = $state<CrawlerTenantWebsiteInventoryPageSize>(
+    CRAWLER_TENANT_WEBSITE_INVENTORY_DEFAULTS.limit
+  );
+  let tenantWebsiteInventorySort = $state<CrawlerTenantWebsiteInventorySort>(
+    CRAWLER_TENANT_WEBSITE_INVENTORY_DEFAULTS.sort
+  );
+  let tenantWebsiteInventorySearch = $state<string>("");
+  let tenantWebsiteInventoryIntervalFilter = $state<CrawlerUpdateInterval | "">("");
+  let tenantWebsiteInventoryStateFilter = $state<CrawlerFailureState | "all" | "healthy">("all");
+  let tenantWebsiteInventoryOverride = $state<CrawlerTenantWebsiteInventoryResponse | null>(null);
+  let tenantWebsiteInventoryBusy = $state<boolean>(false);
+  let tenantWebsiteInventorySearchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Clean up the search-debounce timer on unmount so a late-firing fetch
+  // doesn't land in a tab the operator already left. Plain `$effect` with
+  // an empty deps block runs once on mount; the returned function runs on
+  // destroy.
+  $effect(() => {
+    return () => {
+      if (tenantWebsiteInventorySearchDebounceTimer !== null) {
+        clearTimeout(tenantWebsiteInventorySearchDebounceTimer);
+        tenantWebsiteInventorySearchDebounceTimer = null;
+      }
+    };
+  });
+  const visibleTenantWebsiteInventory = $derived(
+    tenantWebsiteInventoryOverride ?? data.crawlerTenantWebsiteInventory
+  );
+  // Status filter chips, computed via `$derived` so message function
+  // resolution happens at the locale boundary that other markup uses.
+  // Each option carries an inline dot color for the visual badge — the
+  // same affordance as `ApiKeyStateFilter`.
+  const tenantWebsiteInventoryStateFilterOptions = $derived<
+    {
+      value: "all" | "healthy" | CrawlerFailureState;
+      label: string;
+      dot: string;
+    }[]
+  >([
+    {
+      value: "all",
+      label: m.crawler_tenant_website_inventory_state_filter_all(),
+      dot: ""
+    },
+    {
+      value: "healthy",
+      label: m.crawler_tenant_website_inventory_state_healthy(),
+      dot: "bg-positive-default"
+    },
+    {
+      value: "BACKED_OFF",
+      label: m.crawler_failure_inventory_state_backed_off(),
+      dot: "bg-caution"
+    },
+    {
+      value: "AUTO_DISABLED",
+      label: m.crawler_failure_inventory_state_paused(),
+      dot: "bg-destructive"
+    }
+  ]);
 
   const fieldTextByKey: Record<string, () => string> = {
     crawler_hash_skip_title: () => m.crawler_hash_skip_title(),
@@ -646,6 +731,157 @@
     }
   }
 
+  // Refresh the Webbplatser inventory with current filter + paging state.
+  // Page 1 + default sort + no filters matches the SSR payload exactly,
+  // so we short-circuit in that case to avoid a re-fetch flash; any other
+  // combination triggers a tenant-scoped client fetch. The override is
+  // cleared on the SSR path so the SSR payload owns page 1 again.
+  async function refreshTenantWebsiteInventory(
+    opts: {
+      search?: string;
+      page?: number;
+      pageSize?: CrawlerTenantWebsiteInventoryPageSize;
+      interval?: CrawlerUpdateInterval | "";
+      state?: CrawlerFailureState | "all" | "healthy";
+      sort?: CrawlerTenantWebsiteInventorySort;
+      resetPage?: boolean;
+    } = {}
+  ) {
+    const nextSearch = opts.search ?? tenantWebsiteInventorySearch;
+    const nextInterval = opts.interval ?? tenantWebsiteInventoryIntervalFilter;
+    const nextState = opts.state ?? tenantWebsiteInventoryStateFilter;
+    const nextSort = opts.sort ?? tenantWebsiteInventorySort;
+    const nextPageSize = opts.pageSize ?? tenantWebsiteInventoryPageSize;
+    // A filter change resets to page 1 so the operator doesn't land
+    // mid-way through the narrowed result. The caller can override.
+    const nextPage = opts.resetPage ? 1 : (opts.page ?? tenantWebsiteInventoryPage);
+
+    tenantWebsiteInventorySearch = nextSearch;
+    tenantWebsiteInventoryIntervalFilter = nextInterval;
+    tenantWebsiteInventoryStateFilter = nextState;
+    tenantWebsiteInventorySort = nextSort;
+    tenantWebsiteInventoryPageSize = nextPageSize;
+    tenantWebsiteInventoryPage = nextPage;
+
+    const matchesSsr =
+      nextPage === 1 &&
+      nextPageSize === CRAWLER_TENANT_WEBSITE_INVENTORY_DEFAULTS.limit &&
+      nextSort === CRAWLER_TENANT_WEBSITE_INVENTORY_DEFAULTS.sort &&
+      nextSearch.trim() === "" &&
+      nextInterval === "" &&
+      nextState === "all";
+    if (matchesSsr) {
+      tenantWebsiteInventoryOverride = null;
+      return;
+    }
+
+    tenantWebsiteInventoryBusy = true;
+    try {
+      const failureStateParam: CrawlerFailureState | undefined =
+        nextState === "all" || nextState === "healthy" ? undefined : nextState;
+      const response = await intric.crawlerAdmin.tenantWebsiteInventory({
+        limit: nextPageSize,
+        offset: offsetFromCrawlerTenantWebsiteInventoryPage(nextPage, nextPageSize),
+        sort: nextSort,
+        ...(nextSearch.trim() ? { search: nextSearch.trim() } : {}),
+        ...(nextInterval ? { update_interval: nextInterval } : {}),
+        ...(failureStateParam ? { failure_state: failureStateParam } : {})
+      });
+      // "Healthy" is a client-side narrowing — the backend has no
+      // explicit AUTO_DISABLED / BACKED_OFF filter for "neither". Drop
+      // any row that classified into a failure state on this page only;
+      // keep `response.total` unchanged so pagination still reflects the
+      // true tenant-wide row count instead of being capped at the
+      // current-page healthy slice (a tenant where healthy rows span
+      // pages would otherwise lose its "next page" affordance).
+      const filteredItems =
+        nextState === "healthy"
+          ? response.items.filter((item) => item.failure_state === null)
+          : response.items;
+      tenantWebsiteInventoryOverride = {
+        ...response,
+        items: filteredItems
+      };
+    } catch (error) {
+      toastError(error, m.crawler_tenant_website_inventory_load_error());
+    } finally {
+      tenantWebsiteInventoryBusy = false;
+    }
+  }
+
+  function changeTenantWebsiteInventoryPageSize(value: string) {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed) || !isCrawlerTenantWebsiteInventoryPageSize(parsed)) {
+      return;
+    }
+    if (parsed === tenantWebsiteInventoryPageSize) return;
+    void refreshTenantWebsiteInventory({ pageSize: parsed, resetPage: true });
+  }
+
+  function handleTenantWebsiteInventorySearchInput(value: string) {
+    tenantWebsiteInventorySearch = value;
+    // Debounce 300ms so each keystroke doesn't hit the SDK. The visible
+    // override updates on the trailing edge — the input itself stays in
+    // sync via `bind:value` for instant typing feedback.
+    if (tenantWebsiteInventorySearchDebounceTimer !== null) {
+      clearTimeout(tenantWebsiteInventorySearchDebounceTimer);
+    }
+    tenantWebsiteInventorySearchDebounceTimer = setTimeout(() => {
+      tenantWebsiteInventorySearchDebounceTimer = null;
+      void refreshTenantWebsiteInventory({ search: value, resetPage: true });
+    }, 300);
+  }
+
+  function clearTenantWebsiteInventorySearch() {
+    if (tenantWebsiteInventorySearchDebounceTimer !== null) {
+      clearTimeout(tenantWebsiteInventorySearchDebounceTimer);
+      tenantWebsiteInventorySearchDebounceTimer = null;
+    }
+    void refreshTenantWebsiteInventory({ search: "", resetPage: true });
+  }
+
+  function tenantWebsiteInventoryActiveFilterCount(): number {
+    let count = 0;
+    if (tenantWebsiteInventorySearch.trim() !== "") count += 1;
+    if (tenantWebsiteInventoryIntervalFilter !== "") count += 1;
+    if (tenantWebsiteInventoryStateFilter !== "all") count += 1;
+    return count;
+  }
+
+  function clearTenantWebsiteInventoryFilters() {
+    if (tenantWebsiteInventorySearchDebounceTimer !== null) {
+      clearTimeout(tenantWebsiteInventorySearchDebounceTimer);
+      tenantWebsiteInventorySearchDebounceTimer = null;
+    }
+    void refreshTenantWebsiteInventory({
+      search: "",
+      interval: "",
+      state: "all",
+      resetPage: true
+    });
+  }
+
+  function openWebsiteDetail(item: CrawlerTenantWebsiteInventoryItem) {
+    // C4 wires the Sheet drawer. C3 logs the click so the row affordance
+    // can be verified visually + by Playwright before the drawer lands.
+    console.log("[website-detail] open", item.website_id);
+  }
+
+  function tenantWebsiteInventoryRowStatusClass(item: CrawlerTenantWebsiteInventoryItem) {
+    if (item.failure_state === "AUTO_DISABLED") {
+      return "border-destructive/35 bg-destructive/8 text-destructive";
+    }
+    if (item.failure_state === "BACKED_OFF") {
+      return "border-caution/40 bg-caution/8 text-caution";
+    }
+    return "border-positive-default/40 bg-positive-dimmer text-positive-stronger";
+  }
+
+  function formatRelativeOrAbsolute(value: string | null): string {
+    if (!value) return "—";
+    return formatDateTime(value);
+  }
+
   async function handleSaveUpdateInterval() {
     const candidate = intervalCandidate;
     if (candidate === null) return;
@@ -880,6 +1116,18 @@
               {#if visibleActiveInventory && visibleActiveInventory.total > 0}
                 <Badge variant="secondary" class="ml-2 tabular-nums">
                   {visibleActiveInventory.total}
+                </Badge>
+              {/if}
+            </Tabs.Trigger>
+            <Tabs.Trigger
+              value="websites"
+              aria-label={m.crawler_admin_tab_websites()}
+              class="shrink-0"
+            >
+              {m.crawler_admin_tab_websites()}
+              {#if visibleTenantWebsiteInventory && visibleTenantWebsiteInventory.total > 0}
+                <Badge variant="secondary" class="ml-2 tabular-nums">
+                  {visibleTenantWebsiteInventory.total}
                 </Badge>
               {/if}
             </Tabs.Trigger>
@@ -1148,6 +1396,318 @@
                         if (next === activeInventoryPage || activeInventoryFilterBusy || next < 1)
                           return;
                         void refreshActiveInventory({ page: next });
+                      }}
+                      class="m-0 w-auto justify-end"
+                    >
+                      {#snippet children({ pages, currentPage })}
+                        <Pagination.Content>
+                          <Pagination.Item>
+                            <Pagination.PrevButton />
+                          </Pagination.Item>
+                          {#each pages as page (page.key)}
+                            {#if page.type === "ellipsis"}
+                              <Pagination.Item>
+                                <Pagination.Ellipsis />
+                              </Pagination.Item>
+                            {:else}
+                              <Pagination.Item>
+                                <Pagination.Link {page} isActive={currentPage === page.value}>
+                                  {page.value}
+                                </Pagination.Link>
+                              </Pagination.Item>
+                            {/if}
+                          {/each}
+                          <Pagination.Item>
+                            <Pagination.NextButton />
+                          </Pagination.Item>
+                        </Pagination.Content>
+                      {/snippet}
+                    </Pagination.Root>
+                  </div>
+                {/if}
+              {/if}
+            </Card.Content>
+          </Card.Root>
+        </Tabs.Content>
+
+        <Tabs.Content value="websites" class="space-y-0">
+          <Card.Root class="mb-14" aria-labelledby="crawler-tenant-website-inventory-title">
+            <Card.Header>
+              <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                <div class="flex min-w-0 flex-col gap-1">
+                  <h2
+                    id="crawler-tenant-website-inventory-title"
+                    class="text-base leading-snug font-semibold"
+                  >
+                    {m.crawler_tenant_website_inventory_title()}
+                  </h2>
+                  <Card.Description>
+                    {m.crawler_tenant_website_inventory_description()}
+                  </Card.Description>
+                </div>
+                {#if visibleTenantWebsiteInventory}
+                  <Badge variant="outline" class="shrink-0 tabular-nums">
+                    {m.crawler_tenant_website_inventory_count({
+                      shown: visibleTenantWebsiteInventory.items.length,
+                      total: visibleTenantWebsiteInventory.total
+                    })}
+                  </Badge>
+                {/if}
+              </div>
+              <!--
+                Filter strip styled after /admin/api-keys: a flex-wrap row
+                with a search Input that fills available space and a set
+                of pill toggle buttons for interval + status. The pill
+                pattern is a deliberate borrow from `ApiKeyStateFilter`
+                so admins paging across the two admin tabs see consistent
+                affordances. Clear-all chip appears only when ≥1 filter
+                is non-default.
+                -->
+              <div class="bg-subtle border-default mt-4 flex flex-col gap-3 rounded-lg border p-3">
+                <div class="flex flex-wrap items-center gap-2">
+                  <div class="relative min-w-[240px] flex-1">
+                    <Input
+                      type="search"
+                      bind:value={tenantWebsiteInventorySearch}
+                      oninput={(event) =>
+                        handleTenantWebsiteInventorySearchInput(event.currentTarget.value)}
+                      placeholder={m.crawler_tenant_website_inventory_search_placeholder()}
+                      aria-label={m.crawler_tenant_website_inventory_search_label()}
+                      class="pr-9"
+                    />
+                    {#if tenantWebsiteInventorySearch.length > 0}
+                      <button
+                        type="button"
+                        class="text-muted-foreground hover:bg-muted focus-visible:ring-ring/50 absolute top-1/2 right-2 -translate-y-1/2 rounded p-1 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                        aria-label={m.crawler_tenant_website_inventory_search_clear()}
+                        onclick={clearTenantWebsiteInventorySearch}
+                      >
+                        <CircleX class="size-4" aria-hidden="true" />
+                      </button>
+                    {/if}
+                  </div>
+                  {#if tenantWebsiteInventoryActiveFilterCount() > 0}
+                    <Button variant="ghost" size="sm" onclick={clearTenantWebsiteInventoryFilters}>
+                      {m.crawler_tenant_website_inventory_clear_filters()}
+                    </Button>
+                  {/if}
+                </div>
+
+                <div
+                  role="group"
+                  aria-label={m.crawler_tenant_website_inventory_interval_filter_label()}
+                  class="flex flex-wrap gap-1.5"
+                >
+                  <button
+                    type="button"
+                    aria-pressed={tenantWebsiteInventoryIntervalFilter === ""}
+                    onclick={() => refreshTenantWebsiteInventory({ interval: "", resetPage: true })}
+                    class={tenantWebsiteInventoryIntervalFilter === ""
+                      ? "border-accent-default bg-accent-default/10 text-accent-default ring-accent-default/20 inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium ring-2 transition-all"
+                      : "border-border bg-background text-muted-foreground hover:border-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all"}
+                  >
+                    {m.crawler_tenant_website_inventory_interval_filter_all()}
+                  </button>
+                  {#each CRAWLER_UPDATE_INTERVAL_OPTIONS as interval (interval)}
+                    {@const isActive = tenantWebsiteInventoryIntervalFilter === interval}
+                    <button
+                      type="button"
+                      aria-pressed={isActive}
+                      onclick={() =>
+                        refreshTenantWebsiteInventory({
+                          interval,
+                          resetPage: true
+                        })}
+                      class={isActive
+                        ? "border-accent-default bg-accent-default/10 text-accent-default ring-accent-default/20 inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium ring-2 transition-all"
+                        : "border-border bg-background text-muted-foreground hover:border-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all"}
+                    >
+                      {getCrawlerUpdateIntervalLabel(interval)}
+                    </button>
+                  {/each}
+                </div>
+
+                <div
+                  role="group"
+                  aria-label={m.crawler_tenant_website_inventory_state_filter_label()}
+                  class="flex flex-wrap gap-1.5"
+                >
+                  {#each tenantWebsiteInventoryStateFilterOptions as option (option.value)}
+                    {@const isActive = tenantWebsiteInventoryStateFilter === option.value}
+                    <button
+                      type="button"
+                      aria-pressed={isActive}
+                      onclick={() =>
+                        refreshTenantWebsiteInventory({
+                          state: option.value,
+                          resetPage: true
+                        })}
+                      class={isActive
+                        ? "border-accent-default bg-accent-default/10 text-accent-default ring-accent-default/20 inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium ring-2 transition-all"
+                        : "border-border bg-background text-muted-foreground hover:border-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all"}
+                    >
+                      {#if option.dot}
+                        <span class="size-2 rounded-full {option.dot}" aria-hidden="true"></span>
+                      {/if}
+                      {option.label}
+                    </button>
+                  {/each}
+                </div>
+              </div>
+            </Card.Header>
+            <Card.Content class="pt-0">
+              {#if data.crawlerTenantWebsiteInventoryLoadFailed && !tenantWebsiteInventoryOverride}
+                <Alert.Root variant="destructive">
+                  <TriangleAlert aria-hidden="true" />
+                  <Alert.Description>
+                    {m.crawler_tenant_website_inventory_load_error()}
+                  </Alert.Description>
+                </Alert.Root>
+              {:else if tenantWebsiteInventoryBusy && !visibleTenantWebsiteInventory}
+                <p class="text-muted-foreground text-sm">
+                  {m.crawler_tenant_website_inventory_loading()}
+                </p>
+              {:else if !visibleTenantWebsiteInventory || visibleTenantWebsiteInventory.items.length === 0}
+                <p class="text-muted-foreground text-sm">
+                  {tenantWebsiteInventoryActiveFilterCount() > 0
+                    ? m.crawler_tenant_website_inventory_search_empty()
+                    : m.crawler_tenant_website_inventory_empty()}
+                </p>
+              {:else}
+                <div class="overflow-x-auto">
+                  <Table.Root class="min-w-[72rem]">
+                    <Table.Caption class="sr-only">
+                      {m.crawler_tenant_website_inventory_table_caption()}
+                    </Table.Caption>
+                    <Table.Header>
+                      <Table.Row>
+                        <Table.Head>
+                          {m.crawler_tenant_website_inventory_column_website()}
+                        </Table.Head>
+                        <Table.Head>
+                          {m.crawler_tenant_website_inventory_column_owner()}
+                        </Table.Head>
+                        <Table.Head>
+                          {m.crawler_tenant_website_inventory_column_space()}
+                        </Table.Head>
+                        <Table.Head>
+                          {m.crawler_tenant_website_inventory_column_schedule()}
+                        </Table.Head>
+                        <Table.Head class="text-right">
+                          {m.crawler_tenant_website_inventory_column_last_crawled()}
+                        </Table.Head>
+                        <Table.Head>
+                          {m.crawler_tenant_website_inventory_column_status()}
+                        </Table.Head>
+                        <Table.Head class="text-right">
+                          {m.crawler_tenant_website_inventory_column_size()}
+                        </Table.Head>
+                      </Table.Row>
+                    </Table.Header>
+                    <Table.Body>
+                      {#each visibleTenantWebsiteInventory.items as websiteItem (websiteItem.website_id)}
+                        {@const displayName =
+                          getCrawlerTenantWebsiteInventoryDisplayName(websiteItem)}
+                        <Table.Row
+                          class="hover:bg-muted/40 focus-within:bg-muted/40 cursor-pointer"
+                          onclick={() => openWebsiteDetail(websiteItem)}
+                        >
+                          <Table.Cell class="max-w-64">
+                            <span class="block truncate font-medium" title={displayName}>
+                              {displayName}
+                            </span>
+                            {#if websiteItem.url && websiteItem.url !== displayName}
+                              <span
+                                class="text-muted-foreground block truncate text-xs"
+                                title={websiteItem.url}
+                              >
+                                {websiteItem.url}
+                              </span>
+                            {/if}
+                          </Table.Cell>
+                          <Table.Cell class="text-muted-foreground max-w-56 truncate text-sm">
+                            <span
+                              class="block truncate"
+                              title={getCrawlerTenantWebsiteInventoryOwnerLabel(websiteItem)}
+                            >
+                              {getCrawlerTenantWebsiteInventoryOwnerLabel(websiteItem)}
+                            </span>
+                          </Table.Cell>
+                          <Table.Cell class="text-muted-foreground max-w-56 truncate text-sm">
+                            <span
+                              class="block truncate"
+                              title={getCrawlerTenantWebsiteInventorySpaceLabel(websiteItem)}
+                            >
+                              {getCrawlerTenantWebsiteInventorySpaceLabel(websiteItem)}
+                            </span>
+                          </Table.Cell>
+                          <Table.Cell class="text-sm">
+                            {getCrawlerUpdateIntervalLabel(websiteItem.update_interval)}
+                          </Table.Cell>
+                          <Table.Cell class="text-muted-foreground text-right text-xs tabular-nums">
+                            {formatRelativeOrAbsolute(websiteItem.last_crawled_at)}
+                          </Table.Cell>
+                          <Table.Cell>
+                            <Badge
+                              variant="outline"
+                              class={tenantWebsiteInventoryRowStatusClass(websiteItem)}
+                            >
+                              {getCrawlerTenantWebsiteInventoryStatusLabel(websiteItem)}
+                            </Badge>
+                          </Table.Cell>
+                          <Table.Cell class="text-right text-sm tabular-nums">
+                            {websiteItem.size > 0
+                              ? formatCrawlerScheduledIndexedSize(websiteItem.size)
+                              : "—"}
+                          </Table.Cell>
+                        </Table.Row>
+                      {/each}
+                    </Table.Body>
+                  </Table.Root>
+                </div>
+                {#if visibleTenantWebsiteInventory.total > tenantWebsiteInventoryPageSize}
+                  <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex items-center gap-2">
+                      <label
+                        for="crawler-websites-page-size"
+                        class="text-muted-foreground text-xs tracking-wide uppercase"
+                      >
+                        {m.crawler_active_inventory_page_size_label()}
+                      </label>
+                      <Select.Root
+                        type="single"
+                        value={String(tenantWebsiteInventoryPageSize)}
+                        onValueChange={(value) => {
+                          if (value) changeTenantWebsiteInventoryPageSize(value);
+                        }}
+                        disabled={tenantWebsiteInventoryBusy}
+                      >
+                        <Select.Trigger
+                          id="crawler-websites-page-size"
+                          class="w-20"
+                          aria-label={m.crawler_active_inventory_page_size_label()}
+                        >
+                          {tenantWebsiteInventoryPageSize}
+                        </Select.Trigger>
+                        <Select.Content>
+                          {#each CRAWLER_TENANT_WEBSITE_INVENTORY_PAGE_SIZES as option (option)}
+                            <Select.Item value={String(option)}>{option}</Select.Item>
+                          {/each}
+                        </Select.Content>
+                      </Select.Root>
+                    </div>
+                    <Pagination.Root
+                      count={visibleTenantWebsiteInventory.total}
+                      perPage={tenantWebsiteInventoryPageSize}
+                      page={tenantWebsiteInventoryPage}
+                      onPageChange={(next) => {
+                        if (
+                          next === tenantWebsiteInventoryPage ||
+                          tenantWebsiteInventoryBusy ||
+                          next < 1
+                        )
+                          return;
+                        void refreshTenantWebsiteInventory({ page: next });
                       }}
                       class="m-0 w-auto justify-end"
                     >

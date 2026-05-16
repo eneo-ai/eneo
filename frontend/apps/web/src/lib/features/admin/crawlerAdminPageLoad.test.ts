@@ -2,6 +2,7 @@ import { expect, test, vi } from "vitest";
 import { CRAWLER_ACTIVE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerActiveInventory";
 import { CRAWLER_FAILURE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerFailureInventory";
 import { CRAWLER_RECENT_FAILURES_DEFAULTS } from "$lib/features/admin/crawlerRecentFailures";
+import { CRAWLER_TENANT_WEBSITE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerTenantWebsiteInventory";
 import { CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS } from "$lib/features/admin/crawlerWatchdogInterventions";
 import { CRAWLER_WEBSITE_PROCESSING_DEFAULTS } from "$lib/features/admin/crawlerWebsiteProcessing";
 import { load } from "../../../routes/(app)/admin/crawler/+page";
@@ -15,6 +16,9 @@ test("admin crawler load keeps settings available when diagnostics cannot be loa
   const watchdogInterventions = vi.fn().mockRejectedValue(new Error("watchdog unavailable"));
   const scheduledAggregate = vi.fn().mockRejectedValue(new Error("scheduled unavailable"));
   const websiteProcessingAggregate = vi.fn().mockRejectedValue(new Error("processing unavailable"));
+  const tenantWebsiteInventory = vi
+    .fn()
+    .mockRejectedValue(new Error("tenant inventory unavailable"));
   const depends = vi.fn();
 
   const result = await load({
@@ -28,7 +32,8 @@ test("admin crawler load keeps settings available when diagnostics cannot be loa
           recentFailures,
           watchdogInterventions,
           scheduledAggregate,
-          websiteProcessingAggregate
+          websiteProcessingAggregate,
+          tenantWebsiteInventory
         }
       }
     })
@@ -41,6 +46,7 @@ test("admin crawler load keeps settings available when diagnostics cannot be loa
   expect(depends).toHaveBeenCalledWith("admin:crawler-watchdog-interventions");
   expect(depends).toHaveBeenCalledWith("admin:crawler-scheduled");
   expect(depends).toHaveBeenCalledWith("admin:crawler-website-processing");
+  expect(depends).toHaveBeenCalledWith("admin:crawler-tenant-website-inventory");
   expect(getCrawler).toHaveBeenCalledOnce();
   expect(activeInventory).toHaveBeenCalledWith(CRAWLER_ACTIVE_INVENTORY_DEFAULTS);
   expect(failureInventory).toHaveBeenCalledWith(CRAWLER_FAILURE_INVENTORY_DEFAULTS);
@@ -48,6 +54,7 @@ test("admin crawler load keeps settings available when diagnostics cannot be loa
   expect(watchdogInterventions).toHaveBeenCalledWith(CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS);
   expect(scheduledAggregate).toHaveBeenCalledOnce();
   expect(websiteProcessingAggregate).toHaveBeenCalledWith(CRAWLER_WEBSITE_PROCESSING_DEFAULTS);
+  expect(tenantWebsiteInventory).toHaveBeenCalledWith(CRAWLER_TENANT_WEBSITE_INVENTORY_DEFAULTS);
   expect(result).toEqual({
     crawlerSettings,
     crawlerActiveInventory: null,
@@ -64,7 +71,9 @@ test("admin crawler load keeps settings available when diagnostics cannot be loa
     crawlerScheduledAggregateLoadFailed: true,
     crawlerWebsiteProcessingWindowDays: CRAWLER_WEBSITE_PROCESSING_DEFAULTS.days,
     crawlerWebsiteProcessing: null,
-    crawlerWebsiteProcessingLoadFailed: true
+    crawlerWebsiteProcessingLoadFailed: true,
+    crawlerTenantWebsiteInventory: null,
+    crawlerTenantWebsiteInventoryLoadFailed: true
   });
 });
 
@@ -194,6 +203,32 @@ test("admin crawler load returns crawler diagnostics when both diagnostics calls
     ]
   };
   const websiteProcessingAggregate = vi.fn().mockResolvedValue(crawlerWebsiteProcessing);
+  const crawlerTenantWebsiteInventory = {
+    total: 1,
+    limit: 25,
+    offset: 0,
+    items: [
+      {
+        website_id: "12345678-1234-4234-8234-123456789abc",
+        url: "https://example.com",
+        name: "Example website",
+        created_at: "2026-04-01T08:00:00.000Z",
+        update_interval: "daily",
+        failure_state: null,
+        consecutive_failures: 0,
+        next_retry_at: null,
+        last_crawled_at: "2026-05-12T14:14:50.000Z",
+        size: 1_048_576,
+        owner_user_id: "11111111-1111-4111-8111-111111111111",
+        owner_email: "operator@example.com",
+        space_id: null,
+        space_name: null,
+        collection_id: null,
+        collection_name: null
+      }
+    ]
+  };
+  const tenantWebsiteInventory = vi.fn().mockResolvedValue(crawlerTenantWebsiteInventory);
 
   const result = await load({
     depends: vi.fn(),
@@ -206,7 +241,8 @@ test("admin crawler load returns crawler diagnostics when both diagnostics calls
           recentFailures,
           watchdogInterventions,
           scheduledAggregate,
-          websiteProcessingAggregate
+          websiteProcessingAggregate,
+          tenantWebsiteInventory
         }
       }
     })
@@ -218,6 +254,7 @@ test("admin crawler load returns crawler diagnostics when both diagnostics calls
   expect(watchdogInterventions).toHaveBeenCalledWith(CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS);
   expect(scheduledAggregate).toHaveBeenCalledOnce();
   expect(websiteProcessingAggregate).toHaveBeenCalledWith(CRAWLER_WEBSITE_PROCESSING_DEFAULTS);
+  expect(tenantWebsiteInventory).toHaveBeenCalledWith(CRAWLER_TENANT_WEBSITE_INVENTORY_DEFAULTS);
   expect(result).toEqual({
     crawlerSettings,
     crawlerActiveInventory,
@@ -234,6 +271,8 @@ test("admin crawler load returns crawler diagnostics when both diagnostics calls
     crawlerScheduledAggregateLoadFailed: false,
     crawlerWebsiteProcessingWindowDays: CRAWLER_WEBSITE_PROCESSING_DEFAULTS.days,
     crawlerWebsiteProcessing,
-    crawlerWebsiteProcessingLoadFailed: false
+    crawlerWebsiteProcessingLoadFailed: false,
+    crawlerTenantWebsiteInventory,
+    crawlerTenantWebsiteInventoryLoadFailed: false
   });
 });
