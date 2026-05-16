@@ -481,6 +481,7 @@ class CrawlRunRepository:
         offset: int,
         tenant_id: UUID,
         outcome_filter: CrawlOutcomeCode | None = None,
+        website_id: UUID | None = None,
     ) -> CrawlerRecentFailures:
         return await self._recent_terminal_outcomes(
             since=since,
@@ -491,6 +492,7 @@ class CrawlRunRepository:
             tenant_id=tenant_id,
             outcome_codes=RECENT_FAILURE_OUTCOME_CODES,
             outcome_filter=outcome_filter,
+            website_id=website_id,
         )
 
     async def recent_failures_for_sysadmin(
@@ -525,6 +527,7 @@ class CrawlRunRepository:
         offset: int,
         tenant_id: UUID,
         outcome_filter: CrawlOutcomeCode | None = None,
+        website_id: UUID | None = None,
     ) -> CrawlerRecentFailures:
         return await self._recent_terminal_outcomes(
             since=since,
@@ -535,6 +538,7 @@ class CrawlRunRepository:
             tenant_id=tenant_id,
             outcome_codes=WATCHDOG_INTERVENTION_OUTCOME_CODES,
             outcome_filter=outcome_filter,
+            website_id=website_id,
         )
 
     async def watchdog_interventions_for_sysadmin(
@@ -570,6 +574,7 @@ class CrawlRunRepository:
         tenant_id: UUID | None,
         outcome_codes: frozenset[CrawlOutcomeCode],
         outcome_filter: CrawlOutcomeCode | None = None,
+        website_id: UUID | None = None,
     ) -> CrawlerRecentFailures:
         if outcome_filter is not None and outcome_filter not in outcome_codes:
             raise ValueError(
@@ -589,6 +594,14 @@ class CrawlRunRepository:
         ]
         if tenant_id is not None:
             recent_failure_conditions.append(CrawlRunsTable.tenant_id == tenant_id)
+        if website_id is not None:
+            # Tenant-scoped narrowing to one website. The
+            # `crawl_runs.website_id` column carries the FK; combined with
+            # the existing tenant predicate, an admin can only see their
+            # own tenant's runs for this website even if a UUID guess
+            # collides with another tenant's row (FK is per-tenant via
+            # the cascading delete tree).
+            recent_failure_conditions.append(CrawlRunsTable.website_id == website_id)
 
         base_from = sa.join(CrawlRunsTable, Jobs, CrawlRunsTable.job_id == Jobs.id)
         rows_from = sa.outerjoin(
@@ -683,6 +696,7 @@ class CrawlRunRepository:
         limit: int,
         offset: int,
         tenant_id: UUID | None,
+        website_id: UUID | None = None,
     ) -> CrawlerWebsiteProcessingAggregate:
         base_conditions = [
             CrawlRunsTable.created_at >= since,
@@ -690,6 +704,11 @@ class CrawlRunRepository:
         ]
         if tenant_id is not None:
             base_conditions.append(CrawlRunsTable.tenant_id == tenant_id)
+        if website_id is not None:
+            # Narrows the aggregate to one website. The Webbplatser
+            # detail Dialog uses this to render real per-website
+            # history without re-fetching the full tenant-wide top-N.
+            base_conditions.append(CrawlRunsTable.website_id == website_id)
 
         total_stmt = (
             sa.select(sa.func.count(sa.distinct(CrawlRunsTable.website_id)))
@@ -862,6 +881,7 @@ class CrawlRunRepository:
         limit: int,
         offset: int,
         tenant_id: UUID,
+        website_id: UUID | None = None,
     ) -> CrawlerWebsiteProcessingAggregate:
         return await self.website_processing_aggregate(
             since=since,
@@ -870,6 +890,7 @@ class CrawlRunRepository:
             limit=limit,
             offset=offset,
             tenant_id=tenant_id,
+            website_id=website_id,
         )
 
     async def aggregate_baseline(

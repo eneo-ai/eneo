@@ -239,6 +239,7 @@ async def get_current_tenant_crawler_recent_failures(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     outcome_code: Annotated[CrawlOutcomeCode | None, Query()] = None,
+    website_id: Annotated[UUID | None, Query()] = None,
 ) -> CrawlerRecentFailuresResponse:
     until = datetime.now(timezone.utc)
     since = until - timedelta(days=days)
@@ -266,6 +267,7 @@ async def get_current_tenant_crawler_recent_failures(
                 offset=offset,
                 tenant_id=current_user.tenant_id,
                 outcome_filter=outcome_code,
+                website_id=website_id,
             )
         return CrawlerRecentFailuresResponse.from_domain(failures)
 
@@ -282,6 +284,7 @@ async def get_current_tenant_crawler_watchdog_interventions(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     outcome_code: Annotated[CrawlOutcomeCode | None, Query()] = None,
+    website_id: Annotated[UUID | None, Query()] = None,
 ) -> CrawlerRecentFailuresResponse:
     until = datetime.now(timezone.utc)
     since = until - timedelta(days=days)
@@ -312,6 +315,7 @@ async def get_current_tenant_crawler_watchdog_interventions(
                 offset=offset,
                 tenant_id=current_user.tenant_id,
                 outcome_filter=outcome_code,
+                website_id=website_id,
             )
         return CrawlerRecentFailuresResponse.from_domain(interventions)
 
@@ -347,6 +351,7 @@ async def get_current_tenant_crawler_website_processing_aggregate(
     days: Annotated[int, Query(ge=1, le=30)] = 7,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    website_id: Annotated[UUID | None, Query()] = None,
 ) -> CrawlerTenantWebsiteProcessingAggregateResponse:
     until = datetime.now(timezone.utc)
     since = until - timedelta(days=days)
@@ -363,6 +368,7 @@ async def get_current_tenant_crawler_website_processing_aggregate(
                 limit=limit,
                 offset=offset,
                 tenant_id=current_user.tenant_id,
+                website_id=website_id,
             )
         return CrawlerTenantWebsiteProcessingAggregateResponse.from_domain(aggregate)
 

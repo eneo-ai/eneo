@@ -248,3 +248,88 @@ async def test_admin_crawler_recent_failures_has_no_tenant_id_query_parameter(ap
 
     assert {"days", "limit", "offset"}.issubset(query_parameters)
     assert "tenant_id" not in query_parameters
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_admin_crawler_recent_failures_filters_by_website_id(
+    client,
+    db_session,
+    admin_user,
+    admin_user_api_key,
+):
+    """`?website_id=` narrows the recent-failures feed to one website.
+
+    Seeds two websites in the same tenant, one failing crawl_run each.
+    The filter should return exactly the requested website's run; the
+    other website's run must not bleed in. Combined with the existing
+    tenant predicate, the filter never widens the visibility scope —
+    it only narrows. Uses real `datetime.now(timezone.utc)` so the
+    seeded `finished_at` stays inside the rolling 7-day window the
+    router computes from real time.
+    """
+    now = datetime.now(timezone.utc)
+    async with db_session() as session:
+        embedding_model_id = await _embedding_model_id(session)
+        website_a = await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            url_suffix=f"a-{uuid4()}",
+            name="Website A",
+        )
+        website_b = await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            url_suffix=f"b-{uuid4()}",
+            name="Website B",
+        )
+        job_a = await _create_job(
+            session,
+            user_id=admin_user.id,
+            status=Status.FAILED,
+            created_at=now - timedelta(hours=2),
+            finished_at=now - timedelta(hours=2),
+        )
+        job_b = await _create_job(
+            session,
+            user_id=admin_user.id,
+            status=Status.FAILED,
+            created_at=now - timedelta(hours=1),
+            finished_at=now - timedelta(hours=1),
+        )
+        run_a = await _create_crawl_run(
+            session,
+            tenant_id=admin_user.tenant_id,
+            website_id=website_a.id,
+            job_id=job_a.id,
+            created_at=now - timedelta(hours=2),
+            outcome_code=CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED,
+        )
+        run_b = await _create_crawl_run(
+            session,
+            tenant_id=admin_user.tenant_id,
+            website_id=website_b.id,
+            job_id=job_b.id,
+            created_at=now - timedelta(hours=1),
+            outcome_code=CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED,
+        )
+        website_a_id = website_a.id
+        run_a_id = run_a.id
+        run_b_id = run_b.id
+        await session.commit()
+
+    response = await client.get(
+        "/api/v1/admin/crawler/recent-failures",
+        params={"days": 7, "limit": 25, "website_id": str(website_a_id)},
+        headers={"X-API-Key": admin_user_api_key.key},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    returned = {item["crawl_run_id"] for item in data["items"]}
+    assert str(run_a_id) in returned
+    assert str(run_b_id) not in returned

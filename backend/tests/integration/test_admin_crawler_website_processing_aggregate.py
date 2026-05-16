@@ -261,3 +261,73 @@ async def test_admin_crawler_website_processing_aggregate_rejects_invalid_bounds
 
     assert invalid_days_response.status_code == 422
     assert invalid_limit_response.status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_admin_crawler_website_processing_aggregate_filters_by_website_id(
+    client,
+    db_session,
+    admin_user,
+    admin_user_api_key,
+):
+    """`?website_id=` narrows the per-website 7-day aggregate.
+
+    Seeds two websites in the same tenant, each with one finished
+    crawl run. The filter must return exactly the requested website's
+    bucket; the other website's stats must not bleed in. Combined
+    with the existing tenant predicate the filter never widens the
+    visibility scope. Uses real time so the seeded `created_at`
+    stays inside the rolling 7-day window.
+    """
+    now = datetime.now(timezone.utc)
+
+    async with db_session() as session:
+        embedding_model_id = await _embedding_model_id(session)
+        website_a = await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            name="Website A",
+        )
+        website_b = await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            name="Website B",
+        )
+        await _create_crawl_run(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            website_id=website_a.id,
+            created_at=now - timedelta(hours=4),
+            status=Status.COMPLETE,
+            pages_crawled=10,
+        )
+        await _create_crawl_run(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            website_id=website_b.id,
+            created_at=now - timedelta(hours=3),
+            status=Status.COMPLETE,
+            pages_crawled=5,
+        )
+        website_a_id = website_a.id
+        website_b_id = website_b.id
+        await session.commit()
+
+    response = await client.get(
+        "/api/v1/admin/crawler/website-processing",
+        params={"days": 7, "limit": 50, "website_id": str(website_a_id)},
+        headers={"X-API-Key": admin_user_api_key.key},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    returned = {item["website_id"] for item in data["items"]}
+    assert str(website_a_id) in returned
+    assert str(website_b_id) not in returned
