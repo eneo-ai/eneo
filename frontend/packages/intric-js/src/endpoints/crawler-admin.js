@@ -140,6 +140,21 @@ export function initCrawlerAdmin(client) {
           }
         }
       });
+    },
+
+    /**
+     * Queue an immediate crawl retry for one website in the current tenant.
+     * Re-queues a fresh crawl via the existing CrawlService.crawl path
+     * without touching circuit-breaker counters or the update_interval.
+     * @param {string} websiteId
+     * @returns {Promise<void>}
+     * @throws {IntricError}
+     */
+    retryCrawl: async (websiteId) => {
+      await client.fetch("/api/v1/admin/crawler/websites/{website_id}/retry", {
+        method: "post",
+        params: { path: { website_id: websiteId } }
+      });
     }
   };
 }

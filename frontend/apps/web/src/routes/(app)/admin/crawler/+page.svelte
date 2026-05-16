@@ -156,6 +156,19 @@
   let circuitResetCandidate = $state<CrawlerCircuitBreakerResetCandidate | null>(null);
   let resettingCircuitWebsiteId = $state<string | null>(null);
 
+  // Retry-now confirmation state. Uses the same shadcn AlertDialog
+  // pattern as abort/circuit-reset/interval. `retryCandidate` carries
+  // the minimum the dialog renders + the API needs — id for the call,
+  // name for the prompt copy.
+  type RetryCandidate = {
+    website_id: string;
+    website_name: string | null;
+    website_url: string | null;
+  };
+  let retryDialogOpen = $state(false);
+  let retryCandidate = $state<RetryCandidate | null>(null);
+  let retryingWebsiteId = $state<string | null>(null);
+
   // Typed shape consumed by the interval-edit dialog so the candidate
   // can come from either the failure inventory (current source) OR the
   // active inventory (new in sub-tranche 2b). Active-inventory rows
@@ -454,6 +467,19 @@
     circuitResetDialogOpen = true;
   }
 
+  function openRetryDialog(item: {
+    website_id: string;
+    website_name: string | null;
+    website_url: string | null;
+  }) {
+    retryCandidate = {
+      website_id: item.website_id,
+      website_name: item.website_name,
+      website_url: item.website_url
+    };
+    retryDialogOpen = true;
+  }
+
   function openIntervalDialog(item: CrawlerTenantFailureInventoryItem) {
     intervalCandidate = {
       website_id: item.website_id,
@@ -589,6 +615,34 @@
       toastError(error, copy.failureMessage);
     } finally {
       resettingCircuitWebsiteId = null;
+    }
+  }
+
+  async function handleRetryCrawl() {
+    const candidate = retryCandidate;
+    if (candidate === null) return;
+    retryingWebsiteId = candidate.website_id;
+    const websiteLabel =
+      candidate.website_name?.trim() ||
+      candidate.website_url ||
+      m.crawler_active_inventory_unknown_website({
+        id: candidate.website_id.slice(0, 8)
+      });
+    try {
+      await intric.crawlerAdmin.retryCrawl(candidate.website_id);
+      retryDialogOpen = false;
+      retryCandidate = null;
+      toast.success(m.crawler_retry_success({ website: websiteLabel }));
+      // Refresh the views that surface the newly-queued run.
+      await Promise.all([
+        invalidate("admin:crawler-active-inventory"),
+        invalidate("admin:crawler-failure-inventory"),
+        invalidate("admin:crawler-recent-failures")
+      ]);
+    } catch (error) {
+      toastError(error, m.crawler_retry_failed());
+    } finally {
+      retryingWebsiteId = null;
     }
   }
 
@@ -1096,6 +1150,19 @@
                           </Table.Cell>
                           <Table.Cell class="text-right">
                             <div class="flex flex-wrap items-center justify-end gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                aria-label={m.crawler_retry_button_aria({
+                                  website: getCrawlerFailureInventoryWebsiteLabel(failureState)
+                                })}
+                                disabled={retryingWebsiteId !== null}
+                                onclick={() => openRetryDialog(failureState)}
+                              >
+                                {retryingWebsiteId === failureState.website_id
+                                  ? m.crawler_retry_button_busy()
+                                  : m.crawler_retry_button()}
+                              </Button>
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -1802,6 +1869,32 @@
               : resuming
                 ? m.crawler_update_interval_dialog_confirm_resume()
                 : m.crawler_update_interval_dialog_confirm()}
+        </AlertDialog.Action>
+      </AlertDialog.Footer>
+    {/if}
+  </AlertDialog.Content>
+</AlertDialog.Root>
+
+<AlertDialog.Root bind:open={retryDialogOpen}>
+  <AlertDialog.Content>
+    {#if retryCandidate}
+      {@const retryWebsite =
+        retryCandidate.website_name?.trim() ||
+        retryCandidate.website_url ||
+        m.crawler_active_inventory_unknown_website({
+          id: retryCandidate.website_id.slice(0, 8)
+        })}
+      {@const retrySaving = retryingWebsiteId !== null}
+      <AlertDialog.Header>
+        <AlertDialog.Title>{m.crawler_retry_dialog_title()}</AlertDialog.Title>
+        <AlertDialog.Description>
+          {m.crawler_retry_dialog_description({ website: retryWebsite })}
+        </AlertDialog.Description>
+      </AlertDialog.Header>
+      <AlertDialog.Footer>
+        <AlertDialog.Cancel disabled={retrySaving}>{m.cancel()}</AlertDialog.Cancel>
+        <AlertDialog.Action disabled={retrySaving} onclick={() => void handleRetryCrawl()}>
+          {retrySaving ? m.crawler_retry_button_busy() : m.crawler_retry_dialog_confirm()}
         </AlertDialog.Action>
       </AlertDialog.Footer>
     {/if}
