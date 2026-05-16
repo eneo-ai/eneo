@@ -51,6 +51,12 @@ class CrawlerActiveInventoryItem(BaseModel):
     crawl_run_id: UUID | None
     website_id: UUID | None
     website_name: str | None
+    space_id: UUID | None
+    space_name: str | None
+    collection_id: UUID | None
+    collection_name: str | None
+    user_started_by_id: UUID | None
+    user_started_by_email: str | None
     tenant_id: UUID | None
     tenant_display_name: str | None
     status: Status
@@ -77,6 +83,12 @@ class CrawlerActiveInventoryItem(BaseModel):
             crawl_run_id=item.crawl_run_id,
             website_id=item.website_id,
             website_name=item.website_name,
+            space_id=item.space_id,
+            space_name=item.space_name,
+            collection_id=item.collection_id,
+            collection_name=item.collection_name,
+            user_started_by_id=item.user_started_by_id,
+            user_started_by_email=item.user_started_by_email,
             tenant_id=item.tenant_id,
             tenant_display_name=item.tenant_display_name,
             status=item.status,

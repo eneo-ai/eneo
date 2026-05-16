@@ -8,12 +8,25 @@ from intric.websites.domain.crawl_lifecycle import CrawlLifecycle
 
 @dataclass(frozen=True, slots=True)
 class CrawlerActiveInventoryItem:
-    """Active crawl job row; missing crawl-run fields mean an orphan queued job."""
+    """Active crawl job row; missing crawl-run fields mean an orphan queued job.
+
+    Attribution fields (space/collection/user) come from LEFT JOINs and are
+    nullable to keep visibility intact for legacy websites without a Space
+    or Collection. The user-started-by attribution is the `Jobs.user_id`
+    creator, which can differ from the website creator if a teammate
+    triggered the crawl.
+    """
 
     job_id: UUID
     crawl_run_id: UUID | None
     website_id: UUID | None
     website_name: str | None
+    space_id: UUID | None
+    space_name: str | None
+    collection_id: UUID | None
+    collection_name: str | None
+    user_started_by_id: UUID | None
+    user_started_by_email: str | None
     tenant_id: UUID | None
     tenant_display_name: str | None
     status: Status

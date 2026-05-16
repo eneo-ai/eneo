@@ -6,8 +6,11 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.orm import selectinload
 
+from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.job_table import Jobs
+from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
+from intric.database.tables.users_table import Users
 from intric.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from intric.database.tables.websites_table import Websites
 from intric.jobs.job_models import Task
@@ -270,14 +273,46 @@ class CrawlRunRepository:
             active_conditions.append(CrawlRunsTable.tenant_id == tenant_id)
 
         base_from = sa.outerjoin(Jobs, CrawlRunsTable, Jobs.id == CrawlRunsTable.job_id)
+        # Attribution LEFT JOINs are PK-equality lookups and cannot multiply
+        # rows; they are kept off the count query because the count only
+        # needs Jobs ∪ CrawlRuns and the planner can skip them entirely.
+        # Each join predicate is tenant-qualified so a malformed cross-tenant
+        # FK (admin import, recovery path bug, backfill regression) fails
+        # closed — all six attribution fields render as null together rather
+        # than leaking another tenant's space/collection name or user email.
         rows_from = sa.outerjoin(
             sa.outerjoin(
-                base_from,
-                Websites,
-                CrawlRunsTable.website_id == Websites.id,
+                sa.outerjoin(
+                    sa.outerjoin(
+                        sa.outerjoin(
+                            base_from,
+                            Websites,
+                            sa.and_(
+                                CrawlRunsTable.website_id == Websites.id,
+                                Websites.tenant_id == CrawlRunsTable.tenant_id,
+                            ),
+                        ),
+                        Tenants,
+                        CrawlRunsTable.tenant_id == Tenants.id,
+                    ),
+                    Spaces,
+                    sa.and_(
+                        Websites.space_id == Spaces.id,
+                        Spaces.tenant_id == CrawlRunsTable.tenant_id,
+                    ),
+                ),
+                CollectionsTable,
+                sa.and_(
+                    Websites.group_id == CollectionsTable.id,
+                    CollectionsTable.tenant_id == CrawlRunsTable.tenant_id,
+                ),
             ),
-            Tenants,
-            CrawlRunsTable.tenant_id == Tenants.id,
+            Users,
+            sa.and_(
+                Jobs.user_id == Users.id,
+                Users.tenant_id == CrawlRunsTable.tenant_id,
+                Users.deleted_at.is_(None),
+            ),
         )
         total_stmt = (
             sa.select(sa.func.count(Jobs.id))
@@ -295,6 +330,16 @@ class CrawlRunRepository:
                 CrawlRunsTable.id.label("crawl_run_id"),
                 CrawlRunsTable.website_id.label("website_id"),
                 Websites.name.label("website_name"),
+                # Project the joined-row IDs (not the raw FK columns) so the
+                # six attribution fields share one fail-closed contract:
+                # when a join predicate filters out a cross-tenant or
+                # soft-deleted row the ID renders null alongside the name.
+                Spaces.id.label("space_id"),
+                Spaces.name.label("space_name"),
+                CollectionsTable.id.label("collection_id"),
+                CollectionsTable.name.label("collection_name"),
+                Users.id.label("user_started_by_id"),
+                Users.email.label("user_started_by_email"),
                 CrawlRunsTable.tenant_id.label("tenant_id"),
                 Tenants.display_name.label("tenant_display_name"),
                 CrawlRunsTable.created_at.label("crawl_run_created_at"),
@@ -340,6 +385,12 @@ class CrawlRunRepository:
                     crawl_run_id=row["crawl_run_id"],
                     website_id=row["website_id"],
                     website_name=row["website_name"],
+                    space_id=row["space_id"],
+                    space_name=row["space_name"],
+                    collection_id=row["collection_id"],
+                    collection_name=row["collection_name"],
+                    user_started_by_id=row["user_started_by_id"],
+                    user_started_by_email=row["user_started_by_email"],
                     tenant_id=row["tenant_id"],
                     tenant_display_name=row["tenant_display_name"],
                     status=status,
@@ -476,9 +527,7 @@ class CrawlRunRepository:
             Jobs.finished_at.is_not(None),
             Jobs.finished_at >= since,
             Jobs.finished_at < until,
-            CrawlRunsTable.outcome_code.in_(
-                [code.value for code in applied_outcomes]
-            ),
+            CrawlRunsTable.outcome_code.in_([code.value for code in applied_outcomes]),
         ]
         if tenant_id is not None:
             recent_failure_conditions.append(CrawlRunsTable.tenant_id == tenant_id)

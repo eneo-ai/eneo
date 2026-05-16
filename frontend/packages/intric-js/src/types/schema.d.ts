@@ -9703,6 +9703,18 @@ export interface components {
       website_id: string | null;
       /** Website Name */
       website_name: string | null;
+      /** Space Id */
+      space_id: string | null;
+      /** Space Name */
+      space_name: string | null;
+      /** Collection Id */
+      collection_id: string | null;
+      /** Collection Name */
+      collection_name: string | null;
+      /** User Started By Id */
+      user_started_by_id: string | null;
+      /** User Started By Email */
+      user_started_by_email: string | null;
       /** Tenant Id */
       tenant_id: string | null;
       /** Tenant Display Name */
