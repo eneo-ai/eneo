@@ -38,7 +38,7 @@ from intric.crawler.pipelines import (
 from intric.crawler.spiders.crawl_spider import CrawlSpider
 from intric.crawler.spiders.sitemap_spider import SitemapSpider, SourceRetainedUrl
 from intric.main.config import get_settings
-from intric.main.exceptions import CrawlTimeoutError
+from intric.main.exceptions import CrawlPreempted, CrawlTimeoutError
 from intric.tenants.crawler_settings_helper import (
     TenantCrawlerSettings,
     get_crawler_setting,
@@ -82,6 +82,67 @@ class CrawlShutdownError(Exception):
             f"Crawler failed to shut down within {shutdown_timeout}s for {url} - "
             "output file may be incomplete"
         )
+
+
+class _CrawlStoppable(Protocol):
+    """Subset of `CrawlManager` the heartbeat helper needs to stop the crawl.
+
+    Keeping the protocol narrow lets unit tests substitute a fake without
+    constructing a full Scrapy `CrawlManager`.
+    """
+
+    def stop_crawl(self, *, reason: str) -> None: ...
+
+
+async def _run_heartbeat_until_done(
+    *,
+    manager: _CrawlStoppable,
+    crawl_done: asyncio.Event,
+    heartbeat_callback: Callable[[], Coroutine[Any, Any, None]],
+    heartbeat_interval: float,
+    preempt_shutdown_reason: str,
+) -> CrawlPreempted | None:
+    """Run the heartbeat callback until the crawl signals done, with bounded
+    preemption stop semantics.
+
+    Why this is its own helper rather than two inline closures: the broad
+    `except Exception` swallow that used to live inside
+    `_run_crawl_with_timeout` and `_run_sitemap_crawl_with_timeout` ate the
+    intentional `CrawlPreempted` terminal signal from the worker heartbeat,
+    so admin aborts of IN_PROGRESS crawls kept embedding/persisting until
+    the next interval or the configured `max_length` timeout. Extracting
+    the loop here lets the helper distinguish between transient heartbeat
+    errors (logged, loop continues) and preemption (signal Scrapy to stop
+    immediately and propagate the exception) — and lets unit tests assert
+    the bounded-latency invariant without spinning up real Scrapy.
+
+    On `CrawlPreempted`: calls `manager.stop_crawl(reason=...)` so the
+    Scrapy engine starts shutting down within its own grace period; the
+    blocking crawl thread sees the engine wind down and exits. Returns the
+    preemption exception so the caller can raise it after the blocking
+    thread observes the engine shutdown.
+
+    Transient `Exception`s (DB hiccup, Redis blip) are logged and the loop
+    continues — preserving the prior resilience for non-terminal errors.
+    """
+    while not crawl_done.is_set():
+        try:
+            await heartbeat_callback()
+        except CrawlPreempted as preempt_exc:
+            logger.warning(
+                "Heartbeat detected crawler preemption: signaling stop",
+                extra={"reason": preempt_exc.reason},
+            )
+            manager.stop_crawl(reason=preempt_shutdown_reason)
+            return preempt_exc
+        except Exception as exc:
+            logger.warning(f"Heartbeat error during crawl: {exc}")
+        try:
+            await asyncio.wait_for(crawl_done.wait(), timeout=heartbeat_interval)
+            return None  # Crawl completed naturally
+        except asyncio.TimeoutError:
+            pass  # Interval elapsed, continue heartbeat loop
+    return None
 
 
 class CrawlManager:
@@ -738,40 +799,46 @@ class Crawler:
                         "output file may be incomplete"
                     )
 
-        async def heartbeat_loop() -> None:
-            """Run heartbeat while crawl executes in thread."""
-            while not crawl_done.is_set():
-                try:
-                    if heartbeat_callback:
-                        await heartbeat_callback()
-                except Exception as e:
-                    logger.warning(f"Heartbeat error during crawl: {e}")
-                try:
-                    await asyncio.wait_for(
-                        crawl_done.wait(), timeout=heartbeat_interval
-                    )
-                    break  # Crawl completed
-                except asyncio.TimeoutError:
-                    pass  # Interval elapsed, continue heartbeat loop
-
-        # Run crawl in thread with concurrent heartbeat
+        # Run crawl in thread with concurrent heartbeat. Preemption from the
+        # heartbeat callback (admin abort / heartbeat-failures threshold)
+        # propagates as `CrawlPreempted` — raised after the blocking thread
+        # observes the manager's graceful shutdown — instead of being
+        # swallowed by a broad `except Exception` in the heartbeat loop.
+        preemption: CrawlPreempted | None = None
         if heartbeat_callback:
-            heartbeat_task = asyncio.create_task(heartbeat_loop())
+            heartbeat_task: asyncio.Task[CrawlPreempted | None] = asyncio.create_task(
+                _run_heartbeat_until_done(
+                    manager=manager,
+                    crawl_done=crawl_done,
+                    heartbeat_callback=heartbeat_callback,
+                    heartbeat_interval=heartbeat_interval,
+                    preempt_shutdown_reason="preempted",
+                )
+            )
             try:
                 await asyncio.to_thread(blocking_crawl)
             finally:
                 crawl_done.set()
-                heartbeat_task.cancel()
+                # Cancel the heartbeat task if it is still pending (e.g. a
+                # heartbeat callback is mid-await on a stuck Redis/DB call)
+                # so teardown does not block on a degraded dependency. If the
+                # task has already finished (clean exit, returned None, or
+                # raised), .cancel() is a no-op.
+                if not heartbeat_task.done():
+                    heartbeat_task.cancel()
                 try:
-                    await heartbeat_task
+                    preemption = await heartbeat_task
                 except asyncio.CancelledError:
-                    pass
+                    preemption = None
         else:
             await asyncio.to_thread(blocking_crawl)
 
         # Check shutdown status BEFORE allowing caller to read file
         if shutdown_failed:
             raise CrawlShutdownError(url=url, shutdown_timeout=10.0)
+
+        if preemption is not None:
+            raise preemption
 
         if timed_out:
             raise CrawlTimeoutError(
@@ -853,40 +920,46 @@ class Crawler:
                         "output file may be incomplete"
                     )
 
-        async def heartbeat_loop() -> None:
-            """Run heartbeat while crawl executes in thread."""
-            while not crawl_done.is_set():
-                try:
-                    if heartbeat_callback:
-                        await heartbeat_callback()
-                except Exception as e:
-                    logger.warning(f"Heartbeat error during sitemap crawl: {e}")
-                try:
-                    await asyncio.wait_for(
-                        crawl_done.wait(), timeout=heartbeat_interval
-                    )
-                    break
-                except asyncio.TimeoutError:
-                    pass
-
-        # Run crawl in thread with concurrent heartbeat
+        # Run crawl in thread with concurrent heartbeat. Preemption from the
+        # heartbeat callback (admin abort / heartbeat-failures threshold)
+        # propagates as `CrawlPreempted` — raised after the blocking thread
+        # observes the manager's graceful shutdown — instead of being
+        # swallowed by a broad `except Exception` in the heartbeat loop.
+        preemption: CrawlPreempted | None = None
         if heartbeat_callback:
-            heartbeat_task = asyncio.create_task(heartbeat_loop())
+            heartbeat_task: asyncio.Task[CrawlPreempted | None] = asyncio.create_task(
+                _run_heartbeat_until_done(
+                    manager=manager,
+                    crawl_done=crawl_done,
+                    heartbeat_callback=heartbeat_callback,
+                    heartbeat_interval=heartbeat_interval,
+                    preempt_shutdown_reason="preempted",
+                )
+            )
             try:
                 await asyncio.to_thread(blocking_crawl)
             finally:
                 crawl_done.set()
-                heartbeat_task.cancel()
+                # Cancel the heartbeat task if it is still pending (e.g. a
+                # heartbeat callback is mid-await on a stuck Redis/DB call)
+                # so teardown does not block on a degraded dependency. If the
+                # task has already finished (clean exit, returned None, or
+                # raised), .cancel() is a no-op.
+                if not heartbeat_task.done():
+                    heartbeat_task.cancel()
                 try:
-                    await heartbeat_task
+                    preemption = await heartbeat_task
                 except asyncio.CancelledError:
-                    pass
+                    preemption = None
         else:
             await asyncio.to_thread(blocking_crawl)
 
         # Check shutdown status BEFORE allowing caller to read file
         if shutdown_failed:
             raise CrawlShutdownError(url=sitemap_url, shutdown_timeout=10.0)
+
+        if preemption is not None:
+            raise preemption
 
         if timed_out:
             raise CrawlTimeoutError(

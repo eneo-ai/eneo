@@ -13,6 +13,7 @@ import time
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from intric.main.exceptions import CrawlPreempted
 from intric.worker.crawl.preemption import is_job_preempted
 from intric.worker.redis.client import redis_pipeline, redis_pipeline_items
 from intric.worker.redis.lua_scripts import LuaScripts
@@ -106,6 +107,34 @@ class HeartbeatMonitor:
 
         await self._execute_heartbeat()
         self._last_beat_time = current_time
+
+    async def crawler_tick(self) -> None:
+        """Heartbeat tick exposed to the Scrapy-facing crawler boundary.
+
+        Translates worker-domain terminal signals into the crawler-layer
+        `CrawlPreempted` exception so `crawler.crawler._run_heartbeat_until_done`
+        can react without importing worker code. The crawler treats
+        `CrawlPreempted` as a graceful-stop signal that calls
+        `manager.stop_crawl(reason="preempted")` and propagates after the
+        engine winds down — preserving the safe-cleanup-skip guarantee on
+        admin-initiated aborts.
+
+        Why this lives here rather than at the call site: keeping the
+        translation in one named seam stops `crawler.py` from depending on
+        worker exception types and gives unit tests a stable boundary to
+        assert against.
+        """
+        try:
+            await self.tick()
+        except JobPreemptedError as exc:
+            raise CrawlPreempted(
+                f"job {exc.job_id} preempted (external FAILED state)"
+            ) from exc
+        except HeartbeatFailedError as exc:
+            raise CrawlPreempted(
+                f"heartbeat failures exceeded threshold "
+                f"({exc.consecutive_failures}/{exc.max_failures})"
+            ) from exc
 
     async def _execute_heartbeat(self) -> None:
         """Perform the actual heartbeat operations."""

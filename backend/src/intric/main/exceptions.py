@@ -283,6 +283,28 @@ class CrawlTimeoutError(CrawlerException):
         super().__init__(msg)
 
 
+class CrawlPreempted(CrawlerException):
+    """Raised when an external signal asks the crawler to stop early.
+
+    The canonical source is the worker heartbeat detecting either an
+    admin abort (DB Jobs.status flipped to FAILED) or heartbeat-failure
+    threshold exceeded. The crawler treats it as a terminal stop signal:
+    it signals the Scrapy engine to shut down gracefully via
+    `manager.stop_crawl(reason="preempted")` and propagates the
+    exception so the worker's existing preemption handler can run the
+    safe-cleanup-skip + slot-release reactor path.
+
+    This exception lives in the crawler module's exception surface (not
+    the worker module) so `crawler/crawler.py` can catch it without
+    importing worker code — preserving the layer separation between
+    Scrapy orchestration and ARQ worker plumbing.
+    """
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(f"Crawl preempted: {reason}")
+
+
 class NameCollisionException(Exception):
     pass
 

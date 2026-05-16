@@ -1021,7 +1021,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 sitemap_lastmod_skip_cutoff=sitemap_lastmod_skip_cutoff,
                 sitemap_lastmod_skip_allowed_urls=sitemap_lastmod_skip_allowed_urls,
                 # Pass heartbeat callback for liveness during Scrapy crawl phase
-                heartbeat_callback=heartbeat_monitor.tick,
+                heartbeat_callback=heartbeat_monitor.crawler_tick,
                 heartbeat_interval=float(heartbeat_interval_seconds),
             ) as crawl:
                 timings["crawl_and_parse"] = time.time() - start
