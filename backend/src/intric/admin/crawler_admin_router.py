@@ -39,6 +39,7 @@ from intric.websites.domain.crawl_interval_change import (
 )
 from intric.websites.domain.crawl_lifecycle import CrawlLifecycle
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
+from intric.websites.domain.crawl_retry import CrawlRetryWebsite
 from intric.websites.domain.crawl_run_repo import CrawlRunRepository
 from intric.websites.domain.crawler_failure_inventory import CrawlerFailureState
 from intric.websites.domain.crawler_recent_failures import (
@@ -47,6 +48,7 @@ from intric.websites.domain.crawler_recent_failures import (
 )
 from intric.websites.domain.website import UpdateInterval
 from intric.websites.domain.website_admin_repo import WebsiteAdminRepository
+from intric.websites.domain.website_sparse_repo import WebsiteSparseRepository
 from intric.websites.presentation.crawler_admin_models import (
     CrawlerAbortConflictResponse,
     CrawlerActiveInventoryResponse,
@@ -516,3 +518,62 @@ async def set_current_tenant_crawler_update_interval(
             )
             return Response(status_code=status.HTTP_204_NO_CONTENT)
     assert_never(result)
+
+
+@router.post(
+    "/websites/{website_id}/retry",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_404_NOT_FOUND: {"description": "Website not found"},
+    },
+    summary="Queue an immediate crawl retry for one website in the current tenant",
+)
+async def retry_current_tenant_crawl(
+    website_id: UUID,
+    current_user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    container: AdminContainer,
+) -> Response:
+    """Re-queue an immediate crawl for a tenant-owned website.
+
+    The retry flow is deliberately lighter than abort/circuit-reset: it
+    does not touch circuit-breaker counters, does not change the
+    `update_interval`, and does not write a terminal event on prior
+    crawl runs. It just queues a fresh crawl through the existing
+    `CrawlService.crawl(website)` path (which selects feeder vs direct
+    enqueue based on the runtime setting). The audit row records the
+    new `crawl_run_id` so the operator audit trail can cross-reference
+    the requested retry with the run that actually executed.
+
+    Website lookup goes through `WebsiteSparseRepository.get_for_tenant`
+    so the returned shape is the `WebsiteSparse` domain object — which
+    satisfies the `CrawlableWebsite = Website | WebsiteSparse` Protocol
+    `CrawlService.crawl(...)` accepts without an ORM-row coercion.
+    """
+    async with session.begin():
+        repo = WebsiteSparseRepository(session=session)
+        website = await repo.get_for_tenant(
+            website_id=website_id,
+            tenant_id=current_user.tenant_id,
+        )
+
+    if website is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Website not found",
+        )
+
+    crawl_service = container.crawl_service()
+    crawl_run = await crawl_service.crawl(website)
+
+    display_name = website.name if website.name else website.url
+    website_payload = CrawlRetryWebsite(id=website.id, name=str(display_name))
+    await _log_crawler_admin_website_action(
+        container,
+        current_user=current_user,
+        action=ActionType.WEBSITE_CRAWL_RETRY_REQUESTED,
+        website=website_payload,
+        description="Admin requested immediate crawl retry",
+        extra={"crawl_run_id": str(crawl_run.id)},
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

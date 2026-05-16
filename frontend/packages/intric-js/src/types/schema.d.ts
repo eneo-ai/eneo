@@ -2530,6 +2530,40 @@ export interface paths {
     patch: operations["set_current_tenant_crawler_update_interval_api_v1_admin_crawler_websites__website_id__update_interval_patch"];
     trace?: never;
   };
+  "/api/v1/admin/crawler/websites/{website_id}/retry": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Queue an immediate crawl retry for one website in the current tenant
+     * @description Re-queue an immediate crawl for a tenant-owned website.
+     *
+     *     The retry flow is deliberately lighter than abort/circuit-reset: it
+     *     does not touch circuit-breaker counters, does not change the
+     *     `update_interval`, and does not write a terminal event on prior
+     *     crawl runs. It just queues a fresh crawl through the existing
+     *     `CrawlService.crawl(website)` path (which selects feeder vs direct
+     *     enqueue based on the runtime setting). The audit row records the
+     *     new `crawl_run_id` so the operator audit trail can cross-reference
+     *     the requested retry with the run that actually executed.
+     *
+     *     Website lookup goes through `WebsiteSparseRepository.get_for_tenant`
+     *     so the returned shape is the `WebsiteSparse` domain object — which
+     *     satisfies the `CrawlableWebsite = Website | WebsiteSparse` Protocol
+     *     `CrawlService.crawl(...)` accepts without an ORM-row coercion.
+     */
+    post: operations["retry_current_tenant_crawl_api_v1_admin_crawler_websites__website_id__retry_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/credentials/{provider}": {
     parameters: {
       query?: never;
@@ -7191,6 +7225,7 @@ export interface components {
       | "website_crawl_aborted"
       | "website_crawl_circuit_reset"
       | "website_crawl_interval_changed"
+      | "website_crawl_retry_requested"
       | "website_transferred"
       | "group_chat_created"
       | "collection_created"
@@ -26553,6 +26588,42 @@ export interface operations {
         "application/json": components["schemas"]["UpdateIntervalRequest"];
       };
     };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Website not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  retry_current_tenant_crawl_api_v1_admin_crawler_websites__website_id__retry_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        website_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
     responses: {
       /** @description Successful Response */
       204: {

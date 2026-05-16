@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 import sqlalchemy as sa
 
@@ -102,3 +103,28 @@ class WebsiteSparseRepository:
 
         websites_db = await self.session.scalars(stmt)
         return [WebsiteSparse.to_domain(website_db) for website_db in websites_db]
+
+    async def get_for_tenant(
+        self,
+        *,
+        website_id: UUID,
+        tenant_id: UUID,
+    ) -> WebsiteSparse | None:
+        """Tenant-scoped read of one `WebsiteSparse` by id.
+
+        Used by the retry-now admin endpoint to load the website in a
+        shape `CrawlService.crawl(website)` accepts (which expects the
+        `CrawlableWebsite = Website | WebsiteSparse` domain Protocol).
+        The `tenant_id` filter is required — admin permission is
+        tenant-wide, not space-wide, so the SQL gate is the canonical
+        isolation seam.
+        """
+        stmt = (
+            sa.select(WebsitesTable)
+            .where(WebsitesTable.id == website_id)
+            .where(WebsitesTable.tenant_id == tenant_id)
+        )
+        row = await self.session.scalar(stmt)
+        if row is None:
+            return None
+        return WebsiteSparse.to_domain(row)
