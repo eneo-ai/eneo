@@ -185,6 +185,24 @@ export function initCrawlerAdmin(client) {
         params: { query: params }
       });
       return res;
+    },
+
+    /**
+     * Hard-delete one website from the current tenant. Tenant-scoped on
+     * the backend; 404 for unknown id or cross-tenant; 409 with
+     * `error_code=ACTIVE_JOB_BLOCKING` when a queued/running crawl is
+     * attached (operator must abort it first). On success the cascade
+     * removes crawl_runs, websites_spaces, assistants_websites, and
+     * info_blobs in one transaction.
+     * @param {string} websiteId
+     * @returns {Promise<void>}
+     * @throws {IntricError}
+     */
+    deleteWebsite: async (websiteId) => {
+      await client.fetch("/api/v1/admin/crawler/websites/{website_id}", {
+        method: "delete",
+        params: { path: { website_id: websiteId } }
+      });
     }
   };
 }

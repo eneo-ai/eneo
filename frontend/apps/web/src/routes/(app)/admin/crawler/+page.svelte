@@ -175,6 +175,15 @@
   let abortCandidate = $state<CrawlerActiveInventoryItem | null>(null);
   let abortingJobId = $state<string | null>(null);
 
+  // Delete-website confirmation state. The operator must type the
+  // website's URL into the input to enable the destructive button —
+  // mirrors the GDPR-style confirmation guardrail used in other admin
+  // destructive flows.
+  let deleteDialogOpen = $state(false);
+  let deleteCandidate = $state<CrawlerTenantWebsiteInventoryItem | null>(null);
+  let deleteConfirmInput = $state("");
+  let deletingWebsiteId = $state<string | null>(null);
+
   let circuitResetDialogOpen = $state(false);
   let circuitResetCandidate = $state<CrawlerCircuitBreakerResetCandidate | null>(null);
   let resettingCircuitWebsiteId = $state<string | null>(null);
@@ -1007,6 +1016,56 @@
     const activeItem = findActiveJobForWebsite(item.website_id);
     if (activeItem === null) return;
     openAbortDialog(activeItem);
+  }
+
+  /**
+   * Open the typed-name delete confirmation for a website. The
+   * operator has to retype the website's URL into the input before
+   * the destructive button enables — guardrail mirrors the existing
+   * GDPR-style confirmations in /admin.
+   */
+  function openDeleteDialogForInventoryItem(item: CrawlerTenantWebsiteInventoryItem) {
+    deleteCandidate = item;
+    deleteConfirmInput = "";
+    deleteDialogOpen = true;
+  }
+
+  /**
+   * Execute the tenant-scoped DELETE. On success: invalidate the
+   * inventory dependency so the page refetches the row list, close
+   * both the confirmation AlertDialog and the parent detail Dialog,
+   * toast a success message. On 409 ACTIVE_JOB_BLOCKING the existing
+   * `toastError` reads the `intric_error_code` and surfaces the
+   * abort-first message; we keep the candidate so the operator can
+   * see the row state didn't change.
+   */
+  async function handleDeleteCrawlWebsite() {
+    const candidate = deleteCandidate;
+    if (candidate === null) return;
+    if (deleteConfirmInput.trim() !== candidate.url.trim()) return;
+
+    deletingWebsiteId = candidate.website_id;
+    try {
+      await intric.crawlerAdmin.deleteWebsite(candidate.website_id);
+      toast.success(
+        m.crawler_website_delete_success({
+          website: getCrawlerTenantWebsiteInventoryDisplayName(candidate)
+        })
+      );
+      deleteDialogOpen = false;
+      deleteCandidate = null;
+      deleteConfirmInput = "";
+      detailDialogOpen.set(false);
+      detailCandidate = null;
+      await invalidate("admin:crawler-tenant-website-inventory");
+      await invalidate("admin:crawler-failure-inventory");
+      await invalidate("admin:crawler-active-inventory");
+      await invalidate("admin:crawler-scheduled");
+    } catch (error) {
+      toastError(error, m.crawler_website_delete_failed());
+    } finally {
+      deletingWebsiteId = null;
+    }
   }
 
   function tenantWebsiteInventoryRowStatusClass(item: CrawlerTenantWebsiteInventoryItem) {
@@ -2882,12 +2941,68 @@
                 {m.crawler_website_detail_action_abort()}
               </Button>
             {/if}
+            <!-- Destructive Delete is always visible at the bottom of
+              the actions list. The typed-URL confirmation guardrails
+              the action so muscle-memory clicks can't fire it. -->
+            <Button
+              variant="destructive"
+              size="sm"
+              onclick={() => {
+                if (detailCandidateView) openDeleteDialogForInventoryItem(detailCandidateView);
+              }}
+              disabled={deletingWebsiteId !== null}
+            >
+              {m.crawler_website_detail_action_delete()}
+            </Button>
           </section>
         </div>
       </Dialog.Section>
     {/if}
   </Dialog.Content>
 </Dialog.Root>
+
+<AlertDialog.Root bind:open={deleteDialogOpen}>
+  <AlertDialog.Content>
+    {#if deleteCandidate}
+      {@const deleteDisplay = getCrawlerTenantWebsiteInventoryDisplayName(deleteCandidate)}
+      {@const matches = deleteConfirmInput.trim() === deleteCandidate.url.trim()}
+      <AlertDialog.Header>
+        <AlertDialog.Title>
+          {m.crawler_website_delete_dialog_title()}
+        </AlertDialog.Title>
+        <AlertDialog.Description>
+          {m.crawler_website_delete_dialog_description({ website: deleteDisplay })}
+        </AlertDialog.Description>
+      </AlertDialog.Header>
+      <div class="flex flex-col gap-2 px-6 pb-2">
+        <label for="crawler-delete-confirm" class="text-muted-foreground text-xs">
+          {m.crawler_website_delete_dialog_input_label({ url: deleteCandidate.url })}
+        </label>
+        <Input
+          id="crawler-delete-confirm"
+          bind:value={deleteConfirmInput}
+          placeholder={deleteCandidate.url}
+          autocomplete="off"
+          disabled={deletingWebsiteId !== null}
+        />
+      </div>
+      <AlertDialog.Footer>
+        <AlertDialog.Cancel disabled={deletingWebsiteId !== null}>
+          {m.cancel()}
+        </AlertDialog.Cancel>
+        <AlertDialog.Action
+          variant="destructive"
+          disabled={!matches || deletingWebsiteId !== null}
+          onclick={() => void handleDeleteCrawlWebsite()}
+        >
+          {deletingWebsiteId !== null
+            ? m.crawler_website_delete_dialog_busy()
+            : m.crawler_website_delete_dialog_confirm()}
+        </AlertDialog.Action>
+      </AlertDialog.Footer>
+    {/if}
+  </AlertDialog.Content>
+</AlertDialog.Root>
 
 <AlertDialog.Root bind:open={abortDialogOpen}>
   <AlertDialog.Content>

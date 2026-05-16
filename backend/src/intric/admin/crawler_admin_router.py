@@ -41,6 +41,11 @@ from intric.websites.domain.crawl_lifecycle import CrawlLifecycle
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.websites.domain.crawl_retry import CrawlRetryWebsite
 from intric.websites.domain.crawl_run_repo import CrawlRunRepository
+from intric.websites.domain.crawl_website_delete import (
+    CrawlWebsiteDeleteBlocked,
+    CrawlWebsiteDeleteNotFound,
+    CrawlWebsiteDeleteSucceeded,
+)
 from intric.websites.domain.crawler_failure_inventory import CrawlerFailureState
 from intric.websites.domain.crawler_recent_failures import (
     RECENT_FAILURE_OUTCOME_CODES,
@@ -60,6 +65,7 @@ from intric.websites.presentation.crawler_admin_models import (
     CrawlerTenantFailureInventoryResponse,
     CrawlerTenantWebsiteInventoryResponse,
     CrawlerTenantWebsiteProcessingAggregateResponse,
+    CrawlerWebsiteDeleteConflictResponse,
 )
 
 router = APIRouter(
@@ -630,3 +636,71 @@ async def retry_current_tenant_crawl(
         extra={"crawl_run_id": str(crawl_run.id)},
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
+    "/websites/{website_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_404_NOT_FOUND: {"description": "Website not found"},
+        status.HTTP_409_CONFLICT: {"model": CrawlerWebsiteDeleteConflictResponse},
+    },
+    summary="Delete one website in the current tenant",
+)
+async def delete_current_tenant_crawler_website(
+    website_id: UUID,
+    current_user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    container: AdminContainer,
+) -> Response:
+    """Hard-delete one website inside the current tenant scope.
+
+    Refuses when a queued or running crawl job exists for the website
+    (409 with `error_code=ACTIVE_JOB_BLOCKING`); the admin must abort
+    the active job first via `/jobs/{job_id}/abort`. On success the
+    Websites row + all FK-cascaded children (crawl_runs,
+    assistants_websites, websites_spaces, info_blobs) are removed in
+    one transaction; the audit row records the deleted URL.
+    """
+    async with session.begin():
+        repo = WebsiteAdminRepository(session=session)
+        result = await repo.delete_website_for_tenant(
+            website_id=website_id,
+            tenant_id=current_user.tenant_id,
+        )
+
+    match result:
+        case CrawlWebsiteDeleteNotFound():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Website not found",
+            )
+        case CrawlWebsiteDeleteBlocked(code=code):
+            payload = CrawlerWebsiteDeleteConflictResponse(
+                error_code=code,
+                detail=(
+                    "Website has a queued or running crawl job; abort it before "
+                    "deleting the website."
+                ),
+            )
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content=payload.model_dump(mode="json"),
+            )
+        case CrawlWebsiteDeleteSucceeded(website=deleted):
+            # `_log_crawler_admin_website_action` expects a non-null
+            # `name`; fall back to the URL when the operator never set
+            # one (the existing retry / interval-change paths use the
+            # same fallback). The original URL is also threaded into
+            # `extra` so the audit row records both.
+            display_name = deleted.name if deleted.name else deleted.url
+            await _log_crawler_admin_website_action(
+                container,
+                current_user=current_user,
+                action=ActionType.WEBSITE_DELETED,
+                website=CrawlRetryWebsite(id=deleted.id, name=str(display_name)),
+                description="Admin deleted website",
+                extra={"url": deleted.url},
+            )
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+    assert_never(result)

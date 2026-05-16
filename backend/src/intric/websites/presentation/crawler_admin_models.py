@@ -8,6 +8,7 @@ from intric.websites.domain.crawl_abort import CrawlAbortConflictCode
 from intric.websites.domain.crawl_lifecycle import CrawlLifecycle
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode, FailureReason
 from intric.websites.domain.crawl_run import CrawlType
+from intric.websites.domain.crawl_website_delete import CrawlWebsiteDeleteConflictCode
 from intric.websites.domain.crawler_active_inventory import (
     CrawlerActiveInventory as DomainCrawlerActiveInventory,
 )
@@ -50,6 +51,20 @@ from intric.websites.domain.website import UpdateInterval
 
 class CrawlerAbortConflictResponse(BaseModel):
     error_code: CrawlAbortConflictCode
+    detail: str
+
+
+class CrawlerWebsiteDeleteConflictResponse(BaseModel):
+    """409 payload for the admin website-delete flow.
+
+    The current admin surface only refuses when an active crawl job
+    exists for the website; the operator's recovery is to abort that
+    job first and retry. Future conflict reasons (e.g. legal-hold) can
+    extend `CrawlWebsiteDeleteConflictCode` without re-shaping the
+    wire schema.
+    """
+
+    error_code: CrawlWebsiteDeleteConflictCode
     detail: str
 
 

@@ -2593,6 +2593,33 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/crawler/websites/{website_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Delete one website in the current tenant
+     * @description Hard-delete one website inside the current tenant scope.
+     *
+     *     Refuses when a queued or running crawl job exists for the website
+     *     (409 with `error_code=ACTIVE_JOB_BLOCKING`); the admin must abort
+     *     the active job first via `/jobs/{job_id}/abort`. On success the
+     *     Websites row + all FK-cascaded children (crawl_runs,
+     *     assistants_websites, websites_spaces, info_blobs) are removed in
+     *     one transaction; the audit row records the deleted URL.
+     */
+    delete: operations["delete_current_tenant_crawler_website_api_v1_admin_crawler_websites__website_id__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/credentials/{provider}": {
     parameters: {
       query?: never;
@@ -9749,6 +9776,17 @@ export interface components {
      * @enum {string}
      */
     CrawlType: "crawl" | "sitemap";
+    /**
+     * CrawlWebsiteDeleteConflictCode
+     * @description Reason a delete attempt was refused at the repo layer.
+     *
+     *     `ACTIVE_JOB_BLOCKING` fires when the website has a queued or
+     *     running crawl job; the operator must abort it first via the
+     *     existing abort flow so the worker doesn't keep trying to write
+     *     crawl_runs against a now-deleted website row.
+     * @enum {string}
+     */
+    CrawlWebsiteDeleteConflictCode: "ACTIVE_JOB_BLOCKING";
     /** CrawlerAbortConflictResponse */
     CrawlerAbortConflictResponse: {
       error_code: components["schemas"]["CrawlAbortConflictCode"];
@@ -10541,6 +10579,21 @@ export interface components {
       last_cleanup_at: string | null;
       metrics: components["schemas"]["CrawlerWatchdogMetricsResponse"] | null;
       recent_interventions: components["schemas"]["CrawlerRecentFailuresResponse"];
+    };
+    /**
+     * CrawlerWebsiteDeleteConflictResponse
+     * @description 409 payload for the admin website-delete flow.
+     *
+     *     The current admin surface only refuses when an active crawl job
+     *     exists for the website; the operator's recovery is to abort that
+     *     job first and retry. Future conflict reasons (e.g. legal-hold) can
+     *     extend `CrawlWebsiteDeleteConflictCode` without re-shaping the
+     *     wire schema.
+     */
+    CrawlerWebsiteDeleteConflictResponse: {
+      error_code: components["schemas"]["CrawlWebsiteDeleteConflictCode"];
+      /** Detail */
+      detail: string;
     };
     /** CrawlerWebsiteProcessingAggregateItem */
     CrawlerWebsiteProcessingAggregateItem: {
@@ -26788,6 +26841,51 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_current_tenant_crawler_website_api_v1_admin_crawler_websites__website_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        website_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Website not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerWebsiteDeleteConflictResponse"];
+        };
       };
       /** @description Validation Error */
       422: {

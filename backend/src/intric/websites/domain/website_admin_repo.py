@@ -9,6 +9,8 @@ from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
 from intric.database.tables.websites_table import Websites as WebsitesTable
+from intric.jobs.job_models import Task
+from intric.main.models import Status
 from intric.websites.domain.crawl_circuit_reset import (
     CrawlCircuitResetNotFound,
     CrawlCircuitResetPreviousState,
@@ -24,6 +26,14 @@ from intric.websites.domain.crawl_interval_change import (
     CrawlIntervalChangeWebsite,
 )
 from intric.websites.domain.crawl_run import CrawlType
+from intric.websites.domain.crawl_website_delete import (
+    CrawlWebsiteDeleteBlocked,
+    CrawlWebsiteDeleteConflictCode,
+    CrawlWebsiteDeleteNotFound,
+    CrawlWebsiteDeleteResult,
+    CrawlWebsiteDeleteSucceeded,
+    CrawlWebsiteDeleteWebsite,
+)
 from intric.websites.domain.crawler_failure_inventory import (
     CrawlerFailureInventory,
     CrawlerFailureInventoryItem,
@@ -672,6 +682,95 @@ class WebsiteAdminRepository:
             failure_state_cleared=is_auto_disabled_resume,
             previous_consecutive_failures=previous_consecutive_failures,
         )
+
+    async def delete_website_for_tenant(
+        self,
+        *,
+        website_id: UUID,
+        tenant_id: UUID,
+    ) -> CrawlWebsiteDeleteResult:
+        """Hard-delete one website inside the tenant scope.
+
+        Refuses the delete when the website has a queued or running
+        crawl job — the worker would otherwise keep trying to write
+        crawl_runs against a now-missing parent row. The operator must
+        abort the active job first via the existing /jobs/{id}/abort
+        flow.
+
+        The Websites table cascades to crawl_runs, assistants_websites,
+        websites_spaces, and info_blobs via `ondelete="CASCADE"` FKs,
+        so a single tenant-scoped DELETE removes the indexed knowledge
+        attached to the website. Jobs are not FK-linked and are not
+        touched by this operation; aborted-then-deleted leaves the job
+        history intact in /admin/audit-logs.
+
+        Why not service.delete_website: that path is space-scoped and
+        requires the caller to be a member of the website's space.
+        Admin governance lives one level above space membership — the
+        tenant admin can delete any website in their tenant regardless
+        of which space the website's creator put it in.
+        """
+        # Snapshot the row first so audit metadata has the URL even
+        # after the DELETE cascades complete.
+        snapshot_stmt = (
+            sa.select(
+                WebsitesTable.id,
+                WebsitesTable.url,
+                WebsitesTable.name,
+            )
+            .where(WebsitesTable.id == website_id)
+            .where(WebsitesTable.tenant_id == tenant_id)
+        )
+        row = (await self.session.execute(snapshot_stmt)).first()
+        if row is None:
+            return CrawlWebsiteDeleteNotFound(website_id=website_id)
+
+        website = CrawlWebsiteDeleteWebsite(
+            id=row.id,
+            url=str(row.url),
+            name=row.name,
+        )
+
+        # Refuse if a queued/running crawl job exists for this website.
+        # Jobs are not FK-linked to Websites directly; the link is
+        # through `crawl_runs.website_id` + `crawl_runs.job_id`, so we
+        # JOIN through CrawlRuns to bridge the two. Raw SQL keeps the
+        # bridge explicit since the CrawlRuns table is declared in the
+        # websites_table module (`from intric.database.tables.
+        # websites_table import CrawlRuns`) and adding a SQLAlchemy
+        # JOIN here would force an import that contradicts the existing
+        # admin-repo import boundary.
+        active_count_stmt = sa.text(
+            """
+            SELECT COUNT(*) FROM jobs j
+            JOIN crawl_runs cr ON cr.job_id = j.id
+            WHERE cr.website_id = :website_id
+              AND j.task = :task
+              AND j.status IN (:queued, :in_progress)
+            """
+        )
+        active_count = await self.session.scalar(
+            active_count_stmt,
+            {
+                "website_id": website_id,
+                "task": Task.CRAWL.value,
+                "queued": Status.QUEUED.value,
+                "in_progress": Status.IN_PROGRESS.value,
+            },
+        )
+        if int(active_count or 0) > 0:
+            return CrawlWebsiteDeleteBlocked(
+                website=website,
+                code=CrawlWebsiteDeleteConflictCode.ACTIVE_JOB_BLOCKING,
+            )
+
+        delete_stmt = (
+            sa.delete(WebsitesTable)
+            .where(WebsitesTable.id == website_id)
+            .where(WebsitesTable.tenant_id == tenant_id)
+        )
+        await self.session.execute(delete_stmt)
+        return CrawlWebsiteDeleteSucceeded(website=website)
 
 
 def _classify_circuit_breaker_state(
