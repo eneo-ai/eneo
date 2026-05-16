@@ -237,6 +237,32 @@ class Worker:
         settings = get_settings()
         _log_startup_diagnostics(settings)
 
+        # Wrap arq's SIGINT/SIGTERM handlers with press-count escalation so
+        # the operator can break out of a stuck crawl without waiting the
+        # full `job_completion_wait` window. arq's `handle_sig_wait_for_completion`
+        # runs as press 1; press 2 cancels in-flight tasks; press 3 hard-exits.
+        # Install AFTER arq's __init__ (which registers the original handlers
+        # before main()/on_startup is awaited).
+        try:
+            from intric.worker.signal_escalation import (
+                install_escalating_signal_handlers,
+            )
+
+            install_escalating_signal_handlers(
+                loop=asyncio.get_running_loop(),
+                drain_timeout_seconds=float(self.job_completion_wait),
+            )
+        except Exception as exc:
+            # Signal escalation is a UX enhancement, not a correctness
+            # requirement; if installation fails (e.g. unexpected CPython
+            # asyncio shape) the worker still runs with arq's stock handlers.
+            logger.warning(
+                "Could not install escalating signal handlers: %s. "
+                "Ctrl+C will still drain via arq but escalation will not "
+                "shortcut the drain window.",
+                exc,
+            )
+
         # Start crawl feeder as background task if enabled
         # Why: Meters job enqueue rate to prevent burst overload during scheduled crawls
         # Uses leader election to ensure only ONE feeder runs across all workers
