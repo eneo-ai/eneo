@@ -330,6 +330,37 @@
     }
     lastSeenSsrInventory = current;
   });
+
+  // V2-C: page-1 cache TTL. A long-lived Webbplatser tab can drift
+  // from server truth — the operator might paginate, refine filters,
+  // walk away, then come back to a stale SSR snapshot. While the
+  // Webbplatser tab is the active one and the operator is on the
+  // SSR-equivalent state (page 1, no overrides), poll the
+  // invalidation key every 60s so SvelteKit re-runs the page load
+  // function. The active inventory dependency is invalidated in
+  // lock-step so the abort affordance the detail dialog uses stays
+  // current.
+  //
+  // Skipped when an override is set (the operator paginated or
+  // filtered) so we don't fight the operator's current view. Skipped
+  // when the detail dialog is open so a refresh doesn't clear the
+  // candidate mid-action.
+  //
+  // 60s mirrors the cadence of the active-inventory polling other
+  // admin pages use (audit-logs, api-keys) and stays inside the
+  // 5-minute Anthropic prompt cache window the rest of the system
+  // assumes. Returns a cleanup that clears the timer so a tab
+  // change or unmount stops the loop.
+  $effect(() => {
+    if (currentTab !== "websites") return;
+    if (tenantWebsiteInventoryOverride !== null) return;
+    if (detailCandidate !== null) return;
+    const timer = setInterval(() => {
+      void invalidate("admin:crawler-tenant-website-inventory");
+      void invalidate("admin:crawler-active-inventory");
+    }, 60_000);
+    return () => clearInterval(timer);
+  });
   // Status filter chips, computed via `$derived` so message function
   // resolution happens at the locale boundary that other markup uses.
   // Each option carries an inline dot color for the visual badge — the
