@@ -10119,6 +10119,31 @@ export interface components {
        * @description Maximum pages to crawl before stopping (100 to 100k)
        */
       closespider_itemcount?: number | null;
+      /**
+       * Crawl Max Length
+       * @description Maximum crawl duration in seconds (1 min to 24 hours)
+       */
+      crawl_max_length?: number | null;
+      /**
+       * Crawl Stale Threshold Minutes
+       * @description Minutes without activity before IN_PROGRESS job is considered stale (5 min to 24 hours)
+       */
+      crawl_stale_threshold_minutes?: number | null;
+      /**
+       * Queued Stale Threshold Minutes
+       * @description Minutes before QUEUED job is considered orphaned and allows new crawl (1 to 60 min)
+       */
+      queued_stale_threshold_minutes?: number | null;
+      /**
+       * Crawl Heartbeat Interval Seconds
+       * @description Heartbeat interval to signal job is alive (30s to 1 hour)
+       */
+      crawl_heartbeat_interval_seconds?: number | null;
+      /**
+       * Crawl Job Max Age Seconds
+       * @description Maximum job retry age before permanent failure (5 min to 2 hours)
+       */
+      crawl_job_max_age_seconds?: number | null;
     };
     /** CrawlerSettingsUpdate */
     CrawlerSettingsUpdate: {

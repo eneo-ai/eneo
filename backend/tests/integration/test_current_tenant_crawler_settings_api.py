@@ -70,10 +70,15 @@ class TestCurrentTenantCrawlerSettings:
     async def test_admin_cannot_update_operator_only_crawler_settings(
         self, client, admin_user_api_key
     ):
+        # Capacity governance and global feeder knobs stay sysadmin-only;
+        # crawl_page_batch_size is deferred to the token-efficiency tranche.
         for operator_payload in [
             {"tenant_worker_concurrency_limit": 10},
             {"crawl_page_batch_size": 200},
-            {"crawl_max_length": 7200},
+            {"tenant_worker_semaphore_ttl_seconds": 7200},
+            {"crawl_feeder_enabled": False},
+            {"crawl_feeder_interval_seconds": 30},
+            {"crawl_feeder_batch_size": 50},
         ]:
             response = await client.patch(
                 "/api/v1/settings/crawler",
@@ -82,3 +87,63 @@ class TestCurrentTenantCrawlerSettings:
             )
 
             assert response.status_code == 422
+
+    async def test_admin_can_update_tenant_runtime_knobs(
+        self, client, admin_user_api_key
+    ):
+        """Sub-tranche 3a expansion: tenant-scoped runtime knobs that
+        affect this tenant's crawls only (read at crawl start, no impact
+        on already-running crawls) are now tenant-admin editable.
+
+        Bounds come from the canonical CrawlerSettingSpec so the API
+        boundary and the worker runtime stay in sync.
+        """
+        response = await client.patch(
+            "/api/v1/settings/crawler",
+            json={
+                "crawl_max_length": 7200,
+                "crawl_stale_threshold_minutes": 30,
+                "queued_stale_threshold_minutes": 10,
+                "crawl_heartbeat_interval_seconds": 300,
+                "crawl_job_max_age_seconds": 3600,
+            },
+            headers={"X-API-Key": admin_user_api_key.key},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["settings"]["crawl_max_length"] == 7200
+        assert data["settings"]["crawl_stale_threshold_minutes"] == 30
+        assert data["settings"]["queued_stale_threshold_minutes"] == 10
+        assert data["settings"]["crawl_heartbeat_interval_seconds"] == 300
+        assert data["settings"]["crawl_job_max_age_seconds"] == 3600
+        assert set(data["overrides"]) >= {
+            "crawl_max_length",
+            "crawl_stale_threshold_minutes",
+            "queued_stale_threshold_minutes",
+            "crawl_heartbeat_interval_seconds",
+            "crawl_job_max_age_seconds",
+        }
+        assert set(data["editable_settings"]) >= {
+            "crawl_max_length",
+            "crawl_stale_threshold_minutes",
+            "queued_stale_threshold_minutes",
+            "crawl_heartbeat_interval_seconds",
+            "crawl_job_max_age_seconds",
+        }
+        # Validation bounds surface in the specs map so the admin UI can
+        # render min/max hints without hardcoding them.
+        assert data["specs"]["crawl_max_length"]["min"] == 60
+        assert data["specs"]["crawl_max_length"]["max"] == 86400
+
+    async def test_admin_runtime_knob_update_rejects_out_of_bounds(
+        self, client, admin_user_api_key
+    ):
+        """The Pydantic field bounds reject out-of-range values at the API
+        boundary; the worker never sees an unsafe value."""
+        response = await client.patch(
+            "/api/v1/settings/crawler",
+            json={"crawl_max_length": 30},  # below the 60s minimum
+            headers={"X-API-Key": admin_user_api_key.key},
+        )
+        assert response.status_code == 422

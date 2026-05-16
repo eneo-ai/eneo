@@ -225,6 +225,41 @@ class CrawlerSettingsSelfServiceUpdate(BaseModel):
         le=_SPECS["closespider_itemcount"].max,
         description=_SPECS["closespider_itemcount"].description,
     )
+    # Tenant-scoped runtime knobs exposed in sub-tranche 3a. Values are read
+    # at crawl start, so a tenant-admin change does not affect already-running
+    # crawls; each new crawl picks up the updated value. Bounds match the
+    # canonical CrawlerSettingSpec definitions so the same min/max protects
+    # the API boundary and the worker runtime.
+    crawl_max_length: int | None = Field(
+        None,
+        ge=_SPECS["crawl_max_length"].min,
+        le=_SPECS["crawl_max_length"].max,
+        description=_SPECS["crawl_max_length"].description,
+    )
+    crawl_stale_threshold_minutes: int | None = Field(
+        None,
+        ge=_SPECS["crawl_stale_threshold_minutes"].min,
+        le=_SPECS["crawl_stale_threshold_minutes"].max,
+        description=_SPECS["crawl_stale_threshold_minutes"].description,
+    )
+    queued_stale_threshold_minutes: int | None = Field(
+        None,
+        ge=_SPECS["queued_stale_threshold_minutes"].min,
+        le=_SPECS["queued_stale_threshold_minutes"].max,
+        description=_SPECS["queued_stale_threshold_minutes"].description,
+    )
+    crawl_heartbeat_interval_seconds: int | None = Field(
+        None,
+        ge=_SPECS["crawl_heartbeat_interval_seconds"].min,
+        le=_SPECS["crawl_heartbeat_interval_seconds"].max,
+        description=_SPECS["crawl_heartbeat_interval_seconds"].description,
+    )
+    crawl_job_max_age_seconds: int | None = Field(
+        None,
+        ge=_SPECS["crawl_job_max_age_seconds"].min,
+        le=_SPECS["crawl_job_max_age_seconds"].max,
+        description=_SPECS["crawl_job_max_age_seconds"].description,
+    )
 
 
 class CrawlerSettingSpecPublic(BaseModel):

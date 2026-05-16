@@ -215,6 +215,21 @@ SELF_SERVICE_CRAWLER_SETTING_KEYS: frozenset[CrawlerSetting] = frozenset(
         "dns_timeout",
         "retry_times",
         "closespider_itemcount",
+        # Tenant-scoped runtime knobs added in the admin-settings expansion
+        # sub-tranche 3a — each setting is tenant-scope, bounded by the
+        # min/max in its CrawlerSettingSpec, and the value is read at crawl
+        # start so a change does not affect already-running crawls.
+        # Excluded from this expansion: tenant_worker_concurrency_limit and
+        # tenant_worker_semaphore_ttl_seconds (capacity governance —
+        # sysadmin), crawl_feeder_* (global feeder runtime), and
+        # crawl_page_batch_size (deferred to the token-efficiency tranche
+        # because the right operator-facing surface is a retention/cost
+        # observation rather than a free knob).
+        "crawl_max_length",
+        "crawl_stale_threshold_minutes",
+        "queued_stale_threshold_minutes",
+        "crawl_heartbeat_interval_seconds",
+        "crawl_job_max_age_seconds",
     }
 )
 

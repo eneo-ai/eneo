@@ -182,8 +182,19 @@
     crawler_retry_times_description: () => m.crawler_retry_times_description(),
     crawler_closespider_itemcount_title: () => m.crawler_closespider_itemcount_title(),
     crawler_closespider_itemcount_description: () => m.crawler_closespider_itemcount_description(),
+    crawler_max_length_title: () => m.crawler_max_length_title(),
+    crawler_max_length_description: () => m.crawler_max_length_description(),
+    crawler_stale_threshold_title: () => m.crawler_stale_threshold_title(),
+    crawler_stale_threshold_description: () => m.crawler_stale_threshold_description(),
+    crawler_queued_stale_title: () => m.crawler_queued_stale_title(),
+    crawler_queued_stale_description: () => m.crawler_queued_stale_description(),
+    crawler_heartbeat_interval_title: () => m.crawler_heartbeat_interval_title(),
+    crawler_heartbeat_interval_description: () => m.crawler_heartbeat_interval_description(),
+    crawler_job_max_age_title: () => m.crawler_job_max_age_title(),
+    crawler_job_max_age_description: () => m.crawler_job_max_age_description(),
     crawler_unit_mib: () => m.crawler_unit_mib(),
     crawler_unit_seconds: () => m.crawler_unit_seconds(),
+    crawler_unit_minutes: () => m.crawler_unit_minutes(),
     crawler_unit_attempts: () => m.crawler_unit_attempts(),
     crawler_unit_items: () => m.crawler_unit_items()
   };
@@ -201,7 +212,12 @@
       download_timeout: 0,
       dns_timeout: 0,
       retry_times: 0,
-      closespider_itemcount: 0
+      closespider_itemcount: 0,
+      crawl_max_length: 0,
+      crawl_stale_threshold_minutes: 0,
+      queued_stale_threshold_minutes: 0,
+      crawl_heartbeat_interval_seconds: 0,
+      crawl_job_max_age_seconds: 0
     };
   }
 
@@ -219,7 +235,12 @@
       download_timeout: settings.download_timeout,
       dns_timeout: settings.dns_timeout,
       retry_times: settings.retry_times,
-      closespider_itemcount: settings.closespider_itemcount
+      closespider_itemcount: settings.closespider_itemcount,
+      crawl_max_length: settings.crawl_max_length,
+      crawl_stale_threshold_minutes: settings.crawl_stale_threshold_minutes,
+      queued_stale_threshold_minutes: settings.queued_stale_threshold_minutes,
+      crawl_heartbeat_interval_seconds: settings.crawl_heartbeat_interval_seconds,
+      crawl_job_max_age_seconds: settings.crawl_job_max_age_seconds
     };
   }
 

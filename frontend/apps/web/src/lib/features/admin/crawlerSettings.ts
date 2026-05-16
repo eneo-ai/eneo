@@ -49,6 +49,11 @@ export type CrawlerSettingsUpdate = Partial<
     | "dns_timeout"
     | "retry_times"
     | "closespider_itemcount"
+    | "crawl_max_length"
+    | "crawl_stale_threshold_minutes"
+    | "queued_stale_threshold_minutes"
+    | "crawl_heartbeat_interval_seconds"
+    | "crawl_job_max_age_seconds"
   >
 >;
 
@@ -147,6 +152,55 @@ export const CRAWLER_SETTINGS_NUMBER_FIELDS: CrawlerNumberField[] = [
     unitKey: "crawler_unit_items",
     displayUnit: "native",
     step: 100
+  },
+  // Tenant-scoped runtime knobs exposed in admin-settings sub-tranche 3a.
+  // Values are read at crawl start, so changes do not affect already-running
+  // crawls; each new crawl picks up the updated value. Bounds come from the
+  // backend specs via the response so the API boundary stays authoritative.
+  {
+    kind: "number",
+    key: "crawl_max_length",
+    titleKey: "crawler_max_length_title",
+    descriptionKey: "crawler_max_length_description",
+    unitKey: "crawler_unit_seconds",
+    displayUnit: "native",
+    step: 60
+  },
+  {
+    kind: "number",
+    key: "crawl_stale_threshold_minutes",
+    titleKey: "crawler_stale_threshold_title",
+    descriptionKey: "crawler_stale_threshold_description",
+    unitKey: "crawler_unit_minutes",
+    displayUnit: "native",
+    step: 1
+  },
+  {
+    kind: "number",
+    key: "queued_stale_threshold_minutes",
+    titleKey: "crawler_queued_stale_title",
+    descriptionKey: "crawler_queued_stale_description",
+    unitKey: "crawler_unit_minutes",
+    displayUnit: "native",
+    step: 1
+  },
+  {
+    kind: "number",
+    key: "crawl_heartbeat_interval_seconds",
+    titleKey: "crawler_heartbeat_interval_title",
+    descriptionKey: "crawler_heartbeat_interval_description",
+    unitKey: "crawler_unit_seconds",
+    displayUnit: "native",
+    step: 10
+  },
+  {
+    kind: "number",
+    key: "crawl_job_max_age_seconds",
+    titleKey: "crawler_job_max_age_title",
+    descriptionKey: "crawler_job_max_age_description",
+    unitKey: "crawler_unit_seconds",
+    displayUnit: "native",
+    step: 60
   }
 ];
 

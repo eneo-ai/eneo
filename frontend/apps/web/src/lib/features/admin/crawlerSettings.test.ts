@@ -22,10 +22,15 @@ const specs = {
   download_timeout: { type: "int", min: 10, max: 300, description: "" },
   dns_timeout: { type: "int", min: 5, max: 120, description: "" },
   retry_times: { type: "int", min: 0, max: 10, description: "" },
-  closespider_itemcount: { type: "int", min: 100, max: 100_000, description: "" }
+  closespider_itemcount: { type: "int", min: 100, max: 100_000, description: "" },
+  crawl_max_length: { type: "int", min: 60, max: 86_400, description: "" },
+  crawl_stale_threshold_minutes: { type: "int", min: 5, max: 1440, description: "" },
+  queued_stale_threshold_minutes: { type: "int", min: 1, max: 60, description: "" },
+  crawl_heartbeat_interval_seconds: { type: "int", min: 30, max: 3600, description: "" },
+  crawl_job_max_age_seconds: { type: "int", min: 300, max: 7200, description: "" }
 } as const;
 
-test("crawler settings page exposes only user-safe crawler controls", () => {
+test("crawler settings page exposes user-safe crawler controls and tenant runtime knobs", () => {
   const editableKeys = [
     ...CRAWLER_SETTINGS_BOOLEAN_FIELDS.map((field) => field.key),
     ...CRAWLER_SETTINGS_NUMBER_FIELDS.map((field) => field.key)
@@ -39,11 +44,22 @@ test("crawler settings page exposes only user-safe crawler controls", () => {
     "download_timeout",
     "dns_timeout",
     "retry_times",
-    "closespider_itemcount"
+    "closespider_itemcount",
+    // Sub-tranche 3a runtime knobs (tenant-scoped, bounded by CrawlerSettingSpec)
+    "crawl_max_length",
+    "crawl_stale_threshold_minutes",
+    "queued_stale_threshold_minutes",
+    "crawl_heartbeat_interval_seconds",
+    "crawl_job_max_age_seconds"
   ]);
-  expect(editableKeys).not.toContain("crawl_max_length");
-  expect(editableKeys).not.toContain("crawl_page_batch_size");
+  // Capacity governance + global feeder runtime stay sysadmin-only.
   expect(editableKeys).not.toContain("tenant_worker_concurrency_limit");
+  expect(editableKeys).not.toContain("tenant_worker_semaphore_ttl_seconds");
+  expect(editableKeys).not.toContain("crawl_feeder_enabled");
+  expect(editableKeys).not.toContain("crawl_feeder_interval_seconds");
+  expect(editableKeys).not.toContain("crawl_feeder_batch_size");
+  // crawl_page_batch_size deferred to the token-efficiency tranche; HTTP cache is not a real setting today.
+  expect(editableKeys).not.toContain("crawl_page_batch_size");
   expect(editableKeys).not.toContain("crawl_http_cache_enabled");
 });
 
@@ -70,6 +86,10 @@ test("crawler settings update payload is narrowed to editable keys", () => {
       retry_times: 3,
       closespider_itemcount: 5_000,
       crawl_max_length: 7200,
+      crawl_stale_threshold_minutes: 30,
+      queued_stale_threshold_minutes: 10,
+      crawl_heartbeat_interval_seconds: 300,
+      crawl_job_max_age_seconds: 3600,
       crawl_page_batch_size: 200,
       tenant_worker_concurrency_limit: 10
     },
@@ -84,7 +104,12 @@ test("crawler settings update payload is narrowed to editable keys", () => {
     download_timeout: 120,
     dns_timeout: 45,
     retry_times: 3,
-    closespider_itemcount: 5_000
+    closespider_itemcount: 5_000,
+    crawl_max_length: 7200,
+    crawl_stale_threshold_minutes: 30,
+    queued_stale_threshold_minutes: 10,
+    crawl_heartbeat_interval_seconds: 300,
+    crawl_job_max_age_seconds: 3600
   });
 });
 
