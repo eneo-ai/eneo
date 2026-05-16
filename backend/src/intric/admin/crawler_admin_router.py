@@ -186,6 +186,7 @@ async def get_current_tenant_crawler_active_inventory(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     lifecycle_status: Annotated[CrawlLifecycle | None, Query()] = None,
+    website_id: Annotated[UUID | None, Query()] = None,
 ) -> CrawlerActiveInventoryResponse:
     async with _admin_crawler_query_telemetry(
         "active_inventory", tenant_id=current_user.tenant_id
@@ -197,6 +198,7 @@ async def get_current_tenant_crawler_active_inventory(
                 offset=offset,
                 tenant_id=current_user.tenant_id,
                 lifecycle_filter=lifecycle_status,
+                website_id=website_id,
             )
         return CrawlerActiveInventoryResponse.from_domain(inventory)
 

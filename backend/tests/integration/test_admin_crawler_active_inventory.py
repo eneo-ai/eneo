@@ -381,3 +381,87 @@ async def test_admin_crawler_active_inventory_has_no_tenant_id_query_parameter(a
 
     assert {"limit", "offset"}.issubset(query_parameters)
     assert "tenant_id" not in query_parameters
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_admin_crawler_active_inventory_filters_by_website_id(
+    client,
+    db_session,
+    admin_user,
+    admin_user_api_key,
+):
+    """`?website_id=` narrows the active inventory to one website.
+
+    Backs the Webbplatser detail Dialog's abort-button gating —
+    the drawer must show the abort affordance regardless of which
+    page of active inventory the operator was looking at when they
+    clicked the row. Seeds two queued jobs on two different websites
+    in the same tenant; the filter must return only the requested
+    website's queued job.
+    """
+    now = datetime.now(timezone.utc)
+    async with db_session() as session:
+        embedding_model_id = await _embedding_model_id(session)
+        website_a = await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            url_suffix=f"active-a-{uuid4()}",
+            name="Website A",
+        )
+        website_b = await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            url_suffix=f"active-b-{uuid4()}",
+            name="Website B",
+        )
+        job_a = await _create_job(
+            session,
+            user_id=admin_user.id,
+            status=Status.QUEUED,
+            created_at=now - timedelta(minutes=10),
+        )
+        job_b = await _create_job(
+            session,
+            user_id=admin_user.id,
+            status=Status.QUEUED,
+            created_at=now - timedelta(minutes=5),
+        )
+        await _create_crawl_run(
+            session,
+            tenant_id=admin_user.tenant_id,
+            website_id=website_a.id,
+            job_id=job_a.id,
+            created_at=now - timedelta(minutes=10),
+        )
+        await _create_crawl_run(
+            session,
+            tenant_id=admin_user.tenant_id,
+            website_id=website_b.id,
+            job_id=job_b.id,
+            created_at=now - timedelta(minutes=5),
+        )
+        website_a_id = website_a.id
+        website_b_id = website_b.id
+        job_a_id = job_a.id
+        job_b_id = job_b.id
+        await session.commit()
+
+    response = await client.get(
+        "/api/v1/admin/crawler/active",
+        params={"limit": 25, "website_id": str(website_a_id)},
+        headers={"X-API-Key": admin_user_api_key.key},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    returned_websites = {item["website_id"] for item in data["items"]}
+    returned_jobs = {item["job_id"] for item in data["items"]}
+    assert str(website_a_id) in returned_websites
+    assert str(website_b_id) not in returned_websites
+    assert str(job_a_id) in returned_jobs
+    assert str(job_b_id) not in returned_jobs

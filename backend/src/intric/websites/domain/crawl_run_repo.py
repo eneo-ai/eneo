@@ -242,12 +242,14 @@ class CrawlRunRepository:
         offset: int,
         tenant_id: UUID,
         lifecycle_filter: CrawlLifecycle | None = None,
+        website_id: UUID | None = None,
     ) -> CrawlerActiveInventory:
         return await self._active_inventory(
             limit=limit,
             offset=offset,
             tenant_id=tenant_id,
             lifecycle_filter=lifecycle_filter,
+            website_id=website_id,
         )
 
     async def active_inventory_for_sysadmin(
@@ -257,12 +259,14 @@ class CrawlRunRepository:
         offset: int,
         tenant_id: UUID | None,
         lifecycle_filter: CrawlLifecycle | None = None,
+        website_id: UUID | None = None,
     ) -> CrawlerActiveInventory:
         return await self._active_inventory(
             limit=limit,
             offset=offset,
             tenant_id=tenant_id,
             lifecycle_filter=lifecycle_filter,
+            website_id=website_id,
         )
 
     async def _active_inventory(
@@ -272,6 +276,7 @@ class CrawlRunRepository:
         offset: int,
         tenant_id: UUID | None,
         lifecycle_filter: CrawlLifecycle | None = None,
+        website_id: UUID | None = None,
     ) -> CrawlerActiveInventory:
         active_conditions = [
             Jobs.task == Task.CRAWL.value,
@@ -309,6 +314,13 @@ class CrawlRunRepository:
             # Orphan queued jobs have no crawl run yet; filtering on the
             # outer-joined crawl run tenant column intentionally excludes them.
             active_conditions.append(CrawlRunsTable.tenant_id == tenant_id)
+        if website_id is not None:
+            # Narrows the result to one website. Combined with the
+            # tenant predicate above, this is the authoritative source
+            # for "is there an active job for this website?" — the
+            # frontend uses it to gate the drawer's Abort affordance
+            # without relying on the loaded inventory page.
+            active_conditions.append(CrawlRunsTable.website_id == website_id)
 
         base_from = sa.outerjoin(Jobs, CrawlRunsTable, Jobs.id == CrawlRunsTable.job_id)
         # Attribution LEFT JOINs are PK-equality lookups and cannot multiply
