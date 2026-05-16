@@ -120,3 +120,48 @@ export function getCrawlerTenantWebsiteInventorySpaceLabel(
   if (collection) return collection;
   return m.crawler_active_inventory_source_unknown();
 }
+
+/**
+ * Visibility decision for the detail Dialog's action buttons.
+ *
+ * Pulled out as a pure function so the 6 visibility quadrants
+ * (failure_state ∈ {null, AUTO_DISABLED, BACKED_OFF} × active_job ∈
+ * {null, present}) can be unit-tested without a DOM mount harness.
+ * The Dialog component reads this once per render and conditionally
+ * mounts each Button.
+ *
+ * `delete` is always visible because the operator should be able to
+ * remove a registered website regardless of its current state — the
+ * typed-URL confirmation guards against accidental clicks. `retry`
+ * and `interval` are likewise always visible: an admin may want to
+ * re-queue a healthy site or change the schedule of a paused one.
+ */
+export interface WebsiteDetailDialogActionVisibility {
+  retry: boolean;
+  interval: boolean;
+  reset: boolean;
+  abort: boolean;
+  delete: boolean;
+}
+
+export function getWebsiteDetailDialogActionVisibility(args: {
+  candidate: CrawlerTenantWebsiteInventoryItem | null;
+  hasActiveJob: boolean;
+}): WebsiteDetailDialogActionVisibility {
+  if (args.candidate === null) {
+    return {
+      retry: false,
+      interval: false,
+      reset: false,
+      abort: false,
+      delete: false
+    };
+  }
+  return {
+    retry: true,
+    interval: true,
+    reset: args.candidate.failure_state !== null,
+    abort: args.hasActiveJob,
+    delete: true
+  };
+}

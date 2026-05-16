@@ -16,7 +16,9 @@ export function initCrawlerAdmin(client) {
   return {
     /**
      * Get active and queued crawler runs for the current tenant.
-     * @param {{limit?: number, offset?: number, lifecycle_status?: import('../types/schema').components["schemas"]["CrawlLifecycle"]}} [params]
+     * Pass `website_id` to scope the lookup to one website (used by
+     * the detail Dialog's abort-affordance gating).
+     * @param {{limit?: number, offset?: number, lifecycle_status?: import('../types/schema').components["schemas"]["CrawlLifecycle"], website_id?: string}} [params]
      * @returns {Promise<CrawlerActiveInventoryResponse>}
      * @throws {IntricError}
      */

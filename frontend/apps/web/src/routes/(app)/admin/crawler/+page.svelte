@@ -17,8 +17,7 @@
   import * as Pagination from "$lib/components/ui/pagination/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
-  import { Dialog } from "@intric/ui";
-  import { writable } from "svelte/store";
+  import WebsiteDetailDialog from "./WebsiteDetailDialog.svelte";
   import * as Table from "$lib/components/ui/table/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
   import * as ToggleGroup from "$lib/components/ui/toggle-group/index.js";
@@ -308,40 +307,15 @@
     tenantWebsiteInventoryOverride ?? data.crawlerTenantWebsiteInventory
   );
 
-  // Detail Dialog state for the Webbplatser drawer. The Dialog reads
-  // from `detailCandidateView`, which re-resolves against the visible
-  // inventory each time it changes — so an operator-triggered refresh
-  // (e.g., after a successful retry) propagates `last_crawled_at`
-  // updates into the open drawer without re-opening. Falls back to the
-  // original click snapshot if the row left the visible page (filter
-  // change, pagination). Closing the Dialog clears `detailCandidate` so
-  // a stale row can't survive into the next open.
-  //
-  // The `@intric/ui` Dialog's `Root` exposes the open state as a
-  // `Writable<boolean>` store, so we hold the source-of-truth here as a
-  // writable + subscribe to clear the candidate on close.
-  const detailDialogOpen = writable(false);
+  // Detail Dialog state — the candidate row clicked from the table.
+  // The dialog itself owns its open-state writable + active-job
+  // lookup; the parent (this file) only tracks which row is selected.
+  // The component reacts: candidate non-null = dialog opens; clearing
+  // to null = dialog closes. The dialog's `onClose` callback fires
+  // when the user dismisses via Esc or the close button.
   let detailCandidate = $state<CrawlerTenantWebsiteInventoryItem | null>(null);
-  $effect(() => {
-    const unsubscribe = detailDialogOpen.subscribe((open) => {
-      if (!open) {
-        detailCandidate = null;
-      }
-    });
-    return unsubscribe;
-  });
-  const detailCandidateView = $derived<CrawlerTenantWebsiteInventoryItem | null>(
-    detailCandidate === null
-      ? null
-      : (visibleTenantWebsiteInventory?.items.find(
-          (item) => item.website_id === detailCandidate?.website_id
-        ) ?? detailCandidate)
-  );
-  const detailActiveJob = $derived<CrawlerActiveInventoryItem | null>(
-    detailCandidate === null ? null : findActiveJobForWebsite(detailCandidate.website_id)
-  );
 
-  // Drop any open candidate when the SSR payload reference itself
+  // Drop the candidate when the SSR payload reference itself
   // changes — that happens on a route load (tenant context switch on
   // the same route, or a forced invalidate), not on client-side
   // pagination (which mutates `tenantWebsiteInventoryOverride` instead
@@ -353,7 +327,6 @@
     const current = data.crawlerTenantWebsiteInventory;
     if (lastSeenSsrInventory !== null && current !== lastSeenSsrInventory) {
       detailCandidate = null;
-      detailDialogOpen.set(false);
     }
     lastSeenSsrInventory = current;
   });
@@ -924,38 +897,26 @@
   }
 
   function openWebsiteDetail(item: CrawlerTenantWebsiteInventoryItem) {
-    // Open the detail Dialog. The candidate is set first so the Dialog
-    // has a row to render before its open transition fires; the
-    // close-side `$effect` subscribed to `detailDialogOpen` clears the
-    // candidate when the operator dismisses.
+    // Setting the candidate non-null makes the dialog component flip
+    // its internal open store to true. The dialog calls `onClose`
+    // when the operator dismisses, which the closure below null-out
+    // the candidate.
     detailCandidate = item;
-    detailDialogOpen.set(true);
+  }
+
+  function closeWebsiteDetail() {
+    detailCandidate = null;
   }
 
   /**
-   * Look up the active job (queued or running) for a given website in
-   * the currently loaded active inventory. Returns `null` when no job
-   * matches — the drawer disables the "Avbryt aktiv jobb" action in
-   * that case so the operator can't try to abort something that isn't
-   * running.
+   * Helpers below stage the existing AlertDialog flows from a
+   * `CrawlerTenantWebsiteInventoryItem`. They live in the parent
+   * because the AlertDialog candidates + busy guards live here. The
+   * `WebsiteDetailDialog` child component invokes these via callback
+   * props.
    */
-  function findActiveJobForWebsite(websiteId: string): CrawlerActiveInventoryItem | null {
-    const inventory = visibleActiveInventory;
-    if (!inventory) return null;
-    for (const item of inventory.items) {
-      if (item.website_id === websiteId && canAbortCrawlerActiveInventoryItem(item)) {
-        return item;
-      }
-    }
-    return null;
-  }
 
-  /**
-   * Translate a Webbplatser inventory row into the shape
-   * `openIntervalDialog` already expects. Reuses the existing
-   * interval-edit dialog so this slice ships no new mutation flow.
-   */
-  function openIntervalDialogForInventoryItem(item: CrawlerTenantWebsiteInventoryItem) {
+  function adaptIntervalDialog(item: CrawlerTenantWebsiteInventoryItem) {
     intervalCandidate = {
       website_id: item.website_id,
       website_name: item.name,
@@ -966,34 +927,8 @@
     intervalDialogOpen = true;
   }
 
-  /**
-   * Same pattern for retry — the existing dialog takes a minimal shape;
-   * the inventory row already has every field it needs.
-   */
-  function openRetryDialogForInventoryItem(item: CrawlerTenantWebsiteInventoryItem) {
-    openRetryDialog({
-      website_id: item.website_id,
-      website_name: item.name,
-      website_url: item.url
-    });
-  }
-
-  /**
-   * The circuit-breaker reset dialog expects a row that carries
-   * `state` (the failure state classifier output) and the same
-   * scheduling + counter fields as `CrawlerTenantFailureInventoryItem`.
-   * Only callable when `failure_state !== null`; the drawer hides the
-   * action otherwise.
-   */
-  function openCircuitResetDialogForInventoryItem(item: CrawlerTenantWebsiteInventoryItem) {
+  function adaptCircuitResetDialog(item: CrawlerTenantWebsiteInventoryItem) {
     if (item.failure_state === null) return;
-    // `updated_at` on the failure-inventory candidate type tracks the
-    // most recent failure-state observation; the Webbplatser inventory
-    // row doesn't carry that field directly, so we use
-    // `last_crawled_at` (the closest "most recent worker action"
-    // timestamp) and fall back to `created_at` if the website has
-    // never been crawled. The reset dialog does not currently render
-    // `updated_at`, but the type is satisfied honestly.
     openCircuitResetDialog({
       website_id: item.website_id,
       website_url: item.url,
@@ -1007,23 +942,6 @@
     });
   }
 
-  /**
-   * Open the abort confirmation for the live active-inventory item
-   * matching this website. The drawer guards the call with
-   * `findActiveJobForWebsite` so no-op clicks can't happen.
-   */
-  function openAbortDialogForInventoryItem(item: CrawlerTenantWebsiteInventoryItem) {
-    const activeItem = findActiveJobForWebsite(item.website_id);
-    if (activeItem === null) return;
-    openAbortDialog(activeItem);
-  }
-
-  /**
-   * Open the typed-name delete confirmation for a website. The
-   * operator has to retype the website's URL into the input before
-   * the destructive button enables — guardrail mirrors the existing
-   * GDPR-style confirmations in /admin.
-   */
   function openDeleteDialogForInventoryItem(item: CrawlerTenantWebsiteInventoryItem) {
     deleteCandidate = item;
     deleteConfirmInput = "";
@@ -1055,7 +973,6 @@
       deleteDialogOpen = false;
       deleteCandidate = null;
       deleteConfirmInput = "";
-      detailDialogOpen.set(false);
       detailCandidate = null;
       await invalidate("admin:crawler-tenant-website-inventory");
       await invalidate("admin:crawler-failure-inventory");
@@ -2697,269 +2614,40 @@
 </Page.Root>
 
 <!--
-  Webbplatser detail Dialog. Centered modal at `width="medium"` to
-  match the `@intric/ui` Dialog identity used by WebsiteEditor.svelte
-  (the create-website flow). Reads the candidate row from
-  `detailCandidateView` so any update to the visible inventory
-  propagates without re-opening; the open-state subscription clears
-  `detailCandidate` on close so the next click starts fresh.
+  Detail dialog component (V2-D extraction). State + active-job
+  lookup + 6-quadrant visibility logic live in the child; this file
+  only passes the click candidate + busy guards + AlertDialog
+  callback handles. Setting `candidate = null` closes the dialog;
+  the dialog calls `onClose` when the operator dismisses.
 
-  Sections mirror the create-website form so an admin reviewing a
-  registered site sees the same set of configured options the operator
-  picked at creation. Actions in the footer reuse the existing
-  AlertDialog confirmation flows (abort / retry / interval-edit /
-  circuit-reset) — no new mutation endpoints in this slice.
+  Each callback receives a full `CrawlerTenantWebsiteInventoryItem`
+  (for retry / interval / reset / delete) or an `Active­InventoryItem`
+  (for abort, since the child resolved that via the V2-B server
+  lookup). Adapters here translate the inventory row into each
+  existing AlertDialog's candidate shape — keeps the AlertDialog
+  flows unchanged.
   -->
-<Dialog.Root openController={detailDialogOpen}>
-  <Dialog.Content width="medium">
-    {#if detailCandidateView}
-      {@const display = getCrawlerTenantWebsiteInventoryDisplayName(detailCandidateView)}
-      <Dialog.Title>{display}</Dialog.Title>
-      {#if detailCandidateView.url && detailCandidateView.url !== display}
-        <Dialog.Description>
-          <!-- External URL displayed as plain text plus an "Open"
-            button. Rendering as <a href> trips
-            svelte/no-navigation-without-resolve; this is an external
-            navigation that resolve() doesn't apply to, so we open
-            programmatically. The text stays selectable for copy. -->
-          <span class="text-foreground break-words">{detailCandidateView.url}</span>
-          <button
-            type="button"
-            class="text-accent-default ml-1 text-xs hover:underline"
-            onclick={() => {
-              if (detailCandidateView?.url) {
-                window.open(detailCandidateView.url, "_blank", "noopener,noreferrer");
-              }
-            }}
-          >
-            {m.crawler_website_detail_open_external()}
-          </button>
-        </Dialog.Description>
-      {/if}
-
-      <Dialog.Section>
-        <div class="flex flex-col gap-5 p-4">
-          <!-- Status pill row, prominent so the operator sees state up top. -->
-          <div class="flex flex-wrap items-center gap-2">
-            <Badge
-              variant="outline"
-              class={tenantWebsiteInventoryRowStatusClass(detailCandidateView)}
-            >
-              {getCrawlerTenantWebsiteInventoryStatusLabel(detailCandidateView)}
-            </Badge>
-            {#if detailActiveJob !== null}
-              <Badge
-                variant="outline"
-                class="border-accent-default/35 text-accent-default tabular-nums"
-              >
-                {m.crawler_website_detail_active_job()}
-              </Badge>
-            {/if}
-          </div>
-
-          <!-- Crawl configuration — mirrors the create-website form. -->
-          <section aria-labelledby="crawler-website-detail-config" class="flex flex-col gap-2">
-            <h3
-              id="crawler-website-detail-config"
-              class="text-muted-foreground text-xs tracking-wide uppercase"
-            >
-              {m.crawler_website_detail_section_config()}
-            </h3>
-            <dl class="grid grid-cols-[max-content_1fr] items-baseline gap-x-3 gap-y-1.5">
-              <dt class="text-muted-foreground text-sm">
-                {m.crawler_website_detail_field_crawl_type()}
-              </dt>
-              <dd class="text-sm">
-                {detailCandidateView.crawl_type === "sitemap"
-                  ? m.sitemap_based_crawl()
-                  : m.basic_crawl()}
-              </dd>
-              <dt class="text-muted-foreground text-sm">
-                {m.crawler_website_detail_field_interval()}
-              </dt>
-              <dd class="text-sm">
-                {getCrawlerUpdateIntervalLabel(detailCandidateView.update_interval)}
-              </dd>
-              <dt class="text-muted-foreground text-sm">
-                {m.crawler_website_detail_field_download_files()}
-              </dt>
-              <dd class="text-sm">
-                {detailCandidateView.download_files
-                  ? m.crawler_website_detail_value_enabled()
-                  : m.crawler_website_detail_value_disabled()}
-              </dd>
-              <dt class="text-muted-foreground text-sm">
-                {m.crawler_website_detail_field_http_auth()}
-              </dt>
-              <dd class="text-sm">
-                {#if detailCandidateView.requires_http_auth}
-                  {m.crawler_website_detail_value_enabled()}
-                  {#if detailCandidateView.http_auth_username}
-                    <span class="text-muted-foreground">
-                      ({detailCandidateView.http_auth_username})
-                    </span>
-                  {/if}
-                {:else}
-                  {m.crawler_website_detail_value_disabled()}
-                {/if}
-              </dd>
-            </dl>
-          </section>
-
-          <!-- Ownership — space, collection, owner email, created date. -->
-          <section aria-labelledby="crawler-website-detail-ownership" class="flex flex-col gap-2">
-            <h3
-              id="crawler-website-detail-ownership"
-              class="text-muted-foreground text-xs tracking-wide uppercase"
-            >
-              {m.crawler_website_detail_section_ownership()}
-            </h3>
-            <dl class="grid grid-cols-[max-content_1fr] items-baseline gap-x-3 gap-y-1.5">
-              <dt class="text-muted-foreground text-sm">
-                {m.crawler_website_detail_field_space()}
-              </dt>
-              <dd class="text-sm">
-                {getCrawlerTenantWebsiteInventorySpaceLabel(detailCandidateView)}
-              </dd>
-              <dt class="text-muted-foreground text-sm">
-                {m.crawler_website_detail_field_owner()}
-              </dt>
-              <dd class="text-sm">
-                {getCrawlerTenantWebsiteInventoryOwnerLabel(detailCandidateView)}
-              </dd>
-              <dt class="text-muted-foreground text-sm">
-                {m.crawler_website_detail_field_created()}
-              </dt>
-              <dd class="text-sm tabular-nums">
-                {formatDateTime(detailCandidateView.created_at)}
-              </dd>
-            </dl>
-          </section>
-
-          <!-- Activity — schedule state + storage. -->
-          <section aria-labelledby="crawler-website-detail-activity" class="flex flex-col gap-2">
-            <h3
-              id="crawler-website-detail-activity"
-              class="text-muted-foreground text-xs tracking-wide uppercase"
-            >
-              {m.crawler_website_detail_section_activity()}
-            </h3>
-            <dl class="grid grid-cols-[max-content_1fr] items-baseline gap-x-3 gap-y-1.5">
-              <dt class="text-muted-foreground text-sm">
-                {m.crawler_website_detail_field_last_crawled()}
-              </dt>
-              <dd class="text-sm tabular-nums">
-                {formatRelativeOrAbsolute(detailCandidateView.last_crawled_at)}
-              </dd>
-              <dt class="text-muted-foreground text-sm">
-                {m.crawler_tenant_website_inventory_column_size()}
-              </dt>
-              <dd class="text-sm tabular-nums">
-                {detailCandidateView.size > 0
-                  ? formatCrawlerScheduledIndexedSize(detailCandidateView.size)
-                  : "—"}
-              </dd>
-              {#if detailCandidateView.failure_state !== null && detailCandidateView.consecutive_failures > 0}
-                <dt class="text-muted-foreground text-sm">
-                  {m.crawler_website_detail_field_consecutive_failures()}
-                </dt>
-                <dd class="text-sm tabular-nums">
-                  {detailCandidateView.consecutive_failures}
-                </dd>
-              {/if}
-              {#if detailCandidateView.next_retry_at}
-                <dt class="text-muted-foreground text-sm">
-                  {m.crawler_website_detail_field_next_retry()}
-                </dt>
-                <dd class="text-sm tabular-nums">
-                  {formatDateTime(detailCandidateView.next_retry_at)}
-                </dd>
-              {/if}
-            </dl>
-          </section>
-
-          <!--
-            Action footer. Each button hands off to an existing
-            AlertDialog so the audit + tenancy guarantees from the
-            original surfaces apply unchanged. Reset + Abort are
-            conditional — hiding instead of disabling keeps the
-            affordance honest.
-            -->
-          <section
-            aria-labelledby="crawler-website-detail-actions"
-            class="border-border flex flex-col gap-2 border-t pt-4"
-          >
-            <h3
-              id="crawler-website-detail-actions"
-              class="text-muted-foreground text-xs tracking-wide uppercase"
-            >
-              {m.crawler_website_detail_section_actions()}
-            </h3>
-            <Button
-              variant="outline"
-              size="sm"
-              onclick={() => {
-                if (detailCandidateView) openRetryDialogForInventoryItem(detailCandidateView);
-              }}
-              disabled={retryingWebsiteId !== null}
-            >
-              {m.crawler_website_detail_action_retry()}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onclick={() => {
-                if (detailCandidateView) openIntervalDialogForInventoryItem(detailCandidateView);
-              }}
-              disabled={savingIntervalWebsiteId !== null}
-            >
-              {m.crawler_website_detail_action_interval()}
-            </Button>
-            {#if detailCandidateView.failure_state !== null}
-              <Button
-                variant="outline"
-                size="sm"
-                onclick={() => {
-                  if (detailCandidateView)
-                    openCircuitResetDialogForInventoryItem(detailCandidateView);
-                }}
-                disabled={resettingCircuitWebsiteId !== null}
-              >
-                {m.crawler_website_detail_action_reset()}
-              </Button>
-            {/if}
-            {#if detailActiveJob !== null}
-              <Button
-                variant="destructive"
-                size="sm"
-                onclick={() => {
-                  if (detailCandidateView) openAbortDialogForInventoryItem(detailCandidateView);
-                }}
-                disabled={abortingJobId !== null}
-              >
-                <CircleX data-icon="inline-start" aria-hidden="true" />
-                {m.crawler_website_detail_action_abort()}
-              </Button>
-            {/if}
-            <!-- Destructive Delete is always visible at the bottom of
-              the actions list. The typed-URL confirmation guardrails
-              the action so muscle-memory clicks can't fire it. -->
-            <Button
-              variant="destructive"
-              size="sm"
-              onclick={() => {
-                if (detailCandidateView) openDeleteDialogForInventoryItem(detailCandidateView);
-              }}
-              disabled={deletingWebsiteId !== null}
-            >
-              {m.crawler_website_detail_action_delete()}
-            </Button>
-          </section>
-        </div>
-      </Dialog.Section>
-    {/if}
-  </Dialog.Content>
-</Dialog.Root>
+<WebsiteDetailDialog
+  candidate={detailCandidate}
+  visibleInventory={visibleTenantWebsiteInventory}
+  {intric}
+  {abortingJobId}
+  {retryingWebsiteId}
+  {savingIntervalWebsiteId}
+  {resettingCircuitWebsiteId}
+  {deletingWebsiteId}
+  onClose={closeWebsiteDetail}
+  onOpenAbortDialog={openAbortDialog}
+  onOpenRetryDialog={(item) =>
+    openRetryDialog({
+      website_id: item.website_id,
+      website_name: item.name,
+      website_url: item.url
+    })}
+  onOpenIntervalDialog={adaptIntervalDialog}
+  onOpenCircuitResetDialog={adaptCircuitResetDialog}
+  onOpenDeleteDialog={openDeleteDialogForInventoryItem}
+/>
 
 <AlertDialog.Root bind:open={deleteDialogOpen}>
   <AlertDialog.Content>

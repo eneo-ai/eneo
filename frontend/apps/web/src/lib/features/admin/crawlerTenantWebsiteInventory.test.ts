@@ -14,6 +14,7 @@ import {
   getCrawlerTenantWebsiteInventoryOwnerLabel,
   getCrawlerTenantWebsiteInventorySpaceLabel,
   getCrawlerTenantWebsiteInventoryStatusLabel,
+  getWebsiteDetailDialogActionVisibility,
   isCrawlerTenantWebsiteInventoryPageSize,
   offsetFromCrawlerTenantWebsiteInventoryPage,
   pageFromCrawlerTenantWebsiteInventoryOffset
@@ -181,5 +182,125 @@ test("tenantWebsiteInventory SDK method accepts no params and forwards undefined
   expect(fetch).toHaveBeenCalledWith("/api/v1/admin/crawler/websites", {
     method: "get",
     params: { query: undefined }
+  });
+});
+
+// ----- V2-E: detail dialog visibility quadrants --------------------
+// The Dialog's action footer shows different buttons depending on the
+// candidate's failure_state × whether an active job exists. Codex's
+// C4 review flagged the 6 combinations as untested. Below covers all
+// of them via the pure-function helper the Dialog reads — no DOM
+// mount required so vitest stays in the existing "include
+// src/**/*.{test,spec}.{js,ts}" config.
+
+test("action visibility: null candidate hides every button", () => {
+  expect(getWebsiteDetailDialogActionVisibility({ candidate: null, hasActiveJob: false })).toEqual({
+    retry: false,
+    interval: false,
+    reset: false,
+    abort: false,
+    delete: false
+  });
+  expect(getWebsiteDetailDialogActionVisibility({ candidate: null, hasActiveJob: true })).toEqual({
+    retry: false,
+    interval: false,
+    reset: false,
+    abort: false,
+    delete: false
+  });
+});
+
+test("action visibility: healthy candidate + no active job shows retry/interval/delete", () => {
+  expect(
+    getWebsiteDetailDialogActionVisibility({
+      candidate: { ...baseItem, failure_state: null },
+      hasActiveJob: false
+    })
+  ).toEqual({
+    retry: true,
+    interval: true,
+    reset: false,
+    abort: false,
+    delete: true
+  });
+});
+
+test("action visibility: healthy candidate + active job adds abort", () => {
+  expect(
+    getWebsiteDetailDialogActionVisibility({
+      candidate: { ...baseItem, failure_state: null },
+      hasActiveJob: true
+    })
+  ).toEqual({
+    retry: true,
+    interval: true,
+    reset: false,
+    abort: true,
+    delete: true
+  });
+});
+
+test("action visibility: BACKED_OFF candidate + no active job adds reset", () => {
+  expect(
+    getWebsiteDetailDialogActionVisibility({
+      candidate: { ...baseItem, failure_state: "BACKED_OFF" },
+      hasActiveJob: false
+    })
+  ).toEqual({
+    retry: true,
+    interval: true,
+    reset: true,
+    abort: false,
+    delete: true
+  });
+});
+
+test("action visibility: BACKED_OFF candidate + active job shows all destructive buttons", () => {
+  expect(
+    getWebsiteDetailDialogActionVisibility({
+      candidate: { ...baseItem, failure_state: "BACKED_OFF" },
+      hasActiveJob: true
+    })
+  ).toEqual({
+    retry: true,
+    interval: true,
+    reset: true,
+    abort: true,
+    delete: true
+  });
+});
+
+test("action visibility: AUTO_DISABLED candidate + no active job adds reset", () => {
+  expect(
+    getWebsiteDetailDialogActionVisibility({
+      candidate: { ...baseItem, failure_state: "AUTO_DISABLED" },
+      hasActiveJob: false
+    })
+  ).toEqual({
+    retry: true,
+    interval: true,
+    reset: true,
+    abort: false,
+    delete: true
+  });
+});
+
+test("action visibility: AUTO_DISABLED candidate + active job shows all destructive buttons", () => {
+  // AUTO_DISABLED + active is rare in practice (the auto-disable
+  // gate runs *after* a terminal outcome) but the visibility
+  // function must still resolve correctly — the worker could be
+  // mid-flight against a row that the operator paused on a previous
+  // tab.
+  expect(
+    getWebsiteDetailDialogActionVisibility({
+      candidate: { ...baseItem, failure_state: "AUTO_DISABLED" },
+      hasActiveJob: true
+    })
+  ).toEqual({
+    retry: true,
+    interval: true,
+    reset: true,
+    abort: true,
+    delete: true
   });
 });
