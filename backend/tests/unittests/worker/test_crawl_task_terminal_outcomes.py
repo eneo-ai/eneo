@@ -372,6 +372,14 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
     monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
     monkeypatch.setattr(crawl_tasks, "try_duplicate_skip", try_duplicate_skip_fake)
     monkeypatch.setattr(crawl_tasks, "execute_with_recovery", execute_with_recovery)
+    # The zero-output terminator owns its own execute_with_recovery import
+    # since the extraction tranche; patch it so the test's controlled
+    # recovery seam still flows through both crawl_task and the new owner.
+    from intric.worker.crawl import terminal_zero_output
+
+    monkeypatch.setattr(
+        terminal_zero_output, "execute_with_recovery", execute_with_recovery
+    )
     monkeypatch.setattr(
         crawl_tasks,
         "release_crawl_slot_after_task",
@@ -541,6 +549,14 @@ async def test_sitemap_source_skip_cutoff_is_passed_to_crawler_when_enabled(
     monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
     monkeypatch.setattr(crawl_tasks, "try_duplicate_skip", try_duplicate_skip_fake)
     monkeypatch.setattr(crawl_tasks, "execute_with_recovery", execute_with_recovery)
+    # The zero-output terminator owns its own execute_with_recovery import
+    # since the extraction tranche; patch it so the test's controlled
+    # recovery seam still flows through both crawl_task and the new owner.
+    from intric.worker.crawl import terminal_zero_output
+
+    monkeypatch.setattr(
+        terminal_zero_output, "execute_with_recovery", execute_with_recovery
+    )
     monkeypatch.setattr(
         crawl_tasks,
         "release_crawl_slot_after_task",
@@ -693,6 +709,14 @@ async def test_sitemap_source_skip_kwargs_stay_empty_when_not_allowed(
     monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
     monkeypatch.setattr(crawl_tasks, "try_duplicate_skip", try_duplicate_skip_fake)
     monkeypatch.setattr(crawl_tasks, "execute_with_recovery", execute_with_recovery)
+    # The zero-output terminator owns its own execute_with_recovery import
+    # since the extraction tranche; patch it so the test's controlled
+    # recovery seam still flows through both crawl_task and the new owner.
+    from intric.worker.crawl import terminal_zero_output
+
+    monkeypatch.setattr(
+        terminal_zero_output, "execute_with_recovery", execute_with_recovery
+    )
     monkeypatch.setattr(crawl_tasks, "TaskManager", create_task_manager)
     monkeypatch.setattr(crawl_tasks, "persist_batch", persist_batch)
     monkeypatch.setattr(

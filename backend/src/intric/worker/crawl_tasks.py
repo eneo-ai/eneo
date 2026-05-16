@@ -71,6 +71,10 @@ from intric.worker.crawl.post_terminal_effects import (
     PostTerminalEffectInput,
     apply_post_terminal_effects,
 )
+from intric.worker.crawl.terminal_zero_output import (
+    CommitZeroOutputTerminalInput,
+    commit_zero_output_terminal,
+)
 from intric.worker.crawl_context import EmbeddingModelSpec
 from intric.worker.feeder.election import LeaderElection
 from intric.worker.feeder.queues import (
@@ -1004,94 +1008,29 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
                 if terminal_failure_message is not None:
                     assert crawl_output_outcome_code is not None
-                    terminal_outcome_code = crawl_output_outcome_code
-                    from intric.main.models import Status as JobStatus
-
-                    logger.warning(
-                        "Crawl produced no usable output",
-                        extra={
-                            "job_id": str(job_id),
-                            "website_id": str(params.website_id),
-                            "tenant_id": str(crawl_context.tenant_id),
-                            "crawl_type": params.crawl_type.value,
-                            "outcome_code": terminal_outcome_code.value,
-                            "termination_reason": crawl_termination_reason,
-                            "scrapy_diagnostics": crawl.diagnostics.to_log_fields(),
-                        },
-                    )
-
-                    terminal_finished_at = datetime.now(timezone.utc)
-
-                    async def _do_terminal_zero_output_commit(
-                        sess: AsyncSession,
-                    ) -> None:
-                        await commit_terminal(
-                            sess,
-                            TerminalEvent(
-                                crawl_run_id=params.run_id,
-                                job_id=job_id,
-                                job_status=JobStatus.FAILED,
-                                outcome_code=terminal_outcome_code,
-                                finished_at=terminal_finished_at,
-                                result_location=terminal_failure_message,
-                                crawl_run_update=CrawlRunTerminalUpdate(
-                                    pages_crawled=0,
-                                    files_downloaded=0,
-                                    pages_failed=0,
-                                    files_failed=0,
-                                    pages_source_retained=0,
-                                    pages_hash_retained=0,
-                                    files_hash_retained=0,
-                                    files_too_large_skipped=num_files_too_large_skipped,
-                                    files_too_large_download_limit_bytes=(
-                                        files_too_large_download_limit_bytes
-                                    ),
-                                    files_too_large_samples=files_too_large_samples,
-                                    failure_summary=None,
-                                ),
+                    return await commit_zero_output_terminal(
+                        CommitZeroOutputTerminalInput(
+                            crawl_run_id=params.run_id,
+                            job_id=job_id,
+                            website_id=params.website_id,
+                            website_url=website_url,
+                            website_name=website_name,
+                            website_owner_id=website_owner_id,
+                            tenant_id=crawl_context.tenant_id,
+                            crawl_type=params.crawl_type,
+                            outcome_code=crawl_output_outcome_code,
+                            failure_message=terminal_failure_message,
+                            crawl_termination_reason=crawl_termination_reason,
+                            diagnostics_log_fields=crawl.diagnostics.to_log_fields(),
+                            files_too_large_skipped=num_files_too_large_skipped,
+                            files_too_large_download_limit_bytes=(
+                                files_too_large_download_limit_bytes
                             ),
-                        )
-
-                    await execute_with_recovery(
-                        operation_name="terminal_zero_output_commit",
-                        operation=_do_terminal_zero_output_commit,
+                            files_too_large_samples=files_too_large_samples,
+                        ),
+                        audit_service=container.audit_service(),
+                        task_manager=task_manager,
                     )
-
-                    await apply_post_terminal_effects(
-                        PostTerminalEffectInput(
-                            recovery_executor=execute_with_recovery,
-                            audit_service=container.audit_service(),
-                            audit_payload=CrawlAuditPayload(
-                                tenant_id=crawl_context.tenant_id,
-                                website_id=params.website_id,
-                                website_url=website_url,
-                                website_name=website_name,
-                                website_owner_id=website_owner_id,
-                                pages_crawled=0,
-                                pages_failed=0,
-                                pages_hash_retained=0,
-                                pages_source_retained=0,
-                                files_downloaded=0,
-                                files_failed=0,
-                                files_hash_retained=0,
-                                files_too_large_skipped=num_files_too_large_skipped,
-                                blobs_deleted=0,
-                                successful=False,
-                                outcome_code=terminal_outcome_code,
-                            ),
-                            circuit_breaker_operation_name=(
-                                "terminal_circuit_breaker_update"
-                            ),
-                        )
-                    )
-
-                    # Terminal zero-output crawls advance no website crawl
-                    # timestamps, so scheduled retries are not hidden.
-                    task_manager.acknowledge_terminal_commit(successful=False)
-                    return {
-                        "status": "failed",
-                        "outcome_code": terminal_outcome_code.value,
-                    }
 
                 if crawl_is_partial:
                     logger.warning(
