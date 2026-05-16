@@ -26270,6 +26270,7 @@ export interface operations {
       query?: {
         limit?: number;
         offset?: number;
+        state?: components["schemas"]["CrawlerFailureState"] | null;
       };
       header?: never;
       path?: never;
@@ -26303,6 +26304,7 @@ export interface operations {
         days?: number;
         limit?: number;
         offset?: number;
+        outcome_code?: components["schemas"]["CrawlOutcomeCode"] | null;
       };
       header?: never;
       path?: never;
@@ -26336,6 +26338,7 @@ export interface operations {
         days?: number;
         limit?: number;
         offset?: number;
+        outcome_code?: components["schemas"]["CrawlOutcomeCode"] | null;
       };
       header?: never;
       path?: never;

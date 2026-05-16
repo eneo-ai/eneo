@@ -47,11 +47,13 @@ class WebsiteAdminRepository:
         limit: int,
         offset: int,
         tenant_id: UUID | None,
+        state_filter: CrawlerFailureState | None = None,
     ) -> CrawlerFailureInventory:
         return await self._crawler_failure_inventory(
             limit=limit,
             offset=offset,
             tenant_id=tenant_id,
+            state_filter=state_filter,
         )
 
     async def crawler_failure_inventory_for_tenant(
@@ -60,11 +62,13 @@ class WebsiteAdminRepository:
         limit: int,
         offset: int,
         tenant_id: UUID,
+        state_filter: CrawlerFailureState | None = None,
     ) -> CrawlerFailureInventory:
         return await self._crawler_failure_inventory(
             limit=limit,
             offset=offset,
             tenant_id=tenant_id,
+            state_filter=state_filter,
         )
 
     async def _crawler_failure_inventory(
@@ -73,6 +77,7 @@ class WebsiteAdminRepository:
         limit: int,
         offset: int,
         tenant_id: UUID | None,
+        state_filter: CrawlerFailureState | None = None,
     ) -> CrawlerFailureInventory:
         auto_disabled_condition = sa.and_(
             WebsitesTable.update_interval == UpdateInterval.NEVER,
@@ -88,7 +93,16 @@ class WebsiteAdminRepository:
             (auto_disabled_condition, CrawlerFailureState.AUTO_DISABLED.value),
             (backed_off_condition, CrawlerFailureState.BACKED_OFF.value),
         ).label("failure_state")
-        failure_conditions = [sa.or_(auto_disabled_condition, backed_off_condition)]
+
+        # The state_filter narrows the failure-state predicate to exactly one
+        # bucket; without it the inventory returns both buckets so the admin
+        # page's existing default view continues to work unchanged.
+        if state_filter is CrawlerFailureState.AUTO_DISABLED:
+            failure_conditions = [auto_disabled_condition]
+        elif state_filter is CrawlerFailureState.BACKED_OFF:
+            failure_conditions = [backed_off_condition]
+        else:
+            failure_conditions = [sa.or_(auto_disabled_condition, backed_off_condition)]
         if tenant_id is not None:
             failure_conditions.append(WebsitesTable.tenant_id == tenant_id)
 

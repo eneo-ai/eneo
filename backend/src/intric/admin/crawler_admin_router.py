@@ -33,7 +33,13 @@ from intric.websites.domain.crawl_interval_change import (
     CrawlIntervalChangeNotFound,
     CrawlIntervalChangeUnchanged,
 )
+from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.websites.domain.crawl_run_repo import CrawlRunRepository
+from intric.websites.domain.crawler_failure_inventory import CrawlerFailureState
+from intric.websites.domain.crawler_recent_failures import (
+    RECENT_FAILURE_OUTCOME_CODES,
+    WATCHDOG_INTERVENTION_OUTCOME_CODES,
+)
 from intric.websites.domain.website import UpdateInterval
 from intric.websites.domain.website_admin_repo import WebsiteAdminRepository
 from intric.websites.presentation.crawler_admin_models import (
@@ -92,6 +98,7 @@ async def get_current_tenant_crawler_failure_inventory(
     session: Annotated[AsyncSession, Depends(get_session)],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    state: Annotated[CrawlerFailureState | None, Query()] = None,
 ) -> CrawlerTenantFailureInventoryResponse:
     async with session.begin():
         repo = WebsiteAdminRepository(session=session)
@@ -99,6 +106,7 @@ async def get_current_tenant_crawler_failure_inventory(
             limit=limit,
             offset=offset,
             tenant_id=current_user.tenant_id,
+            state_filter=state,
         )
     return CrawlerTenantFailureInventoryResponse.from_domain(inventory)
 
@@ -114,9 +122,20 @@ async def get_current_tenant_crawler_recent_failures(
     days: Annotated[int, Query(ge=1, le=30)] = 7,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    outcome_code: Annotated[CrawlOutcomeCode | None, Query()] = None,
 ) -> CrawlerRecentFailuresResponse:
     until = datetime.now(timezone.utc)
     since = until - timedelta(days=days)
+
+    if outcome_code is not None and outcome_code not in RECENT_FAILURE_OUTCOME_CODES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"outcome_code {outcome_code.value!r} is not in the recent-failures "
+                f"allowlist; use the watchdog-interventions endpoint for "
+                f"watchdog-only outcomes or omit the filter."
+            ),
+        )
 
     async with session.begin():
         repo = CrawlRunRepository(session=session)
@@ -127,6 +146,7 @@ async def get_current_tenant_crawler_recent_failures(
             limit=limit,
             offset=offset,
             tenant_id=current_user.tenant_id,
+            outcome_filter=outcome_code,
         )
     return CrawlerRecentFailuresResponse.from_domain(failures)
 
@@ -142,9 +162,20 @@ async def get_current_tenant_crawler_watchdog_interventions(
     days: Annotated[int, Query(ge=1, le=30)] = 7,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    outcome_code: Annotated[CrawlOutcomeCode | None, Query()] = None,
 ) -> CrawlerRecentFailuresResponse:
     until = datetime.now(timezone.utc)
     since = until - timedelta(days=days)
+
+    if outcome_code is not None and outcome_code not in WATCHDOG_INTERVENTION_OUTCOME_CODES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"outcome_code {outcome_code.value!r} is not a watchdog-driven "
+                f"terminal outcome; use the recent-failures endpoint for "
+                f"non-watchdog outcomes or omit the filter."
+            ),
+        )
 
     async with session.begin():
         repo = CrawlRunRepository(session=session)
@@ -155,6 +186,7 @@ async def get_current_tenant_crawler_watchdog_interventions(
             limit=limit,
             offset=offset,
             tenant_id=current_user.tenant_id,
+            outcome_filter=outcome_code,
         )
     return CrawlerRecentFailuresResponse.from_domain(interventions)
 

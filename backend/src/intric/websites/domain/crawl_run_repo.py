@@ -371,6 +371,7 @@ class CrawlRunRepository:
         limit: int,
         offset: int,
         tenant_id: UUID,
+        outcome_filter: CrawlOutcomeCode | None = None,
     ) -> CrawlerRecentFailures:
         return await self._recent_terminal_outcomes(
             since=since,
@@ -380,6 +381,7 @@ class CrawlRunRepository:
             offset=offset,
             tenant_id=tenant_id,
             outcome_codes=RECENT_FAILURE_OUTCOME_CODES,
+            outcome_filter=outcome_filter,
         )
 
     async def recent_failures_for_sysadmin(
@@ -391,6 +393,7 @@ class CrawlRunRepository:
         limit: int,
         offset: int,
         tenant_id: UUID | None,
+        outcome_filter: CrawlOutcomeCode | None = None,
     ) -> CrawlerRecentFailures:
         return await self._recent_terminal_outcomes(
             since=since,
@@ -400,6 +403,7 @@ class CrawlRunRepository:
             offset=offset,
             tenant_id=tenant_id,
             outcome_codes=RECENT_FAILURE_OUTCOME_CODES,
+            outcome_filter=outcome_filter,
         )
 
     async def watchdog_interventions_for_tenant(
@@ -411,6 +415,7 @@ class CrawlRunRepository:
         limit: int,
         offset: int,
         tenant_id: UUID,
+        outcome_filter: CrawlOutcomeCode | None = None,
     ) -> CrawlerRecentFailures:
         return await self._recent_terminal_outcomes(
             since=since,
@@ -420,6 +425,7 @@ class CrawlRunRepository:
             offset=offset,
             tenant_id=tenant_id,
             outcome_codes=WATCHDOG_INTERVENTION_OUTCOME_CODES,
+            outcome_filter=outcome_filter,
         )
 
     async def watchdog_interventions_for_sysadmin(
@@ -431,6 +437,7 @@ class CrawlRunRepository:
         limit: int,
         offset: int,
         tenant_id: UUID | None,
+        outcome_filter: CrawlOutcomeCode | None = None,
     ) -> CrawlerRecentFailures:
         return await self._recent_terminal_outcomes(
             since=since,
@@ -440,6 +447,7 @@ class CrawlRunRepository:
             offset=offset,
             tenant_id=tenant_id,
             outcome_codes=WATCHDOG_INTERVENTION_OUTCOME_CODES,
+            outcome_filter=outcome_filter,
         )
 
     async def _recent_terminal_outcomes(
@@ -452,12 +460,25 @@ class CrawlRunRepository:
         offset: int,
         tenant_id: UUID | None,
         outcome_codes: frozenset[CrawlOutcomeCode],
+        outcome_filter: CrawlOutcomeCode | None = None,
     ) -> CrawlerRecentFailures:
+        if outcome_filter is not None and outcome_filter not in outcome_codes:
+            raise ValueError(
+                f"outcome_filter {outcome_filter.value!r} is not within the "
+                f"allowed outcome set for this query — caller must validate "
+                f"against the endpoint's allowlist before reaching the repo."
+            )
+        applied_outcomes: frozenset[CrawlOutcomeCode] = (
+            frozenset({outcome_filter}) if outcome_filter is not None else outcome_codes
+        )
+
         recent_failure_conditions = [
             Jobs.finished_at.is_not(None),
             Jobs.finished_at >= since,
             Jobs.finished_at < until,
-            CrawlRunsTable.outcome_code.in_([code.value for code in outcome_codes]),
+            CrawlRunsTable.outcome_code.in_(
+                [code.value for code in applied_outcomes]
+            ),
         ]
         if tenant_id is not None:
             recent_failure_conditions.append(CrawlRunsTable.tenant_id == tenant_id)
