@@ -1,4 +1,6 @@
+import time
 from collections.abc import Mapping
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Protocol, assert_never
 from uuid import UUID
@@ -16,6 +18,7 @@ from intric.authentication.auth_dependencies import (
 )
 from intric.database.database import AsyncSession, get_session
 from intric.main.container.container import Container
+from intric.main.logging import get_logger
 from intric.roles.permissions import Permission
 from intric.server.dependencies.container import get_container
 from intric.users.user import UserInDB
@@ -60,6 +63,43 @@ router = APIRouter(
 )
 
 AdminContainer = Annotated[Container, Depends(get_container(with_user=True))]
+
+logger = get_logger(__name__)
+
+
+@asynccontextmanager
+async def _admin_crawler_query_telemetry(endpoint: str, *, tenant_id: UUID):
+    """Bounded latency + payload-size telemetry for tenant-admin crawler queries.
+
+    Emits one structured log entry per request with `metric_name` +
+    `metric_value` keys so existing log-as-metric ingestion picks it up
+    without a new dependency. Closes plan Step 0's open item "Record
+    current admin crawler page query latency and payload size" — the
+    baseline metric stream lets operators compare before/after admin
+    page slices.
+
+    Keeps the payload-size measurement off the hot path: the response
+    serialization happens after the context manager exits, so the
+    timing window covers only the repo + presentation work the
+    endpoint actually owns. Size logging is left to the FastAPI
+    middleware layer (already records content-length) so this telemetry
+    stays narrow and the per-endpoint hot path doesn't pay for a
+    second JSON encode.
+    """
+    started = time.perf_counter()
+    try:
+        yield
+    finally:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "Admin crawler query completed",
+            extra={
+                "metric_name": "crawler.admin.query_duration_ms",
+                "metric_value": elapsed_ms,
+                "endpoint": endpoint,
+                "tenant_id": str(tenant_id),
+            },
+        )
 
 
 def _abort_conflict_detail(code: CrawlAbortConflictCode) -> str:
@@ -135,15 +175,18 @@ async def get_current_tenant_crawler_active_inventory(
     offset: Annotated[int, Query(ge=0)] = 0,
     lifecycle_status: Annotated[CrawlLifecycle | None, Query()] = None,
 ) -> CrawlerActiveInventoryResponse:
-    async with session.begin():
-        repo = CrawlRunRepository(session=session)
-        inventory = await repo.active_inventory_for_tenant(
-            limit=limit,
-            offset=offset,
-            tenant_id=current_user.tenant_id,
-            lifecycle_filter=lifecycle_status,
-        )
-    return CrawlerActiveInventoryResponse.from_domain(inventory)
+    async with _admin_crawler_query_telemetry(
+        "active_inventory", tenant_id=current_user.tenant_id
+    ):
+        async with session.begin():
+            repo = CrawlRunRepository(session=session)
+            inventory = await repo.active_inventory_for_tenant(
+                limit=limit,
+                offset=offset,
+                tenant_id=current_user.tenant_id,
+                lifecycle_filter=lifecycle_status,
+            )
+        return CrawlerActiveInventoryResponse.from_domain(inventory)
 
 
 @router.get(
@@ -158,15 +201,18 @@ async def get_current_tenant_crawler_failure_inventory(
     offset: Annotated[int, Query(ge=0)] = 0,
     state: Annotated[CrawlerFailureState | None, Query()] = None,
 ) -> CrawlerTenantFailureInventoryResponse:
-    async with session.begin():
-        repo = WebsiteAdminRepository(session=session)
-        inventory = await repo.crawler_failure_inventory_for_tenant(
-            limit=limit,
-            offset=offset,
-            tenant_id=current_user.tenant_id,
-            state_filter=state,
-        )
-    return CrawlerTenantFailureInventoryResponse.from_domain(inventory)
+    async with _admin_crawler_query_telemetry(
+        "failure_inventory", tenant_id=current_user.tenant_id
+    ):
+        async with session.begin():
+            repo = WebsiteAdminRepository(session=session)
+            inventory = await repo.crawler_failure_inventory_for_tenant(
+                limit=limit,
+                offset=offset,
+                tenant_id=current_user.tenant_id,
+                state_filter=state,
+            )
+        return CrawlerTenantFailureInventoryResponse.from_domain(inventory)
 
 
 @router.get(
@@ -195,18 +241,21 @@ async def get_current_tenant_crawler_recent_failures(
             ),
         )
 
-    async with session.begin():
-        repo = CrawlRunRepository(session=session)
-        failures = await repo.recent_failures_for_tenant(
-            since=since,
-            until=until,
-            days=days,
-            limit=limit,
-            offset=offset,
-            tenant_id=current_user.tenant_id,
-            outcome_filter=outcome_code,
-        )
-    return CrawlerRecentFailuresResponse.from_domain(failures)
+    async with _admin_crawler_query_telemetry(
+        "recent_failures", tenant_id=current_user.tenant_id
+    ):
+        async with session.begin():
+            repo = CrawlRunRepository(session=session)
+            failures = await repo.recent_failures_for_tenant(
+                since=since,
+                until=until,
+                days=days,
+                limit=limit,
+                offset=offset,
+                tenant_id=current_user.tenant_id,
+                outcome_filter=outcome_code,
+            )
+        return CrawlerRecentFailuresResponse.from_domain(failures)
 
 
 @router.get(
@@ -238,18 +287,21 @@ async def get_current_tenant_crawler_watchdog_interventions(
             ),
         )
 
-    async with session.begin():
-        repo = CrawlRunRepository(session=session)
-        interventions = await repo.watchdog_interventions_for_tenant(
-            since=since,
-            until=until,
-            days=days,
-            limit=limit,
-            offset=offset,
-            tenant_id=current_user.tenant_id,
-            outcome_filter=outcome_code,
-        )
-    return CrawlerRecentFailuresResponse.from_domain(interventions)
+    async with _admin_crawler_query_telemetry(
+        "watchdog_interventions", tenant_id=current_user.tenant_id
+    ):
+        async with session.begin():
+            repo = CrawlRunRepository(session=session)
+            interventions = await repo.watchdog_interventions_for_tenant(
+                since=since,
+                until=until,
+                days=days,
+                limit=limit,
+                offset=offset,
+                tenant_id=current_user.tenant_id,
+                outcome_filter=outcome_code,
+            )
+        return CrawlerRecentFailuresResponse.from_domain(interventions)
 
 
 @router.get(
@@ -261,12 +313,15 @@ async def get_current_tenant_crawler_scheduled_aggregate(
     current_user: Annotated[UserInDB, Depends(get_current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CrawlerScheduledAggregateResponse:
-    async with session.begin():
-        repo = WebsiteAdminRepository(session=session)
-        aggregate = await repo.scheduled_aggregate_for_tenant(
-            tenant_id=current_user.tenant_id,
-        )
-    return CrawlerScheduledAggregateResponse.from_domain(aggregate)
+    async with _admin_crawler_query_telemetry(
+        "scheduled_aggregate", tenant_id=current_user.tenant_id
+    ):
+        async with session.begin():
+            repo = WebsiteAdminRepository(session=session)
+            aggregate = await repo.scheduled_aggregate_for_tenant(
+                tenant_id=current_user.tenant_id,
+            )
+        return CrawlerScheduledAggregateResponse.from_domain(aggregate)
 
 
 @router.get(
@@ -284,17 +339,20 @@ async def get_current_tenant_crawler_website_processing_aggregate(
     until = datetime.now(timezone.utc)
     since = until - timedelta(days=days)
 
-    async with session.begin():
-        repo = CrawlRunRepository(session=session)
-        aggregate = await repo.website_processing_aggregate_for_tenant(
-            since=since,
-            until=until,
-            days=days,
-            limit=limit,
-            offset=offset,
-            tenant_id=current_user.tenant_id,
-        )
-    return CrawlerTenantWebsiteProcessingAggregateResponse.from_domain(aggregate)
+    async with _admin_crawler_query_telemetry(
+        "website_processing_aggregate", tenant_id=current_user.tenant_id
+    ):
+        async with session.begin():
+            repo = CrawlRunRepository(session=session)
+            aggregate = await repo.website_processing_aggregate_for_tenant(
+                since=since,
+                until=until,
+                days=days,
+                limit=limit,
+                offset=offset,
+                tenant_id=current_user.tenant_id,
+            )
+        return CrawlerTenantWebsiteProcessingAggregateResponse.from_domain(aggregate)
 
 
 @router.post(
