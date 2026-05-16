@@ -1,5 +1,6 @@
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, assert_never
+from typing import Annotated, Protocol, assert_never
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -66,6 +67,60 @@ def _abort_conflict_detail(code: CrawlAbortConflictCode) -> str:
         case CrawlAbortConflictCode.CRAWL_NOT_ABORTABLE:
             return "The crawl job is no longer abortable."
     assert_never(code)
+
+
+class _AuditableWebsite(Protocol):
+    """Shape required by `_log_crawler_admin_website_action`.
+
+    Every domain result type that the crawler admin endpoints emit audit
+    events for (CrawlAbortWebsite, CrawlCircuitResetWebsite,
+    CrawlIntervalChangeWebsite, ...) exposes an `id` UUID and a `name`
+    string. Using a Protocol with read-only attributes keeps the helper
+    signature narrow without importing every concrete result type for
+    typing purposes, and stays compatible with the `frozen=True`
+    dataclasses that back these domain results.
+    """
+
+    @property
+    def id(self) -> UUID: ...
+
+    @property
+    def name(self) -> str: ...
+
+
+async def _log_crawler_admin_website_action(
+    container: "Container",
+    *,
+    current_user: UserInDB,
+    action: ActionType,
+    website: _AuditableWebsite,
+    description: str,
+    extra: Mapping[str, object],
+) -> None:
+    """Single canonical audit emission for crawler admin website mutations.
+
+    All four write endpoints in this router (abort, circuit-breaker reset,
+    interval change, and any future per-website action) share the same
+    audit shape: tenant-scoped, actor=current_user, entity=WEBSITE,
+    metadata=AuditMetadata.standard with extra payload. Centralising the
+    emission here keeps the audit shape and tenant scoping identical
+    across endpoints and makes the audit-coverage gate visible at the
+    router boundary instead of buried inside three near-identical blocks.
+    """
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        actor_id=current_user.id,
+        action=action,
+        entity_type=EntityType.WEBSITE,
+        entity_id=website.id,
+        description=description,
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=website,
+            extra=extra,
+        ),
+    )
 
 
 @router.get(
@@ -278,22 +333,16 @@ async def abort_current_tenant_queued_crawl(
                 content=conflict.model_dump(mode="json"),
             )
         case CrawlAbortSucceeded(website=website, already_terminal=already):
-            audit_service = container.audit_service()
-            await audit_service.log_async(
-                tenant_id=current_user.tenant_id,
-                actor_id=current_user.id,
+            await _log_crawler_admin_website_action(
+                container,
+                current_user=current_user,
                 action=ActionType.WEBSITE_CRAWL_ABORTED,
-                entity_type=EntityType.WEBSITE,
-                entity_id=website.id,
+                website=website,
                 description="Admin aborted queued website crawl",
-                metadata=AuditMetadata.standard(
-                    actor=current_user,
-                    target=website,
-                    extra={
-                        "job_id": str(job_id),
-                        "already_terminal": already,
-                    },
-                ),
+                extra={
+                    "job_id": str(job_id),
+                    "already_terminal": already,
+                },
             )
             return Response(status_code=status.HTTP_204_NO_CONTENT)
     assert_never(result)
@@ -332,27 +381,21 @@ async def reset_current_tenant_crawler_circuit_breaker(
             previous_consecutive_failures=prev_failures,
             previous_next_retry_at=prev_next_retry,
         ):
-            audit_service = container.audit_service()
-            await audit_service.log_async(
-                tenant_id=current_user.tenant_id,
-                actor_id=current_user.id,
+            await _log_crawler_admin_website_action(
+                container,
+                current_user=current_user,
                 action=ActionType.WEBSITE_CRAWL_CIRCUIT_RESET,
-                entity_type=EntityType.WEBSITE,
-                entity_id=website.id,
+                website=website,
                 description="Admin reset crawler circuit breaker",
-                metadata=AuditMetadata.standard(
-                    actor=current_user,
-                    target=website,
-                    extra={
-                        "prev_state": previous_state.value,
-                        "prev_consecutive_failures": prev_failures,
-                        "prev_next_retry_at": (
-                            prev_next_retry.isoformat()
-                            if prev_next_retry is not None
-                            else None
-                        ),
-                    },
-                ),
+                extra={
+                    "prev_state": previous_state.value,
+                    "prev_consecutive_failures": prev_failures,
+                    "prev_next_retry_at": (
+                        prev_next_retry.isoformat()
+                        if prev_next_retry is not None
+                        else None
+                    ),
+                },
             )
             return Response(status_code=status.HTTP_204_NO_CONTENT)
     assert_never(result)
@@ -400,24 +443,18 @@ async def set_current_tenant_crawler_update_interval(
             failure_state_cleared=failure_state_cleared,
             previous_consecutive_failures=previous_consecutive_failures,
         ):
-            audit_service = container.audit_service()
-            await audit_service.log_async(
-                tenant_id=current_user.tenant_id,
-                actor_id=current_user.id,
+            await _log_crawler_admin_website_action(
+                container,
+                current_user=current_user,
                 action=ActionType.WEBSITE_CRAWL_INTERVAL_CHANGED,
-                entity_type=EntityType.WEBSITE,
-                entity_id=website.id,
+                website=website,
                 description="Admin changed crawler update interval",
-                metadata=AuditMetadata.standard(
-                    actor=current_user,
-                    target=website,
-                    extra={
-                        "previous_update_interval": previous_interval.value,
-                        "new_update_interval": new_interval.value,
-                        "failure_state_cleared": failure_state_cleared,
-                        "previous_consecutive_failures": previous_consecutive_failures,
-                    },
-                ),
+                extra={
+                    "previous_update_interval": previous_interval.value,
+                    "new_update_interval": new_interval.value,
+                    "failure_state_cleared": failure_state_cleared,
+                    "previous_consecutive_failures": previous_consecutive_failures,
+                },
             )
             return Response(status_code=status.HTTP_204_NO_CONTENT)
     assert_never(result)
