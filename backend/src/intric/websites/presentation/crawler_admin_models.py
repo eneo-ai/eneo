@@ -57,6 +57,7 @@ class CrawlerActiveInventoryItem(BaseModel):
     collection_name: str | None
     user_started_by_id: UUID | None
     user_started_by_email: str | None
+    update_interval: UpdateInterval | None
     tenant_id: UUID | None
     tenant_display_name: str | None
     status: Status
@@ -89,6 +90,7 @@ class CrawlerActiveInventoryItem(BaseModel):
             collection_name=item.collection_name,
             user_started_by_id=item.user_started_by_id,
             user_started_by_email=item.user_started_by_email,
+            update_interval=item.update_interval,
             tenant_id=item.tenant_id,
             tenant_display_name=item.tenant_display_name,
             status=item.status,

@@ -33,6 +33,7 @@ const baseActiveItem: CrawlerActiveInventoryItem = {
   collection_name: null,
   user_started_by_id: null,
   user_started_by_email: null,
+  update_interval: null,
   tenant_id: "33333333-3333-4333-8333-333333333333",
   tenant_display_name: "Tenant",
   status: "in progress",

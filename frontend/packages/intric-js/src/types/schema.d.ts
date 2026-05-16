@@ -9751,6 +9751,7 @@ export interface components {
       user_started_by_id: string | null;
       /** User Started By Email */
       user_started_by_email: string | null;
+      update_interval: components["schemas"]["UpdateInterval"] | null;
       /** Tenant Id */
       tenant_id: string | null;
       /** Tenant Display Name */

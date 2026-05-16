@@ -4,6 +4,7 @@ from uuid import UUID
 
 from intric.main.models import Status
 from intric.websites.domain.crawl_lifecycle import CrawlLifecycle
+from intric.websites.domain.website import UpdateInterval
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +28,12 @@ class CrawlerActiveInventoryItem:
     collection_name: str | None
     user_started_by_id: UUID | None
     user_started_by_email: str | None
+    # Update interval for the website, nullable for orphan jobs where
+    # the Websites LEFT JOIN returned no row. Surfaces so the admin
+    # active-inventory row can offer a per-row "Change schedule"
+    # affordance without round-tripping through the failure-inventory
+    # tab.
+    update_interval: UpdateInterval | None
     tenant_id: UUID | None
     tenant_display_name: str | None
     status: Status

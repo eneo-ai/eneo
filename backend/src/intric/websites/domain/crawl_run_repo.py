@@ -62,6 +62,7 @@ from intric.websites.domain.crawler_website_processing_aggregate import (
     retention_rate,
     schedule_frequency_weight,
 )
+from intric.websites.domain.website import UpdateInterval
 
 if TYPE_CHECKING:
     from intric.database.database import AsyncSession
@@ -385,6 +386,13 @@ class CrawlRunRepository:
                 CollectionsTable.name.label("collection_name"),
                 Users.id.label("user_started_by_id"),
                 Users.email.label("user_started_by_email"),
+                # `update_interval` is read from the already-joined
+                # Websites row (the same LEFT JOIN that resolves the
+                # website_name + space attribution) so the admin
+                # active-inventory row can show + change the schedule
+                # without an extra round trip. Nullable when the
+                # Websites row didn't join (orphan queued job).
+                Websites.update_interval.label("update_interval"),
                 CrawlRunsTable.tenant_id.label("tenant_id"),
                 Tenants.display_name.label("tenant_display_name"),
                 CrawlRunsTable.created_at.label("crawl_run_created_at"),
@@ -436,6 +444,11 @@ class CrawlRunRepository:
                     collection_name=row["collection_name"],
                     user_started_by_id=row["user_started_by_id"],
                     user_started_by_email=row["user_started_by_email"],
+                    update_interval=(
+                        UpdateInterval(str(row["update_interval"]))
+                        if row["update_interval"] is not None
+                        else None
+                    ),
                     tenant_id=row["tenant_id"],
                     tenant_display_name=row["tenant_display_name"],
                     status=status,
