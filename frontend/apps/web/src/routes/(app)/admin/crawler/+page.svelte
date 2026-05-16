@@ -16,8 +16,9 @@
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
   import * as Pagination from "$lib/components/ui/pagination/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
-  import * as Sheet from "$lib/components/ui/sheet/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
+  import { Dialog } from "@intric/ui";
+  import { writable } from "svelte/store";
   import * as Table from "$lib/components/ui/table/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
   import * as ToggleGroup from "$lib/components/ui/toggle-group/index.js";
@@ -298,16 +299,28 @@
     tenantWebsiteInventoryOverride ?? data.crawlerTenantWebsiteInventory
   );
 
-  // Detail Sheet state for the Webbplatser drawer. The drawer reads
+  // Detail Dialog state for the Webbplatser drawer. The Dialog reads
   // from `detailCandidateView`, which re-resolves against the visible
   // inventory each time it changes — so an operator-triggered refresh
   // (e.g., after a successful retry) propagates `last_crawled_at`
   // updates into the open drawer without re-opening. Falls back to the
   // original click snapshot if the row left the visible page (filter
-  // change, pagination). Closing the Sheet clears `detailCandidate` so
+  // change, pagination). Closing the Dialog clears `detailCandidate` so
   // a stale row can't survive into the next open.
-  let detailSheetOpen = $state<boolean>(false);
+  //
+  // The `@intric/ui` Dialog's `Root` exposes the open state as a
+  // `Writable<boolean>` store, so we hold the source-of-truth here as a
+  // writable + subscribe to clear the candidate on close.
+  const detailDialogOpen = writable(false);
   let detailCandidate = $state<CrawlerTenantWebsiteInventoryItem | null>(null);
+  $effect(() => {
+    const unsubscribe = detailDialogOpen.subscribe((open) => {
+      if (!open) {
+        detailCandidate = null;
+      }
+    });
+    return unsubscribe;
+  });
   const detailCandidateView = $derived<CrawlerTenantWebsiteInventoryItem | null>(
     detailCandidate === null
       ? null
@@ -331,7 +344,7 @@
     const current = data.crawlerTenantWebsiteInventory;
     if (lastSeenSsrInventory !== null && current !== lastSeenSsrInventory) {
       detailCandidate = null;
-      detailSheetOpen = false;
+      detailDialogOpen.set(false);
     }
     lastSeenSsrInventory = current;
   });
@@ -902,12 +915,12 @@
   }
 
   function openWebsiteDetail(item: CrawlerTenantWebsiteInventoryItem) {
-    // Wires the Sheet drawer (C4). The drawer reads the current row
-    // from `detailCandidate` so it stays in sync with row updates
-    // without re-fetching; closing the Sheet clears the candidate so
-    // a stale row can't survive into the next open.
+    // Open the detail Dialog. The candidate is set first so the Dialog
+    // has a row to render before its open transition fires; the
+    // close-side `$effect` subscribed to `detailDialogOpen` clears the
+    // candidate when the operator dismisses.
     detailCandidate = item;
-    detailSheetOpen = true;
+    detailDialogOpen.set(true);
   }
 
   /**
@@ -2625,228 +2638,256 @@
 </Page.Root>
 
 <!--
-  Webbplatser detail drawer. Slides in from the right at ~480px. Reads
-  the candidate row from `detailCandidateView` so any update to the
-  visible inventory propagates without re-opening. Closing clears
-  `detailCandidate` so the next click starts fresh. All actions in the
-  footer reuse the existing AlertDialog confirmation flows
-  (abort / retry / interval-edit / circuit-reset) — no new mutation
-  endpoints in this slice.
+  Webbplatser detail Dialog. Centered modal at `width="medium"` to
+  match the `@intric/ui` Dialog identity used by WebsiteEditor.svelte
+  (the create-website flow). Reads the candidate row from
+  `detailCandidateView` so any update to the visible inventory
+  propagates without re-opening; the open-state subscription clears
+  `detailCandidate` on close so the next click starts fresh.
+
+  Sections mirror the create-website form so an admin reviewing a
+  registered site sees the same set of configured options the operator
+  picked at creation. Actions in the footer reuse the existing
+  AlertDialog confirmation flows (abort / retry / interval-edit /
+  circuit-reset) — no new mutation endpoints in this slice.
   -->
-<Sheet.Root
-  bind:open={detailSheetOpen}
-  onOpenChange={(open) => {
-    if (!open) {
-      detailCandidate = null;
-    }
-  }}
->
-  <Sheet.Content side="right" class="w-full overflow-y-auto sm:max-w-md">
+<Dialog.Root openController={detailDialogOpen}>
+  <Dialog.Content width="medium">
     {#if detailCandidateView}
       {@const display = getCrawlerTenantWebsiteInventoryDisplayName(detailCandidateView)}
-      <Sheet.Header>
-        <Sheet.Title class="break-words">
-          {display}
-        </Sheet.Title>
-        {#if detailCandidateView.url && detailCandidateView.url !== display}
-          <Sheet.Description class="break-words">
-            <!-- External URL displayed as plain text + an "Open" button.
-              Rendering as <a href> trips
-              svelte/no-navigation-without-resolve; this is an external
-              navigation that resolve() doesn't apply to, so we open
-              programmatically. The text stays selectable for copy. -->
-            <span class="text-foreground">{detailCandidateView.url}</span>
-            <button
-              type="button"
-              class="text-accent-default ml-1 text-xs hover:underline"
-              onclick={() => {
-                if (detailCandidateView?.url) {
-                  window.open(detailCandidateView.url, "_blank", "noopener,noreferrer");
-                }
-              }}
-            >
-              {m.crawler_website_detail_open_external()}
-            </button>
-          </Sheet.Description>
-        {/if}
-      </Sheet.Header>
-
-      <div class="flex flex-col gap-5 px-4 pb-4">
-        <!-- Status pill row, prominent so the operator sees state up top. -->
-        <div class="flex items-center gap-2">
-          <Badge
-            variant="outline"
-            class={tenantWebsiteInventoryRowStatusClass(detailCandidateView)}
+      <Dialog.Title>{display}</Dialog.Title>
+      {#if detailCandidateView.url && detailCandidateView.url !== display}
+        <Dialog.Description>
+          <!-- External URL displayed as plain text plus an "Open"
+            button. Rendering as <a href> trips
+            svelte/no-navigation-without-resolve; this is an external
+            navigation that resolve() doesn't apply to, so we open
+            programmatically. The text stays selectable for copy. -->
+          <span class="text-foreground break-words">{detailCandidateView.url}</span>
+          <button
+            type="button"
+            class="text-accent-default ml-1 text-xs hover:underline"
+            onclick={() => {
+              if (detailCandidateView?.url) {
+                window.open(detailCandidateView.url, "_blank", "noopener,noreferrer");
+              }
+            }}
           >
-            {getCrawlerTenantWebsiteInventoryStatusLabel(detailCandidateView)}
-          </Badge>
-          {#if detailActiveJob !== null}
+            {m.crawler_website_detail_open_external()}
+          </button>
+        </Dialog.Description>
+      {/if}
+
+      <Dialog.Section>
+        <div class="flex flex-col gap-5 p-4">
+          <!-- Status pill row, prominent so the operator sees state up top. -->
+          <div class="flex flex-wrap items-center gap-2">
             <Badge
               variant="outline"
-              class="border-accent-default/35 text-accent-default tabular-nums"
+              class={tenantWebsiteInventoryRowStatusClass(detailCandidateView)}
             >
-              {m.crawler_website_detail_active_job()}
+              {getCrawlerTenantWebsiteInventoryStatusLabel(detailCandidateView)}
             </Badge>
-          {/if}
-        </div>
+            {#if detailActiveJob !== null}
+              <Badge
+                variant="outline"
+                class="border-accent-default/35 text-accent-default tabular-nums"
+              >
+                {m.crawler_website_detail_active_job()}
+              </Badge>
+            {/if}
+          </div>
 
-        <!-- Ownership card — space, collection, owner email, created date. -->
-        <section aria-labelledby="crawler-website-detail-ownership" class="flex flex-col gap-2">
-          <h3
-            id="crawler-website-detail-ownership"
-            class="text-muted-foreground text-xs tracking-wide uppercase"
-          >
-            {m.crawler_website_detail_section_ownership()}
-          </h3>
-          <dl class="grid grid-cols-[max-content_1fr] items-baseline gap-x-3 gap-y-1.5">
-            <dt class="text-muted-foreground text-sm">
-              {m.crawler_website_detail_field_space()}
-            </dt>
-            <dd class="text-sm">
-              {getCrawlerTenantWebsiteInventorySpaceLabel(detailCandidateView)}
-            </dd>
-            <dt class="text-muted-foreground text-sm">
-              {m.crawler_website_detail_field_owner()}
-            </dt>
-            <dd class="text-sm">
-              {getCrawlerTenantWebsiteInventoryOwnerLabel(detailCandidateView)}
-            </dd>
-            <dt class="text-muted-foreground text-sm">
-              {m.crawler_website_detail_field_created()}
-            </dt>
-            <dd class="text-sm tabular-nums">
-              {formatDateTime(detailCandidateView.created_at)}
-            </dd>
-          </dl>
-        </section>
-
-        <!-- Schedule card. -->
-        <section aria-labelledby="crawler-website-detail-schedule" class="flex flex-col gap-2">
-          <h3
-            id="crawler-website-detail-schedule"
-            class="text-muted-foreground text-xs tracking-wide uppercase"
-          >
-            {m.crawler_website_detail_section_schedule()}
-          </h3>
-          <dl class="grid grid-cols-[max-content_1fr] items-baseline gap-x-3 gap-y-1.5">
-            <dt class="text-muted-foreground text-sm">
-              {m.crawler_website_detail_field_interval()}
-            </dt>
-            <dd class="text-sm">
-              {getCrawlerUpdateIntervalLabel(detailCandidateView.update_interval)}
-            </dd>
-            <dt class="text-muted-foreground text-sm">
-              {m.crawler_website_detail_field_last_crawled()}
-            </dt>
-            <dd class="text-sm tabular-nums">
-              {formatRelativeOrAbsolute(detailCandidateView.last_crawled_at)}
-            </dd>
-            {#if detailCandidateView.failure_state !== null && detailCandidateView.consecutive_failures > 0}
+          <!-- Crawl configuration — mirrors the create-website form. -->
+          <section aria-labelledby="crawler-website-detail-config" class="flex flex-col gap-2">
+            <h3
+              id="crawler-website-detail-config"
+              class="text-muted-foreground text-xs tracking-wide uppercase"
+            >
+              {m.crawler_website_detail_section_config()}
+            </h3>
+            <dl class="grid grid-cols-[max-content_1fr] items-baseline gap-x-3 gap-y-1.5">
               <dt class="text-muted-foreground text-sm">
-                {m.crawler_website_detail_field_consecutive_failures()}
+                {m.crawler_website_detail_field_crawl_type()}
+              </dt>
+              <dd class="text-sm">
+                {detailCandidateView.crawl_type === "sitemap"
+                  ? m.sitemap_based_crawl()
+                  : m.basic_crawl()}
+              </dd>
+              <dt class="text-muted-foreground text-sm">
+                {m.crawler_website_detail_field_interval()}
+              </dt>
+              <dd class="text-sm">
+                {getCrawlerUpdateIntervalLabel(detailCandidateView.update_interval)}
+              </dd>
+              <dt class="text-muted-foreground text-sm">
+                {m.crawler_website_detail_field_download_files()}
+              </dt>
+              <dd class="text-sm">
+                {detailCandidateView.download_files
+                  ? m.crawler_website_detail_value_enabled()
+                  : m.crawler_website_detail_value_disabled()}
+              </dd>
+              <dt class="text-muted-foreground text-sm">
+                {m.crawler_website_detail_field_http_auth()}
+              </dt>
+              <dd class="text-sm">
+                {#if detailCandidateView.requires_http_auth}
+                  {m.crawler_website_detail_value_enabled()}
+                  {#if detailCandidateView.http_auth_username}
+                    <span class="text-muted-foreground">
+                      ({detailCandidateView.http_auth_username})
+                    </span>
+                  {/if}
+                {:else}
+                  {m.crawler_website_detail_value_disabled()}
+                {/if}
+              </dd>
+            </dl>
+          </section>
+
+          <!-- Ownership — space, collection, owner email, created date. -->
+          <section aria-labelledby="crawler-website-detail-ownership" class="flex flex-col gap-2">
+            <h3
+              id="crawler-website-detail-ownership"
+              class="text-muted-foreground text-xs tracking-wide uppercase"
+            >
+              {m.crawler_website_detail_section_ownership()}
+            </h3>
+            <dl class="grid grid-cols-[max-content_1fr] items-baseline gap-x-3 gap-y-1.5">
+              <dt class="text-muted-foreground text-sm">
+                {m.crawler_website_detail_field_space()}
+              </dt>
+              <dd class="text-sm">
+                {getCrawlerTenantWebsiteInventorySpaceLabel(detailCandidateView)}
+              </dd>
+              <dt class="text-muted-foreground text-sm">
+                {m.crawler_website_detail_field_owner()}
+              </dt>
+              <dd class="text-sm">
+                {getCrawlerTenantWebsiteInventoryOwnerLabel(detailCandidateView)}
+              </dd>
+              <dt class="text-muted-foreground text-sm">
+                {m.crawler_website_detail_field_created()}
               </dt>
               <dd class="text-sm tabular-nums">
-                {detailCandidateView.consecutive_failures}
+                {formatDateTime(detailCandidateView.created_at)}
               </dd>
-            {/if}
-            {#if detailCandidateView.next_retry_at}
+            </dl>
+          </section>
+
+          <!-- Activity — schedule state + storage. -->
+          <section aria-labelledby="crawler-website-detail-activity" class="flex flex-col gap-2">
+            <h3
+              id="crawler-website-detail-activity"
+              class="text-muted-foreground text-xs tracking-wide uppercase"
+            >
+              {m.crawler_website_detail_section_activity()}
+            </h3>
+            <dl class="grid grid-cols-[max-content_1fr] items-baseline gap-x-3 gap-y-1.5">
               <dt class="text-muted-foreground text-sm">
-                {m.crawler_website_detail_field_next_retry()}
+                {m.crawler_website_detail_field_last_crawled()}
               </dt>
               <dd class="text-sm tabular-nums">
-                {formatDateTime(detailCandidateView.next_retry_at)}
+                {formatRelativeOrAbsolute(detailCandidateView.last_crawled_at)}
               </dd>
-            {/if}
-          </dl>
-        </section>
+              <dt class="text-muted-foreground text-sm">
+                {m.crawler_tenant_website_inventory_column_size()}
+              </dt>
+              <dd class="text-sm tabular-nums">
+                {detailCandidateView.size > 0
+                  ? formatCrawlerScheduledIndexedSize(detailCandidateView.size)
+                  : "—"}
+              </dd>
+              {#if detailCandidateView.failure_state !== null && detailCandidateView.consecutive_failures > 0}
+                <dt class="text-muted-foreground text-sm">
+                  {m.crawler_website_detail_field_consecutive_failures()}
+                </dt>
+                <dd class="text-sm tabular-nums">
+                  {detailCandidateView.consecutive_failures}
+                </dd>
+              {/if}
+              {#if detailCandidateView.next_retry_at}
+                <dt class="text-muted-foreground text-sm">
+                  {m.crawler_website_detail_field_next_retry()}
+                </dt>
+                <dd class="text-sm tabular-nums">
+                  {formatDateTime(detailCandidateView.next_retry_at)}
+                </dd>
+              {/if}
+            </dl>
+          </section>
 
-        <!-- Storage card. -->
-        <section aria-labelledby="crawler-website-detail-storage" class="flex flex-col gap-2">
-          <h3
-            id="crawler-website-detail-storage"
-            class="text-muted-foreground text-xs tracking-wide uppercase"
+          <!--
+            Action footer. Each button hands off to an existing
+            AlertDialog so the audit + tenancy guarantees from the
+            original surfaces apply unchanged. Reset + Abort are
+            conditional — hiding instead of disabling keeps the
+            affordance honest.
+            -->
+          <section
+            aria-labelledby="crawler-website-detail-actions"
+            class="border-border flex flex-col gap-2 border-t pt-4"
           >
-            {m.crawler_website_detail_section_storage()}
-          </h3>
-          <dl class="grid grid-cols-[max-content_1fr] items-baseline gap-x-3 gap-y-1.5">
-            <dt class="text-muted-foreground text-sm">
-              {m.crawler_tenant_website_inventory_column_size()}
-            </dt>
-            <dd class="text-sm tabular-nums">
-              {detailCandidateView.size > 0
-                ? formatCrawlerScheduledIndexedSize(detailCandidateView.size)
-                : "—"}
-            </dd>
-          </dl>
-        </section>
-
-        <!--
-          Action footer. Each button hands off to an existing dialog so
-          the audit + tenancy guarantees from the original surfaces apply
-          unchanged. Reset + Abort are conditional — hiding instead of
-          disabling keeps the affordance honest.
-          -->
-        <section
-          aria-labelledby="crawler-website-detail-actions"
-          class="border-border flex flex-col gap-2 border-t pt-4"
-        >
-          <h3
-            id="crawler-website-detail-actions"
-            class="text-muted-foreground text-xs tracking-wide uppercase"
-          >
-            {m.crawler_website_detail_section_actions()}
-          </h3>
-          <Button
-            variant="outline"
-            size="sm"
-            onclick={() => {
-              if (detailCandidateView) openRetryDialogForInventoryItem(detailCandidateView);
-            }}
-            disabled={retryingWebsiteId !== null}
-          >
-            {m.crawler_website_detail_action_retry()}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onclick={() => {
-              if (detailCandidateView) openIntervalDialogForInventoryItem(detailCandidateView);
-            }}
-            disabled={savingIntervalWebsiteId !== null}
-          >
-            {m.crawler_website_detail_action_interval()}
-          </Button>
-          {#if detailCandidateView.failure_state !== null}
+            <h3
+              id="crawler-website-detail-actions"
+              class="text-muted-foreground text-xs tracking-wide uppercase"
+            >
+              {m.crawler_website_detail_section_actions()}
+            </h3>
             <Button
               variant="outline"
               size="sm"
               onclick={() => {
-                if (detailCandidateView)
-                  openCircuitResetDialogForInventoryItem(detailCandidateView);
+                if (detailCandidateView) openRetryDialogForInventoryItem(detailCandidateView);
               }}
-              disabled={resettingCircuitWebsiteId !== null}
+              disabled={retryingWebsiteId !== null}
             >
-              {m.crawler_website_detail_action_reset()}
+              {m.crawler_website_detail_action_retry()}
             </Button>
-          {/if}
-          {#if detailActiveJob !== null}
             <Button
-              variant="destructive"
+              variant="outline"
               size="sm"
               onclick={() => {
-                if (detailCandidateView) openAbortDialogForInventoryItem(detailCandidateView);
+                if (detailCandidateView) openIntervalDialogForInventoryItem(detailCandidateView);
               }}
-              disabled={abortingJobId !== null}
+              disabled={savingIntervalWebsiteId !== null}
             >
-              <CircleX data-icon="inline-start" aria-hidden="true" />
-              {m.crawler_website_detail_action_abort()}
+              {m.crawler_website_detail_action_interval()}
             </Button>
-          {/if}
-        </section>
-      </div>
+            {#if detailCandidateView.failure_state !== null}
+              <Button
+                variant="outline"
+                size="sm"
+                onclick={() => {
+                  if (detailCandidateView)
+                    openCircuitResetDialogForInventoryItem(detailCandidateView);
+                }}
+                disabled={resettingCircuitWebsiteId !== null}
+              >
+                {m.crawler_website_detail_action_reset()}
+              </Button>
+            {/if}
+            {#if detailActiveJob !== null}
+              <Button
+                variant="destructive"
+                size="sm"
+                onclick={() => {
+                  if (detailCandidateView) openAbortDialogForInventoryItem(detailCandidateView);
+                }}
+                disabled={abortingJobId !== null}
+              >
+                <CircleX data-icon="inline-start" aria-hidden="true" />
+                {m.crawler_website_detail_action_abort()}
+              </Button>
+            {/if}
+          </section>
+        </div>
+      </Dialog.Section>
     {/if}
-  </Sheet.Content>
-</Sheet.Root>
+  </Dialog.Content>
+</Dialog.Root>
 
 <AlertDialog.Root bind:open={abortDialogOpen}>
   <AlertDialog.Content>

@@ -221,6 +221,12 @@ async def test_admin_crawler_tenant_website_inventory_scopes_to_current_tenant(
     assert daily_item["owner_user_id"] == str(admin_user.id)
     assert daily_item["owner_email"] == admin_user.email
     assert daily_item["failure_state"] is None
+    # Crawl settings — admin detail surface needs the same shape the
+    # operator picked when registering the website.
+    assert daily_item["crawl_type"] == CrawlType.CRAWL.value
+    assert daily_item["download_files"] is True
+    assert daily_item["requires_http_auth"] is False
+    assert daily_item["http_auth_username"] is None
     # tenant_id of other tenant must not leak via attribution columns
     assert "tenant_id" not in daily_item
 

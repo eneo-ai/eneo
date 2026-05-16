@@ -23,6 +23,7 @@ from intric.websites.domain.crawl_interval_change import (
     CrawlIntervalChangeUnchanged,
     CrawlIntervalChangeWebsite,
 )
+from intric.websites.domain.crawl_run import CrawlType
 from intric.websites.domain.crawler_failure_inventory import (
     CrawlerFailureInventory,
     CrawlerFailureInventoryItem,
@@ -363,6 +364,17 @@ class WebsiteAdminRepository:
                 WebsitesTable.name.label("name"),
                 WebsitesTable.created_at.label("created_at"),
                 WebsitesTable.update_interval.label("update_interval"),
+                WebsitesTable.crawl_type.label("crawl_type"),
+                WebsitesTable.download_files.label("download_files"),
+                WebsitesTable.http_auth_username.label("http_auth_username"),
+                # `requires_http_auth` is derived: the username column is
+                # non-null iff the website was configured with HTTP Basic
+                # Auth. The encrypted password column is never read here
+                # — the admin surface only needs to confirm the auth flag
+                # and the username, never the secret.
+                WebsitesTable.http_auth_username.is_not(None).label(
+                    "requires_http_auth"
+                ),
                 failure_state_expr,
                 WebsitesTable.consecutive_failures.label("consecutive_failures"),
                 WebsitesTable.next_retry_at.label("next_retry_at"),
@@ -390,6 +402,17 @@ class WebsiteAdminRepository:
                 if failure_state_value is not None
                 else None
             )
+            # `crawl_type` is mapped on the table as `Mapped[CrawlType]`,
+            # so SQLAlchemy returns the enum member directly. `str()` on
+            # a `str, Enum` mixin returns the repr `"CrawlType.CRAWL"`,
+            # not the value `"crawl"`, so we hand the enum straight to
+            # the dataclass.
+            raw_crawl_type = row["crawl_type"]
+            crawl_type_value = (
+                raw_crawl_type
+                if isinstance(raw_crawl_type, CrawlType)
+                else CrawlType(raw_crawl_type)
+            )
             items.append(
                 CrawlerTenantWebsiteInventoryItem(
                     website_id=row["website_id"],
@@ -397,6 +420,10 @@ class WebsiteAdminRepository:
                     name=row["name"],
                     created_at=row["created_at"],
                     update_interval=UpdateInterval(str(row["update_interval"])),
+                    crawl_type=crawl_type_value,
+                    download_files=bool(row["download_files"]),
+                    requires_http_auth=bool(row["requires_http_auth"]),
+                    http_auth_username=row["http_auth_username"],
                     failure_state=classified_state,
                     consecutive_failures=int(row["consecutive_failures"]),
                     next_retry_at=row["next_retry_at"],

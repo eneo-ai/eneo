@@ -7,6 +7,7 @@ from intric.main.models import Status
 from intric.websites.domain.crawl_abort import CrawlAbortConflictCode
 from intric.websites.domain.crawl_lifecycle import CrawlLifecycle
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode, FailureReason
+from intric.websites.domain.crawl_run import CrawlType
 from intric.websites.domain.crawler_active_inventory import (
     CrawlerActiveInventory as DomainCrawlerActiveInventory,
 )
@@ -408,6 +409,10 @@ class CrawlerTenantWebsiteInventoryItem(BaseModel):
     name: str | None
     created_at: datetime
     update_interval: UpdateInterval
+    crawl_type: CrawlType
+    download_files: bool
+    requires_http_auth: bool
+    http_auth_username: str | None
     failure_state: CrawlerFailureState | None
     consecutive_failures: int = Field(ge=0)
     next_retry_at: datetime | None
@@ -430,6 +435,10 @@ class CrawlerTenantWebsiteInventoryItem(BaseModel):
             name=item.name,
             created_at=item.created_at,
             update_interval=item.update_interval,
+            crawl_type=item.crawl_type,
+            download_files=item.download_files,
+            requires_http_auth=item.requires_http_auth,
+            http_auth_username=item.http_auth_username,
             failure_state=item.failure_state,
             consecutive_failures=item.consecutive_failures,
             next_retry_at=item.next_retry_at,

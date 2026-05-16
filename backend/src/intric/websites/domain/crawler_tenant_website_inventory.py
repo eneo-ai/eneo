@@ -18,6 +18,7 @@ from datetime import datetime
 from enum import Enum
 from uuid import UUID
 
+from intric.websites.domain.crawl_run import CrawlType
 from intric.websites.domain.crawler_failure_inventory import CrawlerFailureState
 from intric.websites.domain.website import UpdateInterval
 
@@ -54,6 +55,15 @@ class CrawlerTenantWebsiteInventoryItem:
     name: str | None
     created_at: datetime
     update_interval: UpdateInterval
+    crawl_type: CrawlType
+    download_files: bool
+    # Whether HTTP Basic Auth credentials are stored for this website.
+    # The presence flag is enough for the admin governance surface —
+    # the encrypted password itself is never exposed; the username is
+    # admin-readable so the admin can verify which account the worker
+    # crawls as without round-tripping to the space owner.
+    requires_http_auth: bool
+    http_auth_username: str | None
     failure_state: CrawlerFailureState | None
     consecutive_failures: int
     next_retry_at: datetime | None

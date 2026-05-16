@@ -10374,6 +10374,13 @@ export interface components {
        */
       created_at: string;
       update_interval: components["schemas"]["UpdateInterval"];
+      crawl_type: components["schemas"]["CrawlType"];
+      /** Download Files */
+      download_files: boolean;
+      /** Requires Http Auth */
+      requires_http_auth: boolean;
+      /** Http Auth Username */
+      http_auth_username: string | null;
       failure_state: components["schemas"]["CrawlerFailureState"] | null;
       /** Consecutive Failures */
       consecutive_failures: number;
