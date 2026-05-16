@@ -358,7 +358,7 @@ async def reset_current_tenant_crawler_circuit_breaker(
     assert_never(result)
 
 
-class _UpdateIntervalRequest(BaseModel):
+class UpdateIntervalRequest(BaseModel):
     update_interval: UpdateInterval
 
 
@@ -372,7 +372,7 @@ class _UpdateIntervalRequest(BaseModel):
 )
 async def set_current_tenant_crawler_update_interval(
     website_id: UUID,
-    body: _UpdateIntervalRequest,
+    body: UpdateIntervalRequest,
     current_user: Annotated[UserInDB, Depends(get_current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
     container: AdminContainer,

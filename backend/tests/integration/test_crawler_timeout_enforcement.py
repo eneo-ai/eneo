@@ -16,8 +16,8 @@ import pytest
 from httpx import AsyncClient
 
 from intric.tenants.crawler_settings_helper import (
-    get_crawler_setting,
     CRAWLER_SETTING_SPECS,
+    get_crawler_setting,
 )
 
 
@@ -257,7 +257,7 @@ class TestTimeoutDefaultBehavior:
                 tenant.crawler_settings,
             )
 
-            expected_default = CRAWLER_SETTING_SPECS["download_timeout"]["default"]
+            expected_default = CRAWLER_SETTING_SPECS["download_timeout"].default
             assert default_timeout == expected_default
             assert default_timeout == 90, "Hardcoded default should be 90s"
 
@@ -279,7 +279,7 @@ class TestTimeoutDefaultBehavior:
                 tenant.crawler_settings,
             )
 
-            expected_default = CRAWLER_SETTING_SPECS["dns_timeout"]["default"]
+            expected_default = CRAWLER_SETTING_SPECS["dns_timeout"].default
             assert default_timeout == expected_default
             assert default_timeout == 30, "Hardcoded default should be 30s"
 

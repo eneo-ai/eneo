@@ -16449,6 +16449,10 @@ export interface components {
      * @enum {string}
      */
     UpdateInterval: "never" | "daily" | "every_other_day" | "weekly";
+    /** UpdateIntervalRequest */
+    UpdateIntervalRequest: {
+      update_interval: components["schemas"]["UpdateInterval"];
+    };
     /** UpdateSpaceDryRunResponse */
     UpdateSpaceDryRunResponse: {
       /** Assistants */
@@ -17445,10 +17449,6 @@ export interface components {
      * @enum {string}
      */
     WizardType: "attachments" | "groups";
-    /** _UpdateIntervalRequest */
-    _UpdateIntervalRequest: {
-      update_interval: components["schemas"]["UpdateInterval"];
-    };
     /**
      * CredentialInfo
      * @description Information about a configured credential.
@@ -26549,7 +26549,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["_UpdateIntervalRequest"];
+        "application/json": components["schemas"]["UpdateIntervalRequest"];
       };
     };
     responses: {
