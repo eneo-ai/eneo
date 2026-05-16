@@ -83,15 +83,19 @@
   import { formatCrawlerCount } from "$lib/features/admin/crawlerNumberFormat";
   import type { CrawlRunResultLabel } from "$lib/features/knowledge/crawlOutcomePresentation";
   import {
+    CRAWLER_RECENT_FAILURES_PAGE_SIZE,
     getCrawlerRecentFailureOutcomeLabel,
     getCrawlerRecentFailureResultLabels,
     getCrawlerRecentFailureWebsiteLabel,
+    offsetFromCrawlerRecentFailuresPage,
     type CrawlerRecentFailuresResponse
   } from "$lib/features/admin/crawlerRecentFailures";
   import {
+    CRAWLER_WATCHDOG_INTERVENTIONS_PAGE_SIZE,
     getCrawlerWatchdogInterventionOutcomeLabel,
     getCrawlerWatchdogInterventionResultLabels,
     getCrawlerWatchdogInterventionWebsiteLabel,
+    offsetFromCrawlerWatchdogInterventionsPage,
     type CrawlerWatchdogInterventionsResponse
   } from "$lib/features/admin/crawlerWatchdogInterventions";
   import {
@@ -217,6 +221,23 @@
           return name.includes(activeInventorySearchNormalized);
         })
       : (visibleActiveInventory?.items ?? [])
+  );
+
+  // Recent failures + watchdog interventions both render with a fixed
+  // limit per page; client-side state owns the offset so an operator
+  // can page through history without a full page reload. The SSR payload
+  // is always page 1 — `*Override` carries subsequent fetches so we
+  // don't lose the SSR rows if a follow-up fetch fails.
+  let recentFailuresPage = $state<number>(1);
+  let recentFailuresOverride = $state<CrawlerRecentFailuresResponse | null>(null);
+  let recentFailuresBusy = $state(false);
+  const visibleRecentFailures = $derived(recentFailuresOverride ?? data.crawlerRecentFailures);
+
+  let watchdogInterventionsPage = $state<number>(1);
+  let watchdogInterventionsOverride = $state<CrawlerWatchdogInterventionsResponse | null>(null);
+  let watchdogInterventionsBusy = $state(false);
+  const visibleWatchdogInterventions = $derived(
+    watchdogInterventionsOverride ?? data.crawlerWatchdogInterventions
   );
 
   type CrawlerAdminTab = "operations" | "health" | "activity" | "settings";
@@ -366,6 +387,21 @@
         return exhaustive;
       }
     }
+  }
+
+  // KPI button styling. Pressed cards get a saturated ring + bg so the
+  // operator always sees which view is active; the warning tint is
+  // applied to the failing-count card only when there's actually
+  // something failing, so a healthy fleet stays calm.
+  function kpiButtonClass(pressed: boolean, tone: "neutral" | "warning" = "neutral"): string {
+    const base =
+      "focus-visible:ring-ring/50 flex flex-col items-start gap-1.5 rounded-lg border p-4 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none";
+    const pressedStyle =
+      tone === "warning"
+        ? "border-caution/50 bg-caution/8 ring-caution/30 ring-1"
+        : "border-accent-default/50 bg-accent-default/8 ring-accent-default/30 ring-1";
+    const restingStyle = "border-border bg-background hover:bg-muted";
+    return `${base} ${pressed ? pressedStyle : restingStyle}`;
   }
 
   function rangeHint(field: CrawlerNumberField) {
@@ -561,6 +597,55 @@
     void refreshActiveInventory({ page: 1, pageSize: parsed });
   }
 
+  // Page through the 7-day recent-failures window without a full
+  // SvelteKit invalidate(). Page 1 with the default limit matches the
+  // SSR payload exactly, so we clear the override and rely on `data.*`.
+  async function changeRecentFailuresPage(nextPage: number) {
+    if (nextPage === recentFailuresPage || recentFailuresBusy || nextPage < 1) return;
+    if (nextPage === 1) {
+      recentFailuresOverride = null;
+      recentFailuresPage = 1;
+      return;
+    }
+    recentFailuresBusy = true;
+    try {
+      const response = await intric.crawlerAdmin.recentFailures({
+        days: data.crawlerRecentFailuresWindowDays,
+        limit: CRAWLER_RECENT_FAILURES_PAGE_SIZE,
+        offset: offsetFromCrawlerRecentFailuresPage(nextPage)
+      });
+      recentFailuresOverride = response;
+      recentFailuresPage = nextPage;
+    } catch (error) {
+      toastError(error, m.crawler_recent_failures_load_error());
+    } finally {
+      recentFailuresBusy = false;
+    }
+  }
+
+  async function changeWatchdogInterventionsPage(nextPage: number) {
+    if (nextPage === watchdogInterventionsPage || watchdogInterventionsBusy || nextPage < 1) return;
+    if (nextPage === 1) {
+      watchdogInterventionsOverride = null;
+      watchdogInterventionsPage = 1;
+      return;
+    }
+    watchdogInterventionsBusy = true;
+    try {
+      const response = await intric.crawlerAdmin.watchdogInterventions({
+        days: data.crawlerWatchdogInterventionsWindowDays,
+        limit: CRAWLER_WATCHDOG_INTERVENTIONS_PAGE_SIZE,
+        offset: offsetFromCrawlerWatchdogInterventionsPage(nextPage)
+      });
+      watchdogInterventionsOverride = response;
+      watchdogInterventionsPage = nextPage;
+    } catch (error) {
+      toastError(error, m.crawler_watchdog_interventions_load_error());
+    } finally {
+      watchdogInterventionsBusy = false;
+    }
+  }
+
   async function handleSaveUpdateInterval() {
     const candidate = intervalCandidate;
     if (candidate === null) return;
@@ -690,7 +775,7 @@
   </Page.Header>
   <Page.Main>
     <Settings.Page>
-      <p class="text-secondary -mt-4 mb-6 max-w-[64ch] pr-12 pl-2 text-[15px] leading-relaxed">
+      <p class="text-secondary -mt-4 mb-6 max-w-[64ch] px-2 text-[15px] leading-relaxed sm:pr-12">
         {m.crawler_settings_subtitle()}
       </p>
 
@@ -702,6 +787,10 @@
         SSR payloads the tabs already render — no extra network cost.
         Static markup only (no message function calls that could trip
         the toaster hydration fix landed earlier in the session).
+        Semantic: these are toggles for the inline Tabs.Root below, not
+        navigation, so each card uses aria-pressed + selected styling.
+        At mobile (<640px) the grid stacks; at sm+ the three sit
+        side-by-side without changing typography.
         -->
       <div
         class="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-3"
@@ -710,14 +799,14 @@
       >
         <button
           type="button"
-          class="border-border bg-background hover:bg-muted focus-visible:ring-ring/50 flex flex-col items-start gap-1 rounded-lg border p-4 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
-          aria-current={currentTab === "operations" ? "page" : undefined}
+          class={kpiButtonClass(currentTab === "operations")}
+          aria-pressed={currentTab === "operations"}
           onclick={() => (currentTab = "operations")}
         >
           <span class="text-muted-foreground text-xs tracking-wide uppercase">
             {m.crawler_summary_running_label()}
           </span>
-          <span class="text-2xl font-semibold tabular-nums">
+          <span class="text-3xl leading-none font-semibold tabular-nums">
             {visibleActiveInventory ? visibleActiveInventory.total : 0}
           </span>
           <span class="text-muted-foreground text-xs">
@@ -726,14 +815,22 @@
         </button>
         <button
           type="button"
-          class="border-border bg-background hover:bg-muted focus-visible:ring-ring/50 flex flex-col items-start gap-1 rounded-lg border p-4 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
-          aria-current={currentTab === "health" ? "page" : undefined}
+          class={kpiButtonClass(
+            currentTab === "health",
+            (data.crawlerFailureInventory?.total ?? 0) > 0 ? "warning" : "neutral"
+          )}
+          aria-pressed={currentTab === "health"}
           onclick={() => (currentTab = "health")}
         >
           <span class="text-muted-foreground text-xs tracking-wide uppercase">
             {m.crawler_summary_failing_label()}
           </span>
-          <span class="text-2xl font-semibold tabular-nums">
+          <span
+            class="text-3xl leading-none font-semibold tabular-nums {(data.crawlerFailureInventory
+              ?.total ?? 0) > 0
+              ? 'text-caution'
+              : ''}"
+          >
             {data.crawlerFailureInventory ? data.crawlerFailureInventory.total : 0}
           </span>
           <span class="text-muted-foreground text-xs">
@@ -742,14 +839,14 @@
         </button>
         <button
           type="button"
-          class="border-border bg-background hover:bg-muted focus-visible:ring-ring/50 flex flex-col items-start gap-1 rounded-lg border p-4 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
-          aria-current={currentTab === "activity" ? "page" : undefined}
+          class={kpiButtonClass(currentTab === "activity")}
+          aria-pressed={currentTab === "activity"}
           onclick={() => (currentTab = "activity")}
         >
           <span class="text-muted-foreground text-xs tracking-wide uppercase">
             {m.crawler_summary_scheduled_label()}
           </span>
-          <span class="text-2xl font-semibold tabular-nums">
+          <span class="text-3xl leading-none font-semibold tabular-nums">
             {data.crawlerScheduledAggregate ? data.crawlerScheduledAggregate.total_websites : 0}
           </span>
           <span class="text-muted-foreground text-xs">
@@ -765,30 +862,51 @@
         }}
         class="mb-10"
       >
-        <Tabs.List class="mb-4 flex flex-wrap gap-1">
-          <Tabs.Trigger value="operations" aria-label={m.crawler_admin_tab_operations()}>
-            {m.crawler_admin_tab_operations()}
-            {#if visibleActiveInventory && visibleActiveInventory.total > 0}
-              <Badge variant="secondary" class="ml-2 tabular-nums">
-                {visibleActiveInventory.total}
-              </Badge>
-            {/if}
-          </Tabs.Trigger>
-          <Tabs.Trigger value="health" aria-label={m.crawler_admin_tab_health()}>
-            {m.crawler_admin_tab_health()}
-            {#if data.crawlerFailureInventory && data.crawlerFailureInventory.total > 0}
-              <Badge variant="secondary" class="ml-2 tabular-nums">
-                {data.crawlerFailureInventory.total}
-              </Badge>
-            {/if}
-          </Tabs.Trigger>
-          <Tabs.Trigger value="activity" aria-label={m.crawler_admin_tab_activity()}>
-            {m.crawler_admin_tab_activity()}
-          </Tabs.Trigger>
-          <Tabs.Trigger value="settings" aria-label={m.crawler_admin_tab_settings()}>
-            {m.crawler_admin_tab_settings()}
-          </Tabs.Trigger>
-        </Tabs.List>
+        <!--
+          Tabs strip stays single-row at all viewports. Horizontal
+          overflow scrolls on narrow phones instead of wrapping to two
+          rows (which breaks shadcn TabsList's underline rhythm). The
+          -mx-2 px-2 lets the scroll cut bleed against the page edge so
+          the rightmost tab doesn't get clipped by Settings.Page padding.
+          -->
+        <div class="-mx-2 mb-4 overflow-x-auto px-2">
+          <Tabs.List class="inline-flex w-max min-w-full gap-1">
+            <Tabs.Trigger
+              value="operations"
+              aria-label={m.crawler_admin_tab_operations()}
+              class="shrink-0"
+            >
+              {m.crawler_admin_tab_operations()}
+              {#if visibleActiveInventory && visibleActiveInventory.total > 0}
+                <Badge variant="secondary" class="ml-2 tabular-nums">
+                  {visibleActiveInventory.total}
+                </Badge>
+              {/if}
+            </Tabs.Trigger>
+            <Tabs.Trigger value="health" aria-label={m.crawler_admin_tab_health()} class="shrink-0">
+              {m.crawler_admin_tab_health()}
+              {#if data.crawlerFailureInventory && data.crawlerFailureInventory.total > 0}
+                <Badge variant="secondary" class="ml-2 tabular-nums">
+                  {data.crawlerFailureInventory.total}
+                </Badge>
+              {/if}
+            </Tabs.Trigger>
+            <Tabs.Trigger
+              value="activity"
+              aria-label={m.crawler_admin_tab_activity()}
+              class="shrink-0"
+            >
+              {m.crawler_admin_tab_activity()}
+            </Tabs.Trigger>
+            <Tabs.Trigger
+              value="settings"
+              aria-label={m.crawler_admin_tab_settings()}
+              class="shrink-0"
+            >
+              {m.crawler_admin_tab_settings()}
+            </Tabs.Trigger>
+          </Tabs.List>
+        </div>
 
         <Tabs.Content value="operations" class="space-y-0">
           <Card.Root class="mb-14" aria-labelledby="crawler-active-inventory-title">
@@ -1215,11 +1333,11 @@
                     })}
                   </Card.Description>
                 </div>
-                {#if data.crawlerWatchdogInterventions}
+                {#if visibleWatchdogInterventions}
                   <Badge variant="outline" class="shrink-0 tabular-nums">
                     {m.crawler_watchdog_interventions_count({
-                      shown: data.crawlerWatchdogInterventions.items.length,
-                      total: data.crawlerWatchdogInterventions.total
+                      shown: visibleWatchdogInterventions.items.length,
+                      total: visibleWatchdogInterventions.total
                     })}
                   </Badge>
                 {/if}
@@ -1233,7 +1351,7 @@
                     >{m.crawler_watchdog_interventions_load_error()}</Alert.Description
                   >
                 </Alert.Root>
-              {:else if !data.crawlerWatchdogInterventions || data.crawlerWatchdogInterventions.items.length === 0}
+              {:else if !visibleWatchdogInterventions || visibleWatchdogInterventions.items.length === 0}
                 <p class="text-muted-foreground text-sm">
                   {m.crawler_watchdog_interventions_empty({
                     days: data.crawlerWatchdogInterventionsWindowDays
@@ -1257,7 +1375,7 @@
                       </Table.Row>
                     </Table.Header>
                     <Table.Body>
-                      {#each data.crawlerWatchdogInterventions.items as intervention (intervention.crawl_run_id)}
+                      {#each visibleWatchdogInterventions.items as intervention (intervention.crawl_run_id)}
                         <Table.Row>
                           <Table.Cell class="max-w-64">
                             <span
@@ -1293,6 +1411,43 @@
                     </Table.Body>
                   </Table.Root>
                 </div>
+                {#if visibleWatchdogInterventions.total > CRAWLER_WATCHDOG_INTERVENTIONS_PAGE_SIZE}
+                  <div class="mt-4 flex items-center justify-end">
+                    <Pagination.Root
+                      count={visibleWatchdogInterventions.total}
+                      perPage={CRAWLER_WATCHDOG_INTERVENTIONS_PAGE_SIZE}
+                      page={watchdogInterventionsPage}
+                      onPageChange={(next) => {
+                        void changeWatchdogInterventionsPage(next);
+                      }}
+                      class="m-0 w-auto justify-end"
+                    >
+                      {#snippet children({ pages, currentPage })}
+                        <Pagination.Content>
+                          <Pagination.Item>
+                            <Pagination.PrevButton />
+                          </Pagination.Item>
+                          {#each pages as page (page.key)}
+                            {#if page.type === "ellipsis"}
+                              <Pagination.Item>
+                                <Pagination.Ellipsis />
+                              </Pagination.Item>
+                            {:else}
+                              <Pagination.Item>
+                                <Pagination.Link {page} isActive={currentPage === page.value}>
+                                  {page.value}
+                                </Pagination.Link>
+                              </Pagination.Item>
+                            {/if}
+                          {/each}
+                          <Pagination.Item>
+                            <Pagination.NextButton />
+                          </Pagination.Item>
+                        </Pagination.Content>
+                      {/snippet}
+                    </Pagination.Root>
+                  </div>
+                {/if}
               {/if}
             </Card.Content>
           </Card.Root>
@@ -1313,11 +1468,11 @@
                     })}
                   </Card.Description>
                 </div>
-                {#if data.crawlerRecentFailures}
+                {#if visibleRecentFailures}
                   <Badge variant="outline" class="shrink-0 tabular-nums">
                     {m.crawler_recent_failures_count({
-                      shown: data.crawlerRecentFailures.items.length,
-                      total: data.crawlerRecentFailures.total
+                      shown: visibleRecentFailures.items.length,
+                      total: visibleRecentFailures.total
                     })}
                   </Badge>
                 {/if}
@@ -1329,7 +1484,7 @@
                   <TriangleAlert aria-hidden="true" />
                   <Alert.Description>{m.crawler_recent_failures_load_error()}</Alert.Description>
                 </Alert.Root>
-              {:else if !data.crawlerRecentFailures || data.crawlerRecentFailures.items.length === 0}
+              {:else if !visibleRecentFailures || visibleRecentFailures.items.length === 0}
                 <p class="text-muted-foreground text-sm">
                   {m.crawler_recent_failures_empty({
                     days: data.crawlerRecentFailuresWindowDays
@@ -1352,7 +1507,7 @@
                       </Table.Row>
                     </Table.Header>
                     <Table.Body>
-                      {#each data.crawlerRecentFailures.items as failure (failure.crawl_run_id)}
+                      {#each visibleRecentFailures.items as failure (failure.crawl_run_id)}
                         <Table.Row>
                           <Table.Cell class="max-w-64">
                             <span
@@ -1388,6 +1543,43 @@
                     </Table.Body>
                   </Table.Root>
                 </div>
+                {#if visibleRecentFailures.total > CRAWLER_RECENT_FAILURES_PAGE_SIZE}
+                  <div class="mt-4 flex items-center justify-end">
+                    <Pagination.Root
+                      count={visibleRecentFailures.total}
+                      perPage={CRAWLER_RECENT_FAILURES_PAGE_SIZE}
+                      page={recentFailuresPage}
+                      onPageChange={(next) => {
+                        void changeRecentFailuresPage(next);
+                      }}
+                      class="m-0 w-auto justify-end"
+                    >
+                      {#snippet children({ pages, currentPage })}
+                        <Pagination.Content>
+                          <Pagination.Item>
+                            <Pagination.PrevButton />
+                          </Pagination.Item>
+                          {#each pages as page (page.key)}
+                            {#if page.type === "ellipsis"}
+                              <Pagination.Item>
+                                <Pagination.Ellipsis />
+                              </Pagination.Item>
+                            {:else}
+                              <Pagination.Item>
+                                <Pagination.Link {page} isActive={currentPage === page.value}>
+                                  {page.value}
+                                </Pagination.Link>
+                              </Pagination.Item>
+                            {/if}
+                          {/each}
+                          <Pagination.Item>
+                            <Pagination.NextButton />
+                          </Pagination.Item>
+                        </Pagination.Content>
+                      {/snippet}
+                    </Pagination.Root>
+                  </div>
+                {/if}
               {/if}
             </Card.Content>
           </Card.Root>

@@ -12,11 +12,26 @@ import {
 export type CrawlerWatchdogInterventionsResponse =
   components["schemas"]["CrawlerRecentFailuresResponse"];
 export type CrawlerWatchdogInterventionItem = components["schemas"]["CrawlerRecentFailureItem"];
+// 25 rows mirrors the active-inventory page size so operators get a
+// consistent paging rhythm across tabs. When the watchdog has stopped
+// more than 25 crawls in the window, the inline `prev`/`next` controls
+// page through the remainder client-side.
 export const CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS = {
   days: 7,
-  limit: 5,
+  limit: 25,
   offset: 0
 } as const;
+
+export const CRAWLER_WATCHDOG_INTERVENTIONS_PAGE_SIZE =
+  CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS.limit;
+
+export function offsetFromCrawlerWatchdogInterventionsPage(
+  page: number,
+  pageSize: number = CRAWLER_WATCHDOG_INTERVENTIONS_PAGE_SIZE
+): number {
+  if (pageSize <= 0) return 0;
+  return Math.max(0, page - 1) * pageSize;
+}
 
 export function getCrawlerWatchdogInterventionWebsiteLabel(
   item: CrawlerWatchdogInterventionItem
