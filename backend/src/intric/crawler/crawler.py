@@ -88,10 +88,15 @@ class _CrawlStoppable(Protocol):
     """Subset of `CrawlManager` the heartbeat helper needs to stop the crawl.
 
     Keeping the protocol narrow lets unit tests substitute a fake without
-    constructing a full Scrapy `CrawlManager`.
+    constructing a full Scrapy `CrawlManager`. The return type is `object`
+    rather than `None` because the real `CrawlManager.stop_crawl` is wrapped
+    by `@crochet.run_in_reactor` and therefore returns `EventualResult[None]`
+    — the helper here fires-and-forgets the result, so widening to `object`
+    keeps the Protocol structurally compatible with the decorated method
+    without leaking crochet's `EventualResult` into the heartbeat module.
     """
 
-    def stop_crawl(self, *, reason: str) -> None: ...
+    def stop_crawl(self, *, reason: str) -> object: ...
 
 
 async def _run_heartbeat_until_done(

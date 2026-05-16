@@ -188,6 +188,81 @@ async def test_active_inventory_lifecycle_filter_terminal_returns_empty(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_active_inventory_excludes_in_progress_jobs_with_finished_at_set(
+    client,
+    db_session,
+    admin_user,
+    admin_user_api_key,
+):
+    """Defense-in-depth: a Jobs row with status=IN_PROGRESS but
+    finished_at!=NULL is an inconsistent terminal state (the worker
+    should have flipped status before setting finished_at). The active
+    query excludes such rows so the Python lifecycle classifier and the
+    SQL filter cannot disagree on whether the row is RUNNING or TERMINAL.
+    Codex AB-tier finding from the lifecycle-filter review."""
+    now = datetime.now(timezone.utc)
+
+    async with db_session() as session:
+        embedding_model_id = await _embedding_model_id(session)
+        website = Websites(
+            name="Inconsistent terminal-state website",
+            url=f"https://terminal-{uuid4()}.example.com",
+            download_files=True,
+            crawl_type=CrawlType.CRAWL,
+            update_interval=UpdateInterval.NEVER,
+            size=0,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+        )
+        session.add(website)
+        await session.flush()
+
+        ghost_job = Jobs(
+            id=uuid4(),
+            user_id=admin_user.id,
+            task=Task.CRAWL.value,
+            status=Status.IN_PROGRESS.value,  # inconsistent...
+            result_location=None,
+            name="Ghost IN_PROGRESS with finished_at set",
+            finished_at=now,  # ...with finished_at populated
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(ghost_job)
+        await session.flush()
+
+        ghost_run = CrawlRuns(
+            id=uuid4(),
+            created_at=now,
+            updated_at=now,
+            tenant_id=admin_user.tenant_id,
+            website_id=website.id,
+            job_id=ghost_job.id,
+            pages_crawled=5,
+        )
+        session.add(ghost_run)
+        await session.flush()
+        ghost_job_id = str(ghost_job.id)
+        await session.commit()
+
+    response = await client.get(
+        "/api/v1/admin/crawler/active",
+        headers={"X-API-Key": admin_user_api_key.key},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    response_job_ids = {item["job_id"] for item in data["items"]}
+    assert ghost_job_id not in response_job_ids, (
+        "Active inventory must exclude IN_PROGRESS rows with finished_at set "
+        "to keep the SQL filter and Python lifecycle classifier from "
+        "disagreeing at the row level."
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_active_inventory_lifecycle_filter_unknown_value_rejected(
     client,
     admin_user_api_key,

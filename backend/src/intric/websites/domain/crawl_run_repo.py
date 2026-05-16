@@ -275,6 +275,15 @@ class CrawlRunRepository:
         active_conditions = [
             Jobs.task == Task.CRAWL.value,
             Jobs.status.in_([Status.QUEUED.value, Status.IN_PROGRESS.value]),
+            # Defensive: a Jobs row with status=IN_PROGRESS but finished_at!=NULL
+            # is an inconsistent terminal state — the worker should have flipped
+            # status before setting finished_at. Excluding such rows here keeps
+            # `derive_crawl_lifecycle_from_counters(finished_at=row.finished_at)`
+            # from disagreeing with the SQL filter at the row level (the canonical
+            # classifier treats finished_at!=NULL as TERMINAL regardless of
+            # status, so any row that surfaces here with finished_at set would
+            # be classified TERMINAL in Python but pass the active-query SQL).
+            Jobs.finished_at.is_(None),
         ]
         if lifecycle_filter is not None:
             # The SQL classifier mirrors `derive_crawl_lifecycle_from_counters`
@@ -355,6 +364,14 @@ class CrawlRunRepository:
                 Jobs.status.label("job_status"),
                 Jobs.created_at.label("job_created_at"),
                 Jobs.updated_at.label("job_updated_at"),
+                # Select the real finished_at column so the renderer can pass
+                # it through to `derive_crawl_lifecycle_from_counters` instead
+                # of hardcoding `finished_at=None`. The active-conditions WHERE
+                # clause already guards `Jobs.finished_at IS NULL` so this
+                # column is always NULL in practice — but routing the actual
+                # value through removes a load-bearing assumption that a
+                # future maintainer would otherwise have to remember.
+                Jobs.finished_at.label("job_finished_at"),
                 CrawlRunsTable.id.label("crawl_run_id"),
                 CrawlRunsTable.website_id.label("website_id"),
                 Websites.name.label("website_name"),
@@ -404,7 +421,7 @@ class CrawlRunRepository:
             }
             lifecycle_state = derive_crawl_lifecycle_from_counters(
                 status=status,
-                finished_at=None,
+                finished_at=row["job_finished_at"],
                 **counters,
             )
             items.append(

@@ -172,18 +172,31 @@ class FileSizeLimitStatsExtension:
     def headers_received(
         self,
         headers: object,
-        body_length: int,
+        body_length: object,
         request: object,
         spider: object,
     ) -> None:
+        """Scrapy passes `body_length` as `object` despite its docstring saying
+        `int`: on real-world HTTP responses Content-Length may surface as a
+        decimal `str`, bytes, or be missing entirely (HTTP/1.1 chunked
+        encoding, HTTP/2 trailers). Coerce defensively at the signal boundary
+        so the `_should_stop_file_download` comparison never sees a non-int —
+        the previous annotation `body_length: int` was a load-bearing fiction
+        that raised `TypeError: '>' not supported between instances of 'str'
+        and 'int'` on the hot path. When the header is unparseable the early
+        size check is skipped and `bytes_received` still bounds the download.
+        """
         del headers
-        if not self._should_stop_file_download(request, observed_size=body_length):
+        observed = _coerce_optional_nonnegative_int(body_length)
+        if observed is None:
+            return
+        if not self._should_stop_file_download(request, observed_size=observed):
             return
 
         _record_file_too_large_skip(
             spider=spider,
             request=request,
-            observed_size=body_length,
+            observed_size=observed,
             download_max_size=self._download_max_size,
         )
         raise _new_stop_download()
@@ -232,6 +245,38 @@ def _is_file_download_too_large_failure(failure: Failure) -> bool:
 def _observed_size_from_request(request: object) -> int:
     observed_size = _request_meta(request).get(FILE_SIZE_SKIP_OBSERVED_BYTES_META_KEY)
     return observed_size if isinstance(observed_size, int) else 0
+
+
+def _coerce_optional_nonnegative_int(value: object) -> int | None:
+    """Coerce a Scrapy-signal-supplied size value to a non-negative int.
+
+    Scrapy's `headers_received` signal documents `body_length: int` but in
+    practice forwards the raw Content-Length header value, which arrives as
+    `str` (`"1024"`), `bytes` (`b"1024"`), `int` (parsed by some middleware),
+    or is absent entirely (chunked transfer / HTTP/2 trailers). Returns
+    `None` for any value that cannot be safely interpreted as a non-negative
+    int so the caller can skip the early size check and rely on the
+    cumulative `bytes_received` path instead.
+    """
+    if isinstance(value, bool):
+        return None  # bool is an int subclass; reject explicitly to avoid surprises
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            value = value.decode("ascii", errors="strict")
+        except UnicodeDecodeError:
+            return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            parsed = int(stripped)
+        except ValueError:
+            return None
+        return parsed if parsed >= 0 else None
+    return None
 
 
 def _observed_size_from_failure(failure: Failure) -> int:
