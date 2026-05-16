@@ -4,7 +4,9 @@ import { overwriteGetLocale } from "$lib/paraglide/runtime";
 
 import type { CrawlerActiveInventoryItem } from "./crawlerActiveInventory";
 import {
+  CRAWLER_ACTIVE_INVENTORY_DEFAULTS,
   CRAWLER_ACTIVE_INVENTORY_LIFECYCLE_FILTER_OPTIONS,
+  CRAWLER_ACTIVE_INVENTORY_PAGE_SIZES,
   canAbortCrawlerActiveInventoryItem,
   getCrawlerAbortConflictMessage,
   getCrawlerActiveInventoryLifecycleFilterLabel,
@@ -12,7 +14,10 @@ import {
   getCrawlerActiveInventorySourceLabel,
   getCrawlerActiveInventoryStartedByLabel,
   getCrawlerActiveInventoryStatusLabel,
-  getCrawlerActiveInventoryWebsiteLabel
+  getCrawlerActiveInventoryWebsiteLabel,
+  isCrawlerActiveInventoryPageSize,
+  offsetFromCrawlerActiveInventoryPage,
+  pageFromCrawlerActiveInventoryOffset
 } from "./crawlerActiveInventory";
 
 overwriteGetLocale(() => "en");
@@ -214,4 +219,56 @@ test("lifecycle filter options cover all and the three active buckets exhaustive
   expect(getCrawlerActiveInventoryLifecycleFilterLabel("running_no_progress")).toBe(
     "Running, waiting for progress"
   );
+});
+
+test("page size options expose 25/50/100 and the default matches the first option", () => {
+  // The backend accepts up to limit=200, but the UI keeps the choices
+  // small so the page-size selector stays a quick keyboard-toggle, not a
+  // free numeric input. 25 is the default because it fits a 1080p screen
+  // without scrolling; 50/100 unblock operators with hundreds of crawls
+  // who would otherwise paginate 25 rows at a time.
+  expect(CRAWLER_ACTIVE_INVENTORY_PAGE_SIZES).toEqual([25, 50, 100]);
+  expect(CRAWLER_ACTIVE_INVENTORY_DEFAULTS.limit).toBe(CRAWLER_ACTIVE_INVENTORY_PAGE_SIZES[0]);
+  expect(isCrawlerActiveInventoryPageSize(25)).toBe(true);
+  expect(isCrawlerActiveInventoryPageSize(50)).toBe(true);
+  expect(isCrawlerActiveInventoryPageSize(100)).toBe(true);
+  // Numbers outside the curated list must not round-trip through the
+  // selector — they could come from a stale URL query string and would
+  // otherwise let the operator hit the 200 cap without warning.
+  expect(isCrawlerActiveInventoryPageSize(40)).toBe(false);
+  expect(isCrawlerActiveInventoryPageSize(0)).toBe(false);
+  expect(isCrawlerActiveInventoryPageSize(-1)).toBe(false);
+});
+
+test("offset / page conversion is invertible across the typical ranges", () => {
+  for (const pageSize of CRAWLER_ACTIVE_INVENTORY_PAGE_SIZES) {
+    for (const page of [1, 2, 5, 10]) {
+      const offset = offsetFromCrawlerActiveInventoryPage(page, pageSize);
+      expect(pageFromCrawlerActiveInventoryOffset(offset, pageSize)).toBe(page);
+    }
+  }
+});
+
+test("page-from-offset normalizes degenerate inputs to page 1", () => {
+  // Out-of-band values can land here via URL query strings or a stale
+  // bookmark. Page 1 is the safe fallback — never zero or negative,
+  // since the pagination component treats page < 1 as an unbounded back
+  // arrow.
+  expect(pageFromCrawlerActiveInventoryOffset(0, 25)).toBe(1);
+  expect(pageFromCrawlerActiveInventoryOffset(-5, 25)).toBe(1);
+  expect(pageFromCrawlerActiveInventoryOffset(24, 25)).toBe(1);
+  expect(pageFromCrawlerActiveInventoryOffset(25, 25)).toBe(2);
+  expect(pageFromCrawlerActiveInventoryOffset(60, 25)).toBe(3);
+  expect(pageFromCrawlerActiveInventoryOffset(100, 0)).toBe(1);
+});
+
+test("offset-from-page clamps page < 1 to offset 0", () => {
+  // bits-ui's pagination primitive can emit page=0 during boundary
+  // transitions; clamping prevents an offset=-25 round-trip to the
+  // backend (which would 422).
+  expect(offsetFromCrawlerActiveInventoryPage(1, 25)).toBe(0);
+  expect(offsetFromCrawlerActiveInventoryPage(0, 25)).toBe(0);
+  expect(offsetFromCrawlerActiveInventoryPage(-1, 25)).toBe(0);
+  expect(offsetFromCrawlerActiveInventoryPage(2, 25)).toBe(25);
+  expect(offsetFromCrawlerActiveInventoryPage(4, 50)).toBe(150);
 });

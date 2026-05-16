@@ -13,9 +13,34 @@ type CrawlerAbortConflictCode = components["schemas"]["CrawlAbortConflictCode"];
 type CrawlerAbortConflictResponse = components["schemas"]["CrawlerAbortConflictResponse"];
 
 export const CRAWLER_ACTIVE_INVENTORY_DEFAULTS = {
-  limit: 8,
+  // 25 fits comfortably on a 1080p screen without forcing a second
+  // scroll just to see the abort button. The backend caps `limit` at
+  // 200; the UI also exposes 50/100 via CRAWLER_ACTIVE_INVENTORY_PAGE_SIZES
+  // so operators with hundreds of in-flight crawls don't have to paginate
+  // through 25-row pages to find the one they need to cancel.
+  limit: 25,
   offset: 0
 } as const;
+
+export const CRAWLER_ACTIVE_INVENTORY_PAGE_SIZES: readonly number[] = [25, 50, 100] as const;
+
+export type CrawlerActiveInventoryPageSize = (typeof CRAWLER_ACTIVE_INVENTORY_PAGE_SIZES)[number];
+
+export function isCrawlerActiveInventoryPageSize(
+  value: number
+): value is CrawlerActiveInventoryPageSize {
+  return (CRAWLER_ACTIVE_INVENTORY_PAGE_SIZES as readonly number[]).includes(value);
+}
+
+export function pageFromCrawlerActiveInventoryOffset(offset: number, pageSize: number): number {
+  if (pageSize <= 0) return 1;
+  return Math.max(1, Math.floor(Math.max(0, offset) / pageSize) + 1);
+}
+
+export function offsetFromCrawlerActiveInventoryPage(page: number, pageSize: number): number {
+  if (pageSize <= 0) return 0;
+  return Math.max(0, page - 1) * pageSize;
+}
 
 export function getCrawlerActiveInventoryWebsiteLabel(item: CrawlerActiveInventoryItem): string {
   const websiteName = item.website_name?.trim();
