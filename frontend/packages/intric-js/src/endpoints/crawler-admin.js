@@ -13,7 +13,7 @@ export function initCrawlerAdmin(client) {
   return {
     /**
      * Get active and queued crawler runs for the current tenant.
-     * @param {{limit?: number, offset?: number}} [params]
+     * @param {{limit?: number, offset?: number, lifecycle_status?: import('../types/schema').components["schemas"]["CrawlLifecycle"]}} [params]
      * @returns {Promise<CrawlerActiveInventoryResponse>}
      * @throws {IntricError}
      */

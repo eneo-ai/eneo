@@ -4,9 +4,13 @@ import { overwriteGetLocale } from "$lib/paraglide/runtime";
 
 import type { CrawlerActiveInventoryItem } from "./crawlerActiveInventory";
 import {
+  CRAWLER_ACTIVE_INVENTORY_LIFECYCLE_FILTER_OPTIONS,
   canAbortCrawlerActiveInventoryItem,
   getCrawlerAbortConflictMessage,
+  getCrawlerActiveInventoryLifecycleFilterLabel,
   getCrawlerActiveInventoryResultLabels,
+  getCrawlerActiveInventorySourceLabel,
+  getCrawlerActiveInventoryStartedByLabel,
   getCrawlerActiveInventoryStatusLabel,
   getCrawlerActiveInventoryWebsiteLabel
 } from "./crawlerActiveInventory";
@@ -18,6 +22,12 @@ const baseActiveItem: CrawlerActiveInventoryItem = {
   crawl_run_id: "22222222-2222-4222-8222-222222222222",
   website_id: "12345678-1234-4234-8234-123456789abc",
   website_name: null,
+  space_id: null,
+  space_name: null,
+  collection_id: null,
+  collection_name: null,
+  user_started_by_id: null,
+  user_started_by_email: null,
   tenant_id: "33333333-3333-4333-8333-333333333333",
   tenant_display_name: "Tenant",
   status: "in progress",
@@ -143,4 +153,65 @@ test("abort conflict messages use typed backend conflict codes", () => {
       )
     )
   ).toBe("This crawler job can no longer be cancelled. Refreshing status.");
+});
+
+test("active inventory source label combines space and collection with separator", () => {
+  expect(
+    getCrawlerActiveInventorySourceLabel({
+      ...baseActiveItem,
+      space_name: "Marketing",
+      collection_name: "Brand knowledge"
+    })
+  ).toBe("Marketing › Brand knowledge");
+});
+
+test("active inventory source label falls back to whichever attribution is set", () => {
+  expect(
+    getCrawlerActiveInventorySourceLabel({
+      ...baseActiveItem,
+      space_name: "Marketing",
+      collection_name: null
+    })
+  ).toBe("Marketing");
+  expect(
+    getCrawlerActiveInventorySourceLabel({
+      ...baseActiveItem,
+      space_name: null,
+      collection_name: "Brand knowledge"
+    })
+  ).toBe("Brand knowledge");
+  expect(getCrawlerActiveInventorySourceLabel(baseActiveItem)).toBeNull();
+});
+
+test("active inventory started-by label returns trimmed email or null", () => {
+  expect(
+    getCrawlerActiveInventoryStartedByLabel({
+      ...baseActiveItem,
+      user_started_by_email: "owner@example.com"
+    })
+  ).toBe("owner@example.com");
+  expect(
+    getCrawlerActiveInventoryStartedByLabel({
+      ...baseActiveItem,
+      user_started_by_email: "   "
+    })
+  ).toBeNull();
+  expect(getCrawlerActiveInventoryStartedByLabel(baseActiveItem)).toBeNull();
+});
+
+test("lifecycle filter options cover all and the three active buckets exhaustively", () => {
+  expect(CRAWLER_ACTIVE_INVENTORY_LIFECYCLE_FILTER_OPTIONS).toEqual([
+    "all",
+    "queued",
+    "running_with_progress",
+    "running_no_progress"
+  ]);
+  expect(getCrawlerActiveInventoryLifecycleFilterLabel("all")).toBe("All");
+  expect(getCrawlerActiveInventoryLifecycleFilterLabel("queued")).toBe("Queued");
+  expect(getCrawlerActiveInventoryLifecycleFilterLabel("running_with_progress")).toBe(
+    "Running with progress"
+  );
+  expect(getCrawlerActiveInventoryLifecycleFilterLabel("running_no_progress")).toBe(
+    "Running, waiting for progress"
+  );
 });

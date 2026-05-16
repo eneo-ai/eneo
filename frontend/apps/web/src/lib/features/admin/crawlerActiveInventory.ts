@@ -80,6 +80,58 @@ export function isCrawlerActiveInventoryItemRunning(item: CrawlerActiveInventory
   );
 }
 
+export type CrawlerActiveInventoryLifecycleFilter =
+  | "all"
+  | "queued"
+  | "running_with_progress"
+  | "running_no_progress";
+
+export const CRAWLER_ACTIVE_INVENTORY_LIFECYCLE_FILTER_OPTIONS: readonly CrawlerActiveInventoryLifecycleFilter[] =
+  ["all", "queued", "running_with_progress", "running_no_progress"] as const;
+
+export function getCrawlerActiveInventoryLifecycleFilterLabel(
+  value: CrawlerActiveInventoryLifecycleFilter
+): string {
+  switch (value) {
+    case "all":
+      return m.crawler_active_inventory_filter_all();
+    case "queued":
+      return m.crawler_active_inventory_status_queued();
+    case "running_with_progress":
+      return m.crawler_active_inventory_status_running_with_progress();
+    case "running_no_progress":
+      return m.crawler_active_inventory_status_running_no_progress();
+    default: {
+      const exhaustive: never = value;
+      return exhaustive;
+    }
+  }
+}
+
+export function getCrawlerActiveInventorySourceLabel(
+  item: CrawlerActiveInventoryItem
+): string | null {
+  const space = item.space_name?.trim();
+  const collection = item.collection_name?.trim();
+  if (space && collection) {
+    return `${space} › ${collection}`;
+  }
+  if (space) {
+    return space;
+  }
+  if (collection) {
+    return collection;
+  }
+  return null;
+}
+
+export function getCrawlerActiveInventoryStartedByLabel(
+  item: CrawlerActiveInventoryItem
+): string | null {
+  const email = item.user_started_by_email?.trim();
+  return email && email.length > 0 ? email : null;
+}
+
 function readCrawlerAbortConflict(value: unknown): CrawlerAbortConflictResponse | null {
   const response = readObject(value);
   if (response === null) return null;

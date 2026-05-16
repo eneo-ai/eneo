@@ -16,6 +16,7 @@
   import * as Select from "$lib/components/ui/select/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
+  import * as ToggleGroup from "$lib/components/ui/toggle-group/index.js";
   import { Page, Settings } from "$lib/components/layout";
   import { toast } from "$lib/components/toast";
   import { getIntric } from "$lib/core/Intric.js";
@@ -34,13 +35,19 @@
     type CrawlerSettingsUpdate
   } from "$lib/features/admin/crawlerSettings";
   import {
+    CRAWLER_ACTIVE_INVENTORY_DEFAULTS,
+    CRAWLER_ACTIVE_INVENTORY_LIFECYCLE_FILTER_OPTIONS,
     canAbortCrawlerActiveInventoryItem,
     getCrawlerAbortConflictMessage,
+    getCrawlerActiveInventoryLifecycleFilterLabel,
     getCrawlerActiveInventoryResultLabels,
+    getCrawlerActiveInventorySourceLabel,
+    getCrawlerActiveInventoryStartedByLabel,
     getCrawlerActiveInventoryStatusLabel,
     getCrawlerActiveInventoryWebsiteLabel,
     isCrawlerActiveInventoryItemRunning,
     type CrawlerActiveInventoryItem,
+    type CrawlerActiveInventoryLifecycleFilter,
     type CrawlerActiveInventoryResponse
   } from "$lib/features/admin/crawlerActiveInventory";
   import {
@@ -144,6 +151,16 @@
   let intervalCandidate = $state<CrawlerTenantFailureInventoryItem | null>(null);
   let intervalDraft = $state<CrawlerUpdateInterval>("never");
   let savingIntervalWebsiteId = $state<string | null>(null);
+
+  let activeInventoryLifecycleFilter = $state<CrawlerActiveInventoryLifecycleFilter>("all");
+  let activeInventoryFiltered = $state<CrawlerActiveInventoryResponse | null>(null);
+  let activeInventoryFilterBusy = $state(false);
+  // The visible active inventory: the filtered client result wins when set,
+  // otherwise the unfiltered SSR payload from the page load. Keeping both
+  // lets the rapid-toggle UX stay responsive without flashing empty rows.
+  const visibleActiveInventory = $derived(
+    activeInventoryLifecycleFilter === "all" ? data.crawlerActiveInventory : activeInventoryFiltered
+  );
 
   const fieldTextByKey: Record<string, () => string> = {
     crawler_hash_skip_title: () => m.crawler_hash_skip_title(),
@@ -375,6 +392,27 @@
     intervalDialogOpen = true;
   }
 
+  async function applyLifecycleFilter(next: CrawlerActiveInventoryLifecycleFilter) {
+    if (next === activeInventoryLifecycleFilter) return;
+    activeInventoryLifecycleFilter = next;
+    if (next === "all") {
+      activeInventoryFiltered = null;
+      return;
+    }
+    activeInventoryFilterBusy = true;
+    try {
+      const response = await intric.crawlerAdmin.activeInventory({
+        ...CRAWLER_ACTIVE_INVENTORY_DEFAULTS,
+        lifecycle_status: next
+      });
+      activeInventoryFiltered = response;
+    } catch (error) {
+      toastError(error, m.crawler_active_inventory_filter_failed());
+    } finally {
+      activeInventoryFilterBusy = false;
+    }
+  }
+
   async function handleSaveUpdateInterval() {
     const candidate = intervalCandidate;
     if (candidate === null) return;
@@ -512,14 +550,36 @@
               </h2>
               <Card.Description>{m.crawler_active_inventory_description()}</Card.Description>
             </div>
-            {#if data.crawlerActiveInventory}
+            {#if visibleActiveInventory}
               <Badge variant="outline" class="shrink-0 tabular-nums">
                 {m.crawler_active_inventory_count({
-                  shown: data.crawlerActiveInventory.items.length,
-                  total: data.crawlerActiveInventory.total
+                  shown: visibleActiveInventory.items.length,
+                  total: visibleActiveInventory.total
                 })}
               </Badge>
             {/if}
+          </div>
+          <div class="pt-3">
+            <ToggleGroup.Root
+              type="single"
+              variant="outline"
+              size="sm"
+              value={activeInventoryLifecycleFilter}
+              onValueChange={(next) => {
+                if (next) {
+                  void applyLifecycleFilter(next as CrawlerActiveInventoryLifecycleFilter);
+                }
+              }}
+              aria-label={m.crawler_active_inventory_filter_label()}
+              disabled={activeInventoryFilterBusy}
+              class="flex flex-wrap"
+            >
+              {#each CRAWLER_ACTIVE_INVENTORY_LIFECYCLE_FILTER_OPTIONS as option (option)}
+                <ToggleGroup.Item value={option}>
+                  {getCrawlerActiveInventoryLifecycleFilterLabel(option)}
+                </ToggleGroup.Item>
+              {/each}
+            </ToggleGroup.Root>
           </div>
         </Card.Header>
         <Card.Content class="pt-0">
@@ -528,19 +588,25 @@
               <TriangleAlert aria-hidden="true" />
               <Alert.Description>{m.crawler_active_inventory_load_error()}</Alert.Description>
             </Alert.Root>
-          {:else if !data.crawlerActiveInventory || data.crawlerActiveInventory.items.length === 0}
+          {:else if activeInventoryFilterBusy}
+            <p class="text-muted-foreground text-sm">
+              {m.crawler_active_inventory_filter_busy()}
+            </p>
+          {:else if !visibleActiveInventory || visibleActiveInventory.items.length === 0}
             <p class="text-muted-foreground text-sm">
               {m.crawler_active_inventory_empty()}
             </p>
           {:else}
             <div class="overflow-x-auto">
-              <Table.Root class="min-w-[56rem]">
+              <Table.Root class="min-w-[64rem]">
                 <Table.Caption class="sr-only">
                   {m.crawler_active_inventory_table_caption()}
                 </Table.Caption>
                 <Table.Header>
                   <Table.Row>
                     <Table.Head>{m.crawler_active_inventory_column_website()}</Table.Head>
+                    <Table.Head>{m.crawler_active_inventory_column_source()}</Table.Head>
+                    <Table.Head>{m.crawler_active_inventory_column_started_by()}</Table.Head>
                     <Table.Head>{m.crawler_active_inventory_column_status()}</Table.Head>
                     <Table.Head>{m.crawler_active_inventory_column_activity()}</Table.Head>
                     <Table.Head class="text-right">
@@ -552,7 +618,9 @@
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
-                  {#each data.crawlerActiveInventory.items as activeItem (activeItem.job_id)}
+                  {#each visibleActiveInventory.items as activeItem (activeItem.job_id)}
+                    {@const sourceLabel = getCrawlerActiveInventorySourceLabel(activeItem)}
+                    {@const startedByLabel = getCrawlerActiveInventoryStartedByLabel(activeItem)}
                     <Table.Row>
                       <Table.Cell class="max-w-64">
                         <span
@@ -561,6 +629,26 @@
                         >
                           {getCrawlerActiveInventoryWebsiteLabel(activeItem)}
                         </span>
+                      </Table.Cell>
+                      <Table.Cell class="text-muted-foreground max-w-56 truncate text-sm">
+                        {#if sourceLabel}
+                          <span class="block truncate" title={sourceLabel}>{sourceLabel}</span>
+                        {:else}
+                          <span class="text-muted-foreground/60 text-xs">
+                            {m.crawler_active_inventory_source_unknown()}
+                          </span>
+                        {/if}
+                      </Table.Cell>
+                      <Table.Cell class="text-muted-foreground max-w-56 truncate text-sm">
+                        {#if startedByLabel}
+                          <span class="block truncate" title={startedByLabel}>
+                            {startedByLabel}
+                          </span>
+                        {:else}
+                          <span class="text-muted-foreground/60 text-xs">
+                            {m.crawler_active_inventory_started_by_unknown()}
+                          </span>
+                        {/if}
                       </Table.Cell>
                       <Table.Cell>
                         <Badge
