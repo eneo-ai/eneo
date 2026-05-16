@@ -155,8 +155,20 @@
   let circuitResetCandidate = $state<CrawlerCircuitBreakerResetCandidate | null>(null);
   let resettingCircuitWebsiteId = $state<string | null>(null);
 
+  // Typed shape consumed by the interval-edit dialog so the candidate
+  // can come from either the failure inventory (current source) OR the
+  // active inventory (new in sub-tranche 2b). Active-inventory rows
+  // carry no `website_url`, so the dialog falls back to the website
+  // name + a job-id-derived label.
+  type IntervalEditCandidate = {
+    website_id: string;
+    website_name: string | null;
+    website_url: string | null;
+    update_interval: CrawlerUpdateInterval;
+  };
+
   let intervalDialogOpen = $state(false);
-  let intervalCandidate = $state<CrawlerTenantFailureInventoryItem | null>(null);
+  let intervalCandidate = $state<IntervalEditCandidate | null>(null);
   let intervalDraft = $state<CrawlerUpdateInterval>("never");
   let savingIntervalWebsiteId = $state<string | null>(null);
 
@@ -425,7 +437,28 @@
   }
 
   function openIntervalDialog(item: CrawlerTenantFailureInventoryItem) {
-    intervalCandidate = item;
+    intervalCandidate = {
+      website_id: item.website_id,
+      website_name: item.website_name,
+      website_url: item.website_url,
+      update_interval: item.update_interval as CrawlerUpdateInterval
+    };
+    intervalDraft = item.update_interval as CrawlerUpdateInterval;
+    intervalDialogOpen = true;
+  }
+
+  function openIntervalDialogForActiveItem(item: CrawlerActiveInventoryItem) {
+    // Active inventory rows carry the new tenant-qualified
+    // `update_interval` from sub-tranche 2a but no `website_url` (the
+    // active inventory wire intentionally omits the URL). Pass null
+    // through and let the dialog fall back to the website name.
+    if (item.update_interval === null || item.website_id === null) return;
+    intervalCandidate = {
+      website_id: item.website_id,
+      website_name: item.website_name,
+      website_url: null,
+      update_interval: item.update_interval as CrawlerUpdateInterval
+    };
     intervalDraft = item.update_interval as CrawlerUpdateInterval;
     intervalDialogOpen = true;
   }
@@ -496,7 +529,12 @@
     }
 
     savingIntervalWebsiteId = candidate.website_id;
-    const websiteLabel = candidate.website_name?.trim() || candidate.website_url;
+    const websiteLabel =
+      candidate.website_name?.trim() ||
+      candidate.website_url ||
+      m.crawler_active_inventory_unknown_website({
+        id: candidate.website_id.slice(0, 8)
+      });
 
     try {
       await intric.crawlerAdmin.setUpdateInterval(candidate.website_id, nextInterval);
@@ -506,7 +544,8 @@
       await Promise.all([
         invalidate("admin:crawler-failure-inventory"),
         invalidate("admin:crawler-scheduled"),
-        invalidate("admin:crawler-website-processing")
+        invalidate("admin:crawler-website-processing"),
+        invalidate("admin:crawler-active-inventory")
       ]);
     } catch (error) {
       toastError(error, m.crawler_update_interval_failed());
@@ -756,30 +795,49 @@
                             {formatDateTime(activeItem.job_updated_at)}
                           </Table.Cell>
                           <Table.Cell class="text-right">
-                            {#if canAbortCrawlerActiveInventoryItem(activeItem)}
-                              {@const ariaLabel = isCrawlerActiveInventoryItemRunning(activeItem)
-                                ? m.crawler_abort_button_aria_running({
-                                    website: getCrawlerActiveInventoryWebsiteLabel(activeItem)
-                                  })
-                                : m.crawler_abort_button_aria_queued({
+                            <div class="flex flex-wrap items-center justify-end gap-2">
+                              {#if activeItem.update_interval !== null && activeItem.website_id !== null}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled={savingIntervalWebsiteId !== null}
+                                  aria-label={m.crawler_update_interval_button_aria({
                                     website: getCrawlerActiveInventoryWebsiteLabel(activeItem)
                                   })}
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                disabled={abortingJobId !== null}
-                                aria-label={ariaLabel}
-                                onclick={() => openAbortDialog(activeItem)}
-                              >
-                                <CircleX data-icon="inline-start" aria-hidden="true" />
-                                {abortingJobId === activeItem.job_id
-                                  ? m.crawler_abort_button_busy()
-                                  : m.crawler_abort_button()}
-                              </Button>
-                            {:else}
-                              <span class="text-muted-foreground text-xs" aria-hidden="true">—</span
-                              >
-                            {/if}
+                                  onclick={() => openIntervalDialogForActiveItem(activeItem)}
+                                >
+                                  {savingIntervalWebsiteId === activeItem.website_id
+                                    ? m.crawler_update_interval_dialog_busy()
+                                    : m.crawler_update_interval_button()}
+                                </Button>
+                              {/if}
+                              {#if canAbortCrawlerActiveInventoryItem(activeItem)}
+                                {@const ariaLabel = isCrawlerActiveInventoryItemRunning(activeItem)
+                                  ? m.crawler_abort_button_aria_running({
+                                      website: getCrawlerActiveInventoryWebsiteLabel(activeItem)
+                                    })
+                                  : m.crawler_abort_button_aria_queued({
+                                      website: getCrawlerActiveInventoryWebsiteLabel(activeItem)
+                                    })}
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  disabled={abortingJobId !== null}
+                                  aria-label={ariaLabel}
+                                  onclick={() => openAbortDialog(activeItem)}
+                                >
+                                  <CircleX data-icon="inline-start" aria-hidden="true" />
+                                  {abortingJobId === activeItem.job_id
+                                    ? m.crawler_abort_button_busy()
+                                    : m.crawler_abort_button()}
+                                </Button>
+                              {/if}
+                              {#if !canAbortCrawlerActiveInventoryItem(activeItem) && (activeItem.update_interval === null || activeItem.website_id === null)}
+                                <span class="text-muted-foreground text-xs" aria-hidden="true"
+                                  >—</span
+                                >
+                              {/if}
+                            </div>
                           </Table.Cell>
                         </Table.Row>
                       {/each}
@@ -1598,7 +1656,11 @@
     {#if intervalCandidate}
       {@const intervalCurrent = intervalCandidate.update_interval as CrawlerUpdateInterval}
       {@const intervalWebsite =
-        intervalCandidate.website_name?.trim() || intervalCandidate.website_url}
+        intervalCandidate.website_name?.trim() ||
+        intervalCandidate.website_url ||
+        m.crawler_active_inventory_unknown_website({
+          id: intervalCandidate.website_id.slice(0, 8)
+        })}
       {@const intervalSaving = savingIntervalWebsiteId !== null}
       {@const pausing = isPausingTransition(intervalCurrent, intervalDraft)}
       {@const resuming = isResumingTransition(intervalCurrent, intervalDraft)}
