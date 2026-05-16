@@ -32,6 +32,12 @@ from intric.websites.domain.crawler_scheduled_aggregate import (
 from intric.websites.domain.crawler_scheduled_aggregate import (
     CrawlerScheduledIntervalBucket as DomainCrawlerScheduledIntervalBucket,
 )
+from intric.websites.domain.crawler_tenant_website_inventory import (
+    CrawlerTenantWebsiteInventory as DomainCrawlerTenantWebsiteInventory,
+)
+from intric.websites.domain.crawler_tenant_website_inventory import (
+    CrawlerTenantWebsiteInventoryItem as DomainCrawlerTenantWebsiteInventoryItem,
+)
 from intric.websites.domain.crawler_website_processing_aggregate import (
     CrawlerWebsiteProcessingAggregate as DomainCrawlerWebsiteProcessingAggregate,
 )
@@ -381,4 +387,79 @@ class CrawlerTenantWebsiteProcessingAggregateResponse(BaseModel):
             days=aggregate.days,
             since=aggregate.since,
             until=aggregate.until,
+        )
+
+
+class CrawlerTenantWebsiteInventoryItem(BaseModel):
+    """Wire shape for one row of the tenant Webbplatser governance table.
+
+    Mirrors the domain `CrawlerTenantWebsiteInventoryItem` with one
+    rename: the domain `size_bytes` becomes `size` on the wire to match
+    the byte-count naming used by the scheduled aggregate and processing
+    aggregate responses. The `failure_state` field is nullable on the
+    wire: a website with no classifier match is healthy. Ownership
+    columns expose the website *creator* (the user who registered the
+    website), not the user who most recently triggered a crawl — that's
+    the active-inventory's job.
+    """
+
+    website_id: UUID
+    url: str
+    name: str | None
+    created_at: datetime
+    update_interval: UpdateInterval
+    failure_state: CrawlerFailureState | None
+    consecutive_failures: int = Field(ge=0)
+    next_retry_at: datetime | None
+    last_crawled_at: datetime | None
+    size: int = Field(ge=0)
+    owner_user_id: UUID | None
+    owner_email: str | None
+    space_id: UUID | None
+    space_name: str | None
+    collection_id: UUID | None
+    collection_name: str | None
+
+    @classmethod
+    def from_domain(
+        cls, item: DomainCrawlerTenantWebsiteInventoryItem
+    ) -> "CrawlerTenantWebsiteInventoryItem":
+        return cls(
+            website_id=item.website_id,
+            url=item.url,
+            name=item.name,
+            created_at=item.created_at,
+            update_interval=item.update_interval,
+            failure_state=item.failure_state,
+            consecutive_failures=item.consecutive_failures,
+            next_retry_at=item.next_retry_at,
+            last_crawled_at=item.last_crawled_at,
+            size=item.size_bytes,
+            owner_user_id=item.owner_user_id,
+            owner_email=item.owner_email,
+            space_id=item.space_id,
+            space_name=item.space_name,
+            collection_id=item.collection_id,
+            collection_name=item.collection_name,
+        )
+
+
+class CrawlerTenantWebsiteInventoryResponse(BaseModel):
+    items: list[CrawlerTenantWebsiteInventoryItem]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=200)
+    offset: int = Field(ge=0)
+
+    @classmethod
+    def from_domain(
+        cls, inventory: DomainCrawlerTenantWebsiteInventory
+    ) -> "CrawlerTenantWebsiteInventoryResponse":
+        return cls(
+            items=[
+                CrawlerTenantWebsiteInventoryItem.from_domain(item)
+                for item in inventory.items
+            ],
+            total=inventory.total,
+            limit=inventory.limit,
+            offset=inventory.offset,
         )

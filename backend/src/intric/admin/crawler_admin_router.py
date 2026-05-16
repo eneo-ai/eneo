@@ -46,6 +46,9 @@ from intric.websites.domain.crawler_recent_failures import (
     RECENT_FAILURE_OUTCOME_CODES,
     WATCHDOG_INTERVENTION_OUTCOME_CODES,
 )
+from intric.websites.domain.crawler_tenant_website_inventory import (
+    CrawlerTenantWebsiteInventorySort,
+)
 from intric.websites.domain.website import UpdateInterval
 from intric.websites.domain.website_admin_repo import WebsiteAdminRepository
 from intric.websites.domain.website_sparse_repo import WebsiteSparseRepository
@@ -55,6 +58,7 @@ from intric.websites.presentation.crawler_admin_models import (
     CrawlerRecentFailuresResponse,
     CrawlerScheduledAggregateResponse,
     CrawlerTenantFailureInventoryResponse,
+    CrawlerTenantWebsiteInventoryResponse,
     CrawlerTenantWebsiteProcessingAggregateResponse,
 )
 
@@ -355,6 +359,55 @@ async def get_current_tenant_crawler_website_processing_aggregate(
                 tenant_id=current_user.tenant_id,
             )
         return CrawlerTenantWebsiteProcessingAggregateResponse.from_domain(aggregate)
+
+
+@router.get(
+    "/websites",
+    response_model=CrawlerTenantWebsiteInventoryResponse,
+    summary="List every website in the current tenant for governance + drill-down",
+)
+async def get_current_tenant_crawler_website_inventory(
+    current_user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 25,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    search: Annotated[str | None, Query(max_length=200)] = None,
+    update_interval: Annotated[UpdateInterval | None, Query()] = None,
+    space_id: Annotated[UUID | None, Query()] = None,
+    owner_user_id: Annotated[UUID | None, Query()] = None,
+    failure_state: Annotated[CrawlerFailureState | None, Query()] = None,
+    sort: Annotated[
+        CrawlerTenantWebsiteInventorySort, Query()
+    ] = CrawlerTenantWebsiteInventorySort.RECENT_CRAWL,
+) -> CrawlerTenantWebsiteInventoryResponse:
+    """Tenant-scoped lens on every Website row + its attribution + state.
+
+    The Webbplatser admin tab needs a single read that returns *all*
+    websites in the tenant — not the active-inventory subset (queued +
+    running) or the failure-inventory subset (broken). Each filter is
+    optional; the default (no filters, sort=recent_crawl) shows the page
+    layout an admin lands on after clicking the tab.
+
+    No mutation, no audit row required. The router-level telemetry block
+    captures the "did the admin look at the inventory" signal.
+    """
+    async with _admin_crawler_query_telemetry(
+        "tenant_website_inventory", tenant_id=current_user.tenant_id
+    ):
+        async with session.begin():
+            repo = WebsiteAdminRepository(session=session)
+            inventory = await repo.tenant_website_inventory(
+                tenant_id=current_user.tenant_id,
+                limit=limit,
+                offset=offset,
+                search=search,
+                update_interval=update_interval,
+                space_id=space_id,
+                owner_user_id=owner_user_id,
+                failure_state=failure_state,
+                sort=sort,
+            )
+        return CrawlerTenantWebsiteInventoryResponse.from_domain(inventory)
 
 
 @router.post(

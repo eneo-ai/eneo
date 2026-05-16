@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import TIMESTAMP, BigInteger, ForeignKey, String, and_, select
+from sqlalchemy import TIMESTAMP, BigInteger, ForeignKey, Index, String, and_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column, relationship
 
@@ -131,6 +131,27 @@ class Websites(BasePublic):
     # Relationships
     group: Mapped[CollectionsTable] = relationship()
     embedding_model: Mapped[EmbeddingModels] = relationship()
+
+    # Indexes for the admin Webbplatser governance table. Mirrors the
+    # audit_log_table approach: every index leads with tenant_id so a
+    # tenant-scoped WHERE can short-circuit before the secondary sort.
+    # `last_crawled_at` covers the default "recent crawl" sort path;
+    # `update_interval` covers the interval filter chip. Adding more
+    # composite indexes (space_id, user_id) is deferred until p95
+    # telemetry shows the seq-scan cost is real — those filters narrow
+    # results so much that index-free is still fast for most tenants.
+    __table_args__ = (
+        Index(
+            "idx_websites_tenant_last_crawled",
+            "tenant_id",
+            "last_crawled_at",
+        ),
+        Index(
+            "idx_websites_tenant_update_interval",
+            "tenant_id",
+            "update_interval",
+        ),
+    )
 
     @declared_attr  # pyright: ignore[reportArgumentType]  # dict return is valid for __mapper_args__ declared_attr
     def __mapper_args__(cls):  # type: ignore[override]
