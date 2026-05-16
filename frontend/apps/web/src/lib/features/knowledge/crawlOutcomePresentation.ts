@@ -58,6 +58,7 @@ const outcomeLabelsByCode = {
   CRAWL_FILES_TOO_LARGE_ONLY: () => m.crawl_outcome_files_too_large_only(),
   CRAWL_PARTIAL_TIMEOUT: () => m.crawl_outcome_partial_timeout(),
   CRAWL_SHUTDOWN_ERROR: () => m.crawl_outcome_shutdown_error(),
+  CRAWL_HEARTBEAT_FAILED: () => m.crawl_outcome_heartbeat_failed(),
   CRAWL_COMPLETED_WITH_PAGE_FAILURES: () => m.crawl_outcome_page_failures(),
   EMBEDDING_CONFIG_MISSING: () => m.crawl_outcome_embedding_config_missing(),
   UNKNOWN_CRAWL_ERROR: () => m.crawl_outcome_unknown_error()

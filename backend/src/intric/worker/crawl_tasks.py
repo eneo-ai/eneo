@@ -15,6 +15,7 @@ from intric.crawler.crawler import CrawlDiagnostics, CrawlShutdownError
 from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.main.container.container_overrides import scoped_container_overrides
+from intric.main.exceptions import CrawlPreempted, CrawlPreemptionCause
 from intric.main.logging import get_logger
 from intric.tenants.crawler_settings_helper import (
     TenantCrawlerSettings,
@@ -238,6 +239,16 @@ def _crawl_task_exception_outcome(exc: BaseException) -> CrawlOutcomeCode:
         return CrawlOutcomeCode.CRAWL_SHUTDOWN_ERROR
     if isinstance(exc, CrawlMaxAgeExceededError):
         return CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED
+    if (
+        isinstance(exc, CrawlPreempted)
+        and exc.cause == CrawlPreemptionCause.HEARTBEAT_FAILURE
+    ):
+        # Distinguish heartbeat-driven terminations from `UNKNOWN_CRAWL_ERROR`
+        # so operators can see "the crawler stopped talking" as a specific
+        # failure mode in the admin recent-failures view. Admin-abort
+        # preemptions (cause=ADMIN_ABORT) fall through because the abort flow
+        # already commits `CRAWL_ABORTED` independently.
+        return CrawlOutcomeCode.CRAWL_HEARTBEAT_FAILED
     return CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
 
 

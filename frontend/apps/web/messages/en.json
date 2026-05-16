@@ -889,6 +889,7 @@
   "crawl_outcome_files_too_large_only": "Files were too large to download",
   "crawl_outcome_page_failures": "Completed with page or file failures",
   "crawl_outcome_shutdown_error": "Crawler shutdown failed",
+  "crawl_outcome_heartbeat_failed": "Crawler stopped responding",
   "crawl_outcome_unknown_error": "Crawl failed",
   "crawl_outcome_affected_count": "{count} affected",
   "crawl_missing_failure_detail": "No technical error detail was stored for this crawl run.",

@@ -366,6 +366,14 @@ def _crawl_outcome_from_code(
             detail=detail,
         )
 
+    if code == CrawlOutcomeCode.CRAWL_HEARTBEAT_FAILED:
+        return CrawlOutcomePublic(
+            code=code,
+            severity=CrawlOutcomeSeverity.ERROR,
+            message_key="crawl_outcome_heartbeat_failed",
+            detail=detail,
+        )
+
     if code == CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED:
         return CrawlOutcomePublic(
             code=code,

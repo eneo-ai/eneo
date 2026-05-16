@@ -888,6 +888,7 @@
   "crawl_outcome_files_too_large_only": "Filerna var för stora att ladda ner",
   "crawl_outcome_page_failures": "Slutförd med sid- eller filfel",
   "crawl_outcome_shutdown_error": "Crawlern kunde inte stängas korrekt",
+  "crawl_outcome_heartbeat_failed": "Crawlern slutade svara",
   "crawl_outcome_unknown_error": "Indexering misslyckades",
   "crawl_outcome_affected_count": "{count} påverkade",
   "crawl_missing_failure_detail": "Ingen teknisk felinformation sparades för den här körningen.",

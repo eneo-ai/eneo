@@ -13,7 +13,7 @@ import time
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from intric.main.exceptions import CrawlPreempted
+from intric.main.exceptions import CrawlPreempted, CrawlPreemptionCause
 from intric.worker.crawl.preemption import is_job_preempted
 from intric.worker.redis.client import redis_pipeline, redis_pipeline_items
 from intric.worker.redis.lua_scripts import LuaScripts
@@ -128,12 +128,14 @@ class HeartbeatMonitor:
             await self.tick()
         except JobPreemptedError as exc:
             raise CrawlPreempted(
-                f"job {exc.job_id} preempted (external FAILED state)"
+                f"job {exc.job_id} preempted (external FAILED state)",
+                cause=CrawlPreemptionCause.ADMIN_ABORT,
             ) from exc
         except HeartbeatFailedError as exc:
             raise CrawlPreempted(
                 f"heartbeat failures exceeded threshold "
-                f"({exc.consecutive_failures}/{exc.max_failures})"
+                f"({exc.consecutive_failures}/{exc.max_failures})",
+                cause=CrawlPreemptionCause.HEARTBEAT_FAILURE,
             ) from exc
 
     async def _execute_heartbeat(self) -> None:

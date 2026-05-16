@@ -19,6 +19,7 @@ RECENT_FAILURE_OUTCOME_CODES: frozenset[CrawlOutcomeCode] = frozenset(
         CrawlOutcomeCode.CRAWL_DIRECT_ENQUEUE_FAILED,
         CrawlOutcomeCode.CRAWL_PARTIAL_TIMEOUT,
         CrawlOutcomeCode.CRAWL_SHUTDOWN_ERROR,
+        CrawlOutcomeCode.CRAWL_HEARTBEAT_FAILED,
         CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES,
         CrawlOutcomeCode.EMBEDDING_CONFIG_MISSING,
         CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR,

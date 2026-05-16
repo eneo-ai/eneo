@@ -283,6 +283,32 @@ class CrawlTimeoutError(CrawlerException):
         super().__init__(msg)
 
 
+class CrawlPreemptionCause(Enum):
+    """Why a crawl was preempted.
+
+    Persisted as part of the typed outcome the worker writes on
+    terminal commit. Two sources today, distinguished so operators see
+    a heartbeat-driven termination as a specific failure mode rather
+    than the generic `UNKNOWN_CRAWL_ERROR` fallback:
+
+    - `ADMIN_ABORT`: a tenant admin clicked Cancel; the worker
+      heartbeat read `Jobs.status=FAILED` and re-raised. The admin
+      abort flow already commits a typed `CRAWL_ABORTED` terminal
+      event independently, so this branch is mostly informational
+      — the worker exits cleanly without writing another terminal.
+    - `HEARTBEAT_FAILURE`: the heartbeat monitor exceeded its
+      configured `crawl_heartbeat_max_failures` threshold (DB or
+      Redis liveness writes failing repeatedly), so the worker
+      considers the crawl stuck and asks Scrapy to stop. This is the
+      case `_crawl_task_exception_outcome` maps to the new
+      `CrawlOutcomeCode.CRAWL_HEARTBEAT_FAILED` so the operator sees
+      "the heartbeat broke" instead of `UNKNOWN_CRAWL_ERROR`.
+    """
+
+    ADMIN_ABORT = "admin_abort"
+    HEARTBEAT_FAILURE = "heartbeat_failure"
+
+
 class CrawlPreempted(CrawlerException):
     """Raised when an external signal asks the crawler to stop early.
 
@@ -294,14 +320,27 @@ class CrawlPreempted(CrawlerException):
     exception so the worker's existing preemption handler can run the
     safe-cleanup-skip + slot-release reactor path.
 
+    `cause` discriminates the source so `_crawl_task_exception_outcome`
+    can branch on heartbeat-failure terminations (mapping them to the
+    typed `CRAWL_HEARTBEAT_FAILED` outcome) without scraping the
+    reason string. Defaults to `ADMIN_ABORT` for callers that
+    pre-date the discriminator — those raise sites are being migrated
+    in the same tranche that introduced `CRAWL_HEARTBEAT_FAILED`.
+
     This exception lives in the crawler module's exception surface (not
     the worker module) so `crawler/crawler.py` can catch it without
     importing worker code — preserving the layer separation between
     Scrapy orchestration and ARQ worker plumbing.
     """
 
-    def __init__(self, reason: str):
+    def __init__(
+        self,
+        reason: str,
+        *,
+        cause: CrawlPreemptionCause = CrawlPreemptionCause.ADMIN_ABORT,
+    ):
         self.reason = reason
+        self.cause = cause
         super().__init__(f"Crawl preempted: {reason}")
 
 

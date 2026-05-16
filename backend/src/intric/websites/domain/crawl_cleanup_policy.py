@@ -33,8 +33,16 @@ _CLEANUP_POLICY_BY_OUTCOME: dict[CrawlOutcomeCode, CleanupPolicy] = {
     CrawlOutcomeCode.CRAWL_SOURCE_RETENTION_ONLY: CleanupPolicy.CLEANUP_ALLOWED,
     CrawlOutcomeCode.CRAWL_ALL_UNCHANGED: CleanupPolicy.CLEANUP_ALLOWED,
     CrawlOutcomeCode.CRAWL_FILES_TOO_LARGE_ONLY: CleanupPolicy.CLEANUP_NOT_REACHED,
+    # Admin-initiated abort stops the worker before cleanup. The page set
+    # the crawler had at the moment of abort is partial; running stale
+    # cleanup against it would delete blobs that are still canonical.
+    CrawlOutcomeCode.CRAWL_ABORTED: CleanupPolicy.CLEANUP_NOT_REACHED,
     CrawlOutcomeCode.CRAWL_PARTIAL_TIMEOUT: CleanupPolicy.CLEANUP_SKIPPED_PARTIAL,
     CrawlOutcomeCode.CRAWL_SHUTDOWN_ERROR: CleanupPolicy.CLEANUP_NOT_REACHED,
+    # Heartbeat-failure terminations stop the worker mid-crawl with no
+    # guarantee that the page/file set is complete. Treat cleanup as
+    # not-reached so stale-blob deletion does not run on a partial view.
+    CrawlOutcomeCode.CRAWL_HEARTBEAT_FAILED: CleanupPolicy.CLEANUP_NOT_REACHED,
     CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES: CleanupPolicy.CLEANUP_ALLOWED,
     CrawlOutcomeCode.EMBEDDING_CONFIG_MISSING: CleanupPolicy.CLEANUP_ALLOWED,
     CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR: CleanupPolicy.CLEANUP_NOT_REACHED,
