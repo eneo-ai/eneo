@@ -2952,6 +2952,7 @@ async def test_request_self_correction_returns_typed_error_when_proposal_complet
             event
             async for event in processor.request_self_correction(
                 session_id=uuid4(),
+                request_id="req-self-correction",
                 conversation=[
                     ConversationMessage(role="user", content="Bygg ett flöde")
                 ],
@@ -2972,8 +2973,11 @@ async def test_request_self_correction_returns_typed_error_when_proposal_complet
 
     assert [event["event"] for event in events] == ["status", "error"]
     error_payload = json.loads(events[1]["data"])
+    assert error_payload["schema_version"] == 1
     assert error_payload["code"] == "planner_upstream_error"
+    assert error_payload["category"] == "upstream"
     assert error_payload["phase"] == "self_correction"
+    assert error_payload["request_id"] == "req-self-correction"
 
 
 @pytest.mark.asyncio

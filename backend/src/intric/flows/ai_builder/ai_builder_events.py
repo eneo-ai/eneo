@@ -3,13 +3,12 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_edit_models import CompiledEditResult
 
 from intric.flows.ai_builder.ai_builder_event_models import (
-    AIBuilderErrorEventData,
     AIBuilderPlanEventData,
     AIBuilderStatusEventData,
     AIBuilderTextEventData,
@@ -17,7 +16,6 @@ from intric.flows.ai_builder.ai_builder_event_models import (
     StructuredQuestionPayload,
 )
 from intric.flows.ai_builder.ai_builder_models import PlannerPlanEnvelope
-from intric.main.exceptions import ErrorCodes
 
 SSE_EVENT_TEXT = "text"
 SSE_EVENT_PLAN = "plan"
@@ -56,80 +54,6 @@ def build_question_event(question_data: dict[str, Any]) -> dict[str, str]:
         "event": SSE_EVENT_QUESTION,
         "data": payload.model_dump_json(exclude_none=True),
     }
-
-
-def error_payload(
-    *,
-    message: str,
-    code: str,
-    phase: str,
-    intric_error_code: ErrorCodes | int | None = None,
-    request_id: str | None = None,
-) -> str:
-    resolved_error_code = _resolve_intric_error_code(code=code, phase=phase)
-    if intric_error_code is not None:
-        resolved_error_code = int(intric_error_code)
-    return AIBuilderErrorEventData(
-        error=message,
-        message=message,
-        code=code,
-        phase=phase,
-        intric_error_code=resolved_error_code,
-        request_id=request_id or str(uuid4()),
-    ).model_dump_json(exclude_none=True)
-
-
-def build_error_event(
-    *,
-    message: str,
-    code: str,
-    phase: str,
-    intric_error_code: ErrorCodes | int | None = None,
-    request_id: str | None = None,
-) -> dict[str, str]:
-    return {
-        "event": SSE_EVENT_ERROR,
-        "data": error_payload(
-            message=message,
-            code=code,
-            phase=phase,
-            intric_error_code=intric_error_code,
-            request_id=request_id,
-        ),
-    }
-
-
-def _resolve_intric_error_code(*, code: str, phase: str) -> int | None:
-    bad_request_codes = {
-        "architecture_critic_invariant_failed",
-        "architecture_materialization_failed",
-        "planner_output_too_long",
-        "self_correction_invalid_payload",
-        "self_correction_quality_failure",
-        "self_correction_invalid_plan",
-        "question_recovery_unavailable",
-        "question_recovery_exhausted",
-        "question_parse_error",
-        "unsupported_structured_question",
-        "confirm_requirements_parse_error",
-        "confirm_requirements_invalid",
-        "edit_parse_error",
-        "edit_validation_error",
-        "edit_compile_error",
-        "edit_spec_validation_error",
-        "session_message_in_progress",
-    }
-    internal_error_codes = {
-        "planner_upstream_error",
-        "planner_stream_failed",
-    }
-    if code in bad_request_codes:
-        return int(ErrorCodes.BAD_REQUEST)
-    if code in internal_error_codes:
-        return int(ErrorCodes.INTERNAL_SERVER_ERROR)
-    if phase in {"planner", "router"}:
-        return int(ErrorCodes.INTERNAL_SERVER_ERROR)
-    return None
 
 
 def build_requirements_summary_event(data: dict[str, Any]) -> dict[str, str]:

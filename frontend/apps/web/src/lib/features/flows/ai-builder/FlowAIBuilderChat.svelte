@@ -168,7 +168,7 @@
           />
         </svg>
         <Alert.Description class="min-w-0 flex-1 text-[0.8125rem] leading-relaxed">
-          {service.error}
+          {service.error.message}
         </Alert.Description>
         <Button
           variant="ghost"

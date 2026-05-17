@@ -17,6 +17,9 @@ from intric.flows.ai_builder.ai_builder_proposal_repair import (
     request_self_correction,
     retry_forced_tool_after_text,
 )
+from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+    ToolProcessingFailureKind,
+)
 
 
 def _tool_response(*, tool_name: str, arguments: dict[str, object]) -> SimpleNamespace:
@@ -386,7 +389,7 @@ async def _run_repair_capturing(
         process_tool_arguments=process_tool_arguments,
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
-        build_self_correction_error_event=lambda *, feedback, failure_kind: {
+        build_self_correction_error_event=lambda *, feedback, failure_kind, request_id=None: {
             "event": "error",
             "data": feedback or "",
         },
@@ -520,7 +523,7 @@ async def test_request_self_correction_emits_error_event_when_planner_bails_to_c
         process_tool_arguments=process_tool_arguments,
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
-        build_self_correction_error_event=lambda *, feedback, failure_kind: {
+        build_self_correction_error_event=lambda *, feedback, failure_kind, request_id=None: {
             "event": "error",
             "data": feedback or "",
         },
@@ -575,10 +578,24 @@ async def test_request_self_correction_includes_forced_retry_validation_feedback
             failure_kind="validation",
         )
     )
+    observed_request_ids: list[str | None] = []
+
+    def build_self_correction_error_event(
+        *,
+        feedback: str | None,
+        failure_kind: ToolProcessingFailureKind | None,
+        request_id: str | None = None,
+    ) -> dict[str, str]:
+        observed_request_ids.append(request_id)
+        return {
+            "event": "error",
+            "data": feedback or "",
+        }
 
     events: list[dict[str, str]] = []
     async for event in request_self_correction(
         session_id=uuid4(),
+        request_id="req-repair-feedback",
         conversation=[],
         new_messages_start=0,
         error_message="Invalid outline_flow draft.",
@@ -597,10 +614,7 @@ async def test_request_self_correction_includes_forced_retry_validation_feedback
         process_tool_arguments=AsyncMock(),
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
-        build_self_correction_error_event=lambda *, feedback, failure_kind: {
-            "event": "error",
-            "data": feedback or "",
-        },
+        build_self_correction_error_event=build_self_correction_error_event,
         retry_forced_tool_after_text=forced_retry,
         process_tool_kwargs=None,
         flow=None,
@@ -611,6 +625,7 @@ async def test_request_self_correction_includes_forced_retry_validation_feedback
         "event": "error",
         "data": "Validation errors:\n1. Invalid step reference 'step_k'.",
     }
+    assert observed_request_ids == ["req-repair-feedback"]
     forced_retry.assert_awaited_once()
 
 
@@ -687,7 +702,7 @@ async def test_request_self_correction_retries_forced_retry_validation_feedback(
         process_tool_arguments=process_tool_arguments,
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
-        build_self_correction_error_event=lambda *, feedback, failure_kind: {
+        build_self_correction_error_event=lambda *, feedback, failure_kind, request_id=None: {
             "event": "error",
             "data": feedback or "",
         },
@@ -760,7 +775,7 @@ async def test_request_self_correction_limits_text_feedback_retry_budget() -> No
         process_tool_arguments=AsyncMock(),
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
-        build_self_correction_error_event=lambda *, feedback, failure_kind: {
+        build_self_correction_error_event=lambda *, feedback, failure_kind, request_id=None: {
             "event": "error",
             "data": feedback or "",
         },
@@ -826,7 +841,7 @@ async def test_request_self_correction_still_yields_text_for_legitimate_info_req
         process_tool_arguments=process_tool_arguments,
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
-        build_self_correction_error_event=lambda *, feedback, failure_kind: {
+        build_self_correction_error_event=lambda *, feedback, failure_kind, request_id=None: {
             "event": "error",
             "data": feedback or "",
         },

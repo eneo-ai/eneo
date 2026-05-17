@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncGenerator, Awaitable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Annotated, Any, NoReturn, cast
@@ -11,6 +11,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Request, status
 from fastapi.responses import JSONResponse, Response
+from fastapi.routing import APIRoute
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from intric.audit.application.audit_metadata import AuditMetadata
@@ -37,12 +38,21 @@ from intric.flows.ai_builder.ai_builder_context import (
     resolve_planner_model,
     serialize_space_models,
 )
+from intric.flows.ai_builder.ai_builder_error_contract import (
+    AI_BUILDER_ERROR_REGISTRY,
+    AIBuilderErrorCode,
+    AIBuilderErrorPhase,
+    AIBuilderPublicError,
+    ai_builder_error_example,
+    build_ai_builder_error,
+    build_ai_builder_error_event,
+    coerce_ai_builder_error_code,
+)
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_DONE,
     SSE_EVENT_ERROR,
     SSE_EVENT_STATUS,
     SSE_EVENT_USAGE,
-    build_error_event,
     build_usage_event,
 )
 from intric.flows.ai_builder.ai_builder_models import (
@@ -70,20 +80,65 @@ from intric.flows.flow_access_policy import (
 from intric.main.container.container import Container
 from intric.main.exceptions import (
     BadRequestException,
-    ErrorCodes,
     NotFoundException,
     UnauthorizedException,
 )
-from intric.main.models import GeneralError
 from intric.server.dependencies.container import get_container
+from intric.server.exception_handlers import extract_request_id
 
 if TYPE_CHECKING:
     from intric.audit.application.audit_service import AuditService
     from intric.spaces.space import Space
     from intric.tenants.tenant_repo import TenantRepository
 
-router = APIRouter(prefix="/ai-builder", tags=["ai-builder"])
 logger = logging.getLogger(__name__)
+
+
+class AIBuilderPublicErrorRoute(APIRoute):
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        original_route_handler = super().get_route_handler()
+
+        async def ai_builder_route_handler(request: Request) -> Response:
+            try:
+                return await original_route_handler(request)
+            except BadRequestException as error:
+                return _ai_builder_json_error_response(
+                    request=request,
+                    message=str(error)
+                    or "The AI Builder request could not be processed.",
+                    code=coerce_ai_builder_error_code(error.code),
+                    context=error.context,
+                )
+            except UnauthorizedException as error:
+                return _ai_builder_json_error_response(
+                    request=request,
+                    message=str(error)
+                    or "You do not have permission to use this AI Builder resource.",
+                    code=coerce_ai_builder_error_code(
+                        error.code,
+                        default=AIBuilderErrorCode.INSUFFICIENT_SPACE_PERMISSION,
+                    ),
+                    context=error.context,
+                )
+            except NotFoundException as error:
+                return _ai_builder_json_error_response(
+                    request=request,
+                    message=str(error) or "AI Builder resource not found.",
+                    code=coerce_ai_builder_error_code(
+                        error.code,
+                        default=AIBuilderErrorCode.NOT_FOUND,
+                    ),
+                    context=error.context,
+                )
+
+        return ai_builder_route_handler
+
+
+router = APIRouter(
+    prefix="/ai-builder",
+    tags=["ai-builder"],
+    route_class=AIBuilderPublicErrorRoute,
+)
 
 
 EventStream = AsyncGenerator[dict[str, str], None]
@@ -200,13 +255,6 @@ def _raise_scope_mismatch() -> NoReturn:
     )
 
 
-def _request_correlation_id(request: Request) -> str | None:
-    request_id = request.headers.get("x-correlation-id") or request.headers.get(
-        "x-request-id"
-    )
-    return request_id if isinstance(request_id, str) else None
-
-
 def _get_ai_builder_service(container: Container) -> AIBuilderService:
     return container.ai_builder_service()
 
@@ -269,23 +317,43 @@ def _ai_builder_error_response(
     *,
     description: str,
     message: str,
-    intric_error_code: ErrorCodes,
-    code: str | None = None,
+    code: AIBuilderErrorCode,
     context: dict[str, object] | None = None,
 ) -> dict[str, Any]:
-    example: dict[str, Any] = {
-        "message": message,
-        "intric_error_code": int(intric_error_code),
-    }
-    if code is not None:
-        example["code"] = code
-    if context is not None:
-        example["context"] = context
     return {
-        "model": GeneralError,
+        "model": AIBuilderPublicError,
         "description": description,
-        "content": {"application/json": {"example": example}},
+        "content": {
+            "application/json": {
+                "example": ai_builder_error_example(
+                    message=message,
+                    code=code,
+                    context=context,
+                )
+            }
+        },
     }
+
+
+def _ai_builder_json_error_response(
+    *,
+    request: Request,
+    message: str,
+    code: AIBuilderErrorCode,
+    context: dict[str, object] | None = None,
+    phase: AIBuilderErrorPhase | None = None,
+) -> JSONResponse:
+    error = build_ai_builder_error(
+        message=message,
+        code=code,
+        phase=phase,
+        context=context,
+        request_id=extract_request_id(request),
+    )
+    return JSONResponse(
+        status_code=AI_BUILDER_ERROR_REGISTRY[code].http_status,
+        content=error.model_dump(mode="json", exclude_none=True),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -305,14 +373,12 @@ def _ai_builder_error_response(
         400: _ai_builder_error_response(
             description="The request payload is valid JSON but cannot start a builder session in its current state.",
             message="A planner model is required to start an AI Builder session.",
-            intric_error_code=ErrorCodes.BAD_REQUEST,
-            code="bad_request",
+            code=AIBuilderErrorCode.BAD_REQUEST,
         ),
         403: _ai_builder_error_response(
             description="Caller lacks space permission or API key scope for this space.",
             message="API key space scope does not match requested AI builder resource.",
-            intric_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
     },
@@ -380,8 +446,7 @@ async def create_session(
         403: _ai_builder_error_response(
             description="Caller lacks permission to use the AI Builder.",
             message="You do not have permission to use the AI builder in this space.",
-            intric_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_space_permission",
+            code=AIBuilderErrorCode.INSUFFICIENT_SPACE_PERMISSION,
             context={"auth_layer": "space_membership"},
         ),
     },
@@ -454,21 +519,18 @@ async def list_sessions(
         400: _ai_builder_error_response(
             description="The AI Builder session cannot accept a new message in its current state.",
             message="Cannot send messages in this AI Builder session right now.",
-            intric_error_code=ErrorCodes.BAD_REQUEST,
-            code="bad_request",
+            code=AIBuilderErrorCode.BAD_REQUEST,
         ),
         403: _ai_builder_error_response(
             description="Caller lacks space permission or API key scope for this session.",
             message="API key space scope does not match requested AI builder resource.",
-            intric_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: _ai_builder_error_response(
             description="AI Builder session or referenced flow context was not found.",
             message="AI Builder session not found.",
-            intric_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
+            code=AIBuilderErrorCode.NOT_FOUND,
         ),
     },
 )
@@ -590,12 +652,11 @@ async def send_message(
                     "code": code,
                 },
             )
-            error_event = build_error_event(
+            error_event = build_ai_builder_error_event(
                 message=message,
-                code=code,
-                phase="router",
-                intric_error_code=ErrorCodes.BAD_REQUEST,
-                request_id=_request_correlation_id(request),
+                code=coerce_ai_builder_error_code(code),
+                context=getattr(error, "context", None),
+                request_id=extract_request_id(request),
             )
             yield ServerSentEvent(data=error_event["data"], event=error_event["event"])
             yield ServerSentEvent(data="", event=SSE_EVENT_DONE)
@@ -608,11 +669,10 @@ async def send_message(
                     "space_id": str(session.space_id),
                 },
             )
-            error_event = build_error_event(
+            error_event = build_ai_builder_error_event(
                 message="The AI Builder stream failed. Please try again.",
-                code="planner_stream_failed",
-                phase="router",
-                request_id=_request_correlation_id(request),
+                code=AIBuilderErrorCode.PLANNER_STREAM_FAILED,
+                request_id=extract_request_id(request),
             )
             yield ServerSentEvent(data=error_event["data"], event=error_event["event"])
             yield ServerSentEvent(data="", event=SSE_EVENT_DONE)
@@ -631,15 +691,13 @@ async def send_message(
         403: _ai_builder_error_response(
             description="Caller lacks space permission or API key scope for this session.",
             message="API key space scope does not match requested AI builder resource.",
-            intric_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: _ai_builder_error_response(
             description="AI Builder session not found.",
             message="AI Builder session not found.",
-            intric_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
+            code=AIBuilderErrorCode.NOT_FOUND,
         ),
     },
 )
@@ -710,15 +768,13 @@ async def detach_session_attachment(
         403: _ai_builder_error_response(
             description="Caller lacks space permission or API key scope for this session.",
             message="API key space scope does not match requested AI builder resource.",
-            intric_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: _ai_builder_error_response(
             description="AI Builder session not found.",
             message="AI Builder session not found.",
-            intric_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
+            code=AIBuilderErrorCode.NOT_FOUND,
         ),
     },
 )
@@ -765,15 +821,13 @@ async def get_session_models(
         403: _ai_builder_error_response(
             description="Caller lacks space permission or API key scope for the plan's session.",
             message="API key space scope does not match requested AI builder resource.",
-            intric_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: _ai_builder_error_response(
             description="AI Builder plan not found.",
             message="AI Builder plan not found.",
-            intric_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
+            code=AIBuilderErrorCode.NOT_FOUND,
         ),
     },
 )
@@ -810,15 +864,13 @@ async def get_plan(
         403: _ai_builder_error_response(
             description="Caller lacks space permission or API key scope for this session.",
             message="API key space scope does not match requested AI builder resource.",
-            intric_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: _ai_builder_error_response(
             description="AI Builder session not found.",
             message="AI Builder session not found.",
-            intric_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
+            code=AIBuilderErrorCode.NOT_FOUND,
         ),
     },
 )
@@ -857,15 +909,13 @@ async def list_session_plans(
         403: _ai_builder_error_response(
             description="Caller lacks space permission or API key scope for this session.",
             message="API key space scope does not match requested AI builder resource.",
-            intric_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: _ai_builder_error_response(
             description="AI Builder session not found.",
             message="AI Builder session not found.",
-            intric_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
+            code=AIBuilderErrorCode.NOT_FOUND,
         ),
     },
 )
@@ -919,15 +969,13 @@ async def cancel_session(
         403: _ai_builder_error_response(
             description="Caller lacks space permission or API key scope for the plan's session.",
             message="API key space scope does not match requested AI builder resource.",
-            intric_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: _ai_builder_error_response(
             description="AI Builder plan not found.",
             message="AI Builder plan not found.",
-            intric_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
+            code=AIBuilderErrorCode.NOT_FOUND,
         ),
     },
 )
@@ -989,27 +1037,23 @@ async def approve_plan(
                 "invalid_existing_step_ref."
             ),
             message="A transcription model must be selected when using audio input steps.",
-            intric_error_code=ErrorCodes.BAD_REQUEST,
-            code="transcription_model_required",
+            code=AIBuilderErrorCode.TRANSCRIPTION_MODEL_REQUIRED,
         ),
         403: _ai_builder_error_response(
             description="Caller lacks space permission or API key scope for the plan's session.",
             message="API key space scope does not match requested AI builder resource.",
-            intric_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
+            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             context={"auth_layer": "api_key_scope"},
         ),
         404: _ai_builder_error_response(
             description="AI Builder plan not found.",
             message="AI Builder plan not found.",
-            intric_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
+            code=AIBuilderErrorCode.NOT_FOUND,
         ),
         409: _ai_builder_error_response(
             description="The target flow revision changed before apply completed.",
             message="Flow revision changed while applying the plan.",
-            intric_error_code=ErrorCodes.BAD_REQUEST,
-            code="stale_revision",
+            code=AIBuilderErrorCode.STALE_REVISION,
         ),
     },
 )
@@ -1043,18 +1087,13 @@ async def apply_plan(
             expected_revision=body.expected_revision,
         )
     except BadRequestException as e:
-        if getattr(e, "code", None) == "stale_revision":
-            return JSONResponse(
-                status_code=409,
-                content=GeneralError(
-                    message=str(e),
-                    intric_error_code=ErrorCodes.BAD_REQUEST,
-                    code="stale_revision",
-                    context=getattr(e, "context", None),
-                    request_id=_request_correlation_id(request),
-                ).model_dump(exclude_none=True),
-            )
-        raise
+        error_code = coerce_ai_builder_error_code(getattr(e, "code", None))
+        return _ai_builder_json_error_response(
+            request=request,
+            message=str(e) or "The AI Builder plan could not be applied.",
+            code=error_code,
+            context=getattr(e, "context", None),
+        )
 
     # Audit
     user = container.user()
@@ -1096,14 +1135,12 @@ async def apply_plan(
         400: _ai_builder_error_response(
             description="Invalid revision request.",
             message="Can only revise proposed plans.",
-            intric_error_code=ErrorCodes.BAD_REQUEST,
-            code="plan_not_proposed",
+            code=AIBuilderErrorCode.PLAN_NOT_PROPOSED,
         ),
         403: _ai_builder_error_response(
             description="Caller lacks permission.",
             message="Only the session creator can revise plans.",
-            intric_error_code=ErrorCodes.UNAUTHORIZED,
-            code="session_creator_required",
+            code=AIBuilderErrorCode.SESSION_CREATOR_REQUIRED,
         ),
     },
 )

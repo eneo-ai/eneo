@@ -1291,9 +1291,10 @@ class TestSendMessage:
         assert len(events) == 2
         assert events[0]["event"] == SSE_EVENT_ERROR
         error_payload = json.loads(events[0]["data"])
-        assert error_payload["error"] == "The AI planner failed. Please try again."
+        assert error_payload["schema_version"] == 1
         assert error_payload["message"] == "The AI planner failed. Please try again."
         assert error_payload["code"] == "planner_upstream_error"
+        assert error_payload["category"] == "upstream"
         assert error_payload["phase"] == "planner"
         assert error_payload["request_id"]
         assert events[1]["event"] == SSE_EVENT_DONE

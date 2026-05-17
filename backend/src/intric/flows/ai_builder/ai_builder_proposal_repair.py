@@ -7,8 +7,12 @@ from dataclasses import dataclass, replace
 from typing import Any, Protocol, cast, runtime_checkable
 from uuid import UUID, uuid4
 
+from intric.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderErrorCode,
+    AIBuilderErrorPhase,
+    build_ai_builder_error_event,
+)
 from intric.flows.ai_builder.ai_builder_events import (
-    build_error_event,
     build_status_event,
     build_text_event,
 )
@@ -40,6 +44,7 @@ class BuildSelfCorrectionErrorEvent(Protocol):
         *,
         feedback: str | None,
         failure_kind: ToolProcessingFailureKind | None,
+        request_id: str | None = None,
     ) -> dict[str, str]: ...
 
 
@@ -270,6 +275,7 @@ def _build_retry_feedback(
 async def request_self_correction(
     *,
     session_id: UUID,
+    request_id: str | None = None,
     conversation: list[Any],
     new_messages_start: int,
     error_message: str,
@@ -322,10 +328,11 @@ async def request_self_correction(
             )
         except Exception as error:
             logger.error("Self-correction LLM call failed", exc_info=error)
-            yield build_error_event(
+            yield build_ai_builder_error_event(
                 message="The AI planner failed. Please try again.",
-                code="planner_upstream_error",
-                phase="self_correction",
+                code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
+                phase=AIBuilderErrorPhase.SELF_CORRECTION,
+                request_id=request_id,
             )
             return
 
@@ -357,6 +364,7 @@ async def request_self_correction(
                     yield build_self_correction_error_event(
                         feedback=_invalid_tool_arguments_message(error),
                         failure_kind="parse",
+                        request_id=request_id,
                     )
                     return
 
@@ -400,6 +408,7 @@ async def request_self_correction(
                     yield build_self_correction_error_event(
                         feedback=tool_result.feedback,
                         failure_kind=tool_result.failure_kind,
+                        request_id=request_id,
                     )
                     return
 
@@ -440,6 +449,7 @@ async def request_self_correction(
                 process_tool_kwargs=process_tool_kwargs,
                 flow=flow,
                 build_assistant_metadata=build_assistant_metadata,
+                request_id=request_id,
             )
             if forced_outcome.events is not None:
                 for event in forced_outcome.events:
@@ -476,13 +486,15 @@ async def request_self_correction(
             yield build_self_correction_error_event(
                 feedback=forced_outcome.feedback,
                 failure_kind=forced_failure_kind,
+                request_id=request_id,
             )
             return
 
-        yield build_error_event(
+        yield build_ai_builder_error_event(
             message="The AI planner failed. Please try again.",
-            code="planner_invalid_repair_response",
-            phase="self_correction",
+            code=AIBuilderErrorCode.PLANNER_INVALID_REPAIR_RESPONSE,
+            phase=AIBuilderErrorPhase.SELF_CORRECTION,
+            request_id=request_id,
         )
         return
 
@@ -508,6 +520,7 @@ async def retry_forced_tool_after_text(
     process_tool_kwargs: dict[str, Any] | None = None,
     flow: Any = None,
     build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
+    request_id: str | None = None,
 ) -> ForcedToolRetryOutcome:
     if looks_like_information_request(assistant_text):
         return ForcedToolRetryOutcome()
@@ -554,7 +567,11 @@ async def retry_forced_tool_after_text(
             },
         )
     except Exception as error:
-        logger.error("Forced proposal retry failed", exc_info=error)
+        logger.error(
+            "Forced proposal retry failed",
+            exc_info=error,
+            extra={"request_id": request_id},
+        )
         return ForcedToolRetryOutcome()
 
     choice = response.choices[0]

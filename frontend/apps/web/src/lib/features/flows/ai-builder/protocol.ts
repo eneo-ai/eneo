@@ -128,65 +128,42 @@ export type ProposedPlan = Omit<GeneratedAIBuilderPlanResponse, keyof GeneratedP
 
 export type IncomingProposedPlan = Omit<ProposedPlan, "status"> & { status?: PlanStatus };
 
-export type ApplyError =
-  | {
-      code: "stale_revision";
-      message: string;
-      context: Record<string, unknown>;
-    }
-  | {
-      code: "flow_is_published";
-      message: string;
-      context: { flow_id?: string; published_version?: number } & Record<string, unknown>;
-    }
-  | {
-      code: "invalid_existing_step_ref";
-      message: string;
-      context: Record<string, unknown>;
-    }
-  | {
-      code: "transcription_model_required";
-      message: string;
-      context: Record<string, unknown>;
-    }
-  | {
-      code: "flow_space_mismatch";
-      message: string;
-      context: Record<string, unknown>;
-    }
-  | {
-      code: "insufficient_scope";
-      message: string;
-      context: Record<string, unknown>;
-    }
-  | {
-      code: "not_found";
-      message: string;
-      context: Record<string, unknown>;
-    }
-  | {
-      code: "flow_unpublished_apply_failed";
-      message: string;
-      context: {
-        flow_id: string;
-        original_code: ApplyError["code"];
-        original_context: Record<string, unknown>;
-      };
-    }
-  | {
-      code: "network";
-      message: string;
-      context: { status: 0; stage?: string };
-    }
-  | {
-      code: "unknown";
-      message: string;
-      context: {
-        status?: number;
-        original_code?: string;
-        stage?: string;
-      } & Record<string, unknown>;
-    };
+export type AIBuilderErrorCategory =
+  | "bad_request"
+  | "conflict"
+  | "internal"
+  | "network"
+  | "not_found"
+  | "soft_block"
+  | "unauthorized"
+  | "upstream";
+
+export type AIBuilderErrorPhase =
+  | "client"
+  | "planner"
+  | "proposal"
+  | "question"
+  | "question_recovery"
+  | "requirements"
+  | "router"
+  | "self_correction";
+
+export type AIBuilderErrorContextValue = string | number | boolean | null;
+
+export type AIBuilderErrorContext = Record<string, AIBuilderErrorContextValue>;
+
+export interface AIBuilderError {
+  schema_version: 1;
+  code: string;
+  category: AIBuilderErrorCategory;
+  message: string;
+  phase: AIBuilderErrorPhase;
+  request_id: string | null;
+  intric_error_code?: number | null;
+  context: AIBuilderErrorContext;
+}
+
+export type ApplyError = AIBuilderError;
 
 export type PlanRevisionType = components["schemas"]["RevisePlanRequest"]["type"];
 
@@ -227,14 +204,6 @@ export interface AIBuilderTextEventData {
 
 export interface AIBuilderStatusEventData {
   status: string;
-}
-
-export interface AIBuilderErrorEventData {
-  error: string;
-  message: string;
-  code: string;
-  phase: string;
-  request_id?: string | null;
 }
 
 export type AIBuilderQuestionEventData = StructuredQuestion;

@@ -8,6 +8,7 @@ import {
 } from "./FlowAIBuilderDriver";
 import type {
   AIBuilderDraftSession,
+  AIBuilderError,
   AIBuilderModel,
   AIBuilderPlanEditContext,
   AIBuilderPhase,
@@ -97,7 +98,7 @@ export class FlowAIBuilderService {
     return this.#state.isInitializing;
   }
 
-  get error(): string | null {
+  get error(): AIBuilderError | null {
     return this.#state.error;
   }
 

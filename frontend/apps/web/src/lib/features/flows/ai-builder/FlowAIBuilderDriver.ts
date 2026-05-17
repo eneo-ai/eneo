@@ -4,10 +4,17 @@ import type {
   StructuredQuestion,
   StructuredQuestionAnswerMetadata
 } from "./structuredQuestionAnswer";
+import {
+  buildClientAIBuilderError,
+  buildUnpublishedApplyFailureError,
+  isSoftBlockAIBuilderError,
+  isStaleApplyError,
+  parseAIBuilderError
+} from "./aiBuilderError";
 import type {
   AIBuilderConversationMessage,
   AIBuilderDraftSession,
-  AIBuilderErrorEventData,
+  AIBuilderError,
   AIBuilderModel,
   AIBuilderPhase,
   AIBuilderPlanEditContext,
@@ -26,7 +33,6 @@ import type {
   RequirementsSummary,
   TargetKind
 } from "./protocol";
-import { isStaleApplyError, parseAIBuilderApplyError } from "./flowAIBuilderApplyError";
 
 interface AIBuilderStreamHandlers {
   onMessage: (event: AIBuilderStreamEvent) => void;
@@ -49,7 +55,7 @@ export interface FlowAIBuilderState {
   currentPlan: ProposedPlan | null;
   isStreaming: boolean;
   isInitializing: boolean;
-  error: string | null;
+  error: AIBuilderError | null;
   applyError: ApplyError | null;
   applyResult: ApplyResult | null;
   isConflict: boolean;
@@ -205,7 +211,11 @@ export class FlowAIBuilderDriver {
       await this.refreshSession();
       await this.loadDraftSessions();
     } catch (e) {
-      this.#state.error = e instanceof Error ? e.message : "Failed to create session";
+      this.#state.error = parseAIBuilderError({
+        transport: "apply",
+        payload: e,
+        fallbackMessage: "Failed to create session"
+      });
       await this.loadDraftSessions();
       this.#notify();
       throw e;
@@ -430,15 +440,12 @@ export class FlowAIBuilderDriver {
                 break;
               }
               case "error": {
-                const data = JSON.parse(ev.data) as AIBuilderErrorEventData;
-                if (
-                  data.code === "requirements_incomplete" ||
-                  data.code === "requirements_not_confirmed"
-                ) {
-                  this.#state.error = null;
-                } else {
-                  this.#state.error = data.error;
-                }
+                const data = parseAIBuilderError({
+                  transport: "sse",
+                  payload: ev.data,
+                  fallbackMessage: "The AI Builder stream failed. Please try again."
+                });
+                this.#state.error = isSoftBlockAIBuilderError(data) ? null : data;
                 this.#state.statusMessage = null;
                 this.#notify();
                 break;
@@ -467,7 +474,10 @@ export class FlowAIBuilderDriver {
       }
     } catch (e) {
       if (!abortController.signal.aborted) {
-        this.#state.error = e instanceof Error ? e.message : "Stream failed";
+        this.#state.error = buildClientAIBuilderError(
+          e instanceof Error ? e.message : "Stream failed",
+          { code: "stream_failed" }
+        );
         this.#notify();
       }
     } finally {
@@ -495,7 +505,11 @@ export class FlowAIBuilderDriver {
       this.#state.currentPlan = { ...this.#state.currentPlan, status: "approved" };
       this.#notify();
     } catch (e) {
-      this.#state.error = e instanceof Error ? e.message : "Failed to approve plan";
+      this.#state.error = parseAIBuilderError({
+        transport: "apply",
+        payload: e,
+        fallbackMessage: "Failed to approve plan"
+      });
       this.#notify();
       throw e;
     }
@@ -539,11 +553,14 @@ export class FlowAIBuilderDriver {
       await this.refreshSession();
       return result;
     } catch (e: unknown) {
-      const parsed = parseAIBuilderApplyError(e);
+      const parsed = parseAIBuilderError({
+        transport: "apply",
+        payload: e,
+        fallbackMessage: "Failed to apply plan"
+      });
       this.#state.applyError = parsed;
       this.#state.isConflict = isStaleApplyError(parsed);
-      this.#state.error =
-        parsed.code === "unknown" || parsed.code === "network" ? parsed.message : null;
+      this.#state.error = parsed.code === "unknown" || parsed.code === "network" ? parsed : null;
       this.#notify();
       await this.refreshSession();
       throw e;
@@ -567,7 +584,11 @@ export class FlowAIBuilderDriver {
       this.#state.isConflict = false;
       this.#notify();
     } catch (e) {
-      this.#state.error = e instanceof Error ? e.message : "Failed to unpublish flow";
+      this.#state.error = parseAIBuilderError({
+        transport: "apply",
+        payload: e,
+        fallbackMessage: "Failed to unpublish flow"
+      });
       this.#notify();
       throw e;
     }
@@ -575,16 +596,15 @@ export class FlowAIBuilderDriver {
     try {
       return await this.applyPlan(expectedRevision);
     } catch (e) {
-      const parsedApplyError = parseAIBuilderApplyError(e);
-      this.#state.applyError = {
-        code: "flow_unpublished_apply_failed",
-        message: parsedApplyError.message,
-        context: {
-          flow_id: flowId,
-          original_code: parsedApplyError.code,
-          original_context: parsedApplyError.context
-        }
-      };
+      const parsedApplyError = parseAIBuilderError({
+        transport: "apply",
+        payload: e,
+        fallbackMessage: "Failed to apply plan"
+      });
+      this.#state.applyError = buildUnpublishedApplyFailureError({
+        flowId,
+        originalError: parsedApplyError
+      });
       this.#state.isConflict = isStaleApplyError(parsedApplyError);
       this.#state.error = null;
       this.#notify();
@@ -655,7 +675,11 @@ export class FlowAIBuilderDriver {
       };
       this.#notify();
     } catch (e) {
-      this.#state.error = e instanceof Error ? e.message : "Failed to revise plan";
+      this.#state.error = parseAIBuilderError({
+        transport: "apply",
+        payload: e,
+        fallbackMessage: "Failed to revise plan"
+      });
       this.#notify();
     }
   }

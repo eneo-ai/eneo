@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { FlowAIBuilderDriver } from "./FlowAIBuilderDriver";
-import type { AIBuilderDraftSession, AIBuilderSession, ProposedPlan } from "./protocol";
+import type {
+  AIBuilderDraftSession,
+  AIBuilderError,
+  AIBuilderSession,
+  ProposedPlan
+} from "./protocol";
 
 function makeSession(overrides: Partial<AIBuilderSession> = {}): AIBuilderSession {
   return {
@@ -30,6 +35,20 @@ function makePlan(overrides: Partial<ProposedPlan> = {}): ProposedPlan {
       lint_warnings: [],
       risk_acknowledgments: []
     },
+    ...overrides
+  };
+}
+
+function makeAIBuilderError(overrides: Partial<AIBuilderError> = {}): AIBuilderError {
+  return {
+    schema_version: 1,
+    code: "unknown",
+    category: "internal",
+    message: "AI Builder failed",
+    phase: "client",
+    request_id: null,
+    intric_error_code: null,
+    context: {},
     ...overrides
   };
 }
@@ -366,7 +385,7 @@ describe("FlowAIBuilderDriver", () => {
       session: makeSession({ session_id: "session-old", latest_plan_id: "plan-old" }),
       messages: [{ role: "assistant", content: "Old conversation", timestamp: 1 }],
       currentPlan: makePlan({ plan_id: "plan-old" }),
-      error: "Old error",
+      error: makeAIBuilderError({ message: "Old error" }),
       statusMessage: "Old status",
       applyResult: {
         flow_id: "flow-1",
@@ -412,16 +431,19 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.error).toBeNull();
   });
 
-  it("suppresses raw discovery gate errors if they leak from the backend", async () => {
+  it("soft-block stream errors do not set visible error state", async () => {
     const { driver } = makeDriver({
       streamImpl: vi.fn(async (_path, _init, handlers) => {
         handlers.onMessage({
           event: "error",
           data: JSON.stringify({
-            error: "More discovery is needed before confirming requirements.",
+            schema_version: 1,
             message: "More discovery is needed before confirming requirements.",
             code: "requirements_incomplete",
-            phase: "requirements"
+            category: "soft_block",
+            phase: "requirements",
+            request_id: "req-soft-block",
+            intric_error_code: 9007
           })
         });
         handlers.onClose();
@@ -432,6 +454,37 @@ describe("FlowAIBuilderDriver", () => {
     await driver.sendMessage("Build a flow");
 
     expect(driver.state.error).toBeNull();
+  });
+
+  it("stores structured stream errors", async () => {
+    const { driver } = makeDriver({
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        handlers.onMessage({
+          event: "error",
+          data: JSON.stringify({
+            schema_version: 1,
+            code: "planner_stream_failed",
+            category: "internal",
+            message: "The AI Builder stream failed. Please try again.",
+            phase: "router",
+            request_id: "req-stream",
+            intric_error_code: 9024
+          })
+        });
+        handlers.onClose();
+      })
+    });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("Build a flow");
+
+    expect(driver.state.error).toMatchObject({
+      code: "planner_stream_failed",
+      category: "internal",
+      message: "The AI Builder stream failed. Please try again.",
+      phase: "router",
+      request_id: "req-stream"
+    });
   });
 
   it("sends the current UI language with AI Builder messages", async () => {
@@ -682,8 +735,13 @@ describe("FlowAIBuilderDriver", () => {
   it("keeps a published-flow apply error actionable after refreshing state", async () => {
     const publishedError = {
       body: {
+        schema_version: 1,
         code: "flow_is_published",
+        category: "bad_request",
         message: "Flow is published",
+        phase: "router",
+        request_id: "req-published",
+        intric_error_code: 9007,
         context: { flow_id: "flow-1", published_version: 3 }
       }
     };
@@ -701,8 +759,13 @@ describe("FlowAIBuilderDriver", () => {
     await expect(driver.applyPlan()).rejects.toBe(publishedError);
 
     expect(driver.state.applyError).toEqual({
+      schema_version: 1,
       code: "flow_is_published",
+      category: "bad_request",
       message: "Flow is published",
+      phase: "router",
+      request_id: "req-published",
+      intric_error_code: 9007,
       context: { flow_id: "flow-1", published_version: 3 }
     });
     expect(driver.state.currentPlan?.status).toBe("approved");
@@ -732,15 +795,20 @@ describe("FlowAIBuilderDriver", () => {
     await expect(driver.applyPlan()).rejects.toBe(unexpectedError);
 
     expect(driver.state.applyError).toEqual({
+      schema_version: 1,
       code: "unknown",
+      category: "internal",
       message: "Unexpected apply failure",
+      phase: "client",
+      request_id: null,
+      intric_error_code: null,
       context: {
         retryable: false,
         status: 400,
         original_code: "unexpected_backend_code"
       }
     });
-    expect(driver.state.error).toBe("Unexpected apply failure");
+    expect(driver.state.error?.message).toBe("Unexpected apply failure");
     expect(driver.state.isConflict).toBe(false);
   });
 
@@ -762,8 +830,13 @@ describe("FlowAIBuilderDriver", () => {
       session: makeSession({ status: "awaiting_approval", latest_plan_id: "plan-1" }),
       currentPlan: makePlan({ status: "approved" }),
       applyError: {
+        schema_version: 1,
         code: "flow_is_published",
+        category: "bad_request",
         message: "Flow is published",
+        phase: "router",
+        request_id: "req-published",
+        intric_error_code: 9007,
         context: { flow_id: "flow-1", published_version: 3 }
       }
     });
@@ -795,8 +868,13 @@ describe("FlowAIBuilderDriver", () => {
   it("surfaces when apply fails after unpublishing succeeds", async () => {
     const staleError = {
       body: {
+        schema_version: 1,
         code: "stale_revision",
+        category: "conflict",
         message: "Flow was modified",
+        phase: "router",
+        request_id: "req-stale",
+        intric_error_code: 9007,
         context: { latest_revision: 9 }
       }
     };
@@ -811,8 +889,13 @@ describe("FlowAIBuilderDriver", () => {
       session: makeSession({ status: "awaiting_approval", latest_plan_id: "plan-1" }),
       currentPlan: makePlan({ status: "approved" }),
       applyError: {
+        schema_version: 1,
         code: "flow_is_published",
+        category: "bad_request",
         message: "Flow is published",
+        phase: "router",
+        request_id: "req-published",
+        intric_error_code: 9007,
         context: { flow_id: "flow-1", published_version: 3 }
       }
     });
@@ -820,12 +903,17 @@ describe("FlowAIBuilderDriver", () => {
     await expect(driver.unpublishAndApplyPlan()).rejects.toBe(staleError);
 
     expect(driver.state.applyError).toEqual({
+      schema_version: 1,
       code: "flow_unpublished_apply_failed",
+      category: "conflict",
       message: "Flow was modified",
+      phase: "client",
+      request_id: null,
+      intric_error_code: null,
       context: {
         flow_id: "flow-1",
         original_code: "stale_revision",
-        original_context: { latest_revision: 9 }
+        original_context_latest_revision: 9
       }
     });
     expect(driver.state.isConflict).toBe(true);
@@ -871,7 +959,7 @@ describe("FlowAIBuilderDriver", () => {
         steps_removed: 0
       },
       messages: [{ role: "assistant", content: "Applied", timestamp: Date.now() }],
-      error: "stale",
+      error: makeAIBuilderError({ message: "stale" }),
       isConflict: true,
       statusMessage: "repairing"
     });

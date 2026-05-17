@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from fastapi import APIRouter, FastAPI
+from fastapi.testclient import TestClient
 
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
@@ -31,6 +33,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_router import (
+    AIBuilderPublicErrorRoute,
     _authorize_ai_builder_request,
     apply_plan,
     approve_plan,
@@ -45,6 +48,9 @@ from intric.flows.ai_builder.ai_builder_router import (
     revise_plan,
     send_message,
 )
+from intric.flows.ai_builder.ai_builder_router import (
+    router as ai_builder_router,
+)
 from intric.flows.flow_access_policy import FlowApiAction
 from intric.main.exceptions import (
     BadRequestException,
@@ -53,6 +59,106 @@ from intric.main.exceptions import (
     UnauthorizedException,
 )
 from intric.roles.permissions import Permission
+
+
+def test_ai_builder_openapi_errors_reference_public_error_contract() -> None:
+    app = FastAPI()
+    app.include_router(ai_builder_router)
+
+    openapi = app.openapi()
+    assert "AIBuilderPublicError" in openapi["components"]["schemas"]
+    apply_responses = openapi["paths"]["/ai-builder/plans/{plan_id}/apply"][
+        "post"
+    ]["responses"]
+    assert apply_responses["409"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AIBuilderPublicError"
+    }
+
+
+def test_ai_builder_route_class_translates_http_errors_to_public_contract() -> None:
+    app = FastAPI()
+    test_router = APIRouter(route_class=AIBuilderPublicErrorRoute)
+
+    @test_router.get("/busy")
+    async def busy() -> None:
+        raise BadRequestException(
+            "Another AI Builder message is already being processed.",
+            code="session_message_in_progress",
+        )
+
+    @test_router.get("/planner-budget")
+    async def planner_budget() -> None:
+        raise BadRequestException(
+            "No planner output budget is configured.",
+            code="planner_budget_missing",
+            context={"budget_owner": "space"},
+        )
+
+    @test_router.get("/forbidden")
+    async def forbidden() -> None:
+        raise UnauthorizedException(
+            "You do not have permission to use the AI builder in this space.",
+            code="insufficient_space_permission",
+            context={"auth_layer": "space_membership"},
+        )
+
+    @test_router.get("/missing")
+    async def missing() -> None:
+        raise NotFoundException("AI Builder resource not found.")
+
+    app.include_router(test_router)
+    client = TestClient(app)
+
+    response = client.get("/busy", headers={"x-request-id": "req-route"})
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "schema_version": 1,
+        "code": "session_message_in_progress",
+        "category": "conflict",
+        "message": "Another AI Builder message is already being processed.",
+        "phase": "router",
+        "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+        "request_id": "req-route",
+    }
+
+    response = client.get("/planner-budget", headers={"x-request-id": "req-planner"})
+    assert response.status_code == 400
+    assert response.json() == {
+        "schema_version": 1,
+        "code": "planner_budget_missing",
+        "category": "bad_request",
+        "message": "No planner output budget is configured.",
+        "phase": "planner",
+        "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+        "request_id": "req-planner",
+        "context": {"budget_owner": "space"},
+    }
+
+    response = client.get("/forbidden", headers={"x-request-id": "req-forbidden"})
+    assert response.status_code == 403
+    assert response.json() == {
+        "schema_version": 1,
+        "code": "insufficient_space_permission",
+        "category": "unauthorized",
+        "message": "You do not have permission to use the AI builder in this space.",
+        "phase": "router",
+        "intric_error_code": int(ErrorCodes.UNAUTHORIZED),
+        "request_id": "req-forbidden",
+        "context": {"auth_layer": "space_membership"},
+    }
+
+    response = client.get("/missing", headers={"x-request-id": "req-missing"})
+    assert response.status_code == 404
+    assert response.json() == {
+        "schema_version": 1,
+        "code": "not_found",
+        "category": "not_found",
+        "message": "AI Builder resource not found.",
+        "phase": "router",
+        "intric_error_code": int(ErrorCodes.NOT_FOUND),
+        "request_id": "req-missing",
+    }
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1527,8 +1633,10 @@ class TestSendMessageEndpoint:
         events = await _read_sse_events(result)
         assert [event["event"] for event in events] == ["status", "error", "done"]
         error_payload = events[1]["data"]
+        assert error_payload["schema_version"] == 1
         assert error_payload["code"] == "planner_stream_failed"
-        assert error_payload["phase"] == "router"
+        assert error_payload["category"] == "internal"
+        assert error_payload["phase"] == "planner"
         assert error_payload["intric_error_code"] == int(
             ErrorCodes.INTERNAL_SERVER_ERROR
         )
@@ -1564,11 +1672,52 @@ class TestSendMessageEndpoint:
         events = await _read_sse_events(result)
         assert [event["event"] for event in events] == ["error", "done"]
         error_payload = events[0]["data"]
+        assert error_payload["schema_version"] == 1
         assert error_payload["code"] == "session_message_in_progress"
+        assert error_payload["category"] == "conflict"
         assert error_payload["phase"] == "router"
         assert error_payload["intric_error_code"] == int(ErrorCodes.BAD_REQUEST)
         assert "already being processed" in error_payload["message"]
         assert error_payload["request_id"] == "req-stream-busy"
+
+    @pytest.mark.anyio
+    async def test_streams_registry_phase_for_planner_budget_errors(self):
+        container = _make_container()
+        _configure_space_with_planner_model(container)
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+
+        async def rejected_events(*args, **kwargs):
+            raise BadRequestException(
+                "No planner output budget is configured.",
+                code="planner_budget_missing",
+                context={"budget_owner": "space"},
+            )
+            yield  # pragma: no cover
+
+        service.send_message.return_value = rejected_events()
+
+        request = _make_request()
+        request.headers = {"x-request-id": "req-stream-budget"}
+
+        result = await send_message(
+            request=request,
+            session_id=session.id,
+            body=SendMessageRequest(message="Bygg ett flöde"),
+            container=container,
+        )
+
+        events = await _read_sse_events(result)
+        assert [event["event"] for event in events] == ["error", "done"]
+        error_payload = events[0]["data"]
+        assert error_payload["schema_version"] == 1
+        assert error_payload["code"] == "planner_budget_missing"
+        assert error_payload["category"] == "bad_request"
+        assert error_payload["phase"] == "planner"
+        assert error_payload["intric_error_code"] == int(ErrorCodes.BAD_REQUEST)
+        assert error_payload["context"] == {"budget_owner": "space"}
+        assert error_payload["request_id"] == "req-stream-budget"
 
 
 class TestApprovePlanEndpoint:
@@ -1803,8 +1952,11 @@ class TestApplyPlanEndpoint:
 
         payload = __import__("json").loads(response.body)
         assert response.status_code == 409
+        assert payload["schema_version"] == 1
         assert payload["message"] == "Flow draft revision is stale."
         assert payload["code"] == "stale_revision"
+        assert payload["category"] == "conflict"
+        assert payload["phase"] == "router"
         assert payload["intric_error_code"] == ErrorCodes.BAD_REQUEST
 
 

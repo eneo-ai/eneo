@@ -61,14 +61,17 @@ from intric.flows.ai_builder.ai_builder_edit_tool_schema import (
     EDIT_FLOW_TOOL_NAME,
     build_edit_flow_tool_schema,
 )
+from intric.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderErrorCode,
+    AIBuilderErrorPhase,
+    build_ai_builder_error_event,
+    coerce_ai_builder_error_code,
+)
 from intric.flows.ai_builder.ai_builder_events import (
-    SSE_EVENT_ERROR,
-    build_error_event,
     build_plan_event,
     build_requirements_summary_event,
     build_status_event,
     build_text_event,
-    error_payload,
 )
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
@@ -280,13 +283,13 @@ def _build_architecture_error_event(
         "ai_builder_architecture_error",
         extra=log_extra,
     )
-    return build_error_event(
+    return build_ai_builder_error_event(
         message=(
             "The AI planner could not build a valid flow from the confirmed "
             "requirements. Please adjust the requirements and try again."
         ),
-        code=error.public_code,
-        phase="proposal",
+        code=coerce_ai_builder_error_code(error.public_code),
+        phase=AIBuilderErrorPhase.PROPOSAL,
         request_id=request_id,
     )
 
@@ -974,21 +977,23 @@ class AIBuilderProposalProcessor:
         *,
         feedback: str | None,
         failure_kind: ToolProcessingFailureKind | None,
+        request_id: str | None = None,
     ) -> dict[str, str]:
         message = _self_correction_user_message(
             feedback=feedback,
             failure_kind=failure_kind,
         )
         if failure_kind in {"parse", "recoverable_parse"}:
-            code = "self_correction_invalid_payload"
+            code = AIBuilderErrorCode.SELF_CORRECTION_INVALID_PAYLOAD
         elif failure_kind == "quality":
-            code = "self_correction_quality_failure"
+            code = AIBuilderErrorCode.SELF_CORRECTION_QUALITY_FAILURE
         else:
-            code = "self_correction_invalid_plan"
-        return build_error_event(
+            code = AIBuilderErrorCode.SELF_CORRECTION_INVALID_PLAN
+        return build_ai_builder_error_event(
             message=message,
             code=code,
-            phase="self_correction",
+            phase=AIBuilderErrorPhase.SELF_CORRECTION,
+            request_id=request_id,
         )
 
     async def handle_tool_call(
@@ -1128,10 +1133,10 @@ class AIBuilderProposalProcessor:
             )
         except Exception as error:
             logger.error("AI Builder proposal task failed", exc_info=error)
-            yield build_error_event(
+            yield build_ai_builder_error_event(
                 message="The AI planner failed. Please try again.",
-                code="planner_upstream_error",
-                phase="planner",
+                code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
+                phase=AIBuilderErrorPhase.PLANNER,
                 request_id=request_id,
             )
             return
@@ -1211,13 +1216,13 @@ class AIBuilderProposalProcessor:
                 yield event
             return
 
-        yield build_error_event(
+        yield build_ai_builder_error_event(
             message=(
                 "The AI planner did not return a valid flow proposal. "
                 "Please try again or use a more capable model."
             ),
-            code="proposal_tool_missing",
-            phase="proposal",
+            code=AIBuilderErrorCode.PROPOSAL_TOOL_MISSING,
+            phase=AIBuilderErrorPhase.PROPOSAL,
             request_id=request_id,
         )
 
@@ -1334,10 +1339,10 @@ class AIBuilderProposalProcessor:
         if not analyze_discovery_ready(ctx.conversation, flow=ctx.flow):
             return True, []
         return True, [
-            build_error_event(
+            build_ai_builder_error_event(
                 message=requirements_not_confirmed_message,
-                code="requirements_not_confirmed",
-                phase="requirements",
+                code=AIBuilderErrorCode.REQUIREMENTS_NOT_CONFIRMED,
+                phase=AIBuilderErrorPhase.REQUIREMENTS,
                 request_id=ctx.request_id,
             )
         ]
@@ -1621,6 +1626,7 @@ class AIBuilderProposalProcessor:
         self,
         *,
         session_id: UUID,
+        request_id: str,
         conversation: list[ConversationMessage],
         new_messages_start: int,
         error_message: str,
@@ -1648,7 +1654,7 @@ class AIBuilderProposalProcessor:
             available_kb_refs=available_kb_refs,
             resource_catalog=resource_catalog,
             max_output_tokens=max_output_tokens,
-            request_id="self-correction",
+            request_id=request_id,
             flow=flow,
         )
         retry_config = self._submission_retry_config(
@@ -1695,15 +1701,16 @@ class AIBuilderProposalProcessor:
         async def _retry_forced_tool_after_text(
             **kwargs: Any,
         ) -> ForcedToolRetryOutcome:
+            kwargs.setdefault("request_id", ctx.request_id)
             return await self.retry_forced_tool_after_text(
                 **kwargs,
                 usage_tracker=ctx.usage_tracker,
-                request_id=ctx.request_id,
             )
 
         try:
             async for event in run_request_self_correction(
                 session_id=ctx.session_id,
+                request_id=ctx.request_id,
                 conversation=ctx.conversation,
                 new_messages_start=ctx.new_messages_start,
                 error_message=error_message,
@@ -1801,6 +1808,7 @@ class AIBuilderProposalProcessor:
                 process_tool_kwargs=merged_process_kwargs,
                 flow=flow,
                 build_assistant_metadata=build_assistant_metadata,
+                request_id=request_id,
             )
         except AIBuilderArchitectureError as error:
             resolved_request_id = request_id or (
@@ -1941,13 +1949,13 @@ class AIBuilderProposalProcessor:
             if discovery_ready:
                 filtered_tool_schemas = build_discovery_complete_tool_schemas()
             if not filtered_tool_schemas:
-                yield build_error_event(
+                yield build_ai_builder_error_event(
                     message=(
                         "The AI planner lost track of the next clarification step. "
                         "Please try again."
                     ),
-                    code="question_recovery_unavailable",
-                    phase="question_recovery",
+                    code=AIBuilderErrorCode.QUESTION_RECOVERY_UNAVAILABLE,
+                    phase=AIBuilderErrorPhase.QUESTION_RECOVERY,
                 )
                 return
 
@@ -1995,10 +2003,10 @@ class AIBuilderProposalProcessor:
                     "Unexpected structured-question continuation retry failed",
                     exc_info=error,
                 )
-                yield build_error_event(
+                yield build_ai_builder_error_event(
                     message="The AI planner failed. Please try again.",
-                    code="planner_upstream_error",
-                    phase="question_recovery",
+                    code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
+                    phase=AIBuilderErrorPhase.QUESTION_RECOVERY,
                 )
                 return
 
@@ -2015,10 +2023,10 @@ class AIBuilderProposalProcessor:
                 )
                 if repeated_question_call is not None:
                     if retries_remaining <= 0:
-                        yield build_error_event(
+                        yield build_ai_builder_error_event(
                             message="The AI planner kept proposing unsupported discovery questions.",
-                            code="question_recovery_exhausted",
-                            phase="question_recovery",
+                            code=AIBuilderErrorCode.QUESTION_RECOVERY_EXHAUSTED,
+                            phase=AIBuilderErrorPhase.QUESTION_RECOVERY,
                         )
                         return
                     retries_remaining -= 1
@@ -2090,10 +2098,10 @@ class AIBuilderProposalProcessor:
         try:
             arguments = json.loads(tool_call.function.arguments)
         except json.JSONDecodeError as error:
-            yield build_error_event(
+            yield build_ai_builder_error_event(
                 message=f"Invalid question: {error}",
-                code="invalid_question_payload",
-                phase="question",
+                code=AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD,
+                phase=AIBuilderErrorPhase.QUESTION,
             )
             return
 
@@ -2102,14 +2110,11 @@ class AIBuilderProposalProcessor:
         except ValueError:
             fallback_text = build_question_fallback_text(arguments)
             if not fallback_text:
-                yield {
-                    "event": SSE_EVENT_ERROR,
-                    "data": error_payload(
-                        message="Invalid question: could not build fallback prompt",
-                        code="invalid_question_payload",
-                        phase="question",
-                    ),
-                }
+                yield build_ai_builder_error_event(
+                    message="Invalid question: could not build fallback prompt",
+                    code=AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD,
+                    phase=AIBuilderErrorPhase.QUESTION,
+                )
                 return
 
             await persist_tool_turn(

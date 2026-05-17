@@ -35,15 +35,6 @@ class AIBuilderStatusEventData(BaseModel):
     status: str
 
 
-class AIBuilderErrorEventData(BaseModel):
-    error: str = ""
-    message: str
-    code: str
-    phase: str = "router"
-    intric_error_code: int | None = None
-    request_id: str | None = None
-
-
 class KeyDecisionPayload(BaseModel):
     topic: str
     decision: str
@@ -70,7 +61,6 @@ class AIBuilderPlanEventData(BaseModel):
 
 
 __all__ = [
-    "AIBuilderErrorEventData",
     "AIBuilderPlanEventData",
     "AIBuilderStatusEventData",
     "AIBuilderTextEventData",

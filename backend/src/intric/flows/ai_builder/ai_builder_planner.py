@@ -35,12 +35,16 @@ from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
     build_discovery_block_message_runtime,
 )
+from intric.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderErrorCode,
+    AIBuilderErrorPhase,
+    build_ai_builder_error_event,
+)
 from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_DONE,
-    build_error_event,
     build_requirements_summary_event,
     build_status_event,
     build_text_event,
@@ -1378,13 +1382,13 @@ class AIBuilderPlanner:
                 )
             except BadRequestException as error:
                 if error.code == "session_send_lease_lost":
-                    yield build_error_event(
+                    yield build_ai_builder_error_event(
                         message=(
                             "The AI Builder session lock was lost while the "
                             "planner was running. Please try again."
                         ),
-                        code="session_send_lease_lost",
-                        phase="planner",
+                        code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
+                        phase=AIBuilderErrorPhase.PLANNER,
                         request_id=request_id,
                     )
                     yield {"event": SSE_EVENT_DONE, "data": ""}
@@ -1396,23 +1400,23 @@ class AIBuilderPlanner:
                     exc_info=error,
                     extra={"request_id": request_id},
                 )
-                yield build_error_event(
+                yield build_ai_builder_error_event(
                     message="The AI planner failed. Please try again.",
-                    code="planner_upstream_error",
-                    phase="planner",
+                    code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
+                    phase=AIBuilderErrorPhase.PLANNER,
                     request_id=request_id,
                 )
                 yield {"event": SSE_EVENT_DONE, "data": ""}
                 return
 
             if lease_lost_event.is_set():
-                yield build_error_event(
+                yield build_ai_builder_error_event(
                     message=(
                         "The AI Builder session lock was lost while the planner "
                         "was running. Please try again."
                     ),
-                    code="session_send_lease_lost",
-                    phase="planner",
+                    code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
+                    phase=AIBuilderErrorPhase.PLANNER,
                     request_id=request_id,
                 )
                 yield {"event": SSE_EVENT_DONE, "data": ""}
@@ -1480,34 +1484,34 @@ class AIBuilderPlanner:
                         "LLM response truncated (finish_reason=length) — "
                         f"max_tokens={max_output_tokens} may be too low for this model"
                     )
-                    yield build_error_event(
+                    yield build_ai_builder_error_event(
                         message=(
                             "The flow was too complex for the current model's "
                             "output limit. Try simplifying the flow or using a "
                             "more capable model."
                         ),
-                        code="planner_output_too_long",
-                        phase="planner",
+                        code=AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG,
+                        phase=AIBuilderErrorPhase.PLANNER,
                         request_id=request_id,
                     )
                 else:
-                    yield build_error_event(
+                    yield build_ai_builder_error_event(
                         message=(
                             "The AI planner response could not be parsed. "
                             "Please try again."
                         ),
-                        code="planner_parse_error",
-                        phase="planner",
+                        code=AIBuilderErrorCode.PLANNER_PARSE_ERROR,
+                        phase=AIBuilderErrorPhase.PLANNER,
                         request_id=request_id,
                     )
             elif turn_result.kind == "rejected":
-                yield build_error_event(
+                yield build_ai_builder_error_event(
                     message=(
                         "The assistant couldn't complete that step. "
                         "Please rephrase your request or try again."
                     ),
-                    code="planner_rejected",
-                    phase="planner",
+                    code=AIBuilderErrorCode.PLANNER_REJECTED,
+                    phase=AIBuilderErrorPhase.PLANNER,
                     request_id=request_id,
                 )
             elif turn_result.kind == "dispatched":

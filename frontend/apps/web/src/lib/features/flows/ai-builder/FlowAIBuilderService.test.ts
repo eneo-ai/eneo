@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { FlowAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
 import type {
   AIBuilderDraftSession,
+  AIBuilderError,
   AIBuilderModel,
   AIBuilderSession,
   ApplyError,
@@ -57,6 +58,20 @@ function makePlan(overrides: Partial<ProposedPlan> = {}): ProposedPlan {
   };
 }
 
+function makeAIBuilderError(overrides: Partial<AIBuilderError> = {}): AIBuilderError {
+  return {
+    schema_version: 1,
+    code: "invalid_existing_step_ref",
+    category: "bad_request",
+    message: "Plan changed",
+    phase: "router",
+    request_id: "req-test",
+    intric_error_code: 9007,
+    context: {},
+    ...overrides
+  };
+}
+
 function makeService() {
   return new FlowAIBuilderService(
     {
@@ -82,11 +97,15 @@ describe("FlowAIBuilderService", () => {
       }
     ];
     const currentPlan = makePlan({ status: "approved" });
-    const applyError: ApplyError = {
-      code: "invalid_existing_step_ref",
-      message: "Plan changed",
-      context: {}
-    };
+    const applyError: ApplyError = makeAIBuilderError();
+    const error = makeAIBuilderError({
+      code: "unknown",
+      category: "internal",
+      message: "Something failed",
+      phase: "client",
+      request_id: null,
+      intric_error_code: null
+    });
     const applyResult: ApplyResult = {
       flow_id: "flow-1",
       flow_name: "Flow",
@@ -109,7 +128,7 @@ describe("FlowAIBuilderService", () => {
       currentPlan,
       isStreaming: true,
       isInitializing: true,
-      error: "Something failed",
+      error,
       applyError,
       applyResult,
       isConflict: true,
@@ -125,7 +144,7 @@ describe("FlowAIBuilderService", () => {
     expect(service.currentPlan).toBe(currentPlan);
     expect(service.isStreaming).toBe(true);
     expect(service.isInitializing).toBe(true);
-    expect(service.error).toBe("Something failed");
+    expect(service.error).toBe(error);
     expect(service.applyError).toBe(applyError);
     expect(service.applyResult).toBe(applyResult);
     expect(service.isConflict).toBe(true);

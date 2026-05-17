@@ -33,13 +33,18 @@ def _default_message_for_status(status_code: int) -> str:
     return "Request failed."
 
 
-def _extract_request_id(request: Request) -> str | None:
+def extract_request_id(request: Request) -> str | None:
     request_id = request.headers.get("x-correlation-id") or request.headers.get(
         "x-request-id"
     )
-    if request_id:
+    if isinstance(request_id, str) and request_id:
         return request_id
-    return get_request_context().get("correlation_id")
+    context_request_id = get_request_context().get("correlation_id")
+    return (
+        context_request_id
+        if isinstance(context_request_id, str) and context_request_id
+        else None
+    )
 
 
 def _exception_context(
@@ -82,7 +87,7 @@ def add_exception_handlers(app: FastAPI):
             message = error_message or str(exc)
             if not message or not message.strip():
                 message = _default_message_for_status(status_code)
-            request_id = _extract_request_id(request)
+            request_id = extract_request_id(request)
             context = _exception_context(status_code=status_code, exc=exc)
             raw_details = getattr(exc, "details", None)
             details: dict[str, object] | None
