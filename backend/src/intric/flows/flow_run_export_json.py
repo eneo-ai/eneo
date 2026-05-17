@@ -30,6 +30,9 @@ from intric.flows.flow_run_evidence_export_manifest import (
     EvidenceRetentionStateSummary,
     EvidenceReviewCheckpointSummary,
 )
+from intric.flows.flow_run_evidence_export_summary import (
+    build_evidence_export_summary,
+)
 from intric.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
     FlowAttemptProvenanceParseResult,
@@ -123,6 +126,10 @@ def render_evidence_json_export(
         bundle_payload,
         provenance_parse_results=export_payload.provenance_parse_results,
     )
+    summary_typed = build_evidence_export_summary(
+        summary,
+        review_checkpoints=_review_checkpoint_records(bundle_payload),
+    )
     manifest = _build_manifest(
         bundle_payload,
         content_hash,
@@ -140,6 +147,7 @@ def render_evidence_json_export(
         "content_hash": manifest.content_hash,
         "manifest": manifest_payload,
         "summary": summary,
+        "summary_typed": summary_typed.model_dump(mode="json"),
         "redaction": {
             "applied": redaction_applied,
             "policy_version": REDACTION_POLICY_VERSION,

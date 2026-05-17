@@ -308,6 +308,47 @@ def _render_raw_export(
     )
 
 
+def _evidence_version_with_steps(
+    run: FlowRun,
+    *,
+    step_ids: list[UUID],
+) -> FlowVersion:
+    now = datetime.now(timezone.utc)
+    return FlowVersion(
+        flow_id=run.flow_id,
+        version=1,
+        tenant_id=run.tenant_id,
+        definition_checksum="checksum",
+        definition_json={
+            "steps": [
+                {
+                    "step_id": str(step_id),
+                    "assistant_id": str(uuid4()),
+                    "step_order": index,
+                    "user_description": f"Steg {index}",
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "output_type": "text",
+                }
+                for index, step_id in enumerate(step_ids, start=1)
+            ]
+        },
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _evidence_export_content_hash(bundle_payload: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            bundle_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def test_build_debug_export_uses_latest_evidence_timestamp() -> None:
     run, version = _evidence_run_and_version()
     run_timestamp = datetime(2026, 3, 17, 10, 5, tzinfo=timezone.utc)
@@ -1465,6 +1506,307 @@ def test_evidence_export_includes_review_checkpoint_lineage() -> None:
     assert export["summary"]["review_checkpoints"]["by_state"]["resumed"] == 1
     assert export["summary"]["review_checkpoints"]["any_edited"] is True
     assert export["summary"]["review_checkpoints"]["any_resumed"] is True
+
+
+@pytest.mark.parametrize("redacted", [False, True])
+def test_evidence_export_typed_summary_adds_review_impact_without_changing_content_hash(
+    redacted: bool,
+) -> None:
+    run, _ = _evidence_run_and_version()
+    step_1_id = uuid4()
+    step_2_id = uuid4()
+    version = _evidence_version_with_steps(run, step_ids=[step_1_id, step_2_id])
+    created_1 = datetime(2026, 5, 17, 8, 0, tzinfo=timezone.utc)
+    created_2 = datetime(2026, 5, 17, 8, 1, tzinfo=timezone.utc)
+    created_3 = datetime(2026, 5, 17, 8, 2, tzinfo=timezone.utc)
+    first_payload = {"text": "Första utkastet"}
+    edited_payload = {"text": "Redigerat av granskare"}
+    resumed_payload = {"text": "Godkänt och återupptaget"}
+    step_results = [
+        _step_result_for_run(
+            run,
+            step_id=step_1_id,
+            output_payload_json=resumed_payload,
+        ),
+        _step_result_for_run(
+            run,
+            step_id=step_2_id,
+            output_payload_json={"text": "Inget granskningssteg"},
+        ).model_copy(update={"step_order": 2}),
+    ]
+    step_attempts = [
+        _attempt_with_provenance(run, None).model_copy(
+            update={
+                "step_id": step_1_id,
+                "step_order": 1,
+                "attempt_no": 1,
+                "created_at": created_1,
+                "updated_at": created_1,
+            }
+        ),
+        _attempt_with_provenance(run, None).model_copy(
+            update={
+                "step_id": step_1_id,
+                "step_order": 1,
+                "attempt_no": 2,
+                "created_at": created_3,
+                "updated_at": created_3,
+            }
+        ),
+        _attempt_with_provenance(run, None).model_copy(
+            update={
+                "step_id": step_2_id,
+                "step_order": 2,
+                "attempt_no": 1,
+            }
+        ),
+    ]
+    checkpoints = [
+        _review_checkpoint_for_run(
+            run,
+            step_id=step_1_id,
+            step_order=1,
+            attempt_no=1,
+            state=FlowRunReviewCheckpointState.REJECTED,
+            revision=1,
+            original_payload_json=first_payload,
+            current_payload_json=first_payload,
+            resume_idempotency_key=None,
+        ).model_copy(
+            update={
+                "created_at": created_1,
+                "updated_at": created_1,
+                "approved_at": None,
+                "rejected_at": created_1,
+                "resumed_at": None,
+            }
+        ),
+        _review_checkpoint_for_run(
+            run,
+            step_id=step_1_id,
+            step_order=1,
+            attempt_no=1,
+            state=FlowRunReviewCheckpointState.EDITED,
+            revision=1,
+            original_payload_json=first_payload,
+            current_payload_json=edited_payload,
+            resume_idempotency_key=None,
+        ).model_copy(
+            update={
+                "created_at": created_2,
+                "updated_at": created_2,
+                "approved_at": None,
+                "resumed_at": None,
+            }
+        ),
+        _review_checkpoint_for_run(
+            run,
+            step_id=step_1_id,
+            step_order=1,
+            attempt_no=2,
+            state=FlowRunReviewCheckpointState.RESUMED,
+            revision=2,
+            original_payload_json=edited_payload,
+            current_payload_json=resumed_payload,
+            resume_idempotency_key="resume-key-must-not-leak",
+        ).model_copy(
+            update={
+                "created_at": created_3,
+                "updated_at": created_3,
+                "approved_at": created_3,
+                "resumed_at": created_3,
+            }
+        ),
+    ]
+    raw_bundle = build_evidence_bundle(
+        run=run,
+        version=version,
+        step_results=step_results,
+        step_attempts=step_attempts,
+        review_checkpoints=checkpoints,
+    )
+    export = render_evidence_json_export(
+        bundle=redact_evidence_bundle(raw_bundle) if redacted else raw_bundle,
+        context=_redacted_export_context() if redacted else _raw_export_context(),
+    )
+
+    assert export["content_hash"] == _evidence_export_content_hash(export["bundle"])
+    serialized_export = json.dumps(export, sort_keys=True)
+    assert "resume-key-must-not-leak" not in serialized_export
+    assert "resume_idempotency_key" not in serialized_export
+
+    step_1_review = export["summary_typed"]["step_overview"][0]["review_impact"]
+    events = step_1_review["events"]
+    assert step_1_review["checkpoint_count"] == 3
+    assert step_1_review["any_edited"] is True
+    assert step_1_review["any_resumed"] is True
+    assert step_1_review["any_output_changed"] is True
+    assert [event["state"] for event in events] == [
+        "rejected",
+        "edited",
+        "resumed",
+    ]
+    assert [event["decision"] for event in events] == [
+        "rejected",
+        None,
+        "approved",
+    ]
+    assert [event["output_changed"] for event in events] == [False, True, True]
+    assert step_1_review["last_event"] == events[-1]
+    assert step_1_review["last_event"]["attempt_no"] == 2
+    assert step_1_review["last_event"]["revision"] == 2
+
+    step_2_review = export["summary_typed"]["step_overview"][1]["review_impact"]
+    assert step_2_review == {
+        "checkpoint_count": 0,
+        "any_edited": False,
+        "any_resumed": False,
+        "any_output_changed": False,
+        "last_event": None,
+        "events": [],
+    }
+
+
+@pytest.mark.parametrize("state", list(FlowRunReviewCheckpointState))
+def test_evidence_export_typed_summary_maps_review_impact_states(
+    state: FlowRunReviewCheckpointState,
+) -> None:
+    run, _ = _evidence_run_and_version()
+    step_id = uuid4()
+    version = _evidence_version_with_steps(run, step_ids=[step_id])
+    timestamp = datetime(2026, 5, 17, 9, 0, tzinfo=timezone.utc)
+    checkpoint = _review_checkpoint_for_run(
+        run,
+        step_id=step_id,
+        step_order=1,
+        attempt_no=3,
+        state=state,
+        revision=7,
+        original_payload_json={"text": "original"},
+        current_payload_json={"text": "current"},
+        resume_idempotency_key=None,
+    ).model_copy(
+        update={
+            "created_at": timestamp,
+            "updated_at": timestamp,
+            "edited_at": timestamp
+            if state == FlowRunReviewCheckpointState.EDITED
+            else None,
+            "approved_at": timestamp
+            if state
+            in {
+                FlowRunReviewCheckpointState.APPROVED,
+                FlowRunReviewCheckpointState.RESUMED,
+            }
+            else None,
+            "rejected_at": timestamp
+            if state == FlowRunReviewCheckpointState.REJECTED
+            else None,
+            "resumed_at": timestamp
+            if state == FlowRunReviewCheckpointState.RESUMED
+            else None,
+            "cancelled_at": timestamp
+            if state == FlowRunReviewCheckpointState.CANCELLED
+            else None,
+            "expired_at": timestamp
+            if state == FlowRunReviewCheckpointState.EXPIRED
+            else None,
+        }
+    )
+
+    export = _render_raw_export(
+        run,
+        version,
+        step_results=[
+            _step_result_for_run(
+                run,
+                step_id=step_id,
+                output_payload_json={"text": "current"},
+            )
+        ],
+        step_attempts=[
+            _attempt_with_provenance(run, None).model_copy(
+                update={"step_id": step_id, "step_order": 1, "attempt_no": 3}
+            )
+        ],
+        review_checkpoints=[checkpoint],
+    )
+
+    review = export["summary_typed"]["step_overview"][0]["review_impact"]
+    event = review["events"][0]
+    expected_decision = {
+        FlowRunReviewCheckpointState.APPROVED: "approved",
+        FlowRunReviewCheckpointState.RESUMED: "approved",
+        FlowRunReviewCheckpointState.REJECTED: "rejected",
+        FlowRunReviewCheckpointState.CANCELLED: "cancelled",
+    }.get(state)
+    assert review["checkpoint_count"] == 1
+    assert event["state"] == state.value
+    assert event["decision"] == expected_decision
+    assert event["attempt_no"] == 3
+    assert event["revision"] == 7
+    assert event["edited"] is (state == FlowRunReviewCheckpointState.EDITED)
+    assert event["resumed"] is (state == FlowRunReviewCheckpointState.RESUMED)
+    assert event["output_changed"] is True
+
+
+def test_evidence_export_summary_typed_agrees_with_legacy_summary_overlap() -> None:
+    run, _ = _evidence_run_and_version()
+    step_id = uuid4()
+    version = _evidence_version_with_steps(run, step_ids=[step_id])
+    export = _render_raw_export(
+        run,
+        version,
+        step_results=[
+            _step_result_for_run(
+                run,
+                step_id=step_id,
+                output_payload_json={"text": "done"},
+            )
+        ],
+        step_attempts=[
+            _attempt_with_provenance(run, None).model_copy(
+                update={"step_id": step_id, "step_order": 1, "attempt_no": 1}
+            )
+        ],
+    )
+
+    legacy_summary = export["summary"]
+    typed_summary = export["summary_typed"]
+    top_level_fields = (
+        "status",
+        "trace_id",
+        "steps_count",
+        "completed_steps",
+        "failed_steps",
+        "attempts_count",
+        "artifacts_count",
+        "duration_ms",
+        "models_used",
+        "review_checkpoints",
+    )
+    for field in top_level_fields:
+        assert typed_summary[field] == legacy_summary[field]
+
+    legacy_step = legacy_summary["step_overview"][0]
+    typed_step = typed_summary["step_overview"][0]
+    step_fields = (
+        "step_order",
+        "step_id",
+        "user_description",
+        "status",
+        "attempts_count",
+        "retries",
+        "duration_ms",
+        "models_used",
+        "artifact_names",
+        "result_output_kind",
+        "output_summary",
+        "configured_input_type",
+        "configured_output_type",
+    )
+    for field in step_fields:
+        assert typed_step[field] == legacy_step[field]
 
 
 def test_evidence_export_review_summary_surfaces_active_checkpoint_conflict() -> None:

@@ -1066,14 +1066,15 @@ def test_openapi_flow_run_status_capabilities_guides_consumer_lifecycle(
     assert "can_request_redispatch" in description
     assert "redispatched_count: 0" in description
     assert "hard-coding status groups" in capabilities["statuses"]["description"]
-    assert "Recommended status filter order" in capabilities["filter_order"][
-        "description"
-    ]
+    assert (
+        "Recommended status filter order" in capabilities["filter_order"]["description"]
+    )
     assert "continue polling" in row_schema["should_poll"]["description"]
     assert "cancel endpoint" in row_schema["is_cancellable"]["description"]
-    assert "server-gated by staleness" in row_schema["can_request_redispatch"][
-        "description"
-    ]
+    assert (
+        "server-gated by staleness"
+        in row_schema["can_request_redispatch"]["description"]
+    )
 
 
 def test_openapi_flow_step_review_policy_documents_authoring_contract(
@@ -1388,7 +1389,9 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
     assert "Clients should branch on `code`" in error_schema.get("description", "")
 
     details_property = error_schema.get("properties", {}).get("details", {})
-    details_options = details_property.get("anyOf") or details_property.get("oneOf") or []
+    details_options = (
+        details_property.get("anyOf") or details_property.get("oneOf") or []
+    )
     structured_details_ref = next(
         option
         for option in details_options
@@ -1927,6 +1930,109 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
         .get("example", {})
     )
     assert bad_request_example.get("code") == "flow_evidence_export_reason_required"
+
+
+def test_openapi_flow_evidence_export_documents_typed_summary_review_impact(
+    openapi_spec: dict,
+) -> None:
+    operation = _get_operation(
+        openapi_spec,
+        "/api/v1/flows/{id}/runs/{run_id}/evidence/export",
+        "get",
+    )
+    response = operation.get("responses", {}).get("200", {})
+    schema = response.get("content", {}).get("application/json", {}).get("schema", {})
+    export_response = _resolve_component_ref(openapi_spec, schema)
+    export_properties = export_response.get("properties", {})
+    summary_schema = export_properties.get("summary_typed", {})
+    assert summary_schema.get("description")
+    summary = _resolve_component_ref(openapi_spec, summary_schema)
+
+    assert summary.get("title") == "EvidenceExportSummary"
+    assert summary.get("additionalProperties") is False
+    assert set(summary.get("properties", {})) == {
+        "status",
+        "trace_id",
+        "steps_count",
+        "completed_steps",
+        "failed_steps",
+        "attempts_count",
+        "artifacts_count",
+        "duration_ms",
+        "models_used",
+        "review_checkpoints",
+        "final_output",
+        "step_overview",
+    }
+
+    step_overview_items = (
+        summary.get("properties", {}).get("step_overview", {}).get("items", {})
+    )
+    step_overview = _resolve_component_ref(openapi_spec, step_overview_items)
+    assert step_overview.get("title") == "EvidenceStepOverview"
+    assert step_overview.get("additionalProperties") is False
+    step_overview_properties = step_overview.get("properties", {})
+    assert set(step_overview_properties) == {
+        "step_order",
+        "step_id",
+        "user_description",
+        "status",
+        "attempts_count",
+        "retries",
+        "duration_ms",
+        "models_used",
+        "artifact_names",
+        "result_output_kind",
+        "output_summary",
+        "configured_input_type",
+        "configured_output_type",
+        "review_impact",
+    }
+
+    review_impact = _resolve_component_ref(
+        openapi_spec, step_overview_properties["review_impact"]
+    )
+    assert review_impact.get("title") == "EvidenceStepReviewImpact"
+    assert review_impact.get("additionalProperties") is False
+    review_impact_properties = review_impact.get("properties", {})
+    assert set(review_impact_properties) == {
+        "checkpoint_count",
+        "any_edited",
+        "any_resumed",
+        "any_output_changed",
+        "last_event",
+        "events",
+    }
+
+    review_event_items = review_impact_properties["events"].get("items", {})
+    review_event = _resolve_component_ref(openapi_spec, review_event_items)
+    assert review_event.get("title") == "EvidenceStepReviewEvent"
+    assert review_event.get("additionalProperties") is False
+    review_event_properties = review_event.get("properties", {})
+    assert set(review_event_properties) == {
+        "checkpoint_id",
+        "state",
+        "decision",
+        "edited",
+        "resumed",
+        "attempt_no",
+        "revision",
+        "output_changed",
+    }
+    assert _extract_enum_values(openapi_spec, review_event_properties["state"]) == {
+        "awaiting_review",
+        "edited",
+        "approved",
+        "rejected",
+        "resumed",
+        "cancelled",
+        "expired",
+    }
+    assert _extract_enum_values(openapi_spec, review_event_properties["decision"]) == {
+        "approved",
+        "rejected",
+        "cancelled",
+    }
 
 
 def test_openapi_flow_error_responses_include_general_error_examples(

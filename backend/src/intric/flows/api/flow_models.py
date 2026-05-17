@@ -66,6 +66,7 @@ from intric.flows.flow_run_contract_models import (
 )
 from intric.flows.flow_run_error import FlowRunError
 from intric.flows.flow_run_evidence_export_manifest import EvidenceExportManifest
+from intric.flows.flow_run_evidence_export_summary import EvidenceExportSummary
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.main.exceptions import BadRequestException
 from intric.main.models import NOT_PROVIDED, NotProvided, partial_model
@@ -149,6 +150,7 @@ FLOW_RUNTIME_PUBLIC_EXAMPLE: dict[str, Any] = {
         "artifact_signed_url_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/artifacts/{file_id}/signed-url/",
     },
 }
+
 
 def _flow_run_status_capabilities_public_example() -> JsonDict:
     return {
@@ -1983,6 +1985,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                             "rejected": 0,
                             "resumed": 1,
                             "cancelled": 0,
+                            "expired": 0,
                         },
                         "any_edited": True,
                         "any_resumed": True,
@@ -2066,6 +2069,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                             "rejected": 0,
                             "resumed": 1,
                             "cancelled": 0,
+                            "expired": 0,
                         },
                         "any_edited": True,
                         "any_resumed": True,
@@ -2232,6 +2236,96 @@ class FlowRunEvidenceExportResponse(BaseModel):
                         }
                     ],
                 },
+                "summary_typed": {
+                    "status": "completed",
+                    "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
+                    "steps_count": 1,
+                    "completed_steps": 1,
+                    "failed_steps": 0,
+                    "attempts_count": 1,
+                    "artifacts_count": 1,
+                    "duration_ms": 5240,
+                    "models_used": ["gpt-4.1-mini"],
+                    "review_checkpoints": {
+                        "count": 1,
+                        "by_state": {
+                            "awaiting_review": 0,
+                            "edited": 0,
+                            "approved": 0,
+                            "rejected": 0,
+                            "resumed": 1,
+                            "cancelled": 0,
+                            "expired": 0,
+                        },
+                        "any_edited": True,
+                        "any_resumed": True,
+                        "active_checkpoint_id": None,
+                        "active_checkpoint_conflict": False,
+                    },
+                    "final_output": {
+                        "kind": "mixed",
+                        "text_present": True,
+                        "text_preview": {
+                            "preview": "Decision support generated.",
+                            "truncated": False,
+                            "byte_size": 27,
+                            "sha256": "69c2b1d5990f8f1cd6c9eaf0d6f20bc6f3ddc31a58496a49f4158a709c27a53d",
+                        },
+                        "structured_present": False,
+                        "artifact_count": 1,
+                        "artifact_names": ["case-summary.pdf"],
+                    },
+                    "step_overview": [
+                        {
+                            "step_order": 1,
+                            "step_id": "step-1",
+                            "user_description": "Draft the decision support summary",
+                            "status": "completed",
+                            "attempts_count": 1,
+                            "retries": 0,
+                            "duration_ms": 5240,
+                            "models_used": ["gpt-4.1-mini"],
+                            "artifact_names": ["case-summary.pdf"],
+                            "result_output_kind": "mixed",
+                            "output_summary": {
+                                "preview": "Decision support generated.",
+                                "truncated": False,
+                                "byte_size": 27,
+                                "sha256": "69c2b1d5990f8f1cd6c9eaf0d6f20bc6f3ddc31a58496a49f4158a709c27a53d",
+                            },
+                            "configured_input_type": "text",
+                            "configured_output_type": "pdf",
+                            "review_impact": {
+                                "checkpoint_count": 1,
+                                "any_edited": True,
+                                "any_resumed": True,
+                                "any_output_changed": True,
+                                "last_event": {
+                                    "checkpoint_id": "00000000-0000-0000-0000-000000000701",
+                                    "state": "resumed",
+                                    "decision": "approved",
+                                    "edited": True,
+                                    "resumed": True,
+                                    "attempt_no": 1,
+                                    "revision": 2,
+                                    "output_changed": True,
+                                },
+                                "events": [
+                                    {
+                                        "checkpoint_id": "00000000-0000-0000-0000-000000000701",
+                                        "state": "resumed",
+                                        "decision": "approved",
+                                        "edited": True,
+                                        "resumed": True,
+                                        "attempt_no": 1,
+                                        "revision": 2,
+                                        "output_changed": True,
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                },
                 "redaction": {
                     "applied": True,
                     "policy_version": "flow-evidence-redaction.v3",
@@ -2266,6 +2360,13 @@ class FlowRunEvidenceExportResponse(BaseModel):
     content_hash: str
     manifest: EvidenceExportManifest
     summary: dict[str, Any]
+    summary_typed: EvidenceExportSummary = Field(
+        description=(
+            "Typed additive read-model for API consumers. It mirrors stable "
+            "summary fields and adds per-step review impact while legacy "
+            "summary remains available."
+        )
+    )
     redaction: dict[str, Any]
     bundle: dict[str, Any] = Field(
         description=(

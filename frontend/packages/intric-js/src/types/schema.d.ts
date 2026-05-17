@@ -7952,6 +7952,68 @@ export interface components {
       unknown_model_context_window_tokens?: number | null;
     };
     /**
+     * AIBuilderErrorCategory
+     * @enum {string}
+     */
+    AIBuilderErrorCategory:
+      | "bad_request"
+      | "conflict"
+      | "internal"
+      | "not_found"
+      | "soft_block"
+      | "unauthorized"
+      | "upstream";
+    /**
+     * AIBuilderErrorCode
+     * @enum {string}
+     */
+    AIBuilderErrorCode:
+      | "architecture_critic_invariant_failed"
+      | "architecture_materialization_failed"
+      | "bad_request"
+      | "builder_attachment_unavailable"
+      | "flow_is_published"
+      | "flow_space_mismatch"
+      | "insufficient_scope"
+      | "insufficient_space_permission"
+      | "invalid_existing_step_ref"
+      | "invalid_question_payload"
+      | "not_found"
+      | "plan_not_proposed"
+      | "planner_budget_missing"
+      | "planner_invalid_repair_response"
+      | "planner_output_too_long"
+      | "planner_parse_error"
+      | "planner_rejected"
+      | "planner_stream_failed"
+      | "planner_upstream_error"
+      | "proposal_tool_missing"
+      | "question_recovery_exhausted"
+      | "question_recovery_unavailable"
+      | "requirements_incomplete"
+      | "requirements_not_confirmed"
+      | "self_correction_invalid_payload"
+      | "self_correction_invalid_plan"
+      | "self_correction_quality_failure"
+      | "session_creator_required"
+      | "session_message_in_progress"
+      | "session_send_lease_lost"
+      | "stale_revision"
+      | "transcription_model_required"
+      | "unsupported_revision_type";
+    /**
+     * AIBuilderErrorPhase
+     * @enum {string}
+     */
+    AIBuilderErrorPhase:
+      | "planner"
+      | "proposal"
+      | "question"
+      | "question_recovery"
+      | "requirements"
+      | "router"
+      | "self_correction";
+    /**
      * AIBuilderInputSource
      * @enum {string}
      */
@@ -8007,6 +8069,44 @@ export interface components {
        * @description One-based step number from the currently displayed plan.
        */
       target_step_number?: number | null;
+    };
+    /**
+     * AIBuilderPublicError
+     * @description Canonical public AI Builder error. Clients should branch on `code` and `category`, not on the human-readable message.
+     */
+    AIBuilderPublicError: {
+      /**
+       * Schema Version
+       * @description Schema version for the AI Builder error contract.
+       * @default 1
+       * @constant
+       */
+      schema_version?: 1;
+      /** @description Stable machine-readable AI Builder error code. */
+      code: components["schemas"]["AIBuilderErrorCode"];
+      /** @description Stable UI and control-flow category for the error. */
+      category: components["schemas"]["AIBuilderErrorCategory"];
+      /**
+       * Message
+       * @description Human-readable message for users, logs and support. This text is not a stable client contract.
+       */
+      message: string;
+      /** @description AI Builder lifecycle phase that produced the error. */
+      phase: components["schemas"]["AIBuilderErrorPhase"];
+      /** @description Numeric Eneo error category retained for existing clients. */
+      intric_error_code: components["schemas"]["ErrorCodes"];
+      /**
+       * Request Id
+       * @description Request or correlation id that produced the error.
+       */
+      request_id: string;
+      /**
+       * Context
+       * @description Small bounded scalar diagnostics safe for API clients.
+       */
+      context?: {
+        [key: string]: string | number | boolean | null;
+      } | null;
     };
     /**
      * ARQHealth
@@ -11965,6 +12065,48 @@ export interface components {
       artifact_availability_summary: components["schemas"]["EvidenceArtifactAvailabilitySummary"];
       review_checkpoint_summary: components["schemas"]["EvidenceReviewCheckpointSummary"];
     };
+    /** EvidenceExportSummary */
+    EvidenceExportSummary: {
+      /** Status */
+      status?: string | null;
+      /** Trace Id */
+      trace_id?: string | null;
+      /** Steps Count */
+      steps_count: number;
+      /** Completed Steps */
+      completed_steps: number;
+      /** Failed Steps */
+      failed_steps: number;
+      /** Attempts Count */
+      attempts_count: number;
+      /** Artifacts Count */
+      artifacts_count: number;
+      /** Duration Ms */
+      duration_ms?: number | null;
+      /** Models Used */
+      models_used: string[];
+      review_checkpoints: components["schemas"]["EvidenceReviewCheckpointSummary"];
+      final_output: components["schemas"]["EvidenceFinalOutputSummary"];
+      /** Step Overview */
+      step_overview: components["schemas"]["EvidenceStepOverview"][];
+    };
+    /** EvidenceFinalOutputSummary */
+    EvidenceFinalOutputSummary: {
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "empty" | "text" | "structured" | "artifact" | "mixed";
+      /** Text Present */
+      text_present: boolean;
+      text_preview?: components["schemas"]["PayloadPreview"] | null;
+      /** Structured Present */
+      structured_present: boolean;
+      /** Artifact Count */
+      artifact_count: number;
+      /** Artifact Names */
+      artifact_names: string[];
+    };
     /** EvidenceRetentionStateSummary */
     EvidenceRetentionStateSummary: {
       /**
@@ -12001,6 +12143,70 @@ export interface components {
       active_checkpoint_id?: string | null;
       /** Active Checkpoint Conflict */
       active_checkpoint_conflict: boolean;
+    };
+    /** EvidenceStepOverview */
+    EvidenceStepOverview: {
+      /** Step Order */
+      step_order: number;
+      /** Step Id */
+      step_id?: string | null;
+      /** User Description */
+      user_description?: string | null;
+      /** Status */
+      status?: string | null;
+      /** Attempts Count */
+      attempts_count: number;
+      /** Retries */
+      retries: number;
+      /** Duration Ms */
+      duration_ms?: number | null;
+      /** Models Used */
+      models_used: string[];
+      /** Artifact Names */
+      artifact_names: string[];
+      /** Result Output Kind */
+      result_output_kind?: ("empty" | "text" | "structured" | "artifact" | "mixed") | null;
+      output_summary?: components["schemas"]["PayloadPreview"] | null;
+      /** Configured Input Type */
+      configured_input_type?: string | null;
+      /** Configured Output Type */
+      configured_output_type?: string | null;
+      review_impact: components["schemas"]["EvidenceStepReviewImpact"];
+    };
+    /** EvidenceStepReviewEvent */
+    EvidenceStepReviewEvent: {
+      /** Checkpoint Id */
+      checkpoint_id: string;
+      state: components["schemas"]["FlowRunReviewCheckpointState"];
+      /** Decision */
+      decision?: ("approved" | "rejected" | "cancelled") | null;
+      /** Edited */
+      edited: boolean;
+      /** Resumed */
+      resumed: boolean;
+      /** Attempt No */
+      attempt_no: number;
+      /** Revision */
+      revision: number;
+      /**
+       * Output Changed
+       * @description True when the exported original and current checkpoint payloads differ, false when both are present and equal, and null when either payload is not available in the exported evidence.
+       */
+      output_changed?: boolean | null;
+    };
+    /** EvidenceStepReviewImpact */
+    EvidenceStepReviewImpact: {
+      /** Checkpoint Count */
+      checkpoint_count: number;
+      /** Any Edited */
+      any_edited: boolean;
+      /** Any Resumed */
+      any_resumed: boolean;
+      /** Any Output Changed */
+      any_output_changed: boolean;
+      last_event?: components["schemas"]["EvidenceStepReviewEvent"] | null;
+      /** Events */
+      events: components["schemas"]["EvidenceStepReviewEvent"][];
     };
     /**
      * ExpiringKeySummaryItem
@@ -13714,6 +13920,7 @@ export interface components {
      *             "awaiting_review": 0,
      *             "cancelled": 0,
      *             "edited": 0,
+     *             "expired": 0,
      *             "rejected": 0,
      *             "resumed": 1
      *           },
@@ -13856,6 +14063,7 @@ export interface components {
      *             "awaiting_review": 0,
      *             "cancelled": 0,
      *             "edited": 0,
+     *             "expired": 0,
      *             "rejected": 0,
      *             "resumed": 1
      *           },
@@ -14010,6 +14218,103 @@ export interface components {
      *         ],
      *         "steps_count": 1,
      *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
+     *       },
+     *       "summary_typed": {
+     *         "artifacts_count": 1,
+     *         "attempts_count": 1,
+     *         "completed_steps": 1,
+     *         "duration_ms": 5240,
+     *         "failed_steps": 0,
+     *         "final_output": {
+     *           "artifact_count": 1,
+     *           "artifact_names": [
+     *             "case-summary.pdf"
+     *           ],
+     *           "kind": "mixed",
+     *           "structured_present": false,
+     *           "text_present": true,
+     *           "text_preview": {
+     *             "byte_size": 27,
+     *             "preview": "Decision support generated.",
+     *             "sha256": "69c2b1d5990f8f1cd6c9eaf0d6f20bc6f3ddc31a58496a49f4158a709c27a53d",
+     *             "truncated": false
+     *           }
+     *         },
+     *         "models_used": [
+     *           "gpt-4.1-mini"
+     *         ],
+     *         "review_checkpoints": {
+     *           "active_checkpoint_conflict": false,
+     *           "any_edited": true,
+     *           "any_resumed": true,
+     *           "by_state": {
+     *             "approved": 0,
+     *             "awaiting_review": 0,
+     *             "cancelled": 0,
+     *             "edited": 0,
+     *             "expired": 0,
+     *             "rejected": 0,
+     *             "resumed": 1
+     *           },
+     *           "count": 1
+     *         },
+     *         "status": "completed",
+     *         "step_overview": [
+     *           {
+     *             "artifact_names": [
+     *               "case-summary.pdf"
+     *             ],
+     *             "attempts_count": 1,
+     *             "configured_input_type": "text",
+     *             "configured_output_type": "pdf",
+     *             "duration_ms": 5240,
+     *             "models_used": [
+     *               "gpt-4.1-mini"
+     *             ],
+     *             "output_summary": {
+     *               "byte_size": 27,
+     *               "preview": "Decision support generated.",
+     *               "sha256": "69c2b1d5990f8f1cd6c9eaf0d6f20bc6f3ddc31a58496a49f4158a709c27a53d",
+     *               "truncated": false
+     *             },
+     *             "result_output_kind": "mixed",
+     *             "retries": 0,
+     *             "review_impact": {
+     *               "any_edited": true,
+     *               "any_output_changed": true,
+     *               "any_resumed": true,
+     *               "checkpoint_count": 1,
+     *               "events": [
+     *                 {
+     *                   "attempt_no": 1,
+     *                   "checkpoint_id": "00000000-0000-0000-0000-000000000701",
+     *                   "decision": "approved",
+     *                   "edited": true,
+     *                   "output_changed": true,
+     *                   "resumed": true,
+     *                   "revision": 2,
+     *                   "state": "resumed"
+     *                 }
+     *               ],
+     *               "last_event": {
+     *                 "attempt_no": 1,
+     *                 "checkpoint_id": "00000000-0000-0000-0000-000000000701",
+     *                 "decision": "approved",
+     *                 "edited": true,
+     *                 "output_changed": true,
+     *                 "resumed": true,
+     *                 "revision": 2,
+     *                 "state": "resumed"
+     *               }
+     *             },
+     *             "status": "completed",
+     *             "step_id": "step-1",
+     *             "step_order": 1,
+     *             "user_description": "Draft the decision support summary"
+     *           }
+     *         ],
+     *         "steps_count": 1,
+     *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
      *       }
      *     }
      */
@@ -14028,6 +14333,8 @@ export interface components {
       summary: {
         [key: string]: unknown;
       };
+      /** @description Typed additive read-model for API consumers. It mirrors stable summary fields and adds per-step review impact while legacy summary remains available. */
+      summary_typed: components["schemas"]["EvidenceExportSummary"];
       /** Redaction */
       redaction: {
         [key: string]: unknown;
@@ -18960,6 +19267,17 @@ export interface components {
        *     ]
        */
       additional_redirect_uris?: string[] | null;
+    };
+    /** PayloadPreview */
+    PayloadPreview: {
+      /** Preview */
+      preview: unknown;
+      /** Truncated */
+      truncated: boolean;
+      /** Byte Size */
+      byte_size: number;
+      /** Sha256 */
+      sha256?: string | null;
     };
     /**
      * PendingQueueSummary
@@ -38694,15 +39012,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "message": "You do not have permission to use the AI builder in this space.",
-           *       "intric_error_code": 9001,
+           *       "schema_version": 1,
            *       "code": "insufficient_space_permission",
+           *       "category": "unauthorized",
+           *       "message": "You do not have permission to use the AI builder in this space.",
+           *       "phase": "router",
+           *       "intric_error_code": 9001,
+           *       "request_id": "req_01HZYXEXAMPLE",
            *       "context": {
            *         "auth_layer": "space_membership"
            *       }
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
     };
@@ -38737,12 +39059,16 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "schema_version": 1,
+           *       "code": "bad_request",
+           *       "category": "bad_request",
            *       "message": "A planner model is required to start an AI Builder session.",
+           *       "phase": "router",
            *       "intric_error_code": 9007,
-           *       "code": "bad_request"
+           *       "request_id": "req_01HZYXEXAMPLE"
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description Caller lacks space permission or API key scope for this space. */
@@ -38753,15 +39079,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "message": "API key space scope does not match requested AI builder resource.",
-           *       "intric_error_code": 9001,
+           *       "schema_version": 1,
            *       "code": "insufficient_scope",
+           *       "category": "unauthorized",
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "phase": "router",
+           *       "intric_error_code": 9001,
+           *       "request_id": "req_01HZYXEXAMPLE",
            *       "context": {
            *         "auth_layer": "api_key_scope"
            *       }
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description Validation Error */
@@ -38819,12 +39149,16 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "schema_version": 1,
+           *       "code": "bad_request",
+           *       "category": "bad_request",
            *       "message": "Cannot send messages in this AI Builder session right now.",
+           *       "phase": "router",
            *       "intric_error_code": 9007,
-           *       "code": "bad_request"
+           *       "request_id": "req_01HZYXEXAMPLE"
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description Caller lacks space permission or API key scope for this session. */
@@ -38835,15 +39169,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "message": "API key space scope does not match requested AI builder resource.",
-           *       "intric_error_code": 9001,
+           *       "schema_version": 1,
            *       "code": "insufficient_scope",
+           *       "category": "unauthorized",
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "phase": "router",
+           *       "intric_error_code": 9001,
+           *       "request_id": "req_01HZYXEXAMPLE",
            *       "context": {
            *         "auth_layer": "api_key_scope"
            *       }
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description AI Builder session or referenced flow context was not found. */
@@ -38854,12 +39192,16 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "schema_version": 1,
+           *       "code": "not_found",
+           *       "category": "not_found",
            *       "message": "AI Builder session not found.",
+           *       "phase": "router",
            *       "intric_error_code": 9000,
-           *       "code": "not_found"
+           *       "request_id": "req_01HZYXEXAMPLE"
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description Validation Error */
@@ -38902,15 +39244,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "message": "API key space scope does not match requested AI builder resource.",
-           *       "intric_error_code": 9001,
+           *       "schema_version": 1,
            *       "code": "insufficient_scope",
+           *       "category": "unauthorized",
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "phase": "router",
+           *       "intric_error_code": 9001,
+           *       "request_id": "req_01HZYXEXAMPLE",
            *       "context": {
            *         "auth_layer": "api_key_scope"
            *       }
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description AI Builder session not found. */
@@ -38921,12 +39267,16 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "schema_version": 1,
+           *       "code": "not_found",
+           *       "category": "not_found",
            *       "message": "AI Builder session not found.",
+           *       "phase": "router",
            *       "intric_error_code": 9000,
-           *       "code": "not_found"
+           *       "request_id": "req_01HZYXEXAMPLE"
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description Validation Error */
@@ -38999,15 +39349,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "message": "API key space scope does not match requested AI builder resource.",
-           *       "intric_error_code": 9001,
+           *       "schema_version": 1,
            *       "code": "insufficient_scope",
+           *       "category": "unauthorized",
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "phase": "router",
+           *       "intric_error_code": 9001,
+           *       "request_id": "req_01HZYXEXAMPLE",
            *       "context": {
            *         "auth_layer": "api_key_scope"
            *       }
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description AI Builder session not found. */
@@ -39018,12 +39372,16 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "schema_version": 1,
+           *       "code": "not_found",
+           *       "category": "not_found",
            *       "message": "AI Builder session not found.",
+           *       "phase": "router",
            *       "intric_error_code": 9000,
-           *       "code": "not_found"
+           *       "request_id": "req_01HZYXEXAMPLE"
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description Validation Error */
@@ -39066,15 +39424,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "message": "API key space scope does not match requested AI builder resource.",
-           *       "intric_error_code": 9001,
+           *       "schema_version": 1,
            *       "code": "insufficient_scope",
+           *       "category": "unauthorized",
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "phase": "router",
+           *       "intric_error_code": 9001,
+           *       "request_id": "req_01HZYXEXAMPLE",
            *       "context": {
            *         "auth_layer": "api_key_scope"
            *       }
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description AI Builder plan not found. */
@@ -39085,12 +39447,16 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "schema_version": 1,
+           *       "code": "not_found",
+           *       "category": "not_found",
            *       "message": "AI Builder plan not found.",
+           *       "phase": "router",
            *       "intric_error_code": 9000,
-           *       "code": "not_found"
+           *       "request_id": "req_01HZYXEXAMPLE"
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description Validation Error */
@@ -39133,15 +39499,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "message": "API key space scope does not match requested AI builder resource.",
-           *       "intric_error_code": 9001,
+           *       "schema_version": 1,
            *       "code": "insufficient_scope",
+           *       "category": "unauthorized",
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "phase": "router",
+           *       "intric_error_code": 9001,
+           *       "request_id": "req_01HZYXEXAMPLE",
            *       "context": {
            *         "auth_layer": "api_key_scope"
            *       }
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description AI Builder session not found. */
@@ -39152,12 +39522,16 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "schema_version": 1,
+           *       "code": "not_found",
+           *       "category": "not_found",
            *       "message": "AI Builder session not found.",
+           *       "phase": "router",
            *       "intric_error_code": 9000,
-           *       "code": "not_found"
+           *       "request_id": "req_01HZYXEXAMPLE"
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description Validation Error */
@@ -39200,15 +39574,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "message": "API key space scope does not match requested AI builder resource.",
-           *       "intric_error_code": 9001,
+           *       "schema_version": 1,
            *       "code": "insufficient_scope",
+           *       "category": "unauthorized",
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "phase": "router",
+           *       "intric_error_code": 9001,
+           *       "request_id": "req_01HZYXEXAMPLE",
            *       "context": {
            *         "auth_layer": "api_key_scope"
            *       }
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description AI Builder session not found. */
@@ -39219,12 +39597,16 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "schema_version": 1,
+           *       "code": "not_found",
+           *       "category": "not_found",
            *       "message": "AI Builder session not found.",
+           *       "phase": "router",
            *       "intric_error_code": 9000,
-           *       "code": "not_found"
+           *       "request_id": "req_01HZYXEXAMPLE"
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description Validation Error */
@@ -39267,15 +39649,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "message": "API key space scope does not match requested AI builder resource.",
-           *       "intric_error_code": 9001,
+           *       "schema_version": 1,
            *       "code": "insufficient_scope",
+           *       "category": "unauthorized",
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "phase": "router",
+           *       "intric_error_code": 9001,
+           *       "request_id": "req_01HZYXEXAMPLE",
            *       "context": {
            *         "auth_layer": "api_key_scope"
            *       }
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description AI Builder plan not found. */
@@ -39286,12 +39672,16 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "schema_version": 1,
+           *       "code": "not_found",
+           *       "category": "not_found",
            *       "message": "AI Builder plan not found.",
+           *       "phase": "router",
            *       "intric_error_code": 9000,
-           *       "code": "not_found"
+           *       "request_id": "req_01HZYXEXAMPLE"
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description Validation Error */
@@ -39338,12 +39728,16 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "schema_version": 1,
+           *       "code": "transcription_model_required",
+           *       "category": "bad_request",
            *       "message": "A transcription model must be selected when using audio input steps.",
+           *       "phase": "router",
            *       "intric_error_code": 9007,
-           *       "code": "transcription_model_required"
+           *       "request_id": "req_01HZYXEXAMPLE"
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description Caller lacks space permission or API key scope for the plan's session. */
@@ -39354,15 +39748,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "message": "API key space scope does not match requested AI builder resource.",
-           *       "intric_error_code": 9001,
+           *       "schema_version": 1,
            *       "code": "insufficient_scope",
+           *       "category": "unauthorized",
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "phase": "router",
+           *       "intric_error_code": 9001,
+           *       "request_id": "req_01HZYXEXAMPLE",
            *       "context": {
            *         "auth_layer": "api_key_scope"
            *       }
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description AI Builder plan not found. */
@@ -39373,12 +39771,16 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "schema_version": 1,
+           *       "code": "not_found",
+           *       "category": "not_found",
            *       "message": "AI Builder plan not found.",
+           *       "phase": "router",
            *       "intric_error_code": 9000,
-           *       "code": "not_found"
+           *       "request_id": "req_01HZYXEXAMPLE"
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description The target flow revision changed before apply completed. */
@@ -39389,12 +39791,16 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "schema_version": 1,
+           *       "code": "stale_revision",
+           *       "category": "conflict",
            *       "message": "Flow revision changed while applying the plan.",
+           *       "phase": "router",
            *       "intric_error_code": 9007,
-           *       "code": "stale_revision"
+           *       "request_id": "req_01HZYXEXAMPLE"
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description Validation Error */
@@ -39441,12 +39847,16 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "schema_version": 1,
+           *       "code": "plan_not_proposed",
+           *       "category": "bad_request",
            *       "message": "Can only revise proposed plans.",
+           *       "phase": "router",
            *       "intric_error_code": 9007,
-           *       "code": "plan_not_proposed"
+           *       "request_id": "req_01HZYXEXAMPLE"
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description Caller lacks permission. */
@@ -39457,12 +39867,16 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "schema_version": 1,
+           *       "code": "session_creator_required",
+           *       "category": "unauthorized",
            *       "message": "Only the session creator can revise plans.",
+           *       "phase": "router",
            *       "intric_error_code": 9001,
-           *       "code": "session_creator_required"
+           *       "request_id": "req_01HZYXEXAMPLE"
            *     }
            */
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description Validation Error */

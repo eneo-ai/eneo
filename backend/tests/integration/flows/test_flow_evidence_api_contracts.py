@@ -998,12 +998,36 @@ async def test_flow_run_evidence_export_preserves_review_checkpoint_lineage(
             "rejected": 0,
             "resumed": 1,
             "cancelled": 0,
+            "expired": 0,
         },
         "any_edited": True,
         "any_resumed": True,
         "active_checkpoint_id": None,
         "active_checkpoint_conflict": False,
     }
+    assert (
+        raw_payload["summary_typed"]["review_checkpoints"]
+        == raw_payload["manifest"]["review_checkpoint_summary"]
+    )
+    raw_review_impact = raw_payload["summary_typed"]["step_overview"][0][
+        "review_impact"
+    ]
+    raw_review_event = raw_review_impact["events"][0]
+    assert raw_review_impact["checkpoint_count"] == 1
+    assert raw_review_impact["any_edited"] is True
+    assert raw_review_impact["any_resumed"] is True
+    assert raw_review_impact["any_output_changed"] is True
+    assert raw_review_impact["last_event"] == raw_review_event
+    assert raw_review_event["checkpoint_id"] == seeded["review_checkpoint_id"]
+    assert raw_review_event["state"] == "resumed"
+    assert raw_review_event["decision"] == "approved"
+    assert raw_review_event["attempt_no"] == 1
+    assert raw_review_event["revision"] == 4
+    assert raw_review_event["output_changed"] is True
+    redacted_review_event = redacted_payload["summary_typed"]["step_overview"][0][
+        "review_impact"
+    ]["events"][0]
+    assert redacted_review_event["output_changed"] is True
 
 
 @pytest.mark.asyncio

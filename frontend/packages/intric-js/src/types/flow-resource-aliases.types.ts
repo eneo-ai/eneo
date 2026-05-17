@@ -339,6 +339,78 @@ const validFlowEvidenceExport: FlowRunEvidenceExport = {
     }
   },
   summary: {},
+  summary_typed: {
+    status: "completed",
+    trace_id: validFlowRun.trace_id,
+    steps_count: 1,
+    completed_steps: 1,
+    failed_steps: 0,
+    attempts_count: 1,
+    artifacts_count: 1,
+    duration_ms: 1000,
+    models_used: ["gpt-5.4-nano"],
+    review_checkpoints: {
+      count: 1,
+      by_state: { resumed: 1 },
+      any_edited: true,
+      any_resumed: true,
+      active_checkpoint_id: null,
+      active_checkpoint_conflict: false
+    },
+    final_output: {
+      kind: "artifact",
+      text_present: false,
+      text_preview: null,
+      structured_present: false,
+      artifact_count: 1,
+      artifact_names: [validFlowRunResultFile.name]
+    },
+    step_overview: [
+      {
+        step_order: 1,
+        step_id: stepId,
+        user_description: validFlowStep.user_description,
+        status: "completed",
+        attempts_count: 1,
+        retries: 0,
+        duration_ms: 1000,
+        models_used: ["gpt-5.4-nano"],
+        artifact_names: [validFlowRunResultFile.name],
+        result_output_kind: "artifact",
+        output_summary: null,
+        configured_input_type: "text",
+        configured_output_type: "docx",
+        review_impact: {
+          checkpoint_count: 1,
+          any_edited: true,
+          any_resumed: true,
+          any_output_changed: true,
+          last_event: {
+            checkpoint_id: reviewCheckpointId,
+            state: "resumed",
+            decision: "approved",
+            edited: true,
+            resumed: true,
+            attempt_no: 1,
+            revision: 2,
+            output_changed: true
+          },
+          events: [
+            {
+              checkpoint_id: reviewCheckpointId,
+              state: "resumed",
+              decision: "approved",
+              edited: true,
+              resumed: true,
+              attempt_no: 1,
+              revision: 2,
+              output_changed: true
+            }
+          ]
+        }
+      }
+    ]
+  },
   redaction: {},
   bundle: validFlowEvidence
 };
