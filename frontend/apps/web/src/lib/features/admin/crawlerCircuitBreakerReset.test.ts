@@ -37,23 +37,33 @@ test("backed-off websites get recovery copy and no schedule warning", () => {
   const copy = getCrawlerCircuitBreakerResetCopy(backedOffCandidate);
 
   expect(copy.dialogTitle).toBe("Resume scheduled crawling?");
-  expect(copy.dialogDescription).toContain("Example municipality");
+  expect(copy.dialogDescription).toBe(
+    "This clears the retry backoff for the website below so its scheduled crawl can run again at the next interval. Already indexed content is kept."
+  );
   expect(copy.confirmLabel).toBe("Resume crawling");
   expect(copy.followupHint).toBeNull();
   expect(copy.followupTone).toBe("neutral");
   expect(copy.ariaLabel).toContain("Example municipality");
+  expect(getCrawlerCircuitBreakerResetWebsiteLabel(backedOffCandidate)).toBe(
+    "Example municipality"
+  );
 });
 
 test("paused-after-failures websites get explicit follow-up about scheduling", () => {
   const copy = getCrawlerCircuitBreakerResetCopy(pausedCandidate);
 
   expect(copy.dialogTitle).toBe("Clear paused state?");
-  expect(copy.dialogDescription).toContain("https://paused.example.com");
+  expect(copy.dialogDescription).toBe(
+    "This clears the paused state for the website below. The crawler stays manual-only until you choose an update interval on the website itself."
+  );
   expect(copy.confirmLabel).toBe("Clear paused state");
   expect(copy.followupHint).toBe(
     "Scheduled crawling stays manual-only until you pick an update interval on the website."
   );
   expect(copy.followupTone).toBe("caution");
+  expect(getCrawlerCircuitBreakerResetWebsiteLabel(pausedCandidate)).toBe(
+    "https://paused.example.com"
+  );
 });
 
 test("website label falls back to URL when name is missing", () => {

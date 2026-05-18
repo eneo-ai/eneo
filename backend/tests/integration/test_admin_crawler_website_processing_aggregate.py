@@ -239,6 +239,8 @@ async def test_admin_crawler_website_processing_aggregate_is_tenant_scoped(
     assert data["limit"] == 10
     assert data["offset"] == 0
     assert data["days"] == 7
+    assert data["low_retention_threshold"] == 0.5
+    assert data["source_skip_drift_min_indexed"] == 50
     assert "tenant_id" not in data
     assert [item["website_id"] for item in data["items"]] == [
         str(website_id),
@@ -372,3 +374,245 @@ async def test_admin_crawler_website_processing_aggregate_filters_by_website_id(
     returned = {item["website_id"] for item in data["items"]}
     assert str(website_a_id) in returned
     assert str(website_b_id) not in returned
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_admin_crawler_website_processing_aggregate_sort_options(
+    client,
+    db_session,
+    admin_user,
+    admin_user_api_key,
+):
+    """Each sort enum value lands on the expected primary row.
+
+    Three websites in the same tenant:
+    - failure_heavy: 3 failed runs, latest 6h ago
+    - busy: 5 successful runs, latest 4h ago
+    - recent: 1 successful run, latest 30 min ago
+    The default LOAD_PRESSURE sort uses cost-pressure × throughput, so
+    busy (high throughput, DAILY interval) wins. FAILURES sort flips
+    failure_heavy to the top. RUNS sort flips busy. RECENT sort flips
+    recent. Asserting only the primary row keeps the test robust to
+    ranking ties on the tail.
+    """
+    now = datetime.now(timezone.utc)
+
+    async with db_session() as session:
+        embedding_model_id = await _embedding_model_id(session)
+        failure_heavy = await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            name="Failure heavy",
+            update_interval=UpdateInterval.NEVER,
+        )
+        busy = await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            name="Busy daily crawler",
+            update_interval=UpdateInterval.DAILY,
+        )
+        recent = await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            name="Recently active",
+            update_interval=UpdateInterval.NEVER,
+        )
+
+        for offset_hours in (5, 4, 3):
+            await _create_crawl_run(
+                session,
+                tenant_id=admin_user.tenant_id,
+                user_id=admin_user.id,
+                website_id=failure_heavy.id,
+                created_at=now - timedelta(hours=offset_hours),
+                status=Status.FAILED,
+                pages_failed=2,
+            )
+        for offset_hours in (12, 11, 10, 9, 8):
+            await _create_crawl_run(
+                session,
+                tenant_id=admin_user.tenant_id,
+                user_id=admin_user.id,
+                website_id=busy.id,
+                created_at=now - timedelta(hours=offset_hours),
+                status=Status.COMPLETE,
+                pages_crawled=20,
+                files_downloaded=5,
+            )
+        await _create_crawl_run(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            website_id=recent.id,
+            created_at=now - timedelta(minutes=30),
+            status=Status.COMPLETE,
+            pages_crawled=1,
+        )
+        failure_heavy_id = str(failure_heavy.id)
+        busy_id = str(busy.id)
+        recent_id = str(recent.id)
+        await session.commit()
+
+    async def fetch(sort: str) -> dict:
+        response = await client.get(
+            "/api/v1/admin/crawler/website-processing",
+            params={"days": 7, "limit": 10, "sort": sort},
+            headers={"X-API-Key": admin_user_api_key.key},
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    load_pressure = await fetch("load_pressure")
+    failures = await fetch("failures")
+    runs = await fetch("runs")
+    recent_sort = await fetch("recent")
+
+    assert load_pressure["items"][0]["website_id"] == busy_id
+    assert failures["items"][0]["website_id"] == failure_heavy_id
+    assert runs["items"][0]["website_id"] == busy_id
+    assert recent_sort["items"][0]["website_id"] == recent_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_admin_crawler_website_processing_aggregate_failures_only_filter(
+    client,
+    db_session,
+    admin_user,
+    admin_user_api_key,
+):
+    """`failures_only=true` returns only websites with failure signals.
+
+    Seeds one healthy + one failure-heavy website. The healthy site
+    must be excluded from items and from the total count so pagination
+    matches what the operator sees.
+    """
+    now = datetime.now(timezone.utc)
+
+    async with db_session() as session:
+        embedding_model_id = await _embedding_model_id(session)
+        healthy = await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            name="Healthy site",
+        )
+        failing = await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            name="Failing site",
+        )
+        await _create_crawl_run(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            website_id=healthy.id,
+            created_at=now - timedelta(hours=2),
+            status=Status.COMPLETE,
+            pages_crawled=10,
+        )
+        await _create_crawl_run(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            website_id=failing.id,
+            created_at=now - timedelta(hours=1),
+            status=Status.FAILED,
+            pages_failed=3,
+        )
+        failing_id = str(failing.id)
+        await session.commit()
+
+    response = await client.get(
+        "/api/v1/admin/crawler/website-processing",
+        params={"days": 7, "limit": 10, "failures_only": True},
+        headers={"X-API-Key": admin_user_api_key.key},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    assert [item["website_id"] for item in data["items"]] == [failing_id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_admin_crawler_website_processing_aggregate_search(
+    client,
+    db_session,
+    admin_user,
+    admin_user_api_key,
+):
+    """`search=` does a case-insensitive substring match on name + URL.
+
+    A literal `%` in the query must not widen the match (escape_like
+    guard). When the search term matches no rows the response is empty
+    with total=0.
+    """
+    now = datetime.now(timezone.utc)
+
+    async with db_session() as session:
+        embedding_model_id = await _embedding_model_id(session)
+        alpha = await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            name="Alpha service",
+        )
+        beta = await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            name="Beta service",
+        )
+        await _create_crawl_run(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            website_id=alpha.id,
+            created_at=now - timedelta(hours=2),
+            status=Status.COMPLETE,
+            pages_crawled=10,
+        )
+        await _create_crawl_run(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            website_id=beta.id,
+            created_at=now - timedelta(hours=1),
+            status=Status.COMPLETE,
+            pages_crawled=5,
+        )
+        alpha_id = str(alpha.id)
+        await session.commit()
+
+    name_hit = await client.get(
+        "/api/v1/admin/crawler/website-processing",
+        params={"days": 7, "search": "alpha"},
+        headers={"X-API-Key": admin_user_api_key.key},
+    )
+    no_hit = await client.get(
+        "/api/v1/admin/crawler/website-processing",
+        params={"days": 7, "search": "100%"},
+        headers={"X-API-Key": admin_user_api_key.key},
+    )
+
+    assert name_hit.status_code == 200
+    name_data = name_hit.json()
+    assert name_data["total"] == 1
+    assert [item["website_id"] for item in name_data["items"]] == [alpha_id]
+
+    assert no_hit.status_code == 200
+    assert no_hit.json()["total"] == 0

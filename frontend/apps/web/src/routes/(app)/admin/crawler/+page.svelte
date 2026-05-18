@@ -7,7 +7,7 @@
 
 <script lang="ts">
   import { invalidate } from "$app/navigation";
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
@@ -20,6 +20,7 @@
   import KpiSummary from "./KpiSummary.svelte";
   import WebbplatserTab from "./WebbplatserTab.svelte";
   import WebsiteDetailDialog from "./WebsiteDetailDialog.svelte";
+  import { createCrawlerActivityState } from "./crawlerActivityState.svelte";
   import {
     createBulkIntervalState,
     createCrawlerDialogState
@@ -93,6 +94,18 @@
   const dialogs = createCrawlerDialogState(intric, {
     set: (item) => (detailCandidate = item)
   });
+
+  // The activity state owns subsequent refetches (filters / sort / page);
+  // it only needs the SSR snapshot at construction. `untrack` silences
+  // the Svelte 5 "state-only-captures-initial-value" warning, which is
+  // exactly the semantics we want here — later page-load refreshes go
+  // through `intric` from inside the state module, not through `data`.
+  const activity = untrack(() =>
+    createCrawlerActivityState(intric, {
+      response: data.crawlerWebsiteProcessing ?? null,
+      loadFailed: data.crawlerWebsiteProcessingLoadFailed
+    })
+  );
 
   let activeInventoryLifecycleFilter = $state<CrawlerActiveInventoryLifecycleFilter>("all");
   let activeInventoryFiltered = $state<CrawlerActiveInventoryResponse | null>(null);
@@ -728,9 +741,7 @@
           <AktivitetTab
             scheduledAggregate={data.crawlerScheduledAggregate ?? null}
             scheduledAggregateLoadFailed={data.crawlerScheduledAggregateLoadFailed}
-            websiteProcessing={data.crawlerWebsiteProcessing ?? null}
-            websiteProcessingLoadFailed={data.crawlerWebsiteProcessingLoadFailed}
-            websiteProcessingWindowDays={data.crawlerWebsiteProcessingWindowDays}
+            {activity}
             resolveRowLabel={resolveHälsaRowLabel}
             onOpenWebsiteDetail={openWebsiteDetail}
           />

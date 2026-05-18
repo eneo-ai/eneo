@@ -55,6 +55,9 @@ from intric.websites.domain.crawler_recent_failures import (
 from intric.websites.domain.crawler_tenant_website_inventory import (
     CrawlerTenantWebsiteInventorySort,
 )
+from intric.websites.domain.crawler_website_processing_aggregate import (
+    CrawlerWebsiteProcessingSort,
+)
 from intric.websites.domain.website import UpdateInterval
 from intric.websites.domain.website_admin_repo import WebsiteAdminRepository
 from intric.websites.domain.website_sparse_repo import WebsiteSparseRepository
@@ -83,27 +86,37 @@ logger = get_logger(__name__)
 
 
 @asynccontextmanager
-async def _admin_crawler_query_telemetry(endpoint: str, *, tenant_id: UUID):
+async def _admin_crawler_query_telemetry(
+    endpoint: str,
+    *,
+    tenant_id: UUID,
+    extra_labels: Mapping[str, object] | None = None,
+):
     """Bounded latency telemetry for tenant-admin crawler queries.
 
     Emits one structured log entry per request with `metric_name` +
     `metric_value` keys so existing log-as-metric ingestion picks it up
-    without a new dependency. The baseline stream lets operators compare
-    before/after admin page slices.
+    without a new dependency. `extra_labels` lets endpoint-specific
+    dimensions (e.g. `has_search`, `has_filters`) ride alongside the
+    base shape so a slow-query investigation can split latency by
+    filter dimension without re-instrumenting.
     """
     started = time.perf_counter()
     try:
         yield
     finally:
         elapsed_ms = int((time.perf_counter() - started) * 1000)
+        extra: dict[str, object] = {
+            "metric_name": "crawler.admin.query_duration_ms",
+            "metric_value": elapsed_ms,
+            "endpoint": endpoint,
+            "tenant_id": str(tenant_id),
+        }
+        if extra_labels:
+            extra.update(extra_labels)
         logger.info(
             "Admin crawler query completed",
-            extra={
-                "metric_name": "crawler.admin.query_duration_ms",
-                "metric_value": elapsed_ms,
-                "endpoint": endpoint,
-                "tenant_id": str(tenant_id),
-            },
+            extra=extra,
         )
 
 
@@ -347,12 +360,28 @@ async def get_current_tenant_crawler_website_processing_aggregate(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     website_id: Annotated[UUID | None, Query()] = None,
+    sort: Annotated[
+        CrawlerWebsiteProcessingSort, Query()
+    ] = CrawlerWebsiteProcessingSort.LOAD_PRESSURE,
+    failures_only: Annotated[bool, Query()] = False,
+    low_retention_only: Annotated[bool, Query()] = False,
+    source_skip_drift_only: Annotated[bool, Query()] = False,
+    search: Annotated[str | None, Query(max_length=200)] = None,
 ) -> CrawlerTenantWebsiteProcessingAggregateResponse:
     until = datetime.now(timezone.utc)
     since = until - timedelta(days=days)
 
+    has_search = search is not None and search.strip() != ""
+    has_filters = failures_only or low_retention_only or source_skip_drift_only
+
     async with _admin_crawler_query_telemetry(
-        "website_processing_aggregate", tenant_id=current_user.tenant_id
+        "website_processing_aggregate",
+        tenant_id=current_user.tenant_id,
+        extra_labels={
+            "has_search": has_search,
+            "has_filters": has_filters,
+            "sort": sort.value,
+        },
     ):
         async with session.begin():
             repo = CrawlRunRepository(session=session)
@@ -364,6 +393,11 @@ async def get_current_tenant_crawler_website_processing_aggregate(
                 offset=offset,
                 tenant_id=current_user.tenant_id,
                 website_id=website_id,
+                sort=sort,
+                failures_only=failures_only,
+                low_retention_only=low_retention_only,
+                source_skip_drift_only=source_skip_drift_only,
+                search=search,
             )
         return CrawlerTenantWebsiteProcessingAggregateResponse.from_domain(aggregate)
 

@@ -12,12 +12,83 @@ export type CrawlerTenantWebsiteProcessingAggregateResponse =
   components["schemas"]["CrawlerTenantWebsiteProcessingAggregateResponse"];
 export type CrawlerTenantWebsiteProcessingAggregateItem =
   components["schemas"]["CrawlerTenantWebsiteProcessingAggregateItem"];
+export type CrawlerWebsiteProcessingSort = components["schemas"]["CrawlerWebsiteProcessingSort"];
 
+// Backend caps at 200 per page; the Aktivitet UI exposes 10/25/50 so an
+// operator with 10k websites can widen without overwhelming the column
+// layout. 10 is the default — large enough to surface several failure
+// clusters per page, small enough to render below the fold on a laptop.
 export const CRAWLER_WEBSITE_PROCESSING_DEFAULTS = {
   days: 7,
-  limit: 5,
-  offset: 0
-} as const;
+  limit: 10,
+  offset: 0,
+  sort: "load_pressure" as const
+} as const satisfies {
+  days: number;
+  limit: number;
+  offset: number;
+  sort: CrawlerWebsiteProcessingSort;
+};
+
+export const CRAWLER_WEBSITE_PROCESSING_PAGE_SIZES: readonly number[] = [10, 25, 50] as const;
+
+export type CrawlerWebsiteProcessingPageSize =
+  (typeof CRAWLER_WEBSITE_PROCESSING_PAGE_SIZES)[number];
+
+export function isCrawlerWebsiteProcessingPageSize(
+  value: number
+): value is CrawlerWebsiteProcessingPageSize {
+  return (CRAWLER_WEBSITE_PROCESSING_PAGE_SIZES as readonly number[]).includes(value);
+}
+
+// 7 / 14 / 30 days matches the backend's `days` Query bounds (1..30) and
+// covers the operator's typical "did anything break this week / sprint /
+// month" rhythm. 1 / 30 are not useful as chip values — too noisy / too
+// coarse — so the chip set is a curated trio rather than a free integer.
+export const CRAWLER_WEBSITE_PROCESSING_TIME_WINDOWS: readonly number[] = [7, 14, 30] as const;
+
+export type CrawlerWebsiteProcessingTimeWindow =
+  (typeof CRAWLER_WEBSITE_PROCESSING_TIME_WINDOWS)[number];
+
+export function isCrawlerWebsiteProcessingTimeWindow(
+  value: number
+): value is CrawlerWebsiteProcessingTimeWindow {
+  return (CRAWLER_WEBSITE_PROCESSING_TIME_WINDOWS as readonly number[]).includes(value);
+}
+
+export const CRAWLER_WEBSITE_PROCESSING_SORT_OPTIONS: readonly CrawlerWebsiteProcessingSort[] = [
+  "load_pressure",
+  "failures",
+  "runs",
+  "recent"
+] as const;
+
+export function getCrawlerWebsiteProcessingSortLabel(sort: CrawlerWebsiteProcessingSort): string {
+  switch (sort) {
+    case "load_pressure":
+      return m.crawler_website_processing_sort_load_pressure();
+    case "failures":
+      return m.crawler_website_processing_sort_failures();
+    case "runs":
+      return m.crawler_website_processing_sort_runs();
+    case "recent":
+      return m.crawler_website_processing_sort_recent();
+    default: {
+      const exhaustive: never = sort;
+      return exhaustive;
+    }
+  }
+}
+
+export function offsetFromCrawlerWebsiteProcessingPage(page: number, pageSize: number): number {
+  if (pageSize <= 0) return 0;
+  return Math.max(0, page - 1) * pageSize;
+}
+
+export function pageFromCrawlerWebsiteProcessingOffset(offset: number, pageSize: number): number {
+  if (pageSize <= 0) return 1;
+  return Math.max(1, Math.floor(Math.max(0, offset) / pageSize) + 1);
+}
 
 export function getCrawlerWebsiteProcessingWebsiteLabel(
   item: CrawlerTenantWebsiteProcessingAggregateItem
@@ -92,6 +163,9 @@ export function getCrawlerWebsiteProcessingEmbeddingUsageLabel(
   }
 
   const tokens = formatCrawlerCount(item.embedding_input_tokens);
+  if (item.embedding_input_tokens === 0) {
+    return m.crawler_website_processing_embedding_usage_no_new_tokens();
+  }
   if (!item.embedding_total_cost_usd) {
     return m.crawler_website_processing_embedding_usage_cost_missing({ tokens });
   }
@@ -113,6 +187,9 @@ export function getCrawlerWebsiteProcessingLatestRunEmbeddingUsageLabel(
   }
 
   const tokens = formatCrawlerCount(item.latest_embedding_input_tokens);
+  if (item.latest_embedding_input_tokens === 0) {
+    return m.crawler_website_processing_embedding_usage_no_new_tokens();
+  }
   if (!item.latest_embedding_total_cost_usd) {
     return m.crawler_website_processing_embedding_usage_cost_missing({ tokens });
   }
@@ -177,10 +254,11 @@ export const CRAWLER_LOW_RETENTION_THRESHOLD = 0.5;
  * cold websites as wasteful.
  */
 export function isCrawlerWebsiteProcessingLowRetention(
-  item: CrawlerTenantWebsiteProcessingAggregateItem
+  item: CrawlerTenantWebsiteProcessingAggregateItem,
+  threshold: number = CRAWLER_LOW_RETENTION_THRESHOLD
 ): boolean {
   if (item.indexed_content_count <= 0) return false;
-  return item.retention_rate < CRAWLER_LOW_RETENTION_THRESHOLD;
+  return item.retention_rate < threshold;
 }
 
 /**
@@ -195,9 +273,10 @@ export function isCrawlerWebsiteProcessingLowRetention(
 export const CRAWLER_SOURCE_SKIP_DRIFT_MIN_INDEXED = 50;
 
 export function isCrawlerWebsiteProcessingSourceSkipDrift(
-  item: CrawlerTenantWebsiteProcessingAggregateItem
+  item: CrawlerTenantWebsiteProcessingAggregateItem,
+  minIndexed: number = CRAWLER_SOURCE_SKIP_DRIFT_MIN_INDEXED
 ): boolean {
-  if (item.indexed_content_count < CRAWLER_SOURCE_SKIP_DRIFT_MIN_INDEXED) {
+  if (item.indexed_content_count < minIndexed) {
     return false;
   }
   return item.pages_source_retained === 0;

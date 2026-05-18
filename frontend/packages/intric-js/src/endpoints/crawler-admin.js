@@ -87,7 +87,17 @@ export function initCrawlerAdmin(client) {
 
     /**
      * Get crawler processing totals grouped by website for the current tenant.
-     * @param {{days?: number, limit?: number, offset?: number, website_id?: string}} [params]
+     * @param {{
+     *   days?: number,
+     *   limit?: number,
+     *   offset?: number,
+     *   website_id?: string,
+     *   sort?: import("../types/schema").components["schemas"]["CrawlerWebsiteProcessingSort"],
+     *   failures_only?: boolean,
+     *   low_retention_only?: boolean,
+     *   source_skip_drift_only?: boolean,
+     *   search?: string
+     * }} [params]
      * @returns {Promise<CrawlerTenantWebsiteProcessingAggregateResponse>}
      * @throws {IntricError}
      */

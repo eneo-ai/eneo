@@ -521,6 +521,15 @@ class CrawlerTenantWebsiteProcessingAggregateItem(BaseModel):
 
 
 class CrawlerTenantWebsiteProcessingAggregateResponse(BaseModel):
+    """Aggregate response for the Aktivitet tab.
+
+    `low_retention_threshold` and `source_skip_drift_min_indexed` are
+    surfaced alongside the items so the frontend can render the same
+    Låg behållning / Source-skip-drift row badges (and the matching
+    filter chips) without duplicating the constants. Backend owns the
+    truth; the frontend reads them off the call it already makes.
+    """
+
     items: list[CrawlerTenantWebsiteProcessingAggregateItem]
     total: int = Field(ge=0)
     limit: int = Field(ge=1, le=200)
@@ -528,11 +537,18 @@ class CrawlerTenantWebsiteProcessingAggregateResponse(BaseModel):
     days: int = Field(ge=1, le=30)
     since: datetime
     until: datetime
+    low_retention_threshold: float = Field(gt=0.0, lt=1.0)
+    source_skip_drift_min_indexed: int = Field(ge=0)
 
     @classmethod
     def from_domain(
         cls, aggregate: DomainCrawlerWebsiteProcessingAggregate
     ) -> "CrawlerTenantWebsiteProcessingAggregateResponse":
+        from intric.websites.domain.crawler_website_processing_aggregate import (
+            LOW_RETENTION_THRESHOLD,
+            SOURCE_SKIP_DRIFT_MIN_INDEXED,
+        )
+
         return cls(
             items=[
                 CrawlerTenantWebsiteProcessingAggregateItem.from_domain(item)
@@ -544,6 +560,8 @@ class CrawlerTenantWebsiteProcessingAggregateResponse(BaseModel):
             days=aggregate.days,
             since=aggregate.since,
             until=aggregate.until,
+            low_retention_threshold=LOW_RETENTION_THRESHOLD,
+            source_skip_drift_min_indexed=SOURCE_SKIP_DRIFT_MIN_INDEXED,
         )
 
 

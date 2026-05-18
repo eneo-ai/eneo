@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 from typing import Final
 from uuid import UUID
 
@@ -13,6 +14,35 @@ SCHEDULE_FREQUENCY_WEIGHTS: Final[dict[UpdateInterval, float]] = {
     UpdateInterval.WEEKLY: 1.0,
     UpdateInterval.NEVER: 0.0,
 }
+
+# Operator threshold below which a row's retention rate is flagged
+# wasteful (the hash gate / source-skip did not retain enough content).
+# Mirrors the frontend constant in crawlerWebsiteProcessing.ts so the
+# server-side filter ("Endast låg behållning") matches the row badge.
+LOW_RETENTION_THRESHOLD: Final[float] = 0.5
+
+# Minimum indexed content for the source-skip-drift flag to fire.
+# Below this floor the signal is noise (a website with 1 page can't
+# meaningfully demonstrate sitemap drift). Mirrors the frontend
+# constant so server-filtered rows and badge-flagged rows match.
+SOURCE_SKIP_DRIFT_MIN_INDEXED: Final[int] = 50
+
+
+class CrawlerWebsiteProcessingSort(str, Enum):
+    """Stable sort orders the Aktivitet tab can request.
+
+    Each value maps to a deterministic ORDER BY clause in the repository.
+    LOAD_PRESSURE matches the historical ordering (cost-pressure score
+    descending, then throughput descending). The other values surface
+    failure-heavy, busy, or recently-active websites so a tenant admin
+    with thousands of crawls can pivot the view without re-sorting in
+    the client.
+    """
+
+    LOAD_PRESSURE = "load_pressure"
+    FAILURES = "failures"
+    RUNS = "runs"
+    RECENT = "recent"
 
 
 def parse_update_interval_for_cost_score(value: object) -> UpdateInterval | None:

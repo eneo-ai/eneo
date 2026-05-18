@@ -1,12 +1,13 @@
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.orm import aliased, selectinload
 
+from intric.audit.infrastructure.audit_log_repo_impl import escape_like
 from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.job_table import Jobs
 from intric.database.tables.spaces_table import Spaces
@@ -56,9 +57,12 @@ from intric.websites.domain.crawler_recent_failures import (
     CrawlerRecentFailures,
 )
 from intric.websites.domain.crawler_website_processing_aggregate import (
+    LOW_RETENTION_THRESHOLD,
     SCHEDULE_FREQUENCY_WEIGHTS,
+    SOURCE_SKIP_DRIFT_MIN_INDEXED,
     CrawlerWebsiteProcessingAggregate,
     CrawlerWebsiteProcessingAggregateItem,
+    CrawlerWebsiteProcessingSort,
     cost_pressure_score,
     parse_update_interval_for_cost_score,
     retention_rate,
@@ -737,6 +741,20 @@ class CrawlRunRepository:
                 CrawlRunsTable.pages_hash_retained.label("pages_hash_retained"),
                 CrawlRunsTable.files_hash_retained.label("files_hash_retained"),
                 CrawlRunsTable.files_too_large_skipped.label("files_too_large_skipped"),
+                CrawlRunsTable.embedding_model_name_snapshot.label(
+                    "embedding_model_name_snapshot"
+                ),
+                CrawlRunsTable.embedding_model_litellm_name_snapshot.label(
+                    "embedding_model_litellm_name_snapshot"
+                ),
+                CrawlRunsTable.embedding_model_provider_snapshot.label(
+                    "embedding_model_provider_snapshot"
+                ),
+                CrawlRunsTable.embedding_input_tokens.label("embedding_input_tokens"),
+                CrawlRunsTable.embedding_total_cost_usd.label(
+                    "embedding_total_cost_usd"
+                ),
+                CrawlRunsTable.embedding_usage_source.label("embedding_usage_source"),
             )
             .select_from(rows_from)
             .where(*recent_failure_conditions)
@@ -809,6 +827,13 @@ class CrawlRunRepository:
         offset: int,
         tenant_id: UUID | None,
         website_id: UUID | None = None,
+        sort: CrawlerWebsiteProcessingSort = (
+            CrawlerWebsiteProcessingSort.LOAD_PRESSURE
+        ),
+        failures_only: bool = False,
+        low_retention_only: bool = False,
+        source_skip_drift_only: bool = False,
+        search: str | None = None,
     ) -> CrawlerWebsiteProcessingAggregate:
         base_conditions = [
             CrawlRunsTable.created_at >= since,
@@ -821,6 +846,23 @@ class CrawlRunRepository:
             # detail Dialog uses this to render real per-website
             # history without re-fetching the full tenant-wide top-N.
             base_conditions.append(CrawlRunsTable.website_id == website_id)
+
+        # ILIKE OR-clause on Websites.name / url. escape_like treats
+        # user-typed `%` and `_` as literal characters so a search for
+        # "100%" does not silently widen the result set. pg_trgm GIN
+        # indexes on websites.url + websites.name (migration V2-G) keep
+        # the substring scan O(log N).
+        has_search = bool(search and search.strip())
+        if has_search:
+            assert search is not None
+            safe = escape_like(search.strip())
+            pattern = f"%{safe}%"
+            base_conditions.append(
+                sa.or_(
+                    Websites.url.ilike(pattern, escape="\\"),
+                    Websites.name.ilike(pattern, escape="\\"),
+                )
+            )
 
         latest_crawl_run = aliased(CrawlRunsTable)
         latest_conditions = [
@@ -865,13 +907,6 @@ class CrawlRunRepository:
             .where(*latest_conditions)
             .subquery()
         )
-
-        total_stmt = (
-            sa.select(sa.func.count(sa.distinct(CrawlRunsTable.website_id)))
-            .select_from(CrawlRunsTable)
-            .where(*base_conditions)
-        )
-        total = int(await self.session.scalar(total_stmt) or 0)
 
         rows_from = sa.outerjoin(
             sa.outerjoin(
@@ -942,21 +977,96 @@ class CrawlRunRepository:
             pages_crawled + files_downloaded
         )
         throughput = pages_crawled + files_downloaded
+        latest_run_at = sa.func.max(CrawlRunsTable.created_at).label("latest_run_at")
+        total_runs_count = sa.func.count(CrawlRunsTable.id).label("total_runs")
+        terminal_runs_count = (
+            sa.func.count(CrawlRunsTable.id)
+            .filter(Jobs.finished_at.is_not(None))
+            .label("terminal_runs")
+        )
+        failed_runs_count = (
+            sa.func.count(CrawlRunsTable.id)
+            .filter(Jobs.status == Status.FAILED.value)
+            .label("failed_runs")
+        )
+        # Re-build the aggregated retained / fetched expressions without
+        # the .label() wrappers; bare arithmetic on labelled columns
+        # would push the alias into the HAVING clause and confuse the
+        # SQL generator. The values are identical to the labelled ones
+        # because SUM(coalesce(...)) is deterministic.
+        retained_expr = (
+            sa.func.coalesce(sa.func.sum(CrawlRunsTable.pages_hash_retained), 0)
+            + sa.func.coalesce(sa.func.sum(CrawlRunsTable.files_hash_retained), 0)
+            + sa.func.coalesce(sa.func.sum(CrawlRunsTable.pages_source_retained), 0)
+        )
+        fetched_expr = sa.func.coalesce(
+            sa.func.sum(CrawlRunsTable.pages_crawled), 0
+        ) + sa.func.coalesce(sa.func.sum(CrawlRunsTable.files_downloaded), 0)
+        indexed_expr = retained_expr + fetched_expr
 
-        rows_stmt = (
+        # `Any` because SQLAlchemy column-element types don't compose
+        # cleanly through `+`/`<` overloads under pyright strict — the
+        # same untyped-list pattern is used by
+        # `WebsiteAdminRepository.tenant_website_inventory` for its
+        # WHERE conditions. Behaviour is identical; type is the only
+        # difference.
+        having_clauses: list[Any] = []
+        if failures_only:
+            # A row has failures when either the run-level failure
+            # counter is non-zero, or per-item page/file failures were
+            # recorded. The two signals diverge in practice: a watchdog
+            # timeout aborts a run without emitting per-page errors, and
+            # vice versa for partial fetch failures inside a terminal-
+            # OK run. Operators want both.
+            having_clauses.append(
+                sa.or_(
+                    sa.func.count(CrawlRunsTable.id).filter(
+                        Jobs.status == Status.FAILED.value
+                    )
+                    > 0,
+                    sa.func.coalesce(sa.func.sum(CrawlRunsTable.pages_failed), 0) > 0,
+                    sa.func.coalesce(sa.func.sum(CrawlRunsTable.files_failed), 0) > 0,
+                )
+            )
+        if low_retention_only:
+            # retention_rate < LOW_RETENTION_THRESHOLD rewritten in
+            # multiplied form to avoid a division in HAVING:
+            #   retained / indexed < threshold
+            # ⇔ retained < threshold * indexed (when indexed > 0).
+            having_clauses.append(
+                sa.and_(
+                    indexed_expr > 0,
+                    retained_expr < (LOW_RETENTION_THRESHOLD * indexed_expr),
+                )
+            )
+        if source_skip_drift_only:
+            # Source-skip drift: enough indexed work to call the signal
+            # meaningful AND zero source-skip retentions. Mirrors the
+            # frontend `isCrawlerWebsiteProcessingSourceSkipDrift` flag.
+            having_clauses.append(
+                sa.and_(
+                    indexed_expr >= SOURCE_SKIP_DRIFT_MIN_INDEXED,
+                    sa.func.coalesce(
+                        sa.func.sum(CrawlRunsTable.pages_source_retained), 0
+                    )
+                    == 0,
+                )
+            )
+
+        # The aggregated SELECT before ORDER BY / LIMIT / OFFSET. Both
+        # the rows_stmt and total_stmt derive from this so the
+        # `total` and the visible page always reference the same
+        # filtered set.
+        aggregated_stmt = (
             sa.select(
                 CrawlRunsTable.website_id.label("website_id"),
                 Websites.name.label("website_name"),
                 CrawlRunsTable.tenant_id.label("tenant_id"),
                 Tenants.display_name.label("tenant_display_name"),
                 Websites.update_interval.label("update_interval"),
-                sa.func.count(CrawlRunsTable.id).label("total_runs"),
-                sa.func.count(CrawlRunsTable.id)
-                .filter(Jobs.finished_at.is_not(None))
-                .label("terminal_runs"),
-                sa.func.count(CrawlRunsTable.id)
-                .filter(Jobs.status == Status.FAILED.value)
-                .label("failed_runs"),
+                total_runs_count,
+                terminal_runs_count,
+                failed_runs_count,
                 pages_crawled,
                 files_downloaded,
                 pages_hash_retained,
@@ -974,6 +1084,7 @@ class CrawlRunRepository:
                 latest_run_subquery.c.latest_embedding_total_cost_usd,
                 latest_run_subquery.c.latest_embedding_usage_source,
                 indexed_content_count,
+                latest_run_at,
             )
             .select_from(rows_from)
             .where(*base_conditions)
@@ -990,14 +1101,50 @@ class CrawlRunRepository:
                 latest_run_subquery.c.latest_embedding_total_cost_usd,
                 latest_run_subquery.c.latest_embedding_usage_source,
             )
-            .order_by(
+        )
+        if having_clauses:
+            aggregated_stmt = aggregated_stmt.having(*having_clauses)
+
+        # COUNT(*) over the aggregated set: subquery-wrap so HAVING
+        # and search filters are honoured. Two executions of the same
+        # aggregation (count + rows) are the trade-off; the cheaper
+        # `count(*) over ()` window-function alternative returns
+        # `total = 0` on empty pages past the end, which the operator
+        # paginator must not see. If profiling shows the double
+        # aggregation as a real cost, swap to window-fn + scalar
+        # fallback for the empty-page case (see codex review notes
+        # captured in the PR description).
+        total_stmt = sa.select(sa.func.count()).select_from(aggregated_stmt.subquery())
+        total = int(await self.session.scalar(total_stmt) or 0)
+
+        if sort is CrawlerWebsiteProcessingSort.FAILURES:
+            order_by = (
+                failed_runs_count.desc(),
+                (
+                    sa.func.coalesce(sa.func.sum(CrawlRunsTable.pages_failed), 0)
+                    + sa.func.coalesce(sa.func.sum(CrawlRunsTable.files_failed), 0)
+                ).desc(),
+                CrawlRunsTable.website_id.asc(),
+            )
+        elif sort is CrawlerWebsiteProcessingSort.RUNS:
+            order_by = (
+                total_runs_count.desc(),
+                CrawlRunsTable.website_id.asc(),
+            )
+        elif sort is CrawlerWebsiteProcessingSort.RECENT:
+            order_by = (
+                latest_run_at.desc(),
+                CrawlRunsTable.website_id.asc(),
+            )
+        else:
+            # LOAD_PRESSURE — the historical default.
+            order_by = (
                 cost_pressure_for_ordering.desc(),
                 throughput.desc(),
                 CrawlRunsTable.website_id.asc(),
             )
-            .limit(limit)
-            .offset(offset)
-        )
+
+        rows_stmt = aggregated_stmt.order_by(*order_by).limit(limit).offset(offset)
         result = await self.session.execute(rows_stmt)
 
         items: list[CrawlerWebsiteProcessingAggregateItem] = []
@@ -1087,6 +1234,13 @@ class CrawlRunRepository:
         offset: int,
         tenant_id: UUID,
         website_id: UUID | None = None,
+        sort: CrawlerWebsiteProcessingSort = (
+            CrawlerWebsiteProcessingSort.LOAD_PRESSURE
+        ),
+        failures_only: bool = False,
+        low_retention_only: bool = False,
+        source_skip_drift_only: bool = False,
+        search: str | None = None,
     ) -> CrawlerWebsiteProcessingAggregate:
         return await self.website_processing_aggregate(
             since=since,
@@ -1096,6 +1250,11 @@ class CrawlRunRepository:
             offset=offset,
             tenant_id=tenant_id,
             website_id=website_id,
+            sort=sort,
+            failures_only=failures_only,
+            low_retention_only=low_retention_only,
+            source_skip_drift_only=source_skip_drift_only,
+            search=search,
         )
 
     async def aggregate_baseline(

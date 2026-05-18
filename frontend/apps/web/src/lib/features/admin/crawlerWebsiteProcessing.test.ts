@@ -32,7 +32,9 @@ const aggregate: CrawlerTenantWebsiteProcessingAggregateResponse = {
   offset: 0,
   days: 7,
   since: "2026-05-08T12:00:00Z",
-  until: "2026-05-15T12:00:00Z"
+  until: "2026-05-15T12:00:00Z",
+  low_retention_threshold: 0.5,
+  source_skip_drift_min_indexed: 50
 };
 
 const item: CrawlerTenantWebsiteProcessingAggregateItem = {
@@ -119,7 +121,14 @@ test("website processing labels handle unnamed and healthy websites", () => {
       ...item,
       embedding_total_cost_usd: null
     })
-  ).toBe("12,345 tokens · cost missing");
+  ).toBe("12,345 tokens · cost unavailable");
+  expect(
+    getCrawlerWebsiteProcessingLatestRunEmbeddingUsageLabel({
+      ...item,
+      latest_embedding_input_tokens: 0,
+      latest_embedding_total_cost_usd: null
+    })
+  ).toBe("0 tokens · nothing new embedded");
   expect(
     getCrawlerWebsiteProcessingLatestRunModelLabel({
       ...item,

@@ -10693,7 +10693,16 @@ export interface components {
        * Format: date-time
        */
       until: string;
+      /** Low Retention Threshold */
+      low_retention_threshold: number;
+      /** Source Skip Drift Min Indexed */
+      source_skip_drift_min_indexed: number;
     };
+    /**
+     * CrawlerWebsiteProcessingSort
+     * @enum {string}
+     */
+    CrawlerWebsiteProcessingSort: "load_pressure" | "failures" | "runs" | "recent";
     /** CrawlerWatchdogLifecycleObserved */
     CrawlerWatchdogLifecycleObserved: {
       /** Queued */
@@ -26804,6 +26813,11 @@ export interface operations {
         limit?: number;
         offset?: number;
         website_id?: string | null;
+        sort?: components["schemas"]["CrawlerWebsiteProcessingSort"];
+        failures_only?: boolean;
+        low_retention_only?: boolean;
+        source_skip_drift_only?: boolean;
+        search?: string | null;
       };
       header?: never;
       path?: never;

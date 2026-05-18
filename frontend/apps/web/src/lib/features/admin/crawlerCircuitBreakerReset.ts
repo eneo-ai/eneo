@@ -49,9 +49,7 @@ export function getCrawlerCircuitBreakerResetCopy(
       ...baseCopy,
       ariaLabel: m.crawler_circuit_breaker_reset_aria_paused({ website }),
       dialogTitle: m.crawler_circuit_breaker_reset_dialog_title_paused(),
-      dialogDescription: m.crawler_circuit_breaker_reset_dialog_description_paused({
-        website
-      }),
+      dialogDescription: m.crawler_circuit_breaker_reset_dialog_description_paused(),
       confirmLabel: m.crawler_circuit_breaker_reset_dialog_confirm_paused(),
       followupHint: m.crawler_circuit_breaker_reset_followup_paused(),
       followupTone: "caution"
@@ -62,9 +60,7 @@ export function getCrawlerCircuitBreakerResetCopy(
     ...baseCopy,
     ariaLabel: m.crawler_circuit_breaker_reset_aria_backed_off({ website }),
     dialogTitle: m.crawler_circuit_breaker_reset_dialog_title_backed_off(),
-    dialogDescription: m.crawler_circuit_breaker_reset_dialog_description_backed_off({
-      website
-    }),
+    dialogDescription: m.crawler_circuit_breaker_reset_dialog_description_backed_off(),
     confirmLabel: m.crawler_circuit_breaker_reset_dialog_confirm_backed_off(),
     followupHint: null,
     followupTone: "neutral"
