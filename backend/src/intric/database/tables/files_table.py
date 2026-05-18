@@ -20,6 +20,10 @@ class Files(BasePublic):
     mimetype: Mapped[Optional[str]] = mapped_column()
     file_type: Mapped[str] = mapped_column(server_default=FileType.TEXT)
     transcription: Mapped[Optional[str]] = mapped_column()
+    # URL returned by the external file-storage service (today
+    # eneo-knowledge) when raw bytes were pushed there at upload time.
+    # NULL when storage is unconfigured or the upload failed.
+    storage_url: Mapped[Optional[str]] = mapped_column(Text)
 
     # Foreign keys
     user_id: Mapped[UUID] = mapped_column(ForeignKey(Users.id, ondelete="CASCADE"))

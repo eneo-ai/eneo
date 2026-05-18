@@ -13,7 +13,7 @@ import json
 import re
 import time
 from types import TracebackType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from intric.main.config import get_settings
@@ -23,6 +23,12 @@ from intric.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
 )
+from intric.mcp_servers.infrastructure.repo_impl.chat_session_mcp_state_repo_impl import (
+    ChatSessionMcpStateRepo,
+)
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = get_logger(__name__)
 
@@ -47,6 +53,8 @@ class MCPProxySession:
         self,
         mcp_servers: list[MCPServer],
         auth_credentials_map: dict[UUID, dict[str, str]] | None = None,
+        chat_session_id: UUID | None = None,
+        db_session: "AsyncSession | None" = None,
     ):
         """
         Initialize proxy session.
@@ -55,10 +63,23 @@ class MCPProxySession:
             mcp_servers: List of MCP servers the assistant has access to
                         (already filtered by tenant/space/assistant hierarchy)
             auth_credentials_map: Map of server_id -> auth credentials
+            chat_session_id: When set with ``db_session``, the proxy resumes
+                each MCP server's persisted protocol session id on connect and
+                upserts the post-initialize value. Generic — applies to every
+                MCP server, no server-kind branching.
+            db_session: Active SQLAlchemy session backing the
+                ``chat_session_mcp_state`` lookups/upserts. Only consulted when
+                ``chat_session_id`` is non-None.
         """
         super().__init__()
         self.mcp_servers = mcp_servers
         self.auth_credentials_map = auth_credentials_map or {}
+        self.chat_session_id = chat_session_id
+        self._mcp_state_repo: ChatSessionMcpStateRepo | None = (
+            ChatSessionMcpStateRepo(db_session)
+            if chat_session_id is not None and db_session is not None
+            else None
+        )
 
         # Lazy connection cache: server_id -> MCPClient (connected)
         self._clients: dict[UUID, MCPClient] = {}
@@ -306,9 +327,28 @@ class MCPProxySession:
                 )
                 return self._clients[server_id]
 
+            # Resume the MCP-protocol session id we previously persisted for
+            # this (chat_session, server) pair so the server sees a continuous
+            # logical session across user turns. None on first turn or for
+            # callers without a chat context (testing).
+            resume_id: str | None = None
+            if self._mcp_state_repo is not None and self.chat_session_id is not None:
+                try:
+                    resume_id = await self._mcp_state_repo.get(
+                        chat_session_id=self.chat_session_id,
+                        mcp_server_id=server_id,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "[MCPProxy] Failed to read persisted mcp_session_id for "
+                        "server '%s' (continuing without resume): %s",
+                        server.name,
+                        exc,
+                    )
+
             # Create new connection with timing
             auth_creds = self.auth_credentials_map.get(server_id, {})
-            client = MCPClient(server, auth_creds)
+            client = MCPClient(server, auth_creds, resume_mcp_session_id=resume_id)
 
             logger.debug(f"[MCPProxy] Connecting to '{server.name}'...")
             start_time = time.perf_counter()
@@ -319,6 +359,33 @@ class MCPProxySession:
             logger.debug(
                 f"[MCPProxy] Connected to '{server.name}' in {elapsed_ms:.0f}ms"
             )
+
+            # Persist the post-initialize session id so the next user turn
+            # resumes the same logical session. Failure here is non-fatal:
+            # the client is still usable for this turn, we just lose
+            # continuity. Skip the upsert when the value matches what we
+            # already had stored (no schema work for the steady state).
+            assigned_id = client.assigned_mcp_session_id
+            if (
+                self._mcp_state_repo is not None
+                and self.chat_session_id is not None
+                and assigned_id
+                and assigned_id != resume_id
+            ):
+                try:
+                    await self._mcp_state_repo.upsert(
+                        chat_session_id=self.chat_session_id,
+                        mcp_server_id=server_id,
+                        mcp_session_id=assigned_id,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "[MCPProxy] Failed to persist mcp_session_id for "
+                        "server '%s': %s",
+                        server.name,
+                        exc,
+                    )
+
             return client
 
     async def call_tool(

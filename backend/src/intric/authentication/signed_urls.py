@@ -19,11 +19,21 @@ SIGNING_KEY = _get_signing_key()
 
 
 def generate_signed_token(
-    file_id: UUID, expires_at: int, content_disposition: ContentDisposition
+    file_id: UUID,
+    tenant_id: UUID,
+    expires_at: int,
+    content_disposition: ContentDisposition,
 ) -> str:
-    """Generate a signed token for file access."""
+    """Generate a signed token for file access.
+
+    ``tenant_id`` is encoded in the payload (and therefore covered by the
+    HMAC) so the download handler can refuse tokens whose tenant does not
+    match the file being requested. Without this, a leaked or replayed
+    signature could cross tenant boundaries.
+    """
     payload = {
         "file_id": str(file_id),
+        "tenant_id": str(tenant_id),
         "expires_at": expires_at,
         "content_disposition": content_disposition.value,
     }

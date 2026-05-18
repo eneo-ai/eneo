@@ -10,12 +10,19 @@ from intric.main.exceptions import NotFoundException
 
 async def test_download_file_signed_raises_not_found_for_missing_content(monkeypatch):
     file_id = uuid4()
-    payload = {"file_id": str(file_id), "content_disposition": "inline"}
+    tenant_id = uuid4()
+    payload = {
+        "file_id": str(file_id),
+        "tenant_id": str(tenant_id),
+        "content_disposition": "inline",
+    }
 
     monkeypatch.setattr(file_router, "verify_signed_token", lambda _: payload)
 
     file_repo = SimpleNamespace(
-        get_by_id=AsyncMock(return_value=SimpleNamespace(text=None, blob=None))
+        get_by_id=AsyncMock(
+            return_value=SimpleNamespace(text=None, blob=None, tenant_id=tenant_id)
+        )
     )
     container = SimpleNamespace(file_repo=lambda: file_repo)
 

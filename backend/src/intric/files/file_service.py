@@ -8,6 +8,7 @@ from fastapi import UploadFile
 from intric.files.file_models import File, FileBaseWithContent, FileCreate, FileType
 from intric.files.file_protocol import FileProtocol
 from intric.files.file_repo import FileRepository
+from intric.files.file_storage_uploader import upload_raw_to_storage
 from intric.main.exceptions import NotFoundException, UnauthorizedException
 from intric.users.user import UserInDB
 
@@ -31,7 +32,28 @@ class FileService:
             yield
 
     async def save_file(self, upload_file: UploadFile):
+        # Read raw bytes ONCE up front so we can both (a) push the original
+        # to the external file-storage service before eneo's processor
+        # consumes the upload, and (b) hand the same bytes to the protocol
+        # for extraction. Eneo's extractor consumes ``upload_file.file``
+        # destructively (closes the stream after copying to disk), so this
+        # has to happen before ``to_domain`` runs.
+        raw_bytes = await upload_file.read()
+        original_filename = upload_file.filename or "unnamed"
+        original_mimetype = upload_file.content_type
+
+        storage_url = await upload_raw_to_storage(
+            filename=original_filename,
+            mimetype=original_mimetype,
+            raw_bytes=raw_bytes,
+        )
+
+        # Rewind so ``protocol.to_domain`` sees the same bytes as a fresh
+        # upload. Extraction continues as today and gives us file.text /
+        # file.blob for in-eneo uses (references retrieval, vision blocks).
+        await upload_file.seek(0)
         file = await self.protocol.to_domain(upload_file)
+        file.storage_url = storage_url
 
         async with self._write_transaction():
             saved_file = await self.repo.add(

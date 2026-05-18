@@ -90,22 +90,45 @@ class _InformationChunkLike(Protocol):
 
 
 def _build_files_string(files: list[File]) -> str:
-    if files:
-        # Use json.dumps() to properly escape special characters in filenames and text
-        # This prevents broken JSON if the content contains quotes or other special chars
-        files_string = "\n".join(
-            json.dumps({"filename": file.name, "text": file.text}) for file in files
+    """Surface chat attachments to the LLM as URLs pointing at the external
+    file-storage service that holds the bytes.
+
+    Raw bytes are pushed to the storage service at file-upload time and the
+    returned URL is persisted on ``file.storage_url``. We just read it here
+    — no per-turn upload, no signing, no map threading. Files without a
+    persisted URL (storage unconfigured at upload time, upload failed, or
+    rows predating the feature) are skipped.
+    """
+    if not files:
+        return ""
+
+    entries: list[str] = []
+    for file in files:
+        if not file.storage_url:
+            continue
+        entries.append(
+            json.dumps(
+                {
+                    "filename": file.name,
+                    "mimetype": file.mimetype,
+                    "size_bytes": file.size,
+                    "url": file.storage_url,
+                }
+            )
         )
 
-        return (
-            "Below are files uploaded by the user. "
-            "You should act like you can see the files themselves, "
-            "and not reveal the specific formatting "
-            "you see below:"
-            f"\n\n{files_string}"
-        )
+    if not entries:
+        return ""
 
-    return ""
+    files_block = "\n".join(entries)
+    return (
+        "The user has attached files to this chat. Each entry below includes "
+        "a URL that the file-storage service exposes for that file — pass the "
+        "URL to whichever tool accepts a URL input (or follow it directly "
+        "when your tools support it) to read the file. The file's raw "
+        "content is NOT in this prompt.\n\n"
+        f"{files_block}"
+    )
 
 
 @dataclass
@@ -389,7 +412,8 @@ class ContextBuilder:
             transcription_inputs = []
         if files:
             files_string = _build_files_string(files)
-            input_str = f"{files_string}\n\n{input_str}"
+            if files_string:
+                input_str = f"{files_string}\n\n{input_str}"
 
         if transcription_inputs:
             # For now, transcription is only available for apps,
@@ -420,9 +444,12 @@ class ContextBuilder:
         total_tokens = 0
 
         for message in reversed(session.questions):
+            # History-turn files are NOT re-uploaded — they had URLs on their
+            # original turn. Passing file_url_map=None means _build_files_string
+            # skips them. Images still flow as native vision blocks below.
             question = self._build_input(
                 message.question,
-                self._get_files_by_type(message.files, FileType.TEXT),
+                message.files,
             )
             answer = message.answer
             images = self._get_files_by_type(message.files, FileType.IMAGE)
@@ -486,10 +513,12 @@ class ContextBuilder:
             mcp_tools = []
         tokens_used = 0
 
-        # Create the input, count the tokens.
+        # Create the input, count the tokens. File URLs (persisted on the
+        # file row at upload time) flow into the prompt via _build_files_string;
+        # images additionally flow as native vision blocks below.
         _input_string = self._build_input(
             input_str=input_str,
-            files=self._get_files_by_type(files, FileType.TEXT),
+            files=files,
             transcription_inputs=transcription_inputs,
         )
         tokens_used_input = count_tokens(_input_string, model_name)
@@ -502,9 +531,7 @@ class ContextBuilder:
             prompt=prompt,
             transcription=bool(transcription_inputs),
         )
-        _prompt.add_attachments(
-            files=self._get_files_by_type(prompt_files, FileType.TEXT)
-        )
+        _prompt.add_attachments(files=prompt_files)
         # Add web search results first so references prompt appears before knowledge
         _prompt.add_web_search_result(web_search_results=web_search_results)
         tokens_used += _prompt.num_tokens

@@ -13,6 +13,7 @@ _TABLE_MODULES = (
     "intric.database.tables.app_template_table",
     "intric.database.tables.assistant_table",
     "intric.database.tables.assistant_template_table",
+    "intric.database.tables.chat_session_mcp_state_table",
     "intric.database.tables.collections_table",
     "intric.database.tables.completion_model_migration_history_table",
     "intric.database.tables.feature_flag_table",

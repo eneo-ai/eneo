@@ -98,6 +98,7 @@ class MCPClient:
         timeout: int | None = None,
         list_tools_timeout: int | None = None,
         tool_call_timeout: int | None = None,
+        resume_mcp_session_id: str | None = None,
     ):
         """
         Initialize MCP client.
@@ -106,6 +107,10 @@ class MCPClient:
             mcp_server: MCP server configuration
             auth_credentials: Authentication credentials from tenant settings
             timeout: Connection timeout in seconds (defaults to 30s)
+            resume_mcp_session_id: If set, sent as the initial ``Mcp-Session-Id``
+                header so the server resumes the prior logical session for state
+                that outlives a single transport connection (eg file-workbench's
+                per-session ephemeral storage).
         """
         super().__init__()
         self.mcp_server = mcp_server
@@ -113,18 +118,38 @@ class MCPClient:
         self.timeout = timeout or MCP_CONNECTION_TIMEOUT_DEFAULT
         self.list_tools_timeout = list_tools_timeout or MCP_LIST_TOOLS_TIMEOUT_DEFAULT
         self.tool_call_timeout = tool_call_timeout or MCP_TOOL_CALL_TIMEOUT_DEFAULT
+        self.resume_mcp_session_id = resume_mcp_session_id
         self.session: Optional[ClientSession] = None
         self._streams_context = None
         self._session_context = None
+        # Populated after a successful connect() / initialize() round-trip.
+        # serverInfo.name is the discriminator used to detect custom server
+        # contracts (eg file-workbench). assigned_mcp_session_id is the
+        # MCP-protocol session id the server returned and we should persist.
+        self.server_info_name: Optional[str] = None
+        self.server_info_version: Optional[str] = None
+        self.assigned_mcp_session_id: Optional[str] = None
+        # Set by the streamable HTTP transport; reading it after initialize()
+        # returns the session id the SDK captured from the server response.
+        self._get_session_id_callable: Optional[Any] = None
 
     def _build_auth_headers(self) -> dict[str, str]:
-        """Build authentication headers based on server auth type."""
+        """Build authentication + session-resume headers for this connection.
+
+        ``Mcp-Session-Id`` is the MCP-protocol session id. Sending a previously
+        stored value asks the server to resume that logical session — the SDK
+        will then propagate the server's response value (which may be the same
+        or a fresh one) on every subsequent request automatically.
+        """
         headers: dict[str, str] = {}
 
         if self.mcp_server.http_auth_type == "bearer":
             token = self.auth_credentials.get("token")
             if token:
                 headers["Authorization"] = f"Bearer {token}"
+
+        if self.resume_mcp_session_id:
+            headers["Mcp-Session-Id"] = self.resume_mcp_session_id
 
         return headers
 
@@ -194,7 +219,11 @@ class MCPClient:
 
         # Successfully entered - now save the reference
         self._streams_context = streams_context
-        read, write, _ = streams
+        read, write, get_session_id = streams
+        # ``get_session_id`` is a callable the transport exposes that returns
+        # the current MCP-protocol session id (server-assigned, captured from
+        # response headers). It returns None until ``initialize()`` completes.
+        self._get_session_id_callable = get_session_id
         logger.debug(
             f"Streamable HTTP transport connected to {self.mcp_server.http_url}"
         )
@@ -216,14 +245,35 @@ class MCPClient:
         self._session_context = session_context
         self.session = session
 
-        # Initialize the MCP protocol session
+        # Initialize the MCP protocol session. Capture the result so we can
+        # surface serverInfo (name/version) — required to detect custom server
+        # contracts like file-workbench before any tool dispatch happens.
         try:
-            await self.session.initialize()
+            init_result = await self.session.initialize()
         except BaseException:
             await self._cleanup_contexts()
             raise
 
-        logger.info(f"Connected to MCP server: {self.mcp_server.name}")
+        try:
+            server_info = init_result.serverInfo
+            self.server_info_name = getattr(server_info, "name", None)
+            self.server_info_version = getattr(server_info, "version", None)
+        except AttributeError:
+            # Pre-spec servers may omit serverInfo; not a fatal error.
+            pass
+
+        try:
+            self.assigned_mcp_session_id = get_session_id()
+        except Exception:
+            self.assigned_mcp_session_id = None
+
+        logger.info(
+            "Connected to MCP server: %s (server_info=%s/%s, session_id=%s)",
+            self.mcp_server.name,
+            self.server_info_name,
+            self.server_info_version,
+            self.assigned_mcp_session_id,
+        )
 
     async def list_tools(self) -> list[dict[str, Any]]:
         """

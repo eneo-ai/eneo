@@ -31,6 +31,7 @@ class FileBaseWithContent(FileBase):
     text: Optional[str] = None
     blob: Optional[bytes] = None
     transcription: Optional[str] = None
+    storage_url: Optional[str] = None
 
     @model_validator(mode="after")
     def require_one_of_text_or_image(self) -> "FileBaseWithContent":

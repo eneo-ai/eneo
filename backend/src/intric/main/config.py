@@ -408,6 +408,15 @@ class Settings(BaseSettings):
     jwt_token_prefix: str
     url_signing_key: str
 
+    # External file-storage service used when eneo cannot persist the original
+    # file (PDFs, DOCX, etc. — eneo only keeps extracted text). When set, eneo
+    # POSTs newly-attached chat files to this endpoint and surfaces the
+    # returned download URL to the LLM in place of any in-prompt content.
+    # Decoupled from MCP server config: the storage service (today
+    # eneo-knowledge) is its own offering, independent of the MCP protocol.
+    file_storage_url: Optional[str] = None
+    file_storage_bearer_token: Optional[str] = None
+
     # Dev
     testing: bool = False
     dev: bool = False
