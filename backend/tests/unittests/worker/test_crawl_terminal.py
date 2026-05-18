@@ -20,8 +20,25 @@ from intric.worker.crawl import commit_terminal as worker_commit_terminal
 
 
 class _ExecuteResult:
-    def __init__(self, rowcount: int) -> None:
+    def __init__(self, rowcount: int, scalar_values: tuple[object, ...] = ()) -> None:
         self.rowcount = rowcount
+        self._scalar_values = scalar_values
+
+    def scalars(self) -> "_ExecuteResult":
+        return self
+
+    def all(self) -> list[object]:
+        return list(self._scalar_values)
+
+
+def _compiled_param_values(statement) -> set[object]:
+    values: set[object] = set()
+    for value in statement.compile().params.values():
+        if isinstance(value, (list, tuple, set)):
+            values.update(value)
+        else:
+            values.add(value)
+    return values
 
 
 def test_worker_crawl_package_re_exports_canonical_terminal_boundary():
@@ -62,8 +79,7 @@ async def test_commit_terminal_skips_crawl_run_when_job_gate_loses_race():
     has already committed a different terminal state from another path, the
     CrawlRun must not be overwritten with this caller's outcome. Otherwise
     we end up with Jobs.status=COMPLETE while CrawlRuns.outcome_code flipped
-    to a contradictory CRAWL_ABORTED — terminal state corruption that
-    codex peer review caught on the running-abort tranche."""
+    to a contradictory CRAWL_ABORTED."""
     session = AsyncMock()
     session.execute = AsyncMock(
         side_effect=[
@@ -259,15 +275,16 @@ async def test_commit_terminal_can_complete_successful_crawl_without_outcome_cod
 @pytest.mark.asyncio
 async def test_commit_terminal_batch_updates_job_and_crawl_run_sets_once():
     session = AsyncMock()
+    job_ids = (uuid4(), uuid4())
     session.execute = AsyncMock(
         side_effect=[
-            _ExecuteResult(rowcount=2),
+            _ExecuteResult(rowcount=2, scalar_values=job_ids),
             _ExecuteResult(rowcount=2),
         ]
     )
     event = TerminalBatchEvent(
         crawl_run_ids=(uuid4(), uuid4()),
-        job_ids=(uuid4(), uuid4()),
+        job_ids=job_ids,
         job_status=Status.FAILED,
         outcome_code=CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES,
         finished_at=datetime.now(timezone.utc),
@@ -287,6 +304,37 @@ async def test_commit_terminal_batch_updates_job_and_crawl_run_sets_once():
         crawl_run_params["outcome_code"]
         == CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES.value
     )
+
+
+@pytest.mark.asyncio
+async def test_commit_terminal_batch_updates_only_crawl_runs_whose_jobs_won_gate():
+    session = AsyncMock()
+    crawl_run_ids = (uuid4(), uuid4())
+    job_ids = (uuid4(), uuid4())
+    session.execute = AsyncMock(
+        side_effect=[
+            _ExecuteResult(rowcount=1, scalar_values=(job_ids[0],)),
+            _ExecuteResult(rowcount=1),
+        ]
+    )
+    event = TerminalBatchEvent(
+        crawl_run_ids=crawl_run_ids,
+        job_ids=job_ids,
+        job_status=Status.FAILED,
+        outcome_code=CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES,
+        finished_at=datetime.now(timezone.utc),
+        result_location="Crawl stalled before collecting pages",
+        only_set_crawl_outcome_if_missing=True,
+    )
+
+    result = await commit_terminal_batch(session, event)
+
+    crawl_run_stmt = session.execute.call_args_list[1].args[0]
+    crawl_run_id_filter_values = _compiled_param_values(crawl_run_stmt)
+    assert result.job_rows_updated == 1
+    assert result.crawl_run_rows_updated == 1
+    assert crawl_run_ids[0] in crawl_run_id_filter_values
+    assert crawl_run_ids[1] not in crawl_run_id_filter_values
 
 
 def test_terminal_batch_event_rejects_mismatched_job_and_crawl_run_counts():

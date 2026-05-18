@@ -154,7 +154,14 @@ async def commit_terminal_batch(
     session: AsyncSession,
     event: TerminalBatchEvent,
 ) -> TerminalCommitResult:
-    """Batch variant of commit_terminal for multi-row terminal commits; same invariant."""
+    """Batch terminal commit preserving the job-gated CrawlRun invariant.
+
+    A batch UPDATE can move only a subset of the requested Jobs when another
+    terminal path wins the race for some rows. The matching CrawlRuns must be
+    derived from the Jobs this transaction actually updated, not from the full
+    caller-provided batch.
+    """
+    crawl_run_id_by_job_id = dict(zip(event.job_ids, event.crawl_run_ids))
     job_result = await session.execute(
         sa.update(Jobs)
         .where(Jobs.id.in_(event.job_ids))
@@ -169,10 +176,21 @@ async def commit_terminal_batch(
             updated_at=event.finished_at,
             result_location=event.result_location,
         )
+        .returning(Jobs.id)
         .execution_options(synchronize_session=False)
     )
+    updated_job_ids = tuple(job_result.scalars().all())
+    if not updated_job_ids:
+        return TerminalCommitResult(
+            job_rows_updated=0,
+            crawl_run_rows_updated=0,
+        )
 
-    crawl_run_stmt = sa.update(CrawlRuns).where(CrawlRuns.id.in_(event.crawl_run_ids))
+    updated_crawl_run_ids = tuple(
+        crawl_run_id_by_job_id[job_id] for job_id in updated_job_ids
+    )
+
+    crawl_run_stmt = sa.update(CrawlRuns).where(CrawlRuns.id.in_(updated_crawl_run_ids))
     if event.only_set_crawl_outcome_if_missing:
         crawl_run_stmt = crawl_run_stmt.where(CrawlRuns.outcome_code.is_(None))
     crawl_run_result = await session.execute(
@@ -182,7 +200,7 @@ async def commit_terminal_batch(
     )
 
     return TerminalCommitResult(
-        job_rows_updated=job_result.rowcount,
+        job_rows_updated=len(updated_job_ids),
         crawl_run_rows_updated=crawl_run_result.rowcount,
     )
 
