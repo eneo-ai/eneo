@@ -39,7 +39,7 @@ from intric.websites.domain.crawl_interval_change import (
     CrawlIntervalChangeWebsite,
 )
 from intric.websites.domain.crawl_lifecycle import CrawlLifecycle
-from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
+from intric.websites.domain.crawl_outcome import CrawlOutcomeCategory, CrawlOutcomeCode
 from intric.websites.domain.crawl_retry import CrawlRetryWebsite
 from intric.websites.domain.crawl_run_repo import CrawlRunRepository
 from intric.websites.domain.crawl_website_delete import (
@@ -47,6 +47,7 @@ from intric.websites.domain.crawl_website_delete import (
     CrawlWebsiteDeleteNotFound,
     CrawlWebsiteDeleteSucceeded,
 )
+from intric.websites.domain.crawler_failure_clusters import CrawlerFailureClusterSource
 from intric.websites.domain.crawler_failure_inventory import CrawlerFailureState
 from intric.websites.domain.crawler_recent_failures import (
     RECENT_FAILURE_OUTCOME_CODES,
@@ -66,6 +67,7 @@ from intric.websites.presentation.crawler_admin_models import (
     CrawlerActiveInventoryResponse,
     CrawlerBulkIntervalRequest,
     CrawlerBulkIntervalResponse,
+    CrawlerFailureClustersResponse,
     CrawlerRecentFailuresResponse,
     CrawlerScheduledAggregateResponse,
     CrawlerTenantFailureInventoryResponse,
@@ -326,6 +328,50 @@ async def get_current_tenant_crawler_watchdog_interventions(
                 website_id=website_id,
             )
         return CrawlerRecentFailuresResponse.from_domain(interventions)
+
+
+@router.get(
+    "/failure-clusters",
+    response_model=CrawlerFailureClustersResponse,
+    summary="Get grouped crawler failure patterns for the current tenant",
+)
+async def get_current_tenant_crawler_failure_clusters(
+    current_user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    days: Annotated[int, Query(ge=1, le=30)] = 7,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    source: Annotated[
+        CrawlerFailureClusterSource, Query()
+    ] = CrawlerFailureClusterSource.ALL,
+    outcome_category: Annotated[CrawlOutcomeCategory | None, Query()] = None,
+) -> CrawlerFailureClustersResponse:
+    until = datetime.now(timezone.utc)
+    since = until - timedelta(days=days)
+
+    async with _admin_crawler_query_telemetry(
+        "failure_clusters",
+        tenant_id=current_user.tenant_id,
+        extra_labels={
+            "source": source.value,
+            "outcome_category": outcome_category.value
+            if outcome_category is not None
+            else None,
+        },
+    ):
+        async with session.begin():
+            repo = CrawlRunRepository(session=session)
+            clusters = await repo.failure_clusters_for_tenant(
+                since=since,
+                until=until,
+                days=days,
+                limit=limit,
+                offset=offset,
+                tenant_id=current_user.tenant_id,
+                source=source,
+                outcome_category=outcome_category,
+            )
+        return CrawlerFailureClustersResponse.from_domain(clusters)
 
 
 @router.get(

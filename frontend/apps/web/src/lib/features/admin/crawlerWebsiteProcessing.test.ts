@@ -186,7 +186,7 @@ test("website processing labels handle unnamed and healthy websites", () => {
       ...item,
       embedding_total_cost_usd: null
     })
-  ).toBe("12,345 tokens · cost unavailable");
+  ).toBe("12,345 tokens · cost not recorded");
   expect(
     getCrawlerWebsiteProcessingLatestRunEmbeddingUsageLabel({
       ...item,

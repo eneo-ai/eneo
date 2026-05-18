@@ -38,18 +38,13 @@
     type CrawlerActiveInventoryResponse
   } from "$lib/features/admin/crawlerActiveInventory";
   import type { CrawlerTenantFailureInventoryResponse } from "$lib/features/admin/crawlerFailureInventory";
+  import {
+    CRAWLER_FAILURE_CLUSTERS_PAGE_SIZE,
+    offsetFromCrawlerFailureClustersPage,
+    type CrawlerFailureClustersResponse
+  } from "$lib/features/admin/crawlerFailureClusters";
   import type { CrawlerUpdateInterval } from "$lib/features/admin/crawlerUpdateInterval";
   import { formatCrawlerDateTime } from "$lib/features/admin/crawlerPresentation";
-  import {
-    CRAWLER_RECENT_FAILURES_PAGE_SIZE,
-    offsetFromCrawlerRecentFailuresPage,
-    type CrawlerRecentFailuresResponse
-  } from "$lib/features/admin/crawlerRecentFailures";
-  import {
-    CRAWLER_WATCHDOG_INTERVENTIONS_PAGE_SIZE,
-    offsetFromCrawlerWatchdogInterventionsPage,
-    type CrawlerWatchdogInterventionsResponse
-  } from "$lib/features/admin/crawlerWatchdogInterventions";
   import type { CrawlerScheduledAggregateResponse } from "$lib/features/admin/crawlerScheduledAggregate";
   import type { CrawlerTenantWebsiteProcessingAggregateResponse } from "$lib/features/admin/crawlerWebsiteProcessing";
   import {
@@ -74,12 +69,9 @@
       crawlerActiveInventoryLoadFailed: boolean;
       crawlerFailureInventory: CrawlerTenantFailureInventoryResponse | null;
       crawlerFailureInventoryLoadFailed: boolean;
-      crawlerRecentFailuresWindowDays: number;
-      crawlerRecentFailures: CrawlerRecentFailuresResponse | null;
-      crawlerRecentFailuresLoadFailed: boolean;
-      crawlerWatchdogInterventionsWindowDays: number;
-      crawlerWatchdogInterventions: CrawlerWatchdogInterventionsResponse | null;
-      crawlerWatchdogInterventionsLoadFailed: boolean;
+      crawlerFailureClustersWindowDays: number;
+      crawlerFailureClusters: CrawlerFailureClustersResponse | null;
+      crawlerFailureClustersLoadFailed: boolean;
       crawlerScheduledAggregate: CrawlerScheduledAggregateResponse | null;
       crawlerScheduledAggregateLoadFailed: boolean;
       crawlerWebsiteProcessingWindowDays: number;
@@ -127,17 +119,10 @@
       : (visibleActiveInventory?.items ?? [])
   );
 
-  let recentFailuresPage = $state<number>(1);
-  let recentFailuresOverride = $state<CrawlerRecentFailuresResponse | null>(null);
-  let recentFailuresBusy = $state(false);
-  const visibleRecentFailures = $derived(recentFailuresOverride ?? data.crawlerRecentFailures);
-
-  let watchdogInterventionsPage = $state<number>(1);
-  let watchdogInterventionsOverride = $state<CrawlerWatchdogInterventionsResponse | null>(null);
-  let watchdogInterventionsBusy = $state(false);
-  const visibleWatchdogInterventions = $derived(
-    watchdogInterventionsOverride ?? data.crawlerWatchdogInterventions
-  );
+  let failureClustersPage = $state<number>(1);
+  let failureClustersOverride = $state<CrawlerFailureClustersResponse | null>(null);
+  let failureClustersBusy = $state(false);
+  const visibleFailureClusters = $derived(failureClustersOverride ?? data.crawlerFailureClusters);
 
   type CrawlerAdminTab = "operations" | "websites" | "health" | "activity" | "settings";
   let currentTab = $state<CrawlerAdminTab>("operations");
@@ -325,49 +310,26 @@
     void refreshActiveInventory({ page: 1, pageSize: parsed });
   }
 
-  async function changeRecentFailuresPage(nextPage: number) {
-    if (nextPage === recentFailuresPage || recentFailuresBusy || nextPage < 1) return;
+  async function changeFailureClustersPage(nextPage: number) {
+    if (nextPage === failureClustersPage || failureClustersBusy || nextPage < 1) return;
     if (nextPage === 1) {
-      recentFailuresOverride = null;
-      recentFailuresPage = 1;
+      failureClustersOverride = null;
+      failureClustersPage = 1;
       return;
     }
-    recentFailuresBusy = true;
+    failureClustersBusy = true;
     try {
-      const response = await intric.crawlerAdmin.recentFailures({
-        days: data.crawlerRecentFailuresWindowDays,
-        limit: CRAWLER_RECENT_FAILURES_PAGE_SIZE,
-        offset: offsetFromCrawlerRecentFailuresPage(nextPage)
+      const response = await intric.crawlerAdmin.failureClusters({
+        days: data.crawlerFailureClustersWindowDays,
+        limit: CRAWLER_FAILURE_CLUSTERS_PAGE_SIZE,
+        offset: offsetFromCrawlerFailureClustersPage(nextPage)
       });
-      recentFailuresOverride = response;
-      recentFailuresPage = nextPage;
+      failureClustersOverride = response;
+      failureClustersPage = nextPage;
     } catch (error) {
-      toastError(error, m.crawler_recent_failures_load_error());
+      toastError(error, m.crawler_failure_clusters_load_error());
     } finally {
-      recentFailuresBusy = false;
-    }
-  }
-
-  async function changeWatchdogInterventionsPage(nextPage: number) {
-    if (nextPage === watchdogInterventionsPage || watchdogInterventionsBusy || nextPage < 1) return;
-    if (nextPage === 1) {
-      watchdogInterventionsOverride = null;
-      watchdogInterventionsPage = 1;
-      return;
-    }
-    watchdogInterventionsBusy = true;
-    try {
-      const response = await intric.crawlerAdmin.watchdogInterventions({
-        days: data.crawlerWatchdogInterventionsWindowDays,
-        limit: CRAWLER_WATCHDOG_INTERVENTIONS_PAGE_SIZE,
-        offset: offsetFromCrawlerWatchdogInterventionsPage(nextPage)
-      });
-      watchdogInterventionsOverride = response;
-      watchdogInterventionsPage = nextPage;
-    } catch (error) {
-      toastError(error, m.crawler_watchdog_interventions_load_error());
-    } finally {
-      watchdogInterventionsBusy = false;
+      failureClustersBusy = false;
     }
   }
 
@@ -710,21 +672,13 @@
           <HälsaTab
             failureInventory={data.crawlerFailureInventory ?? null}
             failureInventoryLoadFailed={data.crawlerFailureInventoryLoadFailed}
-            watchdog={{
-              visible: visibleWatchdogInterventions,
-              loadFailed: data.crawlerWatchdogInterventionsLoadFailed,
-              windowDays: data.crawlerWatchdogInterventionsWindowDays,
-              page: watchdogInterventionsPage,
-              busy: watchdogInterventionsBusy,
-              onChangePage: (next) => void changeWatchdogInterventionsPage(next)
-            }}
-            recentFailures={{
-              visible: visibleRecentFailures,
-              loadFailed: data.crawlerRecentFailuresLoadFailed,
-              windowDays: data.crawlerRecentFailuresWindowDays,
-              page: recentFailuresPage,
-              busy: recentFailuresBusy,
-              onChangePage: (next) => void changeRecentFailuresPage(next)
+            failureClusters={{
+              visible: visibleFailureClusters,
+              loadFailed: data.crawlerFailureClustersLoadFailed,
+              windowDays: data.crawlerFailureClustersWindowDays,
+              page: failureClustersPage,
+              busy: failureClustersBusy,
+              onChangePage: (next) => void changeFailureClustersPage(next)
             }}
             mutationState={{
               retryingWebsiteId: dialogs.retry.busy,

@@ -1,13 +1,15 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import sqlalchemy as sa
 
 from intric.audit.infrastructure.audit_log_repo_impl import escape_like
 from intric.database.tables.collections_table import CollectionsTable
+from intric.database.tables.job_table import Jobs
 from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
+from intric.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from intric.database.tables.websites_table import Websites as WebsitesTable
 from intric.jobs.job_models import Task
 from intric.main.models import Status
@@ -33,6 +35,7 @@ from intric.websites.domain.crawl_interval_change import (
     CrawlIntervalChangeUnchanged,
     CrawlIntervalChangeWebsite,
 )
+from intric.websites.domain.crawl_outcome import parse_crawl_outcome_code_strict
 from intric.websites.domain.crawl_run import CrawlType
 from intric.websites.domain.crawl_website_delete import (
     CrawlWebsiteDeleteBlocked,
@@ -47,6 +50,7 @@ from intric.websites.domain.crawler_failure_inventory import (
     CrawlerFailureInventoryItem,
     CrawlerFailureState,
 )
+from intric.websites.domain.crawler_recent_failures import RECENT_FAILURE_OUTCOME_CODES
 from intric.websites.domain.crawler_scheduled_aggregate import (
     CrawlerScheduledAggregate,
     CrawlerScheduledIntervalBucket,
@@ -161,6 +165,39 @@ class WebsiteAdminRepository:
         if tenant_id is not None:
             failure_conditions.append(WebsitesTable.tenant_id == tenant_id)
 
+        latest_failure_time = sa.func.coalesce(
+            Jobs.finished_at, CrawlRunsTable.created_at
+        )
+        # `list[Any]` because SQLAlchemy `.in_()` returns BinaryExpression
+        # while `==` returns ColumnElement; pyright strict can't unify the
+        # two without an explicit annotation. Matches the same pattern in
+        # `crawl_run_repo.website_processing_aggregate`.
+        latest_failure_conditions: list[Any] = [
+            CrawlRunsTable.outcome_code.in_(
+                [code.value for code in RECENT_FAILURE_OUTCOME_CODES]
+            )
+        ]
+        if tenant_id is not None:
+            latest_failure_conditions.append(CrawlRunsTable.tenant_id == tenant_id)
+        latest_failure_ranked = (
+            sa.select(
+                CrawlRunsTable.website_id.label("website_id"),
+                CrawlRunsTable.outcome_code.label("latest_failure_outcome_code"),
+                latest_failure_time.label("latest_failure_at"),
+                sa.func.row_number()
+                .over(
+                    partition_by=CrawlRunsTable.website_id,
+                    order_by=(latest_failure_time.desc(), CrawlRunsTable.id.desc()),
+                )
+                .label("failure_rank"),
+            )
+            .select_from(
+                sa.outerjoin(CrawlRunsTable, Jobs, CrawlRunsTable.job_id == Jobs.id)
+            )
+            .where(*latest_failure_conditions)
+            .subquery()
+        )
+
         total_stmt = (
             sa.select(sa.func.count(WebsitesTable.id))
             .select_from(WebsitesTable)
@@ -173,6 +210,30 @@ class WebsiteAdminRepository:
             Tenants,
             WebsitesTable.tenant_id == Tenants.id,
         )
+        rows_from = sa.outerjoin(
+            rows_from,
+            Spaces,
+            sa.and_(
+                WebsitesTable.space_id == Spaces.id,
+                Spaces.tenant_id == WebsitesTable.tenant_id,
+            ),
+        )
+        rows_from = sa.outerjoin(
+            rows_from,
+            Users,
+            sa.and_(
+                WebsitesTable.user_id == Users.id,
+                Users.tenant_id == WebsitesTable.tenant_id,
+            ),
+        )
+        rows_from = sa.outerjoin(
+            rows_from,
+            latest_failure_ranked,
+            sa.and_(
+                latest_failure_ranked.c.website_id == WebsitesTable.id,
+                latest_failure_ranked.c.failure_rank == 1,
+            ),
+        )
         rows_stmt = (
             sa.select(
                 WebsitesTable.id.label("website_id"),
@@ -180,18 +241,24 @@ class WebsiteAdminRepository:
                 WebsitesTable.name.label("website_name"),
                 WebsitesTable.tenant_id.label("tenant_id"),
                 Tenants.display_name.label("tenant_display_name"),
+                Spaces.id.label("space_id"),
+                Spaces.name.label("space_name"),
+                Users.id.label("owner_user_id"),
+                Users.email.label("owner_email"),
                 failure_state,
                 WebsitesTable.update_interval.label("update_interval"),
                 WebsitesTable.consecutive_failures.label("consecutive_failures"),
                 WebsitesTable.next_retry_at.label("next_retry_at"),
                 WebsitesTable.last_crawled_at.label("last_crawled_at"),
                 WebsitesTable.updated_at.label("updated_at"),
+                latest_failure_ranked.c.latest_failure_outcome_code,
+                latest_failure_ranked.c.latest_failure_at,
             )
             .select_from(rows_from)
             .where(*failure_conditions)
             .order_by(
                 WebsitesTable.consecutive_failures.desc(),
-                WebsitesTable.updated_at.desc(),
+                WebsitesTable.next_retry_at.asc().nulls_last(),
                 WebsitesTable.id.asc(),
             )
             .limit(limit)
@@ -212,12 +279,24 @@ class WebsiteAdminRepository:
                     website_name=row["website_name"],
                     tenant_id=row["tenant_id"],
                     tenant_display_name=row["tenant_display_name"],
+                    space_id=row["space_id"],
+                    space_name=row["space_name"],
+                    owner_user_id=row["owner_user_id"],
+                    owner_email=row["owner_email"],
                     state=CrawlerFailureState(str(failure_state_value)),
                     update_interval=update_interval,
                     consecutive_failures=consecutive_failures,
                     next_retry_at=row["next_retry_at"],
                     last_crawled_at=row["last_crawled_at"],
                     updated_at=row["updated_at"],
+                    latest_failure_outcome_code=(
+                        parse_crawl_outcome_code_strict(
+                            row["latest_failure_outcome_code"]
+                        )
+                        if row["latest_failure_outcome_code"] is not None
+                        else None
+                    ),
+                    latest_failure_at=row["latest_failure_at"],
                 )
             )
 

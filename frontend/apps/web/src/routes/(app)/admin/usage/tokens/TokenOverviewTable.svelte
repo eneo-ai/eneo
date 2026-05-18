@@ -60,7 +60,7 @@
 
   const viewModel = table.createViewModel([
     table.columnPrimary({
-      header: "Name",
+      header: m.model(),
       value: (item) => item.model_nickname,
       cell: (item) => {
         return createRender(ModelNameAndVendor, {
@@ -123,6 +123,6 @@
 
 {#if models.length === 0}
   <div class="py-12 text-center">
-    <p class="text-gray-500">No model usage data available for this period</p>
+    <p class="text-muted-foreground">{m.token_usage_no_models_in_period()}</p>
   </div>
 {/if}

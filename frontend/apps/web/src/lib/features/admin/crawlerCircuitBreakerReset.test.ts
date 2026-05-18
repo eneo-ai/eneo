@@ -13,12 +13,18 @@ const backedOffCandidate: CrawlerCircuitBreakerResetCandidate = {
   website_id: "12345678-1234-4234-8234-123456789abc",
   website_url: "https://example.com",
   website_name: "Example municipality",
+  space_id: null,
+  space_name: null,
+  owner_user_id: null,
+  owner_email: null,
   state: "BACKED_OFF",
   update_interval: "daily",
   consecutive_failures: 3,
   next_retry_at: "2026-05-15T10:30:00Z",
   last_crawled_at: "2026-05-14T08:15:00Z",
-  updated_at: "2026-05-15T09:00:00Z"
+  updated_at: "2026-05-15T09:00:00Z",
+  latest_failure_outcome_code: null,
+  latest_failure_at: null
 };
 
 const pausedCandidate: CrawlerCircuitBreakerResetCandidate = {

@@ -10,16 +10,28 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
-  import * as Table from "$lib/components/ui/table/index.js";
-  import { ShieldCheck, TriangleAlert } from "lucide-svelte";
+  import * as Pagination from "$lib/components/ui/pagination/index.js";
+  import { ChevronRight, Clock3, RotateCcw, ShieldCheck, TriangleAlert } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import {
     getCrawlerCircuitBreakerResetCopy,
     type CrawlerCircuitBreakerResetCandidate
   } from "$lib/features/admin/crawlerCircuitBreakerReset";
   import {
+    CRAWLER_FAILURE_CLUSTERS_PAGE_SIZE,
+    getCrawlerFailureClusterAttributionLabel,
+    getCrawlerFailureClusterLatestLabel,
+    getCrawlerFailureClusterOccurrenceLabel,
+    getCrawlerFailureClusterOutcomeLabel,
+    getCrawlerFailureClusterWebsiteLabel,
+    getCrawlerFailureClusterWorkLabel,
+    type CrawlerFailureClustersResponse
+  } from "$lib/features/admin/crawlerFailureClusters";
+  import {
+    getCrawlerFailureInventoryAttributionLabel,
     getCrawlerFailureInventoryFailureLabel,
-    getCrawlerFailureInventoryLastCrawledLabel,
+    getCrawlerFailureInventoryLatestFailureLabel,
+    getCrawlerFailureInventoryLatestFailureTimeLabel,
     getCrawlerFailureInventoryNextStepLabel,
     getCrawlerFailureInventoryStateLabel,
     getCrawlerFailureInventoryStateTooltip,
@@ -27,23 +39,13 @@
     getCrawlerFailureInventoryWebsiteLabel,
     type CrawlerTenantFailureInventoryResponse
   } from "$lib/features/admin/crawlerFailureInventory";
-  import { groupCrawlerHealthRows } from "$lib/features/admin/crawlerHealthGrouping";
   import { crawlerFailureStateBadgeClass } from "$lib/features/admin/crawlerPresentation";
   import {
-    CRAWLER_RECENT_FAILURES_PAGE_SIZE,
-    getCrawlerRecentFailureOutcomeLabel,
-    getCrawlerRecentFailureResultLabels,
-    type CrawlerRecentFailuresResponse
-  } from "$lib/features/admin/crawlerRecentFailures";
+    createCrawlerRelativeTimeFormatter,
+    formatCrawlerRelativeTime
+  } from "$lib/features/admin/crawlerRelativeTime";
   import type { CrawlerTenantWebsiteInventoryItem } from "$lib/features/admin/crawlerTenantWebsiteInventory";
-  import {
-    CRAWLER_WATCHDOG_INTERVENTIONS_PAGE_SIZE,
-    getCrawlerWatchdogInterventionOutcomeLabel,
-    getCrawlerWatchdogInterventionResultLabels,
-    type CrawlerWatchdogInterventionsResponse
-  } from "$lib/features/admin/crawlerWatchdogInterventions";
   import EmptyState from "./EmptyState.svelte";
-  import TerminalOutcomeFeedCard from "./TerminalOutcomeFeedCard.svelte";
 
   type ResolvedRowLabel = {
     label: string;
@@ -68,8 +70,7 @@
   type Props = {
     failureInventory: CrawlerTenantFailureInventoryResponse | null;
     failureInventoryLoadFailed: boolean;
-    watchdog: PaginatedFeed<CrawlerWatchdogInterventionsResponse>;
-    recentFailures: PaginatedFeed<CrawlerRecentFailuresResponse>;
+    failureClusters: PaginatedFeed<CrawlerFailureClustersResponse>;
     mutationState: MutationState;
     resolveRowLabel: (row: { website_id: string; website_name: string | null }) => ResolvedRowLabel;
     onOpenWebsiteDetail: (item: CrawlerTenantWebsiteInventoryItem) => void;
@@ -81,8 +82,7 @@
   const {
     failureInventory,
     failureInventoryLoadFailed,
-    watchdog,
-    recentFailures,
+    failureClusters,
     mutationState,
     resolveRowLabel,
     onOpenWebsiteDetail,
@@ -91,20 +91,13 @@
     onOpenCircuitResetDialog
   }: Props = $props();
 
-  const groupedWatchdog = $derived(
-    watchdog.visible
-      ? groupCrawlerHealthRows(watchdog.visible.items, getCrawlerWatchdogInterventionOutcomeLabel)
-      : []
-  );
-
-  const groupedRecentFailures = $derived(
-    recentFailures.visible
-      ? groupCrawlerHealthRows(recentFailures.visible.items, getCrawlerRecentFailureOutcomeLabel)
-      : []
-  );
+  // One formatter instance per mount keeps i18n / Intl.RelativeTimeFormat
+  // construction off the render path. Shared between the Webbplatser
+  // detail dialog and Aktivitet rows; same convention here.
+  const clusterRelativeTimeFormatter = createCrawlerRelativeTimeFormatter();
 </script>
 
-<Card.Root class="mb-14" aria-labelledby="crawler-failure-inventory-title">
+<Card.Root class="mb-10" aria-labelledby="crawler-failure-inventory-title">
   <Card.Header>
     <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
       <div class="flex min-w-0 flex-col gap-1">
@@ -136,163 +129,296 @@
         {/snippet}
       </EmptyState>
     {:else}
-      <div class="overflow-x-auto">
-        <Table.Root class="min-w-[58rem]">
-          <Table.Caption class="sr-only">
-            {m.crawler_failure_inventory_table_caption()}
-          </Table.Caption>
-          <Table.Header>
-            <Table.Row>
-              <Table.Head>{m.crawler_failure_inventory_column_website()}</Table.Head>
-              <Table.Head>{m.crawler_failure_inventory_column_state()}</Table.Head>
-              <Table.Head>{m.crawler_failure_inventory_column_failures()}</Table.Head>
-              <Table.Head>{m.crawler_failure_inventory_column_next_step()}</Table.Head>
-              <Table.Head class="text-right">
-                {m.crawler_failure_inventory_column_last_crawled()}
-              </Table.Head>
-              <Table.Head class="text-right">
-                {m.crawler_failure_inventory_column_action()}
-              </Table.Head>
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {#each failureInventory.items as failureState (failureState.website_id)}
-              {@const resetCopy = getCrawlerCircuitBreakerResetCopy(failureState)}
-              {@const isResettingThis =
-                mutationState.resettingCircuitWebsiteId === failureState.website_id}
-              <Table.Row>
-                <Table.Cell class="max-w-64">
-                  <span
-                    class="block truncate font-medium"
-                    title={getCrawlerFailureInventoryWebsiteLabel(failureState)}
-                  >
-                    {getCrawlerFailureInventoryWebsiteLabel(failureState)}
-                  </span>
-                </Table.Cell>
-                <Table.Cell>
-                  <Badge
-                    variant="outline"
-                    class={crawlerFailureStateBadgeClass(failureState.state)}
-                    title={getCrawlerFailureInventoryStateTooltip(failureState)}
-                  >
-                    {getCrawlerFailureInventoryStateLabel(failureState)}
-                  </Badge>
-                </Table.Cell>
-                <Table.Cell class="tabular-nums">
-                  {getCrawlerFailureInventoryFailureLabel(failureState)}
-                </Table.Cell>
-                <Table.Cell class="text-muted-foreground max-w-80 text-sm whitespace-normal">
-                  {getCrawlerFailureInventoryNextStepLabel(failureState)}
-                </Table.Cell>
-                <Table.Cell class="text-muted-foreground text-right text-xs tabular-nums">
-                  {getCrawlerFailureInventoryLastCrawledLabel(failureState)}
-                </Table.Cell>
-                <Table.Cell class="text-right">
-                  <div class="flex flex-wrap items-center justify-end gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={m.crawler_retry_button_aria({
-                        website: getCrawlerFailureInventoryWebsiteLabel(failureState)
-                      })}
-                      disabled={mutationState.retryingWebsiteId !== null}
-                      onclick={() => onOpenRetryDialog(failureState)}
-                    >
-                      {mutationState.retryingWebsiteId === failureState.website_id
-                        ? m.crawler_retry_button_busy()
-                        : m.crawler_retry_button()}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={m.crawler_update_interval_button_aria({
-                        website: getCrawlerFailureInventoryWebsiteLabel(failureState)
-                      })}
-                      disabled={mutationState.savingIntervalWebsiteId !== null}
-                      onclick={() => onOpenIntervalDialog(failureState)}
-                    >
-                      {mutationState.savingIntervalWebsiteId === failureState.website_id
-                        ? m.crawler_update_interval_dialog_busy()
-                        : m.crawler_update_interval_button()}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      aria-label={resetCopy.ariaLabel}
-                      disabled={mutationState.resettingCircuitWebsiteId !== null}
-                      onclick={() => onOpenCircuitResetDialog(failureState)}
-                    >
-                      {isResettingThis
-                        ? resetCopy.busyLabel
-                        : failureState.state === "AUTO_DISABLED"
-                          ? m.crawler_circuit_breaker_reset_button_paused()
-                          : m.crawler_circuit_breaker_reset_button_backed_off()}
-                    </Button>
-                  </div>
-                </Table.Cell>
-              </Table.Row>
-            {/each}
-          </Table.Body>
-        </Table.Root>
+      <div class="divide-border divide-y" aria-label={m.crawler_failure_inventory_table_caption()}>
+        <div
+          class="text-muted-foreground hidden grid-cols-[minmax(0,1.8fr)_minmax(11rem,.75fr)_minmax(0,1.1fr)_minmax(0,1fr)] gap-4 px-2 pb-2 text-xs font-medium tracking-wide uppercase lg:grid"
+          aria-hidden="true"
+        >
+          <span>{m.crawler_failure_inventory_column_website()}</span>
+          <span>{m.crawler_failure_inventory_column_state()}</span>
+          <span>{m.crawler_failure_inventory_column_latest_failure()}</span>
+          <span>{m.crawler_failure_inventory_column_next_step()}</span>
+        </div>
+        {#each failureInventory.items as failureState (failureState.website_id)}
+          {@const resetCopy = getCrawlerCircuitBreakerResetCopy(failureState)}
+          {@const isResettingThis =
+            mutationState.resettingCircuitWebsiteId === failureState.website_id}
+          {@const latestFailureTime =
+            getCrawlerFailureInventoryLatestFailureTimeLabel(failureState)}
+          {@const resolved = resolveRowLabel({
+            website_id: failureState.website_id,
+            website_name: failureState.website_name
+          })}
+          <article
+            class="grid grid-cols-1 gap-3 px-2 py-4 lg:grid-cols-[minmax(0,1.8fr)_minmax(11rem,.75fr)_minmax(0,1.1fr)_minmax(0,1fr)]"
+          >
+            <div class="min-w-0">
+              <p
+                class="truncate text-sm font-medium"
+                title={getCrawlerFailureInventoryWebsiteLabel(failureState)}
+              >
+                {getCrawlerFailureInventoryWebsiteLabel(failureState)}
+              </p>
+              <p class="text-muted-foreground mt-1 truncate text-xs">
+                {getCrawlerFailureInventoryAttributionLabel(failureState)}
+              </p>
+              <p class="text-muted-foreground mt-1 text-xs">
+                {getCrawlerFailureInventoryFailureLabel(failureState)}
+              </p>
+            </div>
+
+            <div class="flex items-start">
+              <Badge
+                variant="outline"
+                class={crawlerFailureStateBadgeClass(failureState.state)}
+                title={getCrawlerFailureInventoryStateTooltip(failureState)}
+              >
+                {getCrawlerFailureInventoryStateLabel(failureState)}
+              </Badge>
+            </div>
+
+            <div class="min-w-0 text-sm">
+              <p
+                class="truncate font-medium"
+                title={getCrawlerFailureInventoryLatestFailureLabel(failureState)}
+              >
+                {getCrawlerFailureInventoryLatestFailureLabel(failureState)}
+              </p>
+              {#if latestFailureTime}
+                <p class="text-muted-foreground mt-1 flex items-center gap-1 text-xs tabular-nums">
+                  <Clock3 class="size-3.5" aria-hidden="true" />
+                  {latestFailureTime}
+                </p>
+              {/if}
+            </div>
+
+            <p class="text-muted-foreground text-sm">
+              {getCrawlerFailureInventoryNextStepLabel(failureState)}
+            </p>
+
+            <div
+              class="flex flex-wrap items-center justify-start gap-2 lg:col-span-4 lg:justify-end"
+            >
+              {#if resolved.inventoryItem}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onclick={() =>
+                    resolved.inventoryItem && onOpenWebsiteDetail(resolved.inventoryItem)}
+                >
+                  {m.crawler_inventory_row_action_view_detail()}
+                </Button>
+              {/if}
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={m.crawler_retry_button_aria({
+                  website: getCrawlerFailureInventoryWebsiteLabel(failureState)
+                })}
+                disabled={mutationState.retryingWebsiteId !== null}
+                onclick={() => onOpenRetryDialog(failureState)}
+              >
+                {mutationState.retryingWebsiteId === failureState.website_id
+                  ? m.crawler_retry_button_busy()
+                  : m.crawler_retry_button()}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={m.crawler_update_interval_button_aria({
+                  website: getCrawlerFailureInventoryWebsiteLabel(failureState)
+                })}
+                disabled={mutationState.savingIntervalWebsiteId !== null}
+                onclick={() => onOpenIntervalDialog(failureState)}
+              >
+                {mutationState.savingIntervalWebsiteId === failureState.website_id
+                  ? m.crawler_update_interval_dialog_busy()
+                  : m.crawler_update_interval_button()}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                aria-label={resetCopy.ariaLabel}
+                disabled={mutationState.resettingCircuitWebsiteId !== null}
+                onclick={() => onOpenCircuitResetDialog(failureState)}
+              >
+                {isResettingThis
+                  ? resetCopy.busyLabel
+                  : failureState.state === "AUTO_DISABLED"
+                    ? m.crawler_circuit_breaker_reset_button_paused()
+                    : m.crawler_circuit_breaker_reset_button_backed_off()}
+              </Button>
+            </div>
+          </article>
+        {/each}
       </div>
     {/if}
   </Card.Content>
 </Card.Root>
 
-<TerminalOutcomeFeedCard
-  titleId="crawler-watchdog-interventions-title"
-  labels={{
-    title: m.crawler_watchdog_interventions_title(),
-    description: m.crawler_watchdog_interventions_description({ days: watchdog.windowDays }),
-    count: watchdog.visible
-      ? m.crawler_watchdog_interventions_count({
-          shown: watchdog.visible.items.length,
-          total: watchdog.visible.total
-        })
-      : "",
-    loadError: m.crawler_watchdog_interventions_load_error(),
-    emptyTitle: m.crawler_empty_watchdog_title(),
-    emptyDescription: m.crawler_empty_watchdog_description(),
-    tableCaption: m.crawler_watchdog_interventions_table_caption(),
-    columnWebsite: m.crawler_watchdog_interventions_column_website(),
-    columnOutcome: m.crawler_watchdog_interventions_column_outcome(),
-    columnActivity: m.crawler_watchdog_interventions_column_activity(),
-    columnFinished: m.crawler_watchdog_interventions_column_finished()
-  }}
-  feed={watchdog}
-  groupedRows={groupedWatchdog}
-  pageSize={CRAWLER_WATCHDOG_INTERVENTIONS_PAGE_SIZE}
-  {resolveRowLabel}
-  onOpenRowDetail={onOpenWebsiteDetail}
-  outcomeLabelFn={getCrawlerWatchdogInterventionOutcomeLabel}
-  resultLabelsFn={getCrawlerWatchdogInterventionResultLabels}
-/>
+<Card.Root aria-labelledby="crawler-failure-clusters-title">
+  <Card.Header>
+    <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+      <div class="flex min-w-0 flex-col gap-1">
+        <h2 id="crawler-failure-clusters-title" class="text-base leading-snug font-semibold">
+          {m.crawler_failure_clusters_title()}
+        </h2>
+        <Card.Description>
+          {m.crawler_failure_clusters_description({ days: failureClusters.windowDays })}
+        </Card.Description>
+      </div>
+      {#if failureClusters.visible}
+        <Badge variant="outline" class="shrink-0 tabular-nums">
+          {m.crawler_failure_clusters_count({
+            shown: failureClusters.visible.items.length,
+            total: failureClusters.visible.total
+          })}
+        </Badge>
+      {/if}
+    </div>
+  </Card.Header>
+  <Card.Content class="pt-0">
+    {#if failureClusters.loadFailed}
+      <Alert.Root variant="destructive">
+        <TriangleAlert aria-hidden="true" />
+        <Alert.Description>{m.crawler_failure_clusters_load_error()}</Alert.Description>
+      </Alert.Root>
+    {:else if !failureClusters.visible || failureClusters.visible.items.length === 0}
+      <EmptyState
+        title={m.crawler_empty_failure_clusters_title()}
+        description={m.crawler_empty_failure_clusters_description()}
+      >
+        {#snippet icon()}
+          <ShieldCheck class="size-5" />
+        {/snippet}
+      </EmptyState>
+    {:else}
+      <div class="divide-border divide-y" aria-label={m.crawler_failure_clusters_table_caption()}>
+        <div
+          class="text-muted-foreground hidden grid-cols-[minmax(0,1.7fr)_minmax(0,1.2fr)_minmax(0,.9fr)_minmax(0,.85fr)_auto] gap-4 px-2 pb-2 text-xs font-medium tracking-wide uppercase lg:grid"
+          aria-hidden="true"
+        >
+          <span>{m.crawler_failure_clusters_column_pattern()}</span>
+          <span>{m.crawler_failure_clusters_column_website()}</span>
+          <span>{m.crawler_failure_clusters_column_work()}</span>
+          <span>{m.crawler_failure_clusters_column_latest()}</span>
+          <span class="text-right">{m.crawler_failure_inventory_column_action()}</span>
+        </div>
+        {#each failureClusters.visible.items as cluster (`${cluster.website_id}:${cluster.outcome_code}`)}
+          {@const resolved = resolveRowLabel({
+            website_id: cluster.website_id,
+            website_name: cluster.website_name
+          })}
+          {@const clusterLatestRelative = formatCrawlerRelativeTime(
+            clusterRelativeTimeFormatter,
+            cluster.latest_failed_at
+          )}
+          <article
+            class="grid grid-cols-1 items-start gap-3 px-2 py-4 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1.2fr)_minmax(0,.9fr)_minmax(0,.85fr)_auto]"
+          >
+            <div class="flex min-w-0 flex-col gap-1">
+              <div class="flex min-w-0 flex-wrap items-center gap-2">
+                <p
+                  class="min-w-0 truncate text-sm font-semibold"
+                  title={getCrawlerFailureClusterOutcomeLabel(cluster)}
+                >
+                  {getCrawlerFailureClusterOutcomeLabel(cluster)}
+                </p>
+                {#if cluster.watchdog_occurrences > 0}
+                  <Badge
+                    variant="outline"
+                    class="border-caution/40 bg-caution/8 text-caution shrink-0 gap-1 font-normal"
+                    title={m.crawler_failure_cluster_watchdog_tooltip()}
+                  >
+                    <RotateCcw class="size-3.5" aria-hidden="true" />
+                    {m.crawler_failure_cluster_watchdog_badge()}
+                  </Badge>
+                {/if}
+              </div>
+              <p class="text-muted-foreground text-xs">
+                {getCrawlerFailureClusterOccurrenceLabel(cluster)}
+              </p>
+            </div>
+            <div class="min-w-0">
+              <p
+                class="truncate text-sm font-medium"
+                title={getCrawlerFailureClusterWebsiteLabel(cluster)}
+              >
+                {getCrawlerFailureClusterWebsiteLabel(cluster)}
+              </p>
+              <p class="text-muted-foreground mt-1 truncate text-xs">
+                {getCrawlerFailureClusterAttributionLabel(cluster)}
+              </p>
+            </div>
+            <p class="text-muted-foreground text-sm">
+              {getCrawlerFailureClusterWorkLabel(cluster)}
+            </p>
+            <div class="text-sm tabular-nums">
+              <time datetime={cluster.latest_failed_at} class="text-foreground block">
+                {getCrawlerFailureClusterLatestLabel(cluster)}
+              </time>
+              {#if clusterLatestRelative}
+                <p class="text-muted-foreground mt-0.5 text-xs">
+                  {clusterLatestRelative}
+                </p>
+              {/if}
+            </div>
+            <div class="flex items-center justify-start lg:justify-end">
+              {#if resolved.inventoryItem}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onclick={() =>
+                    resolved.inventoryItem && onOpenWebsiteDetail(resolved.inventoryItem)}
+                >
+                  {m.crawler_inventory_row_action_view_detail()}
+                  <ChevronRight data-icon="inline-end" aria-hidden="true" />
+                </Button>
+              {/if}
+            </div>
+          </article>
+        {/each}
+      </div>
 
-<TerminalOutcomeFeedCard
-  titleId="crawler-recent-failures-title"
-  labels={{
-    title: m.crawler_recent_failures_title(),
-    description: m.crawler_recent_failures_description({ days: recentFailures.windowDays }),
-    count: recentFailures.visible
-      ? m.crawler_recent_failures_count({
-          shown: recentFailures.visible.items.length,
-          total: recentFailures.visible.total
-        })
-      : "",
-    loadError: m.crawler_recent_failures_load_error(),
-    emptyTitle: m.crawler_empty_recent_failures_title(),
-    emptyDescription: m.crawler_empty_recent_failures_description(),
-    tableCaption: m.crawler_recent_failures_table_caption(),
-    columnWebsite: m.crawler_recent_failures_column_website(),
-    columnOutcome: m.crawler_recent_failures_column_outcome(),
-    columnActivity: m.crawler_recent_failures_column_activity(),
-    columnFinished: m.crawler_recent_failures_column_finished()
-  }}
-  feed={recentFailures}
-  groupedRows={groupedRecentFailures}
-  pageSize={CRAWLER_RECENT_FAILURES_PAGE_SIZE}
-  {resolveRowLabel}
-  onOpenRowDetail={onOpenWebsiteDetail}
-  outcomeLabelFn={getCrawlerRecentFailureOutcomeLabel}
-  resultLabelsFn={getCrawlerRecentFailureResultLabels}
-/>
+      {#if failureClusters.visible.total > CRAWLER_FAILURE_CLUSTERS_PAGE_SIZE}
+        <div class="mt-3 flex justify-end">
+          <Pagination.Root
+            count={failureClusters.visible.total}
+            perPage={CRAWLER_FAILURE_CLUSTERS_PAGE_SIZE}
+            page={failureClusters.page}
+            onPageChange={(next) => failureClusters.onChangePage(next)}
+            class="m-0 w-auto justify-end"
+          >
+            {#snippet children({ pages, currentPage })}
+              <Pagination.Content>
+                <Pagination.Item>
+                  <Pagination.PrevButton disabled={failureClusters.busy} />
+                </Pagination.Item>
+                {#each pages as p (p.key)}
+                  {#if p.type === "ellipsis"}
+                    <Pagination.Item>
+                      <Pagination.Ellipsis />
+                    </Pagination.Item>
+                  {:else}
+                    <Pagination.Item>
+                      <Pagination.Link
+                        page={p}
+                        isActive={currentPage === p.value}
+                        disabled={failureClusters.busy}
+                      >
+                        {p.value}
+                      </Pagination.Link>
+                    </Pagination.Item>
+                  {/if}
+                {/each}
+                <Pagination.Item>
+                  <Pagination.NextButton disabled={failureClusters.busy} />
+                </Pagination.Item>
+              </Pagination.Content>
+            {/snippet}
+          </Pagination.Root>
+        </div>
+      {/if}
+    {/if}
+  </Card.Content>
+</Card.Root>

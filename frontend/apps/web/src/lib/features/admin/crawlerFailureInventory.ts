@@ -1,4 +1,5 @@
 import type { components } from "@intric/intric-js";
+import { getCrawlOutcomeLabel } from "$lib/features/knowledge/crawlOutcomePresentation";
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
 import { formatCrawlerCount } from "./crawlerNumberFormat";
@@ -72,6 +73,39 @@ export function getCrawlerFailureInventoryFailureLabel(
   return m.crawler_failure_inventory_failures({
     count: formatCrawlerCount(item.consecutive_failures)
   });
+}
+
+export function getCrawlerFailureInventoryAttributionLabel(
+  item: CrawlerTenantFailureInventoryItem
+): string {
+  const space = item.space_name?.trim();
+  const owner = item.owner_email?.trim();
+  if (space && owner) {
+    return m.crawler_failure_inventory_attribution_space_owner({ space, owner });
+  }
+  if (space) return space;
+  if (owner) return owner;
+  return m.crawler_failure_inventory_attribution_missing();
+}
+
+export function getCrawlerFailureInventoryLatestFailureLabel(
+  item: CrawlerTenantFailureInventoryItem
+): string {
+  if (!item.latest_failure_outcome_code) {
+    return m.crawler_failure_inventory_latest_failure_missing();
+  }
+
+  return getCrawlOutcomeLabel(
+    { code: item.latest_failure_outcome_code },
+    m.crawl_outcome_unknown_error()
+  );
+}
+
+export function getCrawlerFailureInventoryLatestFailureTimeLabel(
+  item: CrawlerTenantFailureInventoryItem
+): string | null {
+  if (!item.latest_failure_at) return null;
+  return formatCrawlerFailureInventoryDateTime(item.latest_failure_at);
 }
 
 export function getCrawlerFailureInventoryNextStepLabel(

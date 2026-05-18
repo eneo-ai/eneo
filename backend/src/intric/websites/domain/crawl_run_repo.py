@@ -27,7 +27,10 @@ from intric.websites.domain.crawl_lifecycle import (
     lifecycle_predicate_for_active_query,
 )
 from intric.websites.domain.crawl_outcome import (
+    CRAWL_OUTCOME_CATEGORY_CODES,
+    CrawlOutcomeCategory,
     CrawlOutcomeCode,
+    crawl_outcome_category,
     parse_crawl_outcome_code_lenient,
     parse_crawl_outcome_code_strict,
     parse_failure_summary_lenient,
@@ -50,6 +53,11 @@ from intric.websites.domain.crawler_baseline import (
     CrawlerBaselineMetrics,
     CrawlerBaselineProcessingTotals,
     CrawlOutcomeBucket,
+)
+from intric.websites.domain.crawler_failure_clusters import (
+    CrawlerFailureClusterItem,
+    CrawlerFailureClusters,
+    CrawlerFailureClusterSource,
 )
 from intric.websites.domain.crawler_recent_failures import (
     RECENT_FAILURE_OUTCOME_CODES,
@@ -109,6 +117,22 @@ def _optional_embedding_usage_source(value: object) -> EmbeddingUsageSource | No
     if value == "missing":
         return "missing"
     raise ValueError(f"Unexpected embedding usage source {value!r}")
+
+
+def _failure_cluster_outcome_codes(
+    *,
+    source: CrawlerFailureClusterSource,
+    outcome_category: CrawlOutcomeCategory | None,
+) -> frozenset[CrawlOutcomeCode]:
+    source_codes = (
+        WATCHDOG_INTERVENTION_OUTCOME_CODES
+        if source is CrawlerFailureClusterSource.WATCHDOG_ONLY
+        else RECENT_FAILURE_OUTCOME_CODES
+    )
+    if outcome_category is None:
+        return source_codes
+    category_codes = CRAWL_OUTCOME_CATEGORY_CODES[outcome_category]
+    return frozenset(code for code in source_codes if code in category_codes)
 
 
 @dataclass(frozen=True, slots=True)
@@ -666,6 +690,239 @@ class CrawlRunRepository:
             tenant_id=tenant_id,
             outcome_codes=WATCHDOG_INTERVENTION_OUTCOME_CODES,
             outcome_filter=outcome_filter,
+        )
+
+    async def failure_clusters_for_tenant(
+        self,
+        *,
+        since: datetime,
+        until: datetime,
+        days: int,
+        limit: int,
+        offset: int,
+        tenant_id: UUID,
+        source: CrawlerFailureClusterSource = CrawlerFailureClusterSource.ALL,
+        outcome_category: CrawlOutcomeCategory | None = None,
+    ) -> CrawlerFailureClusters:
+        applied_outcomes = _failure_cluster_outcome_codes(
+            source=source,
+            outcome_category=outcome_category,
+        )
+        if not applied_outcomes:
+            return CrawlerFailureClusters(
+                items=(),
+                total=0,
+                limit=limit,
+                offset=offset,
+                days=days,
+                since=since,
+                until=until,
+                source=source,
+                outcome_category=outcome_category,
+            )
+
+        latest_crawl_run = aliased(CrawlRunsTable)
+        latest_job = aliased(Jobs)
+        latest_conditions = [
+            latest_job.finished_at.is_not(None),
+            latest_job.finished_at >= since,
+            latest_job.finished_at < until,
+            latest_crawl_run.tenant_id == tenant_id,
+            latest_crawl_run.outcome_code.in_(
+                [code.value for code in applied_outcomes]
+            ),
+        ]
+        latest_ranked = (
+            sa.select(
+                latest_crawl_run.website_id.label("website_id"),
+                latest_crawl_run.outcome_code.label("outcome_code"),
+                latest_crawl_run.id.label("sample_crawl_run_id"),
+                sa.func.row_number()
+                .over(
+                    partition_by=(
+                        latest_crawl_run.website_id,
+                        latest_crawl_run.outcome_code,
+                    ),
+                    order_by=(
+                        latest_job.finished_at.desc(),
+                        latest_crawl_run.id.desc(),
+                    ),
+                )
+                .label("cluster_rank"),
+            )
+            .select_from(
+                sa.join(
+                    latest_crawl_run,
+                    latest_job,
+                    latest_crawl_run.job_id == latest_job.id,
+                )
+            )
+            .where(*latest_conditions)
+            .subquery()
+        )
+
+        failure_conditions = [
+            Jobs.finished_at.is_not(None),
+            Jobs.finished_at >= since,
+            Jobs.finished_at < until,
+            CrawlRunsTable.tenant_id == tenant_id,
+            CrawlRunsTable.outcome_code.in_([code.value for code in applied_outcomes]),
+        ]
+
+        base_from = sa.join(
+            sa.join(CrawlRunsTable, Jobs, CrawlRunsTable.job_id == Jobs.id),
+            Websites,
+            sa.and_(
+                CrawlRunsTable.website_id == Websites.id,
+                Websites.tenant_id == CrawlRunsTable.tenant_id,
+            ),
+        )
+        rows_from = sa.outerjoin(
+            base_from, Tenants, CrawlRunsTable.tenant_id == Tenants.id
+        )
+        rows_from = sa.outerjoin(
+            rows_from,
+            Spaces,
+            sa.and_(
+                Websites.space_id == Spaces.id,
+                Spaces.tenant_id == CrawlRunsTable.tenant_id,
+            ),
+        )
+        rows_from = sa.outerjoin(
+            rows_from,
+            Users,
+            sa.and_(
+                Websites.user_id == Users.id,
+                Users.tenant_id == CrawlRunsTable.tenant_id,
+            ),
+        )
+        rows_from = sa.outerjoin(
+            rows_from,
+            latest_ranked,
+            sa.and_(
+                latest_ranked.c.website_id == CrawlRunsTable.website_id,
+                latest_ranked.c.outcome_code == CrawlRunsTable.outcome_code,
+                latest_ranked.c.cluster_rank == 1,
+            ),
+        )
+
+        watchdog_occurrence = sa.case(
+            (
+                CrawlRunsTable.outcome_code.in_(
+                    [code.value for code in WATCHDOG_INTERVENTION_OUTCOME_CODES]
+                ),
+                1,
+            ),
+            else_=0,
+        )
+        grouped_stmt = (
+            sa.select(
+                CrawlRunsTable.website_id.label("website_id"),
+                Websites.url.label("website_url"),
+                Websites.name.label("website_name"),
+                CrawlRunsTable.tenant_id.label("tenant_id"),
+                Tenants.display_name.label("tenant_display_name"),
+                Spaces.id.label("space_id"),
+                Spaces.name.label("space_name"),
+                Users.id.label("owner_user_id"),
+                Users.email.label("owner_email"),
+                CrawlRunsTable.outcome_code.label("outcome_code"),
+                sa.func.count(CrawlRunsTable.id).label("occurrences"),
+                sa.func.coalesce(sa.func.sum(watchdog_occurrence), 0).label(
+                    "watchdog_occurrences"
+                ),
+                sa.func.min(Jobs.finished_at).label("first_failed_at"),
+                sa.func.max(Jobs.finished_at).label("latest_failed_at"),
+                latest_ranked.c.sample_crawl_run_id.label("sample_crawl_run_id"),
+                sa.func.coalesce(sa.func.sum(CrawlRunsTable.pages_crawled), 0).label(
+                    "pages_crawled"
+                ),
+                sa.func.coalesce(sa.func.sum(CrawlRunsTable.files_downloaded), 0).label(
+                    "files_downloaded"
+                ),
+                sa.func.coalesce(sa.func.sum(CrawlRunsTable.pages_failed), 0).label(
+                    "pages_failed"
+                ),
+                sa.func.coalesce(sa.func.sum(CrawlRunsTable.files_failed), 0).label(
+                    "files_failed"
+                ),
+            )
+            .select_from(rows_from)
+            .where(*failure_conditions)
+            .group_by(
+                CrawlRunsTable.website_id,
+                Websites.url,
+                Websites.name,
+                CrawlRunsTable.tenant_id,
+                Tenants.display_name,
+                Spaces.id,
+                Spaces.name,
+                Users.id,
+                Users.email,
+                CrawlRunsTable.outcome_code,
+                latest_ranked.c.sample_crawl_run_id,
+            )
+        )
+        grouped = grouped_stmt.subquery()
+        total = int(
+            await self.session.scalar(sa.select(sa.func.count()).select_from(grouped))
+            or 0
+        )
+
+        rows_stmt = (
+            sa.select(grouped)
+            .order_by(
+                grouped.c.occurrences.desc(),
+                grouped.c.latest_failed_at.desc(),
+                grouped.c.website_id.asc(),
+                grouped.c.outcome_code.asc(),
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self.session.execute(rows_stmt)
+
+        items: list[CrawlerFailureClusterItem] = []
+        for row in result.mappings():
+            sample_crawl_run_id = row["sample_crawl_run_id"]
+            if sample_crawl_run_id is None:
+                raise RuntimeError("Failure cluster has no representative crawl run")
+            outcome_code = parse_crawl_outcome_code_strict(row["outcome_code"])
+            items.append(
+                CrawlerFailureClusterItem(
+                    website_id=row["website_id"],
+                    website_url=str(row["website_url"]),
+                    website_name=row["website_name"],
+                    tenant_id=row["tenant_id"],
+                    tenant_display_name=row["tenant_display_name"],
+                    space_id=row["space_id"],
+                    space_name=row["space_name"],
+                    owner_user_id=row["owner_user_id"],
+                    owner_email=row["owner_email"],
+                    outcome_code=outcome_code,
+                    outcome_category=crawl_outcome_category(outcome_code),
+                    occurrences=int(row["occurrences"]),
+                    watchdog_occurrences=int(row["watchdog_occurrences"]),
+                    first_failed_at=row["first_failed_at"],
+                    latest_failed_at=row["latest_failed_at"],
+                    sample_crawl_run_id=sample_crawl_run_id,
+                    pages_crawled=int(row["pages_crawled"]),
+                    files_downloaded=int(row["files_downloaded"]),
+                    pages_failed=int(row["pages_failed"]),
+                    files_failed=int(row["files_failed"]),
+                )
+            )
+
+        return CrawlerFailureClusters(
+            items=tuple(items),
+            total=total,
+            limit=limit,
+            offset=offset,
+            days=days,
+            since=since,
+            until=until,
+            source=source,
+            outcome_category=outcome_category,
         )
 
     async def _recent_terminal_outcomes(

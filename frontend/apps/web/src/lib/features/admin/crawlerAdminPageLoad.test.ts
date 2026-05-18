@@ -1,9 +1,8 @@
 import { expect, test, vi } from "vitest";
 import { CRAWLER_ACTIVE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerActiveInventory";
+import { CRAWLER_FAILURE_CLUSTERS_DEFAULTS } from "$lib/features/admin/crawlerFailureClusters";
 import { CRAWLER_FAILURE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerFailureInventory";
-import { CRAWLER_RECENT_FAILURES_DEFAULTS } from "$lib/features/admin/crawlerRecentFailures";
 import { CRAWLER_TENANT_WEBSITE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerTenantWebsiteInventory";
-import { CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS } from "$lib/features/admin/crawlerWatchdogInterventions";
 import { CRAWLER_WEBSITE_PROCESSING_DEFAULTS } from "$lib/features/admin/crawlerWebsiteProcessing";
 import { load } from "../../../routes/(app)/admin/crawler/+page";
 
@@ -12,8 +11,7 @@ test("admin crawler load keeps settings available when diagnostics cannot be loa
   const getCrawler = vi.fn().mockResolvedValue(crawlerSettings);
   const activeInventory = vi.fn().mockRejectedValue(new Error("active unavailable"));
   const failureInventory = vi.fn().mockRejectedValue(new Error("failure inventory unavailable"));
-  const recentFailures = vi.fn().mockRejectedValue(new Error("diagnostics unavailable"));
-  const watchdogInterventions = vi.fn().mockRejectedValue(new Error("watchdog unavailable"));
+  const failureClusters = vi.fn().mockRejectedValue(new Error("failure clusters unavailable"));
   const scheduledAggregate = vi.fn().mockRejectedValue(new Error("scheduled unavailable"));
   const websiteProcessingAggregate = vi.fn().mockRejectedValue(new Error("processing unavailable"));
   const tenantWebsiteInventory = vi
@@ -29,8 +27,7 @@ test("admin crawler load keeps settings available when diagnostics cannot be loa
         crawlerAdmin: {
           activeInventory,
           failureInventory,
-          recentFailures,
-          watchdogInterventions,
+          failureClusters,
           scheduledAggregate,
           websiteProcessingAggregate,
           tenantWebsiteInventory
@@ -42,16 +39,14 @@ test("admin crawler load keeps settings available when diagnostics cannot be loa
   expect(depends).toHaveBeenCalledWith("admin:crawler-settings");
   expect(depends).toHaveBeenCalledWith("admin:crawler-active-inventory");
   expect(depends).toHaveBeenCalledWith("admin:crawler-failure-inventory");
-  expect(depends).toHaveBeenCalledWith("admin:crawler-recent-failures");
-  expect(depends).toHaveBeenCalledWith("admin:crawler-watchdog-interventions");
+  expect(depends).toHaveBeenCalledWith("admin:crawler-failure-clusters");
   expect(depends).toHaveBeenCalledWith("admin:crawler-scheduled");
   expect(depends).toHaveBeenCalledWith("admin:crawler-website-processing");
   expect(depends).toHaveBeenCalledWith("admin:crawler-tenant-website-inventory");
   expect(getCrawler).toHaveBeenCalledOnce();
   expect(activeInventory).toHaveBeenCalledWith(CRAWLER_ACTIVE_INVENTORY_DEFAULTS);
   expect(failureInventory).toHaveBeenCalledWith(CRAWLER_FAILURE_INVENTORY_DEFAULTS);
-  expect(recentFailures).toHaveBeenCalledWith(CRAWLER_RECENT_FAILURES_DEFAULTS);
-  expect(watchdogInterventions).toHaveBeenCalledWith(CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS);
+  expect(failureClusters).toHaveBeenCalledWith(CRAWLER_FAILURE_CLUSTERS_DEFAULTS);
   expect(scheduledAggregate).toHaveBeenCalledOnce();
   expect(websiteProcessingAggregate).toHaveBeenCalledWith(CRAWLER_WEBSITE_PROCESSING_DEFAULTS);
   expect(tenantWebsiteInventory).toHaveBeenCalledWith(CRAWLER_TENANT_WEBSITE_INVENTORY_DEFAULTS);
@@ -61,12 +56,9 @@ test("admin crawler load keeps settings available when diagnostics cannot be loa
     crawlerActiveInventoryLoadFailed: true,
     crawlerFailureInventory: null,
     crawlerFailureInventoryLoadFailed: true,
-    crawlerRecentFailuresWindowDays: CRAWLER_RECENT_FAILURES_DEFAULTS.days,
-    crawlerRecentFailures: null,
-    crawlerRecentFailuresLoadFailed: true,
-    crawlerWatchdogInterventionsWindowDays: CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS.days,
-    crawlerWatchdogInterventions: null,
-    crawlerWatchdogInterventionsLoadFailed: true,
+    crawlerFailureClustersWindowDays: CRAWLER_FAILURE_CLUSTERS_DEFAULTS.days,
+    crawlerFailureClusters: null,
+    crawlerFailureClustersLoadFailed: true,
     crawlerScheduledAggregate: null,
     crawlerScheduledAggregateLoadFailed: true,
     crawlerWebsiteProcessingWindowDays: CRAWLER_WEBSITE_PROCESSING_DEFAULTS.days,
@@ -108,27 +100,35 @@ test("admin crawler load returns crawler diagnostics when both diagnostics calls
       }
     ]
   };
-  const crawlerRecentFailures = {
+  const crawlerFailureClusters = {
     total: 1,
+    limit: 10,
+    offset: 0,
+    days: 7,
+    since: "2026-05-08T12:00:00Z",
+    until: "2026-05-15T12:00:00Z",
+    source: "all",
+    outcome_category: null,
     items: [
       {
-        crawl_run_id: "22222222-2222-4222-8222-222222222222",
-        job_id: "11111111-1111-4111-8111-111111111111",
         website_id: "12345678-1234-4234-8234-123456789abc",
+        website_url: "https://example.com",
         website_name: "Example website",
-        tenant_id: "33333333-3333-4333-8333-333333333333",
-        tenant_display_name: "Tenant",
+        space_id: null,
+        space_name: null,
+        owner_user_id: "11111111-1111-4111-8111-111111111111",
+        owner_email: "operator@example.com",
         outcome_code: "CRAWL_NO_PAGES_RETURNED",
-        failure_summary: null,
-        finished_at: "2026-05-12T14:14:50.000Z",
+        outcome_category: "empty_output",
+        occurrences: 1,
+        watchdog_occurrences: 0,
+        first_failed_at: "2026-05-12T14:14:50.000Z",
+        latest_failed_at: "2026-05-12T14:14:50.000Z",
+        sample_crawl_run_id: "22222222-2222-4222-8222-222222222222",
         pages_crawled: 0,
         files_downloaded: 0,
         pages_failed: 0,
-        files_failed: 0,
-        pages_source_retained: 0,
-        pages_hash_retained: 0,
-        files_hash_retained: 0,
-        files_too_large_skipped: 0
+        files_failed: 0
       }
     ]
   };
@@ -147,22 +147,18 @@ test("admin crawler load returns crawler diagnostics when both diagnostics calls
         consecutive_failures: 3,
         next_retry_at: "2026-05-12T15:14:50.000Z",
         last_crawled_at: "2026-05-12T14:14:50.000Z",
-        updated_at: "2026-05-12T14:14:50.000Z"
+        updated_at: "2026-05-12T14:14:50.000Z",
+        space_id: null,
+        space_name: null,
+        owner_user_id: "11111111-1111-4111-8111-111111111111",
+        owner_email: "operator@example.com",
+        latest_failure_outcome_code: "CRAWL_NO_PAGES_RETURNED",
+        latest_failure_at: "2026-05-12T14:14:50.000Z"
       }
     ]
   };
   const failureInventory = vi.fn().mockResolvedValue(crawlerFailureInventory);
-  const recentFailures = vi.fn().mockResolvedValue(crawlerRecentFailures);
-  const crawlerWatchdogInterventions = {
-    ...crawlerRecentFailures,
-    items: [
-      {
-        ...crawlerRecentFailures.items[0],
-        outcome_code: "CRAWL_RUNTIME_TIMEOUT"
-      }
-    ]
-  };
-  const watchdogInterventions = vi.fn().mockResolvedValue(crawlerWatchdogInterventions);
+  const failureClusters = vi.fn().mockResolvedValue(crawlerFailureClusters);
   const crawlerScheduledAggregate = {
     buckets: [
       { update_interval: "daily", website_count: 2, total_size_bytes: 1_048_576 },
@@ -242,8 +238,7 @@ test("admin crawler load returns crawler diagnostics when both diagnostics calls
         crawlerAdmin: {
           activeInventory,
           failureInventory,
-          recentFailures,
-          watchdogInterventions,
+          failureClusters,
           scheduledAggregate,
           websiteProcessingAggregate,
           tenantWebsiteInventory
@@ -254,8 +249,7 @@ test("admin crawler load returns crawler diagnostics when both diagnostics calls
 
   expect(activeInventory).toHaveBeenCalledWith(CRAWLER_ACTIVE_INVENTORY_DEFAULTS);
   expect(failureInventory).toHaveBeenCalledWith(CRAWLER_FAILURE_INVENTORY_DEFAULTS);
-  expect(recentFailures).toHaveBeenCalledWith(CRAWLER_RECENT_FAILURES_DEFAULTS);
-  expect(watchdogInterventions).toHaveBeenCalledWith(CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS);
+  expect(failureClusters).toHaveBeenCalledWith(CRAWLER_FAILURE_CLUSTERS_DEFAULTS);
   expect(scheduledAggregate).toHaveBeenCalledOnce();
   expect(websiteProcessingAggregate).toHaveBeenCalledWith(CRAWLER_WEBSITE_PROCESSING_DEFAULTS);
   expect(tenantWebsiteInventory).toHaveBeenCalledWith(CRAWLER_TENANT_WEBSITE_INVENTORY_DEFAULTS);
@@ -265,12 +259,9 @@ test("admin crawler load returns crawler diagnostics when both diagnostics calls
     crawlerActiveInventoryLoadFailed: false,
     crawlerFailureInventory,
     crawlerFailureInventoryLoadFailed: false,
-    crawlerRecentFailuresWindowDays: CRAWLER_RECENT_FAILURES_DEFAULTS.days,
-    crawlerRecentFailures,
-    crawlerRecentFailuresLoadFailed: false,
-    crawlerWatchdogInterventionsWindowDays: CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS.days,
-    crawlerWatchdogInterventions,
-    crawlerWatchdogInterventionsLoadFailed: false,
+    crawlerFailureClustersWindowDays: CRAWLER_FAILURE_CLUSTERS_DEFAULTS.days,
+    crawlerFailureClusters,
+    crawlerFailureClustersLoadFailed: false,
     crawlerScheduledAggregate,
     crawlerScheduledAggregateLoadFailed: false,
     crawlerWebsiteProcessingWindowDays: CRAWLER_WEBSITE_PROCESSING_DEFAULTS.days,

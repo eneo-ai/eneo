@@ -13,7 +13,11 @@ from intric.websites.domain.bulk_crawl_interval_change import (
 )
 from intric.websites.domain.crawl_abort import CrawlAbortConflictCode
 from intric.websites.domain.crawl_lifecycle import CrawlLifecycle
-from intric.websites.domain.crawl_outcome import CrawlOutcomeCode, FailureReason
+from intric.websites.domain.crawl_outcome import (
+    CrawlOutcomeCategory,
+    CrawlOutcomeCode,
+    FailureReason,
+)
 from intric.websites.domain.crawl_run import CrawlType
 from intric.websites.domain.crawl_website_delete import CrawlWebsiteDeleteConflictCode
 from intric.websites.domain.crawler_active_inventory import (
@@ -22,6 +26,13 @@ from intric.websites.domain.crawler_active_inventory import (
 from intric.websites.domain.crawler_active_inventory import (
     CrawlerActiveInventoryItem as DomainCrawlerActiveInventoryItem,
 )
+from intric.websites.domain.crawler_failure_clusters import (
+    CrawlerFailureClusterItem as DomainCrawlerFailureClusterItem,
+)
+from intric.websites.domain.crawler_failure_clusters import (
+    CrawlerFailureClusters as DomainCrawlerFailureClusters,
+)
+from intric.websites.domain.crawler_failure_clusters import CrawlerFailureClusterSource
 from intric.websites.domain.crawler_failure_inventory import (
     CrawlerFailureInventory as DomainCrawlerFailureInventory,
 )
@@ -245,12 +256,18 @@ class CrawlerTenantFailureInventoryItem(BaseModel):
     website_id: UUID
     website_url: str
     website_name: str | None
+    space_id: UUID | None
+    space_name: str | None
+    owner_user_id: UUID | None
+    owner_email: str | None
     state: CrawlerFailureState
     update_interval: UpdateInterval
     consecutive_failures: int = Field(ge=0)
     next_retry_at: datetime | None
     last_crawled_at: datetime | None
     updated_at: datetime
+    latest_failure_outcome_code: CrawlOutcomeCode | None
+    latest_failure_at: datetime | None
 
     @classmethod
     def from_domain(
@@ -260,12 +277,18 @@ class CrawlerTenantFailureInventoryItem(BaseModel):
             website_id=item.website_id,
             website_url=item.website_url,
             website_name=item.website_name,
+            space_id=item.space_id,
+            space_name=item.space_name,
+            owner_user_id=item.owner_user_id,
+            owner_email=item.owner_email,
             state=item.state,
             update_interval=item.update_interval,
             consecutive_failures=item.consecutive_failures,
             next_retry_at=item.next_retry_at,
             last_crawled_at=item.last_crawled_at,
             updated_at=item.updated_at,
+            latest_failure_outcome_code=item.latest_failure_outcome_code,
+            latest_failure_at=item.latest_failure_at,
         )
 
 
@@ -379,6 +402,82 @@ class CrawlerRecentFailuresResponse(BaseModel):
             days=failures.days,
             since=failures.since,
             until=failures.until,
+        )
+
+
+class CrawlerFailureClusterItem(BaseModel):
+    website_id: UUID
+    website_url: str
+    website_name: str | None
+    space_id: UUID | None
+    space_name: str | None
+    owner_user_id: UUID | None
+    owner_email: str | None
+    outcome_code: CrawlOutcomeCode
+    outcome_category: CrawlOutcomeCategory
+    occurrences: int = Field(ge=1)
+    watchdog_occurrences: int = Field(ge=0)
+    first_failed_at: datetime
+    latest_failed_at: datetime
+    sample_crawl_run_id: UUID
+    pages_crawled: int = Field(ge=0)
+    files_downloaded: int = Field(ge=0)
+    pages_failed: int = Field(ge=0)
+    files_failed: int = Field(ge=0)
+
+    @classmethod
+    def from_domain(
+        cls, item: DomainCrawlerFailureClusterItem
+    ) -> "CrawlerFailureClusterItem":
+        return cls(
+            website_id=item.website_id,
+            website_url=item.website_url,
+            website_name=item.website_name,
+            space_id=item.space_id,
+            space_name=item.space_name,
+            owner_user_id=item.owner_user_id,
+            owner_email=item.owner_email,
+            outcome_code=item.outcome_code,
+            outcome_category=item.outcome_category,
+            occurrences=item.occurrences,
+            watchdog_occurrences=item.watchdog_occurrences,
+            first_failed_at=item.first_failed_at,
+            latest_failed_at=item.latest_failed_at,
+            sample_crawl_run_id=item.sample_crawl_run_id,
+            pages_crawled=item.pages_crawled,
+            files_downloaded=item.files_downloaded,
+            pages_failed=item.pages_failed,
+            files_failed=item.files_failed,
+        )
+
+
+class CrawlerFailureClustersResponse(BaseModel):
+    items: list[CrawlerFailureClusterItem]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=200)
+    offset: int = Field(ge=0)
+    days: int = Field(ge=1, le=30)
+    since: datetime
+    until: datetime
+    source: CrawlerFailureClusterSource
+    outcome_category: CrawlOutcomeCategory | None
+
+    @classmethod
+    def from_domain(
+        cls, clusters: DomainCrawlerFailureClusters
+    ) -> "CrawlerFailureClustersResponse":
+        return cls(
+            items=[
+                CrawlerFailureClusterItem.from_domain(item) for item in clusters.items
+            ],
+            total=clusters.total,
+            limit=clusters.limit,
+            offset=clusters.offset,
+            days=clusters.days,
+            since=clusters.since,
+            until=clusters.until,
+            source=clusters.source,
+            outcome_category=clusters.outcome_category,
         )
 
 

@@ -102,6 +102,7 @@
     items.length === 0 ? 0 : (activity.page - 1) * activity.pageSize + 1
   );
   const hasItems = $derived(items.length > 0);
+  const showSpaceRollup = $derived((activity.visible?.space_rollup.length ?? 0) > 1);
   const showingLabel = $derived(
     hasItems
       ? m.crawler_website_processing_count_range({
@@ -179,6 +180,10 @@
     return m.crawler_website_processing_latest_run({
       time: formatCrawlerDateTime(item.latest_run_at)
     });
+  }
+
+  function hasLatestRunEmbeddedTokens(item: CrawlerTenantWebsiteProcessingAggregateItem): boolean {
+    return (item.latest_embedding_input_tokens ?? 0) > 0;
   }
 
   function rowSecondaryLine(item: CrawlerTenantWebsiteProcessingAggregateItem): string {
@@ -283,7 +288,7 @@
       </div>
     {/if}
 
-    {#if activity.visible?.space_rollup.length}
+    {#if showSpaceRollup && activity.visible?.space_rollup.length}
       <div class="border-default mt-4 rounded-lg border p-3">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="flex min-w-0 flex-col gap-1">
@@ -393,87 +398,89 @@
         {/if}
       </div>
 
-      <div class="flex flex-col gap-1.5">
-        <span class="text-muted-foreground text-[10px] font-medium tracking-wide uppercase">
-          {m.crawler_website_processing_filter_group_window()}
-        </span>
-        <div
-          role="group"
-          aria-label={m.crawler_website_processing_filter_group_window()}
-          class="flex flex-wrap gap-1.5"
-        >
-          {#each CRAWLER_WEBSITE_PROCESSING_TIME_WINDOWS as window (window)}
-            {@const isActive = activity.days === window}
+      <div class="grid gap-3 lg:grid-cols-[auto_1fr_auto] lg:items-start">
+        <div class="flex flex-col gap-1.5">
+          <span class="text-muted-foreground text-[10px] font-medium tracking-wide uppercase">
+            {m.crawler_website_processing_filter_group_window()}
+          </span>
+          <div
+            role="group"
+            aria-label={m.crawler_website_processing_filter_group_window()}
+            class="flex flex-wrap gap-1.5"
+          >
+            {#each CRAWLER_WEBSITE_PROCESSING_TIME_WINDOWS as window (window)}
+              {@const isActive = activity.days === window}
+              <button
+                type="button"
+                aria-pressed={isActive}
+                class={chipClass(isActive)}
+                onclick={() => {
+                  if (isCrawlerWebsiteProcessingTimeWindow(window)) activity.setDays(window);
+                }}
+              >
+                {m.crawler_website_processing_filter_window_days({ days: window })}
+              </button>
+            {/each}
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-1.5">
+          <span class="text-muted-foreground text-[10px] font-medium tracking-wide uppercase">
+            {m.crawler_website_processing_filter_group_sort()}
+          </span>
+          <div
+            role="group"
+            aria-label={m.crawler_website_processing_filter_group_sort()}
+            class="flex flex-wrap gap-1.5"
+          >
+            {#each CRAWLER_WEBSITE_PROCESSING_SORT_OPTIONS as option (option)}
+              {@const isActive = activity.sort === option}
+              <button
+                type="button"
+                aria-pressed={isActive}
+                class={chipClass(isActive)}
+                onclick={() => activity.setSort(option)}
+              >
+                {getCrawlerWebsiteProcessingSortLabel(option)}
+              </button>
+            {/each}
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-1.5 lg:min-w-64">
+          <span class="text-muted-foreground text-[10px] font-medium tracking-wide uppercase">
+            {m.crawler_website_processing_filter_group_focus()}
+          </span>
+          <div
+            role="group"
+            aria-label={m.crawler_website_processing_filter_group_focus()}
+            class="flex flex-wrap gap-1.5"
+          >
             <button
               type="button"
-              aria-pressed={isActive}
-              class={chipClass(isActive)}
-              onclick={() => {
-                if (isCrawlerWebsiteProcessingTimeWindow(window)) activity.setDays(window);
-              }}
+              aria-pressed={activity.filters.failuresOnly}
+              class={chipClass(activity.filters.failuresOnly)}
+              onclick={() => activity.setFailuresOnly(!activity.filters.failuresOnly)}
             >
-              {m.crawler_website_processing_filter_window_days({ days: window })}
+              {m.crawler_website_processing_filter_failures_only()}
             </button>
-          {/each}
-        </div>
-      </div>
-
-      <div class="flex flex-col gap-1.5">
-        <span class="text-muted-foreground text-[10px] font-medium tracking-wide uppercase">
-          {m.crawler_website_processing_filter_group_sort()}
-        </span>
-        <div
-          role="group"
-          aria-label={m.crawler_website_processing_filter_group_sort()}
-          class="flex flex-wrap gap-1.5"
-        >
-          {#each CRAWLER_WEBSITE_PROCESSING_SORT_OPTIONS as option (option)}
-            {@const isActive = activity.sort === option}
             <button
               type="button"
-              aria-pressed={isActive}
-              class={chipClass(isActive)}
-              onclick={() => activity.setSort(option)}
+              aria-pressed={activity.filters.lowRetentionOnly}
+              class={chipClass(activity.filters.lowRetentionOnly)}
+              onclick={() => activity.setLowRetentionOnly(!activity.filters.lowRetentionOnly)}
             >
-              {getCrawlerWebsiteProcessingSortLabel(option)}
+              {m.crawler_website_processing_filter_low_retention()}
             </button>
-          {/each}
-        </div>
-      </div>
-
-      <div class="flex flex-col gap-1.5">
-        <span class="text-muted-foreground text-[10px] font-medium tracking-wide uppercase">
-          {m.crawler_website_processing_filter_group_focus()}
-        </span>
-        <div
-          role="group"
-          aria-label={m.crawler_website_processing_filter_group_focus()}
-          class="flex flex-wrap gap-1.5"
-        >
-          <button
-            type="button"
-            aria-pressed={activity.filters.failuresOnly}
-            class={chipClass(activity.filters.failuresOnly)}
-            onclick={() => activity.setFailuresOnly(!activity.filters.failuresOnly)}
-          >
-            {m.crawler_website_processing_filter_failures_only()}
-          </button>
-          <button
-            type="button"
-            aria-pressed={activity.filters.lowRetentionOnly}
-            class={chipClass(activity.filters.lowRetentionOnly)}
-            onclick={() => activity.setLowRetentionOnly(!activity.filters.lowRetentionOnly)}
-          >
-            {m.crawler_website_processing_filter_low_retention()}
-          </button>
-          <button
-            type="button"
-            aria-pressed={activity.filters.sourceSkipDriftOnly}
-            class={chipClass(activity.filters.sourceSkipDriftOnly)}
-            onclick={() => activity.setSourceSkipDriftOnly(!activity.filters.sourceSkipDriftOnly)}
-          >
-            {m.crawler_website_processing_filter_source_skip_drift()}
-          </button>
+            <button
+              type="button"
+              aria-pressed={activity.filters.sourceSkipDriftOnly}
+              class={chipClass(activity.filters.sourceSkipDriftOnly)}
+              onclick={() => activity.setSourceSkipDriftOnly(!activity.filters.sourceSkipDriftOnly)}
+            >
+              {m.crawler_website_processing_filter_source_skip_drift()}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -561,10 +568,10 @@
                     : ""}
                   onclick={() => inventoryItem && onOpenWebsiteDetail(inventoryItem)}
                 >
-                  <Table.Cell class="min-w-0 align-top">
+                  <Table.Cell class="min-w-0 overflow-hidden py-3 pr-4 align-top">
                     <div class="flex min-w-0 flex-col gap-1">
                       <span
-                        class="truncate font-medium"
+                        class="truncate leading-5 font-medium"
                         title={getCrawlerWebsiteProcessingWebsiteLabel(processingItem)}
                       >
                         {getCrawlerWebsiteProcessingWebsiteLabel(processingItem)}
@@ -582,25 +589,34 @@
                       </span>
                     </div>
                   </Table.Cell>
-                  <Table.Cell class="align-top text-sm">
+                  <Table.Cell class="py-3 pr-4 align-top text-sm">
                     {getCrawlerWebsiteProcessingScheduleLabel(processingItem)}
                   </Table.Cell>
-                  <Table.Cell class="text-right align-top text-sm tabular-nums">
+                  <Table.Cell class="py-3 pr-4 text-right align-top text-sm tabular-nums">
                     {getCrawlerWebsiteProcessingIndexedSizeLabel(processingItem)}
                   </Table.Cell>
-                  <Table.Cell class="align-top">
-                    <Badge
-                      variant="outline"
-                      class="max-w-full truncate tabular-nums"
-                      title={m.crawler_website_processing_embedding_usage_hint()}
-                    >
-                      {getCrawlerWebsiteProcessingLatestRunEmbeddingUsageLabel(processingItem)}
-                    </Badge>
+                  <Table.Cell class="overflow-hidden py-3 pr-4 align-top">
+                    {#if hasLatestRunEmbeddedTokens(processingItem)}
+                      <Badge
+                        variant="outline"
+                        class="max-w-full truncate tabular-nums"
+                        title={m.crawler_website_processing_embedding_usage_hint()}
+                      >
+                        {getCrawlerWebsiteProcessingLatestRunEmbeddingUsageLabel(processingItem)}
+                      </Badge>
+                    {:else}
+                      <span
+                        class="text-muted-foreground block truncate text-sm"
+                        title={m.crawler_website_processing_embedding_usage_hint()}
+                      >
+                        {getCrawlerWebsiteProcessingLatestRunEmbeddingUsageLabel(processingItem)}
+                      </span>
+                    {/if}
                     <div class="text-muted-foreground mt-1 text-xs">
                       {latestRunLabel(processingItem)}
                     </div>
                   </Table.Cell>
-                  <Table.Cell class="align-top">
+                  <Table.Cell class="py-3 pr-4 align-top">
                     <Badge
                       variant="outline"
                       class={healthClass(health.state)}
@@ -615,7 +631,7 @@
                     </Badge>
                   </Table.Cell>
                   <Table.Cell
-                    class="text-right align-top"
+                    class="py-3 text-right align-top"
                     onclick={(event) => event.stopPropagation()}
                   >
                     <DropdownMenu.Root>

@@ -2445,6 +2445,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/crawler/failure-clusters": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get grouped crawler failure patterns for the current tenant */
+    get: operations["get_current_tenant_crawler_failure_clusters_api_v1_admin_crawler_failure_clusters_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/crawler/scheduled": {
     parameters: {
       query?: never;
@@ -9747,6 +9764,18 @@ export interface components {
       | "CRAWL_COMPLETED_WITH_PAGE_FAILURES"
       | "EMBEDDING_CONFIG_MISSING"
       | "UNKNOWN_CRAWL_ERROR";
+    /**
+     * CrawlOutcomeCategory
+     * @enum {string}
+     */
+    CrawlOutcomeCategory:
+      | "timeout"
+      | "empty_output"
+      | "enqueue"
+      | "embedding"
+      | "partial_failure"
+      | "shutdown"
+      | "unknown";
     /** CrawlOutcomePublic */
     CrawlOutcomePublic: {
       code: components["schemas"]["CrawlOutcomeCode"];
@@ -10120,6 +10149,88 @@ export interface components {
      * @enum {string}
      */
     CrawlerFailureState: "AUTO_DISABLED" | "BACKED_OFF";
+    /** CrawlerFailureClusterItem */
+    CrawlerFailureClusterItem: {
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Website Url */
+      website_url: string;
+      /** Website Name */
+      website_name: string | null;
+      /** Space Id */
+      space_id: string | null;
+      /** Space Name */
+      space_name: string | null;
+      /** Owner User Id */
+      owner_user_id: string | null;
+      /** Owner Email */
+      owner_email: string | null;
+      outcome_code: components["schemas"]["CrawlOutcomeCode"];
+      outcome_category: components["schemas"]["CrawlOutcomeCategory"];
+      /** Occurrences */
+      occurrences: number;
+      /** Watchdog Occurrences */
+      watchdog_occurrences: number;
+      /**
+       * First Failed At
+       * Format: date-time
+       */
+      first_failed_at: string;
+      /**
+       * Latest Failed At
+       * Format: date-time
+       */
+      latest_failed_at: string;
+      /**
+       * Sample Crawl Run Id
+       * Format: uuid
+       */
+      sample_crawl_run_id: string;
+      /** Pages Crawled */
+      pages_crawled: number;
+      /** Files Downloaded */
+      files_downloaded: number;
+      /** Pages Failed */
+      pages_failed: number;
+      /** Files Failed */
+      files_failed: number;
+    };
+    /**
+     * CrawlerFailureClustersResponse
+     * @description Grouped crawler failures for health triage.
+     */
+    CrawlerFailureClustersResponse: {
+      /** Items */
+      items: components["schemas"]["CrawlerFailureClusterItem"][];
+      /** Total */
+      total: number;
+      /** Limit */
+      limit: number;
+      /** Offset */
+      offset: number;
+      /** Days */
+      days: number;
+      /**
+       * Since
+       * Format: date-time
+       */
+      since: string;
+      /**
+       * Until
+       * Format: date-time
+       */
+      until: string;
+      source: components["schemas"]["CrawlerFailureClusterSource"];
+      outcome_category: components["schemas"]["CrawlOutcomeCategory"] | null;
+    };
+    /**
+     * CrawlerFailureClusterSource
+     * @enum {string}
+     */
+    CrawlerFailureClusterSource: "all" | "watchdog_only";
     /**
      * CrawlerHealthResponse
      * @description Crawler health status with operator-friendly signals.
@@ -10489,6 +10600,14 @@ export interface components {
       website_url: string;
       /** Website Name */
       website_name: string | null;
+      /** Space Id */
+      space_id: string | null;
+      /** Space Name */
+      space_name: string | null;
+      /** Owner User Id */
+      owner_user_id: string | null;
+      /** Owner Email */
+      owner_email: string | null;
       state: components["schemas"]["CrawlerFailureState"];
       update_interval: components["schemas"]["UpdateInterval"];
       /** Consecutive Failures */
@@ -10502,6 +10621,9 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+      latest_failure_outcome_code: components["schemas"]["CrawlOutcomeCode"] | null;
+      /** Latest Failure At */
+      latest_failure_at: string | null;
     };
     /** CrawlerTenantFailureInventoryResponse */
     CrawlerTenantFailureInventoryResponse: {
@@ -26998,6 +27120,41 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CrawlerRecentFailuresResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_current_tenant_crawler_failure_clusters_api_v1_admin_crawler_failure_clusters_get: {
+    parameters: {
+      query?: {
+        days?: number;
+        limit?: number;
+        offset?: number;
+        source?: components["schemas"]["CrawlerFailureClusterSource"];
+        outcome_category?: components["schemas"]["CrawlOutcomeCategory"] | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerFailureClustersResponse"];
         };
       };
       /** @description Validation Error */

@@ -1,8 +1,7 @@
 import { CRAWLER_ACTIVE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerActiveInventory";
+import { CRAWLER_FAILURE_CLUSTERS_DEFAULTS } from "$lib/features/admin/crawlerFailureClusters";
 import { CRAWLER_FAILURE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerFailureInventory";
-import { CRAWLER_RECENT_FAILURES_DEFAULTS } from "$lib/features/admin/crawlerRecentFailures";
 import { CRAWLER_TENANT_WEBSITE_INVENTORY_DEFAULTS } from "$lib/features/admin/crawlerTenantWebsiteInventory";
-import { CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS } from "$lib/features/admin/crawlerWatchdogInterventions";
 import { CRAWLER_WEBSITE_PROCESSING_DEFAULTS } from "$lib/features/admin/crawlerWebsiteProcessing";
 
 export const load = async (event) => {
@@ -10,8 +9,7 @@ export const load = async (event) => {
   event.depends("admin:crawler-settings");
   event.depends("admin:crawler-active-inventory");
   event.depends("admin:crawler-failure-inventory");
-  event.depends("admin:crawler-recent-failures");
-  event.depends("admin:crawler-watchdog-interventions");
+  event.depends("admin:crawler-failure-clusters");
   event.depends("admin:crawler-scheduled");
   event.depends("admin:crawler-website-processing");
   event.depends("admin:crawler-tenant-website-inventory");
@@ -20,8 +18,7 @@ export const load = async (event) => {
     crawlerSettings,
     activeInventoryResult,
     failureInventoryResult,
-    recentFailuresResult,
-    watchdogInterventionsResult,
+    failureClustersResult,
     scheduledAggregateResult,
     websiteProcessingResult,
     tenantWebsiteInventoryResult
@@ -36,14 +33,10 @@ export const load = async (event) => {
       .then((crawlerFailureInventory) => ({ ok: true as const, crawlerFailureInventory }))
       .catch(() => ({ ok: false as const })),
     intric.crawlerAdmin
-      .recentFailures(CRAWLER_RECENT_FAILURES_DEFAULTS)
-      .then((crawlerRecentFailures) => ({ ok: true as const, crawlerRecentFailures }))
-      .catch(() => ({ ok: false as const })),
-    intric.crawlerAdmin
-      .watchdogInterventions(CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS)
-      .then((crawlerWatchdogInterventions) => ({
+      .failureClusters(CRAWLER_FAILURE_CLUSTERS_DEFAULTS)
+      .then((crawlerFailureClusters) => ({
         ok: true as const,
-        crawlerWatchdogInterventions
+        crawlerFailureClusters
       }))
       .catch(() => ({ ok: false as const })),
     intric.crawlerAdmin
@@ -73,16 +66,11 @@ export const load = async (event) => {
       ? failureInventoryResult.crawlerFailureInventory
       : null,
     crawlerFailureInventoryLoadFailed: !failureInventoryResult.ok,
-    crawlerRecentFailuresWindowDays: CRAWLER_RECENT_FAILURES_DEFAULTS.days,
-    crawlerRecentFailures: recentFailuresResult.ok
-      ? recentFailuresResult.crawlerRecentFailures
+    crawlerFailureClustersWindowDays: CRAWLER_FAILURE_CLUSTERS_DEFAULTS.days,
+    crawlerFailureClusters: failureClustersResult.ok
+      ? failureClustersResult.crawlerFailureClusters
       : null,
-    crawlerRecentFailuresLoadFailed: !recentFailuresResult.ok,
-    crawlerWatchdogInterventionsWindowDays: CRAWLER_WATCHDOG_INTERVENTIONS_DEFAULTS.days,
-    crawlerWatchdogInterventions: watchdogInterventionsResult.ok
-      ? watchdogInterventionsResult.crawlerWatchdogInterventions
-      : null,
-    crawlerWatchdogInterventionsLoadFailed: !watchdogInterventionsResult.ok,
+    crawlerFailureClustersLoadFailed: !failureClustersResult.ok,
     crawlerScheduledAggregate: scheduledAggregateResult.ok
       ? scheduledAggregateResult.crawlerScheduledAggregate
       : null,

@@ -41,6 +41,70 @@ class CrawlOutcomeCode(str, Enum):
     UNKNOWN_CRAWL_ERROR = "UNKNOWN_CRAWL_ERROR"
 
 
+class CrawlOutcomeCategory(str, Enum):
+    TIMEOUT = "timeout"
+    EMPTY_OUTPUT = "empty_output"
+    ENQUEUE = "enqueue"
+    EMBEDDING = "embedding"
+    PARTIAL_FAILURE = "partial_failure"
+    SHUTDOWN = "shutdown"
+    UNKNOWN = "unknown"
+
+
+CRAWL_OUTCOME_CATEGORY_CODES: dict[
+    CrawlOutcomeCategory, frozenset[CrawlOutcomeCode]
+] = {
+    CrawlOutcomeCategory.TIMEOUT: frozenset(
+        {
+            CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES,
+            CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED,
+            CrawlOutcomeCode.CRAWL_RUNTIME_TIMEOUT,
+            CrawlOutcomeCode.CRAWL_PARTIAL_TIMEOUT,
+        }
+    ),
+    CrawlOutcomeCategory.EMPTY_OUTPUT: frozenset(
+        {
+            CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED,
+            CrawlOutcomeCode.CRAWL_SITEMAP_NO_PAGES,
+        }
+    ),
+    CrawlOutcomeCategory.ENQUEUE: frozenset(
+        {
+            CrawlOutcomeCode.CRAWL_QUEUE_ENQUEUE_FAILED,
+            CrawlOutcomeCode.CRAWL_DIRECT_ENQUEUE_FAILED,
+        }
+    ),
+    CrawlOutcomeCategory.EMBEDDING: frozenset(
+        {
+            CrawlOutcomeCode.EMBEDDING_CONFIG_MISSING,
+        }
+    ),
+    CrawlOutcomeCategory.PARTIAL_FAILURE: frozenset(
+        {
+            CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES,
+        }
+    ),
+    CrawlOutcomeCategory.SHUTDOWN: frozenset(
+        {
+            CrawlOutcomeCode.CRAWL_SHUTDOWN_ERROR,
+            CrawlOutcomeCode.CRAWL_HEARTBEAT_FAILED,
+        }
+    ),
+    CrawlOutcomeCategory.UNKNOWN: frozenset(
+        {
+            CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR,
+        }
+    ),
+}
+
+
+def crawl_outcome_category(outcome_code: CrawlOutcomeCode) -> CrawlOutcomeCategory:
+    for category, codes in CRAWL_OUTCOME_CATEGORY_CODES.items():
+        if outcome_code in codes:
+            return category
+    return CrawlOutcomeCategory.UNKNOWN
+
+
 FailureSummaryInput = Mapping[FailureReason, int] | Mapping[str, int]
 
 

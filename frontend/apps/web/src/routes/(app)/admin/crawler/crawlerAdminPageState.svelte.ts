@@ -193,12 +193,18 @@ export function createCrawlerDialogState(intric: Intric, detailRef: DetailRef) {
       website_id: item.website_id,
       website_url: item.url,
       website_name: item.name,
+      space_id: item.space_id,
+      space_name: item.space_name,
+      owner_user_id: item.owner_user_id,
+      owner_email: item.owner_email,
       state: item.failure_state,
       update_interval: item.update_interval as CrawlerUpdateInterval,
       consecutive_failures: item.consecutive_failures,
       next_retry_at: item.next_retry_at,
       last_crawled_at: item.last_crawled_at,
-      updated_at: item.last_crawled_at ?? item.created_at
+      updated_at: item.last_crawled_at ?? item.created_at,
+      latest_failure_outcome_code: null,
+      latest_failure_at: null
     });
   }
 

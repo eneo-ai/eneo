@@ -2,11 +2,14 @@
 /** @typedef {import('../types/resources').CrawlerActiveInventoryResponse} CrawlerActiveInventoryResponse */
 /** @typedef {import('../types/resources').CrawlerTenantFailureInventoryResponse} CrawlerTenantFailureInventoryResponse */
 /** @typedef {import('../types/resources').CrawlerRecentFailuresResponse} CrawlerRecentFailuresResponse */
+/** @typedef {import('../types/resources').CrawlerFailureClustersResponse} CrawlerFailureClustersResponse */
 /** @typedef {import('../types/resources').CrawlerScheduledAggregateResponse} CrawlerScheduledAggregateResponse */
 /** @typedef {import('../types/resources').CrawlerTenantWebsiteProcessingAggregateResponse} CrawlerTenantWebsiteProcessingAggregateResponse */
 /** @typedef {import('../types/schema').components["schemas"]["CrawlerTenantWebsiteInventoryResponse"]} CrawlerTenantWebsiteInventoryResponse */
 /** @typedef {import('../types/schema').components["schemas"]["CrawlerTenantWebsiteInventorySort"]} CrawlerTenantWebsiteInventorySort */
 /** @typedef {import('../types/schema').components["schemas"]["CrawlerFailureState"]} CrawlerFailureState */
+/** @typedef {import('../types/schema').components["schemas"]["CrawlerFailureClusterSource"]} CrawlerFailureClusterSource */
+/** @typedef {import('../types/schema').components["schemas"]["CrawlOutcomeCategory"]} CrawlOutcomeCategory */
 /** @typedef {import('../types/schema').components["schemas"]["UpdateInterval"]} CrawlerUpdateInterval */
 /** @typedef {import('../types/schema').components["schemas"]["CrawlerBulkIntervalResponse"]} CrawlerBulkIntervalResponse */
 
@@ -67,6 +70,20 @@ export function initCrawlerAdmin(client) {
      */
     watchdogInterventions: async (params) => {
       const res = await client.fetch("/api/v1/admin/crawler/watchdog-interventions", {
+        method: "get",
+        params: { query: params }
+      });
+      return res;
+    },
+
+    /**
+     * Get grouped crawler failure patterns for the current tenant.
+     * @param {{days?: number, limit?: number, offset?: number, source?: CrawlerFailureClusterSource, outcome_category?: CrawlOutcomeCategory}} [params]
+     * @returns {Promise<CrawlerFailureClustersResponse>}
+     * @throws {IntricError}
+     */
+    failureClusters: async (params) => {
+      const res = await client.fetch("/api/v1/admin/crawler/failure-clusters", {
         method: "get",
         params: { query: params }
       });

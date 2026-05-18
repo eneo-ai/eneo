@@ -24,6 +24,9 @@ type _CrawlerTenantFailureInventoryResponseExists = AssertTrue<
 type _CrawlerRecentFailuresResponseExists = AssertTrue<
   components["schemas"]["CrawlerRecentFailuresResponse"] extends object ? true : false
 >;
+type _CrawlerFailureClustersResponseExists = AssertTrue<
+  components["schemas"]["CrawlerFailureClustersResponse"] extends object ? true : false
+>;
 type _CrawlerWatchdogStatusResponseExists = AssertTrue<
   components["schemas"]["CrawlerWatchdogStatusResponse"] extends object ? true : false
 >;
@@ -89,6 +92,18 @@ type _CrawlerTenantFailureInventoryStateField = AssertHasKey<
   components["schemas"]["CrawlerTenantFailureInventoryItem"],
   "state"
 >;
+type _CrawlerTenantFailureInventorySpaceNameField = AssertHasKey<
+  components["schemas"]["CrawlerTenantFailureInventoryItem"],
+  "space_name"
+>;
+type _CrawlerTenantFailureInventoryOwnerEmailField = AssertHasKey<
+  components["schemas"]["CrawlerTenantFailureInventoryItem"],
+  "owner_email"
+>;
+type _CrawlerTenantFailureInventoryLatestFailureField = AssertHasKey<
+  components["schemas"]["CrawlerTenantFailureInventoryItem"],
+  "latest_failure_outcome_code"
+>;
 type _CrawlerRecentFailuresItemsField = AssertHasKey<
   components["schemas"]["CrawlerRecentFailuresResponse"],
   "items"
@@ -104,6 +119,26 @@ type _CrawlerRecentFailuresEmbeddingTokensField = AssertHasKey<
 type _CrawlerRecentFailuresEmbeddingModelField = AssertHasKey<
   components["schemas"]["CrawlerRecentFailureItem"],
   "embedding_model_name_snapshot"
+>;
+type _CrawlerFailureClustersItemsField = AssertHasKey<
+  components["schemas"]["CrawlerFailureClustersResponse"],
+  "items"
+>;
+type _CrawlerFailureClustersSourceField = AssertHasKey<
+  components["schemas"]["CrawlerFailureClustersResponse"],
+  "source"
+>;
+type _CrawlerFailureClusterCategoryField = AssertHasKey<
+  components["schemas"]["CrawlerFailureClusterItem"],
+  "outcome_category"
+>;
+type _CrawlerFailureClusterOwnerEmailField = AssertHasKey<
+  components["schemas"]["CrawlerFailureClusterItem"],
+  "owner_email"
+>;
+type _CrawlerFailureClusterOccurrencesField = AssertHasKey<
+  components["schemas"]["CrawlerFailureClusterItem"],
+  "occurrences"
 >;
 type _CrawlerWatchdogMetricsField = AssertHasKey<
   components["schemas"]["CrawlerWatchdogStatusResponse"],
@@ -289,6 +324,11 @@ type _AdminCrawlerWatchdogInterventionsPathExists = AssertTrue<
     ? true
     : false
 >;
+type _AdminCrawlerFailureClustersPathExists = AssertTrue<
+  paths["/api/v1/admin/crawler/failure-clusters"]["get"] extends operations["get_current_tenant_crawler_failure_clusters_api_v1_admin_crawler_failure_clusters_get"]
+    ? true
+    : false
+>;
 type _AdminCrawlerActivePathExists = AssertTrue<
   paths["/api/v1/admin/crawler/active"]["get"] extends operations["get_current_tenant_crawler_active_inventory_api_v1_admin_crawler_active_get"]
     ? true
@@ -327,6 +367,19 @@ type _AdminCrawlerWatchdogInterventionsQueryHasNoTenantId = AssertTrue<
   >
     ? false
     : true
+>;
+type _AdminCrawlerFailureClustersQueryHasNoTenantId = AssertTrue<
+  "tenant_id" extends keyof NonNullable<
+    operations["get_current_tenant_crawler_failure_clusters_api_v1_admin_crawler_failure_clusters_get"]["parameters"]["query"]
+  >
+    ? false
+    : true
+>;
+type _AdminCrawlerFailureClustersQueryHasSource = AssertHasKey<
+  NonNullable<
+    operations["get_current_tenant_crawler_failure_clusters_api_v1_admin_crawler_failure_clusters_get"]["parameters"]["query"]
+  >,
+  "source"
 >;
 type _AdminCrawlerActiveQueryHasNoTenantId = AssertTrue<
   "tenant_id" extends keyof NonNullable<
