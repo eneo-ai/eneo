@@ -16,15 +16,19 @@ from intric.websites.crawl_dependencies.crawl_models import (
 )
 from intric.websites.domain import crawl_outcome
 from intric.websites.domain.crawl_outcome import (
+    CRAWL_OUTCOME_CATEGORY_CODES,
+    CrawlOutcomeCategory,
     CrawlOutcomeCode,
     FailureReason,
     classify_crawl_outcome,
+    crawl_outcome_category,
     parse_crawl_outcome_code_lenient,
     parse_crawl_outcome_code_strict,
     parse_failure_summary_lenient,
     parse_failure_summary_strict,
     serialize_failure_summary_for_storage,
 )
+from intric.websites.domain.crawler_recent_failures import RECENT_FAILURE_OUTCOME_CODES
 from intric.websites.presentation.website_models import (
     CrawlRunPublic as WebsiteCrawlRunPublic,
 )
@@ -33,6 +37,30 @@ from intric.websites.presentation.website_models import (
 def test_write_side_outcome_parser_rejects_unknown_values():
     with pytest.raises(ValueError, match="UNKNOWN_NEW_OUTCOME"):
         parse_crawl_outcome_code_strict("UNKNOWN_NEW_OUTCOME")
+
+
+def test_outcome_category_mapping_has_no_duplicate_codes():
+    mapped_categories: dict[CrawlOutcomeCode, CrawlOutcomeCategory] = {}
+
+    for category, outcome_codes in CRAWL_OUTCOME_CATEGORY_CODES.items():
+        for outcome_code in outcome_codes:
+            assert outcome_code not in mapped_categories, (
+                f"{outcome_code.value} is mapped to both "
+                f"{mapped_categories[outcome_code].value} and {category.value}"
+            )
+            mapped_categories[outcome_code] = category
+
+
+def test_recent_failure_outcomes_have_reviewed_categories():
+    for outcome_code in RECENT_FAILURE_OUTCOME_CODES:
+        category = crawl_outcome_category(outcome_code)
+
+        assert (
+            category is not CrawlOutcomeCategory.UNKNOWN
+            or outcome_code is CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
+        ), (
+            f"{outcome_code.value} must be categorized before it is shown in admin health"
+        )
 
 
 def test_historical_outcome_parser_keeps_safe_unknown_fallback():

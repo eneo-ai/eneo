@@ -149,11 +149,8 @@ test("crawler state query param omits the default and preserves server-side filt
 
 test("tenantWebsiteInventory SDK method posts the right URL + method + query", async () => {
   // Stand up a stub client with a fetch spy, hand it to the SDK
-  // factory, and call the new method. Asserts the wire contract C3/C4
-  // depends on: the right path, GET method, and the params object
-  // threaded into `params: { query: ... }`. A regression here would
-  // silently misroute filters and leave the table empty without an
-  // obvious failure mode in the UI.
+  // factory, and call the new method. This protects the only handwritten
+  // layer between the generated OpenAPI shape and the crawler admin UI.
   const fetch = vi.fn().mockResolvedValue({ items: [], total: 0, limit: 25, offset: 0 });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const crawlerAdmin = initCrawlerAdmin({ fetch } as any);
