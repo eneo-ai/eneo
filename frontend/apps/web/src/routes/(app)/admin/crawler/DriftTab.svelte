@@ -38,12 +38,10 @@
     crawlerResultBadgeClass,
     formatCrawlerDateTime
   } from "$lib/features/admin/crawlerPresentation";
-  import type { CrawlerTenantWebsiteInventoryItem } from "$lib/features/admin/crawlerTenantWebsiteInventory";
   import EmptyState from "./EmptyState.svelte";
 
   type ResolvedRowLabel = {
     label: string;
-    inventoryItem: CrawlerTenantWebsiteInventoryItem | null;
   };
 
   type Props = {
@@ -58,7 +56,7 @@
     savingIntervalWebsiteId: string | null;
     abortingJobId: string | null;
     resolveRowLabel: (row: { website_id: string; website_name: string | null }) => ResolvedRowLabel;
-    onOpenWebsiteDetail: (item: CrawlerTenantWebsiteInventoryItem) => void;
+    onOpenWebsiteDetailById: (websiteId: string) => void;
     onOpenIntervalDialog: (item: CrawlerActiveInventoryItem) => void;
     onOpenAbortDialog: (item: CrawlerActiveInventoryItem) => void;
     onRefresh: (options: { filter?: CrawlerActiveInventoryLifecycleFilter; page?: number }) => void;
@@ -77,7 +75,7 @@
     savingIntervalWebsiteId,
     abortingJobId,
     resolveRowLabel,
-    onOpenWebsiteDetail,
+    onOpenWebsiteDetailById,
     onOpenIntervalDialog,
     onOpenAbortDialog,
     onRefresh,
@@ -192,15 +190,14 @@
                     website_name: activeItem.website_name
                   })
                 : {
-                    label: getCrawlerActiveInventoryWebsiteLabel(activeItem),
-                    inventoryItem: null
+                    label: getCrawlerActiveInventoryWebsiteLabel(activeItem)
                   }}
               <Table.Row
-                class={activeResolved.inventoryItem
+                class={activeItem.website_id
                   ? "hover:bg-muted/40 focus-within:bg-muted/40 cursor-pointer"
                   : ""}
                 onclick={() =>
-                  activeResolved.inventoryItem && onOpenWebsiteDetail(activeResolved.inventoryItem)}
+                  activeItem.website_id && onOpenWebsiteDetailById(activeItem.website_id)}
               >
                 <Table.Cell class="max-w-64">
                   <span class="block truncate font-medium" title={activeResolved.label}>

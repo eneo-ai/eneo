@@ -36,7 +36,6 @@
   import { formatCrawlerDateTime } from "$lib/features/admin/crawlerPresentation";
   import { formatCrawlerCount } from "$lib/features/admin/crawlerNumberFormat";
   import { formatCrawlerScheduledIndexedSize } from "$lib/features/admin/crawlerScheduledAggregate";
-  import type { CrawlerTenantWebsiteInventoryItem } from "$lib/features/admin/crawlerTenantWebsiteInventory";
   import {
     CRAWLER_LOW_RETENTION_THRESHOLD,
     CRAWLER_SOURCE_SKIP_DRIFT_MIN_INDEXED,
@@ -63,27 +62,20 @@
   import EmptyState from "./EmptyState.svelte";
   import type { CrawlerActivityState } from "./crawlerActivityState.svelte";
 
-  type ResolvedRowLabel = {
-    label: string;
-    inventoryItem: CrawlerTenantWebsiteInventoryItem | null;
-  };
-
   type Props = {
     activity: CrawlerActivityState;
-    resolveRowLabel: (row: { website_id: string; website_name: string | null }) => ResolvedRowLabel;
-    onOpenWebsiteDetail: (item: CrawlerTenantWebsiteInventoryItem) => void;
-    onOpenIntervalDialog: (item: CrawlerTenantWebsiteInventoryItem) => void;
-    onOpenRetryDialog: (item: CrawlerTenantWebsiteInventoryItem) => void;
-    onOpenDeleteDialog: (item: CrawlerTenantWebsiteInventoryItem) => void;
+    onOpenWebsiteDetailById: (websiteId: string) => void;
+    onOpenIntervalDialogById: (websiteId: string) => void;
+    onOpenRetryDialogById: (websiteId: string) => void;
+    onOpenDeleteDialogById: (websiteId: string) => void;
   };
 
   const {
     activity,
-    resolveRowLabel,
-    onOpenWebsiteDetail,
-    onOpenIntervalDialog,
-    onOpenRetryDialog,
-    onOpenDeleteDialog
+    onOpenWebsiteDetailById,
+    onOpenIntervalDialogById,
+    onOpenRetryDialogById,
+    onOpenDeleteDialogById
   }: Props = $props();
 
   const lowRetentionThreshold = $derived(
@@ -195,10 +187,6 @@
       fetched: getCrawlerWebsiteProcessingFetchedLabel(item),
       reuse: getCrawlerWebsiteProcessingReuseLabel(item)
     });
-  }
-
-  function inventoryOrNull(resolved: ResolvedRowLabel): CrawlerTenantWebsiteInventoryItem | null {
-    return resolved.inventoryItem;
   }
 </script>
 
@@ -555,18 +543,13 @@
             </Table.Header>
             <Table.Body>
               {#each items as processingItem (processingItem.website_id)}
-                {@const processingResolved = resolveRowLabel(processingItem)}
-                {@const inventoryItem = inventoryOrNull(processingResolved)}
-                {@const rowClickable = inventoryItem !== null}
                 {@const health = getCrawlerWebsiteProcessingHealthSignal(processingItem, {
                   lowRetentionThreshold,
                   sourceSkipDriftMinIndexed
                 })}
                 <Table.Row
-                  class={rowClickable
-                    ? "hover:bg-muted/40 focus-within:bg-muted/40 cursor-pointer transition-colors"
-                    : ""}
-                  onclick={() => inventoryItem && onOpenWebsiteDetail(inventoryItem)}
+                  class="hover:bg-muted/40 focus-within:bg-muted/40 cursor-pointer transition-colors"
+                  onclick={() => onOpenWebsiteDetailById(processingItem.website_id)}
                 >
                   <Table.Cell class="min-w-0 overflow-hidden py-3 pr-4 align-top">
                     <div class="flex min-w-0 flex-col gap-1">
@@ -652,23 +635,20 @@
                       </DropdownMenu.Trigger>
                       <DropdownMenu.Content align="end" class="min-w-56">
                         <DropdownMenu.Item
-                          disabled={!inventoryItem}
-                          onclick={() => inventoryItem && onOpenWebsiteDetail(inventoryItem)}
+                          onclick={() => onOpenWebsiteDetailById(processingItem.website_id)}
                         >
                           <Eye class="size-4" />
                           {m.crawler_inventory_row_action_view_detail()}
                         </DropdownMenu.Item>
                         <DropdownMenu.Separator />
                         <DropdownMenu.Item
-                          disabled={!inventoryItem}
-                          onclick={() => inventoryItem && onOpenRetryDialog(inventoryItem)}
+                          onclick={() => onOpenRetryDialogById(processingItem.website_id)}
                         >
                           <Play class="size-4" />
                           {m.crawler_website_detail_action_retry()}
                         </DropdownMenu.Item>
                         <DropdownMenu.Item
-                          disabled={!inventoryItem}
-                          onclick={() => inventoryItem && onOpenIntervalDialog(inventoryItem)}
+                          onclick={() => onOpenIntervalDialogById(processingItem.website_id)}
                         >
                           <Clock class="size-4" />
                           {m.crawler_website_detail_action_interval()}
@@ -694,8 +674,7 @@
                         <DropdownMenu.Separator />
                         <DropdownMenu.Item
                           variant="destructive"
-                          disabled={!inventoryItem}
-                          onclick={() => inventoryItem && onOpenDeleteDialog(inventoryItem)}
+                          onclick={() => onOpenDeleteDialogById(processingItem.website_id)}
                         >
                           <Trash2 class="size-4" />
                           {m.crawler_website_detail_action_delete()}
@@ -714,8 +693,6 @@
           aria-label={m.crawler_website_processing_table_caption()}
         >
           {#each items as processingItem (processingItem.website_id)}
-            {@const processingResolved = resolveRowLabel(processingItem)}
-            {@const inventoryItem = inventoryOrNull(processingResolved)}
             {@const health = getCrawlerWebsiteProcessingHealthSignal(processingItem, {
               lowRetentionThreshold,
               sourceSkipDriftMinIndexed
@@ -726,12 +703,9 @@
                   type="button"
                   class={[
                     "min-w-0 flex-1 text-left",
-                    inventoryItem
-                      ? "hover:text-accent-default focus-visible:ring-ring/50 rounded focus-visible:ring-2 focus-visible:outline-none"
-                      : "cursor-default"
+                    "hover:text-accent-default focus-visible:ring-ring/50 rounded focus-visible:ring-2 focus-visible:outline-none"
                   ]}
-                  disabled={!inventoryItem}
-                  onclick={() => inventoryItem && onOpenWebsiteDetail(inventoryItem)}
+                  onclick={() => onOpenWebsiteDetailById(processingItem.website_id)}
                 >
                   <span
                     class="block truncate text-sm font-medium"

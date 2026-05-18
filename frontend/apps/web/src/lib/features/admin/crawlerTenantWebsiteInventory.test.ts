@@ -10,6 +10,7 @@ import { overwriteGetLocale } from "$lib/paraglide/runtime";
 import type { CrawlerTenantWebsiteInventoryItem } from "./crawlerTenantWebsiteInventory";
 import {
   CRAWLER_TENANT_WEBSITE_INVENTORY_PAGE_SIZES,
+  getCrawlerTenantWebsiteInventoryCrawlerStateParam,
   getCrawlerTenantWebsiteInventoryDisplayName,
   getCrawlerTenantWebsiteInventoryOwnerLabel,
   getCrawlerTenantWebsiteInventorySpaceLabel,
@@ -139,6 +140,13 @@ test("page-size guard rejects values outside the published list", () => {
   }
 });
 
+test("crawler state query param omits the default and preserves server-side filters", () => {
+  expect(getCrawlerTenantWebsiteInventoryCrawlerStateParam("all")).toBeUndefined();
+  expect(getCrawlerTenantWebsiteInventoryCrawlerStateParam("healthy")).toBe("healthy");
+  expect(getCrawlerTenantWebsiteInventoryCrawlerStateParam("backed_off")).toBe("backed_off");
+  expect(getCrawlerTenantWebsiteInventoryCrawlerStateParam("auto_disabled")).toBe("auto_disabled");
+});
+
 test("tenantWebsiteInventory SDK method posts the right URL + method + query", async () => {
   // Stand up a stub client with a fetch spy, hand it to the SDK
   // factory, and call the new method. Asserts the wire contract C3/C4
@@ -154,6 +162,8 @@ test("tenantWebsiteInventory SDK method posts the right URL + method + query", a
     offset: 25,
     search: "example.com",
     update_interval: "weekly",
+    crawler_state: "healthy",
+    website_id: "12345678-1234-4234-8234-123456789abc",
     sort: "size_desc"
   });
   expect(fetch).toHaveBeenCalledTimes(1);
@@ -165,6 +175,8 @@ test("tenantWebsiteInventory SDK method posts the right URL + method + query", a
         offset: 25,
         search: "example.com",
         update_interval: "weekly",
+        crawler_state: "healthy",
+        website_id: "12345678-1234-4234-8234-123456789abc",
         sort: "size_desc"
       }
     }
@@ -184,14 +196,6 @@ test("tenantWebsiteInventory SDK method accepts no params and forwards undefined
     params: { query: undefined }
   });
 });
-
-// ----- V2-E: detail dialog visibility quadrants --------------------
-// The Dialog's action footer shows different buttons depending on the
-// candidate's failure_state × whether an active job exists. Codex's
-// C4 review flagged the 6 combinations as untested. Below covers all
-// of them via the pure-function helper the Dialog reads — no DOM
-// mount required so vitest stays in the existing "include
-// src/**/*.{test,spec}.{js,ts}" config.
 
 test("action visibility: null candidate hides every button", () => {
   expect(getWebsiteDetailDialogActionVisibility({ candidate: null, hasActiveJob: false })).toEqual({

@@ -7,6 +7,7 @@
 /** @typedef {import('../types/resources').CrawlerTenantWebsiteProcessingAggregateResponse} CrawlerTenantWebsiteProcessingAggregateResponse */
 /** @typedef {import('../types/schema').components["schemas"]["CrawlerTenantWebsiteInventoryResponse"]} CrawlerTenantWebsiteInventoryResponse */
 /** @typedef {import('../types/schema').components["schemas"]["CrawlerTenantWebsiteInventorySort"]} CrawlerTenantWebsiteInventorySort */
+/** @typedef {import('../types/schema').components["schemas"]["CrawlerTenantWebsiteInventoryStateFilter"]} CrawlerTenantWebsiteInventoryStateFilter */
 /** @typedef {import('../types/schema').components["schemas"]["CrawlerFailureState"]} CrawlerFailureState */
 /** @typedef {import('../types/schema').components["schemas"]["CrawlerFailureClusterSource"]} CrawlerFailureClusterSource */
 /** @typedef {import('../types/schema').components["schemas"]["CrawlOutcomeCategory"]} CrawlOutcomeCategory */
@@ -204,7 +205,9 @@ export function initCrawlerAdmin(client) {
      *   update_interval?: CrawlerUpdateInterval,
      *   space_id?: string,
      *   owner_user_id?: string,
+     *   crawler_state?: CrawlerTenantWebsiteInventoryStateFilter,
      *   failure_state?: CrawlerFailureState,
+     *   website_id?: string,
      *   sort?: CrawlerTenantWebsiteInventorySort
      * }} [params]
      * @returns {Promise<CrawlerTenantWebsiteInventoryResponse>}

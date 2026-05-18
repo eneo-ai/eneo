@@ -44,13 +44,7 @@
     createCrawlerRelativeTimeFormatter,
     formatCrawlerRelativeTime
   } from "$lib/features/admin/crawlerRelativeTime";
-  import type { CrawlerTenantWebsiteInventoryItem } from "$lib/features/admin/crawlerTenantWebsiteInventory";
   import EmptyState from "./EmptyState.svelte";
-
-  type ResolvedRowLabel = {
-    label: string;
-    inventoryItem: CrawlerTenantWebsiteInventoryItem | null;
-  };
 
   type PaginatedFeed<TResponse> = {
     visible: TResponse | null;
@@ -72,8 +66,7 @@
     failureInventoryLoadFailed: boolean;
     failureClusters: PaginatedFeed<CrawlerFailureClustersResponse>;
     mutationState: MutationState;
-    resolveRowLabel: (row: { website_id: string; website_name: string | null }) => ResolvedRowLabel;
-    onOpenWebsiteDetail: (item: CrawlerTenantWebsiteInventoryItem) => void;
+    onOpenWebsiteDetailById: (websiteId: string) => void;
     onOpenRetryDialog: (item: CrawlerCircuitBreakerResetCandidate) => void;
     onOpenIntervalDialog: (item: CrawlerCircuitBreakerResetCandidate) => void;
     onOpenCircuitResetDialog: (item: CrawlerCircuitBreakerResetCandidate) => void;
@@ -84,8 +77,7 @@
     failureInventoryLoadFailed,
     failureClusters,
     mutationState,
-    resolveRowLabel,
-    onOpenWebsiteDetail,
+    onOpenWebsiteDetailById,
     onOpenRetryDialog,
     onOpenIntervalDialog,
     onOpenCircuitResetDialog
@@ -145,10 +137,6 @@
             mutationState.resettingCircuitWebsiteId === failureState.website_id}
           {@const latestFailureTime =
             getCrawlerFailureInventoryLatestFailureTimeLabel(failureState)}
-          {@const resolved = resolveRowLabel({
-            website_id: failureState.website_id,
-            website_name: failureState.website_name
-          })}
           <article
             class="grid grid-cols-1 gap-3 px-2 py-4 lg:grid-cols-[minmax(0,1.8fr)_minmax(11rem,.75fr)_minmax(0,1.1fr)_minmax(0,1fr)]"
           >
@@ -199,16 +187,13 @@
             <div
               class="flex flex-wrap items-center justify-start gap-2 lg:col-span-4 lg:justify-end"
             >
-              {#if resolved.inventoryItem}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onclick={() =>
-                    resolved.inventoryItem && onOpenWebsiteDetail(resolved.inventoryItem)}
-                >
-                  {m.crawler_inventory_row_action_view_detail()}
-                </Button>
-              {/if}
+              <Button
+                variant="ghost"
+                size="sm"
+                onclick={() => onOpenWebsiteDetailById(failureState.website_id)}
+              >
+                {m.crawler_inventory_row_action_view_detail()}
+              </Button>
               <Button
                 variant="ghost"
                 size="sm"
@@ -305,10 +290,6 @@
           <span class="text-right">{m.crawler_failure_inventory_column_action()}</span>
         </div>
         {#each failureClusters.visible.items as cluster (`${cluster.website_id}:${cluster.outcome_code}`)}
-          {@const resolved = resolveRowLabel({
-            website_id: cluster.website_id,
-            website_name: cluster.website_name
-          })}
           {@const clusterLatestRelative = formatCrawlerRelativeTime(
             clusterRelativeTimeFormatter,
             cluster.latest_failed_at
@@ -364,17 +345,14 @@
               {/if}
             </div>
             <div class="flex items-center justify-start lg:justify-end">
-              {#if resolved.inventoryItem}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onclick={() =>
-                    resolved.inventoryItem && onOpenWebsiteDetail(resolved.inventoryItem)}
-                >
-                  {m.crawler_inventory_row_action_view_detail()}
-                  <ChevronRight data-icon="inline-end" aria-hidden="true" />
-                </Button>
-              {/if}
+              <Button
+                variant="ghost"
+                size="sm"
+                onclick={() => onOpenWebsiteDetailById(cluster.website_id)}
+              >
+                {m.crawler_inventory_row_action_view_detail()}
+                <ChevronRight data-icon="inline-end" aria-hidden="true" />
+              </Button>
             </div>
           </article>
         {/each}

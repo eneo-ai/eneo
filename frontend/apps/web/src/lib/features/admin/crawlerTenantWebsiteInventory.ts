@@ -16,6 +16,8 @@ export type CrawlerTenantWebsiteInventoryItem =
   components["schemas"]["CrawlerTenantWebsiteInventoryItem"];
 export type CrawlerTenantWebsiteInventorySort =
   components["schemas"]["CrawlerTenantWebsiteInventorySort"];
+export type CrawlerTenantWebsiteInventoryStateFilter =
+  components["schemas"]["CrawlerTenantWebsiteInventoryStateFilter"];
 export type CrawlerFailureState = components["schemas"]["CrawlerFailureState"];
 
 // 25 rows matches the active inventory page size so an admin paging
@@ -42,6 +44,12 @@ export function isCrawlerTenantWebsiteInventoryPageSize(
   value: number
 ): value is CrawlerTenantWebsiteInventoryPageSize {
   return (CRAWLER_TENANT_WEBSITE_INVENTORY_PAGE_SIZES as readonly number[]).includes(value);
+}
+
+export function getCrawlerTenantWebsiteInventoryCrawlerStateParam(
+  stateFilter: CrawlerTenantWebsiteInventoryStateFilter
+): CrawlerTenantWebsiteInventoryStateFilter | undefined {
+  return stateFilter === "all" ? undefined : stateFilter;
 }
 
 export function offsetFromCrawlerTenantWebsiteInventoryPage(

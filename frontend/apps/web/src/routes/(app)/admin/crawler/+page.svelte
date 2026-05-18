@@ -8,7 +8,7 @@
 <script lang="ts">
   import { invalidate } from "$app/navigation";
   import { onMount, untrack } from "svelte";
-  import { SvelteSet } from "svelte/reactivity";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
   import AktivitetTab from "./AktivitetTab.svelte";
@@ -49,13 +49,14 @@
   import type { CrawlerTenantWebsiteProcessingAggregateResponse } from "$lib/features/admin/crawlerWebsiteProcessing";
   import {
     CRAWLER_TENANT_WEBSITE_INVENTORY_DEFAULTS,
+    getCrawlerTenantWebsiteInventoryCrawlerStateParam,
     isCrawlerTenantWebsiteInventoryPageSize,
     offsetFromCrawlerTenantWebsiteInventoryPage,
-    type CrawlerFailureState,
     type CrawlerTenantWebsiteInventoryItem,
     type CrawlerTenantWebsiteInventoryPageSize,
     type CrawlerTenantWebsiteInventoryResponse,
-    type CrawlerTenantWebsiteInventorySort
+    type CrawlerTenantWebsiteInventorySort,
+    type CrawlerTenantWebsiteInventoryStateFilter
   } from "$lib/features/admin/crawlerTenantWebsiteInventory";
   import { m } from "$lib/paraglide/messages";
 
@@ -136,10 +137,14 @@
   );
   let tenantWebsiteInventorySearch = $state<string>("");
   let tenantWebsiteInventoryIntervalFilter = $state<CrawlerUpdateInterval | "">("");
-  let tenantWebsiteInventoryStateFilter = $state<CrawlerFailureState | "all" | "healthy">("all");
+  let tenantWebsiteInventoryStateFilter = $state<CrawlerTenantWebsiteInventoryStateFilter>("all");
   let tenantWebsiteInventoryOverride = $state<CrawlerTenantWebsiteInventoryResponse | null>(null);
   let tenantWebsiteInventoryBusy = $state<boolean>(false);
   let tenantWebsiteInventorySearchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  const tenantWebsiteInventoryItemCache = new SvelteMap<
+    string,
+    CrawlerTenantWebsiteInventoryItem
+  >();
 
   const tenantWebsiteInventorySelection = new SvelteSet<string>();
   const bulkInterval = createBulkIntervalState(intric, {
@@ -171,6 +176,12 @@
     new Map((visibleTenantWebsiteInventory?.items ?? []).map((item) => [item.website_id, item]))
   );
 
+  $effect(() => {
+    for (const item of visibleTenantWebsiteInventory?.items ?? []) {
+      tenantWebsiteInventoryItemCache.set(item.website_id, item);
+    }
+  });
+
   const tenantWebsiteInventoryMatchesSsrQuery = $derived(
     tenantWebsiteInventoryPage === 1 &&
       tenantWebsiteInventoryPageSize === CRAWLER_TENANT_WEBSITE_INVENTORY_DEFAULTS.limit &&
@@ -181,17 +192,19 @@
       !tenantWebsiteInventoryBusy
   );
 
-  function resolveHälsaRowLabel(row: { website_id: string; website_name: string | null }): {
+  function resolveWebsiteInventoryLabel(row: { website_id: string; website_name: string | null }): {
     label: string;
-    inventoryItem: CrawlerTenantWebsiteInventoryItem | null;
   } {
-    const inventoryItem = visibleTenantWebsiteInventoryById.get(row.website_id) ?? null;
+    const inventoryItem =
+      tenantWebsiteInventoryItemCache.get(row.website_id) ??
+      visibleTenantWebsiteInventoryById.get(row.website_id) ??
+      null;
     const label =
       inventoryItem?.url ||
       inventoryItem?.name ||
       row.website_name ||
       `Webbplats ${row.website_id.slice(0, 8)}`;
-    return { label, inventoryItem };
+    return { label };
   }
 
   const tenantWebsiteInventoryVisibleSelectionCount = $derived(
@@ -214,6 +227,10 @@
     const current = data.crawlerTenantWebsiteInventory;
     if (lastSeenSsrInventory !== null && current !== lastSeenSsrInventory) {
       detailCandidate = null;
+      tenantWebsiteInventoryItemCache.clear();
+      for (const item of current?.items ?? []) {
+        tenantWebsiteInventoryItemCache.set(item.website_id, item);
+      }
     }
     lastSeenSsrInventory = current;
   });
@@ -236,7 +253,7 @@
 
   const tenantWebsiteInventoryStateFilterOptions = $derived<
     {
-      value: "all" | "healthy" | CrawlerFailureState;
+      value: CrawlerTenantWebsiteInventoryStateFilter;
       label: string;
       dot: string;
     }[]
@@ -252,12 +269,12 @@
       dot: "bg-positive-default"
     },
     {
-      value: "BACKED_OFF",
+      value: "backed_off",
       label: m.crawler_failure_inventory_state_backed_off(),
       dot: "bg-caution"
     },
     {
-      value: "AUTO_DISABLED",
+      value: "auto_disabled",
       label: m.crawler_failure_inventory_state_paused(),
       dot: "bg-destructive"
     }
@@ -339,7 +356,7 @@
       page?: number;
       pageSize?: CrawlerTenantWebsiteInventoryPageSize;
       interval?: CrawlerUpdateInterval | "";
-      state?: CrawlerFailureState | "all" | "healthy";
+      state?: CrawlerTenantWebsiteInventoryStateFilter;
       sort?: CrawlerTenantWebsiteInventorySort;
       resetPage?: boolean;
     } = {}
@@ -372,24 +389,16 @@
 
     tenantWebsiteInventoryBusy = true;
     try {
-      const failureStateParam: CrawlerFailureState | undefined =
-        nextState === "all" || nextState === "healthy" ? undefined : nextState;
+      const crawlerStateParam = getCrawlerTenantWebsiteInventoryCrawlerStateParam(nextState);
       const response = await intric.crawlerAdmin.tenantWebsiteInventory({
         limit: nextPageSize,
         offset: offsetFromCrawlerTenantWebsiteInventoryPage(nextPage, nextPageSize),
         sort: nextSort,
         ...(nextSearch.trim() ? { search: nextSearch.trim() } : {}),
         ...(nextInterval ? { update_interval: nextInterval } : {}),
-        ...(failureStateParam ? { failure_state: failureStateParam } : {})
+        ...(crawlerStateParam ? { crawler_state: crawlerStateParam } : {})
       });
-      const filteredItems =
-        nextState === "healthy"
-          ? response.items.filter((item) => item.failure_state === null)
-          : response.items;
-      tenantWebsiteInventoryOverride = {
-        ...response,
-        items: filteredItems
-      };
+      tenantWebsiteInventoryOverride = response;
     } catch (error) {
       toastError(error, m.crawler_tenant_website_inventory_load_error());
     } finally {
@@ -448,6 +457,58 @@
 
   function openWebsiteDetail(item: CrawlerTenantWebsiteInventoryItem) {
     detailCandidate = item;
+  }
+
+  async function resolveTenantWebsiteInventoryItem(
+    websiteId: string
+  ): Promise<CrawlerTenantWebsiteInventoryItem | null> {
+    const cached = tenantWebsiteInventoryItemCache.get(websiteId);
+    if (cached) return cached;
+
+    const response = await intric.crawlerAdmin.tenantWebsiteInventory({
+      website_id: websiteId,
+      limit: 1
+    });
+    const item = response.items[0] ?? null;
+    if (item) {
+      tenantWebsiteInventoryItemCache.set(item.website_id, item);
+    }
+    return item;
+  }
+
+  async function withTenantWebsiteInventoryItem(
+    websiteId: string,
+    action: (item: CrawlerTenantWebsiteInventoryItem) => void
+  ) {
+    try {
+      const item = await resolveTenantWebsiteInventoryItem(websiteId);
+      if (!item) {
+        toastError(
+          new Error(`Website ${websiteId} was not found in tenant inventory`),
+          m.crawler_tenant_website_inventory_load_error()
+        );
+        return;
+      }
+      action(item);
+    } catch (error) {
+      toastError(error, m.crawler_tenant_website_inventory_load_error());
+    }
+  }
+
+  function openWebsiteDetailById(websiteId: string) {
+    void withTenantWebsiteInventoryItem(websiteId, openWebsiteDetail);
+  }
+
+  function openInventoryIntervalDialogById(websiteId: string) {
+    void withTenantWebsiteInventoryItem(websiteId, dialogs.interval.openForInventoryItem);
+  }
+
+  function openInventoryRetryDialogById(websiteId: string) {
+    void withTenantWebsiteInventoryItem(websiteId, dialogs.retry.openForInventoryItem);
+  }
+
+  function openInventoryDeleteDialogById(websiteId: string) {
+    void withTenantWebsiteInventoryItem(websiteId, dialogs.delete.openFor);
   }
 
   function closeWebsiteDetail() {
@@ -609,8 +670,8 @@
             bind:search={activeInventorySearch}
             savingIntervalWebsiteId={dialogs.interval.busy}
             abortingJobId={dialogs.abort.busy}
-            resolveRowLabel={resolveHälsaRowLabel}
-            onOpenWebsiteDetail={openWebsiteDetail}
+            resolveRowLabel={resolveWebsiteInventoryLabel}
+            onOpenWebsiteDetailById={openWebsiteDetailById}
             onOpenIntervalDialog={dialogs.interval.openForActiveItem}
             onOpenAbortDialog={dialogs.abort.openFor}
             onRefresh={(options) => void refreshActiveInventory(options)}
@@ -685,8 +746,7 @@
               savingIntervalWebsiteId: dialogs.interval.busy,
               resettingCircuitWebsiteId: dialogs.circuitReset.busy
             }}
-            resolveRowLabel={resolveHälsaRowLabel}
-            onOpenWebsiteDetail={openWebsiteDetail}
+            onOpenWebsiteDetailById={openWebsiteDetailById}
             onOpenRetryDialog={dialogs.retry.openFor}
             onOpenIntervalDialog={dialogs.interval.openForFailureItem}
             onOpenCircuitResetDialog={dialogs.circuitReset.openFor}
@@ -696,11 +756,10 @@
         <Tabs.Content value="activity" class="space-y-0">
           <AktivitetTab
             {activity}
-            resolveRowLabel={resolveHälsaRowLabel}
-            onOpenWebsiteDetail={openWebsiteDetail}
-            onOpenIntervalDialog={dialogs.interval.openForInventoryItem}
-            onOpenRetryDialog={dialogs.retry.openForInventoryItem}
-            onOpenDeleteDialog={dialogs.delete.openFor}
+            onOpenWebsiteDetailById={openWebsiteDetailById}
+            onOpenIntervalDialogById={openInventoryIntervalDialogById}
+            onOpenRetryDialogById={openInventoryRetryDialogById}
+            onOpenDeleteDialogById={openInventoryDeleteDialogById}
           />
         </Tabs.Content>
 

@@ -36,6 +36,13 @@ class CrawlerTenantWebsiteInventorySort(str, Enum):
     URL = "url"
 
 
+class CrawlerTenantWebsiteInventoryStateFilter(str, Enum):
+    ALL = "all"
+    HEALTHY = "healthy"
+    BACKED_OFF = "backed_off"
+    AUTO_DISABLED = "auto_disabled"
+
+
 @dataclass(frozen=True, slots=True)
 class CrawlerTenantWebsiteInventoryItem:
     """One website row in the governance inventory.

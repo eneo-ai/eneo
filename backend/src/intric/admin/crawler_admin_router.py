@@ -54,6 +54,7 @@ from intric.websites.domain.crawler_recent_failures import (
 )
 from intric.websites.domain.crawler_tenant_website_inventory import (
     CrawlerTenantWebsiteInventorySort,
+    CrawlerTenantWebsiteInventoryStateFilter,
 )
 from intric.websites.domain.crawler_website_processing_aggregate import (
     CrawlerWebsiteProcessingSort,
@@ -84,6 +85,25 @@ router = APIRouter(
 AdminContainer = Annotated[Container, Depends(get_container(with_user=True))]
 
 logger = get_logger(__name__)
+
+
+def _resolve_tenant_website_state_filter(
+    *,
+    crawler_state: CrawlerTenantWebsiteInventoryStateFilter,
+    failure_state: CrawlerFailureState | None,
+) -> CrawlerTenantWebsiteInventoryStateFilter:
+    if failure_state is None:
+        return crawler_state
+    if crawler_state is not CrawlerTenantWebsiteInventoryStateFilter.ALL:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Use either crawler_state or the legacy failure_state filter, not both.",
+        )
+    if failure_state is CrawlerFailureState.AUTO_DISABLED:
+        return CrawlerTenantWebsiteInventoryStateFilter.AUTO_DISABLED
+    if failure_state is CrawlerFailureState.BACKED_OFF:
+        return CrawlerTenantWebsiteInventoryStateFilter.BACKED_OFF
+    assert_never(failure_state)
 
 
 @asynccontextmanager
@@ -461,7 +481,11 @@ async def get_current_tenant_crawler_website_inventory(
     update_interval: Annotated[UpdateInterval | None, Query()] = None,
     space_id: Annotated[UUID | None, Query()] = None,
     owner_user_id: Annotated[UUID | None, Query()] = None,
+    crawler_state: Annotated[
+        CrawlerTenantWebsiteInventoryStateFilter, Query()
+    ] = CrawlerTenantWebsiteInventoryStateFilter.ALL,
     failure_state: Annotated[CrawlerFailureState | None, Query()] = None,
+    website_id: Annotated[UUID | None, Query()] = None,
     sort: Annotated[
         CrawlerTenantWebsiteInventorySort, Query()
     ] = CrawlerTenantWebsiteInventorySort.RECENT_CRAWL,
@@ -477,6 +501,10 @@ async def get_current_tenant_crawler_website_inventory(
     No mutation, no audit row required. The router-level telemetry block
     captures the "did the admin look at the inventory" signal.
     """
+    state_filter = _resolve_tenant_website_state_filter(
+        crawler_state=crawler_state,
+        failure_state=failure_state,
+    )
     async with _admin_crawler_query_telemetry(
         "tenant_website_inventory", tenant_id=current_user.tenant_id
     ):
@@ -490,7 +518,8 @@ async def get_current_tenant_crawler_website_inventory(
                 update_interval=update_interval,
                 space_id=space_id,
                 owner_user_id=owner_user_id,
-                failure_state=failure_state,
+                state_filter=state_filter,
+                website_id=website_id,
                 sort=sort,
             )
         return CrawlerTenantWebsiteInventoryResponse.from_domain(inventory)

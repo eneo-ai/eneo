@@ -143,12 +143,10 @@
       : null
   );
 
-  // Authoritative active-job lookup: V2-B server-side filter on the
-  // active inventory. Without this the abort affordance falsely hid
-  // when the queued job lived on an unloaded page of the active
-  // inventory. We re-fetch whenever the candidate's website_id
-  // changes; cancellation guard prevents an out-of-order response
-  // from overwriting a newer candidate's result.
+  // Active jobs can live outside the current Drift page, so the dialog
+  // asks the active-inventory endpoint for the selected website instead
+  // of trusting page-local state. The cancellation guard prevents an
+  // older response from overwriting a newer candidate's result.
   let activeJob = $state<CrawlerActiveInventoryItem | null>(null);
   $effect(() => {
     const current = candidate;
@@ -244,10 +242,8 @@
     onOpenDeleteDialog(item);
   }
 
-  // Visibility derives from the same pure helper that the V2-E
-  // unit-test exercises against 7 quadrants. Wiring through this
-  // helper guarantees the rendered UI cannot disagree with the
-  // test-asserted spec.
+  // Button visibility has one pure owner so the dialog and unit tests
+  // cannot drift when active-job or failure-state rules change.
   const actionVisibility = $derived(
     getWebsiteDetailDialogActionVisibility({
       candidate: candidateView,

@@ -59,6 +59,7 @@ from intric.websites.domain.crawler_tenant_website_inventory import (
     CrawlerTenantWebsiteInventory,
     CrawlerTenantWebsiteInventoryItem,
     CrawlerTenantWebsiteInventorySort,
+    CrawlerTenantWebsiteInventoryStateFilter,
 )
 from intric.websites.domain.website import (
     WEBSITE_AUTO_DISABLE_FAILURE_THRESHOLD,
@@ -67,6 +68,28 @@ from intric.websites.domain.website import (
 
 if TYPE_CHECKING:
     from intric.database.database import AsyncSession
+
+
+def _auto_disabled_condition():
+    return sa.and_(
+        WebsitesTable.update_interval == UpdateInterval.NEVER,
+        WebsitesTable.consecutive_failures >= WEBSITE_AUTO_DISABLE_FAILURE_THRESHOLD,
+    )
+
+
+def _backed_off_condition():
+    return sa.and_(
+        WebsitesTable.consecutive_failures > 0,
+        WebsitesTable.next_retry_at.is_not(None),
+        WebsitesTable.update_interval != UpdateInterval.NEVER,
+    )
+
+
+def _healthy_condition():
+    return sa.and_(
+        sa.not_(_auto_disabled_condition()),
+        sa.not_(_backed_off_condition()),
+    )
 
 
 def _website_failure_state_case():
@@ -84,18 +107,9 @@ def _website_failure_state_case():
     pyright error without adding caller-visible safety. Callers treat
     the result as an opaque labeled column expression.
     """
-    auto_disabled_condition = sa.and_(
-        WebsitesTable.update_interval == UpdateInterval.NEVER,
-        WebsitesTable.consecutive_failures >= WEBSITE_AUTO_DISABLE_FAILURE_THRESHOLD,
-    )
-    backed_off_condition = sa.and_(
-        WebsitesTable.consecutive_failures > 0,
-        WebsitesTable.next_retry_at.is_not(None),
-        WebsitesTable.update_interval != UpdateInterval.NEVER,
-    )
     return sa.case(
-        (auto_disabled_condition, CrawlerFailureState.AUTO_DISABLED.value),
-        (backed_off_condition, CrawlerFailureState.BACKED_OFF.value),
+        (_auto_disabled_condition(), CrawlerFailureState.AUTO_DISABLED.value),
+        (_backed_off_condition(), CrawlerFailureState.BACKED_OFF.value),
     ).label("failure_state")
 
 
@@ -141,16 +155,8 @@ class WebsiteAdminRepository:
         tenant_id: UUID | None,
         state_filter: CrawlerFailureState | None = None,
     ) -> CrawlerFailureInventory:
-        auto_disabled_condition = sa.and_(
-            WebsitesTable.update_interval == UpdateInterval.NEVER,
-            WebsitesTable.consecutive_failures
-            >= WEBSITE_AUTO_DISABLE_FAILURE_THRESHOLD,
-        )
-        backed_off_condition = sa.and_(
-            WebsitesTable.consecutive_failures > 0,
-            WebsitesTable.next_retry_at.is_not(None),
-            WebsitesTable.update_interval != UpdateInterval.NEVER,
-        )
+        auto_disabled_condition = _auto_disabled_condition()
+        backed_off_condition = _backed_off_condition()
         failure_state = _website_failure_state_case()
 
         # The state_filter narrows the failure-state predicate to exactly one
@@ -317,7 +323,10 @@ class WebsiteAdminRepository:
         update_interval: UpdateInterval | None = None,
         space_id: UUID | None = None,
         owner_user_id: UUID | None = None,
-        failure_state: CrawlerFailureState | None = None,
+        state_filter: CrawlerTenantWebsiteInventoryStateFilter = (
+            CrawlerTenantWebsiteInventoryStateFilter.ALL
+        ),
+        website_id: UUID | None = None,
         sort: CrawlerTenantWebsiteInventorySort = (
             CrawlerTenantWebsiteInventorySort.RECENT_CRAWL
         ),
@@ -348,22 +357,14 @@ class WebsiteAdminRepository:
             conditions.append(WebsitesTable.space_id == space_id)
         if owner_user_id is not None:
             conditions.append(WebsitesTable.user_id == owner_user_id)
-        if failure_state is CrawlerFailureState.AUTO_DISABLED:
-            conditions.append(
-                sa.and_(
-                    WebsitesTable.update_interval == UpdateInterval.NEVER,
-                    WebsitesTable.consecutive_failures
-                    >= WEBSITE_AUTO_DISABLE_FAILURE_THRESHOLD,
-                )
-            )
-        elif failure_state is CrawlerFailureState.BACKED_OFF:
-            conditions.append(
-                sa.and_(
-                    WebsitesTable.consecutive_failures > 0,
-                    WebsitesTable.next_retry_at.is_not(None),
-                    WebsitesTable.update_interval != UpdateInterval.NEVER,
-                )
-            )
+        if website_id is not None:
+            conditions.append(WebsitesTable.id == website_id)
+        if state_filter is CrawlerTenantWebsiteInventoryStateFilter.HEALTHY:
+            conditions.append(_healthy_condition())
+        elif state_filter is CrawlerTenantWebsiteInventoryStateFilter.AUTO_DISABLED:
+            conditions.append(_auto_disabled_condition())
+        elif state_filter is CrawlerTenantWebsiteInventoryStateFilter.BACKED_OFF:
+            conditions.append(_backed_off_condition())
 
         # ILIKE OR-clause across url, name, owner_email. We rely on
         # case-insensitive ILIKE rather than lower(col) function calls

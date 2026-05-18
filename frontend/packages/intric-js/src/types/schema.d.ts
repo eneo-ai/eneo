@@ -10718,6 +10718,8 @@ export interface components {
       | "size_desc"
       | "consecutive_failures"
       | "url";
+    /** @enum {string} */
+    CrawlerTenantWebsiteInventoryStateFilter: "all" | "healthy" | "backed_off" | "auto_disabled";
     /** CrawlerTenantWebsiteProcessingAggregateItem */
     CrawlerTenantWebsiteProcessingAggregateItem: {
       /**
@@ -27237,7 +27239,9 @@ export interface operations {
         update_interval?: components["schemas"]["UpdateInterval"] | null;
         space_id?: string | null;
         owner_user_id?: string | null;
+        crawler_state?: components["schemas"]["CrawlerTenantWebsiteInventoryStateFilter"];
         failure_state?: components["schemas"]["CrawlerFailureState"] | null;
+        website_id?: string | null;
         sort?: components["schemas"]["CrawlerTenantWebsiteInventorySort"];
       };
       header?: never;

@@ -14,6 +14,8 @@ Tests cover:
 - space_id filter narrows to one space
 - owner_user_id filter narrows to one creator
 - failure_state filter mirrors the existing CrawlerFailureState classification
+- crawler_state=healthy filters before pagination
+- website_id resolves a single tenant-owned website for off-page drill-downs
 - pagination contract (limit/offset/total)
 - the endpoint has no tenant_id query parameter (forces current-tenant scope)
 - non-admin users are forbidden
@@ -414,6 +416,149 @@ async def test_admin_crawler_tenant_website_inventory_filters_by_failure_state(
     assert str(backed_id) in backed_ids
     assert str(auto_id) not in backed_ids
     assert str(healthy_id) not in backed_ids
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_admin_crawler_tenant_website_inventory_filters_healthy_before_pagination(
+    client,
+    db_session,
+    admin_user,
+    admin_user_api_key,
+):
+    suffix = uuid4().hex[:8]
+    now = datetime(2026, 5, 15, 8, 0, tzinfo=timezone.utc)
+    async with db_session() as session:
+        embedding_model_id = await _embedding_model_id(session)
+        healthy_first = await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            url_suffix=f"healthy-a-{suffix}",
+            update_interval=UpdateInterval.WEEKLY,
+        )
+        await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            url_suffix=f"healthy-backing-off-{suffix}",
+            update_interval=UpdateInterval.DAILY,
+            consecutive_failures=1,
+            next_retry_at=now + timedelta(hours=1),
+        )
+        await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            url_suffix=f"healthy-disabled-{suffix}",
+            update_interval=UpdateInterval.NEVER,
+            consecutive_failures=WEBSITE_AUTO_DISABLE_FAILURE_THRESHOLD,
+        )
+        healthy_second = await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            url_suffix=f"healthy-z-{suffix}",
+            update_interval=UpdateInterval.WEEKLY,
+        )
+        healthy_first_id = healthy_first.id
+        healthy_second_id = healthy_second.id
+        await session.commit()
+
+    first_page = await client.get(
+        "/api/v1/admin/crawler/websites",
+        params={
+            "limit": 1,
+            "offset": 0,
+            "crawler_state": "healthy",
+            "sort": "url",
+        },
+        headers={"X-API-Key": admin_user_api_key.key},
+    )
+    assert first_page.status_code == 200, first_page.text
+    first_page_data = first_page.json()
+    assert first_page_data["total"] == 2
+    assert [item["website_id"] for item in first_page_data["items"]] == [
+        str(healthy_first_id)
+    ]
+    assert first_page_data["items"][0]["failure_state"] is None
+
+    second_page = await client.get(
+        "/api/v1/admin/crawler/websites",
+        params={
+            "limit": 1,
+            "offset": 1,
+            "crawler_state": "healthy",
+            "sort": "url",
+        },
+        headers={"X-API-Key": admin_user_api_key.key},
+    )
+    assert second_page.status_code == 200, second_page.text
+    second_page_data = second_page.json()
+    assert second_page_data["total"] == 2
+    assert [item["website_id"] for item in second_page_data["items"]] == [
+        str(healthy_second_id)
+    ]
+    assert second_page_data["items"][0]["failure_state"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_admin_crawler_tenant_website_inventory_resolves_one_website_by_id(
+    client,
+    db_session,
+    tenant_factory,
+    user_factory,
+    admin_user,
+    admin_user_api_key,
+):
+    async with db_session() as session:
+        embedding_model_id = await _embedding_model_id(session)
+        other_tenant = await tenant_factory(session, name="Other website lookup tenant")
+        other_user = await user_factory(session, tenant_id=other_tenant.id)
+        own_website = await _create_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            url_suffix=f"lookup-own-{uuid4()}",
+            update_interval=UpdateInterval.WEEKLY,
+        )
+        other_website = await _create_website(
+            session,
+            tenant_id=other_tenant.id,
+            user_id=other_user.id,
+            embedding_model_id=embedding_model_id,
+            url_suffix=f"lookup-other-{uuid4()}",
+            update_interval=UpdateInterval.WEEKLY,
+        )
+        own_website_id = own_website.id
+        other_website_id = other_website.id
+        await session.commit()
+
+    own_response = await client.get(
+        "/api/v1/admin/crawler/websites",
+        params={"website_id": str(own_website_id), "limit": 1},
+        headers={"X-API-Key": admin_user_api_key.key},
+    )
+    assert own_response.status_code == 200, own_response.text
+    own_data = own_response.json()
+    assert own_data["total"] == 1
+    assert [item["website_id"] for item in own_data["items"]] == [str(own_website_id)]
+
+    other_response = await client.get(
+        "/api/v1/admin/crawler/websites",
+        params={"website_id": str(other_website_id), "limit": 1},
+        headers={"X-API-Key": admin_user_api_key.key},
+    )
+    assert other_response.status_code == 200, other_response.text
+    other_data = other_response.json()
+    assert other_data["total"] == 0
+    assert other_data["items"] == []
 
 
 @pytest.mark.asyncio

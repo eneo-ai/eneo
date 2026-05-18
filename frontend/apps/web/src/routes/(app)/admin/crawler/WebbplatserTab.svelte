@@ -42,10 +42,10 @@
     getCrawlerTenantWebsiteInventoryOwnerLabel,
     getCrawlerTenantWebsiteInventorySpaceLabel,
     getCrawlerTenantWebsiteInventoryStatusLabel,
-    type CrawlerFailureState,
     type CrawlerTenantWebsiteInventoryItem,
     type CrawlerTenantWebsiteInventoryPageSize,
-    type CrawlerTenantWebsiteInventoryResponse
+    type CrawlerTenantWebsiteInventoryResponse,
+    type CrawlerTenantWebsiteInventoryStateFilter
   } from "$lib/features/admin/crawlerTenantWebsiteInventory";
   import {
     CRAWLER_UPDATE_INTERVAL_OPTIONS,
@@ -54,7 +54,7 @@
   } from "$lib/features/admin/crawlerUpdateInterval";
   import EmptyState from "./EmptyState.svelte";
 
-  type StateFilterValue = CrawlerFailureState | "all" | "healthy";
+  type StateFilterValue = CrawlerTenantWebsiteInventoryStateFilter;
   type FilterStateOption = { value: StateFilterValue; label: string; dot: string | null };
 
   type RefreshOptions = {
