@@ -17,6 +17,7 @@ from intric.websites.domain.crawl_terminal import (
     TerminalEvent,
     commit_terminal,
 )
+from intric.websites.domain.crawl_terminal_source import CrawlTerminalSource
 from intric.worker.crawl.audit import CrawlAuditPayload
 from intric.worker.crawl.post_terminal_effects import (
     PostTerminalEffectInput,
@@ -81,6 +82,7 @@ async def commit_zero_output_terminal(
                 job_id=input.job_id,
                 job_status=Status.FAILED,
                 outcome_code=input.outcome_code,
+                terminal_source=CrawlTerminalSource.CRAWLER,
                 finished_at=terminal_finished_at,
                 result_location=input.failure_message,
                 crawl_run_update=CrawlRunTerminalUpdate(

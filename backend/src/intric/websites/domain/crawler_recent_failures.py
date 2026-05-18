@@ -28,14 +28,6 @@ RECENT_FAILURE_OUTCOME_CODES: frozenset[CrawlOutcomeCode] = frozenset(
     }
 )
 
-WATCHDOG_INTERVENTION_OUTCOME_CODES: frozenset[CrawlOutcomeCode] = frozenset(
-    {
-        CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES,
-        CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED,
-        CrawlOutcomeCode.CRAWL_RUNTIME_TIMEOUT,
-    }
-)
-
 
 @dataclass(frozen=True, slots=True)
 class CrawlerRecentFailureItem:

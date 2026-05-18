@@ -12,6 +12,7 @@ from intric.jobs.job_models import Task
 from intric.main.models import Status
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.websites.domain.crawl_run import CrawlType
+from intric.websites.domain.crawl_terminal_source import CrawlTerminalSource
 from intric.websites.domain.website import UpdateInterval
 
 
@@ -84,6 +85,7 @@ async def _create_crawl_run(
     embedding_input_tokens: int | None = None,
     embedding_total_cost_usd: Decimal | None = None,
     embedding_usage_source: str | None = None,
+    terminal_source: CrawlTerminalSource | None = None,
 ) -> CrawlRuns:
     crawl_run = CrawlRuns(
         id=uuid4(),
@@ -101,6 +103,7 @@ async def _create_crawl_run(
         files_hash_retained=0,
         files_too_large_skipped=0,
         outcome_code=outcome_code.value,
+        terminal_source=terminal_source.value if terminal_source is not None else None,
         failure_summary=None,
         embedding_model_name_snapshot=embedding_model_name_snapshot,
         embedding_model_litellm_name_snapshot=embedding_model_litellm_name_snapshot,
@@ -181,6 +184,7 @@ async def test_admin_crawler_watchdog_interventions_are_tenant_scoped_and_allowl
             job_id=runtime_job.id,
             created_at=runtime_job.created_at,
             outcome_code=CrawlOutcomeCode.CRAWL_RUNTIME_TIMEOUT,
+            terminal_source=CrawlTerminalSource.WATCHDOG,
             embedding_model_name_snapshot="text-embedding-3-small",
             embedding_model_litellm_name_snapshot="openai/text-embedding-3-small",
             embedding_model_provider_snapshot="openai",
@@ -202,13 +206,30 @@ async def test_admin_crawler_watchdog_interventions_are_tenant_scoped_and_allowl
             job_id=max_age_job.id,
             created_at=max_age_job.created_at,
             outcome_code=CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED,
+            terminal_source=CrawlTerminalSource.WATCHDOG,
         )
-        recent_failure_job = await _create_job(
+        worker_timeout_job = await _create_job(
             session,
             user_id=admin_user.id,
             status=Status.FAILED,
             created_at=now - timedelta(minutes=3),
             finished_at=now - timedelta(minutes=3),
+        )
+        worker_timeout_run = await _create_crawl_run(
+            session,
+            tenant_id=admin_user.tenant_id,
+            website_id=own_website.id,
+            job_id=worker_timeout_job.id,
+            created_at=worker_timeout_job.created_at,
+            outcome_code=CrawlOutcomeCode.CRAWL_RUNTIME_TIMEOUT,
+            terminal_source=CrawlTerminalSource.CRAWLER,
+        )
+        recent_failure_job = await _create_job(
+            session,
+            user_id=admin_user.id,
+            status=Status.FAILED,
+            created_at=now - timedelta(minutes=4),
+            finished_at=now - timedelta(minutes=4),
         )
         recent_failure_run = await _create_crawl_run(
             session,
@@ -217,13 +238,14 @@ async def test_admin_crawler_watchdog_interventions_are_tenant_scoped_and_allowl
             job_id=recent_failure_job.id,
             created_at=recent_failure_job.created_at,
             outcome_code=CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED,
+            terminal_source=CrawlTerminalSource.CRAWLER,
         )
         other_tenant_job = await _create_job(
             session,
             user_id=other_user.id,
             status=Status.FAILED,
-            created_at=now - timedelta(minutes=4),
-            finished_at=now - timedelta(minutes=4),
+            created_at=now - timedelta(minutes=5),
+            finished_at=now - timedelta(minutes=5),
         )
         other_tenant_run = await _create_crawl_run(
             session,
@@ -232,9 +254,11 @@ async def test_admin_crawler_watchdog_interventions_are_tenant_scoped_and_allowl
             job_id=other_tenant_job.id,
             created_at=other_tenant_job.created_at,
             outcome_code=CrawlOutcomeCode.CRAWL_RUNTIME_TIMEOUT,
+            terminal_source=CrawlTerminalSource.WATCHDOG,
         )
         runtime_run_id = runtime_run.id
         max_age_run_id = max_age_run.id
+        worker_timeout_run_id = worker_timeout_run.id
         recent_failure_run_id = recent_failure_run.id
         other_tenant_run_id = other_tenant_run.id
         await session.commit()
@@ -263,6 +287,7 @@ async def test_admin_crawler_watchdog_interventions_are_tenant_scoped_and_allowl
     )
     assert runtime_item["embedding_usage_source"] == "provider_reported"
     returned_ids = {item["crawl_run_id"] for item in data["items"]}
+    assert str(worker_timeout_run_id) not in returned_ids
     assert str(recent_failure_run_id) not in returned_ids
     assert str(other_tenant_run_id) not in returned_ids
 
@@ -275,6 +300,7 @@ async def test_admin_crawler_watchdog_interventions_are_tenant_scoped_and_allowl
         item["crawl_run_id"] for item in recent_failures_response.json()["items"]
     }
     assert str(runtime_run_id) in recent_failure_ids
+    assert str(worker_timeout_run_id) in recent_failure_ids
     assert str(recent_failure_run_id) in recent_failure_ids
 
 

@@ -12,6 +12,7 @@ from intric.jobs.job_models import Task
 from intric.main.models import Status
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.websites.domain.crawl_run import CrawlType
+from intric.websites.domain.crawl_terminal_source import CrawlTerminalSource
 from intric.websites.domain.website import UpdateInterval
 
 
@@ -113,6 +114,7 @@ async def _create_crawl_run(
     files_downloaded: int = 0,
     pages_failed: int = 0,
     files_failed: int = 0,
+    terminal_source: CrawlTerminalSource | None = None,
 ) -> CrawlRuns:
     crawl_run = CrawlRuns(
         id=uuid4(),
@@ -130,6 +132,7 @@ async def _create_crawl_run(
         files_hash_retained=0,
         files_too_large_skipped=0,
         outcome_code=outcome_code.value,
+        terminal_source=terminal_source.value if terminal_source is not None else None,
     )
     session.add(crawl_run)
     await session.flush()
@@ -320,6 +323,22 @@ async def test_admin_crawler_failure_clusters_filter_category_and_source(
             job_id=watchdog_job.id,
             created_at=watchdog_job.created_at,
             outcome_code=CrawlOutcomeCode.CRAWL_RUNTIME_TIMEOUT,
+            terminal_source=CrawlTerminalSource.WATCHDOG,
+        )
+        worker_timeout_job = await _create_job(
+            session,
+            user_id=admin_user.id,
+            created_at=now - timedelta(minutes=15),
+            finished_at=now - timedelta(minutes=15),
+        )
+        await _create_crawl_run(
+            session,
+            tenant_id=admin_user.tenant_id,
+            website_id=website.id,
+            job_id=worker_timeout_job.id,
+            created_at=worker_timeout_job.created_at,
+            outcome_code=CrawlOutcomeCode.CRAWL_RUNTIME_TIMEOUT,
+            terminal_source=CrawlTerminalSource.CRAWLER,
         )
         empty_output_job = await _create_job(
             session,
@@ -334,6 +353,7 @@ async def test_admin_crawler_failure_clusters_filter_category_and_source(
             job_id=empty_output_job.id,
             created_at=empty_output_job.created_at,
             outcome_code=CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED,
+            terminal_source=CrawlTerminalSource.CRAWLER,
         )
         await session.commit()
 
@@ -354,6 +374,8 @@ async def test_admin_crawler_failure_clusters_filter_category_and_source(
     assert [item["outcome_code"] for item in watchdog_data["items"]] == [
         "CRAWL_RUNTIME_TIMEOUT"
     ]
+    assert watchdog_data["items"][0]["occurrences"] == 1
+    assert watchdog_data["items"][0]["watchdog_occurrences"] == 1
 
     assert empty_output_response.status_code == 200
     empty_output_data = empty_output_response.json()

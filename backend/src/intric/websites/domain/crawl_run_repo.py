@@ -45,6 +45,7 @@ from intric.websites.domain.crawl_terminal import (
     TerminalEvent,
     commit_terminal,
 )
+from intric.websites.domain.crawl_terminal_source import CrawlTerminalSource
 from intric.websites.domain.crawler_active_inventory import (
     CrawlerActiveInventory,
     CrawlerActiveInventoryItem,
@@ -61,7 +62,6 @@ from intric.websites.domain.crawler_failure_clusters import (
 )
 from intric.websites.domain.crawler_recent_failures import (
     RECENT_FAILURE_OUTCOME_CODES,
-    WATCHDOG_INTERVENTION_OUTCOME_CODES,
     CrawlerRecentFailureItem,
     CrawlerRecentFailures,
 )
@@ -121,14 +121,9 @@ def _optional_embedding_usage_source(value: object) -> EmbeddingUsageSource | No
 
 def _failure_cluster_outcome_codes(
     *,
-    source: CrawlerFailureClusterSource,
     outcome_category: CrawlOutcomeCategory | None,
 ) -> frozenset[CrawlOutcomeCode]:
-    source_codes = (
-        WATCHDOG_INTERVENTION_OUTCOME_CODES
-        if source is CrawlerFailureClusterSource.WATCHDOG_ONLY
-        else RECENT_FAILURE_OUTCOME_CODES
-    )
+    source_codes = RECENT_FAILURE_OUTCOME_CODES
     if outcome_category is None:
         return source_codes
     category_codes = CRAWL_OUTCOME_CATEGORY_CODES[outcome_category]
@@ -665,9 +660,10 @@ class CrawlRunRepository:
             limit=limit,
             offset=offset,
             tenant_id=tenant_id,
-            outcome_codes=WATCHDOG_INTERVENTION_OUTCOME_CODES,
+            outcome_codes=RECENT_FAILURE_OUTCOME_CODES,
             outcome_filter=outcome_filter,
             website_id=website_id,
+            terminal_source_filter=CrawlTerminalSource.WATCHDOG,
         )
 
     async def watchdog_interventions_for_sysadmin(
@@ -688,8 +684,9 @@ class CrawlRunRepository:
             limit=limit,
             offset=offset,
             tenant_id=tenant_id,
-            outcome_codes=WATCHDOG_INTERVENTION_OUTCOME_CODES,
+            outcome_codes=RECENT_FAILURE_OUTCOME_CODES,
             outcome_filter=outcome_filter,
+            terminal_source_filter=CrawlTerminalSource.WATCHDOG,
         )
 
     async def failure_clusters_for_tenant(
@@ -705,7 +702,6 @@ class CrawlRunRepository:
         outcome_category: CrawlOutcomeCategory | None = None,
     ) -> CrawlerFailureClusters:
         applied_outcomes = _failure_cluster_outcome_codes(
-            source=source,
             outcome_category=outcome_category,
         )
         if not applied_outcomes:
@@ -732,6 +728,10 @@ class CrawlRunRepository:
                 [code.value for code in applied_outcomes]
             ),
         ]
+        if source is CrawlerFailureClusterSource.WATCHDOG_ONLY:
+            latest_conditions.append(
+                latest_crawl_run.terminal_source == CrawlTerminalSource.WATCHDOG.value
+            )
         latest_ranked = (
             sa.select(
                 latest_crawl_run.website_id.label("website_id"),
@@ -768,6 +768,10 @@ class CrawlRunRepository:
             CrawlRunsTable.tenant_id == tenant_id,
             CrawlRunsTable.outcome_code.in_([code.value for code in applied_outcomes]),
         ]
+        if source is CrawlerFailureClusterSource.WATCHDOG_ONLY:
+            failure_conditions.append(
+                CrawlRunsTable.terminal_source == CrawlTerminalSource.WATCHDOG.value
+            )
 
         base_from = sa.join(
             sa.join(CrawlRunsTable, Jobs, CrawlRunsTable.job_id == Jobs.id),
@@ -808,9 +812,7 @@ class CrawlRunRepository:
 
         watchdog_occurrence = sa.case(
             (
-                CrawlRunsTable.outcome_code.in_(
-                    [code.value for code in WATCHDOG_INTERVENTION_OUTCOME_CODES]
-                ),
+                CrawlRunsTable.terminal_source == CrawlTerminalSource.WATCHDOG.value,
                 1,
             ),
             else_=0,
@@ -937,6 +939,7 @@ class CrawlRunRepository:
         outcome_codes: frozenset[CrawlOutcomeCode],
         outcome_filter: CrawlOutcomeCode | None = None,
         website_id: UUID | None = None,
+        terminal_source_filter: CrawlTerminalSource | None = None,
     ) -> CrawlerRecentFailures:
         if outcome_filter is not None and outcome_filter not in outcome_codes:
             raise ValueError(
@@ -964,6 +967,10 @@ class CrawlRunRepository:
             # collides with another tenant's row (FK is per-tenant via
             # the cascading delete tree).
             recent_failure_conditions.append(CrawlRunsTable.website_id == website_id)
+        if terminal_source_filter is not None:
+            recent_failure_conditions.append(
+                CrawlRunsTable.terminal_source == terminal_source_filter.value
+            )
 
         base_from = sa.join(CrawlRunsTable, Jobs, CrawlRunsTable.job_id == Jobs.id)
         rows_from = sa.outerjoin(

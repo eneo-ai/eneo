@@ -51,7 +51,6 @@ from intric.websites.domain.crawler_failure_clusters import CrawlerFailureCluste
 from intric.websites.domain.crawler_failure_inventory import CrawlerFailureState
 from intric.websites.domain.crawler_recent_failures import (
     RECENT_FAILURE_OUTCOME_CODES,
-    WATCHDOG_INTERVENTION_OUTCOME_CODES,
 )
 from intric.websites.domain.crawler_tenant_website_inventory import (
     CrawlerTenantWebsiteInventorySort,
@@ -299,16 +298,13 @@ async def get_current_tenant_crawler_watchdog_interventions(
     until = datetime.now(timezone.utc)
     since = until - timedelta(days=days)
 
-    if (
-        outcome_code is not None
-        and outcome_code not in WATCHDOG_INTERVENTION_OUTCOME_CODES
-    ):
+    if outcome_code is not None and outcome_code not in RECENT_FAILURE_OUTCOME_CODES:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
-                f"outcome_code {outcome_code.value!r} is not a watchdog-driven "
-                f"terminal outcome; use the recent-failures endpoint for "
-                f"non-watchdog outcomes or omit the filter."
+                f"outcome_code {outcome_code.value!r} is not a crawler failure "
+                f"outcome; use the recent-failures endpoint without this filter "
+                f"or choose a failure outcome."
             ),
         )
 

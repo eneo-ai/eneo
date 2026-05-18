@@ -23,9 +23,8 @@ The canonical behavior — owned here — is:
 
 Why this lives in `worker/crawl/` and not in `crawl_tasks.py`: the
 inline implementation was tangled with the broader `crawl_task(...)`
-orchestration and contributed to the Step 5 ≤400 line gate violation.
-The split also makes the duplicate-skip terminal commit testable
-without spinning up the whole crawl_task stack.
+orchestration. The split also makes the duplicate-skip terminal commit
+testable without spinning up the whole crawl_task stack.
 """
 
 from __future__ import annotations
@@ -46,6 +45,7 @@ from intric.websites.domain.crawl_terminal import (
     TerminalEvent,
     commit_terminal,
 )
+from intric.websites.domain.crawl_terminal_source import CrawlTerminalSource
 
 logger = get_logger(__name__)
 
@@ -142,6 +142,7 @@ async def try_duplicate_skip(
                 job_id=job_id,
                 job_status=Status.FAILED,
                 outcome_code=CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED,
+                terminal_source=CrawlTerminalSource.CRAWLER,
                 finished_at=datetime.now(timezone.utc),
                 result_location=skip_message,
             ),

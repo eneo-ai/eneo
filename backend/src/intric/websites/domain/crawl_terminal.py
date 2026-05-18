@@ -18,6 +18,7 @@ from intric.websites.domain.crawl_run import (
     CrawlFileTooLargeSample,
     serialize_crawl_file_too_large_samples,
 )
+from intric.websites.domain.crawl_terminal_source import CrawlTerminalSource
 
 ACTIVE_TERMINAL_JOB_STATUSES: tuple[Status, ...] = (
     Status.QUEUED,
@@ -46,6 +47,7 @@ class TerminalEvent:
     job_id: UUID
     job_status: Status
     outcome_code: CrawlOutcomeCode | None
+    terminal_source: CrawlTerminalSource
     finished_at: datetime
     result_location: str | None = None
     allowed_current_job_statuses: Sequence[Status] = ACTIVE_TERMINAL_JOB_STATUSES
@@ -59,6 +61,7 @@ class TerminalBatchEvent:
     job_ids: tuple[UUID, ...]
     job_status: Status
     outcome_code: CrawlOutcomeCode
+    terminal_source: CrawlTerminalSource
     finished_at: datetime
     result_location: str | None = None
     allowed_current_job_statuses: Sequence[Status] = ACTIVE_TERMINAL_JOB_STATUSES
@@ -113,8 +116,7 @@ async def commit_terminal(
     the CrawlRun must not be overwritten with this caller's outcome. Without
     this gate, a race between the worker writing COMPLETE and an admin
     aborting could leave Jobs.status=COMPLETE while CrawlRuns.outcome_code
-    flipped to CRAWL_ABORTED — terminal state corruption discovered during
-    codex peer review of the running-abort tranche.
+    flipped to CRAWL_ABORTED.
     """
     job_result = await session.execute(
         sa.update(Jobs)
@@ -194,9 +196,10 @@ async def commit_terminal_batch(
     if event.only_set_crawl_outcome_if_missing:
         crawl_run_stmt = crawl_run_stmt.where(CrawlRuns.outcome_code.is_(None))
     crawl_run_result = await session.execute(
-        crawl_run_stmt.values(outcome_code=event.outcome_code.value).execution_options(
-            synchronize_session=False
-        )
+        crawl_run_stmt.values(
+            outcome_code=event.outcome_code.value,
+            terminal_source=event.terminal_source.value,
+        ).execution_options(synchronize_session=False)
     )
 
     return TerminalCommitResult(
@@ -207,7 +210,10 @@ async def commit_terminal_batch(
 
 def _crawl_run_values(event: TerminalEvent) -> dict[str, object]:
     outcome_code = event.outcome_code.value if event.outcome_code is not None else None
-    values: dict[str, object] = {"outcome_code": outcome_code}
+    values: dict[str, object] = {
+        "outcome_code": outcome_code,
+        "terminal_source": event.terminal_source.value,
+    }
     update = event.crawl_run_update
     if update is None:
         return values

@@ -35,6 +35,7 @@ import pytest
 
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.websites.domain.crawl_run import CrawlFileTooLargeSample, CrawlType
+from intric.websites.domain.crawl_terminal_source import CrawlTerminalSource
 from intric.worker.crawl.terminal_zero_output import (
     CommitZeroOutputTerminalInput,
     commit_zero_output_terminal,
@@ -46,6 +47,7 @@ class _RecordedTerminalCommit:
     crawl_run_id: UUID
     job_id: UUID
     outcome_code: CrawlOutcomeCode
+    terminal_source: CrawlTerminalSource
     result_location: str
     crawl_run_update_pages: int
     crawl_run_update_files_too_large: int
@@ -153,6 +155,7 @@ def _patch_recovery_and_post_effects(
                 crawl_run_id=event.crawl_run_id,
                 job_id=event.job_id,
                 outcome_code=event.outcome_code,
+                terminal_source=event.terminal_source,
                 result_location=event.result_location,
                 crawl_run_update_pages=event.crawl_run_update.pages_crawled,
                 crawl_run_update_files_too_large=(
@@ -221,6 +224,7 @@ async def test_commit_zero_output_terminal_records_failed_status_and_acks(
     assert len(terminal_commits) == 1
     commit = terminal_commits[0]
     assert commit.outcome_code == CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED
+    assert commit.terminal_source == CrawlTerminalSource.CRAWLER
     assert commit.result_location == "Crawl produced no pages"
     assert commit.crawl_run_update_pages == 0
     assert commit.crawl_run_update_files_too_large == 0

@@ -8,6 +8,7 @@ from intric.websites.domain.crawl_terminal import (
     commit_terminal,
     commit_terminal_batch,
 )
+from intric.websites.domain.crawl_terminal_source import CrawlTerminalSource
 from intric.worker.crawl.audit import CrawlAuditPayload, record_crawl_audit
 from intric.worker.crawl.bootstrap import (
     CrawlBootstrapResult,
@@ -153,6 +154,7 @@ __all__ = [
     "release_crawl_slot_after_task",
     # Terminal
     "CrawlRunTerminalUpdate",
+    "CrawlTerminalSource",
     "TerminalBatchEvent",
     "TerminalCommitResult",
     "TerminalEvent",

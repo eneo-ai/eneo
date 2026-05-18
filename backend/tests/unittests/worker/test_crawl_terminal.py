@@ -15,6 +15,7 @@ from intric.websites.domain.crawl_terminal import (
     commit_terminal,
     commit_terminal_batch,
 )
+from intric.websites.domain.crawl_terminal_source import CrawlTerminalSource
 from intric.worker.crawl import TerminalEvent as WorkerTerminalEvent
 from intric.worker.crawl import commit_terminal as worker_commit_terminal
 
@@ -62,6 +63,7 @@ async def test_commit_terminal_updates_job_and_crawl_run_once():
         job_id=uuid4(),
         job_status=Status.FAILED,
         outcome_code=CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED,
+        terminal_source=CrawlTerminalSource.CRAWLER,
         finished_at=finished_at,
         result_location="Skipped duplicate crawl; active job 00000000-0000-0000-0000-000000000000",
     )
@@ -71,6 +73,9 @@ async def test_commit_terminal_updates_job_and_crawl_run_once():
     assert result.job_rows_updated == 1
     assert result.crawl_run_rows_updated == 1
     assert session.execute.call_count == 2
+    crawl_run_stmt = session.execute.call_args_list[1].args[0]
+    crawl_run_params = crawl_run_stmt.compile().params
+    assert crawl_run_params["terminal_source"] == CrawlTerminalSource.CRAWLER.value
 
 
 @pytest.mark.asyncio
@@ -91,6 +96,7 @@ async def test_commit_terminal_skips_crawl_run_when_job_gate_loses_race():
         job_id=uuid4(),
         job_status=Status.FAILED,
         outcome_code=CrawlOutcomeCode.CRAWL_ABORTED,
+        terminal_source=CrawlTerminalSource.ADMIN,
         finished_at=datetime.now(timezone.utc),
         result_location="Crawl aborted by tenant admin",
         allowed_current_job_statuses=(Status.QUEUED, Status.IN_PROGRESS),
@@ -118,6 +124,7 @@ async def test_commit_terminal_can_update_zero_output_crawl_run_counts():
         job_id=uuid4(),
         job_status=Status.FAILED,
         outcome_code=CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED,
+        terminal_source=CrawlTerminalSource.CRAWLER,
         finished_at=datetime.now(timezone.utc),
         result_location="Crawl produced no pages",
         crawl_run_update=CrawlRunTerminalUpdate(
@@ -180,6 +187,7 @@ async def test_commit_terminal_serializes_failure_summary_with_string_keys():
         job_id=uuid4(),
         job_status=Status.COMPLETE,
         outcome_code=CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES,
+        terminal_source=CrawlTerminalSource.CRAWLER,
         finished_at=datetime.now(timezone.utc),
         result_location="/api/v1/websites/00000000-0000-0000-0000-000000000000/info-blobs/",
         crawl_run_update=CrawlRunTerminalUpdate(
@@ -216,6 +224,7 @@ async def test_commit_terminal_can_preserve_existing_crawl_run_outcome():
         job_id=uuid4(),
         job_status=Status.FAILED,
         outcome_code=CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR,
+        terminal_source=CrawlTerminalSource.CRAWLER,
         finished_at=datetime.now(timezone.utc),
         result_location="Unhandled exception while running crawl",
         only_set_crawl_outcome_if_missing=True,
@@ -243,6 +252,7 @@ async def test_commit_terminal_can_complete_successful_crawl_without_outcome_cod
         job_id=uuid4(),
         job_status=Status.COMPLETE,
         outcome_code=None,
+        terminal_source=CrawlTerminalSource.CRAWLER,
         finished_at=datetime.now(timezone.utc),
         result_location="/api/v1/websites/00000000-0000-0000-0000-000000000000/info-blobs/",
         crawl_run_update=CrawlRunTerminalUpdate(
@@ -287,6 +297,7 @@ async def test_commit_terminal_batch_updates_job_and_crawl_run_sets_once():
         job_ids=job_ids,
         job_status=Status.FAILED,
         outcome_code=CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES,
+        terminal_source=CrawlTerminalSource.WATCHDOG,
         finished_at=datetime.now(timezone.utc),
         result_location="Crawl stalled before collecting pages",
         only_set_crawl_outcome_if_missing=True,
@@ -304,6 +315,7 @@ async def test_commit_terminal_batch_updates_job_and_crawl_run_sets_once():
         crawl_run_params["outcome_code"]
         == CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES.value
     )
+    assert crawl_run_params["terminal_source"] == CrawlTerminalSource.WATCHDOG.value
 
 
 @pytest.mark.asyncio
@@ -322,6 +334,7 @@ async def test_commit_terminal_batch_updates_only_crawl_runs_whose_jobs_won_gate
         job_ids=job_ids,
         job_status=Status.FAILED,
         outcome_code=CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES,
+        terminal_source=CrawlTerminalSource.WATCHDOG,
         finished_at=datetime.now(timezone.utc),
         result_location="Crawl stalled before collecting pages",
         only_set_crawl_outcome_if_missing=True,
@@ -344,5 +357,6 @@ def test_terminal_batch_event_rejects_mismatched_job_and_crawl_run_counts():
             job_ids=(uuid4(), uuid4()),
             job_status=Status.FAILED,
             outcome_code=CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES,
+            terminal_source=CrawlTerminalSource.WATCHDOG,
             finished_at=datetime.now(timezone.utc),
         )

@@ -70,6 +70,14 @@ class CrawlRuns(BasePublic):
         nullable=True,
         comment="Typed crawl/job outcome code for frontend display and diagnostics",
     )
+    terminal_source: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+        comment=(
+            "Source that committed the terminal outcome; NULL for historical "
+            "rows before terminal attribution was captured"
+        ),
+    )
     failure_summary: Mapped[Optional[dict[str, int]]] = mapped_column(
         JSONB,
         nullable=True,
@@ -125,6 +133,10 @@ class CrawlRuns(BasePublic):
         CheckConstraint(
             "embedding_usage_source IS NULL OR embedding_usage_source IN ('provider_reported', 'missing')",
             name="ck_crawl_runs_embedding_usage_source",
+        ),
+        CheckConstraint(
+            "terminal_source IS NULL OR terminal_source IN ('admin', 'crawler', 'queue', 'watchdog')",
+            name="ck_crawl_runs_terminal_source",
         ),
         Index("idx_crawl_runs_tenant_created_at", "tenant_id", "created_at"),
         Index(

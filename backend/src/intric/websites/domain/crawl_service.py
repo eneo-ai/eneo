@@ -35,6 +35,7 @@ from intric.websites.domain.crawl_terminal import (
     crawl_direct_enqueue_failure_message,
     crawl_pending_queue_enqueue_failure_message,
 )
+from intric.websites.domain.crawl_terminal_source import CrawlTerminalSource
 from intric.worker.feeder.capacity import CapacityManager
 from intric.worker.feeder.crawl_enqueue import (
     CrawlEnqueueFailed,
@@ -240,6 +241,7 @@ class CrawlService:
                 job_id=job_id,
                 job_status=Status.FAILED,
                 outcome_code=CrawlOutcomeCode.CRAWL_ABORTED,
+                terminal_source=CrawlTerminalSource.ADMIN,
                 finished_at=datetime.now(timezone.utc),
                 result_location="Crawl aborted by tenant admin",
                 allowed_current_job_statuses=(Status.QUEUED, Status.IN_PROGRESS),
@@ -311,6 +313,7 @@ class CrawlService:
                         job_id=job_id,
                         job_status=Status.FAILED,
                         outcome_code=CrawlOutcomeCode.CRAWL_QUEUE_ENQUEUE_FAILED,
+                        terminal_source=CrawlTerminalSource.QUEUE,
                         finished_at=datetime.now(timezone.utc),
                         result_location=failure_message,
                     )
@@ -410,6 +413,7 @@ class CrawlService:
                                 outcome_code=(
                                     CrawlOutcomeCode.CRAWL_DIRECT_ENQUEUE_FAILED
                                 ),
+                                terminal_source=CrawlTerminalSource.QUEUE,
                                 finished_at=datetime.now(timezone.utc),
                                 result_location=failure_message,
                             )

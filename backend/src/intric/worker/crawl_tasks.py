@@ -44,6 +44,7 @@ from intric.worker.crawl import (
     CrawlRunTerminalUpdate,
     CrawlSlotAcquireRequest,
     CrawlSlotReleaseRequest,
+    CrawlTerminalSource,
     ExistingBlobState,
     HeartbeatFailedPageProcessingAbort,
     HeartbeatMonitor,
@@ -280,6 +281,7 @@ async def _record_crawl_task_exception(
                 job_id=job_id,
                 job_status=JobStatus.FAILED,
                 outcome_code=outcome_code,
+                terminal_source=CrawlTerminalSource.CRAWLER,
                 finished_at=now,
                 result_location=error_message,
                 only_set_crawl_outcome_if_missing=True,
@@ -484,6 +486,7 @@ async def queue_website_crawls(container: Container):
                                             outcome_code=(
                                                 CrawlOutcomeCode.CRAWL_QUEUE_ENQUEUE_FAILED
                                             ),
+                                            terminal_source=CrawlTerminalSource.QUEUE,
                                             finished_at=datetime.now(timezone.utc),
                                             result_location=failure_message,
                                         ),
@@ -1213,8 +1216,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # synchronous SQL phases. A tenant admin who aborts a crawl while
             # the worker is between heartbeats would otherwise see the worker
             # complete cleanup before observing FAILED. Checking here keeps
-            # the "safe-cleanup skip" guarantee promised by the running-abort
-            # tranche.
+            # cleanup behind a fresh preemption read before stale blobs are
+            # removed.
             async def _do_pre_cleanup_preemption_check(sess: AsyncSession) -> bool:
                 return await is_job_preempted(sess, job_id=job_id)
 
@@ -1386,6 +1389,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         job_id=job_id,
                         job_status=JobStatus.COMPLETE,
                         outcome_code=crawl_run_outcome_code,
+                        terminal_source=CrawlTerminalSource.CRAWLER,
                         finished_at=terminal_finished_at,
                         result_location=result_location,
                         crawl_run_update=CrawlRunTerminalUpdate(

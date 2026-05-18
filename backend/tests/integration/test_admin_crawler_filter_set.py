@@ -1,15 +1,4 @@
-"""Tenant admin filter set across recent failures, watchdog interventions,
-and failure inventory.
-
-This tranche adds the highest-signal filters from the Step 7 plan item:
-- `outcome_code` query parameter narrows recent failures and watchdog
-  interventions to one specific terminal outcome.
-- `state` query parameter narrows the failure inventory to BACKED_OFF or
-  AUTO_DISABLED rows.
-
-Both filter shapes are optional — omitting them preserves the existing
-unfiltered semantics so existing UI continues to work unchanged.
-"""
+"""Tenant admin filters for crawler failure investigation surfaces."""
 
 from __future__ import annotations
 
@@ -26,6 +15,7 @@ from intric.jobs.job_models import Task
 from intric.main.models import Status
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
 from intric.websites.domain.crawl_run import CrawlType
+from intric.websites.domain.crawl_terminal_source import CrawlTerminalSource
 from intric.websites.domain.crawler_failure_inventory import CrawlerFailureState
 from intric.websites.domain.website import (
     WEBSITE_AUTO_DISABLE_FAILURE_THRESHOLD,
@@ -76,6 +66,7 @@ async def _create_failed_crawl_run(
     website_id: UUID,
     outcome_code: CrawlOutcomeCode,
     finished_at: datetime,
+    terminal_source: CrawlTerminalSource | None = None,
 ) -> CrawlRuns:
     job = Jobs(
         id=uuid4(),
@@ -99,6 +90,7 @@ async def _create_failed_crawl_run(
         website_id=website_id,
         job_id=job.id,
         outcome_code=outcome_code.value,
+        terminal_source=terminal_source.value if terminal_source is not None else None,
     )
     session.add(crawl_run)
     await session.flush()
@@ -201,6 +193,7 @@ async def test_watchdog_interventions_outcome_filter_narrows_response(
             website_id=website.id,
             outcome_code=CrawlOutcomeCode.CRAWL_RUNTIME_TIMEOUT,
             finished_at=finished_now,
+            terminal_source=CrawlTerminalSource.WATCHDOG,
         )
         zombie_run = await _create_failed_crawl_run(
             session,
@@ -209,6 +202,7 @@ async def test_watchdog_interventions_outcome_filter_narrows_response(
             website_id=website.id,
             outcome_code=CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES,
             finished_at=finished_now - timedelta(minutes=10),
+            terminal_source=CrawlTerminalSource.WATCHDOG,
         )
         zombie_run_id = zombie_run.id
         await session.commit()

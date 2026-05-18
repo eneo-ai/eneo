@@ -4,9 +4,8 @@ The duplicate-skip logic used to live inline in `worker/crawl_tasks.py`:
 a `_get_primary_active_job_id(...)` helper plus a `try`/`except Exception`
 block that committed a `TerminalEvent(CRAWL_DUPLICATE_SKIPPED)` whenever
 the running job was not the oldest QUEUED/IN_PROGRESS crawl for its
-website. That made `crawl_task(...)` longer than the Step 5 ≤400 line
-gate allows and tangled the duplicate-skip terminal commit with the
-crawl-task orchestration, masking which behavior was owned where.
+website. That tangled the duplicate-skip terminal commit with the
+crawl-task orchestration and made ownership hard to test directly.
 
 These tests pin the ownership split for the new
 `worker/crawl/duplicate_guard.py` module:
@@ -35,6 +34,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
+from intric.websites.domain.crawl_terminal_source import CrawlTerminalSource
 from intric.worker.crawl.duplicate_guard import (
     DuplicateSkipDecision,
     try_duplicate_skip,
@@ -164,6 +164,7 @@ async def test_commits_terminal_event_and_returns_decision_for_duplicate() -> No
     assert event.crawl_run_id == run_id
     assert event.job_id == job_id
     assert event.outcome_code == CrawlOutcomeCode.CRAWL_DUPLICATE_SKIPPED
+    assert event.terminal_source == CrawlTerminalSource.CRAWLER
     assert event.result_location is not None
     assert str(primary_job_id) in event.result_location
     # finished_at must be recent and timezone-aware so audit/event-log

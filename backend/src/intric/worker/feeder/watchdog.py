@@ -516,7 +516,11 @@ class OrphanWatchdog:
         from intric.database.tables.websites_table import CrawlRuns
         from intric.main.models import Status
         from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
-        from intric.worker.crawl import TerminalBatchEvent, commit_terminal_batch
+        from intric.worker.crawl import (
+            CrawlTerminalSource,
+            TerminalBatchEvent,
+            commit_terminal_batch,
+        )
 
         max_age_seconds = self._settings.crawl_job_max_age_seconds or 7200
         max_age_cutoff = now - timedelta(seconds=max_age_seconds)
@@ -576,6 +580,7 @@ class OrphanWatchdog:
                     job_ids=tuple(result.expired_job_ids),
                     job_status=Status.FAILED,
                     outcome_code=CrawlOutcomeCode.CRAWL_MAX_AGE_EXCEEDED,
+                    terminal_source=CrawlTerminalSource.WATCHDOG,
                     finished_at=now,
                     result_location=(
                         "Crawl stayed queued past the configured maximum age "
@@ -875,7 +880,11 @@ class OrphanWatchdog:
         from intric.database.tables.websites_table import CrawlRuns
         from intric.main.models import Status
         from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
-        from intric.worker.crawl import TerminalBatchEvent, commit_terminal_batch
+        from intric.worker.crawl import (
+            CrawlTerminalSource,
+            TerminalBatchEvent,
+            commit_terminal_batch,
+        )
 
         # Use heartbeat-aligned threshold: 3 × heartbeat_interval = ~15 minutes
         # This aligns with crawl_heartbeat_max_failures × crawl_heartbeat_interval_seconds
@@ -957,6 +966,7 @@ class OrphanWatchdog:
                     job_ids=tuple(stalled_job_ids),
                     job_status=Status.FAILED,
                     outcome_code=CrawlOutcomeCode.CRAWL_TIMEOUT_NO_PAGES,
+                    terminal_source=CrawlTerminalSource.WATCHDOG,
                     finished_at=now,
                     result_location=failure_message,
                     allowed_current_job_statuses=(Status.IN_PROGRESS,),
@@ -987,7 +997,11 @@ class OrphanWatchdog:
         from intric.database.tables.websites_table import CrawlRuns
         from intric.main.models import Status
         from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
-        from intric.worker.crawl import TerminalBatchEvent, commit_terminal_batch
+        from intric.worker.crawl import (
+            CrawlTerminalSource,
+            TerminalBatchEvent,
+            commit_terminal_batch,
+        )
 
         timeout_hours = self._settings.orphan_crawl_run_timeout_hours
         timeout_cutoff = now - timedelta(hours=timeout_hours)
@@ -1062,6 +1076,7 @@ class OrphanWatchdog:
                     job_ids=tuple(stale_job_ids),
                     job_status=Status.FAILED,
                     outcome_code=CrawlOutcomeCode.CRAWL_RUNTIME_TIMEOUT,
+                    terminal_source=CrawlTerminalSource.WATCHDOG,
                     finished_at=now,
                     result_location=failure_message,
                     allowed_current_job_statuses=(Status.IN_PROGRESS,),
