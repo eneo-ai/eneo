@@ -133,6 +133,13 @@ class CrawlRuns(BasePublic):
             "website_id",
             "created_at",
         ),
+        Index(
+            "idx_crawl_runs_tenant_created_embedding_usage",
+            "tenant_id",
+            "created_at",
+            "embedding_model_id",
+            postgresql_where=embedding_input_tokens.is_not(None),
+        ),
     )
 
 

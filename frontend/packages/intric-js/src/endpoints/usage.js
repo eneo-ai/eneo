@@ -8,7 +8,7 @@ export function initUsage(client) {
     tokens: {
       /**
        * List token usage status for current tenant
-       * @param {{startDate: string, endDate: string}} [params] Define start and end date for data; Expects UTC time string.
+       * @param {{startDate: string, endDate: string, sourceType?: string}} [params] Define start and end date for data; Expects UTC time string.
        * @throws {IntricError}
        * */
       getSummary: async (params) => {
@@ -17,7 +17,8 @@ export function initUsage(client) {
           params: {
             query: {
               start_date: params?.startDate,
-              end_date: params?.endDate
+              end_date: params?.endDate,
+              source_type: params?.sourceType
             }
           }
         });

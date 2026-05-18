@@ -137,6 +137,54 @@ type _CrawlerTenantWebsiteProcessingTooLargeField = AssertHasKey<
   components["schemas"]["CrawlerTenantWebsiteProcessingAggregateItem"],
   "files_too_large_skipped"
 >;
+type _CrawlerTenantWebsiteProcessingWebsiteUrlField = AssertHasKey<
+  components["schemas"]["CrawlerTenantWebsiteProcessingAggregateItem"],
+  "website_url"
+>;
+type _CrawlerTenantWebsiteProcessingSpaceNameField = AssertHasKey<
+  components["schemas"]["CrawlerTenantWebsiteProcessingAggregateItem"],
+  "space_name"
+>;
+type _CrawlerTenantWebsiteProcessingOwnerEmailField = AssertHasKey<
+  components["schemas"]["CrawlerTenantWebsiteProcessingAggregateItem"],
+  "owner_email"
+>;
+type _CrawlerTenantWebsiteProcessingIndexedSizeField = AssertHasKey<
+  components["schemas"]["CrawlerTenantWebsiteProcessingAggregateItem"],
+  "indexed_size_bytes"
+>;
+type _CrawlerTenantWebsiteProcessingSummaryField = AssertHasKey<
+  components["schemas"]["CrawlerTenantWebsiteProcessingAggregateResponse"],
+  "summary"
+>;
+type _CrawlerTenantWebsiteProcessingNoTenantTotalStorage = AssertTrue<
+  AssertNoKey<
+    components["schemas"]["CrawlerTenantWebsiteProcessingAggregateResponse"],
+    "tenant_total_storage_bytes"
+  >
+>;
+type _CrawlerTenantWebsiteProcessingNoTenantTotalTokens = AssertTrue<
+  AssertNoKey<
+    components["schemas"]["CrawlerTenantWebsiteProcessingAggregateResponse"],
+    "tenant_total_tokens"
+  >
+>;
+type _CrawlerTenantWebsiteProcessingSpaceRollupField = AssertHasKey<
+  components["schemas"]["CrawlerTenantWebsiteProcessingAggregateResponse"],
+  "space_rollup"
+>;
+type _CrawlerTenantWebsiteProcessingSummaryActionCountField = AssertHasKey<
+  components["schemas"]["CrawlerTenantWebsiteProcessingAggregateSummary"],
+  "action_required_count"
+>;
+type _CrawlerTenantWebsiteProcessingSpaceRollupWebsiteCountField = AssertHasKey<
+  components["schemas"]["CrawlerTenantWebsiteProcessingSpaceRollupItem"],
+  "website_count"
+>;
+type _CrawlerTenantWebsiteProcessingSpaceRollupTokensField = AssertHasKey<
+  components["schemas"]["CrawlerTenantWebsiteProcessingSpaceRollupItem"],
+  "embedding_input_tokens"
+>;
 type _CrawlerTenantWebsiteProcessingCostPressureField = AssertHasKey<
   components["schemas"]["CrawlerTenantWebsiteProcessingAggregateItem"],
   "cost_pressure_score"
@@ -183,6 +231,32 @@ type _CrawlFileTooLargeSampleObservedBytesField = AssertHasKey<
 >;
 type _CrawlOutcomeSamplesFieldRemoved = AssertTrue<
   AssertNoKey<components["schemas"]["CrawlOutcomePublic"], "samples">
+>;
+type _TokenUsageSourceBreakdownField = AssertHasKey<
+  components["schemas"]["TokenUsageSummary"],
+  "source_breakdown"
+>;
+type _TokenUsageTotalCostField = AssertHasKey<
+  components["schemas"]["TokenUsageSummary"],
+  "total_cost_usd"
+>;
+type _TokenUsageCostCoverageField = AssertHasKey<
+  components["schemas"]["TokenUsageSummary"],
+  "cost_coverage_ratio"
+>;
+type _ModelUsageSourceTypesField = AssertHasKey<
+  components["schemas"]["ModelUsage"],
+  "source_types"
+>;
+type _ModelUsageModelKindField = AssertHasKey<components["schemas"]["ModelUsage"], "model_kind">;
+type _ModelUsageNullableModelId = AssertTrue<
+  components["schemas"]["ModelUsage"]["model_id"] extends string | null ? true : false
+>;
+type _SourceUsageExists = AssertTrue<
+  components["schemas"]["SourceUsage"] extends object ? true : false
+>;
+type _TokenUsageModelHasNoWebsiteId = AssertTrue<
+  AssertNoKey<components["schemas"]["ModelUsage"], "website_id">
 >;
 
 type _CrawlerBaselinePathExists = AssertTrue<
@@ -281,6 +355,12 @@ type _AdminCrawlerWebsiteProcessingQueryHasNoTenantId = AssertTrue<
   >
     ? false
     : true
+>;
+type _AdminCrawlerWebsiteProcessingQueryHasSpaceId = AssertHasKey<
+  NonNullable<
+    operations["get_current_tenant_crawler_website_processing_aggregate_api_v1_admin_crawler_website_processing_get"]["parameters"]["query"]
+  >,
+  "space_id"
 >;
 type _AdminCrawlerAbortQueuedPathHasJobId = AssertHasKey<
   NonNullable<

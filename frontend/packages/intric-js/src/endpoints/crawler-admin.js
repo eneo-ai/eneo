@@ -92,6 +92,7 @@ export function initCrawlerAdmin(client) {
      *   limit?: number,
      *   offset?: number,
      *   website_id?: string,
+     *   space_id?: string,
      *   sort?: import("../types/schema").components["schemas"]["CrawlerWebsiteProcessingSort"],
      *   failures_only?: boolean,
      *   low_retention_only?: boolean,

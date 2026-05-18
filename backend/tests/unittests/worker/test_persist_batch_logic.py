@@ -148,6 +148,7 @@ def create_embedding_batch(chunks, embedding: list[float]) -> EmbeddingBatchResu
         usage=EmbeddingUsage(
             prompt_tokens=None,
             total_tokens=None,
+            cost_usd=None,
             source="missing",
         ),
     )

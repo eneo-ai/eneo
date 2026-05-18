@@ -110,6 +110,17 @@ def _optional_non_negative_int(value: object) -> int | None:
     return value
 
 
+def _resolved_litellm_model_name(
+    *,
+    model_name: str | None,
+    litellm_model_name: str | None,
+    provider_type: str | None,
+) -> str | None:
+    if model_name and provider_type:
+        return f"{provider_type}/{model_name}"
+    return litellm_model_name
+
+
 class CrawlRun(Entity):
     def __init__(
         self,
@@ -192,10 +203,34 @@ class CrawlRun(Entity):
             else cast(Union["Website", "WebsiteSparse"], kwargs["website"])
         )
         embedding_model = getattr(website, "embedding_model", None)
-        embedding_model_id = getattr(
-            embedding_model, "id", getattr(website, "embedding_model_id", None)
-        )
-        input_cost_per_token = getattr(embedding_model, "input_cost_per_token", None)
+        if embedding_model is not None:
+            embedding_model_id = getattr(embedding_model, "id", None)
+            embedding_model_name = getattr(embedding_model, "name", None)
+            embedding_model_provider = getattr(embedding_model, "provider_type", None)
+            embedding_model_litellm_name = _resolved_litellm_model_name(
+                model_name=embedding_model_name,
+                litellm_model_name=getattr(embedding_model, "litellm_model_name", None),
+                provider_type=embedding_model_provider,
+            )
+            input_cost_per_token = getattr(
+                embedding_model, "input_cost_per_token", None
+            )
+        else:
+            embedding_model_id = getattr(website, "embedding_model_id", None)
+            embedding_model_name = getattr(website, "embedding_model_name", None)
+            embedding_model_provider = getattr(
+                website, "embedding_model_provider_type", None
+            )
+            embedding_model_litellm_name = _resolved_litellm_model_name(
+                model_name=embedding_model_name,
+                litellm_model_name=getattr(
+                    website, "embedding_model_litellm_name", None
+                ),
+                provider_type=embedding_model_provider,
+            )
+            input_cost_per_token = getattr(
+                website, "embedding_model_input_cost_per_token", None
+            )
         return cls(
             id=None,
             created_at=None,
@@ -219,13 +254,9 @@ class CrawlRun(Entity):
             failure_summary=None,
             outcome_code=None,
             embedding_model_id=embedding_model_id,
-            embedding_model_name_snapshot=getattr(embedding_model, "name", None),
-            embedding_model_litellm_name_snapshot=getattr(
-                embedding_model, "litellm_model_name", None
-            ),
-            embedding_model_provider_snapshot=getattr(
-                embedding_model, "provider_type", None
-            ),
+            embedding_model_name_snapshot=embedding_model_name,
+            embedding_model_litellm_name_snapshot=embedding_model_litellm_name,
+            embedding_model_provider_snapshot=embedding_model_provider,
             embedding_input_cost_per_token_snapshot=input_cost_per_token,
             embedding_input_tokens=0 if embedding_model_id is not None else None,
             embedding_usage_source=None,

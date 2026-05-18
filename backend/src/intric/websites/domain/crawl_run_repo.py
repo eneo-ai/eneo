@@ -1,11 +1,12 @@
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.orm import aliased, selectinload
+from sqlalchemy.sql.elements import ColumnElement
 
 from intric.audit.infrastructure.audit_log_repo_impl import escape_like
 from intric.database.tables.collections_table import CollectionsTable
@@ -62,7 +63,9 @@ from intric.websites.domain.crawler_website_processing_aggregate import (
     SOURCE_SKIP_DRIFT_MIN_INDEXED,
     CrawlerWebsiteProcessingAggregate,
     CrawlerWebsiteProcessingAggregateItem,
+    CrawlerWebsiteProcessingAggregateSummary,
     CrawlerWebsiteProcessingSort,
+    CrawlerWebsiteProcessingSpaceRollupItem,
     cost_pressure_score,
     parse_update_interval_for_cost_score,
     retention_rate,
@@ -827,6 +830,7 @@ class CrawlRunRepository:
         offset: int,
         tenant_id: UUID | None,
         website_id: UUID | None = None,
+        space_id: UUID | None = None,
         sort: CrawlerWebsiteProcessingSort = (
             CrawlerWebsiteProcessingSort.LOAD_PRESSURE
         ),
@@ -846,12 +850,13 @@ class CrawlRunRepository:
             # detail Dialog uses this to render real per-website
             # history without re-fetching the full tenant-wide top-N.
             base_conditions.append(CrawlRunsTable.website_id == website_id)
+        if space_id is not None:
+            base_conditions.append(Websites.space_id == space_id)
 
-        # ILIKE OR-clause on Websites.name / url. escape_like treats
+        # ILIKE OR-clause on Websites.name / url / owner email. escape_like treats
         # user-typed `%` and `_` as literal characters so a search for
         # "100%" does not silently widen the result set. pg_trgm GIN
-        # indexes on websites.url + websites.name (migration V2-G) keep
-        # the substring scan O(log N).
+        # indexes on websites.url + websites.name keep the website arms indexed.
         has_search = bool(search and search.strip())
         if has_search:
             assert search is not None
@@ -861,6 +866,7 @@ class CrawlRunRepository:
                 sa.or_(
                     Websites.url.ilike(pattern, escape="\\"),
                     Websites.name.ilike(pattern, escape="\\"),
+                    Users.email.ilike(pattern, escape="\\"),
                 )
             )
 
@@ -912,12 +918,33 @@ class CrawlRunRepository:
             sa.outerjoin(
                 sa.outerjoin(
                     sa.outerjoin(
-                        CrawlRunsTable,
-                        Jobs,
-                        CrawlRunsTable.job_id == Jobs.id,
+                        sa.outerjoin(
+                            sa.outerjoin(
+                                sa.outerjoin(
+                                    CrawlRunsTable,
+                                    Jobs,
+                                    CrawlRunsTable.job_id == Jobs.id,
+                                ),
+                                Websites,
+                                CrawlRunsTable.website_id == Websites.id,
+                            ),
+                            Users,
+                            sa.and_(
+                                Users.id == Websites.user_id,
+                                Users.tenant_id == Websites.tenant_id,
+                            ),
+                        ),
+                        Spaces,
+                        sa.and_(
+                            Spaces.id == Websites.space_id,
+                            Spaces.tenant_id == Websites.tenant_id,
+                        ),
                     ),
-                    Websites,
-                    CrawlRunsTable.website_id == Websites.id,
+                    CollectionsTable,
+                    sa.and_(
+                        CollectionsTable.id == Websites.group_id,
+                        CollectionsTable.tenant_id == Websites.tenant_id,
+                    ),
                 ),
                 Tenants,
                 CrawlRunsTable.tenant_id == Tenants.id,
@@ -1004,13 +1031,7 @@ class CrawlRunRepository:
         ) + sa.func.coalesce(sa.func.sum(CrawlRunsTable.files_downloaded), 0)
         indexed_expr = retained_expr + fetched_expr
 
-        # `Any` because SQLAlchemy column-element types don't compose
-        # cleanly through `+`/`<` overloads under pyright strict — the
-        # same untyped-list pattern is used by
-        # `WebsiteAdminRepository.tenant_website_inventory` for its
-        # WHERE conditions. Behaviour is identical; type is the only
-        # difference.
-        having_clauses: list[Any] = []
+        having_clauses: list[ColumnElement[bool]] = []
         if failures_only:
             # A row has failures when either the run-level failure
             # counter is non-zero, or per-item page/file failures were
@@ -1061,9 +1082,17 @@ class CrawlRunRepository:
             sa.select(
                 CrawlRunsTable.website_id.label("website_id"),
                 Websites.name.label("website_name"),
+                Websites.url.label("website_url"),
                 CrawlRunsTable.tenant_id.label("tenant_id"),
                 Tenants.display_name.label("tenant_display_name"),
+                Websites.space_id.label("space_id"),
+                Spaces.name.label("space_name"),
+                Websites.group_id.label("collection_id"),
+                CollectionsTable.name.label("collection_name"),
+                Websites.user_id.label("owner_user_id"),
+                Users.email.label("owner_email"),
                 Websites.update_interval.label("update_interval"),
+                sa.func.coalesce(Websites.size, 0).label("indexed_size_bytes"),
                 total_runs_count,
                 terminal_runs_count,
                 failed_runs_count,
@@ -1084,6 +1113,7 @@ class CrawlRunRepository:
                 latest_run_subquery.c.latest_embedding_total_cost_usd,
                 latest_run_subquery.c.latest_embedding_usage_source,
                 indexed_content_count,
+                cost_pressure_for_ordering.label("cost_pressure_score_for_ordering"),
                 latest_run_at,
             )
             .select_from(rows_from)
@@ -1091,9 +1121,17 @@ class CrawlRunRepository:
             .group_by(
                 CrawlRunsTable.website_id,
                 Websites.name,
+                Websites.url,
                 CrawlRunsTable.tenant_id,
                 Tenants.display_name,
+                Websites.space_id,
+                Spaces.name,
+                Websites.group_id,
+                CollectionsTable.name,
+                Websites.user_id,
+                Users.email,
                 Websites.update_interval,
+                Websites.size,
                 latest_run_subquery.c.latest_embedding_model_name_snapshot,
                 latest_run_subquery.c.latest_embedding_model_litellm_name_snapshot,
                 latest_run_subquery.c.latest_embedding_model_provider_snapshot,
@@ -1105,17 +1143,221 @@ class CrawlRunRepository:
         if having_clauses:
             aggregated_stmt = aggregated_stmt.having(*having_clauses)
 
-        # COUNT(*) over the aggregated set: subquery-wrap so HAVING
-        # and search filters are honoured. Two executions of the same
-        # aggregation (count + rows) are the trade-off; the cheaper
-        # `count(*) over ()` window-function alternative returns
-        # `total = 0` on empty pages past the end, which the operator
-        # paginator must not see. If profiling shows the double
-        # aggregation as a real cost, swap to window-fn + scalar
-        # fallback for the empty-page case (see codex review notes
-        # captured in the PR description).
-        total_stmt = sa.select(sa.func.count()).select_from(aggregated_stmt.subquery())
-        total = int(await self.session.scalar(total_stmt) or 0)
+        aggregate_scope = aggregated_stmt.subquery()
+        scope_retained_count = (
+            aggregate_scope.c.pages_hash_retained
+            + aggregate_scope.c.files_hash_retained
+            + aggregate_scope.c.pages_source_retained
+        )
+        scope_failed_item_count = (
+            aggregate_scope.c.pages_failed + aggregate_scope.c.files_failed
+        )
+        scope_low_retention = sa.and_(
+            aggregate_scope.c.indexed_content_count > 0,
+            scope_retained_count
+            < (LOW_RETENTION_THRESHOLD * aggregate_scope.c.indexed_content_count),
+        )
+        scope_source_skip_drift = sa.and_(
+            aggregate_scope.c.indexed_content_count >= SOURCE_SKIP_DRIFT_MIN_INDEXED,
+            aggregate_scope.c.pages_source_retained == 0,
+        )
+        scope_requires_action = sa.case(
+            (
+                sa.or_(
+                    aggregate_scope.c.failed_runs > 0,
+                    scope_failed_item_count > 0,
+                    aggregate_scope.c.files_too_large_skipped > 0,
+                    scope_low_retention,
+                    scope_source_skip_drift,
+                ),
+                1,
+            ),
+            else_=0,
+        )
+        summary_stmt = sa.select(
+            sa.func.count().label("website_count"),
+            sa.func.coalesce(sa.func.sum(aggregate_scope.c.total_runs), 0).label(
+                "total_runs"
+            ),
+            sa.func.coalesce(sa.func.sum(aggregate_scope.c.terminal_runs), 0).label(
+                "terminal_runs"
+            ),
+            sa.func.coalesce(sa.func.sum(aggregate_scope.c.failed_runs), 0).label(
+                "failed_runs"
+            ),
+            sa.func.coalesce(sa.func.sum(aggregate_scope.c.pages_crawled), 0).label(
+                "pages_crawled"
+            ),
+            sa.func.coalesce(sa.func.sum(aggregate_scope.c.files_downloaded), 0).label(
+                "files_downloaded"
+            ),
+            sa.func.coalesce(sa.func.sum(scope_retained_count), 0).label(
+                "retained_content_count"
+            ),
+            sa.func.coalesce(
+                sa.func.sum(aggregate_scope.c.files_too_large_skipped), 0
+            ).label("files_too_large_skipped"),
+            sa.func.coalesce(sa.func.sum(scope_failed_item_count), 0).label(
+                "failed_item_count"
+            ),
+            sa.func.coalesce(
+                sa.func.sum(aggregate_scope.c.indexed_size_bytes), 0
+            ).label("indexed_size_bytes"),
+            sa.func.sum(aggregate_scope.c.embedding_input_tokens).label(
+                "embedding_input_tokens"
+            ),
+            sa.func.sum(aggregate_scope.c.embedding_total_cost_usd).label(
+                "embedding_total_cost_usd"
+            ),
+            sa.func.coalesce(sa.func.sum(scope_requires_action), 0).label(
+                "action_required_count"
+            ),
+        ).select_from(aggregate_scope)
+        summary_row = (await self.session.execute(summary_stmt)).mappings().one()
+        summary = CrawlerWebsiteProcessingAggregateSummary(
+            website_count=int(summary_row["website_count"]),
+            total_runs=int(summary_row["total_runs"]),
+            terminal_runs=int(summary_row["terminal_runs"]),
+            failed_runs=int(summary_row["failed_runs"]),
+            pages_crawled=int(summary_row["pages_crawled"]),
+            files_downloaded=int(summary_row["files_downloaded"]),
+            retained_content_count=int(summary_row["retained_content_count"]),
+            files_too_large_skipped=int(summary_row["files_too_large_skipped"]),
+            failed_item_count=int(summary_row["failed_item_count"]),
+            indexed_size_bytes=int(summary_row["indexed_size_bytes"]),
+            embedding_input_tokens=_optional_int(summary_row["embedding_input_tokens"]),
+            embedding_total_cost_usd=_optional_decimal(
+                summary_row["embedding_total_cost_usd"]
+            ),
+            action_required_count=int(summary_row["action_required_count"]),
+        )
+
+        space_retained_count = sa.func.coalesce(sa.func.sum(scope_retained_count), 0)
+        space_indexed_content_count = sa.func.coalesce(
+            sa.func.sum(aggregate_scope.c.indexed_content_count), 0
+        )
+        space_failed_item_count = sa.func.coalesce(
+            sa.func.sum(scope_failed_item_count), 0
+        )
+        space_latest_run_at = sa.func.max(aggregate_scope.c.latest_run_at)
+        space_embedding_tokens = sa.func.sum(aggregate_scope.c.embedding_input_tokens)
+        space_indexed_size = sa.func.coalesce(
+            sa.func.sum(aggregate_scope.c.indexed_size_bytes), 0
+        )
+        space_total_runs = sa.func.coalesce(
+            sa.func.sum(aggregate_scope.c.total_runs), 0
+        )
+        if sort is CrawlerWebsiteProcessingSort.FAILURES:
+            space_rollup_order_by = (
+                (
+                    sa.func.coalesce(sa.func.sum(aggregate_scope.c.failed_runs), 0)
+                    + space_failed_item_count
+                ).desc(),
+                space_latest_run_at.desc(),
+                aggregate_scope.c.space_name.asc().nulls_last(),
+            )
+        elif sort is CrawlerWebsiteProcessingSort.RUNS:
+            space_rollup_order_by = (
+                space_total_runs.desc(),
+                space_latest_run_at.desc(),
+                aggregate_scope.c.space_name.asc().nulls_last(),
+            )
+        elif sort is CrawlerWebsiteProcessingSort.TOKENS:
+            space_rollup_order_by = (
+                sa.func.coalesce(space_embedding_tokens, 0).desc(),
+                space_latest_run_at.desc(),
+                aggregate_scope.c.space_name.asc().nulls_last(),
+            )
+        elif sort is CrawlerWebsiteProcessingSort.INDEXED_SIZE:
+            space_rollup_order_by = (
+                space_indexed_size.desc(),
+                space_latest_run_at.desc(),
+                aggregate_scope.c.space_name.asc().nulls_last(),
+            )
+        elif sort is CrawlerWebsiteProcessingSort.LOW_RETENTION:
+            space_retention_for_ordering = sa.case(
+                (
+                    space_indexed_content_count > 0,
+                    space_retained_count
+                    / sa.func.nullif(space_indexed_content_count, 0),
+                ),
+                else_=1.0,
+            )
+            space_rollup_order_by = (
+                space_retention_for_ordering.asc(),
+                (
+                    sa.func.coalesce(sa.func.sum(aggregate_scope.c.pages_crawled), 0)
+                    + sa.func.coalesce(
+                        sa.func.sum(aggregate_scope.c.files_downloaded), 0
+                    )
+                ).desc(),
+                aggregate_scope.c.space_name.asc().nulls_last(),
+            )
+        elif sort is CrawlerWebsiteProcessingSort.RECENT:
+            space_rollup_order_by = (
+                space_latest_run_at.desc(),
+                aggregate_scope.c.space_name.asc().nulls_last(),
+            )
+        else:
+            space_rollup_order_by = (
+                sa.func.coalesce(
+                    sa.func.sum(aggregate_scope.c.cost_pressure_score_for_ordering), 0
+                ).desc(),
+                (
+                    sa.func.coalesce(sa.func.sum(aggregate_scope.c.pages_crawled), 0)
+                    + sa.func.coalesce(
+                        sa.func.sum(aggregate_scope.c.files_downloaded), 0
+                    )
+                ).desc(),
+                aggregate_scope.c.space_name.asc().nulls_last(),
+            )
+
+        space_rollup_stmt = (
+            sa.select(
+                aggregate_scope.c.space_id,
+                aggregate_scope.c.space_name,
+                sa.func.count().label("website_count"),
+                space_total_runs.label("total_runs"),
+                sa.func.coalesce(sa.func.sum(aggregate_scope.c.pages_crawled), 0).label(
+                    "pages_crawled"
+                ),
+                sa.func.coalesce(
+                    sa.func.sum(aggregate_scope.c.files_downloaded), 0
+                ).label("files_downloaded"),
+                space_indexed_size.label("indexed_size_bytes"),
+                space_embedding_tokens.label("embedding_input_tokens"),
+                sa.func.sum(aggregate_scope.c.embedding_total_cost_usd).label(
+                    "embedding_total_cost_usd"
+                ),
+                sa.func.coalesce(sa.func.sum(scope_requires_action), 0).label(
+                    "action_required_count"
+                ),
+                space_latest_run_at.label("latest_run_at"),
+            )
+            .select_from(aggregate_scope)
+            .group_by(aggregate_scope.c.space_id, aggregate_scope.c.space_name)
+            .order_by(*space_rollup_order_by)
+            .limit(5)
+        )
+        space_rollup_result = await self.session.execute(space_rollup_stmt)
+        space_rollup = tuple(
+            CrawlerWebsiteProcessingSpaceRollupItem(
+                space_id=row["space_id"],
+                space_name=row["space_name"],
+                website_count=int(row["website_count"]),
+                total_runs=int(row["total_runs"]),
+                pages_crawled=int(row["pages_crawled"]),
+                files_downloaded=int(row["files_downloaded"]),
+                indexed_size_bytes=int(row["indexed_size_bytes"]),
+                embedding_input_tokens=_optional_int(row["embedding_input_tokens"]),
+                embedding_total_cost_usd=_optional_decimal(
+                    row["embedding_total_cost_usd"]
+                ),
+                action_required_count=int(row["action_required_count"]),
+                latest_run_at=row["latest_run_at"],
+            )
+            for row in space_rollup_result.mappings()
+        )
 
         if sort is CrawlerWebsiteProcessingSort.FAILURES:
             order_by = (
@@ -1129,6 +1371,33 @@ class CrawlRunRepository:
         elif sort is CrawlerWebsiteProcessingSort.RUNS:
             order_by = (
                 total_runs_count.desc(),
+                CrawlRunsTable.website_id.asc(),
+            )
+        elif sort is CrawlerWebsiteProcessingSort.TOKENS:
+            order_by = (
+                sa.func.coalesce(
+                    sa.func.sum(CrawlRunsTable.embedding_input_tokens), 0
+                ).desc(),
+                latest_run_at.desc(),
+                CrawlRunsTable.website_id.asc(),
+            )
+        elif sort is CrawlerWebsiteProcessingSort.INDEXED_SIZE:
+            order_by = (
+                sa.func.coalesce(Websites.size, 0).desc(),
+                latest_run_at.desc(),
+                CrawlRunsTable.website_id.asc(),
+            )
+        elif sort is CrawlerWebsiteProcessingSort.LOW_RETENTION:
+            retention_for_ordering = sa.case(
+                (
+                    indexed_expr > 0,
+                    retained_expr / sa.func.nullif(indexed_expr, 0),
+                ),
+                else_=1.0,
+            )
+            order_by = (
+                retention_for_ordering.asc(),
+                throughput.desc(),
                 CrawlRunsTable.website_id.asc(),
             )
         elif sort is CrawlerWebsiteProcessingSort.RECENT:
@@ -1163,9 +1432,18 @@ class CrawlRunRepository:
                 CrawlerWebsiteProcessingAggregateItem(
                     website_id=row["website_id"],
                     website_name=row["website_name"],
+                    website_url=str(row["website_url"]),
                     tenant_id=row["tenant_id"],
                     tenant_display_name=row["tenant_display_name"],
+                    space_id=row["space_id"],
+                    space_name=row["space_name"],
+                    collection_id=row["collection_id"],
+                    collection_name=row["collection_name"],
+                    owner_user_id=row["owner_user_id"],
+                    owner_email=row["owner_email"],
                     update_interval=update_interval,
+                    indexed_size_bytes=int(row["indexed_size_bytes"]),
+                    latest_run_at=row["latest_run_at"],
                     total_runs=int(row["total_runs"]),
                     terminal_runs=int(row["terminal_runs"]),
                     failed_runs=int(row["failed_runs"]),
@@ -1215,7 +1493,9 @@ class CrawlRunRepository:
 
         return CrawlerWebsiteProcessingAggregate(
             items=tuple(items),
-            total=total,
+            summary=summary,
+            space_rollup=space_rollup,
+            total=summary.website_count,
             limit=limit,
             offset=offset,
             days=days,
@@ -1234,6 +1514,7 @@ class CrawlRunRepository:
         offset: int,
         tenant_id: UUID,
         website_id: UUID | None = None,
+        space_id: UUID | None = None,
         sort: CrawlerWebsiteProcessingSort = (
             CrawlerWebsiteProcessingSort.LOAD_PRESSURE
         ),
@@ -1250,6 +1531,7 @@ class CrawlRunRepository:
             offset=offset,
             tenant_id=tenant_id,
             website_id=website_id,
+            space_id=space_id,
             sort=sort,
             failures_only=failures_only,
             low_retention_only=low_retention_only,

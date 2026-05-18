@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Literal
 
 from intric.files.chunk_embedding_list import ChunkEmbeddingList
@@ -10,6 +11,7 @@ EmbeddingUsageSource = Literal["provider_reported", "missing"]
 class EmbeddingUsage:
     prompt_tokens: int | None
     total_tokens: int | None
+    cost_usd: Decimal | None
     source: EmbeddingUsageSource
 
 

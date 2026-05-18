@@ -11,6 +11,7 @@
   import ModelNameAndVendor from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import { formatNumber } from "$lib/core/formatting/formatNumber";
   import { m } from "$lib/paraglide/messages";
+  import { getLocale } from "$lib/paraglide/runtime";
 
   export let tokenStats: TokenUsageSummary;
 
@@ -23,6 +24,39 @@
   $: visibleItems = showAllItems ? models : models.slice(0, 10);
 
   const table = Table.createWithResource(visibleItems);
+
+  function sourceTypeLabel(sourceType: string): string {
+    switch (sourceType) {
+      case "chat":
+        return m.token_usage_source_chat();
+      case "app_run":
+        return m.token_usage_source_app_run();
+      case "crawler_embedding":
+        return m.token_usage_source_crawler_embedding();
+      default:
+        return sourceType;
+    }
+  }
+
+  function sourceTypesLabel(sourceTypes: string[]): string {
+    if (sourceTypes.length === 0) return "—";
+    return sourceTypes.map(sourceTypeLabel).join(", ");
+  }
+
+  function formatUsdCost(value: string | null | undefined): string {
+    if (!value) return "—";
+    return new Intl.NumberFormat(getLocale(), {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 6
+    }).format(Number(value));
+  }
+
+  function costLabel(item: TokenUsageSummary["models"][number]): string {
+    if (item.total_cost_usd) return formatUsdCost(item.total_cost_usd);
+    if (item.cost_trackable_token_usage > 0) return m.token_usage_cost_missing();
+    return m.token_usage_cost_not_applicable();
+  }
 
   const viewModel = table.createViewModel([
     table.columnPrimary({
@@ -53,9 +87,22 @@
     }),
 
     table.column({
+      header: m.usage_source(),
+      accessor: "source_types",
+      cell: (item) => sourceTypesLabel(item.value)
+    }),
+
+    table.column({
       header: m.total_tokens(),
       accessor: "total_token_usage",
       cell: (item) => formatNumber(item.value)
+    }),
+
+    table.column({
+      header: m.usage_cost(),
+      id: "usage-cost",
+      accessor: (item) => item,
+      cell: (item) => costLabel(item.value)
     })
   ]);
 

@@ -6,7 +6,10 @@ import {
   formatCrawlerPercent,
   formatCrawlerUsdCost
 } from "./crawlerNumberFormat";
-import { getCrawlerScheduledIntervalLabel } from "./crawlerScheduledAggregate";
+import {
+  formatCrawlerScheduledIndexedSize,
+  getCrawlerScheduledIntervalLabel
+} from "./crawlerScheduledAggregate";
 
 export type CrawlerTenantWebsiteProcessingAggregateResponse =
   components["schemas"]["CrawlerTenantWebsiteProcessingAggregateResponse"];
@@ -58,6 +61,9 @@ export function isCrawlerWebsiteProcessingTimeWindow(
 
 export const CRAWLER_WEBSITE_PROCESSING_SORT_OPTIONS: readonly CrawlerWebsiteProcessingSort[] = [
   "load_pressure",
+  "tokens",
+  "indexed_size",
+  "low_retention",
   "failures",
   "runs",
   "recent"
@@ -67,6 +73,12 @@ export function getCrawlerWebsiteProcessingSortLabel(sort: CrawlerWebsiteProcess
   switch (sort) {
     case "load_pressure":
       return m.crawler_website_processing_sort_load_pressure();
+    case "tokens":
+      return m.crawler_website_processing_sort_tokens();
+    case "indexed_size":
+      return m.crawler_website_processing_sort_indexed_size();
+    case "low_retention":
+      return m.crawler_website_processing_sort_low_retention();
     case "failures":
       return m.crawler_website_processing_sort_failures();
     case "runs":
@@ -95,10 +107,38 @@ export function getCrawlerWebsiteProcessingWebsiteLabel(
 ): string {
   const websiteName = item.website_name?.trim();
   if (websiteName) return websiteName;
+  const websiteUrl = item.website_url?.trim();
+  if (websiteUrl) return websiteUrl;
 
   return m.crawler_website_processing_unknown_website({
     id: item.website_id.slice(0, 8)
   });
+}
+
+export function getCrawlerWebsiteProcessingUrlLabel(
+  item: CrawlerTenantWebsiteProcessingAggregateItem
+): string {
+  return item.website_url?.trim() || item.website_name?.trim() || `#${item.website_id.slice(0, 8)}`;
+}
+
+export function getCrawlerWebsiteProcessingOwnerLabel(
+  item: CrawlerTenantWebsiteProcessingAggregateItem
+): string {
+  return item.owner_email?.trim() || m.crawler_website_processing_owner_unknown();
+}
+
+export function getCrawlerWebsiteProcessingSpaceLabel(
+  item: CrawlerTenantWebsiteProcessingAggregateItem
+): string {
+  const parts = [item.space_name?.trim(), item.collection_name?.trim()].filter(Boolean);
+  if (parts.length === 0) return m.crawler_website_processing_space_unknown();
+  return parts.join(" › ");
+}
+
+export function getCrawlerWebsiteProcessingIndexedSizeLabel(
+  item: CrawlerTenantWebsiteProcessingAggregateItem
+): string {
+  return formatCrawlerScheduledIndexedSize(item.indexed_size_bytes);
 }
 
 export function getCrawlerWebsiteProcessingTotalLabel(
@@ -133,6 +173,15 @@ export function getCrawlerWebsiteProcessingLoadPressureLabel(
   });
 }
 
+export function getCrawlerWebsiteProcessingScheduleLabel(
+  item: CrawlerTenantWebsiteProcessingAggregateItem
+): string {
+  if (item.update_interval === null) {
+    return m.crawler_website_processing_unknown_interval();
+  }
+  return getCrawlerScheduledIntervalLabel(item.update_interval);
+}
+
 export function getCrawlerWebsiteProcessingRetainedLabel(
   item: CrawlerTenantWebsiteProcessingAggregateItem
 ): string {
@@ -140,6 +189,14 @@ export function getCrawlerWebsiteProcessingRetainedLabel(
   return m.crawler_website_processing_retained({
     retained: formatCrawlerCount(retained),
     tooLarge: formatCrawlerCount(item.files_too_large_skipped)
+  });
+}
+
+export function getCrawlerWebsiteProcessingReuseLabel(
+  item: CrawlerTenantWebsiteProcessingAggregateItem
+): string {
+  return m.crawler_website_processing_reuse_rate({
+    retentionRate: formatCrawlerPercent(item.retention_rate)
   });
 }
 
@@ -230,6 +287,51 @@ export function getCrawlerWebsiteProcessingLatestRunUsageSourceLabel(
     default:
       return m.crawler_website_processing_embedding_usage_source_legacy();
   }
+}
+
+export type CrawlerWebsiteProcessingHealthSignal = "healthy" | "failure" | "waste" | "too_large";
+
+export function getCrawlerWebsiteProcessingHealthSignal(
+  item: CrawlerTenantWebsiteProcessingAggregateItem,
+  thresholds: {
+    lowRetentionThreshold?: number;
+    sourceSkipDriftMinIndexed?: number;
+  } = {}
+): { state: CrawlerWebsiteProcessingHealthSignal; label: string; detail: string } {
+  const failureLabel = getCrawlerWebsiteProcessingFailureLabel(item);
+  if (failureLabel) {
+    return {
+      state: "failure",
+      label: m.crawler_website_processing_health_failure(),
+      detail: failureLabel
+    };
+  }
+  if (item.files_too_large_skipped > 0) {
+    return {
+      state: "too_large",
+      label: m.crawler_website_processing_health_too_large(),
+      detail: m.crawler_website_processing_too_large_detail({
+        count: formatCrawlerCount(item.files_too_large_skipped)
+      })
+    };
+  }
+  if (
+    isCrawlerWebsiteProcessingLowRetention(item, thresholds.lowRetentionThreshold) ||
+    isCrawlerWebsiteProcessingSourceSkipDrift(item, thresholds.sourceSkipDriftMinIndexed)
+  ) {
+    return {
+      state: "waste",
+      label: m.crawler_website_processing_health_waste(),
+      detail: isCrawlerWebsiteProcessingSourceSkipDrift(item, thresholds.sourceSkipDriftMinIndexed)
+        ? m.crawler_website_processing_source_skip_drift_badge()
+        : m.crawler_website_processing_low_retention_badge()
+    };
+  }
+  return {
+    state: "healthy",
+    label: m.crawler_website_processing_health_healthy(),
+    detail: m.crawler_website_processing_health_healthy_detail()
+  };
 }
 
 /**

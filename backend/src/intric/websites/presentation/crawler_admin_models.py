@@ -53,6 +53,9 @@ from intric.websites.domain.crawler_website_processing_aggregate import (
 from intric.websites.domain.crawler_website_processing_aggregate import (
     CrawlerWebsiteProcessingAggregateItem as DomainCrawlerWebsiteProcessingAggregateItem,
 )
+from intric.websites.domain.crawler_website_processing_aggregate import (
+    CrawlerWebsiteProcessingSpaceRollupItem as DomainCrawlerWebsiteProcessingSpaceRollupItem,
+)
 from intric.websites.domain.website import UpdateInterval
 
 
@@ -427,7 +430,16 @@ class CrawlerScheduledAggregateResponse(BaseModel):
 class CrawlerTenantWebsiteProcessingAggregateItem(BaseModel):
     website_id: UUID
     website_name: str | None
+    website_url: str
+    space_id: UUID | None
+    space_name: str | None
+    collection_id: UUID | None
+    collection_name: str | None
+    owner_user_id: UUID | None
+    owner_email: str | None
     update_interval: UpdateInterval | None
+    indexed_size_bytes: int = Field(ge=0)
+    latest_run_at: datetime | None
     total_runs: int = Field(ge=0)
     terminal_runs: int = Field(ge=0)
     failed_runs: int = Field(ge=0)
@@ -479,7 +491,16 @@ class CrawlerTenantWebsiteProcessingAggregateItem(BaseModel):
         return cls(
             website_id=item.website_id,
             website_name=item.website_name,
+            website_url=item.website_url,
+            space_id=item.space_id,
+            space_name=item.space_name,
+            collection_id=item.collection_id,
+            collection_name=item.collection_name,
+            owner_user_id=item.owner_user_id,
+            owner_email=item.owner_email,
             update_interval=item.update_interval,
+            indexed_size_bytes=item.indexed_size_bytes,
+            latest_run_at=item.latest_run_at,
             total_runs=item.total_runs,
             terminal_runs=item.terminal_runs,
             failed_runs=item.failed_runs,
@@ -520,6 +541,83 @@ class CrawlerTenantWebsiteProcessingAggregateItem(BaseModel):
         )
 
 
+class CrawlerTenantWebsiteProcessingAggregateSummary(BaseModel):
+    website_count: int = Field(ge=0)
+    total_runs: int = Field(ge=0)
+    terminal_runs: int = Field(ge=0)
+    failed_runs: int = Field(ge=0)
+    pages_crawled: int = Field(ge=0)
+    files_downloaded: int = Field(ge=0)
+    retained_content_count: int = Field(ge=0)
+    files_too_large_skipped: int = Field(ge=0)
+    failed_item_count: int = Field(ge=0)
+    indexed_size_bytes: int = Field(ge=0)
+    embedding_input_tokens: int | None = Field(default=None, ge=0)
+    embedding_total_cost_usd: str | None = None
+    action_required_count: int = Field(ge=0)
+
+    @classmethod
+    def from_domain(
+        cls, aggregate: DomainCrawlerWebsiteProcessingAggregate
+    ) -> "CrawlerTenantWebsiteProcessingAggregateSummary":
+        summary = aggregate.summary
+        return cls(
+            website_count=summary.website_count,
+            total_runs=summary.total_runs,
+            terminal_runs=summary.terminal_runs,
+            failed_runs=summary.failed_runs,
+            pages_crawled=summary.pages_crawled,
+            files_downloaded=summary.files_downloaded,
+            retained_content_count=summary.retained_content_count,
+            files_too_large_skipped=summary.files_too_large_skipped,
+            failed_item_count=summary.failed_item_count,
+            indexed_size_bytes=summary.indexed_size_bytes,
+            embedding_input_tokens=summary.embedding_input_tokens,
+            embedding_total_cost_usd=(
+                str(summary.embedding_total_cost_usd)
+                if summary.embedding_total_cost_usd is not None
+                else None
+            ),
+            action_required_count=summary.action_required_count,
+        )
+
+
+class CrawlerTenantWebsiteProcessingSpaceRollupItem(BaseModel):
+    space_id: UUID | None
+    space_name: str | None
+    website_count: int = Field(ge=0)
+    total_runs: int = Field(ge=0)
+    pages_crawled: int = Field(ge=0)
+    files_downloaded: int = Field(ge=0)
+    indexed_size_bytes: int = Field(ge=0)
+    embedding_input_tokens: int | None = Field(default=None, ge=0)
+    embedding_total_cost_usd: str | None = None
+    action_required_count: int = Field(ge=0)
+    latest_run_at: datetime | None
+
+    @classmethod
+    def from_domain(
+        cls, item: DomainCrawlerWebsiteProcessingSpaceRollupItem
+    ) -> "CrawlerTenantWebsiteProcessingSpaceRollupItem":
+        return cls(
+            space_id=item.space_id,
+            space_name=item.space_name,
+            website_count=item.website_count,
+            total_runs=item.total_runs,
+            pages_crawled=item.pages_crawled,
+            files_downloaded=item.files_downloaded,
+            indexed_size_bytes=item.indexed_size_bytes,
+            embedding_input_tokens=item.embedding_input_tokens,
+            embedding_total_cost_usd=(
+                str(item.embedding_total_cost_usd)
+                if item.embedding_total_cost_usd is not None
+                else None
+            ),
+            action_required_count=item.action_required_count,
+            latest_run_at=item.latest_run_at,
+        )
+
+
 class CrawlerTenantWebsiteProcessingAggregateResponse(BaseModel):
     """Aggregate response for the Aktivitet tab.
 
@@ -531,6 +629,8 @@ class CrawlerTenantWebsiteProcessingAggregateResponse(BaseModel):
     """
 
     items: list[CrawlerTenantWebsiteProcessingAggregateItem]
+    summary: CrawlerTenantWebsiteProcessingAggregateSummary
+    space_rollup: list[CrawlerTenantWebsiteProcessingSpaceRollupItem]
     total: int = Field(ge=0)
     limit: int = Field(ge=1, le=200)
     offset: int = Field(ge=0)
@@ -553,6 +653,13 @@ class CrawlerTenantWebsiteProcessingAggregateResponse(BaseModel):
             items=[
                 CrawlerTenantWebsiteProcessingAggregateItem.from_domain(item)
                 for item in aggregate.items
+            ],
+            summary=CrawlerTenantWebsiteProcessingAggregateSummary.from_domain(
+                aggregate
+            ),
+            space_rollup=[
+                CrawlerTenantWebsiteProcessingSpaceRollupItem.from_domain(item)
+                for item in aggregate.space_rollup
             ],
             total=aggregate.total,
             limit=aggregate.limit,

@@ -39,9 +39,6 @@ Why CONCURRENTLY:
   `202605161430_websites_admin_inventory_indexes.py:22-25,58-70`
   which already takes the autocommit-block + concurrent-create path
   on the same table.
-- Codex pre-merge review (gpt-5.5/high) flagged the previous
-  non-concurrent shape as the only HIGH finding on this slice; this
-  edit lands the AB recommendation directly.
 
 If a deployment is interrupted while PostgreSQL is building these
 concurrent indexes, operators should `DROP INDEX CONCURRENTLY IF

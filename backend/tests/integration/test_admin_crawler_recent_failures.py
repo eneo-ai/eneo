@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
@@ -78,6 +79,12 @@ async def _create_crawl_run(
     created_at: datetime,
     outcome_code: CrawlOutcomeCode | None,
     failure_summary: dict[str, int] | None = None,
+    embedding_model_name_snapshot: str | None = None,
+    embedding_model_litellm_name_snapshot: str | None = None,
+    embedding_model_provider_snapshot: str | None = None,
+    embedding_input_tokens: int | None = None,
+    embedding_total_cost_usd: Decimal | None = None,
+    embedding_usage_source: str | None = None,
 ) -> CrawlRuns:
     crawl_run = CrawlRuns(
         id=uuid4(),
@@ -96,6 +103,12 @@ async def _create_crawl_run(
         files_too_large_skipped=0,
         outcome_code=outcome_code.value if outcome_code is not None else None,
         failure_summary=failure_summary,
+        embedding_model_name_snapshot=embedding_model_name_snapshot,
+        embedding_model_litellm_name_snapshot=embedding_model_litellm_name_snapshot,
+        embedding_model_provider_snapshot=embedding_model_provider_snapshot,
+        embedding_input_tokens=embedding_input_tokens,
+        embedding_total_cost_usd=embedding_total_cost_usd,
+        embedding_usage_source=embedding_usage_source,
     )
     session.add(crawl_run)
     await session.flush()
@@ -172,6 +185,12 @@ async def test_admin_crawler_recent_failures_is_scoped_to_current_tenant(
                 FailureReason.DB_ERROR.value: 2,
                 "LEGACY_UNKNOWN": 3,
             },
+            embedding_model_name_snapshot="text-embedding-3-small",
+            embedding_model_litellm_name_snapshot="openai/text-embedding-3-small",
+            embedding_model_provider_snapshot="openai",
+            embedding_input_tokens=17,
+            embedding_total_cost_usd=Decimal("0.000000340000"),
+            embedding_usage_source="provider_reported",
         )
         other_job = await _create_job(
             session,
@@ -201,7 +220,16 @@ async def test_admin_crawler_recent_failures_is_scoped_to_current_tenant(
     data = response.json()
     assert data["total"] == 1
     assert [item["crawl_run_id"] for item in data["items"]] == [str(own_run_id)]
-    assert data["items"][0]["failure_summary"] == {FailureReason.DB_ERROR.value: 2}
+    item = data["items"][0]
+    assert item["failure_summary"] == {FailureReason.DB_ERROR.value: 2}
+    assert item["embedding_model_name_snapshot"] == "text-embedding-3-small"
+    assert item["embedding_model_litellm_name_snapshot"] == (
+        "openai/text-embedding-3-small"
+    )
+    assert item["embedding_model_provider_snapshot"] == "openai"
+    assert item["embedding_input_tokens"] == 17
+    assert Decimal(item["embedding_total_cost_usd"]) == Decimal("0.000000340000")
+    assert item["embedding_usage_source"] == "provider_reported"
     assert str(other_run_id) not in {item["crawl_run_id"] for item in data["items"]}
 
 

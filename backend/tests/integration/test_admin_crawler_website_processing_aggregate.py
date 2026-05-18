@@ -6,7 +6,9 @@ import pytest
 import sqlalchemy as sa
 
 from intric.database.tables.ai_models_table import EmbeddingModels
+from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.job_table import Jobs
+from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.websites_table import CrawlRuns, Websites
 from intric.jobs.job_models import Task
 from intric.main.models import Status
@@ -28,6 +30,9 @@ async def _create_website(
     embedding_model_id: UUID,
     name: str | None,
     update_interval: UpdateInterval = UpdateInterval.NEVER,
+    size: int = 0,
+    space_id: UUID | None = None,
+    group_id: UUID | None = None,
 ) -> Websites:
     website = Websites(
         id=uuid4(),
@@ -36,10 +41,12 @@ async def _create_website(
         download_files=True,
         crawl_type=CrawlType.CRAWL,
         update_interval=update_interval,
-        size=0,
+        size=size,
         tenant_id=tenant_id,
         user_id=user_id,
         embedding_model_id=embedding_model_id,
+        space_id=space_id,
+        group_id=group_id,
     )
     session.add(website)
     await session.flush()
@@ -142,6 +149,32 @@ async def test_admin_crawler_website_processing_aggregate_is_tenant_scoped(
 
     async with db_session() as session:
         embedding_model_id = await _embedding_model_id(session)
+        org_space_id = await session.scalar(
+            sa.select(Spaces.id).where(
+                Spaces.tenant_id == admin_user.tenant_id,
+                Spaces.user_id.is_(None),
+                Spaces.tenant_space_id.is_(None),
+            )
+        )
+        assert org_space_id is not None
+        space = Spaces(
+            name="Crawler governance space",
+            description="Crawler governance test space",
+            tenant_id=admin_user.tenant_id,
+            tenant_space_id=org_space_id,
+        )
+        session.add(space)
+        await session.flush()
+        collection = CollectionsTable(
+            name="Crawler governance collection",
+            size=0,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            embedding_model_id=embedding_model_id,
+            space_id=space.id,
+        )
+        session.add(collection)
+        await session.flush()
         website = await _create_website(
             session,
             tenant_id=admin_user.tenant_id,
@@ -149,6 +182,9 @@ async def test_admin_crawler_website_processing_aggregate_is_tenant_scoped(
             embedding_model_id=embedding_model_id,
             name="Expensive crawler website",
             update_interval=UpdateInterval.DAILY,
+            size=123_456,
+            space_id=space.id,
+            group_id=collection.id,
         )
         other_website = await _create_website(
             session,
@@ -224,6 +260,9 @@ async def test_admin_crawler_website_processing_aggregate_is_tenant_scoped(
             pages_crawled=99,
         )
         website_id = website.id
+        website_url = website.url
+        space_id = space.id
+        collection_id = collection.id
         other_website_id = other_website.id
         await session.commit()
 
@@ -242,6 +281,35 @@ async def test_admin_crawler_website_processing_aggregate_is_tenant_scoped(
     assert data["low_retention_threshold"] == 0.5
     assert data["source_skip_drift_min_indexed"] == 50
     assert "tenant_id" not in data
+    assert data["summary"] == {
+        "website_count": 2,
+        "total_runs": 3,
+        "terminal_runs": 3,
+        "failed_runs": 1,
+        "pages_crawled": 11,
+        "files_downloaded": 2,
+        "retained_content_count": 13,
+        "files_too_large_skipped": 3,
+        "failed_item_count": 3,
+        "indexed_size_bytes": 123_456,
+        "embedding_input_tokens": 125,
+        "embedding_total_cost_usd": "0.000012500000",
+        "action_required_count": 1,
+    }
+    assert len(data["space_rollup"]) == 2
+    primary_space = data["space_rollup"][0]
+    assert primary_space["space_id"] == str(space_id)
+    assert primary_space["space_name"] == "Crawler governance space"
+    assert primary_space["website_count"] == 1
+    assert primary_space["total_runs"] == 2
+    assert primary_space["pages_crawled"] == 11
+    assert primary_space["files_downloaded"] == 2
+    assert primary_space["indexed_size_bytes"] == 123_456
+    assert primary_space["embedding_input_tokens"] == 125
+    assert primary_space["embedding_total_cost_usd"] == "0.000012500000"
+    assert primary_space["action_required_count"] == 1
+    assert primary_space["latest_run_at"] is not None
+    assert data["space_rollup"][1]["space_id"] is None
     assert [item["website_id"] for item in data["items"]] == [
         str(website_id),
         str(other_website_id),
@@ -249,6 +317,15 @@ async def test_admin_crawler_website_processing_aggregate_is_tenant_scoped(
 
     primary = data["items"][0]
     assert primary["website_name"] == "Expensive crawler website"
+    assert primary["website_url"] == website_url
+    assert primary["space_id"] == str(space_id)
+    assert primary["space_name"] == "Crawler governance space"
+    assert primary["collection_id"] == str(collection_id)
+    assert primary["collection_name"] == "Crawler governance collection"
+    assert primary["owner_user_id"] == str(admin_user.id)
+    assert primary["owner_email"] == admin_user.email
+    assert primary["indexed_size_bytes"] == 123_456
+    assert primary["latest_run_at"] is not None
     assert "tenant_id" not in primary
     assert primary["total_runs"] == 2
     assert primary["terminal_runs"] == 2
@@ -278,11 +355,30 @@ async def test_admin_crawler_website_processing_aggregate_is_tenant_scoped(
 
     secondary = data["items"][1]
     assert secondary["website_name"] is None
+    assert secondary["space_id"] is None
+    assert secondary["collection_id"] is None
+    assert secondary["owner_user_id"] == str(admin_user.id)
+    assert secondary["owner_email"] == admin_user.email
+    assert secondary["indexed_size_bytes"] == 0
     assert secondary["pages_source_retained"] == 4
     assert secondary["embedding_input_tokens"] is None
     assert secondary["embedding_total_cost_usd"] is None
     assert secondary["latest_embedding_model_name_snapshot"] is None
     assert secondary["latest_embedding_usage_source"] is None
+
+    filtered_response = await client.get(
+        "/api/v1/admin/crawler/website-processing",
+        params={"days": 7, "limit": 10, "offset": 0, "space_id": str(space_id)},
+        headers={"X-API-Key": admin_user_api_key.key},
+    )
+
+    assert filtered_response.status_code == 200
+    filtered_data = filtered_response.json()
+    assert filtered_data["total"] == 1
+    assert filtered_data["summary"]["website_count"] == 1
+    assert filtered_data["summary"]["indexed_size_bytes"] == 123_456
+    assert [item["website_id"] for item in filtered_data["items"]] == [str(website_id)]
+    assert filtered_data["space_rollup"][0]["space_id"] == str(space_id)
 
 
 @pytest.mark.asyncio
@@ -407,6 +503,7 @@ async def test_admin_crawler_website_processing_aggregate_sort_options(
             embedding_model_id=embedding_model_id,
             name="Failure heavy",
             update_interval=UpdateInterval.NEVER,
+            size=50,
         )
         busy = await _create_website(
             session,
@@ -415,6 +512,7 @@ async def test_admin_crawler_website_processing_aggregate_sort_options(
             embedding_model_id=embedding_model_id,
             name="Busy daily crawler",
             update_interval=UpdateInterval.DAILY,
+            size=200,
         )
         recent = await _create_website(
             session,
@@ -423,6 +521,7 @@ async def test_admin_crawler_website_processing_aggregate_sort_options(
             embedding_model_id=embedding_model_id,
             name="Recently active",
             update_interval=UpdateInterval.NEVER,
+            size=100,
         )
 
         for offset_hours in (5, 4, 3):
@@ -445,6 +544,7 @@ async def test_admin_crawler_website_processing_aggregate_sort_options(
                 status=Status.COMPLETE,
                 pages_crawled=20,
                 files_downloaded=5,
+                embedding_input_tokens=10,
             )
         await _create_crawl_run(
             session,
@@ -454,6 +554,7 @@ async def test_admin_crawler_website_processing_aggregate_sort_options(
             created_at=now - timedelta(minutes=30),
             status=Status.COMPLETE,
             pages_crawled=1,
+            embedding_input_tokens=500,
         )
         failure_heavy_id = str(failure_heavy.id)
         busy_id = str(busy.id)
@@ -472,11 +573,17 @@ async def test_admin_crawler_website_processing_aggregate_sort_options(
     load_pressure = await fetch("load_pressure")
     failures = await fetch("failures")
     runs = await fetch("runs")
+    tokens = await fetch("tokens")
+    indexed_size = await fetch("indexed_size")
+    low_retention = await fetch("low_retention")
     recent_sort = await fetch("recent")
 
     assert load_pressure["items"][0]["website_id"] == busy_id
     assert failures["items"][0]["website_id"] == failure_heavy_id
     assert runs["items"][0]["website_id"] == busy_id
+    assert tokens["items"][0]["website_id"] == recent_id
+    assert indexed_size["items"][0]["website_id"] == busy_id
+    assert low_retention["items"][0]["website_id"] == busy_id
     assert recent_sort["items"][0]["website_id"] == recent_id
 
 
@@ -615,4 +722,8 @@ async def test_admin_crawler_website_processing_aggregate_search(
     assert [item["website_id"] for item in name_data["items"]] == [alpha_id]
 
     assert no_hit.status_code == 200
-    assert no_hit.json()["total"] == 0
+    no_hit_data = no_hit.json()
+    assert no_hit_data["total"] == 0
+    assert no_hit_data["summary"]["website_count"] == 0
+    assert no_hit_data["summary"]["embedding_input_tokens"] is None
+    assert no_hit_data["summary"]["embedding_total_cost_usd"] is None

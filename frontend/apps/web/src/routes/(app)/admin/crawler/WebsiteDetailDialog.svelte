@@ -22,7 +22,6 @@
     formatCrawlerRelativeTime
   } from "$lib/features/admin/crawlerRelativeTime";
   import {
-    getCrawlerWebsiteProcessingEmbeddingUsageLabel,
     getCrawlerWebsiteProcessingLatestRunEmbeddingUsageLabel,
     getCrawlerWebsiteProcessingLatestRunModelLabel,
     getCrawlerWebsiteProcessingLatestRunProviderLabel,
@@ -618,20 +617,6 @@
                   {m.crawler_website_processing_embedding_usage_unknown()}
                 {:else if processingStats}
                   {getCrawlerWebsiteProcessingLatestRunEmbeddingUsageLabel(processingStats)}
-                {:else}
-                  —
-                {/if}
-              </dd>
-            </div>
-            <div class="space-y-0.5">
-              <dt class="text-muted-foreground text-xs">
-                {m.crawler_website_detail_field_embedding_window_usage({ days: 7 })}
-              </dt>
-              <dd class="text-foreground tabular-nums">
-                {#if processingStatsLoadFailed}
-                  {m.crawler_website_processing_embedding_usage_unknown()}
-                {:else if processingStats}
-                  {getCrawlerWebsiteProcessingEmbeddingUsageLabel(processingStats)}
                 {:else}
                   —
                 {/if}

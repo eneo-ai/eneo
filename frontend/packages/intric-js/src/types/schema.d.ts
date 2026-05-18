@@ -10605,7 +10605,37 @@ export interface components {
       website_id: string;
       /** Website Name */
       website_name: string | null;
+      /** Website Url */
+      website_url: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string | null;
+      /** Space Name */
+      space_name: string | null;
+      /**
+       * Collection Id
+       * Format: uuid
+       */
+      collection_id: string | null;
+      /** Collection Name */
+      collection_name: string | null;
+      /**
+       * Owner User Id
+       * Format: uuid
+       */
+      owner_user_id: string | null;
+      /** Owner Email */
+      owner_email: string | null;
       update_interval: components["schemas"]["UpdateInterval"] | null;
+      /** Indexed Size Bytes */
+      indexed_size_bytes: number;
+      /**
+       * Latest Run At
+       * Format: date-time
+       */
+      latest_run_at: string | null;
       /** Total Runs */
       total_runs: number;
       /** Terminal Runs */
@@ -10671,10 +10701,73 @@ export interface components {
       /** Latest Embedding Usage Source */
       latest_embedding_usage_source?: string | null;
     };
+    /** CrawlerTenantWebsiteProcessingAggregateSummary */
+    CrawlerTenantWebsiteProcessingAggregateSummary: {
+      /** Website Count */
+      website_count: number;
+      /** Total Runs */
+      total_runs: number;
+      /** Terminal Runs */
+      terminal_runs: number;
+      /** Failed Runs */
+      failed_runs: number;
+      /** Pages Crawled */
+      pages_crawled: number;
+      /** Files Downloaded */
+      files_downloaded: number;
+      /** Retained Content Count */
+      retained_content_count: number;
+      /** Files Too Large Skipped */
+      files_too_large_skipped: number;
+      /** Failed Item Count */
+      failed_item_count: number;
+      /** Indexed Size Bytes */
+      indexed_size_bytes: number;
+      /** Embedding Input Tokens */
+      embedding_input_tokens?: number | null;
+      /** Embedding Total Cost Usd */
+      embedding_total_cost_usd?: string | null;
+      /** Action Required Count */
+      action_required_count: number;
+    };
+    /** CrawlerTenantWebsiteProcessingSpaceRollupItem */
+    CrawlerTenantWebsiteProcessingSpaceRollupItem: {
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string | null;
+      /** Space Name */
+      space_name: string | null;
+      /** Website Count */
+      website_count: number;
+      /** Total Runs */
+      total_runs: number;
+      /** Pages Crawled */
+      pages_crawled: number;
+      /** Files Downloaded */
+      files_downloaded: number;
+      /** Indexed Size Bytes */
+      indexed_size_bytes: number;
+      /** Embedding Input Tokens */
+      embedding_input_tokens?: number | null;
+      /** Embedding Total Cost Usd */
+      embedding_total_cost_usd?: string | null;
+      /** Action Required Count */
+      action_required_count: number;
+      /**
+       * Latest Run At
+       * Format: date-time
+       */
+      latest_run_at: string | null;
+    };
     /** CrawlerTenantWebsiteProcessingAggregateResponse */
     CrawlerTenantWebsiteProcessingAggregateResponse: {
       /** Items */
       items: components["schemas"]["CrawlerTenantWebsiteProcessingAggregateItem"][];
+      summary: components["schemas"]["CrawlerTenantWebsiteProcessingAggregateSummary"];
+      /** Space Rollup */
+      space_rollup: components["schemas"]["CrawlerTenantWebsiteProcessingSpaceRollupItem"][];
       /** Total */
       total: number;
       /** Limit */
@@ -10702,7 +10795,14 @@ export interface components {
      * CrawlerWebsiteProcessingSort
      * @enum {string}
      */
-    CrawlerWebsiteProcessingSort: "load_pressure" | "failures" | "runs" | "recent";
+    CrawlerWebsiteProcessingSort:
+      | "load_pressure"
+      | "failures"
+      | "indexed_size"
+      | "low_retention"
+      | "runs"
+      | "tokens"
+      | "recent";
     /** CrawlerWatchdogLifecycleObserved */
     CrawlerWatchdogLifecycleObserved: {
       /** Queued */
@@ -10766,6 +10866,8 @@ export interface components {
       website_id: string;
       /** Website Name */
       website_name: string | null;
+      /** Website Url */
+      website_url: string;
       /**
        * Tenant Id
        * Format: uuid
@@ -10773,7 +10875,26 @@ export interface components {
       tenant_id: string;
       /** Tenant Display Name */
       tenant_display_name: string | null;
+      /** Space Id */
+      space_id: string | null;
+      /** Space Name */
+      space_name: string | null;
+      /** Collection Id */
+      collection_id: string | null;
+      /** Collection Name */
+      collection_name: string | null;
+      /** Owner User Id */
+      owner_user_id: string | null;
+      /** Owner Email */
+      owner_email: string | null;
       update_interval: components["schemas"]["UpdateInterval"] | null;
+      /** Indexed Size Bytes */
+      indexed_size_bytes: number;
+      /**
+       * Latest Run At
+       * Format: date-time
+       */
+      latest_run_at: string | null;
       /** Total Runs */
       total_runs: number;
       /** Terminal Runs */
@@ -13350,13 +13471,62 @@ export interface components {
        */
       is_active?: boolean | null;
     };
+    /** SourceUsage */
+    SourceUsage: {
+      /** Source Type */
+      source_type: string;
+      /** Model Kind */
+      model_kind: string;
+      /**
+       * Input Token Usage
+       * @description Number of tokens used for input prompts
+       */
+      input_token_usage: number;
+      /**
+       * Output Token Usage
+       * @description Number of tokens used for model outputs
+       */
+      output_token_usage: number;
+      /**
+       * Total Token Usage
+       * @description Total tokens (input + output)
+       */
+      total_token_usage: number;
+      /**
+       * Request Count
+       * @description Number of requests recorded for this source
+       */
+      request_count: number;
+      /**
+       * Total Cost Usd
+       * @description Provider-reported USD cost when the source records it
+       */
+      total_cost_usd?: string | null;
+      /**
+       * Cost Covered Token Usage
+       * @description Tokens with a persisted provider cost
+       */
+      cost_covered_token_usage: number;
+      /**
+       * Cost Trackable Token Usage
+       * @description Provider-reported tokens that can be costed when a rate exists
+       */
+      cost_trackable_token_usage: number;
+      /**
+       * Cost Coverage Ratio
+       * @description Share of trackable tokens that have a persisted provider cost
+       */
+      cost_coverage_ratio?: number | null;
+    };
     /** ModelUsage */
     ModelUsage: {
       /**
        * Model Id
        * Format: uuid
        */
-      model_id: string;
+      model_id: string | null;
+      /** Model Kind */
+      model_kind: string;
       /** Model Name */
       model_name: string;
       /**
@@ -13394,6 +13564,36 @@ export interface components {
        * @description Number of requests made with this model
        */
       request_count: number;
+      /**
+       * Source Types
+       * @description Usage source types included in this model aggregate
+       */
+      source_types: string[];
+      /**
+       * Source Breakdown
+       * @description Token usage split by source for this model
+       */
+      source_breakdown: components["schemas"]["SourceUsage"][];
+      /**
+       * Total Cost Usd
+       * @description Provider-reported USD cost when sources record it
+       */
+      total_cost_usd?: string | null;
+      /**
+       * Cost Covered Token Usage
+       * @description Tokens with a persisted provider cost
+       */
+      cost_covered_token_usage: number;
+      /**
+       * Cost Trackable Token Usage
+       * @description Provider-reported tokens that can be costed when a rate exists
+       */
+      cost_trackable_token_usage: number;
+      /**
+       * Cost Coverage Ratio
+       * @description Share of trackable tokens that have a persisted provider cost
+       */
+      cost_coverage_ratio?: number | null;
     };
     /**
      * ModelUsageDetail
@@ -16529,6 +16729,11 @@ export interface components {
       /** Models */
       models: components["schemas"]["ModelUsage"][];
       /**
+       * Source Breakdown
+       * @description Token usage split by source across all models
+       */
+      source_breakdown: components["schemas"]["SourceUsage"][];
+      /**
        * Total Input Token Usage
        * @description Total input token usage across all models
        */
@@ -16543,6 +16748,26 @@ export interface components {
        * @description Total combined token usage across all models
        */
       total_token_usage: number;
+      /**
+       * Total Cost Usd
+       * @description Provider-reported USD cost when sources record it
+       */
+      total_cost_usd?: string | null;
+      /**
+       * Cost Covered Token Usage
+       * @description Tokens with a persisted provider cost
+       */
+      cost_covered_token_usage: number;
+      /**
+       * Cost Trackable Token Usage
+       * @description Provider-reported tokens that can be costed when a rate exists
+       */
+      cost_trackable_token_usage: number;
+      /**
+       * Cost Coverage Ratio
+       * @description Share of trackable tokens that have a persisted provider cost
+       */
+      cost_coverage_ratio?: number | null;
     };
     /**
      * ToolApprovalDecision
@@ -26813,6 +27038,7 @@ export interface operations {
         limit?: number;
         offset?: number;
         website_id?: string | null;
+        space_id?: string | null;
         sort?: components["schemas"]["CrawlerWebsiteProcessingSort"];
         failures_only?: boolean;
         low_retention_only?: boolean;
@@ -32569,6 +32795,8 @@ export interface operations {
         start_date?: string | null;
         /** @description End date for token usage data (defaults to current time).Time defaults to 00:00:00. */
         end_date?: string | null;
+        /** @description Comma-separated token usage sources to include. Allowed values: chat, app_run, crawler_embedding. */
+        source_type?: string | null;
       };
       header?: never;
       path?: never;

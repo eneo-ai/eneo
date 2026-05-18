@@ -11,6 +11,7 @@ from intric.database.tables.sessions_table import Sessions
 from intric.database.tables.users_table import Users
 from intric.token_usage.domain.token_usage_models import (
     ModelTokenUsage,
+    TokenUsageModelKind,
     TokenUsageSummary,
 )
 from intric.token_usage.domain.user_token_usage_models import (
@@ -353,19 +354,7 @@ class UserTokenUsageAnalyzer:
             total_input_tokens=row.input_tokens or 0,
             total_output_tokens=row.output_tokens or 0,
             total_requests=row.request_count or 0,
-            models_used=[
-                ModelTokenUsage(
-                    model_id=model.model_id,
-                    model_name=model.model_name,
-                    model_nickname=model.model_nickname,
-                    model_org=model.model_org,
-                    model_provider=model.model_provider,
-                    input_token_usage=model.input_token_usage,
-                    output_token_usage=model.output_token_usage,
-                    request_count=model.request_count,
-                )
-                for model in model_breakdown.models
-            ],
+            models_used=model_breakdown.models,
         )
 
     async def _get_user_model_breakdown(
@@ -485,6 +474,7 @@ class UserTokenUsageAnalyzer:
                 token_usage_by_model.append(
                     ModelTokenUsage(
                         model_id=row.model_id,
+                        model_kind=TokenUsageModelKind.COMPLETION,
                         model_name=row.model_name,
                         model_nickname=row.model_nickname,
                         model_org=row.model_org,
@@ -492,6 +482,10 @@ class UserTokenUsageAnalyzer:
                         input_token_usage=row.input_tokens or 0,
                         output_token_usage=row.output_tokens or 0,
                         request_count=row.request_count or 0,
+                        source_breakdown=[],
+                        total_cost_usd=None,
+                        cost_covered_token_usage=0,
+                        cost_trackable_token_usage=0,
                     )
                 )
 

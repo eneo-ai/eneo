@@ -231,6 +231,7 @@ async def persist_batch(
     pages_to_embed: list[_PageToEmbed] = []
     prepared_pages: list[PreparedPage] = []
     persisted_urls: list[str] = []
+    persisted_url_set: set[str] = set()
     buffer_embedding_bytes = 0
 
     def add_failure(reason: FailureReason, url: str) -> None:
@@ -583,19 +584,15 @@ async def persist_batch(
                             await session.execute(insert_chunks_stmt)
 
                         await savepoint.commit()
-                        persisted_urls.append(
-                            prepared.url
-                        )  # Track this URL as actually persisted
+                        persisted_urls.append(prepared.url)
+                        persisted_url_set.add(prepared.url)
                         if prepared.embedding_usage.source == "provider_reported":
                             saw_provider_usage = True
                             total_tokens = prepared.embedding_usage.total_tokens or 0
                             indexed_token_delta += total_tokens
-                            if embedding_model.input_cost_per_token is not None:
+                            if prepared.embedding_usage.cost_usd is not None:
                                 saw_indexed_cost = True
-                                indexed_cost_delta += (
-                                    Decimal(total_tokens)
-                                    * embedding_model.input_cost_per_token
-                                )
+                                indexed_cost_delta += prepared.embedding_usage.cost_usd
                         else:
                             saw_missing_usage = True
 
@@ -643,9 +640,8 @@ async def persist_batch(
                 "pages_attempted": len(prepared_pages),
             },
         )
-        # Mark all unpersisted pages as failed with DB_ERROR
         for p in prepared_pages:
-            if p.url not in persisted_urls:
+            if p.url not in persisted_url_set:
                 add_failure(FailureReason.DB_ERROR, p.url)
 
     except Exception as e:
@@ -656,9 +652,8 @@ async def persist_batch(
                 "error": str(e),
             },
         )
-        # Mark all unpersisted pages as failed with DB_ERROR
         for p in prepared_pages:
-            if p.url not in persisted_urls:
+            if p.url not in persisted_url_set:
                 add_failure(FailureReason.DB_ERROR, p.url)
 
     return _build_result(

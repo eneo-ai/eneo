@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, List
 from uuid import UUID
@@ -8,6 +9,9 @@ from pydantic import BaseModel, Field
 if TYPE_CHECKING:
     from intric.token_usage.domain.token_usage_models import (
         ModelTokenUsage as DomainModelTokenUsage,
+    )
+    from intric.token_usage.domain.token_usage_models import (
+        TokenUsageSourceBreakdown as DomainTokenUsageSourceBreakdown,
     )
     from intric.token_usage.domain.token_usage_models import (
         TokenUsageSummary as DomainTokenUsageSummary,
@@ -20,8 +24,54 @@ if TYPE_CHECKING:
     )
 
 
+class SourceUsage(BaseModel):
+    source_type: str
+    model_kind: str
+    input_token_usage: int = Field(
+        ..., description="Number of tokens used for input prompts"
+    )
+    output_token_usage: int = Field(
+        ..., description="Number of tokens used for model outputs"
+    )
+    total_token_usage: int = Field(..., description="Total tokens (input + output)")
+    request_count: int = Field(
+        ..., description="Number of requests recorded for this source"
+    )
+    total_cost_usd: Decimal | None = Field(
+        default=None,
+        description="Provider-reported USD cost when the source records it",
+    )
+    cost_covered_token_usage: int = Field(
+        ..., description="Tokens with a persisted provider cost"
+    )
+    cost_trackable_token_usage: int = Field(
+        ...,
+        description="Provider-reported tokens that can be costed when a rate exists",
+    )
+    cost_coverage_ratio: float | None = Field(
+        default=None,
+        description="Share of trackable tokens that have a persisted provider cost",
+    )
+
+    @classmethod
+    def from_domain(cls, source: "DomainTokenUsageSourceBreakdown") -> "SourceUsage":
+        return cls(
+            source_type=source.source_type.value,
+            model_kind=source.model_kind.value,
+            input_token_usage=source.input_token_usage,
+            output_token_usage=source.output_token_usage,
+            total_token_usage=source.total_token_usage,
+            request_count=source.request_count,
+            total_cost_usd=source.total_cost_usd,
+            cost_covered_token_usage=source.cost_covered_token_usage,
+            cost_trackable_token_usage=source.cost_trackable_token_usage,
+            cost_coverage_ratio=source.cost_coverage_ratio,
+        )
+
+
 class ModelUsage(BaseModel):
-    model_id: UUID
+    model_id: UUID | None
+    model_kind: str
     model_name: str
     model_nickname: str = Field(..., description="User-friendly name of the model")
     model_org: str | None = Field(
@@ -40,11 +90,33 @@ class ModelUsage(BaseModel):
     request_count: int = Field(
         ..., description="Number of requests made with this model"
     )
+    source_types: List[str] = Field(
+        ..., description="Usage source types included in this model aggregate"
+    )
+    source_breakdown: List[SourceUsage] = Field(
+        ..., description="Token usage split by source for this model"
+    )
+    total_cost_usd: Decimal | None = Field(
+        default=None,
+        description="Provider-reported USD cost when sources record it",
+    )
+    cost_covered_token_usage: int = Field(
+        ..., description="Tokens with a persisted provider cost"
+    )
+    cost_trackable_token_usage: int = Field(
+        ...,
+        description="Provider-reported tokens that can be costed when a rate exists",
+    )
+    cost_coverage_ratio: float | None = Field(
+        default=None,
+        description="Share of trackable tokens that have a persisted provider cost",
+    )
 
     @classmethod
     def from_domain(cls, domain_model: "DomainModelTokenUsage") -> "ModelUsage":
         return cls(
             model_id=domain_model.model_id,
+            model_kind=domain_model.model_kind.value,
             model_name=domain_model.model_name,
             model_nickname=domain_model.model_nickname,
             model_org=domain_model.model_org,
@@ -53,6 +125,15 @@ class ModelUsage(BaseModel):
             output_token_usage=domain_model.output_token_usage,
             total_token_usage=domain_model.total_token_usage,
             request_count=domain_model.request_count,
+            source_types=[source.value for source in domain_model.source_types],
+            source_breakdown=[
+                SourceUsage.from_domain(source)
+                for source in domain_model.source_breakdown
+            ],
+            total_cost_usd=domain_model.total_cost_usd,
+            cost_covered_token_usage=domain_model.cost_covered_token_usage,
+            cost_trackable_token_usage=domain_model.cost_trackable_token_usage,
+            cost_coverage_ratio=domain_model.cost_coverage_ratio,
         )
 
 
@@ -60,6 +141,9 @@ class TokenUsageSummary(BaseModel):
     start_date: datetime
     end_date: datetime
     models: List[ModelUsage]
+    source_breakdown: List[SourceUsage] = Field(
+        ..., description="Token usage split by source across all models"
+    )
     total_input_token_usage: int = Field(
         ..., description="Total input token usage across all models"
     )
@@ -69,6 +153,21 @@ class TokenUsageSummary(BaseModel):
     total_token_usage: int = Field(
         ..., description="Total combined token usage across all models"
     )
+    total_cost_usd: Decimal | None = Field(
+        default=None,
+        description="Provider-reported USD cost when sources record it",
+    )
+    cost_covered_token_usage: int = Field(
+        ..., description="Tokens with a persisted provider cost"
+    )
+    cost_trackable_token_usage: int = Field(
+        ...,
+        description="Provider-reported tokens that can be costed when a rate exists",
+    )
+    cost_coverage_ratio: float | None = Field(
+        default=None,
+        description="Share of trackable tokens that have a persisted provider cost",
+    )
 
     @classmethod
     def from_domain(cls, domain: "DomainTokenUsageSummary") -> "TokenUsageSummary":
@@ -76,9 +175,16 @@ class TokenUsageSummary(BaseModel):
             start_date=domain.start_date,
             end_date=domain.end_date,
             models=[ModelUsage.from_domain(model) for model in domain.models],
+            source_breakdown=[
+                SourceUsage.from_domain(source) for source in domain.source_breakdown
+            ],
             total_input_token_usage=domain.total_input_token_usage,
             total_output_token_usage=domain.total_output_token_usage,
             total_token_usage=domain.total_token_usage,
+            total_cost_usd=domain.total_cost_usd,
+            cost_covered_token_usage=domain.cost_covered_token_usage,
+            cost_trackable_token_usage=domain.cost_trackable_token_usage,
+            cost_coverage_ratio=domain.cost_coverage_ratio,
         )
 
 

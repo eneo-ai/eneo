@@ -6,26 +6,13 @@
  */
 
 /**
- * Filter + pagination state for the Aktivitet (crawler activity) tab.
+ * Filter + pagination state for the Aktivitet tab.
  *
- * Kept separate from the page-wide dialog state so the toolbar (search +
- * sort + time-window + focus filters + page size + offset) has one
- * canonical source of truth. The tab component reads getters; toolbar
- * controls invoke the named transition methods; the `refresh()` method
- * re-fetches against the backend `/admin/crawler/website-processing`
- * endpoint with whatever the current state holds.
- *
- * `intric` is captured at construction so the tab component only needs
- * to mount the state once and pass `intric` exactly once. The state
- * survives tab switches within the same admin page mount.
- *
- * Codex review (gpt-5.5 / effort xhigh) called out the risk of letting
- * Aktivitet state live inline in the tab component once debounce + sort
- * + 3 chips + page-size + skeleton + dual empty states all land. This
- * module is the agreed sibling to `crawlerAdminPageState.svelte.ts`.
+ * The tab has one owner for search, sort, time window, focus filters,
+ * page size, and offset. Keeping these transitions together avoids
+ * drift between toolbar controls and the backend query they represent.
  */
 
-import { invalidate } from "$app/navigation";
 import { toastError } from "$lib/core/errors";
 import {
   CRAWLER_WEBSITE_PROCESSING_DEFAULTS,
@@ -64,6 +51,7 @@ export function createCrawlerActivityState(
     CRAWLER_WEBSITE_PROCESSING_DEFAULTS.limit as CrawlerWebsiteProcessingPageSize
   );
   let page = $state<number>(1);
+  let spaceId = $state<string | null>(null);
   let failuresOnly = $state<boolean>(false);
   let lowRetentionOnly = $state<boolean>(false);
   let sourceSkipDriftOnly = $state<boolean>(false);
@@ -85,6 +73,7 @@ export function createCrawlerActivityState(
       limit: number;
       offset: number;
       sort: CrawlerWebsiteProcessingSort;
+      space_id?: string;
       failures_only?: boolean;
       low_retention_only?: boolean;
       source_skip_drift_only?: boolean;
@@ -95,6 +84,7 @@ export function createCrawlerActivityState(
       offset,
       sort
     };
+    if (spaceId !== null) params.space_id = spaceId;
     if (failuresOnly) params.failures_only = true;
     if (lowRetentionOnly) params.low_retention_only = true;
     if (sourceSkipDriftOnly) params.source_skip_drift_only = true;
@@ -105,7 +95,6 @@ export function createCrawlerActivityState(
       const response = await intric.crawlerAdmin.websiteProcessingAggregate(params);
       visible = response;
       loadFailed = false;
-      await invalidate("admin:crawler-website-processing");
     } catch (error) {
       loadFailed = true;
       toastError(error, m.crawler_website_processing_load_error());
@@ -157,6 +146,12 @@ export function createCrawlerActivityState(
     void refresh({});
   }
 
+  function setSpaceId(next: string | null) {
+    if (next === spaceId) return;
+    spaceId = next;
+    void refresh({ resetPage: true });
+  }
+
   function setFailuresOnly(next: boolean) {
     if (next === failuresOnly) return;
     failuresOnly = next;
@@ -176,7 +171,13 @@ export function createCrawlerActivityState(
   }
 
   function clearFilters() {
-    if (!failuresOnly && !lowRetentionOnly && !sourceSkipDriftOnly && search.trim().length === 0) {
+    if (
+      !failuresOnly &&
+      !lowRetentionOnly &&
+      !sourceSkipDriftOnly &&
+      spaceId === null &&
+      search.trim().length === 0
+    ) {
       return;
     }
     if (searchDebounce !== null) {
@@ -186,6 +187,7 @@ export function createCrawlerActivityState(
     failuresOnly = false;
     lowRetentionOnly = false;
     sourceSkipDriftOnly = false;
+    spaceId = null;
     search = "";
     void refresh({ resetPage: true });
   }
@@ -215,6 +217,9 @@ export function createCrawlerActivityState(
     get page() {
       return page;
     },
+    get spaceId() {
+      return spaceId;
+    },
     get filters(): CrawlerActivityFilters {
       return {
         failuresOnly,
@@ -227,6 +232,7 @@ export function createCrawlerActivityState(
       if (failuresOnly) count += 1;
       if (lowRetentionOnly) count += 1;
       if (sourceSkipDriftOnly) count += 1;
+      if (spaceId !== null) count += 1;
       if (search.trim().length > 0) count += 1;
       return count;
     },
@@ -236,6 +242,7 @@ export function createCrawlerActivityState(
     setSort,
     setPageSize,
     setPage,
+    setSpaceId,
     setFailuresOnly,
     setLowRetentionOnly,
     setSourceSkipDriftOnly,

@@ -360,6 +360,7 @@ async def get_current_tenant_crawler_website_processing_aggregate(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     website_id: Annotated[UUID | None, Query()] = None,
+    space_id: Annotated[UUID | None, Query()] = None,
     sort: Annotated[
         CrawlerWebsiteProcessingSort, Query()
     ] = CrawlerWebsiteProcessingSort.LOAD_PRESSURE,
@@ -380,6 +381,7 @@ async def get_current_tenant_crawler_website_processing_aggregate(
         extra_labels={
             "has_search": has_search,
             "has_filters": has_filters,
+            "has_space_filter": space_id is not None,
             "sort": sort.value,
         },
     ):
@@ -393,6 +395,7 @@ async def get_current_tenant_crawler_website_processing_aggregate(
                 offset=offset,
                 tenant_id=current_user.tenant_id,
                 website_id=website_id,
+                space_id=space_id,
                 sort=sort,
                 failures_only=failures_only,
                 low_retention_only=low_retention_only,

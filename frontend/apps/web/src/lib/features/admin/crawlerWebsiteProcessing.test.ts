@@ -11,13 +11,20 @@ import {
   getCrawlerWebsiteProcessingEmbeddingUsageLabel,
   getCrawlerWebsiteProcessingFailureLabel,
   getCrawlerWebsiteProcessingFetchedLabel,
+  getCrawlerWebsiteProcessingHealthSignal,
+  getCrawlerWebsiteProcessingIndexedSizeLabel,
   getCrawlerWebsiteProcessingLatestRunEmbeddingUsageLabel,
   getCrawlerWebsiteProcessingLatestRunModelLabel,
   getCrawlerWebsiteProcessingLatestRunProviderLabel,
   getCrawlerWebsiteProcessingLatestRunUsageSourceLabel,
   getCrawlerWebsiteProcessingLoadPressureLabel,
+  getCrawlerWebsiteProcessingOwnerLabel,
   getCrawlerWebsiteProcessingRetainedLabel,
+  getCrawlerWebsiteProcessingReuseLabel,
+  getCrawlerWebsiteProcessingScheduleLabel,
+  getCrawlerWebsiteProcessingSpaceLabel,
   getCrawlerWebsiteProcessingTotalLabel,
+  getCrawlerWebsiteProcessingUrlLabel,
   getCrawlerWebsiteProcessingWebsiteLabel,
   isCrawlerWebsiteProcessingLowRetention,
   isCrawlerWebsiteProcessingSourceSkipDrift
@@ -27,6 +34,36 @@ overwriteGetLocale(() => "en");
 
 const aggregate: CrawlerTenantWebsiteProcessingAggregateResponse = {
   items: [],
+  summary: {
+    website_count: 12,
+    total_runs: 20,
+    terminal_runs: 18,
+    failed_runs: 2,
+    pages_crawled: 120,
+    files_downloaded: 12,
+    retained_content_count: 313,
+    files_too_large_skipped: 7,
+    failed_item_count: 3,
+    indexed_size_bytes: 123456,
+    embedding_input_tokens: 12345,
+    embedding_total_cost_usd: "0.001234000000",
+    action_required_count: 4
+  },
+  space_rollup: [
+    {
+      space_id: "22345678-1234-4234-8234-123456789abc",
+      space_name: "Governance",
+      website_count: 2,
+      total_runs: 4,
+      pages_crawled: 10,
+      files_downloaded: 2,
+      indexed_size_bytes: 123456,
+      embedding_input_tokens: 12345,
+      embedding_total_cost_usd: "0.001234000000",
+      action_required_count: 1,
+      latest_run_at: "2026-05-15T11:30:00Z"
+    }
+  ],
   total: 12,
   limit: 5,
   offset: 0,
@@ -40,6 +77,15 @@ const aggregate: CrawlerTenantWebsiteProcessingAggregateResponse = {
 const item: CrawlerTenantWebsiteProcessingAggregateItem = {
   website_id: "12345678-1234-4234-8234-123456789abc",
   website_name: "Municipality site",
+  website_url: "https://municipality.example.com",
+  space_id: "22345678-1234-4234-8234-123456789abc",
+  space_name: "Governance",
+  collection_id: "32345678-1234-4234-8234-123456789abc",
+  collection_name: "Schools",
+  owner_user_id: "42345678-1234-4234-8234-123456789abc",
+  owner_email: "owner@example.com",
+  indexed_size_bytes: 123456,
+  latest_run_at: "2026-05-15T11:30:00Z",
   total_runs: 4,
   terminal_runs: 4,
   failed_runs: 1,
@@ -74,8 +120,16 @@ test("website processing labels keep crawler load and retention readable", () =>
     })
   ).toBe("Showing 1 of 12 websites from the last 7 days");
   expect(getCrawlerWebsiteProcessingWebsiteLabel(item)).toBe("Municipality site");
+  expect(getCrawlerWebsiteProcessingUrlLabel(item)).toBe("https://municipality.example.com");
+  expect(getCrawlerWebsiteProcessingOwnerLabel(item)).toBe("owner@example.com");
+  expect(getCrawlerWebsiteProcessingSpaceLabel(item)).toBe("Governance › Schools");
+  expect(getCrawlerWebsiteProcessingScheduleLabel(item)).toBe("Daily");
+  expect(getCrawlerWebsiteProcessingIndexedSizeLabel(item)).toBe("120.6 KiB");
   expect(getCrawlerWebsiteProcessingFetchedLabel(item)).toBe("10 pages · 2 files");
-  expect(getCrawlerWebsiteProcessingLoadPressureLabel(item)).toBe("Daily · load 84 · 96% retained");
+  expect(getCrawlerWebsiteProcessingReuseLabel(item)).toBe("96% reused");
+  expect(getCrawlerWebsiteProcessingLoadPressureLabel(item)).toBe(
+    "Daily · priority 84 · 96% reused"
+  );
   expect(getCrawlerWebsiteProcessingEmbeddingUsageLabel(item)).toBe("12,345 tokens · $0.001234");
   expect(getCrawlerWebsiteProcessingLatestRunEmbeddingUsageLabel(item)).toBe(
     "2,345 tokens · $0.000234"
@@ -83,8 +137,12 @@ test("website processing labels keep crawler load and retention readable", () =>
   expect(getCrawlerWebsiteProcessingLatestRunModelLabel(item)).toBe("text-embedding-3-small");
   expect(getCrawlerWebsiteProcessingLatestRunProviderLabel(item)).toBe("openai");
   expect(getCrawlerWebsiteProcessingLatestRunUsageSourceLabel(item)).toBe("Provider reported");
-  expect(getCrawlerWebsiteProcessingRetainedLabel(item)).toBe("313 retained · 7 too large");
+  expect(getCrawlerWebsiteProcessingRetainedLabel(item)).toBe("313 reused · 7 too large");
   expect(getCrawlerWebsiteProcessingFailureLabel(item)).toBe("Failed runs: 1 · failed items: 3");
+  expect(getCrawlerWebsiteProcessingHealthSignal(item)).toMatchObject({
+    state: "failure",
+    label: "Failure"
+  });
 });
 
 test("website processing labels handle unnamed and healthy websites", () => {
@@ -92,6 +150,13 @@ test("website processing labels handle unnamed and healthy websites", () => {
     getCrawlerWebsiteProcessingWebsiteLabel({
       ...item,
       website_name: null
+    })
+  ).toBe("https://municipality.example.com");
+  expect(
+    getCrawlerWebsiteProcessingWebsiteLabel({
+      ...item,
+      website_name: null,
+      website_url: ""
     })
   ).toBe("Website 12345678");
   expect(
@@ -108,14 +173,14 @@ test("website processing labels handle unnamed and healthy websites", () => {
       update_interval: null,
       cost_pressure_score: 0
     })
-  ).toBe("Unknown schedule · load 0 · 96% retained");
+  ).toBe("Unknown schedule · priority 0 · 96% reused");
   expect(
     getCrawlerWebsiteProcessingEmbeddingUsageLabel({
       ...item,
       embedding_input_tokens: null,
       embedding_total_cost_usd: null
     })
-  ).toBe("Usage unavailable");
+  ).toBe("Missing for this run");
   expect(
     getCrawlerWebsiteProcessingEmbeddingUsageLabel({
       ...item,

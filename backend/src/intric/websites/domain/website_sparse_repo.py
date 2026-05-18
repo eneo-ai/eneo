@@ -1,10 +1,13 @@
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 import sqlalchemy as sa
 
+from intric.database.tables.ai_models_table import EmbeddingModels
 from intric.database.tables.job_table import Jobs
+from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from intric.database.tables.websites_table import Websites as WebsitesTable
 from intric.main.models import Status
@@ -12,6 +15,22 @@ from intric.websites.domain.website import UpdateInterval, WebsiteSparse
 
 if TYPE_CHECKING:
     from intric.database.database import AsyncSession
+
+
+def _to_sparse_website(
+    *,
+    record: WebsitesTable,
+    embedding_model_name: str | None,
+    embedding_model_litellm_name: str | None,
+    embedding_model_provider_type: str | None,
+    embedding_model_input_cost_per_token: Decimal | None,
+) -> WebsiteSparse:
+    sparse = WebsiteSparse.to_domain(record)
+    sparse.embedding_model_name = embedding_model_name
+    sparse.embedding_model_litellm_name = embedding_model_litellm_name
+    sparse.embedding_model_provider_type = embedding_model_provider_type
+    sparse.embedding_model_input_cost_per_token = embedding_model_input_cost_per_token
+    return sparse
 
 
 class WebsiteSparseRepository:
@@ -93,16 +112,56 @@ class WebsiteSparseRepository:
         cond_no_active_jobs = ~sa.exists(active_job_exists)
 
         # Combine all conditions with circuit breaker
-        stmt = sa.select(WebsitesTable).where(
-            sa.and_(
-                sa.or_(cond_daily, cond_every_other_day, cond_weekly),
-                cond_circuit_breaker,
-                cond_no_active_jobs,
+        model_join = sa.outerjoin(
+            WebsitesTable,
+            EmbeddingModels,
+            WebsitesTable.embedding_model_id == EmbeddingModels.id,
+        )
+        provider_join = sa.outerjoin(
+            model_join,
+            ModelProviders,
+            EmbeddingModels.provider_id == ModelProviders.id,
+        )
+
+        stmt = (
+            sa.select(
+                WebsitesTable,
+                EmbeddingModels.name.label("embedding_model_name"),
+                EmbeddingModels.litellm_model_name.label(
+                    "embedding_model_litellm_name"
+                ),
+                ModelProviders.provider_type.label("embedding_model_provider_type"),
+                EmbeddingModels.input_cost_per_token.label(
+                    "embedding_model_input_cost_per_token"
+                ),
+            )
+            .select_from(provider_join)
+            .where(
+                sa.and_(
+                    sa.or_(cond_daily, cond_every_other_day, cond_weekly),
+                    cond_circuit_breaker,
+                    cond_no_active_jobs,
+                )
             )
         )
 
-        websites_db = await self.session.scalars(stmt)
-        return [WebsiteSparse.to_domain(website_db) for website_db in websites_db]
+        rows = await self.session.execute(stmt)
+        return [
+            _to_sparse_website(
+                record=record,
+                embedding_model_name=embedding_model_name,
+                embedding_model_litellm_name=embedding_model_litellm_name,
+                embedding_model_provider_type=embedding_model_provider_type,
+                embedding_model_input_cost_per_token=embedding_model_input_cost_per_token,
+            )
+            for (
+                record,
+                embedding_model_name,
+                embedding_model_litellm_name,
+                embedding_model_provider_type,
+                embedding_model_input_cost_per_token,
+            ) in rows.all()
+        ]
 
     async def get_for_tenant(
         self,
@@ -119,12 +178,47 @@ class WebsiteSparseRepository:
         tenant-wide, not space-wide, so the SQL gate is the canonical
         isolation seam.
         """
+        model_join = sa.outerjoin(
+            WebsitesTable,
+            EmbeddingModels,
+            WebsitesTable.embedding_model_id == EmbeddingModels.id,
+        )
+        provider_join = sa.outerjoin(
+            model_join,
+            ModelProviders,
+            EmbeddingModels.provider_id == ModelProviders.id,
+        )
+
         stmt = (
-            sa.select(WebsitesTable)
+            sa.select(
+                WebsitesTable,
+                EmbeddingModels.name.label("embedding_model_name"),
+                EmbeddingModels.litellm_model_name.label(
+                    "embedding_model_litellm_name"
+                ),
+                ModelProviders.provider_type.label("embedding_model_provider_type"),
+                EmbeddingModels.input_cost_per_token.label(
+                    "embedding_model_input_cost_per_token"
+                ),
+            )
+            .select_from(provider_join)
             .where(WebsitesTable.id == website_id)
             .where(WebsitesTable.tenant_id == tenant_id)
         )
-        row = await self.session.scalar(stmt)
+        row = (await self.session.execute(stmt)).one_or_none()
         if row is None:
             return None
-        return WebsiteSparse.to_domain(row)
+        (
+            record,
+            embedding_model_name,
+            embedding_model_litellm_name,
+            embedding_model_provider_type,
+            embedding_model_input_cost_per_token,
+        ) = row
+        return _to_sparse_website(
+            record=record,
+            embedding_model_name=embedding_model_name,
+            embedding_model_litellm_name=embedding_model_litellm_name,
+            embedding_model_provider_type=embedding_model_provider_type,
+            embedding_model_input_cost_per_token=embedding_model_input_cost_per_token,
+        )

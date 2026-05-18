@@ -29,19 +29,12 @@ SOURCE_SKIP_DRIFT_MIN_INDEXED: Final[int] = 50
 
 
 class CrawlerWebsiteProcessingSort(str, Enum):
-    """Stable sort orders the Aktivitet tab can request.
-
-    Each value maps to a deterministic ORDER BY clause in the repository.
-    LOAD_PRESSURE matches the historical ordering (cost-pressure score
-    descending, then throughput descending). The other values surface
-    failure-heavy, busy, or recently-active websites so a tenant admin
-    with thousands of crawls can pivot the view without re-sorting in
-    the client.
-    """
-
     LOAD_PRESSURE = "load_pressure"
     FAILURES = "failures"
+    INDEXED_SIZE = "indexed_size"
+    LOW_RETENTION = "low_retention"
     RUNS = "runs"
+    TOKENS = "tokens"
     RECENT = "recent"
 
 
@@ -91,9 +84,18 @@ def cost_pressure_score(
 class CrawlerWebsiteProcessingAggregateItem:
     website_id: UUID
     website_name: str | None
+    website_url: str
     tenant_id: UUID
     tenant_display_name: str | None
+    space_id: UUID | None
+    space_name: str | None
+    collection_id: UUID | None
+    collection_name: str | None
+    owner_user_id: UUID | None
+    owner_email: str | None
     update_interval: UpdateInterval | None
+    indexed_size_bytes: int
+    latest_run_at: datetime | None
     total_runs: int
     terminal_runs: int
     failed_runs: int
@@ -120,8 +122,42 @@ class CrawlerWebsiteProcessingAggregateItem:
 
 
 @dataclass(frozen=True, slots=True)
+class CrawlerWebsiteProcessingAggregateSummary:
+    website_count: int
+    total_runs: int
+    terminal_runs: int
+    failed_runs: int
+    pages_crawled: int
+    files_downloaded: int
+    retained_content_count: int
+    files_too_large_skipped: int
+    failed_item_count: int
+    indexed_size_bytes: int
+    embedding_input_tokens: int | None
+    embedding_total_cost_usd: Decimal | None
+    action_required_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class CrawlerWebsiteProcessingSpaceRollupItem:
+    space_id: UUID | None
+    space_name: str | None
+    website_count: int
+    total_runs: int
+    pages_crawled: int
+    files_downloaded: int
+    indexed_size_bytes: int
+    embedding_input_tokens: int | None
+    embedding_total_cost_usd: Decimal | None
+    action_required_count: int
+    latest_run_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
 class CrawlerWebsiteProcessingAggregate:
     items: tuple[CrawlerWebsiteProcessingAggregateItem, ...]
+    summary: CrawlerWebsiteProcessingAggregateSummary
+    space_rollup: tuple[CrawlerWebsiteProcessingSpaceRollupItem, ...]
     total: int
     limit: int
     offset: int

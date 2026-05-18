@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
@@ -77,6 +78,12 @@ async def _create_crawl_run(
     job_id: UUID,
     created_at: datetime,
     outcome_code: CrawlOutcomeCode,
+    embedding_model_name_snapshot: str | None = None,
+    embedding_model_litellm_name_snapshot: str | None = None,
+    embedding_model_provider_snapshot: str | None = None,
+    embedding_input_tokens: int | None = None,
+    embedding_total_cost_usd: Decimal | None = None,
+    embedding_usage_source: str | None = None,
 ) -> CrawlRuns:
     crawl_run = CrawlRuns(
         id=uuid4(),
@@ -95,6 +102,12 @@ async def _create_crawl_run(
         files_too_large_skipped=0,
         outcome_code=outcome_code.value,
         failure_summary=None,
+        embedding_model_name_snapshot=embedding_model_name_snapshot,
+        embedding_model_litellm_name_snapshot=embedding_model_litellm_name_snapshot,
+        embedding_model_provider_snapshot=embedding_model_provider_snapshot,
+        embedding_input_tokens=embedding_input_tokens,
+        embedding_total_cost_usd=embedding_total_cost_usd,
+        embedding_usage_source=embedding_usage_source,
     )
     session.add(crawl_run)
     await session.flush()
@@ -168,6 +181,12 @@ async def test_admin_crawler_watchdog_interventions_are_tenant_scoped_and_allowl
             job_id=runtime_job.id,
             created_at=runtime_job.created_at,
             outcome_code=CrawlOutcomeCode.CRAWL_RUNTIME_TIMEOUT,
+            embedding_model_name_snapshot="text-embedding-3-small",
+            embedding_model_litellm_name_snapshot="openai/text-embedding-3-small",
+            embedding_model_provider_snapshot="openai",
+            embedding_input_tokens=17,
+            embedding_total_cost_usd=Decimal("0.000000340000"),
+            embedding_usage_source="provider_reported",
         )
         max_age_job = await _create_job(
             session,
@@ -232,6 +251,17 @@ async def test_admin_crawler_watchdog_interventions_are_tenant_scoped_and_allowl
         str(runtime_run_id),
         str(max_age_run_id),
     ]
+    runtime_item = data["items"][0]
+    assert runtime_item["embedding_model_name_snapshot"] == "text-embedding-3-small"
+    assert runtime_item["embedding_model_litellm_name_snapshot"] == (
+        "openai/text-embedding-3-small"
+    )
+    assert runtime_item["embedding_model_provider_snapshot"] == "openai"
+    assert runtime_item["embedding_input_tokens"] == 17
+    assert Decimal(runtime_item["embedding_total_cost_usd"]) == Decimal(
+        "0.000000340000"
+    )
+    assert runtime_item["embedding_usage_source"] == "provider_reported"
     returned_ids = {item["crawl_run_id"] for item in data["items"]}
     assert str(recent_failure_run_id) not in returned_ids
     assert str(other_tenant_run_id) not in returned_ids

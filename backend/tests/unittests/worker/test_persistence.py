@@ -417,6 +417,7 @@ class TestPreparedPageDataclass:
             embedding_usage=EmbeddingUsage(
                 prompt_tokens=None,
                 total_tokens=None,
+                cost_usd=None,
                 source="missing",
             ),
             tenant_id=uuid4(),

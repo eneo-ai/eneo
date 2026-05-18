@@ -1,3 +1,4 @@
+from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, Final, Optional, Union, cast, overload
 
@@ -368,6 +369,10 @@ class WebsiteSparse(Entity):
         last_crawled_at: Optional["datetime"],
         consecutive_failures: int = 0,
         next_retry_at: Optional["datetime"] = None,
+        embedding_model_name: str | None = None,
+        embedding_model_litellm_name: str | None = None,
+        embedding_model_provider_type: str | None = None,
+        embedding_model_input_cost_per_token: Decimal | None = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.user_id = user_id
@@ -383,6 +388,10 @@ class WebsiteSparse(Entity):
         self.last_crawled_at = last_crawled_at
         self.consecutive_failures = consecutive_failures
         self.next_retry_at = next_retry_at
+        self.embedding_model_name = embedding_model_name
+        self.embedding_model_litellm_name = embedding_model_litellm_name
+        self.embedding_model_provider_type = embedding_model_provider_type
+        self.embedding_model_input_cost_per_token = embedding_model_input_cost_per_token
 
     @classmethod
     @overload

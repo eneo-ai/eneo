@@ -4,7 +4,10 @@ from typing import Optional
 from uuid import UUID
 
 from intric.roles.permissions import Permission, validate_permissions
-from intric.token_usage.domain.token_usage_models import TokenUsageSummary
+from intric.token_usage.domain.token_usage_models import (
+    TokenUsageSourceType,
+    TokenUsageSummary,
+)
 from intric.token_usage.domain.user_token_usage_models import (
     UserTokenUsage,
     UserTokenUsageSummary,
@@ -34,7 +37,10 @@ class TokenUsageService:
 
     @validate_permissions(permission=Permission.ADMIN)
     async def get_token_usage(
-        self, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None
+        self,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        source_types: frozenset[TokenUsageSourceType] | None = None,
     ) -> TokenUsageSummary:
         """
         Get token usage statistics for the specified date range.
@@ -57,7 +63,10 @@ class TokenUsageService:
             end_date = datetime.now()
 
         return await self.token_usage_analyzer.get_model_token_usage(
-            tenant_id=self.user.tenant_id, start_date=start_date, end_date=end_date
+            tenant_id=self.user.tenant_id,
+            start_date=start_date,
+            end_date=end_date,
+            source_types=source_types,
         )
 
     @validate_permissions(permission=Permission.ADMIN)

@@ -1,6 +1,16 @@
+import importlib
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional, Protocol, TypeGuard, cast
+from dataclasses import dataclass, replace
+from decimal import Decimal
+from typing import (
+    TYPE_CHECKING,
+    Literal,
+    Optional,
+    Protocol,
+    TypedDict,
+    TypeGuard,
+    cast,
+)
 
 import litellm
 from fastapi import HTTPException
@@ -50,6 +60,30 @@ class _LiteLLMEmbeddingResponse(Protocol):
 _LiteLLMEmbeddingCallable = Callable[..., Awaitable[object]]
 
 
+class _CostPerTokenPayload(TypedDict):
+    input_cost_per_token: float
+    output_cost_per_token: float
+
+
+class _LiteLLMCostPerTokenCallable(Protocol):
+    def __call__(
+        self,
+        *,
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        custom_llm_provider: str | None,
+        custom_cost_per_token: _CostPerTokenPayload | None,
+        call_type: Literal["embedding"],
+    ) -> tuple[float, float]: ...
+
+
+_LITELLM_COST_PER_TOKEN = cast(
+    _LiteLLMCostPerTokenCallable,
+    getattr(importlib.import_module("litellm.cost_calculator"), "cost_per_token"),
+)
+
+
 class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
     def _mask_sensitive_params(self, params: dict[str, object]) -> dict[str, object]:
         """Return copy of params with masked API key for safe logging."""
@@ -82,7 +116,9 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
         chunk_embedding_list = ChunkEmbeddingList()
         total_tokens = 0
         prompt_tokens = 0
+        total_cost_usd = Decimal("0")
         saw_provider_usage = False
+        saw_provider_cost = False
 
         for chunked_chunks in self._chunk_chunks(chunks):
             if self.model.family == "e5":
@@ -108,17 +144,22 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                 saw_provider_usage = True
                 total_tokens += batch.usage.total_tokens or 0
                 prompt_tokens += batch.usage.prompt_tokens or 0
+                if batch.usage.cost_usd is not None:
+                    saw_provider_cost = True
+                    total_cost_usd += batch.usage.cost_usd
 
         usage = (
             EmbeddingUsage(
                 prompt_tokens=prompt_tokens,
                 total_tokens=total_tokens,
+                cost_usd=total_cost_usd if saw_provider_cost else None,
                 source="provider_reported",
             )
             if saw_provider_usage
             else EmbeddingUsage(
                 prompt_tokens=None,
                 total_tokens=None,
+                cost_usd=None,
                 source="missing",
             )
         )
@@ -162,6 +203,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                     usage=EmbeddingUsage(
                         prompt_tokens=None,
                         total_tokens=None,
+                        cost_usd=None,
                         source="missing",
                     ),
                 )
@@ -276,6 +318,21 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
 
         embeddings = _embedding_vectors_from_response(response)
         usage = _embedding_usage_from_response(response)
+        if usage.source == "provider_reported":
+            usage = replace(
+                usage,
+                cost_usd=_embedding_cost_usd(
+                    response=response,
+                    model=self.litellm_model or self.model.name,
+                    provider_type=(
+                        self.credential_resolver.provider_type
+                        if self.credential_resolver is not None
+                        else None
+                    ),
+                    usage=usage,
+                    input_cost_per_token=self.model.input_cost_per_token,
+                ),
+            )
         return _LiteLLMEmbeddingBatch(embeddings=embeddings, usage=usage)
 
 
@@ -332,11 +389,87 @@ def _embedding_usage_from_response(
         return EmbeddingUsage(
             prompt_tokens=prompt_tokens if isinstance(prompt_tokens, int) else None,
             total_tokens=total_tokens,
+            cost_usd=None,
             source="provider_reported",
         )
 
     return EmbeddingUsage(
         prompt_tokens=None,
         total_tokens=None,
+        cost_usd=None,
         source="missing",
     )
+
+
+def _embedding_cost_usd(
+    *,
+    response: _LiteLLMEmbeddingResponse,
+    model: str,
+    provider_type: str | None,
+    usage: EmbeddingUsage,
+    input_cost_per_token: Decimal | None,
+) -> Decimal | None:
+    if usage.total_tokens is None:
+        return None
+
+    if input_cost_per_token is None:
+        response_cost = _response_cost_from_hidden_params(response)
+        if response_cost is not None:
+            return response_cost
+
+    prompt_tokens = usage.prompt_tokens or usage.total_tokens
+    custom_cost_per_token = (
+        _CostPerTokenPayload(
+            input_cost_per_token=float(input_cost_per_token),
+            output_cost_per_token=0.0,
+        )
+        if input_cost_per_token is not None
+        else None
+    )
+
+    try:
+        prompt_cost, completion_cost = _LITELLM_COST_PER_TOKEN(
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=0,
+            custom_llm_provider=provider_type,
+            custom_cost_per_token=custom_cost_per_token,
+            call_type="embedding",
+        )
+    except Exception as exc:
+        logger.warning(
+            "LiteLLM embedding cost lookup failed",
+            extra={
+                "model": model,
+                "provider_type": provider_type,
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+            },
+        )
+        return None
+
+    return (Decimal(str(prompt_cost)) + Decimal(str(completion_cost))).quantize(
+        Decimal("0.000000000001")
+    )
+
+
+def _response_cost_from_hidden_params(
+    response: _LiteLLMEmbeddingResponse,
+) -> Decimal | None:
+    hidden_params = getattr(response, "_hidden_params", None)
+    if not isinstance(hidden_params, Mapping):
+        return None
+
+    response_cost = cast(Mapping[object, object], hidden_params).get("response_cost")
+    if response_cost is None:
+        return None
+    if isinstance(response_cost, Decimal):
+        return response_cost.quantize(Decimal("0.000000000001"))
+    if isinstance(response_cost, (int, float)) and not isinstance(response_cost, bool):
+        return Decimal(str(response_cost)).quantize(Decimal("0.000000000001"))
+    if isinstance(response_cost, str):
+        try:
+            return Decimal(response_cost).quantize(Decimal("0.000000000001"))
+        except Exception:
+            return None
+    return None

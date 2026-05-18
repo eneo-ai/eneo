@@ -182,6 +182,9 @@
   const visibleTenantWebsiteInventory = $derived(
     tenantWebsiteInventoryOverride ?? data.crawlerTenantWebsiteInventory
   );
+  const visibleTenantWebsiteInventoryById = $derived(
+    new Map((visibleTenantWebsiteInventory?.items ?? []).map((item) => [item.website_id, item]))
+  );
 
   const tenantWebsiteInventoryMatchesSsrQuery = $derived(
     tenantWebsiteInventoryPage === 1 &&
@@ -197,8 +200,7 @@
     label: string;
     inventoryItem: CrawlerTenantWebsiteInventoryItem | null;
   } {
-    const items = visibleTenantWebsiteInventory?.items ?? [];
-    const inventoryItem = items.find((item) => item.website_id === row.website_id) ?? null;
+    const inventoryItem = visibleTenantWebsiteInventoryById.get(row.website_id) ?? null;
     const label =
       inventoryItem?.url ||
       inventoryItem?.name ||
@@ -739,11 +741,12 @@
 
         <Tabs.Content value="activity" class="space-y-0">
           <AktivitetTab
-            scheduledAggregate={data.crawlerScheduledAggregate ?? null}
-            scheduledAggregateLoadFailed={data.crawlerScheduledAggregateLoadFailed}
             {activity}
             resolveRowLabel={resolveHälsaRowLabel}
             onOpenWebsiteDetail={openWebsiteDetail}
+            onOpenIntervalDialog={dialogs.interval.openForInventoryItem}
+            onOpenRetryDialog={dialogs.retry.openForInventoryItem}
+            onOpenDeleteDialog={dialogs.delete.openFor}
           />
         </Tabs.Content>
 

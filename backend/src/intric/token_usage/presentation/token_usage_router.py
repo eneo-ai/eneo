@@ -3,10 +3,11 @@ from datetime import datetime
 from typing import Annotated, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
+from intric.token_usage.domain.token_usage_models import TokenUsageSourceType
 from intric.token_usage.presentation.token_usage_models import (
     TokenUsageSummary,
     UserSortBy,
@@ -33,6 +34,41 @@ EndDateQuery = Annotated[
         "Time defaults to 00:00:00.",
     ),
 ]
+SourceTypeQuery = Annotated[
+    Optional[str],
+    Query(
+        description=(
+            "Comma-separated token usage sources to include. "
+            "Allowed values: chat, app_run, crawler_embedding."
+        ),
+    ),
+]
+
+
+def parse_source_type_query(
+    value: str | None,
+) -> frozenset[TokenUsageSourceType] | None:
+    if value is None or value.strip() == "":
+        return None
+
+    parsed: set[TokenUsageSourceType] = set()
+    invalid: list[str] = []
+    for raw_part in value.split(","):
+        part = raw_part.strip()
+        if part == "":
+            continue
+        try:
+            parsed.add(TokenUsageSourceType(part))
+        except ValueError:
+            invalid.append(part)
+
+    if invalid:
+        allowed = ", ".join(source.value for source in TokenUsageSourceType)
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid source_type value(s): {', '.join(invalid)}. Allowed values: {allowed}.",
+        )
+    return frozenset(parsed)
 
 
 @router.get("/", response_model=TokenUsageSummary)
@@ -40,6 +76,7 @@ async def get_token_usage(
     container: ContainerDep,
     start_date: StartDateQuery = None,
     end_date: EndDateQuery = None,
+    source_type: SourceTypeQuery = None,
 ):
     """
     Get token usage statistics for the specified date range.
@@ -49,7 +86,9 @@ async def get_token_usage(
     token_usage_service = container.token_usage_service()
 
     usage_summary = await token_usage_service.get_token_usage(
-        start_date=start_date, end_date=end_date
+        start_date=start_date,
+        end_date=end_date,
+        source_types=parse_source_type_query(source_type),
     )
 
     return TokenUsageSummary.from_domain(usage_summary)

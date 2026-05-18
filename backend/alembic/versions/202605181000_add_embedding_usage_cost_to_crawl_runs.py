@@ -22,6 +22,9 @@ CRAWL_RUNS_TENANT_CREATED_AT_INDEX = "idx_crawl_runs_tenant_created_at"
 CRAWL_RUNS_TENANT_WEBSITE_CREATED_AT_INDEX = (
     "idx_crawl_runs_tenant_website_created_at"
 )
+CRAWL_RUNS_TENANT_CREATED_EMBEDDING_USAGE_INDEX = (
+    "idx_crawl_runs_tenant_created_embedding_usage"
+)
 CRAWL_RUNS_EMBEDDING_USAGE_SOURCE_CHECK = (
     "ck_crawl_runs_embedding_usage_source"
 )
@@ -106,10 +109,20 @@ def upgrade() -> None:
             ON crawl_runs (tenant_id, website_id, created_at)
             """
         )
+        op.execute(
+            f"""
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS {CRAWL_RUNS_TENANT_CREATED_EMBEDDING_USAGE_INDEX}
+            ON crawl_runs (tenant_id, created_at, embedding_model_id)
+            WHERE embedding_input_tokens IS NOT NULL
+            """
+        )
 
 
 def downgrade() -> None:
     with op.get_context().autocommit_block():
+        op.execute(
+            f"DROP INDEX CONCURRENTLY IF EXISTS {CRAWL_RUNS_TENANT_CREATED_EMBEDDING_USAGE_INDEX}"
+        )
         op.execute(
             f"DROP INDEX CONCURRENTLY IF EXISTS {CRAWL_RUNS_TENANT_WEBSITE_CREATED_AT_INDEX}"
         )

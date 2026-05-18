@@ -52,7 +52,8 @@ async function invalidateAfterWebsiteDelete(): Promise<void> {
     invalidate("admin:crawler-tenant-website-inventory"),
     invalidate("admin:crawler-failure-inventory"),
     invalidate("admin:crawler-active-inventory"),
-    invalidate("admin:crawler-scheduled")
+    invalidate("admin:crawler-scheduled"),
+    invalidate("admin:crawler-website-processing")
   ]);
 }
 

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -157,6 +158,34 @@ def test_crawl_run_create_defaults_pages_source_retained_to_none():
     assert crawl_run.files_too_large_skipped is None
     assert crawl_run.files_too_large_download_limit_bytes is None
     assert crawl_run.files_too_large_samples == ()
+
+
+def test_crawl_run_create_snapshots_sparse_embedding_model_metadata():
+    model_id = uuid4()
+    website = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        embedding_model_id=model_id,
+        embedding_model_name="text-embedding-3-small",
+        embedding_model_litellm_name="openai/text-embedding-3-small",
+        embedding_model_provider_type="openai",
+        embedding_model_input_cost_per_token=Decimal("0.000000020000"),
+    )
+
+    crawl_run = CrawlRun.create(website=website)
+
+    assert crawl_run.embedding_model_id == model_id
+    assert crawl_run.embedding_model_name_snapshot == "text-embedding-3-small"
+    assert (
+        crawl_run.embedding_model_litellm_name_snapshot
+        == "openai/text-embedding-3-small"
+    )
+    assert crawl_run.embedding_model_provider_snapshot == "openai"
+    assert crawl_run.embedding_input_cost_per_token_snapshot == Decimal(
+        "0.000000020000"
+    )
+    assert crawl_run.embedding_input_tokens == 0
+    assert crawl_run.embedding_total_cost_usd == Decimal("0")
 
 
 def test_crawl_run_update_accepts_typed_outcome_code():
