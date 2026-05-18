@@ -39,7 +39,9 @@ async def scim_http_error_handler(request: Request, exc: ScimHttpError) -> JSONR
 
 
 @scim_app.exception_handler(ScimValidationError)
-async def scim_validation_error_handler(request: Request, exc: ScimValidationError) -> JSONResponse:
+async def scim_validation_error_handler(
+    request: Request, exc: ScimValidationError
+) -> JSONResponse:
     return _scim_error_json(400, str(exc), scim_type="invalidValue")
 
 

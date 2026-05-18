@@ -30,7 +30,9 @@ def get_scim_user_service(
     repository: ScimUserRepository = Depends(get_scim_user_repository),
     audit_service: AuditService = Depends(get_scim_audit_service),
 ) -> ScimUserService:
-    return ScimUserService(repository=repository, tenant_id=tenant_id, audit_service=audit_service)
+    return ScimUserService(
+        repository=repository, tenant_id=tenant_id, audit_service=audit_service
+    )
 
 
 def get_scim_group_repository(
@@ -44,4 +46,6 @@ def get_scim_group_service(
     repository: ScimGroupRepository = Depends(get_scim_group_repository),
     audit_service: AuditService = Depends(get_scim_audit_service),
 ) -> ScimGroupService:
-    return ScimGroupService(repository=repository, tenant_id=tenant_id, audit_service=audit_service)
+    return ScimGroupService(
+        repository=repository, tenant_id=tenant_id, audit_service=audit_service
+    )

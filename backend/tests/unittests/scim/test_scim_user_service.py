@@ -84,7 +84,9 @@ class TestCreateUser:
         repo.email_exists_in_other_tenant.return_value = True
 
         service = _make_service(repo)
-        with pytest.raises(ScimUserConflictError, match="already in use by another tenant"):
+        with pytest.raises(
+            ScimUserConflictError, match="already in use by another tenant"
+        ):
             await service.create_user(CREATE_REQUEST)
 
         repo.create.assert_not_called()
@@ -267,51 +269,97 @@ class TestListUsers:
         service = _make_service(repo)
         await service.list_users(filter_str=None)
         repo.count.assert_called_once_with(tenant_id=ANY, scim_filter=None)
-        repo.list.assert_called_once_with(tenant_id=ANY, scim_filter=None, scim_sort=None, offset=0, limit=None)
+        repo.list.assert_called_once_with(
+            tenant_id=ANY, scim_filter=None, scim_sort=None, offset=0, limit=None
+        )
 
     async def test_eq_filter_on_username(self):
         repo = self._make_repo()
         service = _make_service(repo)
         await service.list_users(filter_str='userName eq "jane@example.com"')
-        repo.list.assert_called_once_with(tenant_id=ANY, scim_filter=ScimFilter("userName", "eq", "jane@example.com"), scim_sort=None, offset=0, limit=None)
+        repo.list.assert_called_once_with(
+            tenant_id=ANY,
+            scim_filter=ScimFilter("userName", "eq", "jane@example.com"),
+            scim_sort=None,
+            offset=0,
+            limit=None,
+        )
 
     async def test_co_filter_on_username(self):
         repo = self._make_repo()
         service = _make_service(repo)
         await service.list_users(filter_str='userName co "jane"')
-        repo.list.assert_called_once_with(tenant_id=ANY, scim_filter=ScimFilter("userName", "co", "jane"), scim_sort=None, offset=0, limit=None)
+        repo.list.assert_called_once_with(
+            tenant_id=ANY,
+            scim_filter=ScimFilter("userName", "co", "jane"),
+            scim_sort=None,
+            offset=0,
+            limit=None,
+        )
 
     async def test_sw_filter_on_username(self):
         repo = self._make_repo()
         service = _make_service(repo)
         await service.list_users(filter_str='userName sw "j"')
-        repo.list.assert_called_once_with(tenant_id=ANY, scim_filter=ScimFilter("userName", "sw", "j"), scim_sort=None, offset=0, limit=None)
+        repo.list.assert_called_once_with(
+            tenant_id=ANY,
+            scim_filter=ScimFilter("userName", "sw", "j"),
+            scim_sort=None,
+            offset=0,
+            limit=None,
+        )
 
     async def test_pr_filter_on_username(self):
         repo = self._make_repo()
         service = _make_service(repo)
         await service.list_users(filter_str="userName pr")
-        repo.list.assert_called_once_with(tenant_id=ANY, scim_filter=ScimFilter("userName", "pr", None), scim_sort=None, offset=0, limit=None)
+        repo.list.assert_called_once_with(
+            tenant_id=ANY,
+            scim_filter=ScimFilter("userName", "pr", None),
+            scim_sort=None,
+            offset=0,
+            limit=None,
+        )
 
     async def test_eq_filter_on_external_id(self):
         repo = self._make_repo()
         service = _make_service(repo)
         await service.list_users(filter_str='externalId eq "aad-guid-123"')
-        repo.list.assert_called_once_with(tenant_id=ANY, scim_filter=ScimFilter("externalId", "eq", "aad-guid-123"), scim_sort=None, offset=0, limit=None)
+        repo.list.assert_called_once_with(
+            tenant_id=ANY,
+            scim_filter=ScimFilter("externalId", "eq", "aad-guid-123"),
+            scim_sort=None,
+            offset=0,
+            limit=None,
+        )
 
     async def test_sort_by_username_ascending(self):
         from intric.scim.schemas.common import ScimSort
+
         repo = self._make_repo()
         service = _make_service(repo)
         await service.list_users(sort_by="userName", sort_order="ascending")
-        repo.list.assert_called_once_with(tenant_id=ANY, scim_filter=None, scim_sort=ScimSort("userName", "ascending"), offset=0, limit=None)
+        repo.list.assert_called_once_with(
+            tenant_id=ANY,
+            scim_filter=None,
+            scim_sort=ScimSort("userName", "ascending"),
+            offset=0,
+            limit=None,
+        )
 
     async def test_sort_by_username_descending(self):
         from intric.scim.schemas.common import ScimSort
+
         repo = self._make_repo()
         service = _make_service(repo)
         await service.list_users(sort_by="userName", sort_order="descending")
-        repo.list.assert_called_once_with(tenant_id=ANY, scim_filter=None, scim_sort=ScimSort("userName", "descending"), offset=0, limit=None)
+        repo.list.assert_called_once_with(
+            tenant_id=ANY,
+            scim_filter=None,
+            scim_sort=ScimSort("userName", "descending"),
+            offset=0,
+            limit=None,
+        )
 
 
 class TestReplaceUser:
@@ -391,7 +439,11 @@ class TestPatchUser:
         service = _make_service(repo)
         await service.patch_user(
             db_user.id,
-            [PatchOperation(op="Replace", path="externalId", value="entra-object-id-123")],
+            [
+                PatchOperation(
+                    op="Replace", path="externalId", value="entra-object-id-123"
+                )
+            ],
         )
 
         assert db_user.external_id == "entra-object-id-123"
@@ -420,7 +472,13 @@ class TestPatchUser:
         service = _make_service(repo)
         await service.patch_user(
             db_user.id,
-            [PatchOperation(op="Replace", path="emails", value=[{"value": "new@example.com", "primary": True}])],
+            [
+                PatchOperation(
+                    op="Replace",
+                    path="emails",
+                    value=[{"value": "new@example.com", "primary": True}],
+                )
+            ],
         )
 
         assert db_user.email == "new@example.com"
@@ -434,10 +492,16 @@ class TestPatchUser:
         service = _make_service(repo)
         await service.patch_user(
             db_user.id,
-            [PatchOperation(op="Replace", path="emails", value=[
-                {"value": "first@example.com", "primary": False},
-                {"value": "primary@example.com", "primary": True},
-            ])],
+            [
+                PatchOperation(
+                    op="Replace",
+                    path="emails",
+                    value=[
+                        {"value": "first@example.com", "primary": False},
+                        {"value": "primary@example.com", "primary": True},
+                    ],
+                )
+            ],
         )
 
         assert db_user.email == "primary@example.com"

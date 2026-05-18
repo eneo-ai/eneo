@@ -17,7 +17,9 @@ _ATTR_MAP = {
 }
 
 
-def _apply_filter(query: Select[tuple[Users]], scim_filter: ScimFilter | None) -> Select[tuple[Users]]:
+def _apply_filter(
+    query: Select[tuple[Users]], scim_filter: ScimFilter | None
+) -> Select[tuple[Users]]:
     if scim_filter is None:
         return query
     col = _ATTR_MAP.get(scim_filter.attribute.lower().replace(".", ""))
@@ -81,7 +83,9 @@ class ScimUserRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_by_username(self, user_name: str, tenant_id: UUID) -> UserModel | None:
+    async def get_by_username(
+        self, user_name: str, tenant_id: UUID
+    ) -> UserModel | None:
         result = await self._session.execute(
             select(UserModel).where(
                 UserModel.username == user_name,
@@ -120,14 +124,18 @@ class ScimUserRepository:
         )
         return result.scalar_one_or_none() is not None
 
-    def _base_list_query(self, tenant_id: UUID, scim_filter: ScimFilter | None) -> Select[tuple[Users]]:
+    def _base_list_query(
+        self, tenant_id: UUID, scim_filter: ScimFilter | None
+    ) -> Select[tuple[Users]]:
         query = select(UserModel).where(
             UserModel.state == "active",
             UserModel.tenant_id == tenant_id,
         )
         return _apply_filter(query, scim_filter)
 
-    async def count(self, tenant_id: UUID, scim_filter: ScimFilter | None = None) -> int:
+    async def count(
+        self, tenant_id: UUID, scim_filter: ScimFilter | None = None
+    ) -> int:
         base = self._base_list_query(tenant_id, scim_filter)
         count_query = select(func.count()).select_from(base.subquery())
         result = await self._session.execute(count_query)

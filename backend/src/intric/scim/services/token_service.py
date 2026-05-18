@@ -32,7 +32,11 @@ class ScimTokenService:
             .where(Tenants.id == tenant_id)
             .values(scim_token_hash=token_hash, updated_at=datetime.now(timezone.utc))
         )
-        await self._log_audit(tenant_id, ActionType.SCIM_TOKEN_CREATED, "Sysadmin generated SCIM bearer token for tenant")
+        await self._log_audit(
+            tenant_id,
+            ActionType.SCIM_TOKEN_CREATED,
+            "Sysadmin generated SCIM bearer token for tenant",
+        )
         return token
 
     async def get_status(self, tenant_id: UUID) -> bool:
@@ -52,7 +56,11 @@ class ScimTokenService:
             .where(Tenants.id == tenant_id)
             .values(scim_token_hash=None, updated_at=datetime.now(timezone.utc))
         )
-        await self._log_audit(tenant_id, ActionType.SCIM_TOKEN_REVOKED, "Sysadmin revoked SCIM bearer token for tenant")
+        await self._log_audit(
+            tenant_id,
+            ActionType.SCIM_TOKEN_REVOKED,
+            "Sysadmin revoked SCIM bearer token for tenant",
+        )
 
     async def _require_tenant(self, tenant_id: UUID) -> None:
         result = await self._session.execute(
@@ -61,7 +69,9 @@ class ScimTokenService:
         if result.scalar_one_or_none() is None:
             raise NotFoundException(f"Tenant {tenant_id} not found")
 
-    async def _log_audit(self, tenant_id: UUID, action: ActionType, description: str) -> None:
+    async def _log_audit(
+        self, tenant_id: UUID, action: ActionType, description: str
+    ) -> None:
         await self._audit.log(
             tenant_id=tenant_id,
             actor_id=None,

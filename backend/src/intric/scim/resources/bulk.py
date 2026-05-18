@@ -39,7 +39,13 @@ def _resolve_path(path: str, bulk_id_map: dict[str, str]) -> str:
     return _BULK_ID_RE.sub(lambda m: bulk_id_map.get(m.group(1), m.group(0)), path)
 
 
-def _scim_error_response(method: str, bulk_id: str | None, status: int, detail: str, scim_type: str | None = None) -> BulkOperationResponse:
+def _scim_error_response(
+    method: str,
+    bulk_id: str | None,
+    status: int,
+    detail: str,
+    scim_type: str | None = None,
+) -> BulkOperationResponse:
     body: dict[str, object] = {
         "schemas": ["urn:ietf:params:scim:api:messages:2.0:Error"],
         "status": str(status),
@@ -47,7 +53,9 @@ def _scim_error_response(method: str, bulk_id: str | None, status: int, detail: 
     }
     if scim_type:
         body["scimType"] = scim_type
-    return BulkOperationResponse(method=method, bulkId=bulk_id, status=str(status), response=body)
+    return BulkOperationResponse(
+        method=method, bulkId=bulk_id, status=str(status), response=body
+    )
 
 
 @router.post("/Bulk")
@@ -65,7 +73,9 @@ async def bulk_operations(
         if payload.failOnErrors and error_count >= payload.failOnErrors:
             break
 
-        result = await _execute_operation(op, bulk_id_map, user_service, group_service, session)
+        result = await _execute_operation(
+            op, bulk_id_map, user_service, group_service, session
+        )
         results.append(result)
 
         if int(result.status) >= 400:
@@ -87,17 +97,23 @@ async def _execute_operation(
     if not match:
         return _scim_error_response(method, op.bulkId, 400, f"Invalid path: {op.path}")
 
-    resource_type = match.group(1)   # "Users" or "Groups"
-    resource_id = match.group(2)     # UUID string or None
+    resource_type = match.group(1)  # "Users" or "Groups"
+    resource_id = match.group(2)  # UUID string or None
 
     try:
         async with session.begin_nested():
             if resource_type == "Users":
-                return await _handle_user_op(method, resource_id, op, bulk_id_map, user_service)
+                return await _handle_user_op(
+                    method, resource_id, op, bulk_id_map, user_service
+                )
             else:
-                return await _handle_group_op(method, resource_id, op, bulk_id_map, group_service)
+                return await _handle_group_op(
+                    method, resource_id, op, bulk_id_map, group_service
+                )
     except ScimHttpError as e:
-        return _scim_error_response(method, op.bulkId, e.status_code, e.detail, e.scim_type)
+        return _scim_error_response(
+            method, op.bulkId, e.status_code, e.detail, e.scim_type
+        )
     except ScimValidationError as e:
         return _scim_error_response(method, op.bulkId, 400, str(e), "invalidValue")
     except Exception as e:
@@ -118,7 +134,9 @@ async def _handle_user_op(
             location = f"/scim/v2/Users/{user.id}"
             if op.bulkId:
                 bulk_id_map[op.bulkId] = user.id
-            return BulkOperationResponse(method=method, bulkId=op.bulkId, location=location, status="201")
+            return BulkOperationResponse(
+                method=method, bulkId=op.bulkId, location=location, status="201"
+            )
 
         if resource_id is None:
             return _scim_error_response(method, op.bulkId, 400, "Resource ID required")
@@ -127,12 +145,16 @@ async def _handle_user_op(
         if method == "PUT":
             data = ScimUserRequest.model_validate(op.data)
             user = await service.replace_user(uid, data)
-            return BulkOperationResponse(method=method, location=f"/scim/v2/Users/{user.id}", status="200")
+            return BulkOperationResponse(
+                method=method, location=f"/scim/v2/Users/{user.id}", status="200"
+            )
 
         if method == "PATCH":
             data = PatchRequest.model_validate(op.data)
             user = await service.patch_user(uid, data.Operations)
-            return BulkOperationResponse(method=method, location=f"/scim/v2/Users/{user.id}", status="200")
+            return BulkOperationResponse(
+                method=method, location=f"/scim/v2/Users/{user.id}", status="200"
+            )
 
         if method == "DELETE":
             await service.delete_user(uid)
@@ -160,7 +182,9 @@ async def _handle_group_op(
             location = f"/scim/v2/Groups/{group.id}"
             if op.bulkId:
                 bulk_id_map[op.bulkId] = group.id
-            return BulkOperationResponse(method=method, bulkId=op.bulkId, location=location, status="201")
+            return BulkOperationResponse(
+                method=method, bulkId=op.bulkId, location=location, status="201"
+            )
 
         if resource_id is None:
             return _scim_error_response(method, op.bulkId, 400, "Resource ID required")
@@ -169,12 +193,16 @@ async def _handle_group_op(
         if method == "PUT":
             data = ScimGroupRequest.model_validate(op.data)
             group = await service.replace_group(gid, data)
-            return BulkOperationResponse(method=method, location=f"/scim/v2/Groups/{group.id}", status="200")
+            return BulkOperationResponse(
+                method=method, location=f"/scim/v2/Groups/{group.id}", status="200"
+            )
 
         if method == "PATCH":
             data = PatchRequest.model_validate(op.data)
             group = await service.patch_group(gid, data.Operations)
-            return BulkOperationResponse(method=method, location=f"/scim/v2/Groups/{group.id}", status="200")
+            return BulkOperationResponse(
+                method=method, location=f"/scim/v2/Groups/{group.id}", status="200"
+            )
 
         if method == "DELETE":
             await service.delete_group(gid)

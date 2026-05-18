@@ -35,7 +35,9 @@ def mock_service() -> AsyncMock:
 async def client(mock_service: AsyncMock) -> AsyncClient:
     scim_app.dependency_overrides[require_scim_auth] = lambda: None
     scim_app.dependency_overrides[get_scim_group_service] = lambda: mock_service
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         yield c
     scim_app.dependency_overrides.clear()
 
@@ -52,7 +54,9 @@ class TestCreateGroup:
         res = await client.post("/scim/v2/Groups", json=CREATE_PAYLOAD, headers=AUTH)
         assert res.status_code == 201
 
-    async def test_returns_group_schema(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_returns_group_schema(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         mock_service.create_group.return_value = _make_scim_group()
         res = await client.post("/scim/v2/Groups", json=CREATE_PAYLOAD, headers=AUTH)
         assert "urn:ietf:params:scim:schemas:core:2.0:Group" in res.json()["schemas"]
@@ -62,27 +66,37 @@ class TestCreateGroup:
         res = await client.post("/scim/v2/Groups", json=CREATE_PAYLOAD, headers=AUTH)
         assert res.json()["id"]
 
-    async def test_returns_meta_resource_type(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_returns_meta_resource_type(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         mock_service.create_group.return_value = _make_scim_group()
         res = await client.post("/scim/v2/Groups", json=CREATE_PAYLOAD, headers=AUTH)
         assert res.json()["meta"]["resourceType"] == "Group"
 
-    async def test_conflict_returns_409(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_conflict_returns_409(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         mock_service.create_group.side_effect = ScimGroupConflictError("already exists")
         res = await client.post("/scim/v2/Groups", json=CREATE_PAYLOAD, headers=AUTH)
         assert res.status_code == 409
 
-    async def test_conflict_returns_scim_error_schema(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_conflict_returns_scim_error_schema(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         mock_service.create_group.side_effect = ScimGroupConflictError("already exists")
         res = await client.post("/scim/v2/Groups", json=CREATE_PAYLOAD, headers=AUTH)
         assert "urn:ietf:params:scim:api:messages:2.0:Error" in res.json()["schemas"]
 
-    async def test_conflict_returns_uniqueness_scim_type(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_conflict_returns_uniqueness_scim_type(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         mock_service.create_group.side_effect = ScimGroupConflictError("already exists")
         res = await client.post("/scim/v2/Groups", json=CREATE_PAYLOAD, headers=AUTH)
         assert res.json()["scimType"] == "uniqueness"
 
-    async def test_returns_location_header(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_returns_location_header(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         group = _make_scim_group()
         mock_service.create_group.return_value = group
         res = await client.post("/scim/v2/Groups", json=CREATE_PAYLOAD, headers=AUTH)
@@ -96,19 +110,25 @@ class TestGetGroup:
         res = await client.get(f"/scim/v2/Groups/{group.id}", headers=AUTH)
         assert res.status_code == 200
 
-    async def test_returns_correct_group(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_returns_correct_group(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         group = _make_scim_group()
         mock_service.get_group.return_value = group
         res = await client.get(f"/scim/v2/Groups/{group.id}", headers=AUTH)
         assert res.json()["id"] == group.id
         assert res.json()["displayName"] == group.displayName
 
-    async def test_not_found_returns_404(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_not_found_returns_404(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         mock_service.get_group.side_effect = ScimGroupNotFoundError()
         res = await client.get(f"/scim/v2/Groups/{uuid4()}", headers=AUTH)
         assert res.status_code == 404
 
-    async def test_not_found_returns_scim_error_schema(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_not_found_returns_scim_error_schema(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         mock_service.get_group.side_effect = ScimGroupNotFoundError()
         res = await client.get(f"/scim/v2/Groups/{uuid4()}", headers=AUTH)
         assert "urn:ietf:params:scim:api:messages:2.0:Error" in res.json()["schemas"]
@@ -120,32 +140,57 @@ class TestListGroups:
         res = await client.get("/scim/v2/Groups", headers=AUTH)
         assert res.status_code == 200
 
-    async def test_returns_list_response_schema(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_returns_list_response_schema(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         mock_service.list_groups.return_value = ([], 0)
         res = await client.get("/scim/v2/Groups", headers=AUTH)
-        assert "urn:ietf:params:scim:api:messages:2.0:ListResponse" in res.json()["schemas"]
+        assert (
+            "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+            in res.json()["schemas"]
+        )
 
-    async def test_returns_total_results(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_returns_total_results(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         groups = [_make_scim_group(), _make_scim_group("Backend")]
         mock_service.list_groups.return_value = (groups, 2)
         res = await client.get("/scim/v2/Groups", headers=AUTH)
         assert res.json()["totalResults"] == 2
 
-    async def test_passes_filter_to_service(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_passes_filter_to_service(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         mock_service.list_groups.return_value = ([], 0)
-        await client.get('/scim/v2/Groups?filter=displayName eq "Engineering"', headers=AUTH)
+        await client.get(
+            '/scim/v2/Groups?filter=displayName eq "Engineering"', headers=AUTH
+        )
         mock_service.list_groups.assert_called_once_with(
-            filter_str='displayName eq "Engineering"', sort_by=None, sort_order=None, start_index=1, count=None
+            filter_str='displayName eq "Engineering"',
+            sort_by=None,
+            sort_order=None,
+            start_index=1,
+            count=None,
         )
 
-    async def test_passes_sort_to_service(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_passes_sort_to_service(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         mock_service.list_groups.return_value = ([], 0)
-        await client.get("/scim/v2/Groups?sortBy=displayName&sortOrder=ascending", headers=AUTH)
+        await client.get(
+            "/scim/v2/Groups?sortBy=displayName&sortOrder=ascending", headers=AUTH
+        )
         mock_service.list_groups.assert_called_once_with(
-            filter_str=None, sort_by="displayName", sort_order="ascending", start_index=1, count=None
+            filter_str=None,
+            sort_by="displayName",
+            sort_order="ascending",
+            start_index=1,
+            count=None,
         )
 
-    async def test_pagination_returns_startindex_and_itemsperpage(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_pagination_returns_startindex_and_itemsperpage(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         page = [_make_scim_group(f"G{i}") for i in range(2)]
         mock_service.list_groups.return_value = (page, 5)
         res = await client.get("/scim/v2/Groups?startIndex=1&count=2", headers=AUTH)
@@ -155,7 +200,9 @@ class TestListGroups:
         assert body["totalResults"] == 5
         assert len(body["Resources"]) == 2
 
-    async def test_pagination_second_page(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_pagination_second_page(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         page = [_make_scim_group(f"G{i}") for i in range(2)]
         mock_service.list_groups.return_value = (page, 5)
         res = await client.get("/scim/v2/Groups?startIndex=3&count=2", headers=AUTH)
@@ -169,45 +216,73 @@ class TestReplaceGroup:
     async def test_returns_200(self, client: AsyncClient, mock_service: AsyncMock):
         group = _make_scim_group()
         mock_service.replace_group.return_value = group
-        res = await client.put(f"/scim/v2/Groups/{group.id}", json=CREATE_PAYLOAD, headers=AUTH)
+        res = await client.put(
+            f"/scim/v2/Groups/{group.id}", json=CREATE_PAYLOAD, headers=AUTH
+        )
         assert res.status_code == 200
 
-    async def test_returns_updated_group_body(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_returns_updated_group_body(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         group = _make_scim_group()
         mock_service.replace_group.return_value = group
-        res = await client.put(f"/scim/v2/Groups/{group.id}", json=CREATE_PAYLOAD, headers=AUTH)
+        res = await client.put(
+            f"/scim/v2/Groups/{group.id}", json=CREATE_PAYLOAD, headers=AUTH
+        )
         assert res.json()["id"] == group.id
         assert "urn:ietf:params:scim:schemas:core:2.0:Group" in res.json()["schemas"]
 
-    async def test_not_found_returns_404(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_not_found_returns_404(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         mock_service.replace_group.side_effect = ScimGroupNotFoundError()
-        res = await client.put(f"/scim/v2/Groups/{uuid4()}", json=CREATE_PAYLOAD, headers=AUTH)
+        res = await client.put(
+            f"/scim/v2/Groups/{uuid4()}", json=CREATE_PAYLOAD, headers=AUTH
+        )
         assert res.status_code == 404
 
-    async def test_not_found_returns_scim_error_schema(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_not_found_returns_scim_error_schema(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         mock_service.replace_group.side_effect = ScimGroupNotFoundError()
-        res = await client.put(f"/scim/v2/Groups/{uuid4()}", json=CREATE_PAYLOAD, headers=AUTH)
+        res = await client.put(
+            f"/scim/v2/Groups/{uuid4()}", json=CREATE_PAYLOAD, headers=AUTH
+        )
         assert "urn:ietf:params:scim:api:messages:2.0:Error" in res.json()["schemas"]
 
-    async def test_conflict_returns_409(self, client: AsyncClient, mock_service: AsyncMock):
-        mock_service.replace_group.side_effect = ScimGroupConflictError("already exists")
-        res = await client.put(f"/scim/v2/Groups/{uuid4()}", json=CREATE_PAYLOAD, headers=AUTH)
+    async def test_conflict_returns_409(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
+        mock_service.replace_group.side_effect = ScimGroupConflictError(
+            "already exists"
+        )
+        res = await client.put(
+            f"/scim/v2/Groups/{uuid4()}", json=CREATE_PAYLOAD, headers=AUTH
+        )
         assert res.status_code == 409
         assert res.json()["scimType"] == "uniqueness"
 
 
 class TestPatchGroup:
-    async def test_add_member_returns_200(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_add_member_returns_200(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         group = _make_scim_group()
         mock_service.patch_group.return_value = group
         payload = {
             "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-            "Operations": [{"op": "Add", "path": "members", "value": [{"value": str(uuid4())}]}],
+            "Operations": [
+                {"op": "Add", "path": "members", "value": [{"value": str(uuid4())}]}
+            ],
         }
-        res = await client.patch(f"/scim/v2/Groups/{group.id}", json=payload, headers=AUTH)
+        res = await client.patch(
+            f"/scim/v2/Groups/{group.id}", json=payload, headers=AUTH
+        )
         assert res.status_code == 200
 
-    async def test_remove_member_returns_200(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_remove_member_returns_200(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         group = _make_scim_group()
         mock_service.patch_group.return_value = group
         uid = uuid4()
@@ -215,36 +290,54 @@ class TestPatchGroup:
             "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
             "Operations": [{"op": "Remove", "path": f'members[value eq "{uid}"]'}],
         }
-        res = await client.patch(f"/scim/v2/Groups/{group.id}", json=payload, headers=AUTH)
+        res = await client.patch(
+            f"/scim/v2/Groups/{group.id}", json=payload, headers=AUTH
+        )
         assert res.status_code == 200
 
-    async def test_replace_displayname_returns_200(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_replace_displayname_returns_200(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         group = _make_scim_group("Renamed")
         mock_service.patch_group.return_value = group
         payload = {
             "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-            "Operations": [{"op": "Replace", "path": "displayName", "value": "Renamed"}],
+            "Operations": [
+                {"op": "Replace", "path": "displayName", "value": "Renamed"}
+            ],
         }
-        res = await client.patch(f"/scim/v2/Groups/{group.id}", json=payload, headers=AUTH)
+        res = await client.patch(
+            f"/scim/v2/Groups/{group.id}", json=payload, headers=AUTH
+        )
         assert res.status_code == 200
         assert res.json()["displayName"] == "Renamed"
 
-    async def test_not_found_returns_404(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_not_found_returns_404(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         mock_service.patch_group.side_effect = ScimGroupNotFoundError()
         payload = {
             "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-            "Operations": [{"op": "Add", "path": "members", "value": [{"value": str(uuid4())}]}],
+            "Operations": [
+                {"op": "Add", "path": "members", "value": [{"value": str(uuid4())}]}
+            ],
         }
-        res = await client.patch(f"/scim/v2/Groups/{uuid4()}", json=payload, headers=AUTH)
+        res = await client.patch(
+            f"/scim/v2/Groups/{uuid4()}", json=payload, headers=AUTH
+        )
         assert res.status_code == 404
 
-    async def test_conflict_returns_409(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_conflict_returns_409(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         mock_service.patch_group.side_effect = ScimGroupConflictError("already exists")
         payload = {
             "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
             "Operations": [{"op": "Replace", "path": "displayName", "value": "Taken"}],
         }
-        res = await client.patch(f"/scim/v2/Groups/{uuid4()}", json=payload, headers=AUTH)
+        res = await client.patch(
+            f"/scim/v2/Groups/{uuid4()}", json=payload, headers=AUTH
+        )
         assert res.status_code == 409
         assert res.json()["scimType"] == "uniqueness"
 
@@ -255,7 +348,9 @@ class TestDeleteGroup:
         res = await client.delete(f"/scim/v2/Groups/{uuid4()}", headers=AUTH)
         assert res.status_code == 204
 
-    async def test_not_found_returns_404(self, client: AsyncClient, mock_service: AsyncMock):
+    async def test_not_found_returns_404(
+        self, client: AsyncClient, mock_service: AsyncMock
+    ):
         mock_service.delete_group.side_effect = ScimGroupNotFoundError()
         res = await client.delete(f"/scim/v2/Groups/{uuid4()}", headers=AUTH)
         assert res.status_code == 404

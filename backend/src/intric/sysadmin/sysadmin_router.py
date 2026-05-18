@@ -53,6 +53,7 @@ from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.main.models import DeleteResponse, PaginatedResponse
 from intric.observability.debug_toggle import DebugFlag, get_debug_flag, set_debug_flag
+from intric.scim.schemas.token import ScimTokenCreatedResponse, ScimTokenStatusResponse
 from intric.server import protocol
 from intric.server.dependencies.container import (
     get_container,
@@ -60,7 +61,6 @@ from intric.server.dependencies.container import (
 )
 from intric.server.dependencies.get_repository import get_repository
 from intric.server.protocol import responses
-from intric.scim.schemas.token import ScimTokenCreatedResponse, ScimTokenStatusResponse
 from intric.sysadmin.sysadmin_service import SysAdminService
 from intric.tenants.tenant import (
     TenantBase,
@@ -1400,7 +1400,9 @@ async def delete_embedding_model(
         "Calling this endpoint again replaces any existing token."
     ),
     responses={
-        201: {"description": "Token created. Copy it now — it will not be shown again."},
+        201: {
+            "description": "Token created. Copy it now — it will not be shown again."
+        },
         404: {"description": "Tenant not found"},
     },
 )

@@ -49,9 +49,30 @@ _USER_SCHEMA = {
             "mutability": "readWrite",
             "returned": "default",
             "subAttributes": [
-                {"name": "value", "type": "string", "multiValued": False, "required": False, "mutability": "readWrite", "returned": "default"},
-                {"name": "primary", "type": "boolean", "multiValued": False, "required": False, "mutability": "readWrite", "returned": "default"},
-                {"name": "type", "type": "string", "multiValued": False, "required": False, "mutability": "readWrite", "returned": "default"},
+                {
+                    "name": "value",
+                    "type": "string",
+                    "multiValued": False,
+                    "required": False,
+                    "mutability": "readWrite",
+                    "returned": "default",
+                },
+                {
+                    "name": "primary",
+                    "type": "boolean",
+                    "multiValued": False,
+                    "required": False,
+                    "mutability": "readWrite",
+                    "returned": "default",
+                },
+                {
+                    "name": "type",
+                    "type": "string",
+                    "multiValued": False,
+                    "required": False,
+                    "mutability": "readWrite",
+                    "returned": "default",
+                },
             ],
         },
         {
@@ -96,8 +117,22 @@ _GROUP_SCHEMA = {
             "mutability": "readWrite",
             "returned": "default",
             "subAttributes": [
-                {"name": "value", "type": "string", "multiValued": False, "required": False, "mutability": "immutable", "returned": "default"},
-                {"name": "display", "type": "string", "multiValued": False, "required": False, "mutability": "immutable", "returned": "default"},
+                {
+                    "name": "value",
+                    "type": "string",
+                    "multiValued": False,
+                    "required": False,
+                    "mutability": "immutable",
+                    "returned": "default",
+                },
+                {
+                    "name": "display",
+                    "type": "string",
+                    "multiValued": False,
+                    "required": False,
+                    "mutability": "immutable",
+                    "returned": "default",
+                },
             ],
         },
     ],
@@ -107,7 +142,9 @@ _GROUP_SCHEMA = {
 @router.get("/Schemas")
 async def schemas() -> ListResponse:
     resources = [_USER_SCHEMA, _GROUP_SCHEMA]
-    return ListResponse(totalResults=len(resources), itemsPerPage=len(resources), Resources=resources)
+    return ListResponse(
+        totalResults=len(resources), itemsPerPage=len(resources), Resources=resources
+    )
 
 
 @router.get("/ResourceTypes")
@@ -128,4 +165,6 @@ async def resource_types() -> ListResponse:
             "meta": {"resourceType": "ResourceType"},
         },
     ]
-    return ListResponse(totalResults=len(resources), itemsPerPage=len(resources), Resources=resources)
+    return ListResponse(
+        totalResults=len(resources), itemsPerPage=len(resources), Resources=resources
+    )

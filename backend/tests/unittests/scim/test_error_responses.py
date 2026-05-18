@@ -1,4 +1,5 @@
 """Verify that all error responses on SCIM routes use the SCIM error schema."""
+
 from unittest.mock import AsyncMock
 
 import pytest
@@ -19,15 +20,21 @@ SCIM_ERROR_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:Error"
 @pytest.fixture
 async def client() -> AsyncClient:
     scim_app.dependency_overrides[require_scim_auth] = _check_test_token
-    scim_app.dependency_overrides[get_scim_user_service] = lambda: AsyncMock(spec=ScimUserService)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    scim_app.dependency_overrides[get_scim_user_service] = lambda: AsyncMock(
+        spec=ScimUserService
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         yield c
     scim_app.dependency_overrides.clear()
 
 
 class TestScimErrorSchema:
     async def test_unauthorized_returns_scim_schema(self, client: AsyncClient):
-        res = await client.get("/scim/v2/Users", headers={"Authorization": "Bearer wrong-token"})
+        res = await client.get(
+            "/scim/v2/Users", headers={"Authorization": "Bearer wrong-token"}
+        )
         assert res.status_code == 401
         body = res.json()
         assert SCIM_ERROR_SCHEMA in body["schemas"]

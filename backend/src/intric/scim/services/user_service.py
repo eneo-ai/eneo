@@ -79,7 +79,13 @@ class ScimUserService:
         self._tenant_id = tenant_id
         self._audit = audit_service
 
-    async def _log(self, action: ActionType, entity_id: UUID, description: str, target: dict[str, Any]) -> None:
+    async def _log(
+        self,
+        action: ActionType,
+        entity_id: UUID,
+        description: str,
+        target: dict[str, Any],
+    ) -> None:
         if self._audit is None:
             return
         await self._audit.log(
@@ -128,14 +134,18 @@ class ScimUserService:
                 )
 
     async def create_user(self, data: ScimUserRequest) -> ScimUser:
-        existing = await self._repository.get_by_username(data.userName, tenant_id=self._tenant_id)
+        existing = await self._repository.get_by_username(
+            data.userName, tenant_id=self._tenant_id
+        )
         if existing is None and "@" in data.userName:
             search_email = (
                 next((e.value for e in data.emails if e.primary), None)
                 or (data.emails[0].value if data.emails else None)
                 or data.userName
             )
-            existing = await self._repository.get_by_email(search_email, tenant_id=self._tenant_id)
+            existing = await self._repository.get_by_email(
+                search_email, tenant_id=self._tenant_id
+            )
             if existing is not None:
                 if data.externalId is not None:
                     external_id_owner = await self._repository.get_by_external_id(
@@ -255,7 +265,9 @@ class ScimUserService:
         scim_filter = ScimFilter.parse(filter_str) if filter_str else None
         scim_sort = ScimSort.parse(sort_by, sort_order)
         offset = max(0, start_index - 1)
-        total = await self._repository.count(tenant_id=self._tenant_id, scim_filter=scim_filter)
+        total = await self._repository.count(
+            tenant_id=self._tenant_id, scim_filter=scim_filter
+        )
         models = await self._repository.list(
             tenant_id=self._tenant_id,
             scim_filter=scim_filter,
@@ -265,7 +277,11 @@ class ScimUserService:
         )
         logger.debug(
             "scim.user.list",
-            extra={"tenant_id": str(self._tenant_id), "total": total, "returned": len(models)},
+            extra={
+                "tenant_id": str(self._tenant_id),
+                "total": total,
+                "returned": len(models),
+            },
         )
         return [_to_scim_user(m) for m in models], total
 
@@ -303,7 +319,9 @@ class ScimUserService:
         )
         return _to_scim_user(model)
 
-    async def patch_user(self, user_id: UUID, operations: list[PatchOperation]) -> ScimUser:
+    async def patch_user(
+        self, user_id: UUID, operations: list[PatchOperation]
+    ) -> ScimUser:
         model = await self._repository.get_by_id(user_id, tenant_id=self._tenant_id)
         if model is None:
             raise ScimUserNotFoundError(f"User '{user_id}' not found")
@@ -329,7 +347,10 @@ class ScimUserService:
             ActionType.SCIM_USER_UPDATED,
             model.id,
             f"SCIM patched user '{model.username}' (PATCH)",
-            {**_user_target(model), "ops": [op.op + ":" + (op.path or "") for op in operations]},
+            {
+                **_user_target(model),
+                "ops": [op.op + ":" + (op.path or "") for op in operations],
+            },
         )
         return _to_scim_user(model)
 
@@ -380,13 +401,16 @@ def _apply_user_attr(model: UserModel, attr: str, value: Any) -> None:
     elif attr == "externalid":
         model.external_id = str(value) if value is not None else None
     elif attr == "emails":
-        entries: list[Any] = value if isinstance(value, list) else [value]  # pyright: ignore[reportUnknownVariableType]
-        primary: str | None = next(
-            (str(e["value"]) for e in entries if isinstance(e, dict) and e.get("primary")),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-            None,
-        ) or (
-            str(entries[0]["value"]) if entries and isinstance(entries[0], dict) else None  # pyright: ignore[reportUnknownArgumentType]
+        raw_entries: list[Any] = (
+            cast(list[Any], value) if isinstance(value, list) else [value]
         )
+        entries: list[dict[str, Any]] = [
+            cast(dict[str, Any], e) for e in raw_entries if isinstance(e, dict)
+        ]
+        primary: str | None = next(
+            (str(e["value"]) for e in entries if e.get("primary")),
+            None,
+        ) or (str(entries[0]["value"]) if entries else None)
         if primary:
             model.email = primary
 

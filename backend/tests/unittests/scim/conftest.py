@@ -41,14 +41,21 @@ def auth_headers() -> dict[str, str]:
 @pytest.fixture
 async def client() -> AsyncClient:
     scim_app.dependency_overrides[require_scim_auth] = _check_test_token
-    scim_app.dependency_overrides[get_scim_user_service] = lambda: AsyncMock(spec=ScimUserService)
-    scim_app.dependency_overrides[get_scim_group_service] = lambda: AsyncMock(spec=ScimGroupService)
+    scim_app.dependency_overrides[get_scim_user_service] = lambda: AsyncMock(
+        spec=ScimUserService
+    )
+    scim_app.dependency_overrides[get_scim_group_service] = lambda: AsyncMock(
+        spec=ScimGroupService
+    )
+
     def _make_session():
         session = AsyncMock()
         session.begin_nested = MagicMock(return_value=AsyncMock())
         return session
 
     scim_app.dependency_overrides[get_session_with_transaction] = _make_session
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         yield c
     scim_app.dependency_overrides.clear()

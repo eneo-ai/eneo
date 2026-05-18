@@ -1,7 +1,6 @@
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
-import pytest
 from httpx import AsyncClient
 
 from intric.scim.app import scim_app
@@ -13,25 +12,37 @@ AUTH = {"Authorization": f"Bearer {TEST_BEARER_TOKEN}"}
 
 def _make_scim_user(username: str = "jane@example.com"):
     from datetime import datetime, timezone
+
     from intric.scim.schemas.user import ScimMeta, ScimUser
+
     uid = str(uuid4())
     return ScimUser(
         id=uid,
         userName=username,
         active=True,
-        meta=ScimMeta(resourceType="User", created=datetime.now(timezone.utc), lastModified=datetime.now(timezone.utc)),
+        meta=ScimMeta(
+            resourceType="User",
+            created=datetime.now(timezone.utc),
+            lastModified=datetime.now(timezone.utc),
+        ),
     )
 
 
 def _make_scim_group(name: str = "Engineering"):
     from datetime import datetime, timezone
+
     from intric.scim.schemas.group import ScimGroup
     from intric.scim.schemas.user import ScimMeta
+
     gid = str(uuid4())
     return ScimGroup(
         id=gid,
         displayName=name,
-        meta=ScimMeta(resourceType="Group", created=datetime.now(timezone.utc), lastModified=datetime.now(timezone.utc)),
+        meta=ScimMeta(
+            resourceType="Group",
+            created=datetime.now(timezone.utc),
+            lastModified=datetime.now(timezone.utc),
+        ),
     )
 
 
@@ -39,7 +50,10 @@ class TestBulkBasics:
     async def test_rejects_missing_token(self, client: AsyncClient):
         res = await client.post(
             "/scim/v2/Bulk",
-            json={"schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"], "Operations": []},
+            json={
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+                "Operations": [],
+            },
         )
         assert res.status_code == 401
 
@@ -47,7 +61,10 @@ class TestBulkBasics:
         with patch("intric.scim.resources.bulk.ScimUserService") as _:
             res = await client.post(
                 "/scim/v2/Bulk",
-                json={"schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"], "Operations": []},
+                json={
+                    "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+                    "Operations": [],
+                },
                 headers=AUTH,
             )
         assert res.status_code == 200
@@ -55,10 +72,16 @@ class TestBulkBasics:
     async def test_returns_bulk_response_schema(self, client: AsyncClient):
         res = await client.post(
             "/scim/v2/Bulk",
-            json={"schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"], "Operations": []},
+            json={
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+                "Operations": [],
+            },
             headers=AUTH,
         )
-        assert "urn:ietf:params:scim:api:messages:2.0:BulkResponse" in res.json()["schemas"]
+        assert (
+            "urn:ietf:params:scim:api:messages:2.0:BulkResponse"
+            in res.json()["schemas"]
+        )
 
     async def test_invalid_path_returns_400_in_operations(self, client: AsyncClient):
         res = await client.post(
@@ -83,12 +106,19 @@ class TestBulkCreate:
             res = await client.post(
                 "/scim/v2/Bulk",
                 json={
-                    "Operations": [{
-                        "method": "POST",
-                        "path": "/Users",
-                        "bulkId": "abc",
-                        "data": {"userName": "jane@example.com", "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"]},
-                    }]
+                    "Operations": [
+                        {
+                            "method": "POST",
+                            "path": "/Users",
+                            "bulkId": "abc",
+                            "data": {
+                                "userName": "jane@example.com",
+                                "schemas": [
+                                    "urn:ietf:params:scim:schemas:core:2.0:User"
+                                ],
+                            },
+                        }
+                    ]
                 },
                 headers=AUTH,
             )
@@ -108,12 +138,19 @@ class TestBulkCreate:
             res = await client.post(
                 "/scim/v2/Bulk",
                 json={
-                    "Operations": [{
-                        "method": "POST",
-                        "path": "/Groups",
-                        "bulkId": "grp1",
-                        "data": {"displayName": "Engineering", "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"]},
-                    }]
+                    "Operations": [
+                        {
+                            "method": "POST",
+                            "path": "/Groups",
+                            "bulkId": "grp1",
+                            "data": {
+                                "displayName": "Engineering",
+                                "schemas": [
+                                    "urn:ietf:params:scim:schemas:core:2.0:Group"
+                                ],
+                            },
+                        }
+                    ]
                 },
                 headers=AUTH,
             )
@@ -125,6 +162,7 @@ class TestBulkCreate:
 
     async def test_conflict_returns_409_in_operations(self, client: AsyncClient):
         from intric.scim.domain.errors import ScimUserConflictError
+
         mock_svc = AsyncMock()
         mock_svc.create_user.side_effect = ScimUserConflictError("already exists")
         scim_app.dependency_overrides[get_scim_user_service] = lambda: mock_svc
@@ -132,11 +170,18 @@ class TestBulkCreate:
             res = await client.post(
                 "/scim/v2/Bulk",
                 json={
-                    "Operations": [{
-                        "method": "POST",
-                        "path": "/Users",
-                        "data": {"userName": "jane@example.com", "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"]},
-                    }]
+                    "Operations": [
+                        {
+                            "method": "POST",
+                            "path": "/Users",
+                            "data": {
+                                "userName": "jane@example.com",
+                                "schemas": [
+                                    "urn:ietf:params:scim:schemas:core:2.0:User"
+                                ],
+                            },
+                        }
+                    ]
                 },
                 headers=AUTH,
             )
@@ -146,7 +191,9 @@ class TestBulkCreate:
         assert ops[0]["status"] == "409"
         assert ops[0]["response"]["scimType"] == "uniqueness"
 
-    async def test_validation_error_returns_400_in_operations(self, client: AsyncClient):
+    async def test_validation_error_returns_400_in_operations(
+        self, client: AsyncClient
+    ):
         from intric.scim.domain.errors import ScimValidationError
 
         mock_svc = AsyncMock()
@@ -158,11 +205,18 @@ class TestBulkCreate:
             res = await client.post(
                 "/scim/v2/Bulk",
                 json={
-                    "Operations": [{
-                        "method": "POST",
-                        "path": "/Groups",
-                        "data": {"displayName": "Engineering", "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"]},
-                    }]
+                    "Operations": [
+                        {
+                            "method": "POST",
+                            "path": "/Groups",
+                            "data": {
+                                "displayName": "Engineering",
+                                "schemas": [
+                                    "urn:ietf:params:scim:schemas:core:2.0:Group"
+                                ],
+                            },
+                        }
+                    ]
                 },
                 headers=AUTH,
             )
@@ -177,6 +231,7 @@ class TestBulkCreate:
 class TestBulkFailOnErrors:
     async def test_stops_after_fail_on_errors(self, client: AsyncClient):
         from intric.scim.domain.errors import ScimUserNotFoundError
+
         mock_svc = AsyncMock()
         mock_svc.delete_user.side_effect = ScimUserNotFoundError("not found")
         scim_app.dependency_overrides[get_scim_user_service] = lambda: mock_svc
@@ -217,7 +272,12 @@ class TestBulkIdReference:
                             "method": "POST",
                             "path": "/Users",
                             "bulkId": "newuser",
-                            "data": {"userName": "jane@example.com", "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"]},
+                            "data": {
+                                "userName": "jane@example.com",
+                                "schemas": [
+                                    "urn:ietf:params:scim:schemas:core:2.0:User"
+                                ],
+                            },
                         },
                         {
                             "method": "DELETE",

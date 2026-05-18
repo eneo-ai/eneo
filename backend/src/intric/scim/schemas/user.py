@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 class ScimUserState(str, Enum):
     """Internal Eneo user states — not exposed in SCIM responses."""
+
     INVITED = "invited"
     ACTIVE = "active"
     INACTIVE = "inactive"

@@ -1,7 +1,4 @@
-import pytest
 from httpx import AsyncClient
-
-from tests.unittests.scim.conftest import TEST_BEARER_TOKEN
 
 
 class TestServiceProviderConfig:
@@ -23,7 +20,10 @@ class TestServiceProviderConfig:
     async def test_returns_correct_schema(self, client: AsyncClient, auth_headers):
         res = await client.get("/scim/v2/ServiceProviderConfig", headers=auth_headers)
         body = res.json()
-        assert "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig" in body["schemas"]
+        assert (
+            "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"
+            in body["schemas"]
+        )
 
     async def test_declares_patch_support(self, client: AsyncClient, auth_headers):
         res = await client.get("/scim/v2/ServiceProviderConfig", headers=auth_headers)
@@ -41,7 +41,9 @@ class TestServiceProviderConfig:
         res = await client.get("/scim/v2/ServiceProviderConfig", headers=auth_headers)
         assert res.json()["bulk"]["supported"] is True
 
-    async def test_bulk_declares_max_operations(self, client: AsyncClient, auth_headers):
+    async def test_bulk_declares_max_operations(
+        self, client: AsyncClient, auth_headers
+    ):
         res = await client.get("/scim/v2/ServiceProviderConfig", headers=auth_headers)
         assert res.json()["bulk"]["maxOperations"] > 0
 
@@ -51,7 +53,9 @@ class TestSchemas:
         res = await client.get("/scim/v2/Schemas", headers=auth_headers)
         assert res.status_code == 200
 
-    async def test_returns_list_response_schema(self, client: AsyncClient, auth_headers):
+    async def test_returns_list_response_schema(
+        self, client: AsyncClient, auth_headers
+    ):
         res = await client.get("/scim/v2/Schemas", headers=auth_headers)
         body = res.json()
         assert "urn:ietf:params:scim:api:messages:2.0:ListResponse" in body["schemas"]
@@ -66,32 +70,42 @@ class TestSchemas:
         ids = [r["id"] for r in res.json()["Resources"]]
         assert "urn:ietf:params:scim:schemas:core:2.0:Group" in ids
 
-    async def test_user_schema_has_required_attributes(self, client: AsyncClient, auth_headers):
+    async def test_user_schema_has_required_attributes(
+        self, client: AsyncClient, auth_headers
+    ):
         res = await client.get("/scim/v2/Schemas", headers=auth_headers)
         user = next(r for r in res.json()["Resources"] if r["id"].endswith(":User"))
         attr_names = {a["name"] for a in user["attributes"]}
         assert {"userName", "emails", "active", "externalId"}.issubset(attr_names)
 
-    async def test_user_schema_username_is_required(self, client: AsyncClient, auth_headers):
+    async def test_user_schema_username_is_required(
+        self, client: AsyncClient, auth_headers
+    ):
         res = await client.get("/scim/v2/Schemas", headers=auth_headers)
         user = next(r for r in res.json()["Resources"] if r["id"].endswith(":User"))
         username_attr = next(a for a in user["attributes"] if a["name"] == "userName")
         assert username_attr["required"] is True
 
-    async def test_user_schema_emails_has_subattributes(self, client: AsyncClient, auth_headers):
+    async def test_user_schema_emails_has_subattributes(
+        self, client: AsyncClient, auth_headers
+    ):
         res = await client.get("/scim/v2/Schemas", headers=auth_headers)
         user = next(r for r in res.json()["Resources"] if r["id"].endswith(":User"))
         emails_attr = next(a for a in user["attributes"] if a["name"] == "emails")
         sub_names = {s["name"] for s in emails_attr["subAttributes"]}
         assert {"value", "primary", "type"}.issubset(sub_names)
 
-    async def test_group_schema_has_required_attributes(self, client: AsyncClient, auth_headers):
+    async def test_group_schema_has_required_attributes(
+        self, client: AsyncClient, auth_headers
+    ):
         res = await client.get("/scim/v2/Schemas", headers=auth_headers)
         group = next(r for r in res.json()["Resources"] if r["id"].endswith(":Group"))
         attr_names = {a["name"] for a in group["attributes"]}
         assert {"displayName", "members"}.issubset(attr_names)
 
-    async def test_group_schema_members_has_subattributes(self, client: AsyncClient, auth_headers):
+    async def test_group_schema_members_has_subattributes(
+        self, client: AsyncClient, auth_headers
+    ):
         res = await client.get("/scim/v2/Schemas", headers=auth_headers)
         group = next(r for r in res.json()["Resources"] if r["id"].endswith(":Group"))
         members_attr = next(a for a in group["attributes"] if a["name"] == "members")
@@ -104,7 +118,9 @@ class TestResourceTypes:
         res = await client.get("/scim/v2/ResourceTypes", headers=auth_headers)
         assert res.status_code == 200
 
-    async def test_returns_list_response_schema(self, client: AsyncClient, auth_headers):
+    async def test_returns_list_response_schema(
+        self, client: AsyncClient, auth_headers
+    ):
         res = await client.get("/scim/v2/ResourceTypes", headers=auth_headers)
         body = res.json()
         assert "urn:ietf:params:scim:api:messages:2.0:ListResponse" in body["schemas"]
@@ -114,7 +130,9 @@ class TestResourceTypes:
         names = [r["name"] for r in res.json()["Resources"]]
         assert "User" in names
 
-    async def test_includes_group_resource_type(self, client: AsyncClient, auth_headers):
+    async def test_includes_group_resource_type(
+        self, client: AsyncClient, auth_headers
+    ):
         res = await client.get("/scim/v2/ResourceTypes", headers=auth_headers)
         names = [r["name"] for r in res.json()["Resources"]]
         assert "Group" in names

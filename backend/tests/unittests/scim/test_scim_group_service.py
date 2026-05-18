@@ -151,33 +151,50 @@ class TestListGroups:
         service = _make_service(repo)
         await service.list_groups(filter_str=None)
         repo.count.assert_called_once_with(tenant_id=ANY, scim_filter=None)
-        repo.list.assert_called_once_with(tenant_id=ANY, scim_filter=None, scim_sort=None, offset=0, limit=None)
+        repo.list.assert_called_once_with(
+            tenant_id=ANY, scim_filter=None, scim_sort=None, offset=0, limit=None
+        )
 
     async def test_passes_filter_to_repo(self):
         from intric.scim.schemas.common import ScimFilter
+
         repo = self._make_repo()
         service = _make_service(repo)
         await service.list_groups(filter_str='displayName eq "Engineering"')
         repo.list.assert_called_once_with(
-            tenant_id=ANY, scim_filter=ScimFilter("displayName", "eq", "Engineering"), scim_sort=None, offset=0, limit=None
+            tenant_id=ANY,
+            scim_filter=ScimFilter("displayName", "eq", "Engineering"),
+            scim_sort=None,
+            offset=0,
+            limit=None,
         )
 
     async def test_eq_filter_on_external_id(self):
         from intric.scim.schemas.common import ScimFilter
+
         repo = self._make_repo()
         service = _make_service(repo)
         await service.list_groups(filter_str='externalId eq "aad-group-guid"')
         repo.list.assert_called_once_with(
-            tenant_id=ANY, scim_filter=ScimFilter("externalId", "eq", "aad-group-guid"), scim_sort=None, offset=0, limit=None
+            tenant_id=ANY,
+            scim_filter=ScimFilter("externalId", "eq", "aad-group-guid"),
+            scim_sort=None,
+            offset=0,
+            limit=None,
         )
 
     async def test_sort_by_displayname(self):
         from intric.scim.schemas.common import ScimSort
+
         repo = self._make_repo()
         service = _make_service(repo)
         await service.list_groups(sort_by="displayName", sort_order="descending")
         repo.list.assert_called_once_with(
-            tenant_id=ANY, scim_filter=None, scim_sort=ScimSort("displayName", "descending"), offset=0, limit=None
+            tenant_id=ANY,
+            scim_filter=None,
+            scim_sort=ScimSort("displayName", "descending"),
+            offset=0,
+            limit=None,
         )
 
 
@@ -268,7 +285,11 @@ class TestPatchGroup:
         with pytest.raises(ScimValidationError):
             await service.patch_group(
                 db_group.id,
-                [PatchOperation(op="Add", path="members", value=[{"value": str(user_id)}])],
+                [
+                    PatchOperation(
+                        op="Add", path="members", value=[{"value": str(user_id)}]
+                    )
+                ],
             )
 
         repo.add_member.assert_not_called()

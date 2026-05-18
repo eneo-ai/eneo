@@ -25,7 +25,9 @@ _GROUP_ATTR_MAP = {
 _NOT_DELETED = GroupModel.state.is_(None) | (GroupModel.state != UserGroupState.DELETED)
 
 
-def _apply_filter(query: Select[tuple[UserGroups]], scim_filter: ScimFilter | None) -> Select[tuple[UserGroups]]:
+def _apply_filter(
+    query: Select[tuple[UserGroups]], scim_filter: ScimFilter | None
+) -> Select[tuple[UserGroups]]:
     if scim_filter is None:
         return query
     col = _GROUP_ATTR_MAP.get(scim_filter.attribute.lower())
@@ -77,7 +79,9 @@ class ScimGroupRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_by_id_including_deleted(self, group_id: UUID, tenant_id: UUID) -> GroupModel | None:
+    async def get_by_id_including_deleted(
+        self, group_id: UUID, tenant_id: UUID
+    ) -> GroupModel | None:
         result = await self._session.execute(
             select(GroupModel).where(
                 GroupModel.id == group_id,
@@ -109,7 +113,9 @@ class ScimGroupRepository:
         )
         return set(result.scalars().all())
 
-    def _base_list_query(self, tenant_id: UUID, scim_filter: ScimFilter | None) -> Select[tuple[UserGroups]]:
+    def _base_list_query(
+        self, tenant_id: UUID, scim_filter: ScimFilter | None
+    ) -> Select[tuple[UserGroups]]:
         query = (
             select(GroupModel)
             .options(selectinload(GroupModel.users))
@@ -117,7 +123,9 @@ class ScimGroupRepository:
         )
         return _apply_filter(query, scim_filter)
 
-    async def count(self, tenant_id: UUID, scim_filter: ScimFilter | None = None) -> int:
+    async def count(
+        self, tenant_id: UUID, scim_filter: ScimFilter | None = None
+    ) -> int:
         base = self._base_list_query(tenant_id, scim_filter)
         count_query = select(func.count()).select_from(base.subquery())
         result = await self._session.execute(count_query)
