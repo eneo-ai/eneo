@@ -1,10 +1,11 @@
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import aliased, selectinload
 
 from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.job_table import Jobs
@@ -13,6 +14,7 @@ from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
 from intric.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from intric.database.tables.websites_table import Websites
+from intric.embedding_models.domain.embedding_batch import EmbeddingUsageSource
 from intric.jobs.job_models import Task
 from intric.main.exceptions import NotFoundException
 from intric.main.models import Status
@@ -79,7 +81,27 @@ def _optional_int(value: object) -> int | None:
         return None
     if isinstance(value, int):
         return value
+    if isinstance(value, Decimal) and value == value.to_integral_value():
+        return int(value)
     raise TypeError(f"Expected integer crawl counter, got {type(value).__name__}")
+
+
+def _optional_decimal(value: object) -> Decimal | None:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value
+    raise TypeError(f"Expected decimal crawl counter, got {type(value).__name__}")
+
+
+def _optional_embedding_usage_source(value: object) -> EmbeddingUsageSource | None:
+    if value is None:
+        return None
+    if value == "provider_reported":
+        return "provider_reported"
+    if value == "missing":
+        return "missing"
+    raise ValueError(f"Unexpected embedding usage source {value!r}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +163,20 @@ class CrawlRunRepository:
                     crawl_run.files_too_large_samples
                 ),
                 outcome_code=_serialize_crawl_outcome_code(crawl_run.outcome_code),
+                embedding_model_id=crawl_run.embedding_model_id,
+                embedding_model_name_snapshot=(crawl_run.embedding_model_name_snapshot),
+                embedding_model_litellm_name_snapshot=(
+                    crawl_run.embedding_model_litellm_name_snapshot
+                ),
+                embedding_model_provider_snapshot=(
+                    crawl_run.embedding_model_provider_snapshot
+                ),
+                embedding_input_cost_per_token_snapshot=(
+                    crawl_run.embedding_input_cost_per_token_snapshot
+                ),
+                embedding_input_tokens=crawl_run.embedding_input_tokens,
+                embedding_usage_source=crawl_run.embedding_usage_source,
+                embedding_total_cost_usd=crawl_run.embedding_total_cost_usd,
                 job_id=crawl_run.job_id,
             )
             .options(selectinload(CrawlRunsTable.job))
@@ -184,6 +220,42 @@ class CrawlRunRepository:
     async def commit_terminal(self, event: TerminalEvent) -> TerminalCommitResult:
         """Multi-table terminal write delegated to crawl_terminal; this repo owns the session."""
         return await commit_terminal(self.session, event)
+
+    async def record_indexed_embedding_usage(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        token_delta: int,
+        cost_delta: Decimal | None,
+        usage_source: EmbeddingUsageSource,
+    ) -> None:
+        values: dict[str, object] = {
+            "embedding_usage_source": sa.case(
+                (
+                    CrawlRunsTable.embedding_usage_source == "provider_reported",
+                    "provider_reported",
+                ),
+                else_=usage_source,
+            )
+        }
+        if token_delta > 0:
+            values["embedding_input_tokens"] = (
+                sa.func.coalesce(CrawlRunsTable.embedding_input_tokens, 0) + token_delta
+            )
+        if cost_delta is not None:
+            values["embedding_total_cost_usd"] = (
+                sa.func.coalesce(CrawlRunsTable.embedding_total_cost_usd, 0)
+                + cost_delta
+            )
+
+        stmt = (
+            sa.update(CrawlRunsTable)
+            .where(CrawlRunsTable.id == run_id)
+            .where(CrawlRunsTable.tenant_id == tenant_id)
+            .values(**values)
+        )
+        await self.session.execute(stmt)
 
     async def abort_target_for_tenant(
         self,
@@ -416,6 +488,20 @@ class CrawlRunRepository:
                 CrawlRunsTable.pages_hash_retained.label("pages_hash_retained"),
                 CrawlRunsTable.files_hash_retained.label("files_hash_retained"),
                 CrawlRunsTable.files_too_large_skipped.label("files_too_large_skipped"),
+                CrawlRunsTable.embedding_model_name_snapshot.label(
+                    "embedding_model_name_snapshot"
+                ),
+                CrawlRunsTable.embedding_model_litellm_name_snapshot.label(
+                    "embedding_model_litellm_name_snapshot"
+                ),
+                CrawlRunsTable.embedding_model_provider_snapshot.label(
+                    "embedding_model_provider_snapshot"
+                ),
+                CrawlRunsTable.embedding_input_tokens.label("embedding_input_tokens"),
+                CrawlRunsTable.embedding_total_cost_usd.label(
+                    "embedding_total_cost_usd"
+                ),
+                CrawlRunsTable.embedding_usage_source.label("embedding_usage_source"),
             )
             .select_from(rows_from)
             .where(*active_conditions)
@@ -686,6 +772,20 @@ class CrawlRunRepository:
                     files_too_large_skipped=_optional_int(
                         row["files_too_large_skipped"]
                     ),
+                    embedding_model_name_snapshot=row["embedding_model_name_snapshot"],
+                    embedding_model_litellm_name_snapshot=row[
+                        "embedding_model_litellm_name_snapshot"
+                    ],
+                    embedding_model_provider_snapshot=row[
+                        "embedding_model_provider_snapshot"
+                    ],
+                    embedding_input_tokens=_optional_int(row["embedding_input_tokens"]),
+                    embedding_total_cost_usd=_optional_decimal(
+                        row["embedding_total_cost_usd"]
+                    ),
+                    embedding_usage_source=_optional_embedding_usage_source(
+                        row["embedding_usage_source"]
+                    ),
                 )
             )
 
@@ -722,6 +822,50 @@ class CrawlRunRepository:
             # history without re-fetching the full tenant-wide top-N.
             base_conditions.append(CrawlRunsTable.website_id == website_id)
 
+        latest_crawl_run = aliased(CrawlRunsTable)
+        latest_conditions = [
+            latest_crawl_run.created_at >= since,
+            latest_crawl_run.created_at < until,
+        ]
+        if tenant_id is not None:
+            latest_conditions.append(latest_crawl_run.tenant_id == tenant_id)
+        if website_id is not None:
+            latest_conditions.append(latest_crawl_run.website_id == website_id)
+        latest_run_subquery = (
+            sa.select(
+                latest_crawl_run.website_id.label("website_id"),
+                latest_crawl_run.embedding_model_name_snapshot.label(
+                    "latest_embedding_model_name_snapshot"
+                ),
+                latest_crawl_run.embedding_model_litellm_name_snapshot.label(
+                    "latest_embedding_model_litellm_name_snapshot"
+                ),
+                latest_crawl_run.embedding_model_provider_snapshot.label(
+                    "latest_embedding_model_provider_snapshot"
+                ),
+                latest_crawl_run.embedding_input_tokens.label(
+                    "latest_embedding_input_tokens"
+                ),
+                latest_crawl_run.embedding_total_cost_usd.label(
+                    "latest_embedding_total_cost_usd"
+                ),
+                latest_crawl_run.embedding_usage_source.label(
+                    "latest_embedding_usage_source"
+                ),
+                sa.func.row_number()
+                .over(
+                    partition_by=latest_crawl_run.website_id,
+                    order_by=(
+                        latest_crawl_run.created_at.desc(),
+                        latest_crawl_run.id.desc(),
+                    ),
+                )
+                .label("row_number"),
+            )
+            .where(*latest_conditions)
+            .subquery()
+        )
+
         total_stmt = (
             sa.select(sa.func.count(sa.distinct(CrawlRunsTable.website_id)))
             .select_from(CrawlRunsTable)
@@ -732,15 +876,22 @@ class CrawlRunRepository:
         rows_from = sa.outerjoin(
             sa.outerjoin(
                 sa.outerjoin(
-                    CrawlRunsTable,
-                    Jobs,
-                    CrawlRunsTable.job_id == Jobs.id,
+                    sa.outerjoin(
+                        CrawlRunsTable,
+                        Jobs,
+                        CrawlRunsTable.job_id == Jobs.id,
+                    ),
+                    Websites,
+                    CrawlRunsTable.website_id == Websites.id,
                 ),
-                Websites,
-                CrawlRunsTable.website_id == Websites.id,
+                Tenants,
+                CrawlRunsTable.tenant_id == Tenants.id,
             ),
-            Tenants,
-            CrawlRunsTable.tenant_id == Tenants.id,
+            latest_run_subquery,
+            sa.and_(
+                latest_run_subquery.c.website_id == CrawlRunsTable.website_id,
+                latest_run_subquery.c.row_number == 1,
+            ),
         )
         pages_crawled = sa.func.coalesce(
             sa.func.sum(CrawlRunsTable.pages_crawled), 0
@@ -766,6 +917,12 @@ class CrawlRunRepository:
         files_failed = sa.func.coalesce(
             sa.func.sum(CrawlRunsTable.files_failed), 0
         ).label("files_failed")
+        embedding_input_tokens = sa.func.sum(
+            CrawlRunsTable.embedding_input_tokens
+        ).label("embedding_input_tokens")
+        embedding_total_cost_usd = sa.func.sum(
+            CrawlRunsTable.embedding_total_cost_usd
+        ).label("embedding_total_cost_usd")
         retained_content_count = (
             pages_hash_retained + files_hash_retained + pages_source_retained
         )
@@ -808,6 +965,14 @@ class CrawlRunRepository:
                 files_too_large_skipped,
                 pages_failed,
                 files_failed,
+                embedding_input_tokens,
+                embedding_total_cost_usd,
+                latest_run_subquery.c.latest_embedding_model_name_snapshot,
+                latest_run_subquery.c.latest_embedding_model_litellm_name_snapshot,
+                latest_run_subquery.c.latest_embedding_model_provider_snapshot,
+                latest_run_subquery.c.latest_embedding_input_tokens,
+                latest_run_subquery.c.latest_embedding_total_cost_usd,
+                latest_run_subquery.c.latest_embedding_usage_source,
                 indexed_content_count,
             )
             .select_from(rows_from)
@@ -818,6 +983,12 @@ class CrawlRunRepository:
                 CrawlRunsTable.tenant_id,
                 Tenants.display_name,
                 Websites.update_interval,
+                latest_run_subquery.c.latest_embedding_model_name_snapshot,
+                latest_run_subquery.c.latest_embedding_model_litellm_name_snapshot,
+                latest_run_subquery.c.latest_embedding_model_provider_snapshot,
+                latest_run_subquery.c.latest_embedding_input_tokens,
+                latest_run_subquery.c.latest_embedding_total_cost_usd,
+                latest_run_subquery.c.latest_embedding_usage_source,
             )
             .order_by(
                 cost_pressure_for_ordering.desc(),
@@ -869,6 +1040,28 @@ class CrawlRunRepository:
                         schedule_weight=schedule_weight_value,
                         indexed_content_count=indexed_content_count_value,
                         retained_count=retained_content_count_value,
+                    ),
+                    embedding_input_tokens=_optional_int(row["embedding_input_tokens"]),
+                    embedding_total_cost_usd=_optional_decimal(
+                        row["embedding_total_cost_usd"]
+                    ),
+                    latest_embedding_model_name_snapshot=row[
+                        "latest_embedding_model_name_snapshot"
+                    ],
+                    latest_embedding_model_litellm_name_snapshot=row[
+                        "latest_embedding_model_litellm_name_snapshot"
+                    ],
+                    latest_embedding_model_provider_snapshot=row[
+                        "latest_embedding_model_provider_snapshot"
+                    ],
+                    latest_embedding_input_tokens=_optional_int(
+                        row["latest_embedding_input_tokens"]
+                    ),
+                    latest_embedding_total_cost_usd=_optional_decimal(
+                        row["latest_embedding_total_cost_usd"]
+                    ),
+                    latest_embedding_usage_source=_optional_embedding_usage_source(
+                        row["latest_embedding_usage_source"]
                     ),
                 )
             )
@@ -957,6 +1150,12 @@ class CrawlRunRepository:
                 sa.func.coalesce(sa.func.sum(CrawlRunsTable.files_failed), 0).label(
                     "files_failed"
                 ),
+                sa.func.sum(CrawlRunsTable.embedding_input_tokens).label(
+                    "embedding_input_tokens"
+                ),
+                sa.func.sum(CrawlRunsTable.embedding_total_cost_usd).label(
+                    "embedding_total_cost_usd"
+                ),
             )
             .select_from(CrawlRunsTable)
             .outerjoin(Jobs, CrawlRunsTable.job_id == Jobs.id)
@@ -982,6 +1181,8 @@ class CrawlRunRepository:
         files_too_large_skipped = 0
         pages_failed = 0
         files_failed = 0
+        embedding_input_tokens: int | None = None
+        embedding_total_cost_usd: Decimal | None = None
 
         for row in result.mappings():
             row_total_runs = int(row["total_runs"])
@@ -1000,6 +1201,22 @@ class CrawlRunRepository:
             files_too_large_skipped += int(row["files_too_large_skipped"])
             pages_failed += int(row["pages_failed"])
             files_failed += int(row["files_failed"])
+            row_embedding_input_tokens = _optional_int(row["embedding_input_tokens"])
+            if row_embedding_input_tokens is not None:
+                embedding_input_tokens = (
+                    row_embedding_input_tokens
+                    if embedding_input_tokens is None
+                    else embedding_input_tokens + row_embedding_input_tokens
+                )
+            row_embedding_total_cost_usd = _optional_decimal(
+                row["embedding_total_cost_usd"]
+            )
+            if row_embedding_total_cost_usd is not None:
+                embedding_total_cost_usd = (
+                    row_embedding_total_cost_usd
+                    if embedding_total_cost_usd is None
+                    else embedding_total_cost_usd + row_embedding_total_cost_usd
+                )
 
             if outcome_code_value is None:
                 legacy_null_outcome_runs += row_terminal_runs
@@ -1055,6 +1272,8 @@ class CrawlRunRepository:
                 files_too_large_skipped=files_too_large_skipped,
                 pages_failed=pages_failed,
                 files_failed=files_failed,
+                embedding_input_tokens=embedding_input_tokens,
+                embedding_total_cost_usd=embedding_total_cost_usd,
             ),
         )
 

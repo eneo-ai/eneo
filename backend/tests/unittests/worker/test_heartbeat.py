@@ -7,6 +7,7 @@ Tests the heartbeat module's behavior:
 - Preemption detection
 """
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -17,6 +18,14 @@ from intric.worker.crawl.heartbeat import (
     HeartbeatMonitor,
     JobPreemptedError,
 )
+
+
+def test_heartbeat_delegates_slot_ttl_key_ownership_to_capacity_manager():
+    source_path = Path(__file__).parents[3] / "src/intric/worker/crawl/heartbeat.py"
+    source = source_path.read_text()
+
+    assert "LuaScripts.slot_key" not in source
+    assert "LuaScripts.preacquired_slot_key" not in source
 
 
 def _redis_pipeline_context(pipeline: MagicMock) -> MagicMock:

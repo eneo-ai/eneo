@@ -1,7 +1,8 @@
 """Integration coverage for crawl-run repository persistence."""
 
 from datetime import datetime, timedelta, timezone
-from uuid import UUID
+from decimal import Decimal
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
@@ -194,3 +195,84 @@ async def test_crawl_run_repository_round_trips_source_retention_fields(
         assert (
             reloaded.outcome_code == CrawlOutcomeCode.CRAWL_COMPLETED_WITH_PAGE_FAILURES
         )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_crawl_run_repository_accumulates_embedding_usage_for_indexed_pages(
+    db_session,
+    admin_user,
+    space_factory,
+):
+    async with db_session() as session:
+        embedding_model_id = await session.scalar(
+            sa.select(EmbeddingModels.id).limit(1)
+        )
+        assert embedding_model_id is not None
+
+        space = await space_factory(session, "Crawl run embedding usage space")
+        website = WebsitesTable(
+            name="Crawl run embedding usage site",
+            url="https://example.com/embedding-usage",
+            download_files=False,
+            crawl_type=CrawlType.SITEMAP,
+            update_interval=UpdateInterval.DAILY,
+            size=0,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            space_id=space.id,
+        )
+        session.add(website)
+        await session.flush()
+
+        repo = CrawlRunRepository(session)
+        inserted = await repo.add(
+            _crawl_run_for_website(
+                website_id=website.id,
+                tenant_id=admin_user.tenant_id,
+                pages_source_retained=0,
+                pages_hash_retained=0,
+                files_hash_retained=0,
+                files_too_large_skipped=0,
+                outcome_code=CrawlOutcomeCode.CRAWL_ALL_UNCHANGED,
+            )
+        )
+        assert inserted.id is not None
+
+        await repo.record_indexed_embedding_usage(
+            run_id=inserted.id,
+            tenant_id=admin_user.tenant_id,
+            token_delta=120,
+            cost_delta=Decimal("0.000012000000"),
+            usage_source="provider_reported",
+        )
+        await repo.record_indexed_embedding_usage(
+            run_id=inserted.id,
+            tenant_id=uuid4(),
+            token_delta=999,
+            cost_delta=Decimal("9.990000000000"),
+            usage_source="provider_reported",
+        )
+        await repo.record_indexed_embedding_usage(
+            run_id=inserted.id,
+            tenant_id=admin_user.tenant_id,
+            token_delta=0,
+            cost_delta=None,
+            usage_source="missing",
+        )
+        await session.flush()
+
+        stored = (
+            await session.execute(
+                sa.select(
+                    CrawlRunsTable.embedding_input_tokens,
+                    CrawlRunsTable.embedding_total_cost_usd,
+                    CrawlRunsTable.embedding_usage_source,
+                ).where(CrawlRunsTable.id == inserted.id)
+            )
+        ).one()
+
+    assert stored.embedding_input_tokens == 120
+    assert stored.embedding_total_cost_usd == Decimal("0.000012000000")
+    assert stored.embedding_usage_source == "provider_reported"

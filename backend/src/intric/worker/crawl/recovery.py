@@ -20,6 +20,7 @@ import logging
 import random
 import time
 from collections.abc import Awaitable
+from enum import StrEnum
 from typing import TYPE_CHECKING, Callable, TypeVar
 from uuid import UUID
 
@@ -39,10 +40,16 @@ __all__ = [
     "execute_with_recovery",
     "calculate_exponential_backoff",
     "update_job_retry_stats",
+    "CrawlRetrySignal",
     "reset_tenant_retry_delay",
     "is_invalid_transaction_error",
     "is_invalid_transaction_error_msg",
 ]
+
+
+class CrawlRetrySignal(StrEnum):
+    BUSY = "busy"
+    FAILURE = "failure"
 
 
 def is_invalid_transaction_error(error: Exception) -> bool:
@@ -293,24 +300,25 @@ async def update_job_retry_stats(
     *,
     job_id: UUID,
     redis_client: "aioredis.Redis | None",
-    is_actual_failure: bool,
+    retry_signal: CrawlRetrySignal,
     max_age_seconds: int,
 ) -> tuple[int, float]:
     """Update job retry statistics using Redis Pipeline.
 
-    CRITICAL: Only increments failure counter for ACTUAL failures, not concurrency busy signals.
-    This prevents jobs from being abandoned just because they're waiting for an available slot.
+    Only failure signals increment the failure counter. Busy signals keep the
+    original start time and enforce age only, so a job is not abandoned just
+    because it is waiting for tenant capacity.
 
     Uses Redis Pipeline for atomic-ish operations:
     1. SET NX for start_time (only sets if not exists, captures first attempt time)
-    2. INCR retry_count ONLY if is_actual_failure=True (not for busy waits)
+    2. INCR retry_count ONLY if retry_signal=CrawlRetrySignal.FAILURE (not for busy waits)
     3. GET both values to return current state
 
     Args:
         job_id: Unique job identifier
         redis_client: Redis connection
-        is_actual_failure: True if this is a real failure (network error, etc.),
-                          False if just waiting for concurrency slot (busy signal)
+        retry_signal: Whether this retry was caused by tenant capacity or by a
+            real crawl failure.
         max_age_seconds: Maximum job age for TTL calculation
 
     Returns:
@@ -320,10 +328,10 @@ async def update_job_retry_stats(
 
     Example:
         Job tries to run at 2:00:00 but hits concurrency limit:
-        - is_actual_failure=False -> retry_count stays 0, only max_age enforced
+        - retry_signal=BUSY -> retry_count stays 0, only max_age enforced
 
         Job tries to crawl but gets network timeout:
-        - is_actual_failure=True -> retry_count increments, both limits enforced
+        - retry_signal=FAILURE -> retry_count increments, both limits enforced
     """
     if not redis_client:
         # Graceful degradation: no Redis means no tracking
@@ -345,9 +353,7 @@ async def update_job_retry_stats(
             # 2. Get current start time
             pipe.get(start_key)
 
-            # 3. Conditionally increment failure counter
-            #    CRITICAL: Only increment for ACTUAL failures, not busy waits
-            if is_actual_failure:
+            if retry_signal is CrawlRetrySignal.FAILURE:
                 pipe.incr(count_key)
                 pipe.expire(count_key, ttl_seconds)
             else:
@@ -371,7 +377,7 @@ async def update_job_retry_stats(
         else:
             start_ts = now
 
-        if is_actual_failure:
+        if retry_signal is CrawlRetrySignal.FAILURE:
             # INCR returns int
             retry_count = (
                 int(retry_count_raw) if isinstance(retry_count_raw, int) else 1
@@ -396,7 +402,7 @@ async def update_job_retry_stats(
             extra={
                 "job_id": str(job_id),
                 "error": str(exc),
-                "is_actual_failure": is_actual_failure,
+                "retry_signal": retry_signal.value,
             },
         )
         # Conservative fallback

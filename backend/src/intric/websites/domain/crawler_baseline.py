@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID
 
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
@@ -21,6 +22,8 @@ class CrawlerBaselineProcessingTotals:
     files_too_large_skipped: int
     pages_failed: int
     files_failed: int
+    embedding_input_tokens: int | None
+    embedding_total_cost_usd: Decimal | None
 
 
 @dataclass(frozen=True, slots=True)

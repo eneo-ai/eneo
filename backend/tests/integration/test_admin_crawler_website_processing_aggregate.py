@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
@@ -85,6 +86,12 @@ async def _create_crawl_run(
     pages_hash_retained: int = 0,
     files_hash_retained: int = 0,
     files_too_large_skipped: int = 0,
+    embedding_model_name_snapshot: str | None = None,
+    embedding_model_litellm_name_snapshot: str | None = None,
+    embedding_model_provider_snapshot: str | None = None,
+    embedding_input_tokens: int | None = None,
+    embedding_total_cost_usd: Decimal | None = None,
+    embedding_usage_source: str | None = None,
 ) -> CrawlRuns:
     finished_at = created_at + timedelta(seconds=10)
     job = await _create_job(
@@ -109,6 +116,12 @@ async def _create_crawl_run(
         pages_hash_retained=pages_hash_retained,
         files_hash_retained=files_hash_retained,
         files_too_large_skipped=files_too_large_skipped,
+        embedding_model_name_snapshot=embedding_model_name_snapshot,
+        embedding_model_litellm_name_snapshot=embedding_model_litellm_name_snapshot,
+        embedding_model_provider_snapshot=embedding_model_provider_snapshot,
+        embedding_input_tokens=embedding_input_tokens,
+        embedding_total_cost_usd=embedding_total_cost_usd,
+        embedding_usage_source=embedding_usage_source,
     )
     session.add(crawl_run)
     await session.flush()
@@ -166,6 +179,12 @@ async def test_admin_crawler_website_processing_aggregate_is_tenant_scoped(
             pages_hash_retained=8,
             files_hash_retained=1,
             files_too_large_skipped=3,
+            embedding_model_name_snapshot="Old embedding model",
+            embedding_model_litellm_name_snapshot="openai/old-embedding",
+            embedding_model_provider_snapshot="openai",
+            embedding_input_tokens=100,
+            embedding_total_cost_usd=Decimal("0.000010000000"),
+            embedding_usage_source="provider_reported",
         )
         await _create_crawl_run(
             session,
@@ -177,6 +196,12 @@ async def test_admin_crawler_website_processing_aggregate_is_tenant_scoped(
             pages_crawled=1,
             pages_failed=1,
             files_failed=2,
+            embedding_model_name_snapshot="Latest embedding model",
+            embedding_model_litellm_name_snapshot="openai/latest-embedding",
+            embedding_model_provider_snapshot="openai",
+            embedding_input_tokens=25,
+            embedding_total_cost_usd=Decimal("0.000002500000"),
+            embedding_usage_source="provider_reported",
         )
         await _create_crawl_run(
             session,
@@ -186,6 +211,8 @@ async def test_admin_crawler_website_processing_aggregate_is_tenant_scoped(
             created_at=now - timedelta(minutes=30),
             status=Status.COMPLETE,
             pages_source_retained=4,
+            embedding_input_tokens=None,
+            embedding_total_cost_usd=None,
         )
         await _create_crawl_run(
             session,
@@ -236,10 +263,24 @@ async def test_admin_crawler_website_processing_aggregate_is_tenant_scoped(
     assert primary["indexed_content_count"] == 22
     assert primary["retention_rate"] == pytest.approx(9 / 22)
     assert primary["cost_pressure_score"] == pytest.approx(91.0)
+    assert primary["embedding_input_tokens"] == 125
+    assert primary["embedding_total_cost_usd"] == "0.000012500000"
+    assert primary["latest_embedding_model_name_snapshot"] == "Latest embedding model"
+    assert primary["latest_embedding_model_litellm_name_snapshot"] == (
+        "openai/latest-embedding"
+    )
+    assert primary["latest_embedding_model_provider_snapshot"] == "openai"
+    assert primary["latest_embedding_input_tokens"] == 25
+    assert primary["latest_embedding_total_cost_usd"] == "0.000002500000"
+    assert primary["latest_embedding_usage_source"] == "provider_reported"
 
     secondary = data["items"][1]
     assert secondary["website_name"] is None
     assert secondary["pages_source_retained"] == 4
+    assert secondary["embedding_input_tokens"] is None
+    assert secondary["embedding_total_cost_usd"] is None
+    assert secondary["latest_embedding_model_name_snapshot"] is None
+    assert secondary["latest_embedding_usage_source"] is None
 
 
 @pytest.mark.asyncio

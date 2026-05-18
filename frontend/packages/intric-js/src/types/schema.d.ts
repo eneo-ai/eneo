@@ -2620,6 +2620,41 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/crawler/websites/bulk-interval": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Apply one update_interval to many websites in the current tenant
+     * @description Apply one interval to many websites — capped + per-row audited.
+     *
+     *     Loops the existing per-row setter (preserving the auto-disabled
+     *     resume invariant) inside one transaction. Each `Applied` row gets
+     *     the same per-website audit emission as the per-row endpoint, so
+     *     audit-log search by `EntityType.WEBSITE` entity_id stays intact.
+     *     `Unchanged` + `Failed` rows surface to the operator but are not
+     *     audited (no state change). Returns 200 with a structured
+     *     `{applied, unchanged, failed}` payload rather than 207 — the
+     *     JS SDK is typed and doesn't benefit from polyglot status codes.
+     *
+     *     `website_ids` is capped at 100 by the request model
+     *     `max_length=BULK_INTERVAL_MAX_WEBSITE_IDS`; "select all matching
+     *     filter" is deferred to v3 (audit-by-id under the same transaction
+     *     as the filter run is its own commit — see
+     *     `bulk_crawl_interval_change.py` module docstring).
+     */
+    post: operations["bulk_set_current_tenant_crawler_update_interval_api_v1_admin_crawler_websites_bulk_interval_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/credentials/{provider}": {
     parameters: {
       query?: never;
@@ -9078,6 +9113,16 @@ export interface components {
       }[];
     };
     /**
+     * BulkIntervalRowFailureCode
+     * @description Reason a bulk-interval row didn't apply.
+     *
+     *     `NOT_FOUND` is what the underlying setter returns when the
+     *     `(website_id, tenant_id)` pair has no match, covering both
+     *     "deleted concurrently" and "cross-tenant id guess".
+     * @enum {string}
+     */
+    BulkIntervalRowFailureCode: "NOT_FOUND";
+    /**
      * CallbackRequest
      * @description OIDC callback with authorization code.
      * @example {
@@ -9905,6 +9950,16 @@ export interface components {
       pages_failed: number;
       /** Files Failed */
       files_failed: number;
+      /**
+       * Embedding Input Tokens
+       * @description Provider-reported embedding input tokens indexed in the window.
+       */
+      embedding_input_tokens?: number | null;
+      /**
+       * Embedding Total Cost Usd
+       * @description Run-time USD cost snapshot for provider-reported embedding usage.
+       */
+      embedding_total_cost_usd?: string | null;
     };
     /** CrawlerBaselineResponse */
     CrawlerBaselineResponse: {
@@ -9952,6 +10007,70 @@ export interface components {
        */
       outcome_counts: components["schemas"]["CrawlOutcomeBucket"][];
       processing_totals: components["schemas"]["CrawlerBaselineProcessingTotals"];
+    };
+    /** CrawlerBulkIntervalAppliedRow */
+    CrawlerBulkIntervalAppliedRow: {
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Website Name */
+      website_name: string;
+      previous_update_interval: components["schemas"]["UpdateInterval"];
+      new_update_interval: components["schemas"]["UpdateInterval"];
+      /** Failure State Cleared */
+      failure_state_cleared: boolean;
+    };
+    /** CrawlerBulkIntervalFailedRow */
+    CrawlerBulkIntervalFailedRow: {
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      code: components["schemas"]["BulkIntervalRowFailureCode"];
+    };
+    /**
+     * CrawlerBulkIntervalRequest
+     * @description Wire shape for the admin bulk-interval endpoint.
+     *
+     *     The explicit website-id list stays capped until "select all matching
+     *     filter" can be implemented with same-transaction filtering and
+     *     per-website audit rows.
+     */
+    CrawlerBulkIntervalRequest: {
+      /** Website Ids */
+      website_ids: string[];
+      update_interval: components["schemas"]["UpdateInterval"];
+    };
+    /**
+     * CrawlerBulkIntervalResponse
+     * @description 200-with-structured-payload outcome of the bulk-interval batch.
+     *
+     *     Wire shape preserves per-row outcome so the admin UI can render
+     *     a partial-success summary (e.g. "32 updated, 3 unchanged, 1
+     *     failed") + drill into failures by id. Avoids 207 Multi-Status —
+     *     the JS SDK doesn't benefit from polyglot status codes.
+     */
+    CrawlerBulkIntervalResponse: {
+      /** Applied */
+      applied: components["schemas"]["CrawlerBulkIntervalAppliedRow"][];
+      /** Unchanged */
+      unchanged: components["schemas"]["CrawlerBulkIntervalUnchangedRow"][];
+      /** Failed */
+      failed: components["schemas"]["CrawlerBulkIntervalFailedRow"][];
+    };
+    /** CrawlerBulkIntervalUnchangedRow */
+    CrawlerBulkIntervalUnchangedRow: {
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Website Name */
+      website_name: string;
+      update_interval: components["schemas"]["UpdateInterval"];
     };
     /** CrawlerFailureInventoryItem */
     CrawlerFailureInventoryItem: {
@@ -10074,6 +10193,18 @@ export interface components {
       files_hash_retained: number | null;
       /** Files Too Large Skipped */
       files_too_large_skipped: number | null;
+      /** Embedding Model Name Snapshot */
+      embedding_model_name_snapshot: string | null;
+      /** Embedding Model Litellm Name Snapshot */
+      embedding_model_litellm_name_snapshot: string | null;
+      /** Embedding Model Provider Snapshot */
+      embedding_model_provider_snapshot: string | null;
+      /** Embedding Input Tokens */
+      embedding_input_tokens?: number | null;
+      /** Embedding Total Cost Usd */
+      embedding_total_cost_usd?: string | null;
+      /** Embedding Usage Source */
+      embedding_usage_source: string | null;
     };
     /**
      * CrawlerRecentFailuresResponse
@@ -10499,7 +10630,7 @@ export interface components {
       files_failed: number;
       /**
        * Schedule Frequency Weight
-       * @description Schedule multiplier used for crawler cost-pressure ranking.
+       * @description Schedule multiplier used for crawler load-pressure ranking.
        */
       schedule_frequency_weight: number;
       /**
@@ -10514,9 +10645,31 @@ export interface components {
       retention_rate: number;
       /**
        * Cost Pressure Score
-       * @description Schedule-weighted changed/new page and file count for ranking.
+       * @description Schedule-weighted fetched page and file count for load ranking.
        */
       cost_pressure_score: number;
+      /**
+       * Embedding Input Tokens
+       * @description Provider-reported embedding input tokens indexed in this window.
+       */
+      embedding_input_tokens?: number | null;
+      /**
+       * Embedding Total Cost Usd
+       * @description Run-time USD cost snapshot for provider-reported embedding usage.
+       */
+      embedding_total_cost_usd?: string | null;
+      /** Latest Embedding Model Name Snapshot */
+      latest_embedding_model_name_snapshot?: string | null;
+      /** Latest Embedding Model Litellm Name Snapshot */
+      latest_embedding_model_litellm_name_snapshot?: string | null;
+      /** Latest Embedding Model Provider Snapshot */
+      latest_embedding_model_provider_snapshot?: string | null;
+      /** Latest Embedding Input Tokens */
+      latest_embedding_input_tokens?: number | null;
+      /** Latest Embedding Total Cost Usd */
+      latest_embedding_total_cost_usd?: string | null;
+      /** Latest Embedding Usage Source */
+      latest_embedding_usage_source?: string | null;
     };
     /** CrawlerTenantWebsiteProcessingAggregateResponse */
     CrawlerTenantWebsiteProcessingAggregateResponse: {
@@ -10636,7 +10789,7 @@ export interface components {
       files_failed: number;
       /**
        * Schedule Frequency Weight
-       * @description Schedule multiplier used for crawler cost-pressure ranking.
+       * @description Schedule multiplier used for crawler load-pressure ranking.
        */
       schedule_frequency_weight: number;
       /**
@@ -10651,9 +10804,25 @@ export interface components {
       retention_rate: number;
       /**
        * Cost Pressure Score
-       * @description Schedule-weighted changed/new page and file count for ranking.
+       * @description Schedule-weighted fetched page and file count for load ranking.
        */
       cost_pressure_score: number;
+      /** Embedding Input Tokens */
+      embedding_input_tokens?: number | null;
+      /** Embedding Total Cost Usd */
+      embedding_total_cost_usd?: string | null;
+      /** Latest Embedding Model Name Snapshot */
+      latest_embedding_model_name_snapshot?: string | null;
+      /** Latest Embedding Model Litellm Name Snapshot */
+      latest_embedding_model_litellm_name_snapshot?: string | null;
+      /** Latest Embedding Model Provider Snapshot */
+      latest_embedding_model_provider_snapshot?: string | null;
+      /** Latest Embedding Input Tokens */
+      latest_embedding_input_tokens?: number | null;
+      /** Latest Embedding Total Cost Usd */
+      latest_embedding_total_cost_usd?: string | null;
+      /** Latest Embedding Usage Source */
+      latest_embedding_usage_source?: string | null;
     };
     /** CrawlerWebsiteProcessingAggregateResponse */
     CrawlerWebsiteProcessingAggregateResponse: {
@@ -26477,6 +26646,7 @@ export interface operations {
         limit?: number;
         offset?: number;
         lifecycle_status?: components["schemas"]["CrawlLifecycle"] | null;
+        website_id?: string | null;
       };
       header?: never;
       path?: never;
@@ -26544,6 +26714,7 @@ export interface operations {
         limit?: number;
         offset?: number;
         outcome_code?: components["schemas"]["CrawlOutcomeCode"] | null;
+        website_id?: string | null;
       };
       header?: never;
       path?: never;
@@ -26578,6 +26749,7 @@ export interface operations {
         limit?: number;
         offset?: number;
         outcome_code?: components["schemas"]["CrawlOutcomeCode"] | null;
+        website_id?: string | null;
       };
       header?: never;
       path?: never;
@@ -26631,6 +26803,7 @@ export interface operations {
         days?: number;
         limit?: number;
         offset?: number;
+        website_id?: string | null;
       };
       header?: never;
       path?: never;
@@ -26885,6 +27058,39 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CrawlerWebsiteDeleteConflictResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  bulk_set_current_tenant_crawler_update_interval_api_v1_admin_crawler_websites_bulk_interval_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CrawlerBulkIntervalRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlerBulkIntervalResponse"];
         };
       };
       /** @description Validation Error */

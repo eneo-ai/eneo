@@ -24,6 +24,11 @@ from uuid import uuid4
 
 import pytest
 
+from intric.embedding_models.domain.embedding_batch import (
+    EmbeddingBatchResult,
+    EmbeddingUsage,
+)
+from intric.files.chunk_embedding_list import ChunkEmbeddingList
 from intric.worker.crawl_context import CrawlContext, EmbeddingModelSpec
 
 # =============================================================================
@@ -134,6 +139,20 @@ def create_mock_container(embeddings_service):
     return mock_container
 
 
+def create_embedding_batch(chunks, embedding: list[float]) -> EmbeddingBatchResult:
+    chunk_list = list(chunks)
+    chunk_embeddings = ChunkEmbeddingList()
+    chunk_embeddings.add(chunk_list, [embedding for _ in chunk_list])
+    return EmbeddingBatchResult(
+        embeddings=chunk_embeddings,
+        usage=EmbeddingUsage(
+            prompt_tokens=None,
+            total_tokens=None,
+            source="missing",
+        ),
+    )
+
+
 # =============================================================================
 # FIXTURES
 # =============================================================================
@@ -187,8 +206,7 @@ def mock_embeddings_service():
     service = MagicMock()
 
     async def mock_get_embeddings(model, chunks):
-        # Return list of (chunk, embedding) tuples
-        return [(chunk, [0.1, 0.2, 0.3] * 128) for chunk in chunks]
+        return create_embedding_batch(chunks, [0.1, 0.2, 0.3] * 128)
 
     service.get_embeddings = AsyncMock(side_effect=mock_get_embeddings)
     return service
@@ -223,7 +241,7 @@ class TestEmbeddingSemaphoreBehavior:
             concurrent_calls.append(current_concurrent)
             await asyncio.sleep(0.05)  # Simulate API latency
             current_concurrent -= 1
-            return [(chunk, [0.1] * 384) for chunk in chunks]
+            return create_embedding_batch(chunks, [0.1] * 384)
 
         # Create a service with tracking
         service = MagicMock()
@@ -282,7 +300,7 @@ class TestEmbeddingSemaphoreBehavior:
             call_count += 1
             if call_count == 2:
                 raise RuntimeError("Simulated embedding API failure")
-            return [(chunk, [0.1] * 384) for chunk in chunks]
+            return create_embedding_batch(chunks, [0.1] * 384)
 
         service = MagicMock()
         service.get_embeddings = AsyncMock(side_effect=mock_get_embeddings_with_failure)
@@ -344,7 +362,7 @@ class TestEmbeddingSemaphoreBehavior:
                 await asyncio.sleep(
                     10
                 )  # Will timeout (ctx timeout is 15s, but we'll patch shorter)
-            return [(chunk, [0.1] * 384) for chunk in chunks]
+            return create_embedding_batch(chunks, [0.1] * 384)
 
         service = MagicMock()
         service.get_embeddings = AsyncMock(
@@ -623,7 +641,7 @@ class TestMemoryCapsEnforcement:
 
         async def mock_get_embeddings(model, chunks):
             # Return large embeddings to trigger cap quickly
-            return [(chunk, [0.1] * 1536) for chunk in chunks]
+            return create_embedding_batch(chunks, [0.1] * 1536)
 
         service = MagicMock()
         service.get_embeddings = AsyncMock(side_effect=mock_get_embeddings)
@@ -1095,7 +1113,7 @@ class TestPhaseIsolation:
                 ("EMBEDDING_END", asyncio.get_event_loop().time())
             )
             embedding_completed_at = asyncio.get_event_loop().time()
-            return [(chunk, [0.1] * 384) for chunk in chunks]
+            return create_embedding_batch(chunks, [0.1] * 384)
 
         service = MagicMock()
         service.get_embeddings = AsyncMock(side_effect=mock_get_embeddings)

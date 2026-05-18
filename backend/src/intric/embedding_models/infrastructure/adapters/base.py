@@ -4,7 +4,7 @@ from abc import abstractmethod
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
-from intric.files.chunk_embedding_list import ChunkEmbeddingList
+from intric.embedding_models.domain.embedding_batch import EmbeddingBatchResult
 from intric.info_blobs.info_blob import InfoBlobChunk
 from intric.main.logging import get_logger
 
@@ -86,5 +86,5 @@ class EmbeddingModelAdapter(abc.ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def get_embeddings(self, chunks: list[InfoBlobChunk]) -> ChunkEmbeddingList:
+    async def get_embeddings(self, chunks: list[InfoBlobChunk]) -> EmbeddingBatchResult:
         raise NotImplementedError

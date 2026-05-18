@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -29,6 +30,7 @@ from intric.main.config import get_settings
 from intric.main.container.container_overrides import scoped_container_overrides
 from intric.main.logging import get_logger
 from intric.websites.domain.crawl_outcome import FailureReason
+from intric.websites.domain.crawl_run_repo import CrawlRunRepository
 from intric.worker.crawl_context import (
     CrawlContext,
     EmbeddingModelSpec,
@@ -401,7 +403,7 @@ async def persist_batch(
                 async with _get_embedding_semaphore():
                     try:
                         async with asyncio.timeout(ctx.embedding_timeout_seconds):
-                            chunk_embedding_list = (
+                            embedding_batch = (
                                 await create_embeddings_service.get_embeddings(
                                     model=embedding_model,
                                     chunks=chunk_objects,
@@ -422,7 +424,7 @@ async def persist_batch(
 
                 # 4. Extract embeddings from ChunkEmbeddingList
                 embeddings: list[list[float]] = []
-                for _, embedding in chunk_embedding_list:
+                for _, embedding in embedding_batch.embeddings:
                     # ChunkEmbeddingList returns numpy arrays, convert to list
                     embeddings.append(
                         embedding.tolist()  # type: ignore[attr-defined]
@@ -445,6 +447,7 @@ async def persist_batch(
                     content_hash=page.content_hash,
                     chunks=chunks,
                     embeddings=embeddings,
+                    embedding_usage=embedding_batch.usage,
                     tenant_id=ctx.tenant_id,
                     website_id=ctx.website_id,
                     user_id=ctx.user_id,
@@ -515,6 +518,11 @@ async def persist_batch(
     try:
         async with asyncio.timeout(ctx.max_transaction_wall_time_seconds):
             async with sessionmanager.session() as session, session.begin():
+                indexed_token_delta = 0
+                indexed_cost_delta = Decimal("0")
+                saw_indexed_cost = False
+                saw_provider_usage = False
+                saw_missing_usage = False
                 for prepared in prepared_pages:
                     # Per-page savepoint for atomic delete+insert
                     savepoint = await session.begin_nested()
@@ -578,6 +586,18 @@ async def persist_batch(
                         persisted_urls.append(
                             prepared.url
                         )  # Track this URL as actually persisted
+                        if prepared.embedding_usage.source == "provider_reported":
+                            saw_provider_usage = True
+                            total_tokens = prepared.embedding_usage.total_tokens or 0
+                            indexed_token_delta += total_tokens
+                            if embedding_model.input_cost_per_token is not None:
+                                saw_indexed_cost = True
+                                indexed_cost_delta += (
+                                    Decimal(total_tokens)
+                                    * embedding_model.input_cost_per_token
+                                )
+                        else:
+                            saw_missing_usage = True
 
                     except Exception as e:
                         await savepoint.rollback()
@@ -591,6 +611,18 @@ async def persist_batch(
                                 "error": str(e),
                             },
                         )
+
+                if saw_provider_usage or saw_missing_usage:
+                    usage_source = (
+                        "provider_reported" if saw_provider_usage else "missing"
+                    )
+                    await CrawlRunRepository(session).record_indexed_embedding_usage(
+                        run_id=ctx.run_id,
+                        tenant_id=ctx.tenant_id,
+                        token_delta=indexed_token_delta,
+                        cost_delta=indexed_cost_delta if saw_indexed_cost else None,
+                        usage_source=usage_source,
+                    )
 
         # Connection returned to pool HERE - typically ~50-300ms total
         logger.debug(

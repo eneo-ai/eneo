@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -12,6 +13,14 @@ from intric.worker.redis.lua_scripts import LuaScripts
 from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
 
 
+def test_slot_acquire_delegates_preacquired_slot_storage_to_capacity_manager():
+    source_path = Path(__file__).parents[3] / "src/intric/worker/crawl/slot_acquire.py"
+    source = source_path.read_text()
+
+    assert "LuaScripts.preacquired_slot_key" not in source
+    assert "LuaScripts.release_slot" not in source
+
+
 def _limiter(*, acquired: bool = True) -> MagicMock:
     limiter = MagicMock(spec=TenantConcurrencyLimiter)
     limiter.acquire = AsyncMock(return_value=acquired)
@@ -22,6 +31,7 @@ def _redis() -> MagicMock:
     redis_client = MagicMock()
     redis_client.get = AsyncMock(return_value=None)
     redis_client.expire = AsyncMock()
+    redis_client.delete = AsyncMock()
     return redis_client
 
 
@@ -62,7 +72,7 @@ async def test_mismatched_preacquired_slot_is_released_before_acquiring_tenant_s
     limiter = _limiter()
 
     with patch(
-        "intric.worker.crawl.slot_acquire.LuaScripts.release_slot",
+        "intric.worker.feeder.capacity.LuaScripts.release_slot",
         new=AsyncMock(),
     ) as release_slot:
         result = await acquire_crawl_slot(
@@ -80,6 +90,9 @@ async def test_mismatched_preacquired_slot_is_released_before_acquiring_tenant_s
     assert result.path == CrawlSlotAcquirePath.PREACQUIRED_MISMATCH_REACQUIRED
     assert result.preacquired_tenant_id is None
     release_slot.assert_awaited_once_with(redis_client, feeder_tenant_id, 300)
+    redis_client.delete.assert_awaited_once_with(
+        LuaScripts.preacquired_slot_key(job_id)
+    )
     limiter.acquire.assert_awaited_once_with(worker_tenant_id)
 
 
@@ -163,7 +176,7 @@ async def test_preacquired_read_failure_falls_back_to_normal_acquire_and_logs_wa
     limiter = _limiter()
     logger = MagicMock()
 
-    with patch("intric.worker.crawl.slot_acquire.logger", logger):
+    with patch("intric.worker.feeder.capacity.logger", logger):
         result = await acquire_crawl_slot(
             CrawlSlotAcquireRequest(
                 job_id=job_id,
@@ -193,7 +206,7 @@ async def test_invalid_preacquired_tenant_id_falls_back_to_normal_acquire():
     limiter = _limiter()
     logger = MagicMock()
 
-    with patch("intric.worker.crawl.slot_acquire.logger", logger):
+    with patch("intric.worker.feeder.capacity.logger", logger):
         result = await acquire_crawl_slot(
             CrawlSlotAcquireRequest(
                 job_id=job_id,
@@ -220,7 +233,7 @@ async def test_preacquired_ttl_refresh_failure_keeps_reused_slot_result():
     limiter = _limiter()
     logger = MagicMock()
 
-    with patch("intric.worker.crawl.slot_acquire.logger", logger):
+    with patch("intric.worker.feeder.capacity.logger", logger):
         result = await acquire_crawl_slot(
             CrawlSlotAcquireRequest(
                 job_id=job_id,
@@ -277,7 +290,7 @@ async def test_mismatch_release_followed_by_limit_reached_clears_preacquired_sta
     limiter = _limiter(acquired=False)
 
     with patch(
-        "intric.worker.crawl.slot_acquire.LuaScripts.release_slot",
+        "intric.worker.feeder.capacity.LuaScripts.release_slot",
         new=AsyncMock(),
     ) as release_slot:
         result = await acquire_crawl_slot(
@@ -295,6 +308,9 @@ async def test_mismatch_release_followed_by_limit_reached_clears_preacquired_sta
     assert result.path == CrawlSlotAcquirePath.PREACQUIRED_MISMATCH_REACQUIRED
     assert result.preacquired_tenant_id is None
     release_slot.assert_awaited_once_with(redis_client, feeder_tenant_id, 300)
+    redis_client.delete.assert_awaited_once_with(
+        LuaScripts.preacquired_slot_key(job_id)
+    )
     limiter.acquire.assert_awaited_once_with(worker_tenant_id)
 
 
@@ -309,10 +325,10 @@ async def test_mismatch_release_failure_is_logged_and_correct_tenant_acquire_sti
 
     with (
         patch(
-            "intric.worker.crawl.slot_acquire.LuaScripts.release_slot",
+            "intric.worker.feeder.capacity.LuaScripts.release_slot",
             new=AsyncMock(side_effect=RuntimeError("redis failed")),
         ) as release_slot,
-        patch("intric.worker.crawl.slot_acquire.logger", logger),
+        patch("intric.worker.feeder.capacity.logger", logger),
     ):
         result = await acquire_crawl_slot(
             CrawlSlotAcquireRequest(
@@ -330,7 +346,7 @@ async def test_mismatch_release_failure_is_logged_and_correct_tenant_acquire_sti
     release_slot.assert_awaited_once()
     limiter.acquire.assert_awaited_once_with(worker_tenant_id)
     logger.error.assert_any_call(
-        "Failed to release mismatched pre-acquired crawl slot",
+        "Failed to release pre-acquired crawl slot",
         extra={
             "job_id": str(job_id),
             "tenant_id": str(feeder_tenant_id),

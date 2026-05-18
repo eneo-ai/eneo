@@ -27,7 +27,13 @@ const baseFailure: CrawlerRecentFailureItem = {
   pages_source_retained: 0,
   pages_hash_retained: 290,
   files_hash_retained: 1,
-  files_too_large_skipped: 12
+  files_too_large_skipped: 12,
+  embedding_model_name_snapshot: null,
+  embedding_model_litellm_name_snapshot: null,
+  embedding_model_provider_snapshot: null,
+  embedding_input_tokens: null,
+  embedding_total_cost_usd: null,
+  embedding_usage_source: null
 };
 
 test("recent crawler failure labels use typed outcome text and stable website fallback", () => {
@@ -45,6 +51,17 @@ test("recent crawler failure result labels distinguish work, retained content, s
     "Too large: 12 files",
     "Failed: 1 page"
   ]);
+});
+
+test("recent crawler failure result labels include per-run embedding usage when present", () => {
+  expect(
+    getCrawlerRecentFailureResultLabels({
+      ...baseFailure,
+      embedding_input_tokens: 12345,
+      embedding_total_cost_usd: "0.001234000000",
+      embedding_usage_source: "provider_reported"
+    }).map((label) => label.label)
+  ).toContain("12,345 tokens · $0.001234");
 });
 
 test("recent crawler failure prefers stored website names", () => {

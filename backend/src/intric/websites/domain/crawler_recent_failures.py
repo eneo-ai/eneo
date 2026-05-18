@@ -1,8 +1,10 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID
 
+from intric.embedding_models.domain.embedding_batch import EmbeddingUsageSource
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode, FailureReason
 
 # Keep this deny-by-default. A newly introduced failure outcome should not appear
@@ -54,6 +56,12 @@ class CrawlerRecentFailureItem:
     pages_hash_retained: int | None
     files_hash_retained: int | None
     files_too_large_skipped: int | None
+    embedding_model_name_snapshot: str | None
+    embedding_model_litellm_name_snapshot: str | None
+    embedding_model_provider_snapshot: str | None
+    embedding_input_tokens: int | None
+    embedding_total_cost_usd: Decimal | None
+    embedding_usage_source: EmbeddingUsageSource | None
 
 
 @dataclass(frozen=True, slots=True)

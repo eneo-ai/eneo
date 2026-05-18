@@ -35,6 +35,7 @@ from intric.websites.domain.crawl_terminal import (
     crawl_direct_enqueue_failure_message,
     crawl_pending_queue_enqueue_failure_message,
 )
+from intric.worker.feeder.capacity import CapacityManager
 from intric.worker.feeder.crawl_enqueue import (
     CrawlEnqueueFailed,
     enqueue_crawl_job,
@@ -44,7 +45,6 @@ from intric.worker.feeder.queues import (
     PendingQueue,
     PendingQueueAddError,
 )
-from intric.worker.redis.lua_scripts import LuaScripts
 
 if TYPE_CHECKING:
     from intric.jobs.task_service import TaskService
@@ -90,80 +90,16 @@ class CrawlService:
         self.task_service = task_service
         self.redis_client = redis_client
         self.settings = get_settings()
+        self.capacity_manager = CapacityManager(redis_client, self.settings)
 
     async def _try_acquire_slot(self, tenant_id: UUID) -> bool:
-        """Atomically try to acquire a concurrency slot for this tenant.
-
-        Uses same Lua script as TenantConcurrencyLimiter for atomic INCR-then-check.
-
-        Args:
-            tenant_id: Tenant identifier
-
-        Returns:
-            True if slot acquired, False if at capacity
-        """
-        max_concurrent = self.settings.tenant_worker_concurrency_limit
-        ttl = self.settings.tenant_worker_semaphore_ttl_seconds
-
-        try:
-            result = await LuaScripts.acquire_slot(
-                self.redis_client,
-                tenant_id,
-                max_concurrent,
-                ttl,
-            )
-
-            acquired = result > 0
-
-            if not acquired:
-                logger.debug(
-                    "Slot acquisition failed (at capacity)",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "max_concurrent": max_concurrent,
-                    },
-                )
-
-            return acquired
-
-        except Exception as exc:
-            logger.warning(
-                "Failed to acquire slot in CrawlService",
-                extra={"tenant_id": str(tenant_id), "error": str(exc)},
-            )
-            return False
+        return await self.capacity_manager.try_acquire_slot(tenant_id)
 
     async def _mark_slot_preacquired(self, job_id: UUID, tenant_id: UUID) -> None:
-        """Mark that we pre-acquired a slot for this job.
-
-        Worker checks this flag to skip limiter.acquire() (slot already held).
-        TTL ensures cleanup if job is never picked up.
-
-        Args:
-            job_id: Job identifier for the flag key
-            tenant_id: Stored in value so worker can release slot even if tenant
-                       injection fails. Consistent with Feeder's implementation.
-
-        Raises on failure - caller must handle rollback to prevent double-acquire.
-        """
-        key = LuaScripts.preacquired_slot_key(job_id)
-        # Store tenant_id (same as Feeder) so worker can release slot on failure
-        # Let exception propagate - caller handles rollback
-        await self.redis_client.set(
-            key, str(tenant_id), ex=self.settings.tenant_worker_semaphore_ttl_seconds
-        )
+        await self.capacity_manager.mark_slot_preacquired(job_id, tenant_id)
 
     async def _release_slot(self, tenant_id: UUID) -> None:
-        """Release a previously acquired slot after direct handoff setup fails."""
-        ttl = self.settings.tenant_worker_semaphore_ttl_seconds
-
-        try:
-            await LuaScripts.release_slot(self.redis_client, tenant_id, ttl)
-        except Exception as exc:
-            logger.warning(
-                "Failed to release slot",
-                extra={"tenant_id": str(tenant_id), "error": str(exc)},
-            )
+        await self.capacity_manager.release_slot(tenant_id)
 
     async def release_job_resources(self, job_id: UUID, tenant_id: UUID) -> None:
         """Release slot and clean up flag for a failed/preempted job.
@@ -176,29 +112,11 @@ class CrawlService:
             job_id: Job ID to clean up flag for
             tenant_id: Tenant ID for slot release
         """
-        ttl = self.settings.tenant_worker_semaphore_ttl_seconds
-        try:
-            await LuaScripts.release_slot(self.redis_client, tenant_id, ttl)
-        except Exception as exc:
-            logger.warning(
-                "Failed to release slot for preempted job",
-                extra={
-                    "tenant_id": str(tenant_id),
-                    "job_id": str(job_id),
-                    "error": str(exc),
-                },
-            )
+        await self.capacity_manager.release_slot(tenant_id)
 
         # Preemption handles an already-terminal job, so slot release can run before
         # flag deletion without a worker racing this handoff path.
-        flag_key = LuaScripts.preacquired_slot_key(job_id)
-        try:
-            await self.redis_client.delete(flag_key)
-        except Exception as flag_exc:
-            logger.debug(
-                "Failed to delete slot_preacquired flag during preemption",
-                extra={"job_id": str(job_id), "error": str(flag_exc)},
-            )
+        await self.capacity_manager.clear_preacquired_flag(job_id)
 
     async def _cleanup_aborted_crawl_job(
         self,
@@ -243,9 +161,10 @@ class CrawlService:
             # the tenant counter.
             return
 
-        flag_key = LuaScripts.preacquired_slot_key(job_id)
         try:
-            has_preacquired_slot = await self.redis_client.get(flag_key) is not None
+            has_preacquired_slot = (
+                await self.capacity_manager.get_preacquired_tenant(job_id)
+            ) is not None
         except Exception as exc:
             logger.warning(
                 "Failed to inspect pre-acquired crawl slot during abort cleanup",
@@ -479,15 +398,7 @@ class CrawlService:
                     failure_message = crawl_direct_enqueue_failure_message(exc)
                     # Rollback capacity before terminal commit so a failed DB write
                     # cannot leave future crawls blocked by a leaked slot.
-                    try:
-                        await self.redis_client.delete(
-                            LuaScripts.preacquired_slot_key(crawl_job.id)
-                        )
-                    except Exception as flag_exc:
-                        logger.debug(
-                            "Failed to delete slot_preacquired flag during rollback",
-                            extra={"job_id": str(crawl_job.id), "error": str(flag_exc)},
-                        )
+                    await self.capacity_manager.clear_preacquired_flag(crawl_job.id)
                     await self._release_slot(website.tenant_id)
 
                     try:

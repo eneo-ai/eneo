@@ -1,11 +1,12 @@
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
 import redis
-from arq.jobs import JobStatus
 
+from intric.jobs.job_manager import JobRuntimeStatus
 from intric.main.exceptions import NotReadyException
 from intric.worker.feeder.crawl_status import (
     CrawlJobStatus,
@@ -15,19 +16,26 @@ from intric.worker.feeder.crawl_status import (
 )
 
 
+def test_crawl_status_does_not_import_arq_status_enum() -> None:
+    source_path = Path(__file__).parents[4] / "src/intric/worker/feeder/crawl_status.py"
+    source = source_path.read_text()
+
+    assert "arq.jobs" not in source
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("arq_status", "expected_status"),
     [
-        (JobStatus.deferred, CrawlJobStatus.DEFERRED),
-        (JobStatus.queued, CrawlJobStatus.QUEUED),
-        (JobStatus.in_progress, CrawlJobStatus.IN_PROGRESS),
-        (JobStatus.complete, CrawlJobStatus.COMPLETE),
-        (JobStatus.not_found, CrawlJobStatus.NOT_FOUND),
+        (JobRuntimeStatus.DEFERRED, CrawlJobStatus.DEFERRED),
+        (JobRuntimeStatus.QUEUED, CrawlJobStatus.QUEUED),
+        (JobRuntimeStatus.IN_PROGRESS, CrawlJobStatus.IN_PROGRESS),
+        (JobRuntimeStatus.COMPLETE, CrawlJobStatus.COMPLETE),
+        (JobRuntimeStatus.NOT_FOUND, CrawlJobStatus.NOT_FOUND),
     ],
 )
-async def test_get_crawl_job_status_maps_arq_statuses(
-    arq_status: JobStatus,
+async def test_get_crawl_job_status_maps_runtime_statuses(
+    arq_status: JobRuntimeStatus,
     expected_status: CrawlJobStatus,
 ) -> None:
     job_id = uuid4()

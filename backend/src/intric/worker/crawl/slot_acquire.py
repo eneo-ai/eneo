@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from intric.main.logging import get_logger
-from intric.worker.redis.lua_scripts import LuaScripts
+from intric.worker.feeder.capacity import CapacityManager
 from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
 
 if TYPE_CHECKING:
@@ -46,35 +46,7 @@ async def _read_preacquired_tenant_id(
     if redis_client is None:
         return None
 
-    try:
-        raw_tenant_id = await redis_client.get(LuaScripts.preacquired_slot_key(job_id))
-    except Exception as exc:
-        logger.warning(
-            "Failed to check pre-acquired crawl slot",
-            extra={"job_id": str(job_id), "error": str(exc)},
-        )
-        return None
-
-    if raw_tenant_id is None:
-        return None
-
-    try:
-        tenant_id_text = (
-            raw_tenant_id.decode()
-            if isinstance(raw_tenant_id, bytes)
-            else str(raw_tenant_id)
-        )
-        return UUID(tenant_id_text)
-    except ValueError as exc:
-        logger.warning(
-            "Invalid pre-acquired crawl slot tenant id",
-            extra={
-                "job_id": str(job_id),
-                "tenant_id": str(raw_tenant_id),
-                "error": str(exc),
-            },
-        )
-        return None
+    return await CapacityManager(redis_client).get_preacquired_tenant(job_id)
 
 
 async def _refresh_preacquired_slot_ttl(
@@ -87,17 +59,11 @@ async def _refresh_preacquired_slot_ttl(
     if redis_client is None:
         return
 
-    try:
-        await redis_client.expire(LuaScripts.slot_key(tenant_id), ttl_seconds)
-    except Exception as exc:
-        logger.debug(
-            "Failed to refresh pre-acquired crawl slot TTL",
-            extra={
-                "job_id": str(job_id),
-                "tenant_id": str(tenant_id),
-                "error": str(exc),
-            },
-        )
+    await CapacityManager(redis_client).refresh_slot_ttl(
+        tenant_id=tenant_id,
+        ttl_seconds=ttl_seconds,
+        job_id=job_id,
+    )
 
 
 async def _release_mismatched_preacquired_slot(
@@ -121,17 +87,11 @@ async def _release_mismatched_preacquired_slot(
     if redis_client is None:
         return
 
-    try:
-        await LuaScripts.release_slot(redis_client, preacquired_tenant_id, ttl_seconds)
-    except Exception as exc:
-        logger.error(
-            "Failed to release mismatched pre-acquired crawl slot",
-            extra={
-                "job_id": str(job_id),
-                "tenant_id": str(preacquired_tenant_id),
-                "error": str(exc),
-            },
-        )
+    await CapacityManager(redis_client).release_preacquired_slot(
+        job_id=job_id,
+        tenant_id=preacquired_tenant_id,
+        ttl_seconds=ttl_seconds,
+    )
 
 
 async def acquire_crawl_slot(

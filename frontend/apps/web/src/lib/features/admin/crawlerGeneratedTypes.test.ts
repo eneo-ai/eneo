@@ -53,6 +53,14 @@ type _CrawlerBaselineProcessingTotalsField = AssertHasKey<
   components["schemas"]["CrawlerBaselineResponse"],
   "processing_totals"
 >;
+type _CrawlerBaselineEmbeddingTokensField = AssertHasKey<
+  components["schemas"]["CrawlerBaselineProcessingTotals"],
+  "embedding_input_tokens"
+>;
+type _CrawlerBaselineEmbeddingCostField = AssertHasKey<
+  components["schemas"]["CrawlerBaselineProcessingTotals"],
+  "embedding_total_cost_usd"
+>;
 type _CrawlerActiveItemsField = AssertHasKey<
   components["schemas"]["CrawlerActiveInventoryResponse"],
   "items"
@@ -88,6 +96,14 @@ type _CrawlerRecentFailuresItemsField = AssertHasKey<
 type _CrawlerRecentFailuresFailureSummaryField = AssertHasKey<
   components["schemas"]["CrawlerRecentFailureItem"],
   "failure_summary"
+>;
+type _CrawlerRecentFailuresEmbeddingTokensField = AssertHasKey<
+  components["schemas"]["CrawlerRecentFailureItem"],
+  "embedding_input_tokens"
+>;
+type _CrawlerRecentFailuresEmbeddingModelField = AssertHasKey<
+  components["schemas"]["CrawlerRecentFailureItem"],
+  "embedding_model_name_snapshot"
 >;
 type _CrawlerWatchdogMetricsField = AssertHasKey<
   components["schemas"]["CrawlerWatchdogStatusResponse"],
@@ -128,6 +144,22 @@ type _CrawlerTenantWebsiteProcessingCostPressureField = AssertHasKey<
 type _CrawlerTenantWebsiteProcessingUpdateIntervalField = AssertHasKey<
   components["schemas"]["CrawlerTenantWebsiteProcessingAggregateItem"],
   "update_interval"
+>;
+type _CrawlerTenantWebsiteProcessingEmbeddingTokensField = AssertHasKey<
+  components["schemas"]["CrawlerTenantWebsiteProcessingAggregateItem"],
+  "embedding_input_tokens"
+>;
+type _CrawlerTenantWebsiteProcessingEmbeddingCostField = AssertHasKey<
+  components["schemas"]["CrawlerTenantWebsiteProcessingAggregateItem"],
+  "embedding_total_cost_usd"
+>;
+type _CrawlerTenantWebsiteProcessingLatestEmbeddingModelField = AssertHasKey<
+  components["schemas"]["CrawlerTenantWebsiteProcessingAggregateItem"],
+  "latest_embedding_model_name_snapshot"
+>;
+type _CrawlerTenantWebsiteProcessingLatestEmbeddingTokensField = AssertHasKey<
+  components["schemas"]["CrawlerTenantWebsiteProcessingAggregateItem"],
+  "latest_embedding_input_tokens"
 >;
 type _CrawlerScheduledBucketsField = AssertHasKey<
   components["schemas"]["CrawlerScheduledAggregateResponse"],

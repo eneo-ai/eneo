@@ -302,19 +302,17 @@ class TestRedisTTLManagement:
         - tenant:{tenant_id}:active_jobs (counter)
         - job:{job_id}:slot_preacquired (flag)
 
-        This is documented in the HeartbeatMonitor._refresh_redis_ttl() method.
-        Note: Heartbeat logic was extracted to HeartbeatMonitor during refactoring.
+        HeartbeatMonitor delegates Redis key ownership to CapacityManager.
         """
         import inspect
 
-        from intric.worker.crawl.heartbeat import HeartbeatMonitor
+        from intric.worker.feeder.capacity import CapacityManager
 
-        source = inspect.getsource(HeartbeatMonitor._refresh_redis_ttl)
+        source = inspect.getsource(CapacityManager.refresh_preacquired_slot_ttls)
 
-        # Verify pipeline pattern for atomic TTL refresh
-        assert "pipe = self._redis_client.pipeline(transaction=True)" in source
-        assert "pipe.expire(concurrency_key, self._semaphore_ttl_seconds)" in source
-        assert "pipe.expire(flag_key, self._semaphore_ttl_seconds)" in source
+        assert "redis_pipeline(self._redis, transaction=True)" in source
+        assert "LuaScripts.slot_key(tenant_id)" in source
+        assert "LuaScripts.preacquired_slot_key(job_id)" in source
 
 
 class TestZombieJobPrevention:

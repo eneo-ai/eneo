@@ -40,6 +40,7 @@ from intric.websites.domain.crawl_terminal import (
 from intric.worker.crawl import (
     CrawlAuditPayload,
     CrawlCompletionTimings,
+    CrawlRetrySignal,
     CrawlRunTerminalUpdate,
     CrawlSlotAcquireRequest,
     CrawlSlotReleaseRequest,
@@ -644,11 +645,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 default=settings.crawl_job_max_age_seconds,
             )
 
-            # Update stats with is_actual_failure=False (this is a busy signal, not a real failure)
             failure_count, job_age = await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=redis_client,
-                is_actual_failure=False,  # CRITICAL: Don't count busy waits as failures
+                retry_signal=CrawlRetrySignal.BUSY,
                 max_age_seconds=max_age_seconds,
             )
 
@@ -822,6 +822,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             bootstrap_result = await bootstrap_crawl(
                 session_scope=Container.session_scope,
                 website_id=params.website_id,
+                run_id=params.run_id,
                 tenant=tenant,
                 user=container.user(),
                 tenant_crawler_settings=tenant_crawler_settings,

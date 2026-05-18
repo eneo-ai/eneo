@@ -5,6 +5,8 @@ import {
   type CrawlOutcomeLabelSource,
   type CrawlRunResultLabel
 } from "$lib/features/knowledge/crawlOutcomePresentation";
+import { formatCrawlerCount, formatCrawlerUsdCost } from "./crawlerNumberFormat";
+import { m } from "$lib/paraglide/messages";
 
 export type CrawlerTerminalOutcomeFeedItem = components["schemas"]["CrawlerRecentFailureItem"];
 
@@ -26,7 +28,7 @@ export function getCrawlerTerminalOutcomeResultLabels(
   const pagesFailed = positiveCrawlCount(item.pages_failed);
   const filesFailed = positiveCrawlCount(item.files_failed);
 
-  return getCrawlRunResultLabels({
+  const labels = getCrawlRunResultLabels({
     outcome: outcomeFromTerminalFeedItem(item),
     failure_summary: item.failure_summary,
     processing_summary: {
@@ -42,8 +44,30 @@ export function getCrawlerTerminalOutcomeResultLabels(
       files_failed: filesFailed
     }
   });
+  const embeddingUsageLabel = terminalEmbeddingUsageLabel(item);
+  if (embeddingUsageLabel) {
+    labels.push({
+      color: "blue",
+      label: embeddingUsageLabel
+    });
+  }
+  return labels;
 }
 
 function indexedCount(total: number, hashRetained: number, failed: number): number {
   return Math.max(total - hashRetained - failed, 0);
+}
+
+function terminalEmbeddingUsageLabel(item: CrawlerTerminalOutcomeFeedItem): string | null {
+  if (item.embedding_input_tokens === null || item.embedding_input_tokens === undefined) {
+    return null;
+  }
+  const tokens = formatCrawlerCount(item.embedding_input_tokens);
+  if (!item.embedding_total_cost_usd) {
+    return m.crawler_website_processing_embedding_usage_cost_missing({ tokens });
+  }
+  return m.crawler_website_processing_embedding_usage({
+    tokens,
+    cost: formatCrawlerUsdCost(item.embedding_total_cost_usd)
+  });
 }

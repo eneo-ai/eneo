@@ -11,6 +11,14 @@ from intric.database.tables.users_table import Users
 from intric.database.tables.websites_table import Websites as WebsitesTable
 from intric.jobs.job_models import Task
 from intric.main.models import Status
+from intric.websites.domain.bulk_crawl_interval_change import (
+    BulkIntervalChangeResult,
+    BulkIntervalRowApplied,
+    BulkIntervalRowFailed,
+    BulkIntervalRowFailureCode,
+    BulkIntervalRowResult,
+    BulkIntervalRowUnchanged,
+)
 from intric.websites.domain.crawl_circuit_reset import (
     CrawlCircuitResetNotFound,
     CrawlCircuitResetPreviousState,
@@ -683,6 +691,65 @@ class WebsiteAdminRepository:
             previous_consecutive_failures=previous_consecutive_failures,
         )
 
+    async def bulk_set_crawl_update_interval_for_tenant(
+        self,
+        *,
+        website_ids: list[UUID],
+        tenant_id: UUID,
+        new_update_interval: UpdateInterval,
+    ) -> BulkIntervalChangeResult:
+        """Apply one interval change to many websites in one transaction.
+
+        This loops the existing single-row setter rather than writing a
+        bulk SQL UPDATE. The setter owns the auto-disabled resume
+        invariant (clearing `consecutive_failures` and `next_retry_at`
+        for NEVER→recurring transitions at the failure threshold), and a
+        bulk UPDATE would create a second implementation of that rule.
+
+        Each per-row outcome maps to the corresponding `BulkInterval*`
+        variant:
+            CrawlIntervalChangeApplied → BulkIntervalRowApplied
+            CrawlIntervalChangeUnchanged → BulkIntervalRowUnchanged
+            CrawlIntervalChangeNotFound → BulkIntervalRowFailed(NOT_FOUND)
+
+        The caller audit-logs each `Applied` row with the same per-row
+        audit helper as the single-website endpoint. Unchanged and
+        failed rows are returned to the operator but not audited because
+        they do not mutate website state.
+
+        De-dupes the input list before applying so a duplicated id
+        in the request body counts as one row in the result.
+        """
+        seen: set[UUID] = set()
+        deduped_ids = [wid for wid in website_ids if not (wid in seen or seen.add(wid))]
+
+        applied_rows: list[BulkIntervalRowApplied] = []
+        unchanged_rows: list[BulkIntervalRowUnchanged] = []
+        failed_rows: list[BulkIntervalRowFailed] = []
+
+        for website_id in deduped_ids:
+            outcome = await self.set_crawl_update_interval_for_tenant(
+                website_id=website_id,
+                tenant_id=tenant_id,
+                new_update_interval=new_update_interval,
+            )
+            row_result: BulkIntervalRowResult = _bulk_row_from_setter_outcome(
+                website_id=website_id, outcome=outcome
+            )
+            match row_result:
+                case BulkIntervalRowApplied():
+                    applied_rows.append(row_result)
+                case BulkIntervalRowUnchanged():
+                    unchanged_rows.append(row_result)
+                case BulkIntervalRowFailed():
+                    failed_rows.append(row_result)
+
+        return BulkIntervalChangeResult(
+            applied=tuple(applied_rows),
+            unchanged=tuple(unchanged_rows),
+            failed=tuple(failed_rows),
+        )
+
     async def delete_website_for_tenant(
         self,
         *,
@@ -771,6 +838,49 @@ class WebsiteAdminRepository:
         )
         await self.session.execute(delete_stmt)
         return CrawlWebsiteDeleteSucceeded(website=website)
+
+
+def _bulk_row_from_setter_outcome(
+    *,
+    website_id: UUID,
+    outcome: CrawlIntervalChangeResult,
+) -> BulkIntervalRowResult:
+    """Adapt the per-row interval-change result to its bulk-flow variant.
+
+    Pulled out as a free function so the bulk loop body stays a flat
+    sequence of `await` calls and the variant-mapping logic is
+    testable without the surrounding transaction.
+    """
+    match outcome:
+        case CrawlIntervalChangeApplied(
+            website=website,
+            previous_update_interval=previous_interval,
+            new_update_interval=new_interval,
+            failure_state_cleared=failure_state_cleared,
+            previous_consecutive_failures=previous_consecutive_failures,
+        ):
+            return BulkIntervalRowApplied(
+                website_id=website.id,
+                website_name=website.name,
+                previous_update_interval=previous_interval,
+                new_update_interval=new_interval,
+                failure_state_cleared=failure_state_cleared,
+                previous_consecutive_failures=previous_consecutive_failures,
+            )
+        case CrawlIntervalChangeUnchanged(
+            website=website,
+            update_interval=current_interval,
+        ):
+            return BulkIntervalRowUnchanged(
+                website_id=website.id,
+                website_name=website.name,
+                update_interval=current_interval,
+            )
+        case CrawlIntervalChangeNotFound():
+            return BulkIntervalRowFailed(
+                website_id=website_id,
+                code=BulkIntervalRowFailureCode.NOT_FOUND,
+            )
 
 
 def _classify_circuit_breaker_state(

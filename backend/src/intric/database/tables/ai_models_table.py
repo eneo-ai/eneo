@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -7,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Numeric,
     UniqueConstraint,
     func,
 )
@@ -128,6 +130,16 @@ class EmbeddingModels(BasePublic):
     description: Mapped[Optional[str]] = mapped_column()
     org: Mapped[Optional[str]] = mapped_column()
     litellm_model_name: Mapped[Optional[str]] = mapped_column()
+    input_cost_per_token: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(20, 12),
+        nullable=True,
+        comment="USD input cost per token for provider-reported usage",
+    )
+    output_cost_per_token: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(20, 12),
+        nullable=True,
+        comment="USD output cost per token; unused by embeddings but kept rate-card compatible",
+    )
 
     # Tenant model support: NULL = global model, NOT NULL = tenant-specific model
     tenant_id: Mapped[Optional[UUID]] = mapped_column(

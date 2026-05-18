@@ -352,6 +352,14 @@ async def test_sysadmin_crawler_website_processing_aggregate_groups_by_website(
         "indexed_content_count": 15,
         "retention_rate": pytest.approx(5 / 15),
         "cost_pressure_score": pytest.approx(70.0),
+        "embedding_input_tokens": None,
+        "embedding_total_cost_usd": None,
+        "latest_embedding_model_name_snapshot": None,
+        "latest_embedding_model_litellm_name_snapshot": None,
+        "latest_embedding_model_provider_snapshot": None,
+        "latest_embedding_input_tokens": None,
+        "latest_embedding_total_cost_usd": None,
+        "latest_embedding_usage_source": None,
     }
     assert data["items"][1]["website_name"] is None
     assert data["items"][1]["total_runs"] == 1

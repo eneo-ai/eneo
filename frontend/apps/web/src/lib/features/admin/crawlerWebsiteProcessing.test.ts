@@ -8,9 +8,14 @@ import type {
 import {
   CRAWLER_LOW_RETENTION_THRESHOLD,
   CRAWLER_SOURCE_SKIP_DRIFT_MIN_INDEXED,
-  getCrawlerWebsiteProcessingCostLabel,
+  getCrawlerWebsiteProcessingEmbeddingUsageLabel,
   getCrawlerWebsiteProcessingFailureLabel,
   getCrawlerWebsiteProcessingFetchedLabel,
+  getCrawlerWebsiteProcessingLatestRunEmbeddingUsageLabel,
+  getCrawlerWebsiteProcessingLatestRunModelLabel,
+  getCrawlerWebsiteProcessingLatestRunProviderLabel,
+  getCrawlerWebsiteProcessingLatestRunUsageSourceLabel,
+  getCrawlerWebsiteProcessingLoadPressureLabel,
   getCrawlerWebsiteProcessingRetainedLabel,
   getCrawlerWebsiteProcessingTotalLabel,
   getCrawlerWebsiteProcessingWebsiteLabel,
@@ -48,10 +53,18 @@ const item: CrawlerTenantWebsiteProcessingAggregateItem = {
   schedule_frequency_weight: 7,
   indexed_content_count: 325,
   retention_rate: 313 / 325,
-  cost_pressure_score: 84
+  cost_pressure_score: 84,
+  embedding_input_tokens: 12345,
+  embedding_total_cost_usd: "0.001234000000",
+  latest_embedding_model_name_snapshot: "text-embedding-3-small",
+  latest_embedding_model_litellm_name_snapshot: "openai/text-embedding-3-small",
+  latest_embedding_model_provider_snapshot: "openai",
+  latest_embedding_input_tokens: 2345,
+  latest_embedding_total_cost_usd: "0.000234000000",
+  latest_embedding_usage_source: "provider_reported"
 };
 
-test("website processing labels keep crawler cost and retention readable", () => {
+test("website processing labels keep crawler load and retention readable", () => {
   expect(
     getCrawlerWebsiteProcessingTotalLabel({
       ...aggregate,
@@ -60,7 +73,14 @@ test("website processing labels keep crawler cost and retention readable", () =>
   ).toBe("Showing 1 of 12 websites from the last 7 days");
   expect(getCrawlerWebsiteProcessingWebsiteLabel(item)).toBe("Municipality site");
   expect(getCrawlerWebsiteProcessingFetchedLabel(item)).toBe("10 pages · 2 files");
-  expect(getCrawlerWebsiteProcessingCostLabel(item)).toBe("Daily · score 84 · 96% retained");
+  expect(getCrawlerWebsiteProcessingLoadPressureLabel(item)).toBe("Daily · load 84 · 96% retained");
+  expect(getCrawlerWebsiteProcessingEmbeddingUsageLabel(item)).toBe("12,345 tokens · $0.001234");
+  expect(getCrawlerWebsiteProcessingLatestRunEmbeddingUsageLabel(item)).toBe(
+    "2,345 tokens · $0.000234"
+  );
+  expect(getCrawlerWebsiteProcessingLatestRunModelLabel(item)).toBe("text-embedding-3-small");
+  expect(getCrawlerWebsiteProcessingLatestRunProviderLabel(item)).toBe("openai");
+  expect(getCrawlerWebsiteProcessingLatestRunUsageSourceLabel(item)).toBe("Provider reported");
   expect(getCrawlerWebsiteProcessingRetainedLabel(item)).toBe("313 retained · 7 too large");
   expect(getCrawlerWebsiteProcessingFailureLabel(item)).toBe("Failed runs: 1 · failed items: 3");
 });
@@ -81,12 +101,38 @@ test("website processing labels handle unnamed and healthy websites", () => {
     })
   ).toBeNull();
   expect(
-    getCrawlerWebsiteProcessingCostLabel({
+    getCrawlerWebsiteProcessingLoadPressureLabel({
       ...item,
       update_interval: null,
       cost_pressure_score: 0
     })
-  ).toBe("Unknown schedule · score 0 · 96% retained");
+  ).toBe("Unknown schedule · load 0 · 96% retained");
+  expect(
+    getCrawlerWebsiteProcessingEmbeddingUsageLabel({
+      ...item,
+      embedding_input_tokens: null,
+      embedding_total_cost_usd: null
+    })
+  ).toBe("Usage unavailable");
+  expect(
+    getCrawlerWebsiteProcessingEmbeddingUsageLabel({
+      ...item,
+      embedding_total_cost_usd: null
+    })
+  ).toBe("12,345 tokens · cost missing");
+  expect(
+    getCrawlerWebsiteProcessingLatestRunModelLabel({
+      ...item,
+      latest_embedding_model_name_snapshot: null,
+      latest_embedding_model_litellm_name_snapshot: null
+    })
+  ).toBe("Not recorded for older runs");
+  expect(
+    getCrawlerWebsiteProcessingLatestRunUsageSourceLabel({
+      ...item,
+      latest_embedding_usage_source: "missing"
+    })
+  ).toBe("Token usage missing");
 });
 
 test("low-retention drift signal flags websites below the operator-visible waste threshold", () => {

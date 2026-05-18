@@ -36,6 +36,7 @@ from intric.websites.domain.crawl_interval_change import (
     CrawlIntervalChangeApplied,
     CrawlIntervalChangeNotFound,
     CrawlIntervalChangeUnchanged,
+    CrawlIntervalChangeWebsite,
 )
 from intric.websites.domain.crawl_lifecycle import CrawlLifecycle
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode
@@ -60,6 +61,8 @@ from intric.websites.domain.website_sparse_repo import WebsiteSparseRepository
 from intric.websites.presentation.crawler_admin_models import (
     CrawlerAbortConflictResponse,
     CrawlerActiveInventoryResponse,
+    CrawlerBulkIntervalRequest,
+    CrawlerBulkIntervalResponse,
     CrawlerRecentFailuresResponse,
     CrawlerScheduledAggregateResponse,
     CrawlerTenantFailureInventoryResponse,
@@ -81,22 +84,12 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def _admin_crawler_query_telemetry(endpoint: str, *, tenant_id: UUID):
-    """Bounded latency + payload-size telemetry for tenant-admin crawler queries.
+    """Bounded latency telemetry for tenant-admin crawler queries.
 
     Emits one structured log entry per request with `metric_name` +
     `metric_value` keys so existing log-as-metric ingestion picks it up
-    without a new dependency. Closes plan Step 0's open item "Record
-    current admin crawler page query latency and payload size" — the
-    baseline metric stream lets operators compare before/after admin
-    page slices.
-
-    Keeps the payload-size measurement off the hot path: the response
-    serialization happens after the context manager exits, so the
-    timing window covers only the repo + presentation work the
-    endpoint actually owns. Size logging is left to the FastAPI
-    middleware layer (already records content-length) so this telemetry
-    stays narrow and the per-endpoint hot path doesn't pay for a
-    second JSON encode.
+    without a new dependency. The baseline stream lets operators compare
+    before/after admin page slices.
     """
     started = time.perf_counter()
     try:
@@ -696,11 +689,6 @@ async def delete_current_tenant_crawler_website(
                 content=payload.model_dump(mode="json"),
             )
         case CrawlWebsiteDeleteSucceeded(website=deleted):
-            # `_log_crawler_admin_website_action` expects a non-null
-            # `name`; fall back to the URL when the operator never set
-            # one (the existing retry / interval-change paths use the
-            # same fallback). The original URL is also threaded into
-            # `extra` so the audit row records both.
             display_name = deleted.name if deleted.name else deleted.url
             await _log_crawler_admin_website_action(
                 container,
@@ -712,3 +700,65 @@ async def delete_current_tenant_crawler_website(
             )
             return Response(status_code=status.HTTP_204_NO_CONTENT)
     assert_never(result)
+
+
+@router.post(
+    "/websites/bulk-interval",
+    response_model=CrawlerBulkIntervalResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Apply one update_interval to many websites in the current tenant",
+)
+async def bulk_set_current_tenant_crawler_update_interval(
+    payload: CrawlerBulkIntervalRequest,
+    current_user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    container: AdminContainer,
+) -> CrawlerBulkIntervalResponse:
+    """Apply one interval to many websites — capped + per-row audited.
+
+    Loops the existing per-row setter (preserving the auto-disabled
+    resume invariant) inside one transaction. Each `Applied` row gets
+    the same per-website audit emission as the per-row endpoint, so
+    audit-log search by `EntityType.WEBSITE` entity_id stays intact.
+    `Unchanged` + `Failed` rows surface to the operator but are not
+    audited (no state change). Returns 200 with a structured
+    `{applied, unchanged, failed}` payload rather than 207 — the
+    JS SDK is typed and doesn't benefit from polyglot status codes.
+
+    `website_ids` is capped at 100 by the request model
+    `max_length=BULK_INTERVAL_MAX_WEBSITE_IDS`; "select all matching
+    filter" is deferred to v3 (audit-by-id under the same transaction
+    as the filter run is its own commit — see
+    `bulk_crawl_interval_change.py` module docstring).
+    """
+    async with _admin_crawler_query_telemetry(
+        "bulk_set_update_interval", tenant_id=current_user.tenant_id
+    ):
+        async with session.begin():
+            repo = WebsiteAdminRepository(session=session)
+            result = await repo.bulk_set_crawl_update_interval_for_tenant(
+                website_ids=list(payload.website_ids),
+                tenant_id=current_user.tenant_id,
+                new_update_interval=payload.update_interval,
+            )
+
+        for applied in result.applied:
+            await _log_crawler_admin_website_action(
+                container,
+                current_user=current_user,
+                action=ActionType.WEBSITE_CRAWL_INTERVAL_CHANGED,
+                website=CrawlIntervalChangeWebsite(
+                    id=applied.website_id,
+                    name=applied.website_name,
+                ),
+                description="Admin changed crawler update interval (bulk)",
+                extra={
+                    "previous_update_interval": applied.previous_update_interval.value,
+                    "new_update_interval": applied.new_update_interval.value,
+                    "failure_state_cleared": applied.failure_state_cleared,
+                    "previous_consecutive_failures": applied.previous_consecutive_failures,
+                    "bulk": True,
+                },
+            )
+
+        return CrawlerBulkIntervalResponse.from_domain(result)

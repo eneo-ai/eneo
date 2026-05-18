@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import Final
 from uuid import UUID
 
+from intric.embedding_models.domain.embedding_batch import EmbeddingUsageSource
 from intric.websites.domain.website import UpdateInterval
 
 SCHEDULE_FREQUENCY_WEIGHTS: Final[dict[UpdateInterval, float]] = {
@@ -77,6 +79,14 @@ class CrawlerWebsiteProcessingAggregateItem:
     indexed_content_count: int
     retention_rate: float
     cost_pressure_score: float
+    embedding_input_tokens: int | None
+    embedding_total_cost_usd: Decimal | None
+    latest_embedding_model_name_snapshot: str | None
+    latest_embedding_model_litellm_name_snapshot: str | None
+    latest_embedding_model_provider_snapshot: str | None
+    latest_embedding_input_tokens: int | None
+    latest_embedding_total_cost_usd: Decimal | None
+    latest_embedding_usage_source: EmbeddingUsageSource | None
 
 
 @dataclass(frozen=True, slots=True)

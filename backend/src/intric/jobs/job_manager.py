@@ -1,3 +1,4 @@
+from enum import StrEnum
 from uuid import UUID
 
 from arq import create_pool
@@ -12,6 +13,23 @@ from intric.main.logging import get_logger
 from intric.redis.connection import build_arq_redis_settings
 
 logger = get_logger(__name__)
+
+
+class JobRuntimeStatus(StrEnum):
+    DEFERRED = "deferred"
+    QUEUED = "queued"
+    IN_PROGRESS = "in_progress"
+    COMPLETE = "complete"
+    NOT_FOUND = "not_found"
+
+
+_ARQ_TO_RUNTIME_STATUS: dict[JobStatus, JobRuntimeStatus] = {
+    JobStatus.deferred: JobRuntimeStatus.DEFERRED,
+    JobStatus.queued: JobRuntimeStatus.QUEUED,
+    JobStatus.in_progress: JobRuntimeStatus.IN_PROGRESS,
+    JobStatus.complete: JobRuntimeStatus.COMPLETE,
+    JobStatus.not_found: JobRuntimeStatus.NOT_FOUND,
+}
 
 
 class JobManager:
@@ -45,12 +63,12 @@ class JobManager:
         assert self._redis is not None
         await self._redis.enqueue_job(task)
 
-    async def get_job_status(self, job_id: UUID) -> JobStatus:
+    async def get_job_status(self, job_id: UUID) -> JobRuntimeStatus:
         if self._redis is None:
             raise NotReadyException("Job manager is not initialized!")
         job = Job(job_id=str(job_id), redis=self._redis)
 
-        return await job.status()
+        return _ARQ_TO_RUNTIME_STATUS[await job.status()]
 
     async def abort_job(
         self,

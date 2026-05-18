@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
@@ -62,6 +63,8 @@ async def _create_crawl_run(
     pages_hash_retained: int = 0,
     files_hash_retained: int = 0,
     files_too_large_skipped: int = 0,
+    embedding_input_tokens: int | None = None,
+    embedding_total_cost_usd: Decimal | None = None,
     create_job: bool = True,
 ) -> CrawlRuns:
     job_id: UUID | None = None
@@ -97,6 +100,8 @@ async def _create_crawl_run(
         files_hash_retained=files_hash_retained,
         files_too_large_skipped=files_too_large_skipped,
         outcome_code=outcome_code,
+        embedding_input_tokens=embedding_input_tokens,
+        embedding_total_cost_usd=embedding_total_cost_usd,
     )
     session.add(crawl_run)
     await session.flush()
@@ -153,6 +158,8 @@ async def test_sysadmin_crawler_baseline_separates_typed_unknown_from_legacy_row
             files_downloaded=1,
             pages_failed=1,
             files_hash_retained=1,
+            embedding_input_tokens=20,
+            embedding_total_cost_usd=Decimal("0.000002000000"),
         )
         await _create_crawl_run(
             session,
@@ -168,6 +175,8 @@ async def test_sysadmin_crawler_baseline_separates_typed_unknown_from_legacy_row
             pages_failed=2,
             files_failed=1,
             files_too_large_skipped=2,
+            embedding_input_tokens=30,
+            embedding_total_cost_usd=Decimal("0.000003000000"),
         )
         await _create_crawl_run(
             session,
@@ -182,6 +191,8 @@ async def test_sysadmin_crawler_baseline_separates_typed_unknown_from_legacy_row
             files_downloaded=2,
             pages_hash_retained=5,
             files_hash_retained=2,
+            embedding_input_tokens=50,
+            embedding_total_cost_usd=Decimal("0.000005000000"),
         )
         await _create_crawl_run(
             session,
@@ -193,6 +204,8 @@ async def test_sysadmin_crawler_baseline_separates_typed_unknown_from_legacy_row
             finished_at=inside_window,
             outcome_code="OLD_GARBAGE_STRING",
             pages_source_retained=4,
+            embedding_input_tokens=None,
+            embedding_total_cost_usd=None,
         )
         await _create_crawl_run(
             session,
@@ -205,6 +218,8 @@ async def test_sysadmin_crawler_baseline_separates_typed_unknown_from_legacy_row
             outcome_code=CrawlOutcomeCode.CRAWL_NO_PAGES_RETURNED.value,
             pages_crawled=1,
             pages_failed=4,
+            embedding_input_tokens=10,
+            embedding_total_cost_usd=Decimal("0.000001000000"),
         )
         await _create_crawl_run(
             session,
@@ -329,6 +344,8 @@ async def test_sysadmin_crawler_baseline_separates_typed_unknown_from_legacy_row
         "files_too_large_skipped": 2,
         "pages_failed": 7,
         "files_failed": 1,
+        "embedding_input_tokens": 110,
+        "embedding_total_cost_usd": "0.000011000000",
     }
 
     cross_tenant_response = await client.get(
@@ -390,6 +407,8 @@ async def test_sysadmin_crawler_baseline_empty_window_returns_zeroes(
         "files_too_large_skipped": 0,
         "pages_failed": 0,
         "files_failed": 0,
+        "embedding_input_tokens": None,
+        "embedding_total_cost_usd": None,
     }
 
 

@@ -13,6 +13,7 @@ from uuid import uuid4
 import pytest
 
 from intric.worker.crawl.recovery import (
+    CrawlRetrySignal,
     calculate_exponential_backoff,
     update_job_retry_stats,
 )
@@ -259,7 +260,7 @@ class TestUpdateJobRetryStats:
         retry_count, job_age = await update_job_retry_stats(
             job_id=job_id,
             redis_client=None,
-            is_actual_failure=True,
+            retry_signal=CrawlRetrySignal.FAILURE,
             max_age_seconds=1800,
         )
 
@@ -268,7 +269,7 @@ class TestUpdateJobRetryStats:
 
     @pytest.mark.asyncio
     async def test_actual_failure_increments_counter(self):
-        """is_actual_failure=True should increment the retry counter."""
+        """retry_signal=CrawlRetrySignal.FAILURE should increment the retry counter."""
         job_id = uuid4()
 
         # Results for: SET NX, GET start_time, INCR, EXPIRE
@@ -285,16 +286,15 @@ class TestUpdateJobRetryStats:
             await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis,
-                is_actual_failure=True,
+                retry_signal=CrawlRetrySignal.FAILURE,
                 max_age_seconds=1800,
             )
 
-        # Should have called incr (is_actual_failure=True)
         assert mock_pipe.incr.called, "Should increment counter for actual failure"
 
     @pytest.mark.asyncio
     async def test_busy_signal_does_not_increment_counter(self):
-        """is_actual_failure=False should NOT increment the retry counter."""
+        """retry_signal=CrawlRetrySignal.BUSY should NOT increment the retry counter."""
         job_id = uuid4()
 
         # Results for: SET NX, GET start_time, GET retry_count (no INCR)
@@ -310,11 +310,10 @@ class TestUpdateJobRetryStats:
             await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis,
-                is_actual_failure=False,  # Just busy signal
+                retry_signal=CrawlRetrySignal.BUSY,
                 max_age_seconds=1800,
             )
 
-        # Should NOT have called incr (is_actual_failure=False)
         assert not mock_pipe.incr.called, "Should NOT increment counter for busy signal"
 
     @pytest.mark.asyncio
@@ -330,7 +329,7 @@ class TestUpdateJobRetryStats:
             await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis,
-                is_actual_failure=True,
+                retry_signal=CrawlRetrySignal.FAILURE,
                 max_age_seconds=1800,
             )
 
@@ -356,7 +355,7 @@ class TestUpdateJobRetryStats:
         retry_count, job_age = await update_job_retry_stats(
             job_id=job_id,
             redis_client=mock_redis,
-            is_actual_failure=True,
+            retry_signal=CrawlRetrySignal.FAILURE,
             max_age_seconds=1800,
         )
 
@@ -377,7 +376,7 @@ class TestUpdateJobRetryStats:
             await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis,
-                is_actual_failure=True,
+                retry_signal=CrawlRetrySignal.FAILURE,
                 max_age_seconds=1800,
             )
 
@@ -400,7 +399,7 @@ class TestUpdateJobRetryStats:
             await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis,
-                is_actual_failure=True,
+                retry_signal=CrawlRetrySignal.FAILURE,
                 max_age_seconds=max_age,
             )
 
@@ -436,7 +435,7 @@ class TestUpdateJobRetryStats:
         retry_count, job_age = await update_job_retry_stats(
             job_id=job_id,
             redis_client=mock_redis,
-            is_actual_failure=True,
+            retry_signal=CrawlRetrySignal.FAILURE,
             max_age_seconds=1800,
         )
 
@@ -464,7 +463,7 @@ class TestUpdateJobRetryStats:
             retry_count, job_age = await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis,
-                is_actual_failure=True,
+                retry_signal=CrawlRetrySignal.FAILURE,
                 max_age_seconds=1800,
             )
 
@@ -491,7 +490,7 @@ class TestUpdateJobRetryStats:
             retry_count_1, _ = await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis_1,
-                is_actual_failure=True,
+                retry_signal=CrawlRetrySignal.FAILURE,
                 max_age_seconds=1800,
             )
 
@@ -509,7 +508,7 @@ class TestUpdateJobRetryStats:
             retry_count_2, _ = await update_job_retry_stats(
                 job_id=job_id,
                 redis_client=mock_redis_2,
-                is_actual_failure=True,
+                retry_signal=CrawlRetrySignal.FAILURE,
                 max_age_seconds=1800,
             )
 

@@ -107,6 +107,15 @@ class CrawlerBaselineProcessingTotals(BaseModel):
     files_too_large_skipped: int = Field(ge=0)
     pages_failed: int = Field(ge=0)
     files_failed: int = Field(ge=0)
+    embedding_input_tokens: int | None = Field(
+        default=None,
+        ge=0,
+        description="Provider-reported embedding input tokens indexed in the window.",
+    )
+    embedding_total_cost_usd: str | None = Field(
+        default=None,
+        description="Run-time USD cost snapshot for provider-reported embedding usage.",
+    )
 
     @classmethod
     def from_domain(
@@ -121,6 +130,12 @@ class CrawlerBaselineProcessingTotals(BaseModel):
             files_too_large_skipped=totals.files_too_large_skipped,
             pages_failed=totals.pages_failed,
             files_failed=totals.files_failed,
+            embedding_input_tokens=totals.embedding_input_tokens,
+            embedding_total_cost_usd=(
+                str(totals.embedding_total_cost_usd)
+                if totals.embedding_total_cost_usd is not None
+                else None
+            ),
         )
 
 
@@ -325,7 +340,7 @@ class CrawlerWebsiteProcessingAggregateItem(BaseModel):
     files_failed: int = Field(ge=0)
     schedule_frequency_weight: float = Field(
         ge=0,
-        description="Schedule multiplier used for crawler cost-pressure ranking.",
+        description="Schedule multiplier used for crawler load-pressure ranking.",
     )
     indexed_content_count: int = Field(
         ge=0,
@@ -338,8 +353,16 @@ class CrawlerWebsiteProcessingAggregateItem(BaseModel):
     )
     cost_pressure_score: float = Field(
         ge=0,
-        description="Schedule-weighted changed/new page and file count for ranking.",
+        description="Schedule-weighted fetched page and file count for load ranking.",
     )
+    embedding_input_tokens: int | None = Field(default=None, ge=0)
+    embedding_total_cost_usd: str | None = None
+    latest_embedding_model_name_snapshot: str | None = None
+    latest_embedding_model_litellm_name_snapshot: str | None = None
+    latest_embedding_model_provider_snapshot: str | None = None
+    latest_embedding_input_tokens: int | None = Field(default=None, ge=0)
+    latest_embedding_total_cost_usd: str | None = None
+    latest_embedding_usage_source: str | None = None
 
     @classmethod
     def from_domain(
@@ -366,6 +389,28 @@ class CrawlerWebsiteProcessingAggregateItem(BaseModel):
             indexed_content_count=item.indexed_content_count,
             retention_rate=item.retention_rate,
             cost_pressure_score=item.cost_pressure_score,
+            embedding_input_tokens=item.embedding_input_tokens,
+            embedding_total_cost_usd=(
+                str(item.embedding_total_cost_usd)
+                if item.embedding_total_cost_usd is not None
+                else None
+            ),
+            latest_embedding_model_name_snapshot=(
+                item.latest_embedding_model_name_snapshot
+            ),
+            latest_embedding_model_litellm_name_snapshot=(
+                item.latest_embedding_model_litellm_name_snapshot
+            ),
+            latest_embedding_model_provider_snapshot=(
+                item.latest_embedding_model_provider_snapshot
+            ),
+            latest_embedding_input_tokens=item.latest_embedding_input_tokens,
+            latest_embedding_total_cost_usd=(
+                str(item.latest_embedding_total_cost_usd)
+                if item.latest_embedding_total_cost_usd is not None
+                else None
+            ),
+            latest_embedding_usage_source=item.latest_embedding_usage_source,
         )
 
 

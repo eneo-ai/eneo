@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import TYPE_CHECKING, Optional, Union
 
 from typing_extensions import override
@@ -46,6 +47,7 @@ class EmbeddingModel(AIModel):
         provider_id: Optional["UUID"] = None,
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
+        input_cost_per_token: Optional[Decimal] = None,
     ):
         super().__init__(
             user=user,
@@ -74,11 +76,11 @@ class EmbeddingModel(AIModel):
         self.provider_id = provider_id
         self.provider_name = provider_name
         self.provider_type = provider_type
+        self.input_cost_per_token = input_cost_per_token
 
     @override
     def get_credential_provider_name(self) -> str:
         """Get the credential provider name for this model."""
-        # If litellm_model_name is set, extract provider from prefix (e.g. "azure/gpt-4" → "azure")
         if self.litellm_model_name and "/" in self.litellm_model_name:
             return self.litellm_model_name.split("/")[0].lower()
 
@@ -122,6 +124,7 @@ class EmbeddingModel(AIModel):
             provider_id=db_model.provider_id,
             provider_name=provider_name,
             provider_type=provider_type,
+            input_cost_per_token=db_model.input_cost_per_token,
         )
 
     def update(self, is_org_enabled: Union[bool, "NotProvided"]):

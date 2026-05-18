@@ -7,6 +7,16 @@ from intric.worker.crawl import CrawlSlotReleasePath
 from intric.worker.redis.lua_scripts import LuaScripts
 
 
+def test_slot_release_delegates_preacquired_flag_ownership_to_capacity_manager():
+    from pathlib import Path
+
+    source_path = Path(__file__).parents[3] / "src/intric/worker/crawl/slot_release.py"
+    source = source_path.read_text()
+
+    assert "LuaScripts.preacquired_slot_key" not in source
+    assert "LuaScripts.release_slot" not in source
+
+
 @pytest.mark.asyncio
 async def test_normal_release_uses_limiter_resets_backoff_and_deletes_flag():
     from intric.main.config import get_settings
@@ -47,7 +57,7 @@ async def test_normal_release_uses_limiter_resets_backoff_and_deletes_flag():
 
 
 @pytest.mark.asyncio
-async def test_preacquired_fallback_releases_with_lua_and_deletes_flag():
+async def test_preacquired_fallback_delegates_release_to_capacity_manager():
     from intric.main.config import get_settings
     from intric.worker.crawl.slot_release import (
         CrawlSlotReleaseRequest,
@@ -58,31 +68,24 @@ async def test_preacquired_fallback_releases_with_lua_and_deletes_flag():
     tenant_id = uuid4()
     settings = get_settings()
     redis_client = MagicMock()
+    redis_client.eval = AsyncMock()
     redis_client.delete = AsyncMock()
 
-    with patch(
-        "intric.worker.crawl.slot_release.LuaScripts.release_slot",
-        new=AsyncMock(),
-    ) as release_slot:
-        result = await release_crawl_slot_after_task(
-            CrawlSlotReleaseRequest(
-                job_id=job_id,
-                tenant_id=None,
-                preacquired_tenant_id=tenant_id,
-                acquired=False,
-            ),
-            limiter=None,
-            redis_client=redis_client,
-            settings=settings,
-        )
+    result = await release_crawl_slot_after_task(
+        CrawlSlotReleaseRequest(
+            job_id=job_id,
+            tenant_id=None,
+            preacquired_tenant_id=tenant_id,
+            acquired=False,
+        ),
+        limiter=None,
+        redis_client=redis_client,
+        settings=settings,
+    )
 
     assert result.released is True
     assert result.path == CrawlSlotReleasePath.PREACQUIRED_FALLBACK
-    release_slot.assert_awaited_once_with(
-        redis_client,
-        tenant_id,
-        settings.tenant_worker_semaphore_ttl_seconds,
-    )
+    redis_client.eval.assert_awaited_once()
     redis_client.delete.assert_awaited_once_with(
         LuaScripts.preacquired_slot_key(job_id)
     )
@@ -150,7 +153,7 @@ async def test_no_release_when_no_slot_was_acquired():
 
 
 @pytest.mark.asyncio
-async def test_preacquired_fallback_returns_unreleased_when_lua_release_fails():
+async def test_preacquired_fallback_returns_unreleased_when_capacity_release_fails():
     from intric.main.config import get_settings
     from intric.worker.crawl.slot_release import (
         CrawlSlotReleaseRequest,
@@ -160,33 +163,25 @@ async def test_preacquired_fallback_returns_unreleased_when_lua_release_fails():
     job_id = uuid4()
     tenant_id = uuid4()
     redis_client = MagicMock()
+    redis_client.eval = AsyncMock(side_effect=RuntimeError("redis unavailable"))
     redis_client.delete = AsyncMock()
-    logger = MagicMock()
 
-    with (
-        patch(
-            "intric.worker.crawl.slot_release.LuaScripts.release_slot",
-            new=AsyncMock(side_effect=RuntimeError("redis unavailable")),
-        ) as release_slot,
-        patch("intric.worker.crawl.slot_release.logger", logger),
-    ):
-        result = await release_crawl_slot_after_task(
-            CrawlSlotReleaseRequest(
-                job_id=job_id,
-                tenant_id=None,
-                preacquired_tenant_id=tenant_id,
-                acquired=False,
-            ),
-            limiter=None,
-            redis_client=redis_client,
-            settings=get_settings(),
-        )
+    result = await release_crawl_slot_after_task(
+        CrawlSlotReleaseRequest(
+            job_id=job_id,
+            tenant_id=None,
+            preacquired_tenant_id=tenant_id,
+            acquired=False,
+        ),
+        limiter=None,
+        redis_client=redis_client,
+        settings=get_settings(),
+    )
 
     assert result.released is False
     assert result.path == CrawlSlotReleasePath.PREACQUIRED_FALLBACK
-    release_slot.assert_awaited_once()
+    redis_client.eval.assert_awaited_once()
     redis_client.delete.assert_not_awaited()
-    logger.error.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -232,30 +227,22 @@ async def test_flag_delete_failure_keeps_successful_release_result():
 
     redis_client = MagicMock()
     redis_client.delete = AsyncMock(side_effect=RuntimeError("delete failed"))
-    logger = MagicMock()
+    redis_client.eval = AsyncMock()
 
-    with (
-        patch(
-            "intric.worker.crawl.slot_release.LuaScripts.release_slot",
-            new=AsyncMock(),
+    result = await release_crawl_slot_after_task(
+        CrawlSlotReleaseRequest(
+            job_id=uuid4(),
+            tenant_id=None,
+            preacquired_tenant_id=uuid4(),
+            acquired=False,
         ),
-        patch("intric.worker.crawl.slot_release.logger", logger),
-    ):
-        result = await release_crawl_slot_after_task(
-            CrawlSlotReleaseRequest(
-                job_id=uuid4(),
-                tenant_id=None,
-                preacquired_tenant_id=uuid4(),
-                acquired=False,
-            ),
-            limiter=None,
-            redis_client=redis_client,
-            settings=get_settings(),
-        )
+        limiter=None,
+        redis_client=redis_client,
+        settings=get_settings(),
+    )
 
     assert result.released is True
     assert result.path == CrawlSlotReleasePath.PREACQUIRED_FALLBACK
-    logger.debug.assert_called_once()
 
 
 @pytest.mark.asyncio

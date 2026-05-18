@@ -1,5 +1,6 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, Optional, Union, cast, overload
 
@@ -133,6 +134,14 @@ class CrawlRun(Entity):
         outcome_code: Optional[CrawlOutcomeCode] = None,
         files_too_large_download_limit_bytes: Optional[int] = None,
         files_too_large_samples: tuple[CrawlFileTooLargeSample, ...] = (),
+        embedding_model_id: Optional["UUID"] = None,
+        embedding_model_name_snapshot: Optional[str] = None,
+        embedding_model_litellm_name_snapshot: Optional[str] = None,
+        embedding_model_provider_snapshot: Optional[str] = None,
+        embedding_input_cost_per_token_snapshot: Optional[Decimal] = None,
+        embedding_input_tokens: Optional[int] = None,
+        embedding_usage_source: Optional[str] = None,
+        embedding_total_cost_usd: Optional[Decimal] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.status = status
@@ -153,6 +162,18 @@ class CrawlRun(Entity):
         self.job_id = job_id
         self.failure_summary = failure_summary
         self.outcome_code = outcome_code
+        self.embedding_model_id = embedding_model_id
+        self.embedding_model_name_snapshot = embedding_model_name_snapshot
+        self.embedding_model_litellm_name_snapshot = (
+            embedding_model_litellm_name_snapshot
+        )
+        self.embedding_model_provider_snapshot = embedding_model_provider_snapshot
+        self.embedding_input_cost_per_token_snapshot = (
+            embedding_input_cost_per_token_snapshot
+        )
+        self.embedding_input_tokens = embedding_input_tokens
+        self.embedding_usage_source = embedding_usage_source
+        self.embedding_total_cost_usd = embedding_total_cost_usd
 
     @overload
     @classmethod
@@ -170,6 +191,11 @@ class CrawlRun(Entity):
             if args
             else cast(Union["Website", "WebsiteSparse"], kwargs["website"])
         )
+        embedding_model = getattr(website, "embedding_model", None)
+        embedding_model_id = getattr(
+            embedding_model, "id", getattr(website, "embedding_model_id", None)
+        )
+        input_cost_per_token = getattr(embedding_model, "input_cost_per_token", None)
         return cls(
             id=None,
             created_at=None,
@@ -192,6 +218,20 @@ class CrawlRun(Entity):
             job_id=None,
             failure_summary=None,
             outcome_code=None,
+            embedding_model_id=embedding_model_id,
+            embedding_model_name_snapshot=getattr(embedding_model, "name", None),
+            embedding_model_litellm_name_snapshot=getattr(
+                embedding_model, "litellm_model_name", None
+            ),
+            embedding_model_provider_snapshot=getattr(
+                embedding_model, "provider_type", None
+            ),
+            embedding_input_cost_per_token_snapshot=input_cost_per_token,
+            embedding_input_tokens=0 if embedding_model_id is not None else None,
+            embedding_usage_source=None,
+            embedding_total_cost_usd=(
+                Decimal("0") if input_cost_per_token is not None else None
+            ),
         )
 
     @classmethod
@@ -250,6 +290,18 @@ class CrawlRun(Entity):
                 on_unknown_key=report_legacy_failure_summary_key_dropped,
             ),
             outcome_code=parse_crawl_outcome_code_lenient(record.outcome_code),
+            embedding_model_id=record.embedding_model_id,
+            embedding_model_name_snapshot=record.embedding_model_name_snapshot,
+            embedding_model_litellm_name_snapshot=(
+                record.embedding_model_litellm_name_snapshot
+            ),
+            embedding_model_provider_snapshot=record.embedding_model_provider_snapshot,
+            embedding_input_cost_per_token_snapshot=(
+                record.embedding_input_cost_per_token_snapshot
+            ),
+            embedding_input_tokens=record.embedding_input_tokens,
+            embedding_usage_source=record.embedding_usage_source,
+            embedding_total_cost_usd=record.embedding_total_cost_usd,
         )
 
     def update(

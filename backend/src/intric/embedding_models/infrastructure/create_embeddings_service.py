@@ -1,11 +1,12 @@
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Optional, Protocol, TypeGuard, runtime_checkable
 from uuid import UUID
 
+from intric.embedding_models.domain.embedding_batch import EmbeddingBatchResult
 from intric.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
 from intric.embedding_models.infrastructure.adapters.litellm_embeddings import (
     LiteLLMEmbeddingAdapter,
 )
-from intric.files.chunk_embedding_list import ChunkEmbeddingList
 from intric.info_blobs.info_blob import InfoBlobChunk
 from intric.main.config import SETTINGS, Settings
 from intric.main.exceptions import ProviderInactiveException, ProviderNotFoundException
@@ -53,6 +54,9 @@ class EmbeddingModelLike(Protocol):
 
     @property
     def open_source(self) -> bool: ...
+
+    @property
+    def input_cost_per_token(self) -> Decimal | None: ...
 
 
 @runtime_checkable
@@ -214,7 +218,7 @@ class CreateEmbeddingsService:
         self,
         model: EmbeddingModelLike,
         chunks: list[InfoBlobChunk],
-    ) -> ChunkEmbeddingList:
+    ) -> EmbeddingBatchResult:
         """Generate embeddings for text chunks."""
         adapter = await self._get_adapter(model)
         return await adapter.get_embeddings(chunks)

@@ -46,6 +46,14 @@ def _crawl_run_record(
         ),
         failure_summary=None,
         outcome_code=outcome_code,
+        embedding_model_id=None,
+        embedding_model_name_snapshot=None,
+        embedding_model_litellm_name_snapshot=None,
+        embedding_model_provider_snapshot=None,
+        embedding_input_cost_per_token_snapshot=None,
+        embedding_input_tokens=None,
+        embedding_usage_source=None,
+        embedding_total_cost_usd=None,
     )
 
 

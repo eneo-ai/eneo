@@ -27,7 +27,13 @@ const baseIntervention: CrawlerWatchdogInterventionItem = {
   pages_source_retained: 0,
   pages_hash_retained: 290,
   files_hash_retained: 1,
-  files_too_large_skipped: 12
+  files_too_large_skipped: 12,
+  embedding_model_name_snapshot: null,
+  embedding_model_litellm_name_snapshot: null,
+  embedding_model_provider_snapshot: null,
+  embedding_input_tokens: null,
+  embedding_total_cost_usd: null,
+  embedding_usage_source: null
 };
 
 test("watchdog intervention labels use typed outcome text and stable website fallback", () => {

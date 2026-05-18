@@ -39,8 +39,6 @@ settings = ChunkSettings()
 
 
 def autocut(y_values: list[float], cutoff: int = 2) -> int:
-    # Written by GPT-4, fact-checked by GPT-4
-
     if len(y_values) <= 1:
         return len(y_values)
 
@@ -137,12 +135,12 @@ class Datastore:
             return
 
         logger.debug(f"Embedding {len(info_blob_chunks)} info-blob chunks.")
-        chunk_embedding_list = await self.create_embeddings_service.get_embeddings(
+        embedding_batch = await self.create_embeddings_service.get_embeddings(
             model=embedding_model, chunks=info_blob_chunks
         )
 
         logger.debug(f"Adding {len(info_blob_chunks)} info-blob chunks to datastore.")
-        await self._add(chunk_embedding_list)
+        await self._add(embedding_batch.embeddings)
 
     async def semantic_search(
         self,

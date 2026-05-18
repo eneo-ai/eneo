@@ -3,7 +3,8 @@ import { m } from "$lib/paraglide/messages";
 import {
   formatCrawlerCount,
   formatCrawlerDecimal,
-  formatCrawlerPercent
+  formatCrawlerPercent,
+  formatCrawlerUsdCost
 } from "./crawlerNumberFormat";
 import { getCrawlerScheduledIntervalLabel } from "./crawlerScheduledAggregate";
 
@@ -48,10 +49,10 @@ export function getCrawlerWebsiteProcessingFetchedLabel(
   });
 }
 
-export function getCrawlerWebsiteProcessingCostLabel(
+export function getCrawlerWebsiteProcessingLoadPressureLabel(
   item: CrawlerTenantWebsiteProcessingAggregateItem
 ): string {
-  return m.crawler_website_processing_cost({
+  return m.crawler_website_processing_load_pressure({
     interval:
       item.update_interval === null
         ? m.crawler_website_processing_unknown_interval()
@@ -83,6 +84,77 @@ export function getCrawlerWebsiteProcessingFailureLabel(
   });
 }
 
+export function getCrawlerWebsiteProcessingEmbeddingUsageLabel(
+  item: CrawlerTenantWebsiteProcessingAggregateItem
+): string {
+  if (item.embedding_input_tokens === null || item.embedding_input_tokens === undefined) {
+    return m.crawler_website_processing_embedding_usage_unknown();
+  }
+
+  const tokens = formatCrawlerCount(item.embedding_input_tokens);
+  if (!item.embedding_total_cost_usd) {
+    return m.crawler_website_processing_embedding_usage_cost_missing({ tokens });
+  }
+
+  return m.crawler_website_processing_embedding_usage({
+    tokens,
+    cost: formatCrawlerUsdCost(item.embedding_total_cost_usd)
+  });
+}
+
+export function getCrawlerWebsiteProcessingLatestRunEmbeddingUsageLabel(
+  item: CrawlerTenantWebsiteProcessingAggregateItem
+): string {
+  if (
+    item.latest_embedding_input_tokens === null ||
+    item.latest_embedding_input_tokens === undefined
+  ) {
+    return m.crawler_website_processing_embedding_usage_unknown();
+  }
+
+  const tokens = formatCrawlerCount(item.latest_embedding_input_tokens);
+  if (!item.latest_embedding_total_cost_usd) {
+    return m.crawler_website_processing_embedding_usage_cost_missing({ tokens });
+  }
+
+  return m.crawler_website_processing_embedding_usage({
+    tokens,
+    cost: formatCrawlerUsdCost(item.latest_embedding_total_cost_usd)
+  });
+}
+
+export function getCrawlerWebsiteProcessingLatestRunModelLabel(
+  item: CrawlerTenantWebsiteProcessingAggregateItem
+): string {
+  return (
+    item.latest_embedding_model_name_snapshot?.trim() ||
+    item.latest_embedding_model_litellm_name_snapshot?.trim() ||
+    m.crawler_website_processing_embedding_model_unknown()
+  );
+}
+
+export function getCrawlerWebsiteProcessingLatestRunProviderLabel(
+  item: CrawlerTenantWebsiteProcessingAggregateItem
+): string {
+  return (
+    item.latest_embedding_model_provider_snapshot?.trim() ||
+    m.crawler_website_processing_embedding_model_unknown()
+  );
+}
+
+export function getCrawlerWebsiteProcessingLatestRunUsageSourceLabel(
+  item: CrawlerTenantWebsiteProcessingAggregateItem
+): string {
+  switch (item.latest_embedding_usage_source) {
+    case "provider_reported":
+      return m.crawler_website_processing_embedding_usage_source_provider_reported();
+    case "missing":
+      return m.crawler_website_processing_embedding_usage_source_missing();
+    default:
+      return m.crawler_website_processing_embedding_usage_source_legacy();
+  }
+}
+
 /**
  * Token-efficiency drift threshold below which a website's retention rate is
  * flagged as wasteful. A retention rate of 0.5 means at least half of the
@@ -95,10 +167,10 @@ export const CRAWLER_LOW_RETENTION_THRESHOLD = 0.5;
 
 /**
  * Drift signal: the row's retention rate is below the operator-visible
- * waste threshold. Indexed work without retention is the cost the
- * token-efficiency tranche is meant to surface — operators sorting by
- * cost_pressure_score already see expensive websites at the top; this
- * lets them spot which ones are expensive *because* retention dropped.
+ * waste threshold. Indexed work without retention is the load the
+ * token-efficiency tranche is meant to surface; the pressure score
+ * identifies busy recurring crawls, and this flag explains whether
+ * that load comes from poor retention.
  *
  * Rows with no indexed work (indexed_content_count == 0) are not low
  * retention; they're idle. Returning false keeps the UI from flagging

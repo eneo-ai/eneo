@@ -1,8 +1,19 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import TIMESTAMP, BigInteger, ForeignKey, Index, String, and_, select
+from sqlalchemy import (
+    TIMESTAMP,
+    BigInteger,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    and_,
+    select,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column, relationship
 
@@ -64,6 +75,38 @@ class CrawlRuns(BasePublic):
         nullable=True,
         comment="JSONB dict mapping failure reason codes to counts",
     )
+    embedding_model_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(EmbeddingModels.id, ondelete="SET NULL"),
+        nullable=True,
+    )
+    embedding_model_name_snapshot: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+    )
+    embedding_model_litellm_name_snapshot: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+    )
+    embedding_model_provider_snapshot: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+    )
+    embedding_input_cost_per_token_snapshot: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(20, 12),
+        nullable=True,
+    )
+    embedding_input_tokens: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        nullable=True,
+    )
+    embedding_usage_source: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+    )
+    embedding_total_cost_usd: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(20, 12),
+        nullable=True,
+    )
 
     # Foreign keys
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
@@ -76,6 +119,21 @@ class CrawlRuns(BasePublic):
 
     # Relationships
     job: Mapped[Jobs] = relationship()
+    embedding_model: Mapped[Optional[EmbeddingModels]] = relationship()
+
+    __table_args__ = (
+        CheckConstraint(
+            "embedding_usage_source IS NULL OR embedding_usage_source IN ('provider_reported', 'missing')",
+            name="ck_crawl_runs_embedding_usage_source",
+        ),
+        Index("idx_crawl_runs_tenant_created_at", "tenant_id", "created_at"),
+        Index(
+            "idx_crawl_runs_tenant_website_created_at",
+            "tenant_id",
+            "website_id",
+            "created_at",
+        ),
+    )
 
 
 class Websites(BasePublic):

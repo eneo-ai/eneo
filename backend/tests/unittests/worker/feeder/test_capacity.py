@@ -589,6 +589,138 @@ class TestGetPreacquiredTenant:
 
         assert result is None
 
+    @pytest.mark.asyncio
+    async def test_returns_tenant_id_from_string_flag(self):
+        from intric.worker.feeder.capacity import CapacityManager
+
+        redis_mock = MagicMock()
+        tenant_id = uuid4()
+        redis_mock.get = AsyncMock(return_value=str(tenant_id))
+        job_id = uuid4()
+
+        manager = CapacityManager(redis_mock)
+        result = await manager.get_preacquired_tenant(job_id)
+
+        assert result == tenant_id
+
+    @pytest.mark.asyncio
+    async def test_returns_none_and_logs_warning_on_invalid_flag(self):
+        from intric.worker.feeder import capacity as capacity_module
+        from intric.worker.feeder.capacity import CapacityManager
+
+        redis_mock = MagicMock()
+        redis_mock.get = AsyncMock(return_value=b"not-a-uuid")
+        job_id = uuid4()
+        logger = MagicMock()
+
+        manager = CapacityManager(redis_mock)
+        with patch.object(capacity_module, "logger", logger):
+            result = await manager.get_preacquired_tenant(job_id)
+
+        assert result is None
+        logger.warning.assert_called_once()
+
+
+class TestRefreshSlotTtl:
+    @pytest.mark.asyncio
+    async def test_refreshes_slot_ttl(self):
+        from intric.worker.feeder.capacity import CapacityManager
+
+        redis_mock = MagicMock()
+        redis_mock.expire = AsyncMock()
+        tenant_id = uuid4()
+        job_id = uuid4()
+
+        manager = CapacityManager(redis_mock)
+        await manager.refresh_slot_ttl(
+            tenant_id=tenant_id,
+            ttl_seconds=300,
+            job_id=job_id,
+        )
+
+        redis_mock.expire.assert_awaited_once_with(
+            LuaScripts.slot_key(tenant_id),
+            300,
+        )
+
+    @pytest.mark.asyncio
+    async def test_ttl_refresh_is_best_effort(self):
+        from intric.worker.feeder import capacity as capacity_module
+        from intric.worker.feeder.capacity import CapacityManager
+
+        redis_mock = MagicMock()
+        redis_mock.expire = AsyncMock(side_effect=RuntimeError("expire failed"))
+        tenant_id = uuid4()
+        job_id = uuid4()
+        logger = MagicMock()
+
+        manager = CapacityManager(redis_mock)
+        with patch.object(capacity_module, "logger", logger):
+            await manager.refresh_slot_ttl(
+                tenant_id=tenant_id,
+                ttl_seconds=300,
+                job_id=job_id,
+            )
+
+        logger.debug.assert_called_once_with(
+            "Failed to refresh pre-acquired crawl slot TTL",
+            extra={
+                "job_id": str(job_id),
+                "tenant_id": str(tenant_id),
+                "error": "expire failed",
+            },
+        )
+
+
+class TestRefreshPreacquiredSlotTtls:
+    @pytest.mark.asyncio
+    async def test_refreshes_counter_and_flag_ttls_atomically(self):
+        from intric.worker.feeder.capacity import CapacityManager
+
+        redis_mock = MagicMock()
+        pipeline = MagicMock()
+        pipeline.__aenter__ = AsyncMock(return_value=pipeline)
+        pipeline.__aexit__ = AsyncMock(return_value=None)
+        pipeline.expire = MagicMock()
+        pipeline.execute = AsyncMock(return_value=[1, 1])
+        redis_mock.pipeline = MagicMock(return_value=pipeline)
+        tenant_id = uuid4()
+        job_id = uuid4()
+
+        manager = CapacityManager(redis_mock)
+        result = await manager.refresh_preacquired_slot_ttls(
+            job_id=job_id,
+            tenant_id=tenant_id,
+            ttl_seconds=300,
+        )
+
+        assert result.counter_refreshed is True
+        assert result.flag_refreshed is True
+        pipeline.expire.assert_any_call(LuaScripts.slot_key(tenant_id), 300)
+        pipeline.expire.assert_any_call(LuaScripts.preacquired_slot_key(job_id), 300)
+
+    @pytest.mark.asyncio
+    async def test_reports_missing_counter_or_flag_without_raising(self):
+        from intric.worker.feeder.capacity import CapacityManager
+
+        redis_mock = MagicMock()
+        pipeline = MagicMock()
+        pipeline.__aenter__ = AsyncMock(return_value=pipeline)
+        pipeline.__aexit__ = AsyncMock(return_value=None)
+        pipeline.expire = MagicMock()
+        pipeline.execute = AsyncMock(return_value=[0, 1])
+        redis_mock.pipeline = MagicMock(return_value=pipeline)
+
+        manager = CapacityManager(redis_mock)
+        result = await manager.refresh_preacquired_slot_ttls(
+            job_id=uuid4(),
+            tenant_id=uuid4(),
+            ttl_seconds=300,
+        )
+
+        assert result.counter_refreshed is False
+        assert result.flag_refreshed is True
+
 
 class TestGetMinimumFeederInterval:
     """Tests for get_minimum_feeder_interval method.

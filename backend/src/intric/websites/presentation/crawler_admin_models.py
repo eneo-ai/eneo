@@ -4,6 +4,13 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from intric.main.models import Status
+from intric.websites.domain.bulk_crawl_interval_change import (
+    BULK_INTERVAL_MAX_WEBSITE_IDS,
+    BulkIntervalRowFailureCode,
+)
+from intric.websites.domain.bulk_crawl_interval_change import (
+    BulkIntervalChangeResult as DomainBulkIntervalChangeResult,
+)
 from intric.websites.domain.crawl_abort import CrawlAbortConflictCode
 from intric.websites.domain.crawl_lifecycle import CrawlLifecycle
 from intric.websites.domain.crawl_outcome import CrawlOutcomeCode, FailureReason
@@ -66,6 +73,85 @@ class CrawlerWebsiteDeleteConflictResponse(BaseModel):
 
     error_code: CrawlWebsiteDeleteConflictCode
     detail: str
+
+
+class CrawlerBulkIntervalRequest(BaseModel):
+    """Wire shape for the admin bulk-interval endpoint.
+
+    The explicit website-id list stays capped until "select all matching
+    filter" can be implemented with same-transaction filtering and
+    per-website audit rows.
+    """
+
+    website_ids: list[UUID] = Field(
+        min_length=1, max_length=BULK_INTERVAL_MAX_WEBSITE_IDS
+    )
+    update_interval: UpdateInterval
+
+
+class CrawlerBulkIntervalAppliedRow(BaseModel):
+    website_id: UUID
+    website_name: str
+    previous_update_interval: UpdateInterval
+    new_update_interval: UpdateInterval
+    failure_state_cleared: bool
+
+
+class CrawlerBulkIntervalUnchangedRow(BaseModel):
+    website_id: UUID
+    website_name: str
+    update_interval: UpdateInterval
+
+
+class CrawlerBulkIntervalFailedRow(BaseModel):
+    website_id: UUID
+    code: BulkIntervalRowFailureCode
+
+
+class CrawlerBulkIntervalResponse(BaseModel):
+    """200-with-structured-payload outcome of the bulk-interval batch.
+
+    Wire shape preserves per-row outcome so the admin UI can render
+    a partial-success summary (e.g. "32 updated, 3 unchanged, 1
+    failed") + drill into failures by id. Avoids 207 Multi-Status —
+    the JS SDK doesn't benefit from polyglot status codes.
+    """
+
+    applied: list[CrawlerBulkIntervalAppliedRow]
+    unchanged: list[CrawlerBulkIntervalUnchangedRow]
+    failed: list[CrawlerBulkIntervalFailedRow]
+
+    @classmethod
+    def from_domain(
+        cls, result: DomainBulkIntervalChangeResult
+    ) -> "CrawlerBulkIntervalResponse":
+        return cls(
+            applied=[
+                CrawlerBulkIntervalAppliedRow(
+                    website_id=row.website_id,
+                    website_name=row.website_name,
+                    previous_update_interval=row.previous_update_interval,
+                    new_update_interval=row.new_update_interval,
+                    failure_state_cleared=row.failure_state_cleared,
+                )
+                for row in result.applied
+            ],
+            unchanged=[
+                CrawlerBulkIntervalUnchangedRow(
+                    website_id=row.website_id,
+                    website_name=row.website_name,
+                    update_interval=row.update_interval,
+                )
+                for row in result.unchanged
+            ],
+            failed=[
+                CrawlerBulkIntervalFailedRow(
+                    website_id=row.website_id,
+                    code=row.code,
+                )
+                for row in result.failed
+            ],
+        )
 
 
 class CrawlerActiveInventoryItem(BaseModel):
@@ -219,6 +305,12 @@ class CrawlerRecentFailureItem(BaseModel):
     pages_hash_retained: int | None
     files_hash_retained: int | None
     files_too_large_skipped: int | None
+    embedding_model_name_snapshot: str | None
+    embedding_model_litellm_name_snapshot: str | None
+    embedding_model_provider_snapshot: str | None
+    embedding_input_tokens: int | None = Field(default=None, ge=0)
+    embedding_total_cost_usd: str | None = None
+    embedding_usage_source: str | None
 
     @classmethod
     def from_domain(
@@ -244,6 +336,18 @@ class CrawlerRecentFailureItem(BaseModel):
             pages_hash_retained=item.pages_hash_retained,
             files_hash_retained=item.files_hash_retained,
             files_too_large_skipped=item.files_too_large_skipped,
+            embedding_model_name_snapshot=item.embedding_model_name_snapshot,
+            embedding_model_litellm_name_snapshot=(
+                item.embedding_model_litellm_name_snapshot
+            ),
+            embedding_model_provider_snapshot=item.embedding_model_provider_snapshot,
+            embedding_input_tokens=item.embedding_input_tokens,
+            embedding_total_cost_usd=(
+                str(item.embedding_total_cost_usd)
+                if item.embedding_total_cost_usd is not None
+                else None
+            ),
+            embedding_usage_source=item.embedding_usage_source,
         )
 
 
@@ -337,7 +441,7 @@ class CrawlerTenantWebsiteProcessingAggregateItem(BaseModel):
     files_failed: int = Field(ge=0)
     schedule_frequency_weight: float = Field(
         ge=0,
-        description="Schedule multiplier used for crawler cost-pressure ranking.",
+        description="Schedule multiplier used for crawler load-pressure ranking.",
     )
     indexed_content_count: int = Field(
         ge=0,
@@ -350,8 +454,23 @@ class CrawlerTenantWebsiteProcessingAggregateItem(BaseModel):
     )
     cost_pressure_score: float = Field(
         ge=0,
-        description="Schedule-weighted changed/new page and file count for ranking.",
+        description="Schedule-weighted fetched page and file count for load ranking.",
     )
+    embedding_input_tokens: int | None = Field(
+        default=None,
+        ge=0,
+        description="Provider-reported embedding input tokens indexed in this window.",
+    )
+    embedding_total_cost_usd: str | None = Field(
+        default=None,
+        description="Run-time USD cost snapshot for provider-reported embedding usage.",
+    )
+    latest_embedding_model_name_snapshot: str | None = None
+    latest_embedding_model_litellm_name_snapshot: str | None = None
+    latest_embedding_model_provider_snapshot: str | None = None
+    latest_embedding_input_tokens: int | None = Field(default=None, ge=0)
+    latest_embedding_total_cost_usd: str | None = None
+    latest_embedding_usage_source: str | None = None
 
     @classmethod
     def from_domain(
@@ -376,6 +495,28 @@ class CrawlerTenantWebsiteProcessingAggregateItem(BaseModel):
             indexed_content_count=item.indexed_content_count,
             retention_rate=item.retention_rate,
             cost_pressure_score=item.cost_pressure_score,
+            embedding_input_tokens=item.embedding_input_tokens,
+            embedding_total_cost_usd=(
+                str(item.embedding_total_cost_usd)
+                if item.embedding_total_cost_usd is not None
+                else None
+            ),
+            latest_embedding_model_name_snapshot=(
+                item.latest_embedding_model_name_snapshot
+            ),
+            latest_embedding_model_litellm_name_snapshot=(
+                item.latest_embedding_model_litellm_name_snapshot
+            ),
+            latest_embedding_model_provider_snapshot=(
+                item.latest_embedding_model_provider_snapshot
+            ),
+            latest_embedding_input_tokens=item.latest_embedding_input_tokens,
+            latest_embedding_total_cost_usd=(
+                str(item.latest_embedding_total_cost_usd)
+                if item.latest_embedding_total_cost_usd is not None
+                else None
+            ),
+            latest_embedding_usage_source=item.latest_embedding_usage_source,
         )
 
 

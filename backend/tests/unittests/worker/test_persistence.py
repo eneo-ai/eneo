@@ -16,6 +16,7 @@ from uuid import uuid4
 
 import pytest
 
+from intric.embedding_models.domain.embedding_batch import EmbeddingUsage
 from intric.worker.crawl_context import CrawlContext, EmbeddingModelSpec, PreparedPage
 
 
@@ -413,6 +414,11 @@ class TestPreparedPageDataclass:
             content_hash=b"\x00" * 32,  # 32-byte hash
             chunks=["chunk1", "chunk2"],
             embeddings=[[0.1, 0.2], [0.3, 0.4]],
+            embedding_usage=EmbeddingUsage(
+                prompt_tokens=None,
+                total_tokens=None,
+                source="missing",
+            ),
             tenant_id=uuid4(),
             website_id=uuid4(),
             user_id=uuid4(),

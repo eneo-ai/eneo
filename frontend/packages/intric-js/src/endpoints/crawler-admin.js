@@ -8,6 +8,7 @@
 /** @typedef {import('../types/schema').components["schemas"]["CrawlerTenantWebsiteInventorySort"]} CrawlerTenantWebsiteInventorySort */
 /** @typedef {import('../types/schema').components["schemas"]["CrawlerFailureState"]} CrawlerFailureState */
 /** @typedef {import('../types/schema').components["schemas"]["UpdateInterval"]} CrawlerUpdateInterval */
+/** @typedef {import('../types/schema').components["schemas"]["CrawlerBulkIntervalResponse"]} CrawlerBulkIntervalResponse */
 
 /**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
@@ -86,7 +87,7 @@ export function initCrawlerAdmin(client) {
 
     /**
      * Get crawler processing totals grouped by website for the current tenant.
-     * @param {{days?: number, limit?: number, offset?: number}} [params]
+     * @param {{days?: number, limit?: number, offset?: number, website_id?: string}} [params]
      * @returns {Promise<CrawlerTenantWebsiteProcessingAggregateResponse>}
      * @throws {IntricError}
      */
@@ -205,6 +206,39 @@ export function initCrawlerAdmin(client) {
         method: "delete",
         params: { path: { website_id: websiteId } }
       });
+    },
+
+    /**
+     * Apply one update_interval to many websites in the current tenant.
+     * Capped at 100 explicit ids per request (the request body cap
+     * lives in `BULK_INTERVAL_MAX_WEBSITE_IDS`). Each per-row outcome
+     * is one of:
+     *   - applied: the row's interval changed; metadata mirrors the
+     *     per-row endpoint shape so audit consumers stay consistent
+     *   - unchanged: the row already had the target interval; no-op
+     *   - failed: the row wasn't found in the tenant (deleted
+     *     concurrently or cross-tenant id guess)
+     * Each `applied` row emits the same per-website audit row as the
+     * per-row endpoint, so audit-log search by EntityType.WEBSITE
+     * entity_id remains intact. Returns 200 with a typed structured
+     * payload (not 207) — the SDK consumer can render a partial-
+     * success summary and drill into failures by id.
+     * @param {string[]} websiteIds
+     * @param {CrawlerUpdateInterval} updateInterval
+     * @returns {Promise<CrawlerBulkIntervalResponse>}
+     * @throws {IntricError}
+     */
+    bulkSetUpdateInterval: async (websiteIds, updateInterval) => {
+      const res = await client.fetch("/api/v1/admin/crawler/websites/bulk-interval", {
+        method: "post",
+        requestBody: {
+          "application/json": {
+            website_ids: websiteIds,
+            update_interval: updateInterval
+          }
+        }
+      });
+      return res;
     }
   };
 }

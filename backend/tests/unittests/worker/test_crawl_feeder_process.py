@@ -20,7 +20,6 @@ from intric.worker.feeder.crawl_enqueue import (
     CrawlEnqueueResult,
 )
 from intric.worker.feeder.queues import JobEnqueuer, PendingCrawlPayload, PendingQueue
-from intric.worker.redis.lua_scripts import LuaScripts
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +47,7 @@ class _CapacityManagerForProcessTest(CapacityManager):
         self.acquire_attempts: list[UUID] = []
         self.released_tenants: list[UUID] = []
         self.preacquired_jobs: list[UUID] = []
+        self.cleared_preacquired_jobs: list[UUID] = []
 
     async def get_tenant_settings(self, tenant_id: UUID) -> TenantCrawlerSettings:
         return TenantCrawlerSettings.from_overrides(None)
@@ -81,6 +81,9 @@ class _CapacityManagerForProcessTest(CapacityManager):
         tenant_settings: TenantCrawlerSettings | None = None,
     ) -> None:
         self.released_tenants.append(tenant_id)
+
+    async def clear_preacquired_flag(self, job_id: UUID) -> None:
+        self.cleared_preacquired_jobs.append(job_id)
 
 
 class _TypedJobEnqueuerForProcessTest(JobEnqueuer):
@@ -193,9 +196,8 @@ class TestCrawlFeederProcessTenantQueue:
         assert pending_queue.removed_raw_bytes == []
         assert capacity_manager.preacquired_jobs == [job_id]
         assert capacity_manager.released_tenants == [tenant_id]
-        redis_client.delete.assert_awaited_once_with(
-            LuaScripts.preacquired_slot_key(job_id)
-        )
+        assert capacity_manager.cleared_preacquired_jobs == [job_id]
+        redis_client.delete.assert_not_awaited()
 
     async def test_invalid_pending_job_id_moves_entry_to_dlq_and_removes_pending(
         self,

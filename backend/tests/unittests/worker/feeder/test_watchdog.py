@@ -68,13 +68,8 @@ def _calls_attribute(tree: ast.AST, attribute_name: str) -> bool:
 
 def test_worker_runtime_arq_jobs_imports_stay_behind_typed_boundaries() -> None:
     worker_root = Path(__file__).parents[4] / "src/intric/worker"
-    allowed = {
-        worker_root / "feeder/crawl_status.py",
-    }
     offenders: list[str] = []
     for source_path in worker_root.rglob("*.py"):
-        if source_path in allowed:
-            continue
         tree = ast.parse(source_path.read_text())
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module == "arq.jobs":
@@ -846,6 +841,13 @@ class TestWatchdogPhase35FailStalledStartup:
 class TestWatchdogSlotRelease:
     """Tests for post-transaction slot release."""
 
+    def test_watchdog_delegates_slot_release_storage_to_capacity_manager(self):
+        source_path = Path(__file__).parents[4] / "src/intric/worker/feeder/watchdog.py"
+        source = source_path.read_text()
+
+        assert "LuaScripts.preacquired_slot_key" not in source
+        assert "LuaScripts.release_slot" not in source
+
     @pytest.mark.asyncio
     async def test_releases_slots_after_transaction_commit(self):
         """Should release slots OUTSIDE the DB transaction."""
@@ -862,7 +864,7 @@ class TestWatchdogSlotRelease:
         settings_mock.tenant_worker_semaphore_ttl_seconds = 300
 
         with patch(
-            "intric.worker.feeder.watchdog.LuaScripts.release_slot",
+            "intric.worker.feeder.capacity.LuaScripts.release_slot",
             new_callable=AsyncMock,
         ) as mock_release:
             watchdog = OrphanWatchdog(redis_mock, settings_mock)
@@ -883,7 +885,7 @@ class TestWatchdogSlotRelease:
         settings_mock.tenant_worker_semaphore_ttl_seconds = 300
 
         with patch(
-            "intric.worker.feeder.watchdog.LuaScripts.release_slot",
+            "intric.worker.feeder.capacity.LuaScripts.release_slot",
             new_callable=AsyncMock,
             side_effect=Exception("Redis connection lost"),
         ):

@@ -15,8 +15,7 @@ from uuid import UUID
 
 from intric.main.exceptions import CrawlPreempted, CrawlPreemptionCause
 from intric.worker.crawl.preemption import is_job_preempted
-from intric.worker.redis.client import redis_pipeline, redis_pipeline_items
-from intric.worker.redis.lua_scripts import LuaScripts
+from intric.worker.feeder.capacity import CapacityManager
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
@@ -77,11 +76,13 @@ class HeartbeatMonitor:
     ):
         super().__init__()
         self._job_id = job_id
-        self._redis_client = redis_client
         self._tenant = tenant
         self._interval_seconds = interval_seconds
         self._max_failures = max_failures
         self._semaphore_ttl_seconds = semaphore_ttl_seconds
+        self._capacity_manager = (
+            CapacityManager(redis_client) if redis_client is not None else None
+        )
 
         self._last_beat_time: float = 0.0
         self._consecutive_failures: int = 0
@@ -175,46 +176,29 @@ class HeartbeatMonitor:
         Raises:
             HeartbeatFailedError: If consecutive failures exceed max_failures
         """
-        if not self._redis_client or not self._tenant:
+        if not self._capacity_manager or not self._tenant:
             return
 
-        concurrency_key = LuaScripts.slot_key(self._tenant.id)
-        flag_key = LuaScripts.preacquired_slot_key(self._job_id)
-
         try:
-            async with redis_pipeline(self._redis_client, transaction=True) as pipe:
-                pipe.expire(concurrency_key, self._semaphore_ttl_seconds)
-                pipe.expire(flag_key, self._semaphore_ttl_seconds)
-                results = redis_pipeline_items(await pipe.execute())
-
+            refresh_result = await self._capacity_manager.refresh_preacquired_slot_ttls(
+                job_id=self._job_id,
+                tenant_id=self._tenant.id,
+                ttl_seconds=self._semaphore_ttl_seconds,
+            )
             self._consecutive_failures = 0
 
-            counter_refreshed_raw = results[0] if len(results) > 0 else 0
-            flag_refreshed_raw = results[1] if len(results) > 1 else 0
-            counter_refreshed = (
-                int(counter_refreshed_raw)
-                if isinstance(counter_refreshed_raw, int)
-                else 0
-            )
-            flag_refreshed = (
-                int(flag_refreshed_raw) if isinstance(flag_refreshed_raw, int) else 0
-            )
-
-            if counter_refreshed == 0:
+            if not refresh_result.counter_refreshed:
                 logger.warning(
                     "Heartbeat: counter key missing or expired",
                     extra={
                         "job_id": str(self._job_id),
-                        "concurrency_key": concurrency_key,
+                        "tenant_id": str(self._tenant.id),
                     },
                 )
-            if flag_refreshed == 0:
+            if not refresh_result.flag_refreshed:
                 logger.warning(
                     "Heartbeat: flag key missing or expired",
-                    extra={
-                        "job_id": str(self._job_id),
-                        "flag_key": flag_key,
-                    },
+                    extra={"job_id": str(self._job_id)},
                 )
 
         except Exception:

@@ -18,6 +18,7 @@ import pytest
 import redis.asyncio as aioredis
 
 from intric.worker.crawl.recovery import (
+    CrawlRetrySignal,
     calculate_exponential_backoff,
     update_job_retry_stats,
 )
@@ -44,7 +45,7 @@ async def test_job_retry_stats_tracks_per_job_not_per_tenant(
         await update_job_retry_stats(
             job_id=job_1,
             redis_client=redis_client,
-            is_actual_failure=True,
+            retry_signal=CrawlRetrySignal.FAILURE,
             max_age_seconds=1800,
         )
 
@@ -52,7 +53,7 @@ async def test_job_retry_stats_tracks_per_job_not_per_tenant(
     await update_job_retry_stats(
         job_id=job_2,
         redis_client=redis_client,
-        is_actual_failure=True,
+        retry_signal=CrawlRetrySignal.FAILURE,
         max_age_seconds=1800,
     )
 
@@ -90,7 +91,7 @@ async def test_busy_signal_does_not_increment_retry_count(
         retry_count, job_age = await update_job_retry_stats(
             job_id=job_id,
             redis_client=redis_client,
-            is_actual_failure=False,  # Busy signal, not real failure
+            retry_signal=CrawlRetrySignal.BUSY,  # Busy signal, not real failure
             max_age_seconds=1800,
         )
 
@@ -122,7 +123,7 @@ async def test_actual_failure_increments_retry_count(
         retry_count, job_age = await update_job_retry_stats(
             job_id=job_id,
             redis_client=redis_client,
-            is_actual_failure=True,  # Real failure
+            retry_signal=CrawlRetrySignal.FAILURE,  # Real failure
             max_age_seconds=1800,
         )
 
@@ -158,7 +159,7 @@ async def test_mixed_busy_and_failure_only_counts_failures(
         await update_job_retry_stats(
             job_id=job_id,
             redis_client=redis_client,
-            is_actual_failure=False,
+            retry_signal=CrawlRetrySignal.BUSY,
             max_age_seconds=1800,
         )
 
@@ -166,7 +167,7 @@ async def test_mixed_busy_and_failure_only_counts_failures(
     await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
-        is_actual_failure=True,
+        retry_signal=CrawlRetrySignal.FAILURE,
         max_age_seconds=1800,
     )
 
@@ -175,7 +176,7 @@ async def test_mixed_busy_and_failure_only_counts_failures(
         await update_job_retry_stats(
             job_id=job_id,
             redis_client=redis_client,
-            is_actual_failure=False,
+            retry_signal=CrawlRetrySignal.BUSY,
             max_age_seconds=1800,
         )
 
@@ -183,7 +184,7 @@ async def test_mixed_busy_and_failure_only_counts_failures(
     await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
-        is_actual_failure=True,
+        retry_signal=CrawlRetrySignal.FAILURE,
         max_age_seconds=1800,
     )
 
@@ -210,7 +211,7 @@ async def test_job_age_tracking_from_first_attempt(
     retry_count_1, job_age_1 = await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
-        is_actual_failure=False,
+        retry_signal=CrawlRetrySignal.BUSY,
         max_age_seconds=1800,
     )
 
@@ -226,7 +227,7 @@ async def test_job_age_tracking_from_first_attempt(
     retry_count_2, job_age_2 = await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
-        is_actual_failure=False,
+        retry_signal=CrawlRetrySignal.BUSY,
         max_age_seconds=1800,
     )
 
@@ -252,7 +253,7 @@ async def test_redis_keys_have_proper_ttl(
     await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
-        is_actual_failure=True,
+        retry_signal=CrawlRetrySignal.FAILURE,
         max_age_seconds=max_age,
     )
 
@@ -355,7 +356,7 @@ async def test_concurrent_job_updates_race_condition(
         await update_job_retry_stats(
             job_id=job_id,
             redis_client=redis_client,
-            is_actual_failure=True,
+            retry_signal=CrawlRetrySignal.FAILURE,
             max_age_seconds=1800,
         )
 
@@ -396,7 +397,7 @@ async def test_max_retry_count_behavior(
         retry_count, job_age = await update_job_retry_stats(
             job_id=job_id,
             redis_client=redis_client,
-            is_actual_failure=True,
+            retry_signal=CrawlRetrySignal.FAILURE,
             max_age_seconds=1800,
         )
 
@@ -434,7 +435,7 @@ async def test_job_age_exceeds_max_age(
     retry_count_1, job_age_1 = await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
-        is_actual_failure=False,
+        retry_signal=CrawlRetrySignal.BUSY,
         max_age_seconds=max_age_seconds,
     )
     assert job_age_1 < 1.0, "Initial age should be near 0"
@@ -447,7 +448,7 @@ async def test_job_age_exceeds_max_age(
     retry_count_2, job_age_2 = await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
-        is_actual_failure=False,
+        retry_signal=CrawlRetrySignal.BUSY,
         max_age_seconds=max_age_seconds,
     )
 
@@ -481,7 +482,7 @@ async def test_retry_count_returned_correctly(
     retry_count_1, _ = await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
-        is_actual_failure=True,
+        retry_signal=CrawlRetrySignal.FAILURE,
         max_age_seconds=1800,
     )
     assert retry_count_1 == 1, "First failure should return retry_count=1"
@@ -490,7 +491,7 @@ async def test_retry_count_returned_correctly(
     retry_count_2, _ = await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
-        is_actual_failure=True,
+        retry_signal=CrawlRetrySignal.FAILURE,
         max_age_seconds=1800,
     )
     assert retry_count_2 == 2, "Second failure should return retry_count=2"
@@ -499,7 +500,7 @@ async def test_retry_count_returned_correctly(
     retry_count_3, _ = await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
-        is_actual_failure=False,
+        retry_signal=CrawlRetrySignal.BUSY,
         max_age_seconds=1800,
     )
     assert retry_count_3 == 2, "Busy signal should return same retry_count=2"
@@ -508,7 +509,7 @@ async def test_retry_count_returned_correctly(
     retry_count_4, _ = await update_job_retry_stats(
         job_id=job_id,
         redis_client=redis_client,
-        is_actual_failure=True,
+        retry_signal=CrawlRetrySignal.FAILURE,
         max_age_seconds=1800,
     )
     assert retry_count_4 == 3, "Third failure should return retry_count=3"

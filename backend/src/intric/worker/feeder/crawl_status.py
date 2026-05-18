@@ -3,9 +3,7 @@ from enum import StrEnum
 from typing import TypeAlias
 from uuid import UUID
 
-from arq.jobs import JobStatus
-
-from intric.jobs.job_manager import job_manager
+from intric.jobs.job_manager import JobRuntimeStatus, job_manager
 
 
 class CrawlJobStatus(StrEnum):
@@ -30,17 +28,17 @@ class CrawlJobStatusLookupFailed:
 
 CrawlJobStatusResult: TypeAlias = CrawlJobStatusKnown | CrawlJobStatusLookupFailed
 
-_ARQ_TO_CRAWL_STATUS: dict[JobStatus, CrawlJobStatus] = {
-    JobStatus.deferred: CrawlJobStatus.DEFERRED,
-    JobStatus.queued: CrawlJobStatus.QUEUED,
-    JobStatus.in_progress: CrawlJobStatus.IN_PROGRESS,
-    JobStatus.complete: CrawlJobStatus.COMPLETE,
-    JobStatus.not_found: CrawlJobStatus.NOT_FOUND,
+_RUNTIME_TO_CRAWL_STATUS: dict[JobRuntimeStatus, CrawlJobStatus] = {
+    JobRuntimeStatus.DEFERRED: CrawlJobStatus.DEFERRED,
+    JobRuntimeStatus.QUEUED: CrawlJobStatus.QUEUED,
+    JobRuntimeStatus.IN_PROGRESS: CrawlJobStatus.IN_PROGRESS,
+    JobRuntimeStatus.COMPLETE: CrawlJobStatus.COMPLETE,
+    JobRuntimeStatus.NOT_FOUND: CrawlJobStatus.NOT_FOUND,
 }
 
 
-def _to_crawl_job_status(status: JobStatus) -> CrawlJobStatus:
-    return _ARQ_TO_CRAWL_STATUS[status]
+def _to_crawl_job_status(status: JobRuntimeStatus) -> CrawlJobStatus:
+    return _RUNTIME_TO_CRAWL_STATUS[status]
 
 
 async def get_crawl_job_status(job_id: UUID) -> CrawlJobStatusResult:

@@ -1,37 +1,11 @@
-"""Terminal-zero-output crawl ownership.
-
-A crawl that completes with no usable output — no pages returned, the
-sitemap fetched but yielded nothing, the only successful work was
-files that exceeded the download size limit, the crawl timed out
-before collecting any pages — is still a typed terminal event. The
-worker must:
-
-  1. Log "Crawl produced no usable output" with the diagnostics shape
-     operators already rely on.
-  2. Commit one `TerminalEvent(outcome_code=...)` through
-     `execute_with_recovery` so retries are bounded to the same
-     recovery budget the rest of `crawl_task(...)` enjoys.
-  3. Apply post-terminal effects (audit + circuit-breaker + slot
-     release) with a `CrawlAuditPayload` whose counters are zero,
-     EXCEPT the `files_too_large_skipped` counter which carries the
-     only successful-ish work the crawler did before terminating
-     (operators need this in the audit trail to explain "the crawl
-     ended but we still spent download bandwidth").
-  4. Acknowledge the terminal commit on the `TaskManager` so the
-     orchestration's outer exception handler does not subsequently
-     flip the job status.
-
-This module owns those four steps so `crawl_task(...)` stays
-orchestration-only. The previous inline implementation lived at
-`worker/crawl_tasks.py:1005-1094` and tangled the recovery plumbing +
-audit payload construction with the rest of the crawl_task body.
-"""
+"""Terminal handling for crawls that produced no indexable content."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from intric.main.logging import get_logger
@@ -51,6 +25,8 @@ from intric.worker.crawl.post_terminal_effects import (
 from intric.worker.crawl.recovery import execute_with_recovery
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
     from intric.audit.application.audit_service import AuditService
     from intric.worker.task_manager import TaskManager
 
@@ -59,14 +35,6 @@ logger = get_logger(__name__)
 
 @dataclass(frozen=True)
 class CommitZeroOutputTerminalInput:
-    """Strongly-typed parameter bundle for `commit_zero_output_terminal(...)`.
-
-    Grouping the inputs into a frozen dataclass keeps the call site at
-    `crawl_task(...)` declarative — the caller assembles the inputs
-    once and the no-output terminator policy is invoked with one
-    typed argument instead of fourteen positional parameters.
-    """
-
     crawl_run_id: UUID
     job_id: UUID
     website_id: UUID
@@ -78,7 +46,7 @@ class CommitZeroOutputTerminalInput:
     outcome_code: CrawlOutcomeCode
     failure_message: str
     crawl_termination_reason: str
-    diagnostics_log_fields: dict[str, Any]
+    diagnostics_log_fields: Mapping[str, object]
     files_too_large_skipped: int
     files_too_large_download_limit_bytes: int | None
     files_too_large_samples: tuple[CrawlFileTooLargeSample, ...]
@@ -90,13 +58,6 @@ async def commit_zero_output_terminal(
     audit_service: "AuditService",
     task_manager: "TaskManager",
 ) -> dict[str, str]:
-    """Commit the typed terminal event + post-effects for a zero-output crawl.
-
-    Returns the status dict the caller should return from
-    `crawl_task(...)`. The dict shape is preserved from the previous
-    inline implementation so the ARQ job result wire format does not
-    change (`{"status": "failed", "outcome_code": <value>}`).
-    """
     logger.warning(
         "Crawl produced no usable output",
         extra={
@@ -112,7 +73,7 @@ async def commit_zero_output_terminal(
 
     terminal_finished_at = datetime.now(timezone.utc)
 
-    async def _do_commit(sess: Any) -> None:
+    async def _do_commit(sess: "AsyncSession") -> None:
         await commit_terminal(
             sess,
             TerminalEvent(

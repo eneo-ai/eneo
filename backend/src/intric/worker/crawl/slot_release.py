@@ -9,7 +9,6 @@ from intric.main.config import Settings
 from intric.main.logging import get_logger
 from intric.worker.crawl.recovery import reset_tenant_retry_delay
 from intric.worker.feeder.capacity import CapacityManager
-from intric.worker.redis.lua_scripts import LuaScripts
 from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
 
 if TYPE_CHECKING:
@@ -39,22 +38,6 @@ class CrawlSlotReleaseResult:
     path: CrawlSlotReleasePath
 
 
-async def _delete_preacquired_flag(
-    redis_client: aioredis.Redis | None,
-    job_id: UUID,
-) -> None:
-    if redis_client is None:
-        return
-
-    try:
-        await redis_client.delete(LuaScripts.preacquired_slot_key(job_id))
-    except Exception as exc:
-        logger.debug(
-            "Failed to delete crawl pre-acquired slot flag",
-            extra={"job_id": str(job_id), "error": str(exc)},
-        )
-
-
 async def release_crawl_slot_after_task(
     request: CrawlSlotReleaseRequest,
     *,
@@ -68,7 +51,10 @@ async def release_crawl_slot_after_task(
             tenant_id=request.tenant_id,
             redis_client=redis_client,
         )
-        await _delete_preacquired_flag(redis_client, request.job_id)
+        if redis_client is not None:
+            await CapacityManager(redis_client, settings).clear_preacquired_flag(
+                request.job_id
+            )
         return CrawlSlotReleaseResult(
             released=True,
             path=CrawlSlotReleasePath.NORMAL,
@@ -98,30 +84,16 @@ async def release_crawl_slot_after_task(
                 path=CrawlSlotReleasePath.PREACQUIRED_FALLBACK,
             )
 
-        try:
-            await LuaScripts.release_slot(
-                redis_client,
-                request.preacquired_tenant_id,
-                settings.tenant_worker_semaphore_ttl_seconds,
-            )
-            await _delete_preacquired_flag(redis_client, request.job_id)
-            return CrawlSlotReleaseResult(
-                released=True,
-                path=CrawlSlotReleasePath.PREACQUIRED_FALLBACK,
-            )
-        except Exception as release_exc:
-            logger.error(
-                "Failed to release pre-acquired slot in fallback",
-                extra={
-                    "job_id": str(request.job_id),
-                    "tenant_id": str(request.preacquired_tenant_id),
-                    "error": str(release_exc),
-                },
-            )
-            return CrawlSlotReleaseResult(
-                released=False,
-                path=CrawlSlotReleasePath.PREACQUIRED_FALLBACK,
-            )
+        released = await CapacityManager(
+            redis_client, settings
+        ).release_preacquired_slot(
+            job_id=request.job_id,
+            tenant_id=request.preacquired_tenant_id,
+        )
+        return CrawlSlotReleaseResult(
+            released=released,
+            path=CrawlSlotReleasePath.PREACQUIRED_FALLBACK,
+        )
 
     if (
         request.tenant_id is None

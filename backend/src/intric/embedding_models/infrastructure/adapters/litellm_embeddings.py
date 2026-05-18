@@ -1,4 +1,6 @@
-from typing import TYPE_CHECKING, Optional
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional, Protocol, TypeGuard, cast
 
 import litellm
 from fastapi import HTTPException
@@ -11,6 +13,10 @@ from tenacity import (
 )
 from typing_extensions import override
 
+from intric.embedding_models.domain.embedding_batch import (
+    EmbeddingBatchResult,
+    EmbeddingUsage,
+)
 from intric.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
 from intric.files.chunk_embedding_list import ChunkEmbeddingList
 from intric.main.config import get_settings
@@ -28,6 +34,20 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _LiteLLMEmbeddingBatch:
+    embeddings: list[list[float]]
+    usage: EmbeddingUsage
+
+
+class _LiteLLMEmbeddingResponse(Protocol):
+    data: object
+    usage: object | None
+
+
+_LiteLLMEmbeddingCallable = Callable[..., Awaitable[object]]
 
 
 class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
@@ -49,9 +69,6 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
         super().__init__(model)
         self.credential_resolver = credential_resolver
 
-        # Use explicit litellm_model_name if provided (supports frozen dataclasses
-        # like EmbeddingModelSpec where the name is constructed from provider info).
-        # Falls back to model.litellm_model_name for mutable ORM objects.
         self.litellm_model = litellm_model_name or model.litellm_model_name
 
         logger.debug(
@@ -59,11 +76,15 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
         )
 
     @override
-    async def get_embeddings(self, chunks: list["InfoBlobChunk"]) -> ChunkEmbeddingList:
+    async def get_embeddings(
+        self, chunks: list["InfoBlobChunk"]
+    ) -> EmbeddingBatchResult:
         chunk_embedding_list = ChunkEmbeddingList()
+        total_tokens = 0
+        prompt_tokens = 0
+        saw_provider_usage = False
 
         for chunked_chunks in self._chunk_chunks(chunks):
-            # Add "passage:" prefix for E5 models, use text directly for others
             if self.model.family == "e5":
                 texts_for_chunks = [
                     f"passage: {chunk.text}" for chunk in chunked_chunks
@@ -81,16 +102,30 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                     self.model.family,
                 )
 
-            embeddings_for_chunks: list[list[float]] = await self._get_embeddings(
-                texts=texts_for_chunks
-            )
-            chunk_embedding_list.add(chunked_chunks, embeddings_for_chunks)
+            batch = await self._get_embeddings(texts=texts_for_chunks)
+            chunk_embedding_list.add(chunked_chunks, batch.embeddings)
+            if batch.usage.source == "provider_reported":
+                saw_provider_usage = True
+                total_tokens += batch.usage.total_tokens or 0
+                prompt_tokens += batch.usage.prompt_tokens or 0
 
-        return chunk_embedding_list
+        usage = (
+            EmbeddingUsage(
+                prompt_tokens=prompt_tokens,
+                total_tokens=total_tokens,
+                source="provider_reported",
+            )
+            if saw_provider_usage
+            else EmbeddingUsage(
+                prompt_tokens=None,
+                total_tokens=None,
+                source="missing",
+            )
+        )
+        return EmbeddingBatchResult(embeddings=chunk_embedding_list, usage=usage)
 
     @override
     async def get_embedding_for_query(self, query: str) -> list[float]:
-        # Add "query:" prefix for E5 models, use query directly for others
         max_input = self.model.max_input  # may be None → slice[:None] keeps full string
         if self.model.family == "e5":
             truncated_query = f"query: {query[:max_input]}"
@@ -107,8 +142,8 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                 self.model.family,
             )
 
-        embeddings: list[list[float]] = await self._get_embeddings([truncated_query])
-        return embeddings[0]
+        batch = await self._get_embeddings([truncated_query])
+        return batch.embeddings[0]
 
     @retry(
         wait=wait_random_exponential(min=1, max=20),
@@ -116,26 +151,29 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
         retry=retry_if_not_exception_type(BadRequestException),
         reraise=True,
     )
-    async def _get_embeddings(self, texts: list[str]) -> list[list[float]]:
+    async def _get_embeddings(self, texts: list[str]) -> _LiteLLMEmbeddingBatch:
         try:
-            # Guard against empty input - some APIs require non-empty input
             if not texts or len(texts) == 0:
                 logger.warning(
                     "[LiteLLM] Empty text list provided to embeddings, returning empty result"
                 )
-                return []
+                return _LiteLLMEmbeddingBatch(
+                    embeddings=[],
+                    usage=EmbeddingUsage(
+                        prompt_tokens=None,
+                        total_tokens=None,
+                        source="missing",
+                    ),
+                )
 
-            # Prepare the parameters for the embeddings
             params: dict[str, object] = {
                 "input": texts,
                 "model": self.litellm_model,
             }
 
-            # If dimensions exists on the model, add it to the parameters
             if self.model.dimensions is not None:
                 params["dimensions"] = self.model.dimensions
 
-            # Inject tenant-specific credentials if credential_resolver is provided
             if self.credential_resolver:
                 provider = self.credential_resolver.provider_type
 
@@ -154,7 +192,6 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                         detail=f"Embedding service unavailable: {str(e)}",
                     )
 
-                # Inject endpoint for providers with custom endpoints
                 settings = get_settings()
                 if provider == "infinity":
                     endpoint_fallback = settings.infinity_url
@@ -173,7 +210,6 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                         f"[LiteLLM] {self.litellm_model}: Injecting endpoint for {provider}: {endpoint}"
                     )
 
-                # Inject api_version for Azure embeddings
                 if provider == "azure":
                     api_version = self.credential_resolver.get_credential_field(
                         field="api_version",
@@ -193,8 +229,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                 f"{self._mask_sensitive_params(safe_params)}"
             )
 
-            # Call LiteLLM API to get the embeddings
-            response = await litellm.aembedding(**params)  # pyright: ignore[reportUnknownMemberType] – litellm lacks complete stubs
+            response = await _call_litellm_embedding(params)
 
             logger.debug(
                 f"[LiteLLM] {self.litellm_model}: Embedding request successful"
@@ -239,7 +274,69 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
             )
             raise OpenAIException("Unknown LiteLLM exception") from e
 
-        return [
-            embedding["embedding"]  # pyright: ignore[reportUnknownVariableType,reportUnknownMemberType,reportUnknownArgumentType] – litellm EmbeddingResponse.data items lack full stubs
-            for embedding in response.data  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType] – litellm lacks complete stubs
-        ]
+        embeddings = _embedding_vectors_from_response(response)
+        usage = _embedding_usage_from_response(response)
+        return _LiteLLMEmbeddingBatch(embeddings=embeddings, usage=usage)
+
+
+def _embedding_vectors_from_response(
+    response: _LiteLLMEmbeddingResponse,
+) -> list[list[float]]:
+    data = response.data
+    if not _is_non_string_sequence(data):
+        raise OpenAIException("LiteLLM embedding response did not include data")
+
+    return [_embedding_vector_from_item(item) for item in data]
+
+
+def _embedding_vector_from_item(item: object) -> list[float]:
+    if not isinstance(item, Mapping):
+        raise OpenAIException("LiteLLM embedding response item was not an object")
+
+    mapping = cast(Mapping[object, object], item)
+    embedding = mapping.get("embedding")
+    if not _is_non_string_sequence(embedding):
+        raise OpenAIException("LiteLLM embedding response item lacked embedding")
+
+    vector: list[float] = []
+    for value in embedding:
+        if not _is_embedding_number(value):
+            raise OpenAIException("LiteLLM embedding vector contained a non-number")
+        vector.append(float(value))
+    return vector
+
+
+def _is_non_string_sequence(value: object) -> TypeGuard[Sequence[object]]:
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes))
+
+
+def _is_embedding_number(value: object) -> TypeGuard[int | float]:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+async def _call_litellm_embedding(
+    params: dict[str, object],
+) -> _LiteLLMEmbeddingResponse:
+    aembedding = cast(_LiteLLMEmbeddingCallable, getattr(litellm, "aembedding"))
+    return cast(_LiteLLMEmbeddingResponse, await aembedding(**params))
+
+
+def _embedding_usage_from_response(
+    response: _LiteLLMEmbeddingResponse,
+) -> EmbeddingUsage:
+    usage = response.usage
+    total_tokens = getattr(usage, "total_tokens", None)
+    prompt_tokens = getattr(usage, "prompt_tokens", None)
+
+    if isinstance(total_tokens, int):
+        return EmbeddingUsage(
+            prompt_tokens=prompt_tokens if isinstance(prompt_tokens, int) else None,
+            total_tokens=total_tokens,
+            source="provider_reported",
+        )
+
+    return EmbeddingUsage(
+        prompt_tokens=None,
+        total_tokens=None,
+        source="missing",
+    )

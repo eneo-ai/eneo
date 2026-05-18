@@ -60,6 +60,7 @@ from intric.worker.crawl.persistence import (
 )
 from intric.worker.crawl.preemption import is_job_preempted
 from intric.worker.crawl.recovery import (
+    CrawlRetrySignal,
     calculate_exponential_backoff,
     execute_with_recovery,
     is_invalid_transaction_error,
@@ -134,6 +135,7 @@ __all__ = [
     "is_job_preempted",
     # Recovery - Main API
     "calculate_exponential_backoff",
+    "CrawlRetrySignal",
     "execute_with_recovery",
     "reset_tenant_retry_delay",
     "update_job_retry_stats",

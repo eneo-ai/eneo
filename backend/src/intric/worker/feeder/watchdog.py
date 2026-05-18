@@ -41,6 +41,7 @@ from intric.websites.domain.crawl_lifecycle import (
     no_page_progress_sql_predicate,
 )
 from intric.websites.domain.crawl_run import CrawlType
+from intric.worker.feeder.capacity import CapacityManager
 from intric.worker.feeder.crawl_enqueue import (
     CrawlEnqueueDuplicate,
     CrawlEnqueueFailed,
@@ -246,6 +247,7 @@ class OrphanWatchdog:
         super().__init__()
         self._redis = redis_client
         self._settings = settings
+        self._capacity_manager = CapacityManager(redis_client, settings)
 
     async def run_cleanup(self) -> CleanupMetrics:
         """Execute all cleanup phases with transaction-safe orchestration.
@@ -1088,43 +1090,25 @@ class OrphanWatchdog:
         ttl = self._settings.tenant_worker_semaphore_ttl_seconds
 
         for slot in slots:
-            flag_key = LuaScripts.preacquired_slot_key(slot.job_id)
-            try:
-                # IN_PROGRESS jobs definitely had a slot - always release
-                # QUEUED jobs might not have acquired a slot - check flag first
-                should_release = slot.was_in_progress or await self._redis.get(flag_key)
+            preacquired_tenant_id = await self._capacity_manager.get_preacquired_tenant(
+                slot.job_id
+            )
+            if not slot.was_in_progress and preacquired_tenant_id is None:
+                continue
 
-                if should_release:
-                    await LuaScripts.release_slot(self._redis, slot.tenant_id, ttl)
-                    released += 1
-
-                    # Best-effort flag cleanup
-                    try:
-                        await self._redis.delete(flag_key)
-                    except Exception as flag_exc:
-                        logger.debug(
-                            "Failed to delete slot_preacquired flag",
-                            extra={
-                                "job_id": str(slot.job_id),
-                                "error": str(flag_exc),
-                            },
-                        )
-
-                    logger.debug(
-                        "Released slot for job",
-                        extra={
-                            "job_id": str(slot.job_id),
-                            "tenant_id": str(slot.tenant_id),
-                            "was_in_progress": slot.was_in_progress,
-                        },
-                    )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to release slot for job",
+            released_tenant_id = preacquired_tenant_id or slot.tenant_id
+            if await self._capacity_manager.release_preacquired_slot(
+                job_id=slot.job_id,
+                tenant_id=released_tenant_id,
+                ttl_seconds=ttl,
+            ):
+                released += 1
+                logger.debug(
+                    "Released slot for job",
                     extra={
                         "job_id": str(slot.job_id),
-                        "tenant_id": str(slot.tenant_id),
-                        "error": str(exc),
+                        "tenant_id": str(released_tenant_id),
+                        "was_in_progress": slot.was_in_progress,
                     },
                 )
 

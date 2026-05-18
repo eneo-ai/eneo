@@ -3,8 +3,9 @@ from uuid import uuid4
 
 import pytest
 from arq.connections import ArqRedis
+from arq.jobs import JobStatus
 
-from intric.jobs.job_manager import JobManager
+from intric.jobs.job_manager import JobManager, JobRuntimeStatus
 from intric.jobs.job_models import Task
 from intric.main.exceptions import NotReadyException
 from intric.websites.crawl_dependencies.crawl_models import CrawlTask
@@ -77,6 +78,34 @@ async def test_abort_job_delegates_to_arq_job_abort():
     assert aborted is True
     job_cls.assert_called_once_with(job_id=str(job_id), redis=redis)
     arq_job.abort.assert_awaited_once_with(timeout=12.0, poll_delay=0.25)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("arq_status", "expected_status"),
+    [
+        (JobStatus.deferred, JobRuntimeStatus.DEFERRED),
+        (JobStatus.queued, JobRuntimeStatus.QUEUED),
+        (JobStatus.in_progress, JobRuntimeStatus.IN_PROGRESS),
+        (JobStatus.complete, JobRuntimeStatus.COMPLETE),
+        (JobStatus.not_found, JobRuntimeStatus.NOT_FOUND),
+    ],
+)
+async def test_get_job_status_maps_arq_status_to_runtime_status(
+    arq_status: JobStatus,
+    expected_status: JobRuntimeStatus,
+):
+    job_id = uuid4()
+    manager = JobManager()
+    redis = AsyncMock(spec=ArqRedis)
+    manager._redis = redis
+
+    arq_job = Mock()
+    arq_job.status = AsyncMock(return_value=arq_status)
+    with patch("intric.jobs.job_manager.Job", return_value=arq_job):
+        status = await manager.get_job_status(job_id)
+
+    assert status == expected_status
 
 
 @pytest.mark.asyncio

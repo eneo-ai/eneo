@@ -412,6 +412,10 @@ def test_crawl_service_does_not_own_slot_lua_or_slot_key_literals() -> None:
         re.compile(r"redis\.call\("),
         re.compile(r'f"tenant:\\{[^}]+\\}:active_jobs"'),
         re.compile(r'f"job:\\{[^}]+\\}:slot_preacquired"'),
+        re.compile(r"LuaScripts\.preacquired_slot_key"),
+        re.compile(r"redis_client\.set\("),
+        re.compile(r"redis_client\.get\("),
+        re.compile(r"redis_client\.delete\("),
         re.compile(r"job_service\.fail_job"),
     ]
 

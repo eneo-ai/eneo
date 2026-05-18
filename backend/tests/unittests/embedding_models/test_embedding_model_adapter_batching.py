@@ -1,11 +1,12 @@
 from dataclasses import dataclass
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
 
+from intric.embedding_models.domain.embedding_batch import EmbeddingBatchResult
 from intric.embedding_models.infrastructure.adapters import base as adapter_base
 from intric.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
-from intric.files.chunk_embedding_list import ChunkEmbeddingList
 from intric.info_blobs.info_blob import InfoBlobChunk
 
 
@@ -20,6 +21,7 @@ class _EmbeddingModel:
     max_batch_size: int | None
     dimensions: int | None
     open_source: bool
+    input_cost_per_token: Decimal | None = None
 
 
 class _BatchingAdapter(EmbeddingModelAdapter):
@@ -32,7 +34,7 @@ class _BatchingAdapter(EmbeddingModelAdapter):
     async def get_embedding_for_query(self, query: str) -> list[float]:
         raise NotImplementedError
 
-    async def get_embeddings(self, chunks: list[InfoBlobChunk]) -> ChunkEmbeddingList:
+    async def get_embeddings(self, chunks: list[InfoBlobChunk]) -> EmbeddingBatchResult:
         raise NotImplementedError
 
 

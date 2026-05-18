@@ -150,6 +150,7 @@ async def build_embedding_model_spec(
         max_batch_size=embedding_model.max_batch_size,
         dimensions=embedding_model.dimensions,
         open_source=embedding_model.open_source,
+        input_cost_per_token=embedding_model.input_cost_per_token,
         provider_id=embedding_model.provider_id,
         provider_type=provider_type,
         provider_credentials=provider_credentials,
@@ -161,6 +162,7 @@ async def bootstrap_crawl(
     *,
     session_scope: Callable[[], AbstractAsyncContextManager[AsyncSession]],
     website_id: UUID,
+    run_id: UUID,
     tenant: TenantInDB,
     user: UserInDB,
     tenant_crawler_settings: TenantCrawlerSettings,
@@ -249,6 +251,7 @@ async def bootstrap_crawl(
 
         crawl_context = CrawlContext(
             website_id=website.id,
+            run_id=run_id,
             tenant_id=website.tenant_id,
             tenant_slug=tenant.slug,
             user_id=user.id,

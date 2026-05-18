@@ -6,6 +6,7 @@ Uses Lua scripts for atomic Redis operations to prevent race conditions.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -15,13 +16,23 @@ from intric.tenants.crawler_settings_helper import (
     TenantCrawlerSettings,
     get_crawler_setting,
 )
-from intric.worker.redis.client import redis_scan_match_bytes
+from intric.worker.redis.client import (
+    redis_pipeline,
+    redis_pipeline_items,
+    redis_scan_match_bytes,
+)
 from intric.worker.redis.lua_scripts import LuaScripts
 
 if TYPE_CHECKING:
     import redis.asyncio as aioredis
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class SlotTtlRefreshResult:
+    counter_refreshed: bool
+    flag_refreshed: bool
 
 
 class CapacityManager:
@@ -246,6 +257,81 @@ class CapacityManager:
         except Exception:
             pass  # Best effort cleanup
 
+    async def release_preacquired_slot(
+        self,
+        *,
+        job_id: UUID,
+        tenant_id: UUID,
+        tenant_settings: TenantCrawlerSettings | None = None,
+        ttl_seconds: int | None = None,
+    ) -> bool:
+        """Release a slot that was handed off through a pre-acquired flag."""
+        ttl = (
+            ttl_seconds
+            if ttl_seconds is not None
+            else self.get_slot_ttl(tenant_settings)
+        )
+        try:
+            await LuaScripts.release_slot(self._redis, tenant_id, ttl)
+        except Exception as exc:
+            logger.error(
+                "Failed to release pre-acquired crawl slot",
+                extra={
+                    "job_id": str(job_id),
+                    "tenant_id": str(tenant_id),
+                    "error": str(exc),
+                },
+            )
+            return False
+
+        try:
+            await self._redis.delete(LuaScripts.preacquired_slot_key(job_id))
+        except Exception as exc:
+            logger.debug(
+                "Failed to delete crawl pre-acquired slot flag",
+                extra={"job_id": str(job_id), "error": str(exc)},
+            )
+        return True
+
+    async def refresh_slot_ttl(
+        self,
+        *,
+        tenant_id: UUID,
+        ttl_seconds: int,
+        job_id: UUID,
+    ) -> None:
+        try:
+            await self._redis.expire(LuaScripts.slot_key(tenant_id), ttl_seconds)
+        except Exception as exc:
+            logger.debug(
+                "Failed to refresh pre-acquired crawl slot TTL",
+                extra={
+                    "job_id": str(job_id),
+                    "tenant_id": str(tenant_id),
+                    "error": str(exc),
+                },
+            )
+
+    async def refresh_preacquired_slot_ttls(
+        self,
+        *,
+        job_id: UUID,
+        tenant_id: UUID,
+        ttl_seconds: int,
+    ) -> SlotTtlRefreshResult:
+        async with redis_pipeline(self._redis, transaction=True) as pipe:
+            pipe.expire(LuaScripts.slot_key(tenant_id), ttl_seconds)
+            pipe.expire(LuaScripts.preacquired_slot_key(job_id), ttl_seconds)
+            results = redis_pipeline_items(await pipe.execute())
+
+        counter_refreshed_raw = results[0] if len(results) > 0 else 0
+        flag_refreshed_raw = results[1] if len(results) > 1 else 0
+
+        return SlotTtlRefreshResult(
+            counter_refreshed=counter_refreshed_raw == 1,
+            flag_refreshed=flag_refreshed_raw == 1,
+        )
+
     async def get_preacquired_tenant(self, job_id: UUID) -> UUID | None:
         """Get the tenant ID from a pre-acquired flag.
 
@@ -258,10 +344,28 @@ class CapacityManager:
         key = LuaScripts.preacquired_slot_key(job_id)
         try:
             value = await self._redis.get(key)
-            if value:
-                return UUID(value.decode())
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "Failed to check pre-acquired crawl slot",
+                extra={"job_id": str(job_id), "error": str(exc)},
+            )
+            return None
+
+        if value is None:
+            return None
+
+        try:
+            tenant_id_text = value.decode() if isinstance(value, bytes) else str(value)
+            return UUID(tenant_id_text)
+        except ValueError as exc:
+            logger.warning(
+                "Invalid pre-acquired crawl slot tenant id",
+                extra={
+                    "job_id": str(job_id),
+                    "tenant_id": str(value),
+                    "error": str(exc),
+                },
+            )
         return None
 
     async def get_minimum_feeder_interval(self) -> int:
