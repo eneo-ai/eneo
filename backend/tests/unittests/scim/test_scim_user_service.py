@@ -10,7 +10,7 @@ from intric.scim.domain.errors import (
     ScimValidationError,
 )
 from intric.scim.schemas.common import ScimFilter
-from intric.scim.schemas.user import PatchOperation, ScimUserRequest
+from intric.scim.schemas.user import PatchOperation, ScimUserRequest, ScimUserState
 from intric.scim.services.user_service import ScimUserService
 
 
@@ -20,7 +20,8 @@ def _make_db_user(user_name: str = "jane@example.com", active: bool = True):
     m.external_id = None
     m.username = user_name
     m.email = user_name
-    m.state = "active" if active else "inactive"
+    m.state = ScimUserState.ACTIVE if active else ScimUserState.DELETED
+    m.deleted_at = None if active else datetime.now(timezone.utc)
     m.created_at = datetime.now(timezone.utc)
     m.updated_at = datetime.now(timezone.utc)
     return m
@@ -378,7 +379,7 @@ class TestPatchUser:
             [PatchOperation(op="Replace", path="active", value=False)],
         )
 
-        assert db_user.state == "inactive"
+        assert db_user.state == ScimUserState.DELETED
         repo.update.assert_called_once_with(db_user)
 
     async def test_patch_updates_external_id(self):
@@ -477,7 +478,7 @@ class TestDeleteUser:
         service = _make_service(repo)
         await service.delete_user(db_user.id)
 
-        assert db_user.state == "inactive"
+        assert db_user.state == ScimUserState.DELETED
         repo.update.assert_called_once_with(db_user)
 
     async def test_raises_not_found_for_missing_user(self):
@@ -488,10 +489,13 @@ class TestDeleteUser:
         with pytest.raises(ScimUserNotFoundError):
             await service.delete_user(uuid4())
 
-    async def test_raises_not_found_for_already_inactive_user(self):
+    async def test_already_deleted_user_is_idempotent_noop(self):
         repo = AsyncMock()
         repo.get_by_id.return_value = _make_db_user(active=False)
 
         service = _make_service(repo)
-        with pytest.raises(ScimUserNotFoundError):
-            await service.delete_user(uuid4())
+        # SCIM DELETE on an already-deprovisioned user is idempotent:
+        # it must not raise and must not issue a second write.
+        await service.delete_user(uuid4())
+
+        repo.update.assert_not_called()

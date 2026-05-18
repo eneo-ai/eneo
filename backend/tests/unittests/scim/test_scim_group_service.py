@@ -328,7 +328,7 @@ class TestDeleteGroup:
 
     async def test_raises_not_found(self):
         repo = AsyncMock()
-        repo.get_by_id.return_value = None
+        repo.get_by_id_including_deleted.return_value = None
 
         service = _make_service(repo)
         with pytest.raises(ScimGroupNotFoundError):
