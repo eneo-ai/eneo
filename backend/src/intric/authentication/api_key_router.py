@@ -31,6 +31,7 @@ from intric.authentication.auth_dependencies import (
     require_api_key_permission,
     require_permission,
     require_session_auth,
+    require_user_for_creation,
 )
 from intric.authentication.auth_models import (
     ApiKeyCreatedResponse,
@@ -908,10 +909,11 @@ async def create_api_key(
     _session_guard: None = Depends(require_session_auth),
     _perm_guard: None = Depends(require_permission(Permission.API_KEYS)),
     # Defense-in-depth: require_session_auth rejects API-key callers first, so
-    # this never fires for legitimate traffic. Kept so the route-coverage gate
+    # these never fire for legitimate traffic. Kept so the route-coverage gate
     # (tests/unit/test_api_key_route_coverage.py) stays green and so a future
     # regression of the session guard cannot silently re-open the path.
     _api_key_guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    _user_for_creation: None = Depends(require_user_for_creation),
 ) -> ApiKeyCreatedResponse:
     lifecycle = container.api_key_lifecycle_service()
     try:

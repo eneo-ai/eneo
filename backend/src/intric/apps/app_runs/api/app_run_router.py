@@ -55,7 +55,7 @@ async def delete_app_run(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.APP_RUN_DELETED,
         entity_type=EntityType.APP_RUN,
         entity_id=id,

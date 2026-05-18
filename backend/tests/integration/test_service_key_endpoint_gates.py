@@ -90,6 +90,21 @@ async def tenant_read_service_secret(client, admin_token) -> str:
     return payload["secret"]
 
 
+@pytest.fixture
+async def test_space_id(client, admin_token) -> str:
+    """Real space the test can address. Needed because `forbid_org_space`
+    on the `/spaces/{id}/applications/*` routes resolves the space before
+    our `require_user_for_creation` gate runs — a placeholder UUID would
+    404 there before the gate ever fires."""
+    resp = await client.post(
+        "/api/v1/spaces/",
+        json={"name": f"gate-test-{uuid4().hex[:8]}"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
 # ---------------------------------------------------------------------------
 # 1. Synthesized permissions — admin listings now work for service keys
 # ---------------------------------------------------------------------------
@@ -245,3 +260,98 @@ async def test_legacy_user_api_key_revoke_rejects_service_key(
     )
     assert resp.status_code == 403, resp.text
     assert _has_user_identity_required_code(resp.json()), resp.text
+
+
+# ---------------------------------------------------------------------------
+# 4. Creation gate — service keys cannot create new user-owned resources
+# ---------------------------------------------------------------------------
+
+
+def _has_creation_gate_code(payload: dict) -> bool:
+    detail = payload.get("detail")
+    if isinstance(detail, dict):
+        return detail.get("code") == "service_key_cannot_create_resources"
+    if isinstance(detail, str):
+        return "service_key_cannot_create_resources" in detail
+    return payload.get("code") == "service_key_cannot_create_resources"
+
+
+# (method, path_template, json_body) — `{space_id}` in path_template is
+# replaced with a real space id from the fixture. The `/spaces/{id}/applications/*`
+# routes carry `Depends(forbid_org_space)` which resolves the space before
+# our creation gate runs, so a placeholder id would 404 there. Top-level
+# routes without a path resolver use a stub UUID directly.
+_STUB_ID = "00000000-0000-0000-0000-000000000001"
+_CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
+    ("POST", "/api/v1/assistants/", {"name": "x", "space_id": _STUB_ID}),
+    ("POST", "/api/v1/spaces/", {"name": "x"}),
+    (
+        "POST",
+        "/api/v1/spaces/{space_id}/applications/assistants/",
+        {"name": "x"},
+    ),
+    (
+        "POST",
+        "/api/v1/spaces/{space_id}/applications/group-chats/",
+        {"name": "x"},
+    ),
+    (
+        "POST",
+        "/api/v1/spaces/{space_id}/applications/apps/",
+        {"name": "x"},
+    ),
+    (
+        "POST",
+        "/api/v1/spaces/{space_id}/applications/services/",
+        {"name": "x"},
+    ),
+    (
+        "POST",
+        "/api/v1/spaces/{space_id}/knowledge/groups/",
+        {"name": "x"},
+    ),
+    (
+        "POST",
+        "/api/v1/spaces/{space_id}/knowledge/websites/",
+        {"name": "x", "url": "https://example.com", "space_id": _STUB_ID},
+    ),
+    (
+        "POST",
+        "/api/v1/groups/",
+        {"name": "x", "embedding_model": {"id": _STUB_ID}},
+    ),
+    ("POST", f"/api/v1/groups/{_STUB_ID}/info-blobs/", {"info_blobs": []}),
+    ("POST", "/api/v1/roles/", {"name": "x", "permissions": []}),
+    ("POST", "/api/v1/mcp-servers/", {"name": "x", "url": "https://example.com"}),
+]
+
+
+@pytest.mark.parametrize("method,path_template,body", _CREATION_ENDPOINTS)
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_service_key_creation_endpoints_return_403_with_gate_code(
+    client, tenant_admin_service_secret, test_space_id, method, path_template, body
+):
+    """Every gated create endpoint returns 403 with the creation-gate code
+    when called by a service key, regardless of body validity."""
+    path = path_template.format(space_id=test_space_id)
+    resp = await client.request(
+        method,
+        path,
+        json=body,
+        headers={"X-API-Key": tenant_admin_service_secret},
+    )
+    assert resp.status_code == 403, f"{method} {path}: {resp.status_code} {resp.text}"
+    assert _has_creation_gate_code(resp.json()), f"{method} {path}: {resp.text}"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_bearer_user_can_create_space(client, admin_token):
+    """Sanity check — the creation gate must NOT regress bearer auth."""
+    resp = await client.post(
+        "/api/v1/spaces/",
+        json={"name": f"control-space-{uuid4().hex[:8]}"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 201, resp.text

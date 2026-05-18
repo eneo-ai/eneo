@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Query
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.authentication.auth_dependencies import require_user_for_creation
 from intric.main.container.container import Container
 from intric.main.exceptions import BadRequestException
 from intric.main.models import NOT_PROVIDED, NotProvided, PaginatedResponse
@@ -111,7 +112,7 @@ async def enable_mcp_for_tenant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_ENABLED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=settings.id,
@@ -170,7 +171,7 @@ async def disable_mcp_for_tenant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_DISABLED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=mcp_server_id,
@@ -210,7 +211,7 @@ async def update_tenant_tool_enabled(
     )
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=action,
         entity_type=EntityType.MCP_SERVER_TOOL,
         entity_id=tool.id,
@@ -258,6 +259,7 @@ async def get_mcp_server(
 async def create_mcp_server(
     data: MCPServerCreate,
     container: Container = _WITH_USER,
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     """Create a new MCP server in global catalog (admin only).
 
@@ -299,7 +301,7 @@ async def create_mcp_server(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_CREATED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=result.server.id,
@@ -398,7 +400,7 @@ async def update_mcp_server(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_UPDATED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=mcp_server.id,
@@ -431,7 +433,7 @@ async def delete_mcp_server(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_DELETED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=id,
@@ -540,7 +542,7 @@ async def approve_tool_changes(
     mcp_server = await service.get_mcp_server(id)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_UPDATED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=id,
@@ -585,7 +587,7 @@ async def reject_tool_changes(
     mcp_server = await service.get_mcp_server(id)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_UPDATED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=id,
@@ -624,7 +626,7 @@ async def approve_all_tool_changes(
     mcp_server = await service.get_mcp_server(id)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_UPDATED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=id,
@@ -668,7 +670,7 @@ async def update_tool_default_enabled(
     )
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=action,
         entity_type=EntityType.MCP_SERVER_TOOL,
         entity_id=tool.id,

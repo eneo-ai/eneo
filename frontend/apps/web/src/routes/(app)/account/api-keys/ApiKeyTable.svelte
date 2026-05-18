@@ -243,7 +243,11 @@
 
                   <!-- Service key badge -->
                   {#if key.ownership === "service"}
-                    <Badge variant="outline" class="text-muted h-auto gap-1.5 px-2 py-0.5">
+                    <Badge
+                      variant="outline"
+                      class="text-muted h-auto gap-1.5 px-2 py-0.5"
+                      title={m.api_keys_ownership_service_badge_tooltip()}
+                    >
                       <Server class="h-3 w-3" />
                       {m.api_keys_ownership_service_badge()}
                     </Badge>
