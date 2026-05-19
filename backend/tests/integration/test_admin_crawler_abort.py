@@ -473,8 +473,7 @@ async def test_admin_abort_running_crawl_does_not_release_worker_owned_slot(
     out via the slot-release reactor. The admin abort path must NOT decrement
     the counter or delete the preacquired flag, otherwise the worker's own
     release on exit double-decrements the counter and lets a future crawl
-    exceed the configured concurrency limit. Regression test against the
-    finding raised by codex peer review of the running-abort tranche."""
+    exceed the configured concurrency limit."""
     _install_audit_recorder(monkeypatch)
 
     async def record_abort(

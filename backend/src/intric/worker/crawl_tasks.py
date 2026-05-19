@@ -247,10 +247,12 @@ def _crawl_task_exception_outcome(exc: BaseException) -> CrawlOutcomeCode:
     ):
         # Distinguish heartbeat-driven terminations from `UNKNOWN_CRAWL_ERROR`
         # so operators can see "the crawler stopped talking" as a specific
-        # failure mode in the admin recent-failures view. Admin-abort
-        # preemptions (cause=ADMIN_ABORT) fall through because the abort flow
-        # already commits `CRAWL_ABORTED` independently.
+        # failure mode in the admin recent-failures view. Scrapy-level
+        # admin-abort preemptions (cause=ADMIN_ABORT) fall through to the
+        # worker-owned `JobPreemptedError` mapping below.
         return CrawlOutcomeCode.CRAWL_HEARTBEAT_FAILED
+    if isinstance(exc, JobPreemptedError):
+        return CrawlOutcomeCode.CRAWL_ABORTED
     return CrawlOutcomeCode.UNKNOWN_CRAWL_ERROR
 
 
@@ -372,9 +374,11 @@ async def queue_website_crawls(container: Container):
             f"Processing {len(websites)} websites due for crawling",
             extra={
                 "feeder_enabled": settings.crawl_feeder_enabled,
-                "mode": "pending_queue"
-                if settings.crawl_feeder_enabled
-                else "direct_enqueue",
+                "mode": (
+                    "pending_queue"
+                    if settings.crawl_feeder_enabled
+                    else "direct_enqueue"
+                ),
                 "website_count": len(websites),
             },
         )
@@ -1071,9 +1075,11 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             "job_id": str(job_id),
                             "website_id": str(params.website_id),
                             "tenant_id": str(crawl_context.tenant_id),
-                            "lastmod_cutoff": sitemap_lastmod_skip_cutoff.isoformat()
-                            if sitemap_lastmod_skip_cutoff is not None
-                            else None,
+                            "lastmod_cutoff": (
+                                sitemap_lastmod_skip_cutoff.isoformat()
+                                if sitemap_lastmod_skip_cutoff is not None
+                                else None
+                            ),
                             "retained_count": crawl.source_retained_count,
                             "caveat": "Trusts upstream sitemap lastmod values",
                         },
@@ -1277,6 +1283,26 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
             timings["cleanup_deleted"] = time.time() - cleanup_start
 
+            async def _do_preemption_check(sess: AsyncSession) -> bool:
+                return await is_job_preempted(sess, job_id=job_id)
+
+            job_was_preempted = await execute_with_recovery(
+                operation_name="preemption_check",
+                operation=_do_preemption_check,
+            )
+
+            if job_was_preempted:
+                logger.warning(
+                    "Crawl job was preempted after cleanup - skipping website and crawl-run finalization",
+                    extra={
+                        "job_id": str(job_id),
+                        "website_id": str(params.website_id),
+                        "pages_crawled": num_pages,
+                        "files_crawled": num_files,
+                    },
+                )
+                raise JobPreemptedError(job_id)
+
             update_start = time.time()
 
             async def _do_update_size(sess: AsyncSession) -> None:
@@ -1336,29 +1362,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     crawl_termination_reason if crawl_is_partial else None
                 ),
             )
-
-            async def _do_preemption_check(sess: AsyncSession) -> bool:
-                return await is_job_preempted(sess, job_id=job_id)
-
-            job_was_preempted = await execute_with_recovery(
-                operation_name="preemption_check",
-                operation=_do_preemption_check,
-            )
-
-            if job_was_preempted:
-                logger.warning(
-                    "Crawl job was preempted during execution - aborting without writing results",
-                    extra={
-                        "job_id": str(job_id),
-                        "website_id": str(params.website_id),
-                        "pages_crawled": num_pages,
-                        "files_crawled": num_files,
-                    },
-                )
-                # Don't write results - exit gracefully
-                # Note: Downloaded pages/files were already processed, but we won't update
-                # the crawl_run or website stats since a new crawl should handle that
-                return {"status": "preempted", "pages_crawled": num_pages}
 
             failure_summary = dict(failure_counts) if failure_counts else None
             crawl_run_outcome_code = classify_crawl_outcome(
@@ -1518,9 +1521,11 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             extra={
                 "job_id": str(job_id),
                 "tenant_id": str(tenant.id) if tenant is not None else None,
-                "preacquired_tenant_id": str(preacquired_tenant_id)
-                if preacquired_tenant_id is not None
-                else None,
+                "preacquired_tenant_id": (
+                    str(preacquired_tenant_id)
+                    if preacquired_tenant_id is not None
+                    else None
+                ),
                 "slot_release_path": slot_release.path.value,
                 "slot_released": slot_release.released,
             },

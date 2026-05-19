@@ -283,11 +283,11 @@ async def test_real_loop_smoke_cancels_real_pending_task() -> None:
 
 @pytest.mark.asyncio
 async def test_install_wraps_existing_signal_handler_and_first_press_forwards() -> None:
-    """Codex AB-tier finding: the install path is the riskier surface
-    (private-attribute walk, wrap-of-real-handler, sentinel logic) and
-    was previously untested. Installing over a real `add_signal_handler`
-    and asserting the captured handler still fires on press 1 pins the
-    contract that the wrap is transparent for graceful drain.
+    """Installing over a real `add_signal_handler` must remain transparent.
+
+    This path walks private loop attributes and wraps the existing handler,
+    so it is the easiest place to accidentally break ARQ's graceful drain
+    contract while changing signal escalation behavior.
     """
     loop = asyncio.get_running_loop()
     drain_called: list[int] = []

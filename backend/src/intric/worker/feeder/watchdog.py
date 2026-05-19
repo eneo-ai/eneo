@@ -817,15 +817,16 @@ class OrphanWatchdog:
         else:
             status = status_result.status
 
-        # Safe fallback: ARQ deduplicates by job_id, while not re-enqueueing can leave
-        # a genuinely missing crawl stuck indefinitely.
-        if status != CrawlJobStatus.NOT_FOUND:
+        if status.is_live:
             logger.info(
-                "Job already in ARQ, skipping re-queue",
+                "Job is still live in queue runtime, skipping watchdog re-queue",
                 extra={"job_id": str(job_id), "crawl_job_status": status.value},
             )
             return False
 
+        # ARQ can keep terminal results for its result TTL. In that window
+        # enqueue_crawl_job reports a duplicate; treating it as a no-op lets
+        # the next watchdog pass retry only if the DB job still needs rescue.
         result = await enqueue_crawl_job(
             job_id=job_id,
             user_id=user_id,

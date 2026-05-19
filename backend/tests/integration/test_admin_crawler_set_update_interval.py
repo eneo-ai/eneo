@@ -261,8 +261,7 @@ async def test_set_update_interval_resume_from_auto_disable_clears_failure_state
     recurring schedule must also reset `consecutive_failures` and
     `next_retry_at`. Otherwise the next crawl failure trips auto-disable
     again immediately and operators have no recovery path short of also
-    calling `/reset-circuit-breaker`. Regression test against codex AB
-    finding for the interval-change tranche."""
+    calling `/reset-circuit-breaker`."""
     audit_calls = _install_audit_recorder(monkeypatch)
 
     async with db_session() as session:

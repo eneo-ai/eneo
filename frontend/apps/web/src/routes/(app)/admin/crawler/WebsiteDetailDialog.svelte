@@ -35,6 +35,7 @@
     getCrawlerTenantWebsiteInventorySpaceLabel,
     getCrawlerTenantWebsiteInventoryStatusLabel,
     getWebsiteDetailDialogActionVisibility,
+    isWebsiteDetailIntervalDirty,
     type CrawlerTenantWebsiteInventoryItem,
     type CrawlerTenantWebsiteInventoryResponse
   } from "$lib/features/admin/crawlerTenantWebsiteInventory";
@@ -79,31 +80,6 @@
     onOpenDeleteDialog: (item: CrawlerTenantWebsiteInventoryItem) => void;
   } = $props();
 
-  // Inline schedule edit state. Writable derived: re-evaluates from
-  // the candidate whenever the operator opens a different row, but
-  // user mutation (via Select) overrides until the source changes
-  // again. This is the canonical Svelte 5 pattern instead of
-  // $state + $effect (which the linter rightly rejects as redundant
-  // for this use case).
-  let intervalDraft = $derived<CrawlerUpdateInterval | null>(
-    (candidate?.update_interval as CrawlerUpdateInterval | undefined) ?? null
-  );
-  const intervalIsDirty = $derived(
-    candidate !== null &&
-      intervalDraft !== null &&
-      intervalDraft !== (candidate.update_interval as CrawlerUpdateInterval)
-  );
-
-  async function handleSaveInterval() {
-    if (candidate === null || intervalDraft === null || !intervalIsDirty) return;
-    await onSaveInterval(candidate.website_id, intervalDraft);
-  }
-
-  function resetIntervalDraft() {
-    if (candidate === null) return;
-    intervalDraft = candidate.update_interval as CrawlerUpdateInterval;
-  }
-
   // The dialog is "controlled" via candidate. Untracked snapshot of
   // `candidate` prevents the onOpenChange→onClose loop when the
   // parent already nulled the candidate (e.g. via Esc → onClose).
@@ -124,6 +100,28 @@
       : (visibleInventory?.items.find((item) => item.website_id === candidate?.website_id) ??
           candidate)
   );
+
+  // Derive from the re-resolved row so a refreshed inventory response
+  // clears the dirty state after an inline interval save.
+  let intervalDraft = $derived<CrawlerUpdateInterval | null>(
+    (candidateView?.update_interval as CrawlerUpdateInterval | undefined) ?? null
+  );
+  const intervalIsDirty = $derived(
+    isWebsiteDetailIntervalDirty({
+      currentInterval: candidateView?.update_interval as CrawlerUpdateInterval | undefined,
+      draftInterval: intervalDraft
+    })
+  );
+
+  async function handleSaveInterval() {
+    if (candidateView === null || intervalDraft === null || !intervalIsDirty) return;
+    await onSaveInterval(candidateView.website_id, intervalDraft);
+  }
+
+  function resetIntervalDraft() {
+    if (candidateView === null) return;
+    intervalDraft = candidateView.update_interval as CrawlerUpdateInterval;
+  }
 
   const relativeFormatter = createCrawlerRelativeTimeFormatter();
 

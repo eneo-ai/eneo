@@ -1,10 +1,9 @@
 """Heartbeat preemption loop: bounded-latency stop on admin abort.
 
-This guards the safety invariant codex peer review surfaced after the
-running-abort tranche: when the heartbeat callback raises
-`CrawlPreempted`, the crawler must (1) stop the Scrapy engine via
-`manager.stop_crawl(reason=...)` within one heartbeat interval, and
-(2) propagate the preemption exception rather than swallowing it.
+When the heartbeat callback raises `CrawlPreempted`, the crawler must
+(1) stop the Scrapy engine via `manager.stop_crawl(reason=...)` within
+one heartbeat interval, and (2) propagate the preemption exception rather
+than swallowing it.
 
 The broad `except Exception` swallow that previously lived at
 `crawler.py:741` and `:856` ate this signal and let the worker keep
@@ -128,17 +127,14 @@ async def test_heartbeat_loop_propagates_preemption_and_signals_stop_crawl() -> 
 
 @pytest.mark.asyncio
 async def test_heartbeat_task_is_cancellable_when_callback_is_stuck() -> None:
-    """Codex AB regression guard: the outer `_run_crawl_with_timeout` /
-    `_run_sitemap_crawl_with_timeout` pattern wraps the heartbeat helper
-    in an `asyncio.Task` and is expected to cancel it during teardown if
-    the heartbeat callback is stuck mid-await on a degraded dependency
-    (slow Redis, stalled DB connection). Without that cancel, teardown
-    would block on the client's own connection timeout instead of
-    completing promptly.
+    """The crawler timeout wrapper must cancel heartbeat teardown promptly.
 
-    This test pins the helper's cancellability so a future refactor that
-    accidentally drops `heartbeat_task.cancel()` (the original defect
-    codex peer review surfaced) is caught immediately."""
+    The outer `_run_crawl_with_timeout` / `_run_sitemap_crawl_with_timeout`
+    pattern wraps the heartbeat helper in an `asyncio.Task`. If the callback
+    is stuck mid-await on a degraded dependency (slow Redis, stalled DB
+    connection), teardown must cancel the task instead of waiting for the
+    client's own connection timeout.
+    """
     manager = _FakeCrawlManager()
     crawl_done = asyncio.Event()
     callback_started = asyncio.Event()

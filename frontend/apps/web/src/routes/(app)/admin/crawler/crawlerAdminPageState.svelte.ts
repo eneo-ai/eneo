@@ -36,21 +36,31 @@ type RetryCandidate = {
   website_url: string | null;
 };
 
-type IntervalEditCandidate = {
+export type IntervalEditCandidate = {
   website_id: string;
   website_name: string | null;
   website_url: string | null;
   update_interval: CrawlerUpdateInterval;
+  source: IntervalEditSource;
 };
 
 export type DetailRef = {
   set: (item: CrawlerTenantWebsiteInventoryItem | null) => void;
 };
 
+export type IntervalEditSource = "failure_inventory" | "active_inventory" | "tenant_inventory";
+
+export type CrawlerDialogRefreshRef = {
+  visibleActiveInventory: () => Promise<void>;
+  visibleFailureClusters: () => Promise<void>;
+  visibleTenantWebsiteInventory: () => Promise<void>;
+};
+
 async function invalidateAfterWebsiteDelete(): Promise<void> {
   await Promise.all([
     invalidate("admin:crawler-tenant-website-inventory"),
     invalidate("admin:crawler-failure-inventory"),
+    invalidate("admin:crawler-failure-clusters"),
     invalidate("admin:crawler-active-inventory"),
     invalidate("admin:crawler-scheduled"),
     invalidate("admin:crawler-website-processing")
@@ -68,17 +78,20 @@ async function invalidateAfterCircuitReset(): Promise<void> {
   await invalidate("admin:crawler-failure-inventory");
 }
 
-async function invalidateAfterIntervalChange(
-  options: { includeInventory: boolean } = { includeInventory: false }
-): Promise<void> {
+export function getCrawlerIntervalChangeInvalidationKeys(
+  source: IntervalEditSource
+): readonly string[] {
   const keys = [
     "admin:crawler-failure-inventory",
     "admin:crawler-scheduled",
     "admin:crawler-website-processing",
     "admin:crawler-active-inventory"
   ];
-  if (options.includeInventory) keys.unshift("admin:crawler-tenant-website-inventory");
-  await Promise.all(keys.map((key) => invalidate(key)));
+  return source === "tenant_inventory" ? ["admin:crawler-tenant-website-inventory", ...keys] : keys;
+}
+
+async function invalidateAfterIntervalChange(source: IntervalEditSource): Promise<void> {
+  await Promise.all(getCrawlerIntervalChangeInvalidationKeys(source).map((key) => invalidate(key)));
 }
 
 async function invalidateAfterRetry(): Promise<void> {
@@ -104,7 +117,11 @@ export type CrawlerSelectionRef = {
   delete: (id: string) => void;
 };
 
-export function createCrawlerDialogState(intric: Intric, detailRef: DetailRef) {
+export function createCrawlerDialogState(
+  intric: Intric,
+  detailRef: DetailRef,
+  refreshRef: CrawlerDialogRefreshRef
+) {
   let deleteDialogOpen = $state(false);
   let deleteCandidate = $state<CrawlerTenantWebsiteInventoryItem | null>(null);
   let deleteConfirmInput = $state("");
@@ -162,7 +179,8 @@ export function createCrawlerDialogState(intric: Intric, detailRef: DetailRef) {
       website_id: item.website_id,
       website_name: item.website_name,
       website_url: item.website_url,
-      update_interval: item.update_interval as CrawlerUpdateInterval
+      update_interval: item.update_interval as CrawlerUpdateInterval,
+      source: "failure_inventory"
     });
   }
 
@@ -172,7 +190,8 @@ export function createCrawlerDialogState(intric: Intric, detailRef: DetailRef) {
       website_id: item.website_id,
       website_name: item.website_name,
       website_url: null,
-      update_interval: item.update_interval as CrawlerUpdateInterval
+      update_interval: item.update_interval as CrawlerUpdateInterval,
+      source: "active_inventory"
     });
   }
 
@@ -182,7 +201,8 @@ export function createCrawlerDialogState(intric: Intric, detailRef: DetailRef) {
       website_id: item.website_id,
       website_name: item.name,
       website_url: item.url,
-      update_interval: item.update_interval as CrawlerUpdateInterval
+      update_interval: item.update_interval as CrawlerUpdateInterval,
+      source: "tenant_inventory"
     });
   }
 
@@ -244,6 +264,10 @@ export function createCrawlerDialogState(intric: Intric, detailRef: DetailRef) {
       deleteConfirmInput = "";
       detailRef.set(null);
       await invalidateAfterWebsiteDelete();
+      await Promise.all([
+        refreshRef.visibleTenantWebsiteInventory(),
+        refreshRef.visibleFailureClusters()
+      ]);
     } catch (error) {
       toastError(error, m.crawler_website_delete_failed());
     } finally {
@@ -264,6 +288,7 @@ export function createCrawlerDialogState(intric: Intric, detailRef: DetailRef) {
         wasRunning ? m.crawler_abort_success_running() : m.crawler_abort_success_queued()
       );
       await invalidateAfterAbort();
+      await refreshRef.visibleActiveInventory();
     } catch (error) {
       const conflictMessage = getCrawlerAbortConflictMessage(error);
       if (conflictMessage) {
@@ -290,6 +315,7 @@ export function createCrawlerDialogState(intric: Intric, detailRef: DetailRef) {
       circuitResetCandidate = null;
       toast.success(copy.successMessage);
       await invalidateAfterCircuitReset();
+      await refreshRef.visibleFailureClusters();
     } catch (error) {
       toastError(error, copy.failureMessage);
     } finally {
@@ -314,7 +340,10 @@ export function createCrawlerDialogState(intric: Intric, detailRef: DetailRef) {
       intervalDialogOpen = false;
       intervalCandidate = null;
       toast.success(m.crawler_update_interval_success({ website: label }));
-      await invalidateAfterIntervalChange();
+      await invalidateAfterIntervalChange(candidate.source);
+      if (candidate.source === "tenant_inventory") {
+        await refreshRef.visibleTenantWebsiteInventory();
+      }
     } catch (error) {
       toastError(error, m.crawler_update_interval_failed());
     } finally {
@@ -349,7 +378,8 @@ export function createCrawlerDialogState(intric: Intric, detailRef: DetailRef) {
     try {
       await intric.crawlerAdmin.setUpdateInterval(websiteId, newInterval);
       toast.success(m.crawler_update_interval_success({ website: detailLabel }));
-      await invalidateAfterIntervalChange({ includeInventory: true });
+      await invalidateAfterIntervalChange("tenant_inventory");
+      await refreshRef.visibleTenantWebsiteInventory();
     } catch (error) {
       toastError(error, m.crawler_update_interval_failed());
     } finally {

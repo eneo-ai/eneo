@@ -17,6 +17,7 @@ import {
   getCrawlerTenantWebsiteInventoryStatusLabel,
   getWebsiteDetailDialogActionVisibility,
   isCrawlerTenantWebsiteInventoryPageSize,
+  isWebsiteDetailIntervalDirty,
   offsetFromCrawlerTenantWebsiteInventoryPage,
   pageFromCrawlerTenantWebsiteInventoryOffset
 } from "./crawlerTenantWebsiteInventory";
@@ -304,4 +305,25 @@ test("action visibility: AUTO_DISABLED candidate + active job shows all destruct
     abort: true,
     delete: true
   });
+});
+
+test("detail interval dirty state follows the refreshed inventory row", () => {
+  expect(
+    isWebsiteDetailIntervalDirty({
+      currentInterval: "weekly",
+      draftInterval: "daily"
+    })
+  ).toBe(true);
+  expect(
+    isWebsiteDetailIntervalDirty({
+      currentInterval: "weekly",
+      draftInterval: "weekly"
+    })
+  ).toBe(false);
+  expect(
+    isWebsiteDetailIntervalDirty({
+      currentInterval: null,
+      draftInterval: "weekly"
+    })
+  ).toBe(false);
 });

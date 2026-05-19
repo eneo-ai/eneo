@@ -198,8 +198,7 @@ async def test_active_inventory_excludes_in_progress_jobs_with_finished_at_set(
     finished_at!=NULL is an inconsistent terminal state (the worker
     should have flipped status before setting finished_at). The active
     query excludes such rows so the Python lifecycle classifier and the
-    SQL filter cannot disagree on whether the row is RUNNING or TERMINAL.
-    Codex AB-tier finding from the lifecycle-filter review."""
+    SQL filter cannot disagree on whether the row is RUNNING or TERMINAL."""
     now = datetime.now(timezone.utc)
 
     async with db_session() as session:

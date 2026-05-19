@@ -5,7 +5,7 @@ crawler-layer terminal stop signal. Without these translations, the
 crawler module would either need to import worker exception types
 (`JobPreemptedError`, `HeartbeatFailedError`) — breaking layer
 separation — or fall back to a broad `except Exception` which is the
-defect codex peer review surfaced in tranche 3.
+kind of bug this seam is meant to prevent.
 """
 
 from __future__ import annotations

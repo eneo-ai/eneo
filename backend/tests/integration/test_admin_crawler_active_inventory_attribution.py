@@ -252,8 +252,7 @@ async def test_active_inventory_attribution_drops_cross_tenant_references(
     ownership), the attribution fields must render as NULL so no foreign
     tenant data leaks through the JOIN. The crawl row itself stays visible
     — the operator still needs to see and abort it — but every attribution
-    field renders nullably together rather than partial-leaking. Codex
-    AB-tier finding from the attribution sub-tranche review."""
+    field renders nullably together rather than partial-leaking."""
     now = datetime.now(timezone.utc) - timedelta(minutes=2)
 
     async with db_session() as session:

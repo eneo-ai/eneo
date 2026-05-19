@@ -9,6 +9,7 @@
  */
 import type { components } from "@intric/intric-js";
 import { m } from "$lib/paraglide/messages";
+import type { CrawlerUpdateInterval } from "./crawlerUpdateInterval";
 
 export type CrawlerTenantWebsiteInventoryResponse =
   components["schemas"]["CrawlerTenantWebsiteInventoryResponse"];
@@ -172,4 +173,16 @@ export function getWebsiteDetailDialogActionVisibility(args: {
     abort: args.hasActiveJob,
     delete: true
   };
+}
+
+export function isWebsiteDetailIntervalDirty(args: {
+  currentInterval: CrawlerUpdateInterval | null | undefined;
+  draftInterval: CrawlerUpdateInterval | null;
+}): boolean {
+  return (
+    args.currentInterval !== null &&
+    args.currentInterval !== undefined &&
+    args.draftInterval !== null &&
+    args.draftInterval !== args.currentInterval
+  );
 }

@@ -66,6 +66,15 @@ def test_direct_enqueue_failure_message_is_bounded_and_specific() -> None:
     assert len(crawl_direct_enqueue_failure_message(RuntimeError("x" * 600))) == 512
 
 
+def test_job_preempted_exception_records_aborted_outcome() -> None:
+    assert (
+        crawl_tasks._crawl_task_exception_outcome(
+            crawl_tasks.JobPreemptedError(uuid4())
+        )
+        == CrawlOutcomeCode.CRAWL_ABORTED
+    )
+
+
 @dataclass
 class _FakeExecuteResult:
     rowcount: int = 1
@@ -161,6 +170,21 @@ async def _release_crawl_slot_after_task(
     *_args: object, **_kwargs: object
 ) -> CrawlSlotReleaseResult:
     return CrawlSlotReleaseResult(released=False, path=CrawlSlotReleasePath.NOOP)
+
+
+def _patch_execute_with_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+    execute_with_recovery: object,
+) -> None:
+    monkeypatch.setattr(crawl_tasks, "execute_with_recovery", execute_with_recovery)
+
+    # terminal_zero_output imports the recovery seam at module scope, so
+    # tests that steer recovery sessions must patch both owners.
+    from intric.worker.crawl import terminal_zero_output
+
+    monkeypatch.setattr(
+        terminal_zero_output, "execute_with_recovery", execute_with_recovery
+    )
 
 
 class _FakeJobRepo:
@@ -371,15 +395,7 @@ async def test_terminal_no_output_records_failed_outcome_without_stale_cleanup(
 
     monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
     monkeypatch.setattr(crawl_tasks, "try_duplicate_skip", try_duplicate_skip_fake)
-    monkeypatch.setattr(crawl_tasks, "execute_with_recovery", execute_with_recovery)
-    # The zero-output terminator owns its own execute_with_recovery import
-    # since the extraction tranche; patch it so the test's controlled
-    # recovery seam still flows through both crawl_task and the new owner.
-    from intric.worker.crawl import terminal_zero_output
-
-    monkeypatch.setattr(
-        terminal_zero_output, "execute_with_recovery", execute_with_recovery
-    )
+    _patch_execute_with_recovery(monkeypatch, execute_with_recovery)
     monkeypatch.setattr(
         crawl_tasks,
         "release_crawl_slot_after_task",
@@ -495,6 +511,7 @@ async def test_sitemap_source_skip_cutoff_is_passed_to_crawler_when_enabled(
             max_batch_size=32,
             dimensions=1536,
             open_source=False,
+            input_cost_per_token=None,
             provider_id=None,
         ),
         http_auth_username=None,
@@ -548,15 +565,7 @@ async def test_sitemap_source_skip_cutoff_is_passed_to_crawler_when_enabled(
 
     monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
     monkeypatch.setattr(crawl_tasks, "try_duplicate_skip", try_duplicate_skip_fake)
-    monkeypatch.setattr(crawl_tasks, "execute_with_recovery", execute_with_recovery)
-    # The zero-output terminator owns its own execute_with_recovery import
-    # since the extraction tranche; patch it so the test's controlled
-    # recovery seam still flows through both crawl_task and the new owner.
-    from intric.worker.crawl import terminal_zero_output
-
-    monkeypatch.setattr(
-        terminal_zero_output, "execute_with_recovery", execute_with_recovery
-    )
+    _patch_execute_with_recovery(monkeypatch, execute_with_recovery)
     monkeypatch.setattr(
         crawl_tasks,
         "release_crawl_slot_after_task",
@@ -607,6 +616,127 @@ async def test_sitemap_source_skip_cutoff_is_passed_to_crawler_when_enabled(
 
 
 @pytest.mark.asyncio
+async def test_post_cleanup_preemption_skips_website_timestamp_updates(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source_verified_at = datetime.fromisoformat("2026-05-12T08:00:00+00:00")
+    tenant = SimpleNamespace(
+        id=uuid4(),
+        slug="test",
+        crawler_settings={
+            "crawl_sitemap_lastmod_skip_enabled": True,
+            "crawl_heartbeat_interval_seconds": 60,
+        },
+    )
+    user = SimpleNamespace(id=uuid4())
+    embedding_model_id = uuid4()
+    retained_url = "https://example.com/stable"
+    website = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=tenant.id,
+        url="https://example.com",
+        last_crawled_at=None,
+        embedding_model=SimpleNamespace(
+            id=embedding_model_id,
+            name="text-embedding-3-small",
+            litellm_model_name="openai/text-embedding-3-small",
+            family=None,
+            max_input=8191,
+            max_batch_size=32,
+            dimensions=1536,
+            open_source=False,
+            input_cost_per_token=None,
+            provider_id=None,
+        ),
+        http_auth_username=None,
+        encrypted_auth_password=None,
+        user_id=user.id,
+        name="Example",
+        last_source_verified_at=source_verified_at,
+    )
+    crawler = _FakeCrawler(
+        is_partial=False,
+        termination_reason="completed",
+        source_retained_urls=frozenset({retained_url}),
+    )
+    audit_service = _FakeAuditService()
+    container = _FakeContainer(
+        tenant=tenant,
+        user=user,
+        audit_service=audit_service,
+        crawler=crawler,
+    )
+    preemption_results = iter([False, True])
+    operations: list[str] = []
+    recovery_sessions: list[_FakeRecoverySession] = []
+
+    @asynccontextmanager
+    async def session_scope() -> AsyncIterator[_FakeBootstrapSession]:
+        yield _FakeBootstrapSession(
+            website,
+            rows=((retained_url, b"hash", embedding_model_id),),
+        )
+
+    async def try_duplicate_skip_fake(
+        *,
+        session_scope: object,
+        job_id: UUID,
+        run_id: UUID,
+        website_id: UUID,
+    ) -> None:
+        del session_scope, job_id, run_id
+        assert website_id == website.id
+        return None
+
+    async def is_job_preempted(*_args: object, **_kwargs: object) -> bool:
+        return next(preemption_results)
+
+    async def execute_with_recovery(
+        *,
+        operation_name: str,
+        operation,
+    ):
+        operations.append(operation_name)
+        recovery_session = _FakeRecoverySession()
+        recovery_sessions.append(recovery_session)
+        return await operation(recovery_session)
+
+    monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
+    monkeypatch.setattr(crawl_tasks, "try_duplicate_skip", try_duplicate_skip_fake)
+    monkeypatch.setattr(crawl_tasks, "is_job_preempted", is_job_preempted)
+    _patch_execute_with_recovery(monkeypatch, execute_with_recovery)
+    monkeypatch.setattr(
+        crawl_tasks,
+        "release_crawl_slot_after_task",
+        _release_crawl_slot_after_task,
+    )
+
+    result = await crawl_tasks.crawl_task(
+        job_id=uuid4(),
+        params=CrawlTask(
+            user_id=user.id,
+            website_id=website.id,
+            run_id=uuid4(),
+            url=website.url,
+            crawl_type=CrawlType.SITEMAP,
+        ),
+        container=container,
+    )
+
+    assert result is False
+    assert "pre_cleanup_preemption_check" in operations
+    assert "preemption_check" in operations
+    assert "website_size_update" not in operations
+    assert "website_post_crawl_timestamps_update" not in operations
+    assert audit_service.metadata is None
+    emitted_sql = "\n".join(
+        str(stmt) for session in recovery_sessions for stmt in session.executed
+    )
+    assert "last_crawled_at" not in emitted_sql
+    assert "last_source_verified_at" not in emitted_sql
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("last_source_verified_at", "lastmod_skip_enabled"),
     [
@@ -646,6 +776,7 @@ async def test_sitemap_source_skip_kwargs_stay_empty_when_not_allowed(
             max_batch_size=32,
             dimensions=1536,
             open_source=False,
+            input_cost_per_token=None,
             provider_id=None,
         ),
         http_auth_username=None,
@@ -708,15 +839,7 @@ async def test_sitemap_source_skip_kwargs_stay_empty_when_not_allowed(
 
     monkeypatch.setattr(crawl_tasks.Container, "session_scope", session_scope)
     monkeypatch.setattr(crawl_tasks, "try_duplicate_skip", try_duplicate_skip_fake)
-    monkeypatch.setattr(crawl_tasks, "execute_with_recovery", execute_with_recovery)
-    # The zero-output terminator owns its own execute_with_recovery import
-    # since the extraction tranche; patch it so the test's controlled
-    # recovery seam still flows through both crawl_task and the new owner.
-    from intric.worker.crawl import terminal_zero_output
-
-    monkeypatch.setattr(
-        terminal_zero_output, "execute_with_recovery", execute_with_recovery
-    )
+    _patch_execute_with_recovery(monkeypatch, execute_with_recovery)
     monkeypatch.setattr(crawl_tasks, "TaskManager", create_task_manager)
     monkeypatch.setattr(crawl_tasks, "persist_batch", persist_batch)
     monkeypatch.setattr(

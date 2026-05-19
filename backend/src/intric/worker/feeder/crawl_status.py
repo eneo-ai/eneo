@@ -13,6 +13,19 @@ class CrawlJobStatus(StrEnum):
     COMPLETE = "complete"
     NOT_FOUND = "not_found"
 
+    @property
+    def is_live(self) -> bool:
+        return self in _LIVE_CRAWL_JOB_STATUSES
+
+
+_LIVE_CRAWL_JOB_STATUSES: frozenset[CrawlJobStatus] = frozenset(
+    {
+        CrawlJobStatus.DEFERRED,
+        CrawlJobStatus.QUEUED,
+        CrawlJobStatus.IN_PROGRESS,
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class CrawlJobStatusKnown:

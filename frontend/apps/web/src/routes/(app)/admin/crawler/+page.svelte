@@ -84,9 +84,17 @@
   } = $props();
 
   let detailCandidate = $state<CrawlerTenantWebsiteInventoryItem | null>(null);
-  const dialogs = createCrawlerDialogState(intric, {
-    set: (item) => (detailCandidate = item)
-  });
+  const dialogs = createCrawlerDialogState(
+    intric,
+    {
+      set: (item) => (detailCandidate = item)
+    },
+    {
+      visibleActiveInventory: () => refreshActiveInventory({}),
+      visibleFailureClusters: () => refreshCurrentFailureClusters(),
+      visibleTenantWebsiteInventory: () => refreshTenantWebsiteInventory()
+    }
+  );
 
   // The activity state owns subsequent refetches (filters / sort / page);
   // it only needs the SSR snapshot at construction. `untrack` silences
@@ -343,6 +351,27 @@
       });
       failureClustersOverride = response;
       failureClustersPage = nextPage;
+    } catch (error) {
+      toastError(error, m.crawler_failure_clusters_load_error());
+    } finally {
+      failureClustersBusy = false;
+    }
+  }
+
+  async function refreshCurrentFailureClusters() {
+    if (failureClustersPage === 1) {
+      failureClustersOverride = null;
+      return;
+    }
+
+    failureClustersBusy = true;
+    try {
+      const response = await intric.crawlerAdmin.failureClusters({
+        days: data.crawlerFailureClustersWindowDays,
+        limit: CRAWLER_FAILURE_CLUSTERS_PAGE_SIZE,
+        offset: offsetFromCrawlerFailureClustersPage(failureClustersPage)
+      });
+      failureClustersOverride = response;
     } catch (error) {
       toastError(error, m.crawler_failure_clusters_load_error());
     } finally {

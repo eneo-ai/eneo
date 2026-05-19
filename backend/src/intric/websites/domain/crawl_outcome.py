@@ -97,12 +97,15 @@ CRAWL_OUTCOME_CATEGORY_CODES: dict[
     ),
 }
 
+CRAWL_OUTCOME_CODE_CATEGORIES: Mapping[CrawlOutcomeCode, CrawlOutcomeCategory] = {
+    code: category
+    for category, codes in CRAWL_OUTCOME_CATEGORY_CODES.items()
+    for code in codes
+}
+
 
 def crawl_outcome_category(outcome_code: CrawlOutcomeCode) -> CrawlOutcomeCategory:
-    for category, codes in CRAWL_OUTCOME_CATEGORY_CODES.items():
-        if outcome_code in codes:
-            return category
-    return CrawlOutcomeCategory.UNKNOWN
+    return CRAWL_OUTCOME_CODE_CATEGORIES.get(outcome_code, CrawlOutcomeCategory.UNKNOWN)
 
 
 FailureSummaryInput = Mapping[FailureReason, int] | Mapping[str, int]

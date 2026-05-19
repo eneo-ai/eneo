@@ -1,8 +1,4 @@
-"""Unit tests for the OrphanWatchdog module.
-
-Tests the 5-phase orphan job cleanup with transaction-safe slot release.
-Following TDD approach - tests define expected behavior before implementation.
-"""
+"""Unit tests for orphan crawl-job cleanup and requeue behavior."""
 
 import ast
 import json
@@ -189,6 +185,49 @@ class TestWatchdogRequeue:
 
         assert requeued is False
         enqueue_crawl_job.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_requeue_retries_when_runtime_status_is_terminal_complete(self):
+        from intric.worker.feeder.crawl_enqueue import CrawlEnqueued
+        from intric.worker.feeder.crawl_status import (
+            CrawlJobStatus,
+            CrawlJobStatusKnown,
+        )
+        from intric.worker.feeder.watchdog import OrphanWatchdog
+
+        redis_mock = MagicMock()
+        settings_mock = MagicMock()
+        watchdog = OrphanWatchdog(redis_mock, settings_mock)
+        job_id = uuid4()
+
+        with (
+            patch(
+                "intric.worker.feeder.watchdog.get_crawl_job_status",
+                new=AsyncMock(
+                    return_value=CrawlJobStatusKnown(
+                        job_id=job_id,
+                        status=CrawlJobStatus.COMPLETE,
+                    )
+                ),
+            ),
+            patch(
+                "intric.worker.feeder.watchdog.enqueue_crawl_job",
+                new=AsyncMock(return_value=CrawlEnqueued(job_id=job_id)),
+            ) as enqueue_crawl_job,
+        ):
+            requeued = await watchdog._requeue_job(
+                job_id=job_id,
+                user_id=uuid4(),
+                run_id=uuid4(),
+                tenant_id=uuid4(),
+                website_id=uuid4(),
+                url="https://example.com",
+                download_files=False,
+                crawl_type="crawl",
+            )
+
+        assert requeued is True
+        enqueue_crawl_job.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_requeue_does_not_parse_duplicate_exception_text(self):
