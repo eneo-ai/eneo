@@ -17,8 +17,14 @@ if not os.getenv("TENANT_WORKER_SEMAPHORE_TTL_SECONDS"):
     os.environ["TENANT_WORKER_SEMAPHORE_TTL_SECONDS"] = "3600"  # 1 hour
 
 import asyncio
+from typing import TYPE_CHECKING
 
 import pytest
+
+from tests.warning_filters import IGNORED_WARNINGS
+
+if TYPE_CHECKING:
+    from _pytest.terminal import TerminalReporter
 
 # Import shared fixture modules
 # These fixtures are automatically discovered by pytest
@@ -32,6 +38,43 @@ pytest_plugins = [
     "tests.integration.fixtures.organization_knowledge",  # Organization knowledge fixtures
     "tests.integration.fixtures.integrations",  # Integration fixtures (SharePoint, etc.)
 ]
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register structured warning ignores so they ride alongside pytest.ini.
+
+    Each entry in IGNORED_WARNINGS is forced to declare a resolution path; this
+    hook turns them into real ``filterwarnings`` lines for pytest.
+    """
+    for entry in IGNORED_WARNINGS:
+        config.addinivalue_line("filterwarnings", entry.to_filter_string())
+
+
+def pytest_terminal_summary(
+    terminalreporter: "TerminalReporter",
+    exitstatus: int,  # noqa: ARG001  # required by pytest hook contract
+    config: pytest.Config,  # noqa: ARG001
+) -> None:
+    """Print the active warning ignores at the end of every run.
+
+    We want this tech debt visible on every test run so it doesn't quietly
+    rot. Each entry carries the concrete action required to delete it.
+    """
+    if not IGNORED_WARNINGS:
+        return
+
+    terminalreporter.write_sep("=", f"warning ignores ({len(IGNORED_WARNINGS)})")
+    terminalreporter.write_line(
+        "These filters silence pytest warnings today. Each must declare a "
+        "resolution path — work them down, don't grow the list."
+    )
+    terminalreporter.write_line("")
+    for entry in IGNORED_WARNINGS:
+        category = entry.category or "Warning"
+        terminalreporter.write_line(f"  • [{category}] {entry.pattern}")
+        terminalreporter.write_line(f"      why: {entry.reason}")
+        terminalreporter.write_line(f"      fix: {entry.resolution}")
+        terminalreporter.write_line("")
 
 
 def pytest_collection_modifyitems(config, items):
