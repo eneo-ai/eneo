@@ -37,9 +37,7 @@ def get_litellm_deprecation_date(
     return result
 
 
-def is_model_deprecated(
-    model_name: str, provider_type: Optional[str] = None
-) -> bool:
+def is_model_deprecated(model_name: str, provider_type: Optional[str] = None) -> bool:
     """Check if a model's deprecation date has passed."""
     dep_date = get_litellm_deprecation_date(model_name, provider_type)
     if not dep_date:

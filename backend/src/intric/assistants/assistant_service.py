@@ -382,7 +382,9 @@ class AssistantService:
         completion_model = None
         if completion_model_id is not None:
             if not space.is_completion_model_available(completion_model_id):
-                raise BadRequestException("The completion model is not enabled in the space.")
+                raise BadRequestException(
+                    "The completion model is not enabled in the space."
+                )
             completion_model = space.get_completion_model(completion_model_id)
 
         attachments = None
