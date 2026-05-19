@@ -890,3 +890,51 @@ def test_reverse_proxy_ip_resolution_falls_back_to_client_host():
         trusted_proxy_headers=[],
     )
     assert ip == "192.168.1.1"
+
+
+def test_resolve_client_ip_returns_none_for_non_ip_client_host():
+    """A non-IP request.client.host (e.g. Starlette TestClient's "testclient")
+    must not propagate downstream — audit INET column would crash and IP
+    allow-list parsing would silently fail."""
+    request = SimpleNamespace(
+        headers={},
+        client=SimpleNamespace(host="testclient"),
+    )
+
+    ip = resolve_client_ip(
+        request,
+        trusted_proxy_count=0,
+        trusted_proxy_headers=[],
+    )
+    assert ip is None
+
+
+def test_resolve_client_ip_returns_none_for_non_ip_in_forwarded_for():
+    """A proxy that injects garbage in X-Forwarded-For must not bypass
+    validation — extracted hop is validated before being returned."""
+    request = SimpleNamespace(
+        headers={"x-forwarded-for": "not-an-ip, 10.0.0.1"},
+        client=SimpleNamespace(host="10.0.0.1"),
+    )
+
+    ip = resolve_client_ip(
+        request,
+        trusted_proxy_count=1,
+        trusted_proxy_headers=[],
+    )
+    assert ip is None
+
+
+def test_resolve_client_ip_accepts_ipv6():
+    """IPv6 addresses pass validation."""
+    request = SimpleNamespace(
+        headers={},
+        client=SimpleNamespace(host="2001:db8::1"),
+    )
+
+    ip = resolve_client_ip(
+        request,
+        trusted_proxy_count=0,
+        trusted_proxy_headers=[],
+    )
+    assert ip == "2001:db8::1"

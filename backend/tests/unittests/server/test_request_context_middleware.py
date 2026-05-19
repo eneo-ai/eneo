@@ -120,8 +120,33 @@ def test_middleware_falls_back_to_client_host_without_proxy_config(monkeypatch):
 
     assert response.status_code == 200
     snap = captured["snapshot"]
-    # TestClient connects from a fixed test host (typically "testclient")
-    assert snap["ip_address"] is not None
+    # TestClient connects from the hostname "testclient", not a real IP.
+    # resolve_client_ip rejects non-IP values so the audit INET column and
+    # API-key allow-list parsing never see garbage. The fallback path is
+    # still exercised — it just yields None rather than propagating the
+    # hostname downstream.
+    assert snap.get("ip_address") is None
+
+
+def test_middleware_drops_non_ip_in_forwarded_for(monkeypatch):
+    """A proxy injecting a non-IP value in X-Forwarded-For must not propagate
+    downstream — extracted hop is validated before reaching audit logs."""
+    captured: dict[str, dict] = {}
+    app = _build_app(captured)
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "trusted_proxy_count", 1)
+    monkeypatch.setattr(settings, "trusted_proxy_headers", ["x-forwarded-for"])
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/probe",
+            headers={"X-Forwarded-For": "not-an-ip, 10.0.0.1"},
+        )
+
+    assert response.status_code == 200
+    snap = captured["snapshot"]
+    assert snap.get("ip_address") is None
 
 
 def test_middleware_clears_context_after_request():
