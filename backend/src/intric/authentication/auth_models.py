@@ -263,10 +263,6 @@ def compute_effective_state(
     if rotation_grace_until is not None:
         if rotation_grace_until.tzinfo is None:
             rotation_grace_until = rotation_grace_until.replace(tzinfo=timezone.utc)
-        # Inclusive comparison: a key whose grace ends exactly at "now" is
-        # considered past grace. disable_grace_period sets grace_until =
-        # datetime.now(timezone.utc); without <= the next request landing on
-        # the same microsecond would still authenticate with the old secret.
         if rotation_grace_until <= comparison_time:
             return ApiKeyState.REVOKED
     if suspended_at is not None:
