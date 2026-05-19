@@ -6,6 +6,13 @@
 export function initFlows(client) {
   /** @param {string} path @param {object} options */
   const _fetch = (path, options) => /** @type {any} */ (client).fetch(path, options);
+  /** @param {string} path @param {object} options */
+  const _binaryFetch = (path, options) => {
+    if (!("binaryFetch" in client) || typeof client.binaryFetch !== "function") {
+      throw new Error("Flow package export requires a client with binaryFetch support.");
+    }
+    return /** @type {any} */ (client).binaryFetch(path, options);
+  };
   const _textEncoder = new TextEncoder();
 
   /**
@@ -299,6 +306,79 @@ export function initFlows(client) {
      */
     inputPolicy: async ({ id }) => {
       return _fetch(`/api/v1/flows/${id}/input-policy/`, { method: "get" });
+    },
+
+    packages: {
+      /**
+       * Validate a portable Flow package before selecting a target space.
+       * @param {{file: File, signal?: AbortSignal}} params
+       * @throws {IntricError}
+       */
+      validate: async ({ file, signal }) => {
+        const formData = new FormData();
+        formData.append("package_file", file);
+        return _fetch("/api/v1/flow-packages/validate/", {
+          method: "post",
+          requestBody: { "multipart/form-data": formData },
+          signal
+        });
+      },
+
+      /**
+       * Preview package dependency resolution for a target space.
+       * @param {{spaceId: string, file: File, signal?: AbortSignal}} params
+       * @throws {IntricError}
+       */
+      createImportPlan: async ({ spaceId, file, signal }) => {
+        const formData = new FormData();
+        formData.append("package_file", file);
+        return _fetch("/api/v1/spaces/{id}/flow-packages/import-plan/", {
+          method: "post",
+          params: { path: { id: spaceId } },
+          requestBody: { "multipart/form-data": formData },
+          signal
+        });
+      },
+
+      /**
+       * Import a package into a target space as a draft Flow.
+       * @param {{spaceId: string, packageBase64: string, selectedBindings?: import('../types/resources').FlowPackageImportResourceBinding[]}} params
+       * @throws {IntricError}
+       */
+      importDraft: async ({ spaceId, packageBase64, selectedBindings = [] }) => {
+        return _fetch("/api/v1/spaces/{id}/flow-packages/imports/", {
+          method: "post",
+          params: { path: { id: spaceId } },
+          requestBody: {
+            "application/json": {
+              package_base64: packageBase64,
+              selected_bindings: selectedBindings
+            }
+          }
+        });
+      },
+
+      /**
+       * Export a draft Flow as a portable package bundle.
+       * @param {{id: string, packageId: string, packageVersion: string, name: string, description?: string, signal?: AbortSignal}} params
+       * @returns {Promise<import('../types/fetch').IntricBinaryResponse>}
+       * @throws {IntricError}
+       */
+      export: async ({ id, packageId, packageVersion, name, description = "", signal }) => {
+        return _binaryFetch("/api/v1/flows/{id}/package-exports/", {
+          method: "post",
+          params: { path: { id } },
+          requestBody: {
+            "application/json": {
+              package_id: packageId,
+              package_version: packageVersion,
+              name,
+              description
+            }
+          },
+          signal
+        });
+      }
     },
 
     published: {

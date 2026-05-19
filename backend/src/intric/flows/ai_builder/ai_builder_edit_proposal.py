@@ -44,9 +44,12 @@ from intric.flows.ai_builder.ai_builder_plan_store import (
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
+    AssistantSnapshotResourceUnavailableError,
     canonicalize_edit_draft_resources,
+    collect_flow_spec_resource_bindings,
     format_resource_resolution_feedback,
 )
+from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -72,7 +75,7 @@ async def process_edit_arguments(
     available_model_refs: set[str] | None,
     available_kb_refs: set[str] | None,
     flow: Flow | None,
-    assistant_snapshots: dict[UUID, dict[str, Any]] | None,
+    assistant_snapshots: AssistantAuthoringSnapshots | None,
     litellm_model: str,
     litellm_kwargs: dict[str, Any],
     max_output_tokens: int,
@@ -169,6 +172,21 @@ async def process_edit_arguments(
             flow_description=flow.description,
             current_metadata_json=flow.metadata_json,
             assistant_snapshots=assistant_snapshots,
+            resource_catalog=resource_catalog,
+        )
+    except AssistantSnapshotResourceUnavailableError as exc:
+        logger.warning(
+            "Edit compilation failed because an assistant snapshot references "
+            "an unavailable %s resource",
+            exc.kind,
+        )
+        return ToolProcessingResult(
+            feedback=(
+                "A resource used by the existing flow is no longer available. "
+                "Re-select the affected model, knowledge base, or MCP resource "
+                "and try again."
+            ),
+            failure_kind="validation",
         )
     except Exception as exc:
         logger.error("Edit compilation failed: %s", exc, exc_info=True)
@@ -346,6 +364,11 @@ async def process_edit_arguments(
         plan_rationale=draft.plan_rationale,
         reasoning=None,
         validation=validation,
+        resource_bindings=(
+            collect_flow_spec_resource_bindings(compiled_spec, catalog=resource_catalog)
+            if resource_catalog is not None
+            else tuple()
+        ),
         edit_result_json=serialized_edit_result,
         lease_request_id=lease_request_id,
         lease_lock_token=lease_lock_token,
@@ -426,7 +449,7 @@ def _bind_process_edit_arguments(
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
         flow: Flow | None,
-        assistant_snapshots: dict[UUID, dict[str, Any]] | None,
+        assistant_snapshots: AssistantAuthoringSnapshots | None,
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
         max_output_tokens: int,
@@ -466,7 +489,7 @@ def _bind_process_edit_arguments(
 def edit_flow_retry_config(
     *,
     processor: AIBuilderProposalProcessor,
-    assistant_snapshots: dict[UUID, dict[str, Any]] | None,
+    assistant_snapshots: AssistantAuthoringSnapshots | None,
     litellm_model: str,
     litellm_kwargs: dict[str, Any],
     max_output_tokens: int,

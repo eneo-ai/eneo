@@ -80,6 +80,12 @@ from intric.flows.ai_builder.planning_state import (
     ResolvedSlot,
     StepTriple,
 )
+from intric.flows.flow_resource_bindings import (
+    LocalResourceBinding,
+    LocalResourceKind,
+    ResourceSlotKind,
+    ResourceSlotRef,
+)
 from intric.main.exceptions import BadRequestException, UnauthorizedException
 
 # ---------------------------------------------------------------------------
@@ -103,6 +109,17 @@ def _make_user(
     user.id = user_id or uuid4()
     user.tenant_id = tenant_id or uuid4()
     return user
+
+
+def _make_space_service() -> AsyncMock:
+    space_service = AsyncMock()
+    space = MagicMock()
+    space.get_default_transcription_model.return_value = None
+    space.completion_models = []
+    space.collections = []
+    space.mcp_servers = []
+    space_service.get_space.return_value = space
+    return space_service
 
 
 def _make_session(
@@ -137,6 +154,7 @@ def _make_plan(
     tenant_id: UUID | None = None,
     status: PlanStatus = PlanStatus.PROPOSED,
     spec: FlowDraftSpecCore | None = None,
+    resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
     edit_result_json: dict[str, object] | None = None,
 ) -> BuilderPlan:
     if spec is None:
@@ -160,7 +178,20 @@ def _make_plan(
         spec=spec,
         spec_hash=spec.spec_hash(),
         envelope=envelope,
+        resource_bindings=resource_bindings,
         edit_result_json=edit_result_json,
+    )
+
+
+def _make_resource_binding() -> LocalResourceBinding:
+    return LocalResourceBinding(
+        slot_ref=ResourceSlotRef(
+            kind=ResourceSlotKind.MODEL,
+            slot="fast-model",
+            label="Fast model",
+        ),
+        local_kind=LocalResourceKind.COMPLETION_MODEL,
+        local_id=uuid4(),
     )
 
 
@@ -169,6 +200,7 @@ def _make_service(
     repo: AsyncMock | None = None,
     flow_service: AsyncMock | None = None,
     completion_service: Any | None = None,
+    space_service: AsyncMock | None = None,
 ) -> AIBuilderService:
     if repo is None:
         repo = AsyncMock()
@@ -184,6 +216,7 @@ def _make_service(
         repo=repo,
         flow_service=flow_service or AsyncMock(),
         completion_service=resolved_completion_service,
+        space_service=space_service or _make_space_service(),
     )
 
 
@@ -1666,6 +1699,7 @@ class TestRevisePlan:
         plan = _make_plan(
             status=PlanStatus.PROPOSED,
             tenant_id=user.tenant_id,
+            resource_bindings=(_make_resource_binding(),),
             edit_result_json={"other_key": "value"},
         )
         session = _make_session(
@@ -1699,6 +1733,10 @@ class TestRevisePlan:
                 "description_override_manual"
             ]
             is True
+        )
+        assert (
+            mock_persist_plan.await_args.kwargs["resource_bindings"]
+            == plan.resource_bindings
         )
 
     @pytest.mark.anyio
@@ -2712,6 +2750,7 @@ async def test_prepare_message_context_stages_new_files_and_builds_attachment_co
         repo=repo,
         flow_service=AsyncMock(),
         completion_service=completion_service,
+        space_service=AsyncMock(),
         file_service=file_service,
     )
 
@@ -2764,6 +2803,7 @@ async def test_prepare_message_context_does_not_persist_new_files_before_message
         repo=repo,
         flow_service=AsyncMock(),
         completion_service=completion_service,
+        space_service=AsyncMock(),
         file_service=file_service,
     )
 
@@ -2817,6 +2857,7 @@ async def test_prepare_message_context_rejects_missing_or_unavailable_file_ids()
         repo=repo,
         flow_service=AsyncMock(),
         completion_service=completion_service,
+        space_service=AsyncMock(),
         file_service=file_service,
     )
 
@@ -2897,6 +2938,7 @@ async def test_get_session_attachment_snapshot_returns_warning_when_some_files_m
         repo=repo,
         flow_service=AsyncMock(),
         completion_service=AsyncMock(),
+        space_service=AsyncMock(),
         file_service=file_service,
     )
 
@@ -2929,6 +2971,7 @@ async def test_get_session_attachment_snapshot_warns_when_attached_file_has_no_r
         repo=repo,
         flow_service=AsyncMock(),
         completion_service=AsyncMock(),
+        space_service=AsyncMock(),
         file_service=file_service,
     )
 

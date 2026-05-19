@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from intric.flows.ai_builder.ai_builder_api_models import SendMessageRequest
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
+    AssistantSpecLocalRefNotPortableError,
     FlowChangeSet,
     FlowDraftSpecCore,
     InputSource,
@@ -56,6 +57,16 @@ def _make_spec(
     if steps is None:
         steps = [_make_step()]
     return FlowDraftSpecCore(flow_name=flow_name, steps=steps)
+
+
+def _has_local_ref_not_portable_error(exc: ValidationError) -> bool:
+    for error in exc.errors():
+        ctx = error.get("ctx")
+        if not isinstance(ctx, dict):
+            continue
+        if isinstance(ctx.get("error"), AssistantSpecLocalRefNotPortableError):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +146,23 @@ class TestFlowDraftSpecCore:
             mcp_tool_refs=[" tool_a ", "tool_a", ""],
         )
         assert spec_obj.mcp_tool_refs == ["tool_a"]
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("model_ref", "11111111-1111-4111-8111-111111111111"),
+            ("knowledge_refs", ["11111111-1111-4111-8111-111111111111"]),
+            ("mcp_server_refs", ["11111111-1111-4111-8111-111111111111"]),
+            ("mcp_tool_refs", ["11111111-1111-4111-8111-111111111111"]),
+        ],
+    )
+    def test_assistant_spec_rejects_uuid_shaped_resource_refs(
+        self, field: str, value: str | list[str]
+    ) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            AssistantSpec(instructions="Test", **{field: value})
+
+        assert _has_local_ref_not_portable_error(exc_info.value)
 
     def test_assistant_spec_rejects_knowledge_and_mcp_mix(self) -> None:
         with pytest.raises(ValueError, match="knowledge_refs and MCP refs"):

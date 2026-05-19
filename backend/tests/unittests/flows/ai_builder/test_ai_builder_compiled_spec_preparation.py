@@ -266,8 +266,11 @@ def test_prepare_compiled_spec_for_session_expands_mcp_server_refs_to_tools() ->
 
     assert result.spec is not None
     assistant_spec = result.spec.steps[0].assistant_spec
-    assert assistant_spec.mcp_server_refs == ["server-time"]
-    assert assistant_spec.mcp_tool_refs == ["tool-current-time", "tool-convert-time"]
+    assert assistant_spec.mcp_server_refs == ["mcp_server.time-mcp"]
+    assert assistant_spec.mcp_tool_refs == [
+        "mcp_tool.time-mcp-get-current-time",
+        "mcp_tool.time-mcp-convert-time",
+    ]
 
 
 def test_prepare_compiled_spec_normalizes_output_contract_prompt_metadata() -> None:

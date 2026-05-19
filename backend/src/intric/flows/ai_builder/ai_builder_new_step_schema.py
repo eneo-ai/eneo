@@ -15,13 +15,6 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
 from intric.flows.flow_review_policy import FlowStepReviewMode
 
 
-def small_ref_enums(values: list[dict[str, Any]] | None) -> list[str] | None:
-    if not values or len(values) > 15:
-        return None
-    refs = [value["ref"] for value in values if isinstance(value.get("ref"), str)]
-    return refs or None
-
-
 def build_new_step_draft_schema(
     *,
     model_refs: list[str] | None,
@@ -110,7 +103,7 @@ def build_new_step_draft_schema(
 
     properties["model_ref"] = {
         "type": ["string", "null"],
-        "description": "Optional canonical model ref to use for this step.",
+        "description": "Optional portable model slot ref to use for this step.",
     }
     if model_refs is not None:
         model_ref_property = cast(dict[str, Any], properties["model_ref"])
@@ -120,7 +113,7 @@ def build_new_step_draft_schema(
         "type": "array",
         "items": {"type": "string"},
         "uniqueItems": True,
-        "description": "Optional canonical knowledge base refs for this step.",
+        "description": "Optional portable knowledge slot refs for this step.",
     }
     if kb_refs is not None:
         knowledge_ref_property = cast(dict[str, Any], properties["knowledge_refs"])
@@ -132,7 +125,7 @@ def build_new_step_draft_schema(
         "items": {"type": "string"},
         "uniqueItems": True,
         "description": (
-            "Optional canonical MCP server refs for this step. Use only when the "
+            "Optional portable MCP server slot refs for this step. Use only when the "
             "step needs external tools or live data. Do not combine with knowledge_refs."
         ),
     }
@@ -146,7 +139,7 @@ def build_new_step_draft_schema(
         "items": {"type": "string"},
         "uniqueItems": True,
         "description": (
-            "Optional canonical MCP tool refs for least-privilege tool access. "
+            "Optional portable MCP tool slot refs for least-privilege tool access. "
             "Prefer this over enabling a whole server when one specific tool is enough."
         ),
     }

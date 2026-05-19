@@ -19,12 +19,14 @@ from intric.flows.ai_builder.ai_builder_models import (
     MCPPolicy,
     OutputMode,
     OutputType,
+    PlannerPlanEnvelope,
     StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_plan_store import (
     append_plan_messages,
     build_lint_warnings,
     format_validation_feedback,
+    persist_plan,
     store_plan_and_update_conversation,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import (
@@ -32,6 +34,12 @@ from intric.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationResult,
 )
 from intric.flows.ai_builder.planning_state import PlanningState
+from intric.flows.flow_resource_bindings import (
+    LocalResourceBinding,
+    LocalResourceKind,
+    ResourceSlotKind,
+    ResourceSlotRef,
+)
 
 
 def test_build_lint_warnings_hides_internal_info_level_quality_lints() -> None:
@@ -194,6 +202,18 @@ def _make_turn_spec() -> FlowDraftSpecCore:
     )
 
 
+def _make_binding() -> LocalResourceBinding:
+    return LocalResourceBinding(
+        slot_ref=ResourceSlotRef(
+            kind=ResourceSlotKind.MODEL,
+            slot="fast-model",
+            label="Fast model",
+        ),
+        local_kind=LocalResourceKind.COMPLETION_MODEL,
+        local_id=uuid4(),
+    )
+
+
 @pytest.mark.asyncio
 async def test_store_plan_and_update_conversation_saves_planning_state_inside_savepoint() -> (
     None
@@ -224,3 +244,65 @@ async def test_store_plan_and_update_conversation_saves_planning_state_inside_sa
     assert isinstance(saved_state, PlanningState)
     assert saved_state.draft_plan_id == repo.create_plan.return_value.id
     assert saved_state.phase == "plan_proposed"
+
+
+@pytest.mark.asyncio
+async def test_store_plan_and_update_conversation_passes_resource_bindings_to_repo() -> (
+    None
+):
+    repo = _make_repo_mock()
+    binding = _make_binding()
+
+    await store_plan_and_update_conversation(
+        repo=repo,
+        tenant_id=uuid4(),
+        session_id=uuid4(),
+        conversation=[],
+        new_messages_start=0,
+        assistant_content="plan ready",
+        tool_call_id="call-unit-1",
+        tool_name=OUTLINE_FLOW_TOOL_NAME,
+        arguments={},
+        spec=_make_turn_spec(),
+        assumptions=[],
+        plan_rationale=None,
+        reasoning=None,
+        validation=SpecValidationResult(),
+        resource_bindings=(binding,),
+    )
+
+    assert repo.create_plan.await_args is not None
+    assert repo.create_plan.await_args.kwargs["resource_bindings"] == (binding,)
+
+
+@pytest.mark.asyncio
+async def test_persist_plan_uses_only_bindings_for_current_plan() -> None:
+    repo = _make_repo_mock()
+    tenant_id = uuid4()
+    session_id = uuid4()
+    first_binding = _make_binding()
+    second_binding = _make_binding()
+    spec = _make_turn_spec()
+
+    await persist_plan(
+        repo=repo,
+        tenant_id=tenant_id,
+        session_id=session_id,
+        spec=spec,
+        envelope=PlannerPlanEnvelope(spec=spec),
+        resource_bindings=(first_binding,),
+    )
+    await persist_plan(
+        repo=repo,
+        tenant_id=tenant_id,
+        session_id=session_id,
+        spec=spec,
+        envelope=PlannerPlanEnvelope(spec=spec),
+        resource_bindings=(second_binding,),
+    )
+
+    first_call, second_call = repo.create_plan.await_args_list
+    assert first_call.kwargs["resource_bindings"] == (first_binding,)
+    assert second_call.kwargs["resource_bindings"] == (second_binding,)
+    assert first_binding not in second_call.kwargs["resource_bindings"]
+    assert repo.supersede_existing_plans.await_count == 2

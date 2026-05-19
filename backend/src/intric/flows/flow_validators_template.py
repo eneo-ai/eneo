@@ -9,6 +9,15 @@ from intric.main.exceptions import BadRequestException
 
 _STEP_REFERENCE_PATTERN = re.compile(r"^step_(\d+)$")
 _EXACT_TEMPLATE_EXPRESSION_PATTERN = re.compile(r"^\s*\{\{\s*([^{}]+)\s*\}\}\s*$")
+TEMPLATE_FILL_RESOURCE_CONFIG_KEYS = frozenset(
+    {"template_asset_id", "template_file_id"}
+)
+
+
+def has_template_fill_resource_reference(output_config: object) -> bool:
+    if not isinstance(output_config, dict):
+        return False
+    return any(key in output_config for key in TEMPLATE_FILL_RESOURCE_CONFIG_KEYS)
 
 
 def validate_template_fill_output_config(

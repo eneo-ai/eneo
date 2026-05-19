@@ -1240,14 +1240,14 @@ _ARCHETYPE_CASES: tuple[dict[str, Any], ...] = (
                 "input_source": "flow_input",
                 "input_type": "text",
                 "output_type": "text",
-                "mcp_server_refs": ["11111111-1111-4111-8111-111111111111"],
-                "mcp_tool_refs": ["22222222-2222-4222-8222-222222222222"],
+                "mcp_server_refs": ["mcp_server.case-registry"],
+                "mcp_tool_refs": ["mcp_tool.case-registry-lookup"],
             },
         ],
         expected_assistants_to_create=1,
         expected_output_modes=["pass_through"],
-        expected_mcp_server_refs_by_step=[["11111111-1111-4111-8111-111111111111"]],
-        expected_mcp_tool_refs_by_step=[["22222222-2222-4222-8222-222222222222"]],
+        expected_mcp_server_refs_by_step=[["mcp_server.case-registry"]],
+        expected_mcp_tool_refs_by_step=[["mcp_tool.case-registry-lookup"]],
     ),
 )
 

@@ -17,6 +17,7 @@
   import FlowValidationBanner from "$lib/features/flows/components/FlowValidationBanner.svelte";
   import FlowRunsTable from "$lib/features/flows/components/FlowRunsTable.svelte";
   import FlowRunDialog from "$lib/features/flows/components/FlowRunDialog.svelte";
+  import FlowPackageExportDialog from "$lib/features/flows/components/FlowPackageExportDialog.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
@@ -346,6 +347,11 @@
           {/if}
         </Button>
       {:else}
+        <FlowPackageExportDialog
+          flow={$resource}
+          intric={data.intric}
+          beforeExport={async () => flowEditor.flushSaves()}
+        />
         <Button
           variant="default"
           disabled={!canPublish || publishLoading}

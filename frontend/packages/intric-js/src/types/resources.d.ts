@@ -148,6 +148,24 @@ export type Flow = components["schemas"]["FlowPublic"];
 export type FlowTemplatePlaceholder = components["schemas"]["FlowTemplatePlaceholderPublic"];
 export type FlowTemplateInspection = components["schemas"]["FlowTemplateInspectionPublic"];
 export type FlowTemplateAsset = components["schemas"]["FlowTemplateAssetPublic"];
+export type FlowPackageExportRequest = components["schemas"]["FlowPackageExportRequest"];
+export type FlowPackageImportPlan = components["schemas"]["FlowPackageImportPlan"];
+export type FlowPackageImportPlanSummary = components["schemas"]["FlowPackageImportPlanSummary"];
+export type FlowPackageImportPlanStatus = components["schemas"]["FlowPackageImportPlanStatus"];
+export type FlowPackageImportResult = components["schemas"]["FlowPackageImportPublic"];
+export type FlowPackageValidation = components["schemas"]["FlowPackageValidationPublic"];
+export type FlowPackageDependencyResolution = NonNullable<
+  FlowPackageImportPlan["dependency_resolutions"]
+>[number];
+export type FlowPackageLocalCandidate = components["schemas"]["FlowPackageLocalCandidate"];
+export type FlowPackageModelCandidate = components["schemas"]["FlowPackageModelCandidate"];
+export type FlowPackageResourceSlotRef = components["schemas"]["ResourceSlotRef-Input"];
+export type FlowPackageImportResourceBinding =
+  components["schemas"]["FlowPackageImportResourceBindingRequest"];
+export type FlowPackageRequirementDataSensitivity =
+  components["schemas"]["FlowPackageRequirementDataSensitivity"];
+export type LocalResourceBinding = components["schemas"]["LocalResourceBinding"];
+export type LocalResourceKind = components["schemas"]["LocalResourceKind"];
 export type FlowRunContractStepInput = components["schemas"]["FlowRuntimeInputContractPublic"];
 export type FlowRunContractTemplateReadiness = components["schemas"]["FlowTemplateReadinessPublic"];
 export type FlowRunContract = components["schemas"]["FlowRunContractPublic"];

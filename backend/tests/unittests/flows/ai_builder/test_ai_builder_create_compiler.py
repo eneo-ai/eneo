@@ -823,8 +823,8 @@ def test_canonicalize_create_draft_resources_resolves_names_to_refs() -> None:
     canonicalized, issues = canonicalize_create_draft_resources(draft, catalog=catalog)
 
     assert issues == []
-    assert canonicalized.steps[0].model_ref == "model-1"
-    assert canonicalized.steps[0].knowledge_refs == ["kb-1"]
+    assert canonicalized.steps[0].model_ref == "model.gpt-5-4-nano"
+    assert canonicalized.steps[0].knowledge_refs == ["knowledge.risk-kb"]
 
 
 def test_outline_flow_schema_hides_low_level_flow_mechanics() -> None:
@@ -919,7 +919,7 @@ def test_selected_mcp_server_is_attached_to_explicit_outline_step_only(
 
     updated = attach_selected_mcp_refs_to_explicit_outline_steps(
         outline,
-        selected_server_refs={"time-server"},
+        selected_server_refs={"mcp_server.time-mcp"},
         catalog=catalog,
     )
     draft, issues = canonicalize_create_draft_resources(
@@ -928,8 +928,8 @@ def test_selected_mcp_server_is_attached_to_explicit_outline_step_only(
     )
 
     assert issues == []
-    assert draft.steps[0].mcp_server_refs == ["time-server"]
-    assert draft.steps[0].mcp_tool_refs == ["current-time"]
+    assert draft.steps[0].mcp_server_refs == ["mcp_server.time-mcp"]
+    assert draft.steps[0].mcp_tool_refs == ["mcp_tool.time-mcp-get-current-time"]
     assert draft.steps[1].mcp_server_refs == []
     assert draft.steps[1].mcp_tool_refs == []
     record = next(
@@ -946,11 +946,11 @@ def test_selected_mcp_server_is_attached_to_explicit_outline_step_only(
     assert record.patched_steps == [
         {
             "step_name": "Hämta aktuell tid med Time MCP",
-            "mcp_server_refs": ["time-server"],
+            "mcp_server_refs": ["mcp_server.time-mcp"],
             "mcp_tool_refs": [],
         }
     ]
-    assert record.selected_mcp_server_refs == ["time-server"]
+    assert record.selected_mcp_server_refs == ["mcp_server.time-mcp"]
 
 
 def test_selected_mcp_attachment_prefers_explicit_tool_aliases() -> None:
@@ -985,7 +985,7 @@ def test_selected_mcp_attachment_prefers_explicit_tool_aliases() -> None:
 
     updated = attach_selected_mcp_refs_to_explicit_outline_steps(
         outline,
-        selected_server_refs={"time-server"},
+        selected_server_refs={"mcp_server.time-mcp"},
         catalog=catalog,
     )
     draft, issues = canonicalize_create_draft_resources(
@@ -994,8 +994,8 @@ def test_selected_mcp_attachment_prefers_explicit_tool_aliases() -> None:
     )
 
     assert issues == []
-    assert draft.steps[0].mcp_server_refs == ["time-server"]
-    assert draft.steps[0].mcp_tool_refs == ["current-time"]
+    assert draft.steps[0].mcp_server_refs == ["mcp_server.time-mcp"]
+    assert draft.steps[0].mcp_tool_refs == ["mcp_tool.time-mcp-get-current-time"]
 
 
 def test_selected_mcp_attachment_uses_explicit_tool_alias_without_server_name() -> None:
@@ -1035,7 +1035,7 @@ def test_selected_mcp_attachment_uses_explicit_tool_alias_without_server_name() 
 
     updated = attach_selected_mcp_refs_to_explicit_outline_steps(
         outline,
-        selected_server_refs={"time-server"},
+        selected_server_refs={"mcp_server.time-mcp"},
         catalog=catalog,
     )
     draft, issues = canonicalize_create_draft_resources(
@@ -1044,10 +1044,10 @@ def test_selected_mcp_attachment_uses_explicit_tool_alias_without_server_name() 
     )
 
     assert issues == []
-    assert draft.steps[0].mcp_server_refs == ["time-server"]
-    assert draft.steps[0].mcp_tool_refs == ["current-time"]
-    assert draft.steps[1].mcp_server_refs == ["time-server"]
-    assert draft.steps[1].mcp_tool_refs == ["convert-time"]
+    assert draft.steps[0].mcp_server_refs == ["mcp_server.time-mcp"]
+    assert draft.steps[0].mcp_tool_refs == ["mcp_tool.time-mcp-get-current-time"]
+    assert draft.steps[1].mcp_server_refs == ["mcp_server.time-mcp"]
+    assert draft.steps[1].mcp_tool_refs == ["mcp_tool.time-mcp-convert-time"]
 
 
 def test_selected_mcp_attachment_skips_knowledge_steps() -> None:
@@ -1137,8 +1137,8 @@ def test_outline_flow_schema_exposes_model_and_knowledge_refs_for_small_catalog(
         "properties"
     ]
 
-    assert step_props["model_ref"]["enum"] == ["model-1", None]
-    assert step_props["knowledge_refs"]["items"]["enum"] == ["kb-1"]
+    assert step_props["model_ref"]["enum"] == ["model.gpt-5-4-nano", None]
+    assert step_props["knowledge_refs"]["items"]["enum"] == ["knowledge.risk-kb"]
 
 
 def test_outline_flow_schema_keeps_mcp_refs_free_form_for_malformed_catalog() -> None:

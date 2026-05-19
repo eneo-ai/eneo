@@ -71,7 +71,7 @@ class TestBuildEditFlowToolSchema:
         ]["properties"]["add_payload"]
         model_ref = add_payload["properties"]["model_ref"]
         assert "enum" in model_ref
-        assert "model_a" in model_ref["enum"]
+        assert "model.model-a" in model_ref["enum"]
 
     def test_model_refs_not_injected_when_large(self):
         models = [{"ref": f"model_{i}"} for i in range(20)]

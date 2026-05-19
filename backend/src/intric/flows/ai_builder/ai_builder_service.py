@@ -64,6 +64,7 @@ from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from intric.main.exceptions import BadRequestException
 from intric.model_providers.infrastructure.litellm_runtime_config import (
     configure_litellm_runtime,
@@ -142,7 +143,7 @@ class PreparedMessageContext:
     litellm_kwargs: dict[str, object]
     structured_output_decision: StructuredOutputCapabilityDecision
     flow: "Flow | None"
-    assistant_snapshots: dict[UUID, dict[str, Any]] | None
+    assistant_snapshots: AssistantAuthoringSnapshots | None
     attachment_files: list[File]
 
 
@@ -172,8 +173,8 @@ class AIBuilderService:
         repo: AIBuilderRepository,
         flow_service: "FlowService",
         completion_service: "CompletionService",
+        space_service: "SpaceService",
         file_service: "FileService | None" = None,
-        space_service: "SpaceService | None" = None,
     ) -> None:
         self.user = user
         self.repo = repo
@@ -482,7 +483,7 @@ class AIBuilderService:
         available_kbs: list[dict[str, Any]] | None = None,
         available_mcps: AIBuilderMCPResourceInput = None,
         flow: "Flow | None" = None,
-        assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+        assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         attachment_files: list[File] | None = None,
         max_input_tokens: int | None = None,
         max_output_tokens: int | None = None,
@@ -609,8 +610,6 @@ class AIBuilderService:
             )
 
         if revision_type == "keep_current_description":
-            # Create new plan version with description_override_manual flag
-            # The spec stays the same — the flag is stored in edit_result_json
             revised_edit_result = dict(plan.edit_result_json or {})
             revised_edit_result["description_override_manual"] = True
 
@@ -627,6 +626,7 @@ class AIBuilderService:
                 session_id=plan.session_id,
                 spec=plan.spec,
                 envelope=envelope,
+                resource_bindings=plan.resource_bindings,
                 edit_result_json=revised_edit_result,
             )
             return new_plan

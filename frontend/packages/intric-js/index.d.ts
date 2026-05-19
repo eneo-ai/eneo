@@ -16,7 +16,7 @@ export {
   type FlowRunStatusCapabilities,
   type FlowRunStatusCapability
 } from "./src/flows/flow-run-status-capabilities";
-export { JSONRequestBody } from "./src/types/fetch";
+export { JSONRequestBody, type IntricBinaryResponse } from "./src/types/fetch";
 export * from "./src/types/resources";
 export * from "./src/socket/types";
 export type { components } from "./src/types/schema";

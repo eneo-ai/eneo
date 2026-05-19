@@ -1,4 +1,4 @@
-"""Tests for AI Builder runtime input defaults — input_format/description sync."""
+"""Tests for Flow authoring runtime input defaults."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     InputType,
     StepSpec,
 )
-from intric.flows.ai_builder.ai_builder_runtime_input_defaults import (
+from intric.flows.flow_authoring_runtime_input import (
     resolve_runtime_input_config,
 )
 

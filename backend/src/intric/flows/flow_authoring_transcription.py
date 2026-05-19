@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, cast
 from uuid import UUID
 
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
@@ -18,13 +18,6 @@ def apply_audio_transcription_defaults(
     spec: FlowDraftSpecCore,
     default_transcription_model_id: UUID | None,
 ) -> JsonObject | None:
-    """Ensure AI Builder-generated audio-input flows have runnable transcription config.
-
-    Audio flow-input steps require flow-level wizard transcription settings at publish/apply
-    time. AI Builder should auto-populate those defaults when the flow design clearly uses
-    audio input, while preserving any richer explicit wizard settings already present.
-    """
-
     if not _uses_audio_flow_input(spec):
         return _cleanup_transcription_metadata(metadata)
 
@@ -72,7 +65,6 @@ _TRANSCRIPTION_WIZARD_KEYS = {
 
 
 def _cleanup_transcription_metadata(metadata: JsonObject | None) -> JsonObject | None:
-    """Remove stale wizard transcription keys when no audio flow_input remains."""
     if not isinstance(metadata, dict):
         return metadata
 

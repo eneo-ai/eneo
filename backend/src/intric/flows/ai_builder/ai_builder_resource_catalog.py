@@ -20,11 +20,31 @@ from intric.flows.ai_builder.ai_builder_models import (
     StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+from intric.flows.assistant_authoring_snapshot import (
+    AssistantAuthoringResourceRef,
+    AssistantAuthoringSnapshot,
+)
+from intric.flows.flow_resource_bindings import (
+    LocalResourceBinding,
+    LocalResourceKind,
+    ResourceSlotAllocator,
+    ResourceSlotKind,
+    ResourceSlotRef,
+)
 
 ResourceKind = Literal["knowledge_base", "mcp_server", "mcp_tool", "model"]
 
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 RESOURCE_DESCRIPTION_MAX_CHARS = 240
+
+
+class AssistantSnapshotResourceUnavailableError(ValueError):
+    def __init__(self, *, kind: ResourceKind, local_ref: str) -> None:
+        self.kind = kind
+        self.local_ref = local_ref
+        super().__init__(
+            f"Assistant snapshot references an unavailable {kind} resource."
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,16 +82,22 @@ class AIBuilderResourceReferenceMaterial:
 
 @dataclass(frozen=True)
 class AIBuilderResourceCatalogEntry:
-    ref: str
+    local_ref: str
     display_name: str
     aliases: tuple[str, ...]
     kind: ResourceKind
+    slot_ref: ResourceSlotRef
+    local_binding: LocalResourceBinding | None
     description: str = ""
     parent_ref: str | None = None
 
     @property
+    def authoring_ref(self) -> str:
+        return self.slot_ref.ref
+
+    @property
     def option_label(self) -> str:
-        return f"{self.display_name} [{self.ref}]"
+        return f"{self.display_name} [{self.authoring_ref}]"
 
 
 @dataclass(frozen=True)
@@ -93,22 +119,40 @@ class AIBuilderResourceCatalog:
     _kb_alias_index: dict[str, tuple[AIBuilderResourceCatalogEntry, ...]]
     _mcp_server_alias_index: dict[str, tuple[AIBuilderResourceCatalogEntry, ...]]
     _mcp_tool_alias_index: dict[str, tuple[AIBuilderResourceCatalogEntry, ...]]
+    _model_local_ref_index: dict[str, AIBuilderResourceCatalogEntry]
+    _kb_local_ref_index: dict[str, AIBuilderResourceCatalogEntry]
+    _mcp_server_local_ref_index: dict[str, AIBuilderResourceCatalogEntry]
+    _mcp_tool_local_ref_index: dict[str, AIBuilderResourceCatalogEntry]
 
     @property
     def model_refs(self) -> set[str]:
-        return {entry.ref for entry in self.models}
+        return {entry.authoring_ref for entry in self.models}
 
     @property
     def knowledge_base_refs(self) -> set[str]:
-        return {entry.ref for entry in self.knowledge_bases}
+        return {entry.authoring_ref for entry in self.knowledge_bases}
 
     @property
     def mcp_server_refs(self) -> set[str]:
-        return {entry.ref for entry in self.mcp_servers}
+        return {entry.authoring_ref for entry in self.mcp_servers}
 
     @property
     def mcp_tool_refs(self) -> set[str]:
-        return {entry.ref for entry in self.mcp_tools}
+        return {entry.authoring_ref for entry in self.mcp_tools}
+
+    def small_ref_enum_for_kind(
+        self,
+        kind: ResourceKind,
+        *,
+        limit: int = 15,
+    ) -> list[str] | None:
+        refs = {
+            entry.authoring_ref
+            for entry in self._entries_for_kind(kind)
+        }
+        if not refs or len(refs) > limit:
+            return None
+        return sorted(refs)
 
     def resolve(
         self,
@@ -152,7 +196,7 @@ class AIBuilderResourceCatalog:
                     entry.option_label for entry in self._entries_for_kind(kind)
                 ),
             )
-        return resolved_entry.ref, None
+        return resolved_entry.authoring_ref, None
 
     def entry_for_ref(
         self,
@@ -161,12 +205,56 @@ class AIBuilderResourceCatalog:
         ref: str,
     ) -> AIBuilderResourceCatalogEntry | None:
         return next(
-            (entry for entry in self._entries_for_kind(kind) if entry.ref == ref),
+            (
+                entry
+                for entry in self._entries_for_kind(kind)
+                if entry.authoring_ref == ref
+            ),
             None,
         )
 
+    def entry_for_local_ref(
+        self,
+        *,
+        kind: ResourceKind,
+        local_ref: str,
+    ) -> AIBuilderResourceCatalogEntry | None:
+        return self._local_ref_index_for_kind(kind).get(local_ref.strip())
+
+    def assistant_spec_from_snapshot(
+        self,
+        snapshot: AssistantAuthoringSnapshot,
+    ) -> AssistantSpec:
+        return AssistantSpec(
+            instructions=snapshot.instructions,
+            model_ref=(
+                self._authoring_ref_for_snapshot_resource(
+                    kind="model",
+                    resource=snapshot.model,
+                )
+                if snapshot.model is not None
+                else None
+            ),
+            knowledge_refs=self._authoring_refs_for_snapshot_resources(
+                kind="knowledge_base",
+                resources=snapshot.knowledge_refs,
+            ),
+            mcp_server_refs=self._authoring_refs_for_snapshot_resources(
+                kind="mcp_server",
+                resources=snapshot.mcp_server_refs,
+            ),
+            mcp_tool_refs=self._authoring_refs_for_snapshot_resources(
+                kind="mcp_tool",
+                resources=snapshot.mcp_tool_refs,
+            ),
+        )
+
     def mcp_tool_refs_for_server(self, server_ref: str) -> list[str]:
-        return [entry.ref for entry in self.mcp_tools if entry.parent_ref == server_ref]
+        return [
+            entry.authoring_ref
+            for entry in self.mcp_tools
+            if entry.parent_ref == server_ref
+        ]
 
     def refs_mentioned_in_text(
         self,
@@ -188,10 +276,10 @@ class AIBuilderResourceCatalog:
         allowed = set(allowed_refs) if allowed_refs is not None else None
         matched: set[str] = set()
         for entry in self._entries_for_kind(kind):
-            if allowed is not None and entry.ref not in allowed:
+            if allowed is not None and entry.authoring_ref not in allowed:
                 continue
             if _entry_alias_is_mentioned(entry=entry, normalized_text=haystack):
-                matched.add(entry.ref)
+                matched.add(entry.authoring_ref)
         return frozenset(matched)
 
     def _alias_index_for_kind(
@@ -206,6 +294,18 @@ class AIBuilderResourceCatalog:
             return self._mcp_tool_alias_index
         return self._model_alias_index
 
+    def _local_ref_index_for_kind(
+        self,
+        kind: ResourceKind,
+    ) -> dict[str, AIBuilderResourceCatalogEntry]:
+        if kind == "knowledge_base":
+            return self._kb_local_ref_index
+        if kind == "mcp_server":
+            return self._mcp_server_local_ref_index
+        if kind == "mcp_tool":
+            return self._mcp_tool_local_ref_index
+        return self._model_local_ref_index
+
     def _entries_for_kind(
         self,
         kind: ResourceKind,
@@ -218,18 +318,65 @@ class AIBuilderResourceCatalog:
             return self.mcp_tools
         return self.models
 
+    def _authoring_ref_for_snapshot_resource(
+        self,
+        *,
+        kind: ResourceKind,
+        resource: AssistantAuthoringResourceRef,
+    ) -> str:
+        entry = self.entry_for_local_ref(kind=kind, local_ref=resource.local_ref)
+        if entry is None:
+            raise AssistantSnapshotResourceUnavailableError(
+                kind=kind,
+                local_ref=resource.local_ref,
+            )
+        return entry.authoring_ref
+
+    def _authoring_refs_for_snapshot_resources(
+        self,
+        *,
+        kind: ResourceKind,
+        resources: tuple[AssistantAuthoringResourceRef, ...],
+    ) -> list[str]:
+        refs: list[str] = []
+        for resource in resources:
+            ref = self._authoring_ref_for_snapshot_resource(
+                kind=kind,
+                resource=resource,
+            )
+            if ref not in refs:
+                refs.append(ref)
+        return refs
+
 
 def build_ai_builder_resource_catalog(
     *,
     available_models: Sequence[Mapping[str, Any]] | None,
     available_kbs: Sequence[Mapping[str, Any]] | None,
     available_mcps: Iterable[Mapping[str, Any]] | None = None,
+    prior_bindings: Iterable[LocalResourceBinding] = (),
 ) -> AIBuilderResourceCatalog:
-    models = tuple(_build_entries(available_models or [], kind="model"))
-    knowledge_bases = tuple(_build_entries(available_kbs or [], kind="knowledge_base"))
+    allocator = ResourceSlotAllocator(prior_bindings=prior_bindings)
+    models = tuple(
+        _build_entries(available_models or [], kind="model", allocator=allocator)
+    )
+    knowledge_bases = tuple(
+        _build_entries(available_kbs or [], kind="knowledge_base", allocator=allocator)
+    )
     normalized_mcps = normalize_ai_builder_mcp_resources(available_mcps)
-    mcp_servers = tuple(_build_entries(normalized_mcps, kind="mcp_server"))
-    mcp_tools = tuple(_build_mcp_tool_entries(normalized_mcps))
+    mcp_servers = tuple(
+        _build_entries(normalized_mcps, kind="mcp_server", allocator=allocator)
+    )
+    mcp_server_entries_by_local_ref = {
+        entry.local_ref: entry for entry in mcp_servers
+    }
+    mcp_tools = tuple(
+        _build_mcp_tool_entries(
+            normalized_mcps,
+            allocator=allocator,
+            mcp_server_entries_by_local_ref=mcp_server_entries_by_local_ref,
+        )
+    )
     return AIBuilderResourceCatalog(
         models=models,
         knowledge_bases=knowledge_bases,
@@ -239,6 +386,10 @@ def build_ai_builder_resource_catalog(
         _kb_alias_index=_build_alias_index(knowledge_bases),
         _mcp_server_alias_index=_build_alias_index(mcp_servers),
         _mcp_tool_alias_index=_build_alias_index(mcp_tools),
+        _model_local_ref_index=_build_local_ref_index(models),
+        _kb_local_ref_index=_build_local_ref_index(knowledge_bases),
+        _mcp_server_local_ref_index=_build_local_ref_index(mcp_servers),
+        _mcp_tool_local_ref_index=_build_local_ref_index(mcp_tools),
     )
 
 
@@ -262,7 +413,7 @@ def build_ai_builder_resource_reference_material(
         selected_mcp_servers=tuple(
             _resource_reference_entry(entry)
             for entry in catalog.mcp_servers
-            if entry.ref in selected_servers
+            if entry.authoring_ref in selected_servers
         ),
         selected_mcp_tools=tuple(
             _resource_reference_entry(entry)
@@ -297,6 +448,45 @@ def canonicalize_flow_spec_resources(
     if not changed:
         return spec, issues
     return spec.model_copy(update={"steps": updated_steps}), issues
+
+
+def collect_flow_spec_resource_bindings(
+    spec: FlowDraftSpecCore,
+    *,
+    catalog: AIBuilderResourceCatalog,
+) -> tuple[LocalResourceBinding, ...]:
+    bindings_by_slot: dict[tuple[ResourceSlotKind, str], LocalResourceBinding] = {}
+    for step in spec.steps:
+        assistant_spec = step.assistant_spec
+        if assistant_spec.model_ref is not None:
+            _collect_binding_for_ref(
+                bindings_by_slot=bindings_by_slot,
+                catalog=catalog,
+                kind="model",
+                ref=assistant_spec.model_ref,
+            )
+        for ref in assistant_spec.knowledge_refs:
+            _collect_binding_for_ref(
+                bindings_by_slot=bindings_by_slot,
+                catalog=catalog,
+                kind="knowledge_base",
+                ref=ref,
+            )
+        for ref in assistant_spec.mcp_server_refs:
+            _collect_binding_for_ref(
+                bindings_by_slot=bindings_by_slot,
+                catalog=catalog,
+                kind="mcp_server",
+                ref=ref,
+            )
+        for ref in assistant_spec.mcp_tool_refs:
+            _collect_binding_for_ref(
+                bindings_by_slot=bindings_by_slot,
+                catalog=catalog,
+                kind="mcp_tool",
+                ref=ref,
+            )
+    return tuple(bindings_by_slot.values())
 
 
 def canonicalize_edit_draft_resources(
@@ -503,6 +693,26 @@ def canonicalize_assistant_spec_resources(
     )
 
 
+def _collect_binding_for_ref(
+    *,
+    bindings_by_slot: dict[tuple[ResourceSlotKind, str], LocalResourceBinding],
+    catalog: AIBuilderResourceCatalog,
+    kind: ResourceKind,
+    ref: str,
+) -> None:
+    entry = catalog.entry_for_ref(kind=kind, ref=ref)
+    if entry is None or entry.local_binding is None:
+        return
+    slot_ref = entry.local_binding.slot_ref
+    bindings_by_slot.setdefault((slot_ref.kind, slot_ref.slot), entry.local_binding)
+
+
+def _build_local_ref_index(
+    entries: Iterable[AIBuilderResourceCatalogEntry],
+) -> dict[str, AIBuilderResourceCatalogEntry]:
+    return {entry.local_ref: entry for entry in entries}
+
+
 def format_resource_resolution_feedback(
     issues: list[AIBuilderResourceResolutionIssue],
 ) -> str:
@@ -546,6 +756,7 @@ def _build_entries(
     items: Sequence[Mapping[str, Any]],
     *,
     kind: ResourceKind,
+    allocator: ResourceSlotAllocator,
 ) -> list[AIBuilderResourceCatalogEntry]:
     entries: list[AIBuilderResourceCatalogEntry] = []
     for item in items:
@@ -555,12 +766,19 @@ def _build_entries(
         display_name = (
             str(item.get("display_name", item.get("name", ref))).strip() or ref
         )
+        local_kind = _local_kind_for_resource_kind(kind)
+        slot_ref, local_binding = allocator.allocate(
+            slot_kind=_slot_kind_for_resource_kind(kind),
+            local_kind=local_kind,
+            local_ref=ref,
+            display_name=display_name,
+        )
         aliases = tuple(
             dict.fromkeys(
                 filter(
                     None,
                     [
-                        _normalize_alias(ref),
+                        _normalize_alias(slot_ref.ref),
                         _normalize_alias(display_name),
                     ],
                 )
@@ -568,10 +786,12 @@ def _build_entries(
         )
         entries.append(
             AIBuilderResourceCatalogEntry(
-                ref=ref,
+                local_ref=ref,
                 display_name=display_name,
                 aliases=aliases,
                 kind=kind,
+                slot_ref=slot_ref,
+                local_binding=local_binding,
                 description=str(item.get("description", "")).strip(),
             )
         )
@@ -582,7 +802,7 @@ def _resource_reference_entry(
     entry: AIBuilderResourceCatalogEntry,
 ) -> AIBuilderResourceReferenceEntry:
     return AIBuilderResourceReferenceEntry(
-        ref=entry.ref,
+        ref=entry.authoring_ref,
         display_name=entry.display_name,
         description=_bounded_description(entry.description),
         parent_ref=entry.parent_ref,
@@ -597,6 +817,9 @@ def _bounded_description(description: str) -> str:
 
 def _build_mcp_tool_entries(
     available_mcps: list[AIBuilderMCPServerResource],
+    *,
+    allocator: ResourceSlotAllocator,
+    mcp_server_entries_by_local_ref: Mapping[str, AIBuilderResourceCatalogEntry],
 ) -> list[AIBuilderResourceCatalogEntry]:
     entries: list[AIBuilderResourceCatalogEntry] = []
     for server in available_mcps:
@@ -608,13 +831,21 @@ def _build_mcp_tool_entries(
             ref = tool["ref"]
             if not ref:
                 continue
+            server_entry = mcp_server_entries_by_local_ref.get(server_ref)
+            parent_ref = server_entry.authoring_ref if server_entry else server_ref
             display_name = tool["display_name"] or tool["name"] or ref
+            slot_ref, local_binding = allocator.allocate(
+                slot_kind=ResourceSlotKind.MCP_TOOL,
+                local_kind=LocalResourceKind.MCP_TOOL,
+                local_ref=ref,
+                display_name=f"{server_name} {display_name}",
+            )
             aliases = tuple(
                 dict.fromkeys(
                     filter(
                         None,
                         [
-                            _normalize_alias(ref),
+                            _normalize_alias(slot_ref.ref),
                             _normalize_alias(display_name),
                             _normalize_alias(f"{server_name} {display_name}"),
                         ],
@@ -623,12 +854,14 @@ def _build_mcp_tool_entries(
             )
             entries.append(
                 AIBuilderResourceCatalogEntry(
-                    ref=ref,
+                    local_ref=ref,
                     display_name=f"{server_name}: {display_name}",
                     aliases=aliases,
                     kind="mcp_tool",
+                    slot_ref=slot_ref,
+                    local_binding=local_binding,
                     description=tool["description"],
-                    parent_ref=server_ref,
+                    parent_ref=parent_ref,
                 )
             )
     return entries
@@ -642,6 +875,26 @@ def _build_alias_index(
         for alias in entry.aliases:
             alias_index.setdefault(alias, []).append(entry)
     return {alias: tuple(values) for alias, values in alias_index.items()}
+
+
+def _slot_kind_for_resource_kind(kind: ResourceKind) -> ResourceSlotKind:
+    if kind == "knowledge_base":
+        return ResourceSlotKind.KNOWLEDGE
+    if kind == "mcp_server":
+        return ResourceSlotKind.MCP_SERVER
+    if kind == "mcp_tool":
+        return ResourceSlotKind.MCP_TOOL
+    return ResourceSlotKind.MODEL
+
+
+def _local_kind_for_resource_kind(kind: ResourceKind) -> LocalResourceKind:
+    if kind == "knowledge_base":
+        return LocalResourceKind.COLLECTION
+    if kind == "mcp_server":
+        return LocalResourceKind.MCP_SERVER
+    if kind == "mcp_tool":
+        return LocalResourceKind.MCP_TOOL
+    return LocalResourceKind.COMPLETION_MODEL
 
 
 def _normalize_alias(value: str) -> str:

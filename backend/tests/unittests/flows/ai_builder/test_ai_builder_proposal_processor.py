@@ -56,6 +56,7 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AssistantSnapshotResourceUnavailableError,
     build_ai_builder_resource_catalog,
 )
 from intric.flows.ai_builder.ai_builder_tools import (
@@ -442,6 +443,7 @@ def test_create_submission_schema_keeps_mcp_refs_free_form() -> None:
                 "tools": [{"ref": "tool-1", "name": "lookup_case"}],
             }
         ],
+        resource_catalog=None,
     )
 
     step_props = schemas[0]["function"]["parameters"]["properties"]["steps"]["items"][
@@ -1107,7 +1109,7 @@ async def test_propose_plan_reasks_when_user_requests_mcp_after_declining() -> N
     assert question_payload["question_id"] == MCP_RESOURCE_SELECTION_QUESTION_ID
     assert [option["value"] for option in question_payload["options"]] == [
         MCP_SELECTION_WITHOUT,
-        f"{MCP_SELECTION_USE_SERVER_PREFIX}time-server",
+        f"{MCP_SELECTION_USE_SERVER_PREFIX}mcp_server.time-mcp",
     ]
     assert not processor.litellm_client.acompletion.await_count
 
@@ -1154,7 +1156,7 @@ async def test_outline_processing_enforces_without_mcp_selection() -> None:
                 {
                     "name": "Hämta tid",
                     "task": "Hämta aktuell tid via Time MCP.",
-                    "mcp_tool_refs": ["current-time"],
+                    "mcp_tool_refs": ["mcp_tool.time-mcp-get-current-time"],
                 }
             ],
         },
@@ -1239,7 +1241,7 @@ async def test_outline_quality_failure_records_failed_first_attempt() -> None:
                 {
                     "name": "Hämta tid",
                     "task": "Hämta aktuell tid via Time MCP.",
-                    "mcp_tool_refs": ["current-time"],
+                    "mcp_tool_refs": ["mcp_tool.time-mcp-get-current-time"],
                 }
             ],
         },
@@ -1980,6 +1982,77 @@ async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> No
 
 
 @pytest.mark.asyncio
+async def test_edit_proposal_returns_validation_when_snapshot_resource_is_unavailable() -> None:
+    processor = _make_processor()
+    flow = MagicMock()
+    flow.steps = [
+        FlowStep(
+            id=uuid4(),
+            flow_id=uuid4(),
+            tenant_id=uuid4(),
+            assistant_id=uuid4(),
+            step_order=1,
+            user_description="Skapa rapport",
+            input_source="flow_input",
+            input_type="text",
+            output_mode="pass_through",
+            output_type="text",
+            mcp_policy="inherit",
+        )
+    ]
+    flow.draft_revision = 7
+    flow.name = "Rapportflöde"
+    flow.description = "Skapar rapport."
+    flow.metadata_json = {}
+    arguments = {
+        "plan_rationale": "Byt namn.",
+        "operations": [
+            {
+                "op": "modify",
+                "target_ref": "existing_step_1",
+                "patch": {"name": "Skapa DOCX-rapport"},
+            }
+        ],
+    }
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
+            side_effect=AssistantSnapshotResourceUnavailableError(
+                kind="knowledge_base",
+                local_ref="missing-kb",
+            ),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
+            return_value=SpecValidationResult(),
+        ),
+    ):
+        result = await process_edit_arguments(
+            processor=processor,
+            session_id=uuid4(),
+            conversation=[],
+            new_messages_start=0,
+            arguments=arguments,
+            assistant_content="Här är mitt förslag:",
+            tool_call_id="call_edit",
+            available_model_refs=None,
+            available_kb_refs=None,
+            flow=flow,
+            assistant_snapshots=None,
+            litellm_model="openai/gpt-4",
+            litellm_kwargs={"api_key": "sk-test"},
+            max_output_tokens=1024,
+            resource_catalog=None,
+        )
+
+    assert result.failure_kind == "validation"
+    assert result.feedback is not None
+    assert "resource used by the existing flow is no longer available" in result.feedback
+    assert "missing-kb" not in result.feedback
+
+
+@pytest.mark.asyncio
 async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> None:
     processor = _make_processor()
     flow = MagicMock()
@@ -2206,7 +2279,7 @@ async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
     compiled_spec = _make_flow_spec(
         model_ref=None,
         knowledge_refs=[],
-        mcp_tool_refs=["current-time"],
+        mcp_tool_refs=["mcp_tool.time-mcp-get-current-time"],
     )
     edit_result = MagicMock(compiled_spec=compiled_spec, advisories=[])
     compiled_validation = MagicMock(valid=True, errors=[])
@@ -2262,7 +2335,7 @@ async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
     assert question_payload["question_id"] == MCP_RESOURCE_SELECTION_QUESTION_ID
     assert [option["value"] for option in question_payload["options"]] == [
         MCP_SELECTION_WITHOUT,
-        f"{MCP_SELECTION_USE_SERVER_PREFIX}time-server",
+        f"{MCP_SELECTION_USE_SERVER_PREFIX}mcp_server.time-mcp",
     ]
     assert prepare_spec.call_args.kwargs["resource_catalog"] is catalog
     store_plan.assert_not_awaited()
@@ -2304,7 +2377,7 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
     compiled_spec = _make_flow_spec(
         model_ref=None,
         knowledge_refs=[],
-        mcp_tool_refs=["current-time"],
+        mcp_tool_refs=["mcp_tool.time-mcp-get-current-time"],
     )
     edit_result = MagicMock(compiled_spec=compiled_spec, advisories=[])
     compiled_validation = MagicMock(valid=True, errors=[])

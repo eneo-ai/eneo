@@ -30,7 +30,6 @@ from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_token_prefix,
     normalize_discovery_text,
 )
-from intric.flows.ai_builder.ai_builder_flow_name import MAX_FLOW_NAME_LENGTH
 from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_input_type_values,
     builder_output_type_values,
@@ -51,13 +50,13 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
 from intric.flows.ai_builder.ai_builder_new_step_schema import (
     build_review_mode_schema,
     build_structured_field_schema,
-    small_ref_enums,
 )
 from intric.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
+    build_ai_builder_resource_catalog,
 )
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     NO_EXTRA_RUNTIME_METADATA,
@@ -85,6 +84,7 @@ from intric.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     PlanningState,
 )
+from intric.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
 from intric.flows.flow_review_policy import FlowStepReviewMode
 
 OUTLINE_FLOW_TOOL_NAME = "outline_flow"
@@ -982,9 +982,15 @@ def build_outline_flow_tool_schema(
     available_models: list[dict[str, Any]] | None = None,
     available_kbs: list[dict[str, Any]] | None = None,
     available_mcps: AIBuilderMCPResourceInput = None,
+    resource_catalog: AIBuilderResourceCatalog | None = None,
 ) -> dict[str, Any]:
-    model_refs = small_ref_enums(available_models)
-    kb_refs = small_ref_enums(available_kbs)
+    catalog = resource_catalog or build_ai_builder_resource_catalog(
+        available_models=available_models,
+        available_kbs=available_kbs,
+        available_mcps=available_mcps,
+    )
+    model_refs = catalog.small_ref_enum_for_kind("model")
+    kb_refs = catalog.small_ref_enum_for_kind("knowledge_base")
     # Keep MCP refs free-form. Catalog resolution and quality feedback handle
     # unknown or unrelated MCP selections without coercing the planner into an
     # available-but-wrong server when the requested MCP is absent.
@@ -1112,14 +1118,14 @@ def _outline_step_schema(
             },
             "model_ref": {
                 "type": ["string", "null"],
-                "description": "Optional canonical model ref to use for this step.",
+                "description": "Optional portable model slot ref to use for this step.",
             },
             "knowledge_refs": {
                 "type": "array",
                 "items": {"type": "string"},
                 "uniqueItems": True,
                 "description": (
-                    "Canonical knowledge base refs this semantic step needs. "
+                    "Portable knowledge slot refs this semantic step needs. "
                     "Do not combine with MCP refs on the same step."
                 ),
             },
@@ -1128,7 +1134,7 @@ def _outline_step_schema(
                 "items": {"type": "string"},
                 "uniqueItems": True,
                 "description": (
-                    "Canonical MCP server refs this semantic step needs. Use only "
+                    "Portable MCP server slot refs this semantic step needs. Use only "
                     "for external tools/live data and never together with knowledge_refs."
                 ),
             },
@@ -1137,7 +1143,7 @@ def _outline_step_schema(
                 "items": {"type": "string"},
                 "uniqueItems": True,
                 "description": (
-                    "Canonical MCP tool refs for least-privilege tool access. "
+                    "Portable MCP tool slot refs for least-privilege tool access. "
                     "Prefer tool refs over whole-server refs when possible."
                 ),
             },

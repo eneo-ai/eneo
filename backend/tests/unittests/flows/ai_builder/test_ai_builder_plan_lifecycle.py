@@ -24,6 +24,12 @@ from intric.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifec
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     MaterializerProgressSnapshot,
 )
+from intric.flows.flow_resource_bindings import (
+    LocalResourceBinding,
+    LocalResourceKind,
+    ResourceSlotKind,
+    ResourceSlotRef,
+)
 from intric.main.exceptions import BadRequestException
 
 
@@ -32,6 +38,17 @@ def _make_user() -> MagicMock:
     user.id = uuid4()
     user.tenant_id = uuid4()
     return user
+
+
+def _make_space_service() -> AsyncMock:
+    space_service = AsyncMock()
+    space = MagicMock()
+    space.get_default_transcription_model.return_value = None
+    space.completion_models = []
+    space.collections = []
+    space.mcp_servers = []
+    space_service.get_space.return_value = space
+    return space_service
 
 
 def _make_spec(*, input_type: InputType = InputType.TEXT) -> FlowDraftSpecCore:
@@ -77,6 +94,7 @@ def _make_plan(
     status: PlanStatus = PlanStatus.APPROVED,
     edit_result_json: dict[str, object] | None = None,
     spec: FlowDraftSpecCore | None = None,
+    resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
 ) -> BuilderPlan:
     used_spec = spec or _make_spec()
     return BuilderPlan(
@@ -87,7 +105,23 @@ def _make_plan(
         spec=used_spec,
         spec_hash=used_spec.spec_hash(),
         envelope=PlannerPlanEnvelope(spec=used_spec),
+        resource_bindings=resource_bindings,
         edit_result_json=edit_result_json,
+    )
+
+
+def _make_binding(
+    *,
+    kind: ResourceSlotKind,
+    slot: str,
+    label: str,
+    local_kind: LocalResourceKind,
+    local_id,
+) -> LocalResourceBinding:
+    return LocalResourceBinding(
+        slot_ref=ResourceSlotRef(kind=kind, slot=slot, label=label),
+        local_kind=local_kind,
+        local_id=local_id,
     )
 
 
@@ -152,6 +186,7 @@ class TestAIBuilderPlanLifecycle:
             user=user,
             repo=repo,
             flow_service=flow_service,
+            space_service=_make_space_service(),
         )
         await lifecycle.apply_plan(plan_id=plan.id, expected_revision=2)
 
@@ -161,6 +196,7 @@ class TestAIBuilderPlanLifecycle:
         assert origin["builder_plan_id"] == str(plan.id)
         assert origin["builder_spec_hash"] == plan.spec_hash
         assert isinstance(origin["applied_at"], str)
+        assert mock_execute.call_args.kwargs["resource_bindings"] == tuple()
 
     @pytest.mark.anyio
     async def test_apply_plan_rejects_edit_flow_space_mismatch(self):
@@ -194,6 +230,7 @@ class TestAIBuilderPlanLifecycle:
             user=user,
             repo=repo,
             flow_service=flow_service,
+            space_service=_make_space_service(),
         )
 
         with pytest.raises(BadRequestException, match="space"):
@@ -275,6 +312,7 @@ class TestAIBuilderPlanLifecycle:
             user=user,
             repo=repo,
             flow_service=flow_service,
+            space_service=_make_space_service(),
         )
 
         with pytest.raises(RuntimeError, match="apply failed"):
@@ -323,6 +361,7 @@ class TestAIBuilderPlanLifecycle:
             user=user,
             repo=repo,
             flow_service=flow_service,
+            space_service=_make_space_service(),
         )
 
         with pytest.raises(RuntimeError, match="compile exploded"):
@@ -376,6 +415,7 @@ class TestAIBuilderPlanLifecycle:
             user=user,
             repo=repo,
             flow_service=flow_service,
+            space_service=_make_space_service(),
         )
 
         with pytest.raises(BadRequestException, match="invalid compile"):
@@ -446,6 +486,7 @@ class TestAIBuilderPlanLifecycle:
             user=user,
             repo=repo,
             flow_service=flow_service,
+            space_service=_make_space_service(),
         )
 
         with pytest.raises(RuntimeError, match="execute exploded"):
@@ -506,6 +547,7 @@ class TestAIBuilderPlanLifecycle:
             user=user,
             repo=repo,
             flow_service=flow_service,
+            space_service=_make_space_service(),
         )
 
         with pytest.raises(BadRequestException, match="stale"):
@@ -519,7 +561,7 @@ class TestAIBuilderPlanLifecycle:
     @pytest.mark.anyio
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
-    async def test_apply_plan_canonicalizes_unique_model_and_kb_aliases_before_compile(
+    async def test_apply_plan_uses_plan_resource_bindings_without_rederiving(
         self,
         mock_compile,
         mock_execute,
@@ -535,21 +577,40 @@ class TestAIBuilderPlanLifecycle:
             flow_id=None,
             target_kind=TargetKind.CREATE,
         )
+        model_id = uuid4()
+        collection_id = uuid4()
+        plan_bindings = (
+            _make_binding(
+                kind=ResourceSlotKind.MODEL,
+                slot="fast-model",
+                label="Fast model",
+                local_kind=LocalResourceKind.COMPLETION_MODEL,
+                local_id=model_id,
+            ),
+            _make_binding(
+                kind=ResourceSlotKind.KNOWLEDGE,
+                slot="policy-kb",
+                label="Policy KB",
+                local_kind=LocalResourceKind.COLLECTION,
+                local_id=collection_id,
+            ),
+        )
         plan = _make_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
             spec=_make_grounded_spec(
-                model_ref="gpt-5.4-nano",
-                knowledge_refs=["socio"],
+                model_ref="model.fast-model",
+                knowledge_refs=["knowledge.policy-kb"],
             ),
+            resource_bindings=plan_bindings,
         )
         space = MagicMock()
         space.get_default_transcription_model.return_value = None
         space.completion_models = [
-            SimpleNamespace(id=uuid4(), name="gpt-5.4-nano", provider_type="openai")
+            SimpleNamespace(id=model_id, name="gpt-5.4-nano", provider_type="openai")
         ]
         space.collections = [
-            SimpleNamespace(id=uuid4(), name="socio", description="Sociologi")
+            SimpleNamespace(id=collection_id, name="socio", description="Sociologi")
         ]
         space_service.get_space.return_value = space
         repo.get_plan.return_value = plan
@@ -569,20 +630,34 @@ class TestAIBuilderPlanLifecycle:
             flow_service=flow_service,
             space_service=space_service,
         )
-        await lifecycle.apply_plan(plan_id=plan.id)
+        with patch(
+            (
+                "intric.flows.ai_builder.ai_builder_plan_lifecycle."
+                "collect_flow_spec_resource_bindings"
+            ),
+            side_effect=AssertionError("apply must not re-derive bindings"),
+            create=True,
+        ):
+            await lifecycle.apply_plan(plan_id=plan.id)
 
         compiled_spec = mock_compile.call_args.args[0]
         assistant_spec = compiled_spec.steps[0].assistant_spec
-        assert assistant_spec.model_ref == str(space.completion_models[0].id)
-        assert assistant_spec.knowledge_refs == [str(space.collections[0].id)]
+        assert assistant_spec.model_ref == "model.fast-model"
+        assert assistant_spec.knowledge_refs == ["knowledge.policy-kb"]
+        assert mock_execute.call_args.kwargs["resource_bindings"] == plan_bindings
 
     @pytest.mark.anyio
-    async def test_apply_plan_rejects_ambiguous_kb_alias_before_compile(self) -> None:
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
+    async def test_apply_plan_rejects_resource_plan_without_binding_snapshot(
+        self,
+        mock_compile,
+        mock_execute,
+    ) -> None:
         user = _make_user()
         repo = AsyncMock()
         flow_service = AsyncMock()
         space_service = AsyncMock()
-
         session = _make_session(
             tenant_id=user.tenant_id,
             actor_user_id=user.id,
@@ -592,15 +667,10 @@ class TestAIBuilderPlanLifecycle:
         plan = _make_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            spec=_make_grounded_spec(model_ref=None, knowledge_refs=["socio"]),
+            spec=_make_grounded_spec(model_ref="model.fast-model", knowledge_refs=[]),
         )
         space = MagicMock()
         space.get_default_transcription_model.return_value = None
-        space.completion_models = []
-        space.collections = [
-            SimpleNamespace(id=uuid4(), name="Socio", description="A"),
-            SimpleNamespace(id=uuid4(), name="socio", description="B"),
-        ]
         space_service.get_space.return_value = space
         repo.get_plan.return_value = plan
         repo.get_session.return_value = session
@@ -612,9 +682,74 @@ class TestAIBuilderPlanLifecycle:
             space_service=space_service,
         )
 
-        with pytest.raises(
-            BadRequestException, match="Ambiguous knowledge base reference 'socio'"
-        ):
+        with pytest.raises(BadRequestException) as exc_info:
             await lifecycle.apply_plan(plan_id=plan.id)
 
-        flow_service.create_flow.assert_not_awaited()
+        assert exc_info.value.code == "ai_builder_plan_resource_bindings_missing"
+        mock_compile.assert_not_called()
+        mock_execute.assert_not_called()
+        repo.update_session_status.assert_not_awaited()
+
+    @pytest.mark.anyio
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
+    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
+    async def test_apply_plan_rejects_replaced_resource_with_same_name_before_compile(
+        self,
+        mock_compile,
+        mock_execute,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        flow_service = AsyncMock()
+        space_service = AsyncMock()
+        missing_model_id = uuid4()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            spec=_make_grounded_spec(
+                model_ref="model.fast-model",
+                knowledge_refs=[],
+            ),
+            resource_bindings=(
+                _make_binding(
+                    kind=ResourceSlotKind.MODEL,
+                    slot="fast-model",
+                    label="Fast model",
+                    local_kind=LocalResourceKind.COMPLETION_MODEL,
+                    local_id=missing_model_id,
+                ),
+            ),
+        )
+        space = MagicMock()
+        space.get_default_transcription_model.return_value = None
+        space.completion_models = [
+            SimpleNamespace(id=uuid4(), name="Fast model", provider_type="openai")
+        ]
+        space.collections = []
+        space_service.get_space.return_value = space
+        repo.get_plan.return_value = plan
+        repo.get_session.return_value = session
+
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+            space_service=space_service,
+        )
+
+        with pytest.raises(BadRequestException) as exc_info:
+            await lifecycle.apply_plan(plan_id=plan.id)
+
+        assert exc_info.value.code == "ai_builder_plan_resource_binding_unavailable"
+        assert exc_info.value.context["slot_ref"] == "model.fast-model"
+        assert exc_info.value.context["slot_kind"] == "model"
+        assert exc_info.value.context["local_kind"] == "completion_model"
+        mock_compile.assert_not_called()
+        mock_execute.assert_not_called()
+        repo.update_session_status.assert_not_awaited()

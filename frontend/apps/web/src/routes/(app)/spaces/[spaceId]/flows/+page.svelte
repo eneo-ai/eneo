@@ -8,6 +8,7 @@
   import { m } from "$lib/paraglide/messages";
   import FlowsTable from "./FlowsTable.svelte";
   import CreateFlowDialog from "./CreateFlowDialog.svelte";
+  import FlowPackageImportDialog from "$lib/features/flows/components/FlowPackageImportDialog.svelte";
 
   let {
     data
@@ -49,7 +50,14 @@
   <Page.Header>
     <Page.Title title={m.flows()}></Page.Title>
     {#if user.hasPermission("flows_manage")}
-      <CreateFlowDialog />
+      <div class="flex items-center gap-2">
+        <FlowPackageImportDialog
+          intric={data.intric}
+          spaceId={$currentSpace.id}
+          spaceRouteId={$currentSpace.routeId}
+        />
+        <CreateFlowDialog />
+      </div>
     {/if}
   </Page.Header>
   <Page.Main>

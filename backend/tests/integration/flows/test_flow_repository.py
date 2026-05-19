@@ -6,9 +6,11 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.flow_tables import (
+    FlowResourceBindings,
     FlowRuns,
     Flows,
     FlowStepResults,
@@ -22,6 +24,13 @@ from intric.flows import (
     FlowStepResult,
     FlowStepResultStatus,
     FlowVersionRepository,
+)
+from intric.flows.flow_resource_bindings import (
+    FlowResourceBindingSource,
+    LocalResourceBinding,
+    LocalResourceKind,
+    ResourceSlotKind,
+    ResourceSlotRef,
 )
 from intric.main.exceptions import BadRequestException, NotFoundException
 
@@ -72,6 +81,35 @@ def _build_flow(
     )
 
 
+def _resource_binding(
+    *,
+    slot: str,
+    local_id: UUID | None = None,
+) -> LocalResourceBinding:
+    return LocalResourceBinding(
+        slot_ref=ResourceSlotRef(
+            kind=ResourceSlotKind.MODEL,
+            slot=slot,
+            label=slot.replace("-", " ").title(),
+        ),
+        local_kind=LocalResourceKind.COMPLETION_MODEL,
+        local_id=local_id or uuid4(),
+    )
+
+
+async def _resource_binding_rows(
+    session: AsyncSession,
+    *,
+    flow_id: UUID,
+) -> list[FlowResourceBindings]:
+    result = await session.execute(
+        sa.select(FlowResourceBindings)
+        .where(FlowResourceBindings.flow_id == flow_id)
+        .order_by(FlowResourceBindings.slot.asc())
+    )
+    return list(result.scalars().all())
+
+
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_flow_repository_create_get_and_tenant_scope(
@@ -115,6 +153,243 @@ async def test_flow_repository_create_get_and_tenant_scope(
 
         with pytest.raises(NotFoundException):
             await repo.get(created.id, uuid4())
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_repository_replaces_resource_bindings(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flows binding space", [model.id])
+        assistant = await assistant_factory(
+            session,
+            "Binding Assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        repo = FlowRepository(session=session, factory=FlowFactory())
+        created = await repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        assert created.id is not None
+
+        await repo.replace_resource_bindings(
+            flow_id=created.id,
+            tenant_id=admin_user.tenant_id,
+            bindings=(
+                _resource_binding(slot="model-a"),
+                _resource_binding(slot="model-b"),
+            ),
+            source=FlowResourceBindingSource.AI_BUILDER,
+        )
+        await repo.replace_resource_bindings(
+            flow_id=created.id,
+            tenant_id=admin_user.tenant_id,
+            bindings=(_resource_binding(slot="model-c"),),
+            source=FlowResourceBindingSource.AI_BUILDER,
+        )
+
+        rows = await _resource_binding_rows(session, flow_id=created.id)
+        assert [row.slot for row in rows] == ["model-c"]
+        assert rows[0].tenant_id == admin_user.tenant_id
+        assert rows[0].space_id == space.id
+        assert rows[0].source == FlowResourceBindingSource.AI_BUILDER.value
+        assert rows[0].slot_label == "Model C"
+
+        await repo.replace_resource_bindings(
+            flow_id=created.id,
+            tenant_id=admin_user.tenant_id,
+            bindings=tuple(),
+            source=FlowResourceBindingSource.AI_BUILDER,
+        )
+
+        assert await _resource_binding_rows(session, flow_id=created.id) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_repository_lists_resource_bindings_as_typed_values(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flows binding read space", [model.id])
+        assistant = await assistant_factory(
+            session,
+            "Binding Read Assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        repo = FlowRepository(session=session, factory=FlowFactory())
+        created = await repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        assert created.id is not None
+        first_id = uuid4()
+        second_id = uuid4()
+        await repo.replace_resource_bindings(
+            flow_id=created.id,
+            tenant_id=admin_user.tenant_id,
+            bindings=(
+                _resource_binding(slot="model-b", local_id=second_id),
+                _resource_binding(slot="model-a", local_id=first_id),
+            ),
+            source=FlowResourceBindingSource.AI_BUILDER,
+        )
+
+        bindings = await repo.list_resource_bindings(
+            flow_id=created.id,
+            tenant_id=admin_user.tenant_id,
+        )
+
+        assert [binding.slot_ref.slot for binding in bindings] == ["model-a", "model-b"]
+        assert [binding.slot_ref.label for binding in bindings] == [
+            "Model A",
+            "Model B",
+        ]
+        assert [binding.local_id for binding in bindings] == [first_id, second_id]
+        with pytest.raises(NotFoundException):
+            await repo.list_resource_bindings(
+                flow_id=created.id,
+                tenant_id=uuid4(),
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_repository_resource_binding_replacement_is_atomic_on_insert_failure(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flows binding atomicity space", [model.id])
+        assistant = await assistant_factory(
+            session,
+            "Binding Atomicity Assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        repo = FlowRepository(session=session, factory=FlowFactory())
+        created = await repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        assert created.id is not None
+
+        original_local_id = uuid4()
+        await repo.replace_resource_bindings(
+            flow_id=created.id,
+            tenant_id=admin_user.tenant_id,
+            bindings=(
+                _resource_binding(
+                    slot="original-model",
+                    local_id=original_local_id,
+                ),
+            ),
+            source=FlowResourceBindingSource.AI_BUILDER,
+        )
+
+        nested = await session.begin_nested()
+        try:
+            await repo.replace_resource_bindings(
+                flow_id=created.id,
+                tenant_id=admin_user.tenant_id,
+                bindings=(
+                    _resource_binding(slot="duplicate-model"),
+                    _resource_binding(slot="duplicate-model"),
+                ),
+                source=FlowResourceBindingSource.AI_BUILDER,
+            )
+        except IntegrityError:
+            await nested.rollback()
+        else:
+            await nested.rollback()
+            pytest.fail("Expected duplicate binding insert to fail.")
+
+        rows = await _resource_binding_rows(session, flow_id=created.id)
+        assert [(row.slot, row.local_resource_id) for row in rows] == [
+            ("original-model", original_local_id)
+        ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_repository_resource_binding_write_is_tenant_scoped(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flows binding tenant space", [model.id])
+        assistant = await assistant_factory(
+            session,
+            "Binding Tenant Assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        repo = FlowRepository(session=session, factory=FlowFactory())
+        created = await repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        assert created.id is not None
+
+        with pytest.raises(NotFoundException):
+            await repo.replace_resource_bindings(
+                flow_id=created.id,
+                tenant_id=uuid4(),
+                bindings=(_resource_binding(slot="model-a"),),
+                source=FlowResourceBindingSource.AI_BUILDER,
+            )
+
+        assert await _resource_binding_rows(session, flow_id=created.id) == []
 
 
 @pytest.mark.asyncio

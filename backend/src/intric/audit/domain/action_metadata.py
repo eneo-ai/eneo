@@ -277,6 +277,14 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "name_sv": "Flow-bevisning exporterad",
         "description_sv": "Loggar när rik körningsbevisning exporteras som JSON",
     },
+    ActionType.FLOW_PACKAGE_EXPORTED.value: {
+        "name_sv": "Flow-paket exporterat",
+        "description_sv": "Loggar när ett flow exporteras som ett portabelt paket",
+    },
+    ActionType.FLOW_PACKAGE_DRAFT_INSTALLED.value: {
+        "name_sv": "Flow-paket importerat som utkast",
+        "description_sv": "Loggar när ett portabelt flow-paket importeras som ett nytt utkast",
+    },
     ActionType.TEMPLATE_CREATED.value: {
         "name_sv": "Mall skapad",
         "description_sv": "Loggar när en ny mall skapas",

@@ -57,7 +57,7 @@ type SuccessResponse<Responses extends { [x: number]: any }> = Values<
   >
 >["content"]["application/json"];
 
-type IntricFetchFunction = <
+export type IntricFetchFunction = <
   Endpoint extends keyof IntricEndpoints,
   Method extends keyof IntricEndpoints[Endpoint]
 >(
@@ -95,6 +95,51 @@ type IntricFetchFunction = <
         }
 ) => Promise<SuccessResponse<Responses<Endpoint, Method>>>;
 
+export type IntricBinaryResponse = {
+  blob: Blob;
+  contentType: string;
+  filename?: string;
+  headers: Headers;
+};
+
+export type IntricBinaryFetchFunction = <
+  Endpoint extends keyof IntricEndpoints,
+  Method extends keyof IntricEndpoints[Endpoint]
+>(
+  endpoint: Endpoint,
+  args: IntricParams<Endpoint, Method> extends never
+    ? IntricRequestBody<Endpoint, Method> extends never
+      ? {
+          method: Method;
+          params?: never;
+          requestBody?: never;
+          signal?: AbortSignal;
+          headers?: Record<string, string>;
+        }
+      : {
+          method: Method;
+          params?: never;
+          requestBody: IntricClientRequestBody<Endpoint, Method>;
+          signal?: AbortSignal;
+          headers?: Record<string, string>;
+        }
+    : IntricRequestBody<Endpoint, Method> extends never
+      ? {
+          method: Method;
+          params: IntricParams<Endpoint, Method>;
+          requestBody?: never;
+          signal?: AbortSignal;
+          headers?: Record<string, string>;
+        }
+      : {
+          method: Method;
+          params: IntricParams<Endpoint, Method>;
+          requestBody: IntricClientRequestBody<Endpoint, Method>;
+          signal?: AbortSignal;
+          headers?: Record<string, string>;
+        }
+) => Promise<IntricBinaryResponse>;
+
 type IntricStreamingEndpoints =
   | "/api/v1/assistants/{id}/sessions/{session_id}/"
   | "/api/v1/assistants/{id}/sessions/"
@@ -102,7 +147,7 @@ type IntricStreamingEndpoints =
   | "/api/v1/conversations/"
   | "/api/v1/analysis/conversation-insights/";
 
-type IntricStreamFunction = <Endpoint extends IntricStreamingEndpoints>(
+export type IntricStreamFunction = <Endpoint extends IntricStreamingEndpoints>(
   endpoint: Endpoint,
   args: {
     params: IntricParams<Endpoint, "post">;
@@ -120,7 +165,7 @@ type IntricStreamFunction = <Endpoint extends IntricStreamingEndpoints>(
   abortController?: AbortController | undefined
 ) => Promise<void>;
 
-type IntricXhrFunction = <
+export type IntricXhrFunction = <
   Endpoint extends keyof IntricEndpoints,
   Method extends keyof IntricEndpoints[Endpoint]
 >(

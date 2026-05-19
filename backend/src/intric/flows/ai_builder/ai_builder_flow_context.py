@@ -12,6 +12,15 @@ from intric.flows.ai_builder.ai_builder_mcp_resources import (
     normalize_ai_builder_mcp_resources,
 )
 from intric.flows.ai_builder.ai_builder_models import FlowDraftSpecCore
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderResourceCatalog,
+    AIBuilderResourceCatalogEntry,
+    build_ai_builder_resource_catalog,
+)
+from intric.flows.assistant_authoring_snapshot import (
+    AssistantAuthoringResourceRef,
+    AssistantAuthoringSnapshots,
+)
 from intric.flows.domain.flow import Flow, FlowStep, JsonObject
 
 if TYPE_CHECKING:
@@ -21,7 +30,7 @@ if TYPE_CHECKING:
 def build_flow_context(
     flow: Flow,
     *,
-    assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+    assistant_snapshots: AssistantAuthoringSnapshots | None = None,
     is_edit_mode: bool = False,
     capabilities: FlowCapabilityProfile | None = None,
     edit_scope: "EditScopeResolution | None" = None,
@@ -44,20 +53,21 @@ def build_flow_context(
 def _build_detailed_flow_context(
     flow: Flow,
     *,
-    assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+    assistant_snapshots: AssistantAuthoringSnapshots | None = None,
     is_edit_mode: bool = False,
 ) -> str:
+    sorted_steps = sorted(flow.steps, key=lambda step: step.step_order)
     lines = [
         f"Namn: {flow.name}",
         f"Beskrivning: {flow.description or '(ingen)'}",
         f"Draft-revision: {flow.draft_revision}",
         f"Publicerad: {'Ja (v' + str(flow.published_version) + ')' if flow.published else 'Nej'}",
-        f"Antal steg: {len(flow.steps)}",
+        f"Antal steg: {len(sorted_steps)}",
     ]
 
-    if flow.steps:
+    if sorted_steps:
         lines.append("\nSteg:")
-        for step in sorted(flow.steps, key=lambda s: s.step_order):
+        for step in sorted_steps:
             ref = f"existing_step_{step.step_order}"
             lines.append(
                 f"  {step.step_order}. {step.user_description or '(namnlöst)'} "
@@ -89,64 +99,24 @@ def _build_detailed_flow_context(
                 if assistant_snapshots
                 else None
             )
-            if isinstance(snapshot, dict):
-                instructions = snapshot.get("instructions")
-                if isinstance(instructions, str) and instructions.strip():
+            if snapshot is not None:
+                if snapshot.instructions:
                     # Sanitize: show a purpose summary, not raw instructions.
                     # Raw instructions are untrusted flow content that should
                     # not be elevated to system-level prompt context.
-                    synopsis = _build_step_synopsis(instructions)
+                    synopsis = _build_step_synopsis(snapshot.instructions)
                     lines.append(f"     Syfte: {synopsis}")
 
-                model_ref = snapshot.get("model_ref")
-                model_label = snapshot.get("model_label")
-                if isinstance(model_ref, str) and model_ref.strip():
-                    if isinstance(model_label, str) and model_label.strip():
-                        lines.append(f"     Modell: {model_label} [{model_ref}]")
-                    else:
-                        lines.append(f"     Modell: {model_ref}")
+                if snapshot.model is not None:
+                    lines.append(f"     Modell: {snapshot.model.display_value}")
 
-                knowledge_refs = snapshot.get("knowledge_refs")
-                knowledge_labels = snapshot.get("knowledge_labels")
-                if isinstance(knowledge_refs, list):
-                    refs_raw = cast(list[object], knowledge_refs)
-                    refs = [str(ref).strip() for ref in refs_raw if str(ref).strip()]
-                    labels = (
-                        [
-                            str(label).strip()
-                            for label in cast(list[object], knowledge_labels)
-                            if str(label).strip()
-                        ]
-                        if isinstance(knowledge_labels, list)
-                        else []
-                    )
-                    if refs:
-                        display_refs: list[str] = []
-                        for index, ref in enumerate(refs):
-                            label = labels[index] if index < len(labels) else None
-                            display_refs.append(f"{label} [{ref}]" if label else ref)
-                        lines.append(f"     Kunskapsbaser: {', '.join(display_refs)}")
+                knowledge_values = _display_snapshot_resources(snapshot.knowledge_refs)
+                if knowledge_values:
+                    lines.append(f"     Kunskapsbaser: {', '.join(knowledge_values)}")
 
-                mcp_tool_refs = snapshot.get("mcp_tool_refs")
-                mcp_tool_labels = snapshot.get("mcp_tool_labels")
-                if isinstance(mcp_tool_refs, list):
-                    refs_raw = cast(list[object], mcp_tool_refs)
-                    refs = [str(ref).strip() for ref in refs_raw if str(ref).strip()]
-                    labels = (
-                        [
-                            str(label).strip()
-                            for label in cast(list[object], mcp_tool_labels)
-                            if str(label).strip()
-                        ]
-                        if isinstance(mcp_tool_labels, list)
-                        else []
-                    )
-                    if refs:
-                        display_refs = []
-                        for index, ref in enumerate(refs):
-                            label = labels[index] if index < len(labels) else None
-                            display_refs.append(f"{label} [{ref}]" if label else ref)
-                        lines.append(f"     MCP-verktyg: {', '.join(display_refs)}")
+                mcp_tool_values = _display_snapshot_resources(snapshot.mcp_tool_refs)
+                if mcp_tool_values:
+                    lines.append(f"     MCP-verktyg: {', '.join(mcp_tool_values)}")
 
             if step.output_config:
                 output_config_str = str(step.output_config)
@@ -170,11 +140,11 @@ def _build_detailed_flow_context(
                             f"  - {field_dict.get('name', '?')} ({field_dict.get('type', '?')})"
                         )
 
-    if is_edit_mode and flow.steps:
+    if is_edit_mode and sorted_steps:
         lines.append("\nEdit-referenstabell:")
         lines.append("  Ref                 | Namn                | IO-typ")
         lines.append("  --------------------|---------------------|-------")
-        for step in sorted(flow.steps, key=lambda s: s.step_order):
+        for step in sorted_steps:
             ref = f"existing_step_{step.step_order}"
             name = (step.user_description or "(namnlöst)")[:20]
             io = f"{step.input_type} → {step.output_type}"
@@ -186,7 +156,7 @@ def _build_detailed_flow_context(
 def _build_edit_mode_flow_context(
     flow: Flow,
     *,
-    assistant_snapshots: dict[UUID, dict[str, Any]] | None,
+    assistant_snapshots: AssistantAuthoringSnapshots | None,
     capabilities: FlowCapabilityProfile,
     edit_scope: "EditScopeResolution | None",
 ) -> str:
@@ -264,56 +234,116 @@ def _build_edit_mode_flow_context(
 
 def build_available_models_context(
     models: list[dict[str, Any]],
+    *,
+    resource_catalog: AIBuilderResourceCatalog | None = None,
 ) -> list[dict[str, str]]:
     """Build model context for system prompt injection."""
-    return [
-        {
-            "ref": str(model.get("id", model.get("ref", ""))),
-            "name": str(model.get("name", "")),
-            "display_name": str(model.get("display_name", model.get("name", ""))),
-            "provider": str(model.get("provider", "unknown")),
-        }
-        for model in models
-    ]
+    catalog = resource_catalog or build_ai_builder_resource_catalog(
+        available_models=models,
+        available_kbs=[],
+        available_mcps=[],
+    )
+    entries_by_local_ref = _entries_by_local_ref(catalog.models)
+    context: list[dict[str, str]] = []
+    for model in models:
+        local_ref = _local_resource_ref(model)
+        entry = entries_by_local_ref.get(local_ref)
+        if entry is None:
+            continue
+        context.append(
+            {
+                "ref": entry.authoring_ref,
+                "name": str(model.get("name", "")),
+                "display_name": str(model.get("display_name", model.get("name", ""))),
+                "provider": str(model.get("provider", "unknown")),
+            }
+        )
+    return context
 
 
 def build_available_kbs_context(
     knowledge_bases: list[dict[str, Any]],
+    *,
+    resource_catalog: AIBuilderResourceCatalog | None = None,
 ) -> list[dict[str, str]]:
     """Build knowledge base context for system prompt injection."""
-    return [
-        {
-            "ref": str(kb.get("id", kb.get("ref", ""))),
-            "name": str(kb.get("name", "")),
-            "display_name": str(kb.get("display_name", kb.get("name", ""))),
-            "description": str(kb.get("description", "")),
-        }
-        for kb in knowledge_bases
-    ]
+    catalog = resource_catalog or build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=knowledge_bases,
+        available_mcps=[],
+    )
+    entries_by_local_ref = _entries_by_local_ref(catalog.knowledge_bases)
+    context: list[dict[str, str]] = []
+    for kb in knowledge_bases:
+        local_ref = _local_resource_ref(kb)
+        entry = entries_by_local_ref.get(local_ref)
+        if entry is None:
+            continue
+        context.append(
+            {
+                "ref": entry.authoring_ref,
+                "name": str(kb.get("name", "")),
+                "display_name": str(kb.get("display_name", kb.get("name", ""))),
+                "description": str(kb.get("description", "")),
+            }
+        )
+    return context
 
 
 def build_available_mcp_context(
     mcp_servers: AIBuilderMCPResourceInput,
+    *,
+    resource_catalog: AIBuilderResourceCatalog | None = None,
 ) -> list[dict[str, Any]]:
     """Build MCP resource context for prompt injection."""
-    return [
-        {
-            "ref": server["ref"],
-            "name": server["name"],
-            "display_name": server["display_name"],
-            "description": server["description"],
-            "tools": [
+    normalized_servers = normalize_ai_builder_mcp_resources(mcp_servers)
+    catalog = resource_catalog or build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=normalized_servers,
+    )
+    server_entries_by_local_ref = _entries_by_local_ref(catalog.mcp_servers)
+    tool_entries_by_local_ref = _entries_by_local_ref(catalog.mcp_tools)
+    context: list[dict[str, Any]] = []
+    for server in normalized_servers:
+        server_entry = server_entries_by_local_ref.get(server["ref"])
+        if server_entry is None:
+            continue
+        tools: list[dict[str, str]] = []
+        for tool in server["tools"]:
+            tool_entry = tool_entries_by_local_ref.get(tool["ref"])
+            if tool_entry is None:
+                continue
+            tools.append(
                 {
-                    "ref": tool["ref"],
+                    "ref": tool_entry.authoring_ref,
                     "name": tool["name"],
                     "display_name": tool["display_name"],
                     "description": tool["description"],
                 }
-                for tool in server["tools"]
-            ],
-        }
-        for server in normalize_ai_builder_mcp_resources(mcp_servers)
-    ]
+            )
+        if not tools:
+            continue
+        context.append(
+            {
+                "ref": server_entry.authoring_ref,
+                "name": server["name"],
+                "display_name": server["display_name"],
+                "description": server["description"],
+                "tools": tools,
+            }
+        )
+    return context
+
+
+def _entries_by_local_ref(
+    entries: tuple[AIBuilderResourceCatalogEntry, ...],
+) -> dict[str, AIBuilderResourceCatalogEntry]:
+    return {entry.local_ref: entry for entry in entries}
+
+
+def _local_resource_ref(resource: dict[str, Any]) -> str:
+    return str(resource.get("ref", resource.get("id", ""))).strip()
 
 
 def build_step_ref_mapping(flow: Flow) -> dict[str, UUID]:
@@ -423,35 +453,25 @@ def _form_field_names(flow: Flow) -> list[str]:
 
 def _knowledge_base_summary(
     steps: list[FlowStep],
-    assistant_snapshots: dict[UUID, dict[str, Any]] | None,
+    assistant_snapshots: AssistantAuthoringSnapshots | None,
 ) -> str | None:
     if not assistant_snapshots:
         return None
     parts: list[str] = []
     for step in steps:
         snapshot = assistant_snapshots.get(step.assistant_id)
-        if not isinstance(snapshot, dict):
+        if snapshot is None:
             continue
-        labels = snapshot.get("knowledge_labels")
-        refs = snapshot.get("knowledge_refs")
-        display_values = (
-            [
-                str(label).strip()
-                for label in cast(list[object], labels)
-                if isinstance(label, str) and label.strip()
-            ]
-            if isinstance(labels, list)
-            else []
-        )
-        if not display_values and isinstance(refs, list):
-            display_values = [
-                str(ref).strip()
-                for ref in cast(list[object], refs)
-                if isinstance(ref, str) and ref.strip()
-            ]
+        display_values = _display_snapshot_resources(snapshot.knowledge_refs)
         if display_values:
             parts.append(f"steg {step.step_order} ({', '.join(display_values)})")
     return "; ".join(parts) or None
+
+
+def _display_snapshot_resources(
+    refs: tuple[AssistantAuthoringResourceRef, ...],
+) -> list[str]:
+    return [resource.display_value for resource in refs]
 
 
 def _format_step_ranges(step_orders: tuple[int, ...]) -> str | None:
@@ -527,11 +547,9 @@ def _build_step_synopsis(instructions: str) -> str:
     Extracts the first sentence or line as a purpose summary, avoiding
     injecting the full untrusted instructions into the system prompt.
     """
-    # Take first non-empty line
     for line in instructions.split("\n"):
         stripped = line.strip()
         if stripped:
-            # Truncate at first sentence boundary or 120 chars
             for end in (".", "!", "。"):
                 idx = stripped.find(end)
                 if 0 < idx < 120:

@@ -41,6 +41,15 @@ from intric.embedding_models.presentation.tenant_embedding_models_router import 
     router as tenant_embedding_models_router,
 )
 from intric.files.file_router import router as files_router
+from intric.flow_packages.api import (
+    flow_router as flow_package_flow_router,
+)
+from intric.flow_packages.api import (
+    space_router as flow_package_space_router,
+)
+from intric.flow_packages.api import (
+    tenant_router as flow_package_tenant_router,
+)
 from intric.flows.api.flow_router import router as flows_router
 from intric.group_chat.presentation.group_chat_router import router as group_chat_router
 from intric.groups_legacy.api.group_router import router as groups_router
@@ -401,6 +410,24 @@ router.include_router(
         Depends(require_api_key_scope_check(resource_type="flow", path_param="id")),
     ],
 )
+router.include_router(
+    flow_package_flow_router,
+    prefix="/flows/{id}",
+    tags=["flow-packages"],
+    dependencies=[
+        Depends(require_resource_permission_for_method("flows")),
+        Depends(require_api_key_scope_check(resource_type="flow", path_param="id")),
+    ],
+)
+router.include_router(
+    flow_package_tenant_router,
+    prefix="/flow-packages",
+    tags=["flow-packages"],
+    dependencies=[
+        Depends(require_resource_permission_for_method("flows")),
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+    ],
+)
 router.include_router(icons_router, prefix="/icons", tags=["icons"])
 router.include_router(limit_router, prefix="/limits", tags=["limits"])
 router.include_router(
@@ -409,6 +436,15 @@ router.include_router(
     tags=["spaces"],
     dependencies=[
         Depends(require_resource_permission_for_method("spaces")),
+        Depends(require_api_key_scope_check(resource_type="space", path_param="id")),
+    ],
+)
+router.include_router(
+    flow_package_space_router,
+    prefix="/spaces/{id}/flow-packages",
+    tags=["flow-packages"],
+    dependencies=[
+        Depends(require_resource_permission_for_method("flows")),
         Depends(require_api_key_scope_check(resource_type="space", path_param="id")),
     ],
 )

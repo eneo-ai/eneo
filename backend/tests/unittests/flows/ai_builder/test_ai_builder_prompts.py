@@ -21,6 +21,7 @@ from intric.flows.ai_builder.ai_builder_models import (
 )
 from intric.flows.ai_builder.ai_builder_prompts import (
     build_available_kbs_context,
+    build_available_mcp_context,
     build_available_models_context,
     build_clarification_hints,
     build_flow_context,
@@ -31,6 +32,10 @@ from intric.flows.ai_builder.ai_builder_prompts import (
 )
 from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
+)
+from intric.flows.assistant_authoring_snapshot import (
+    AssistantAuthoringResourceRef,
+    AssistantAuthoringSnapshot,
 )
 from intric.flows.flow import Flow, FlowStep
 
@@ -950,13 +955,23 @@ class TestBuildClarificationHints:
         ctx = build_flow_context(
             flow,
             assistant_snapshots={
-                step.assistant_id: {
-                    "instructions": "Extrahera summary, keywords och teman.",
-                    "model_ref": "model-uuid-1",
-                    "model_label": "GPT-4",
-                    "knowledge_refs": ["kb-policy", "kb-archive"],
-                    "knowledge_labels": ["Policy", "Archive"],
-                }
+                step.assistant_id: AssistantAuthoringSnapshot(
+                    instructions="Extrahera summary, keywords och teman.",
+                    model=AssistantAuthoringResourceRef(
+                        local_ref="model-uuid-1",
+                        label="GPT-4",
+                    ),
+                    knowledge_refs=(
+                        AssistantAuthoringResourceRef(
+                            local_ref="kb-policy",
+                            label="Policy",
+                        ),
+                        AssistantAuthoringResourceRef(
+                            local_ref="kb-archive",
+                            label="Archive",
+                        ),
+                    ),
+                )
             },
         )
         assert "Syfte:" in ctx
@@ -995,10 +1010,15 @@ class TestBuildClarificationHints:
         ctx = build_flow_context(
             flow,
             assistant_snapshots={
-                step_two.assistant_id: {
-                    "knowledge_refs": ["kb-policy"],
-                    "knowledge_labels": ["Policy"],
-                }
+                step_two.assistant_id: AssistantAuthoringSnapshot(
+                    instructions="",
+                    knowledge_refs=(
+                        AssistantAuthoringResourceRef(
+                            local_ref="kb-policy",
+                            label="Policy",
+                        ),
+                    ),
+                )
             },
             is_edit_mode=True,
             capabilities=build_flow_capability_profile(flow),
@@ -1013,7 +1033,7 @@ class TestBuildClarificationHints:
         assert "Indata: dokument via steg 1" in ctx
         assert "Utdata: PDF via steg 2" in ctx
         assert "Formulär: Referensnummer" in ctx
-        assert "Kunskapsbaser: steg 2 (Policy)" in ctx
+        assert "Kunskapsbaser: steg 2 (Policy [kb-policy])" in ctx
         assert "Källhänvisningar: steg 1" in ctx
         assert "Aktiv familj: output_artifact" in ctx
         assert "Begärd ändring: PDF -> DOCX" in ctx
@@ -1030,14 +1050,14 @@ class TestContextBuilders:
         models = [{"id": "abc-123", "name": "GPT-4", "provider": "openai"}]
         result = build_available_models_context(models)
         assert len(result) == 1
-        assert result[0]["ref"] == "abc-123"
+        assert result[0]["ref"] == "model.gpt-4"
         assert result[0]["name"] == "GPT-4"
 
     def test_build_kbs_context(self) -> None:
         kbs = [{"id": "kb-1", "name": "Policy", "description": "Company policies"}]
         result = build_available_kbs_context(kbs)
         assert len(result) == 1
-        assert result[0]["ref"] == "kb-1"
+        assert result[0]["ref"] == "knowledge.policy"
         assert result[0]["display_name"] == "Policy"
         assert result[0]["description"] == "Company policies"
 
@@ -1045,6 +1065,20 @@ class TestContextBuilders:
         kbs = [{"id": "kb-1", "name": "Policy"}]
         result = build_available_kbs_context(kbs)
         assert result[0]["description"] == ""
+
+    def test_build_mcp_context_uses_slot_refs(self) -> None:
+        mcps = [
+            {
+                "id": "server-1",
+                "name": "Case Registry",
+                "tools": [{"id": "tool-1", "name": "lookup_case"}],
+            }
+        ]
+
+        result = build_available_mcp_context(mcps)
+
+        assert result[0]["ref"] == "mcp_server.case-registry"
+        assert result[0]["tools"][0]["ref"] == "mcp_tool.case-registry-lookup-case"
 
 
 # ---------------------------------------------------------------------------

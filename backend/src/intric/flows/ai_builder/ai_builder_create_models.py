@@ -4,13 +4,13 @@ from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from intric.flows.ai_builder.ai_builder_flow_name import normalize_flow_name
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     StructuredFieldDraft as _StructuredFieldDraft,
 )
+from intric.flows.flow_authoring_name import normalize_flow_name
 
 CreateFormFieldType = Literal["text", "number", "date", "select", "multiselect"]
 

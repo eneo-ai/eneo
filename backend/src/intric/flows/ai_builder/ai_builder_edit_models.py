@@ -15,7 +15,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from intric.flows.ai_builder.ai_builder_flow_name import normalize_optional_flow_name
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -30,6 +29,7 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     PreviousFieldRef,
 )
+from intric.flows.flow_authoring_name import normalize_optional_flow_name
 from intric.flows.flow_review_policy import FlowStepReviewMode
 
 # ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
 )
+from intric.flows.flow_resource_bindings import LocalResourceBinding
 
 if TYPE_CHECKING:
     from intric.flows.flow import Flow
@@ -157,6 +158,7 @@ async def store_plan_and_update_conversation(
     plan_rationale: str | None,
     reasoning: str | None,
     validation: SpecValidationResult,
+    resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
     edit_result_json: dict[str, Any] | None = None,
     lease_request_id: UUID | None = None,
     lease_lock_token: UUID | None = None,
@@ -189,6 +191,7 @@ async def store_plan_and_update_conversation(
             session_id=session_id,
             spec=spec,
             envelope=envelope,
+            resource_bindings=resource_bindings,
             edit_result_json=edit_result_json,
             lease_request_id=lease_request_id,
             lease_lock_token=lease_lock_token,
@@ -221,6 +224,7 @@ async def persist_plan(
     session_id: UUID,
     spec: FlowDraftSpecCore,
     envelope: PlannerPlanEnvelope,
+    resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
     edit_result_json: dict[str, Any] | None = None,
     lease_request_id: UUID | None = None,
     lease_lock_token: UUID | None = None,
@@ -234,6 +238,7 @@ async def persist_plan(
         tenant_id=tenant_id,
         spec=spec,
         envelope=envelope,
+        resource_bindings=resource_bindings,
         edit_result_json=edit_result_json,
     )
     await repo.update_session_latest_plan(

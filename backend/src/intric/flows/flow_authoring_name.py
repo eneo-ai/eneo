@@ -7,7 +7,7 @@ MAX_FLOW_NAME_LENGTH = 120
 _WHITESPACE_RE = re.compile(r"\s+")
 _SLUG_DELIMITER_RE = re.compile(r"[_-]+")
 _SLUG_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
-_AI_BUILDER_NAME_TOKENS = {
+_GENERATED_NAME_TOKENS = {
     "artifact",
     "artifacts",
     "builder",
@@ -54,8 +54,6 @@ def normalize_optional_flow_name(value: str | None) -> str | None:
 
 
 def _humanize_generated_slug_name(value: str) -> str:
-    """Repair strong generated-slug signals while leaving ordinary names alone."""
-
     if not _looks_generated_slug_like(value):
         return value
 
@@ -63,7 +61,7 @@ def _humanize_generated_slug_name(value: str) -> str:
     kept_tokens = [
         token
         for token in raw_tokens
-        if token not in _CONNECTOR_TOKENS and token not in _AI_BUILDER_NAME_TOKENS
+        if token not in _CONNECTOR_TOKENS and token not in _GENERATED_NAME_TOKENS
     ]
     if len(kept_tokens) < 2:
         kept_tokens = raw_tokens
@@ -80,7 +78,7 @@ def _looks_generated_slug_like(value: str) -> bool:
         return False
     if delimiter_count >= 3:
         return True
-    return any(token in _AI_BUILDER_NAME_TOKENS for token in tokens)
+    return any(token in _GENERATED_NAME_TOKENS for token in tokens)
 
 
 def _format_name_token(token: str) -> str:

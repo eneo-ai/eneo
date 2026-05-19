@@ -8,6 +8,8 @@ from intric.assistants.assistant import Assistant, AssistantOrigin
 from intric.assistants.assistant_service import AssistantService
 from intric.files.file_models import File
 from intric.files.file_repo import FileRepository
+from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
+from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from intric.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
 )
@@ -15,6 +17,10 @@ from intric.flows.domain.flow import Flow, FlowSparse, FlowStep, JsonObject
 from intric.flows.flow_metadata import (
     normalize_flow_metadata_for_write,
     normalize_persisted_flow_metadata,
+)
+from intric.flows.flow_resource_bindings import (
+    FlowResourceBindingSource,
+    LocalResourceBinding,
 )
 from intric.flows.flow_review_policy import dump_flow_step_review_policy
 from intric.flows.flow_security_classification import (
@@ -153,6 +159,30 @@ class FlowService:
             offset=offset,
         )
 
+    async def replace_resource_bindings(
+        self,
+        *,
+        flow_id: UUID,
+        bindings: tuple[LocalResourceBinding, ...],
+        source: FlowResourceBindingSource,
+    ) -> None:
+        await self.flow_repo.replace_resource_bindings(
+            flow_id=flow_id,
+            tenant_id=self.user.tenant_id,
+            bindings=bindings,
+            source=source,
+        )
+
+    async def list_resource_bindings(
+        self,
+        *,
+        flow_id: UUID,
+    ) -> tuple[LocalResourceBinding, ...]:
+        return await self.flow_repo.list_resource_bindings(
+            flow_id=flow_id,
+            tenant_id=self.user.tenant_id,
+        )
+
     async def update_flow(
         self,
         *,
@@ -253,9 +283,7 @@ class FlowService:
         self._assert_flow_assistant_owned_by_flow(flow=flow, assistant=assistant)
         return assistant, permissions
 
-    async def get_flow_assistant_snapshots(
-        self, flow: Flow
-    ) -> dict[UUID, dict[str, Any]]:
+    async def get_flow_assistant_snapshots(self, flow: Flow) -> AssistantAuthoringSnapshots:
         assistant_ids = list(dict.fromkeys(step.assistant_id for step in flow.steps))
         return await self.flow_repo.get_assistant_snapshots(
             assistant_ids=assistant_ids,
@@ -267,7 +295,7 @@ class FlowService:
         *,
         flow_id: UUID,
         assistant_id: UUID,
-        **changes: Any,
+        update: FlowAssistantUpdateCommand,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         flow = await self.get_flow(flow_id)
         self._ensure_flow_is_mutable(flow)
@@ -276,16 +304,27 @@ class FlowService:
         await self._validate_flow_assistant_security_change(
             flow=flow,
             assistant=assistant,
-            changes=changes,
+            update=update,
         )
-        assistant_service = cast(Any, self.assistant_service)
-        return cast(
-            tuple[Assistant, list[ResourcePermission]],
-            await assistant_service.update_assistant(
-                assistant_id=assistant_id,
-                include_hidden=True,
-                **changes,
-            ),
+        return await self.assistant_service.update_assistant(
+            assistant_id=assistant_id,
+            include_hidden=True,
+            name=update.name,
+            prompt=update.prompt,
+            completion_model_id=update.completion_model_id,
+            completion_model_kwargs=update.completion_model_kwargs,
+            logging_enabled=update.logging_enabled,
+            groups=update.groups,
+            websites=update.websites,
+            integration_knowledge_ids=update.integration_knowledge_ids,
+            mcp_server_ids=update.mcp_server_ids,
+            mcp_tools=update.mcp_tools,
+            attachment_ids=update.attachment_ids,
+            description=update.description,
+            insight_enabled=update.insight_enabled,
+            data_retention_days=update.data_retention_days,
+            metadata_json=update.metadata_json,
+            icon_id=update.icon_id,
         )
 
     async def delete_flow_assistant(
@@ -497,19 +536,12 @@ class FlowService:
         *,
         flow: Flow,
         assistant: Assistant,
-        changes: dict[str, Any],
+        update: FlowAssistantUpdateCommand,
     ) -> None:
         if self.space_service is None:
             return
 
-        relevant_fields = {
-            "completion_model_id",
-            "groups",
-            "websites",
-            "integration_knowledge_ids",
-            "mcp_server_ids",
-        }
-        if relevant_fields.isdisjoint(changes.keys()):
+        if not update.changed_security_field_names():
             return
 
         if not any(step.assistant_id == assistant.id for step in flow.steps):
@@ -520,7 +552,7 @@ class FlowService:
             self._build_candidate_flow_assistant_for_security_validation(
                 assistant=assistant,
                 space=space,
-                changes=changes,
+                update=update,
             )
         )
         assistants_by_id: dict[UUID, Any] = {assistant.id: candidate_assistant}
@@ -543,11 +575,11 @@ class FlowService:
         *,
         assistant: Assistant,
         space: Any,
-        changes: dict[str, Any],
+        update: FlowAssistantUpdateCommand,
     ) -> Any:
         completion_model = assistant.completion_model
-        if "completion_model_id" in changes:
-            next_completion_model_id = changes["completion_model_id"]
+        if update.is_set("completion_model_id"):
+            next_completion_model_id = update.completion_model_id
             completion_model = (
                 space.get_completion_model(next_completion_model_id)
                 if next_completion_model_id is not None
@@ -555,32 +587,29 @@ class FlowService:
             )
 
         collections = assistant.collections
-        if "groups" in changes and changes["groups"] is not None:
-            collections = [
-                space.get_collection(group_id) for group_id in changes["groups"]
-            ]
+        if update.is_set("groups") and update.groups is not None:
+            collections = [space.get_collection(group_id) for group_id in update.groups]
 
         websites = assistant.websites
-        if "websites" in changes and changes["websites"] is not None:
+        if update.is_set("websites") and update.websites is not None:
             websites = [
-                space.get_website(website_id) for website_id in changes["websites"]
+                space.get_website(website_id) for website_id in update.websites
             ]
 
         integration_knowledge_list = assistant.integration_knowledge_list
-        if (
-            "integration_knowledge_ids" in changes
-            and changes["integration_knowledge_ids"] is not None
+        if update.is_set("integration_knowledge_ids") and (
+            update.integration_knowledge_ids is not None
         ):
             integration_knowledge_list = [
                 space.get_integration_knowledge(integration_knowledge_id)
-                for integration_knowledge_id in changes["integration_knowledge_ids"]
+                for integration_knowledge_id in update.integration_knowledge_ids
             ]
 
         mcp_servers: list[MCPServer] = assistant.mcp_servers
-        if "mcp_server_ids" in changes and changes["mcp_server_ids"] is not None:
+        if update.is_set("mcp_server_ids") and update.mcp_server_ids is not None:
             mcp_servers = []
             unavailable_mcp_server_ids: list[str] = []
-            for mcp_server_id in changes["mcp_server_ids"]:
+            for mcp_server_id in update.mcp_server_ids:
                 try:
                     mcp_servers.append(
                         cast(MCPServer, space.get_mcp_server(mcp_server_id))

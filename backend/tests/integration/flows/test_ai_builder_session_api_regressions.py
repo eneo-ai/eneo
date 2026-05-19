@@ -47,6 +47,7 @@ from intric.flows.ai_builder.planning_state import (
     ResolvedSlot,
     StepTriple,
 )
+from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
 from intric.flows.flow import FlowStep
 from intric.main.exceptions import BadRequestException, NotFoundException
 from intric.prompts.api.prompt_models import PromptCreate
@@ -2617,7 +2618,11 @@ async def test_ai_builder_api_edit_mode_output_only_change_updates_description_a
         await flow_service.update_flow_assistant(
             flow_id=flow.id,
             assistant_id=assistant.id,
-            prompt=PromptCreate(text="Skriv ett kort beslutsunderlag i textformat."),
+            update=FlowAssistantUpdateCommand(
+                prompt=PromptCreate(
+                    text="Skriv ett kort beslutsunderlag i textformat."
+                )
+            ),
         )
         flow = await flow_service.update_flow(
             flow_id=flow.id,

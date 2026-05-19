@@ -150,6 +150,7 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     canonicalize_create_draft_resources,
+    collect_flow_spec_resource_bindings,
     format_resource_resolution_feedback,
 )
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
@@ -171,6 +172,7 @@ from intric.flows.ai_builder.ai_builder_tools import (
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.ai_builder.planning_state import AggregationIntent, PlanningState
+from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -445,7 +447,7 @@ class ProposalContext:
     lease_request_id: UUID | None = None
     lease_lock_token: UUID | None = None
     flow: "Flow | None" = None
-    assistant_snapshots: dict[UUID, dict[str, Any]] | None = None
+    assistant_snapshots: AssistantAuthoringSnapshots | None = None
     text_content: str | None = None
     assistant_metadata: dict[str, Any] | None = None
     planning_state: PlanningState | None = None
@@ -895,6 +897,11 @@ class AIBuilderProposalProcessor:
             plan_rationale=draft.plan_rationale,
             reasoning=None,
             validation=validation,
+            resource_bindings=(
+                collect_flow_spec_resource_bindings(spec, catalog=resource_catalog)
+                if resource_catalog is not None
+                else tuple()
+            ),
             lease_request_id=lease_request_id,
             lease_lock_token=lease_lock_token,
             flow=flow,
@@ -1017,7 +1024,7 @@ class AIBuilderProposalProcessor:
         lease_lock_token: UUID | None = None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
         flow: "Flow | None" = None,
-        assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+        assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         planning_state: PlanningState | None = None,
         usage_tracker: ProposalTurnTelemetry | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
@@ -1075,7 +1082,7 @@ class AIBuilderProposalProcessor:
         proposal_temperature: float,
         request_id: str,
         flow: "Flow | None" = None,
-        assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+        assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         assistant_metadata: dict[str, Any] | None = None,
         planning_state: PlanningState | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
@@ -1112,6 +1119,7 @@ class AIBuilderProposalProcessor:
             available_models=available_models,
             available_kbs=available_kbs,
             available_mcps=available_mcps,
+            resource_catalog=resource_catalog,
         )
         usage_tracker = ProposalTurnTelemetry(
             request_id=request_id,
@@ -1640,7 +1648,7 @@ class AIBuilderProposalProcessor:
         max_output_tokens: int,
         resource_catalog: AIBuilderResourceCatalog | None = None,
         flow: "Flow | None" = None,
-        assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+        assistant_snapshots: AssistantAuthoringSnapshots | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         ctx = ProposalContext(
             session_id=session_id,
@@ -1845,7 +1853,7 @@ class AIBuilderProposalProcessor:
         resource_catalog: AIBuilderResourceCatalog | None = None,
         max_output_tokens: int,
         flow: "Flow | None" = None,
-        assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+        assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         planning_state: PlanningState | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
@@ -1913,7 +1921,7 @@ class AIBuilderProposalProcessor:
         resource_catalog: AIBuilderResourceCatalog | None = None,
         flow: "Flow | None" = None,
         original_question_id: str | None = None,
-        assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+        assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         usage_tracker: ProposalTurnTelemetry | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         submission_tool_name = _active_submission_tool_name(flow)
@@ -2518,7 +2526,7 @@ class AIBuilderProposalProcessor:
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
         max_output_tokens: int,
-        assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+        assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
         planning_state: PlanningState | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
@@ -2581,6 +2589,7 @@ def _active_submission_tool_schemas(
     available_models: list[dict[str, Any]] | None,
     available_kbs: list[dict[str, Any]] | None,
     available_mcps: AIBuilderMCPResourceInput,
+    resource_catalog: AIBuilderResourceCatalog | None,
 ) -> list[dict[str, Any]]:
     if flow is None:
         return [
@@ -2588,6 +2597,7 @@ def _active_submission_tool_schemas(
                 available_models=available_models,
                 available_kbs=available_kbs,
                 available_mcps=available_mcps,
+                resource_catalog=resource_catalog,
             )
         ]
     return [
@@ -2596,5 +2606,6 @@ def _active_submission_tool_schemas(
             available_models=available_models,
             available_kbs=available_kbs,
             available_mcps=available_mcps,
+            resource_catalog=resource_catalog,
         )
     ]

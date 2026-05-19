@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from intric.flows.ai_builder.ai_builder_flow_name import MAX_FLOW_NAME_LENGTH
 from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_form_field_type_values,
     builder_input_source_values,
@@ -24,9 +23,13 @@ from intric.flows.ai_builder.ai_builder_new_step_schema import (
     build_new_step_draft_schema,
     build_previous_field_refs_schema,
     build_review_mode_schema,
-    small_ref_enums,
+)
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderResourceCatalog,
+    build_ai_builder_resource_catalog,
 )
 from intric.flows.domain.flow import FlowStep
+from intric.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
 
 EDIT_FLOW_TOOL_NAME = "edit_flow"
 
@@ -36,6 +39,7 @@ def build_edit_flow_tool_schema(
     available_models: list[dict[str, Any]] | None = None,
     available_kbs: list[dict[str, Any]] | None = None,
     available_mcps: AIBuilderMCPResourceInput = None,
+    resource_catalog: AIBuilderResourceCatalog | None = None,
 ) -> dict[str, Any]:
     """Build the edit_flow tool schema with dynamic constraints.
 
@@ -51,8 +55,13 @@ def build_edit_flow_tool_schema(
     target_ref_enum: list[str | None] = valid_refs + [None]
     anchor_ref_enum: list[str | None] = valid_refs + [None]
 
-    model_refs = small_ref_enums(available_models)
-    kb_refs = small_ref_enums(available_kbs)
+    catalog = resource_catalog or build_ai_builder_resource_catalog(
+        available_models=available_models,
+        available_kbs=available_kbs,
+        available_mcps=available_mcps,
+    )
+    model_refs = catalog.small_ref_enum_for_kind("model")
+    kb_refs = catalog.small_ref_enum_for_kind("knowledge_base")
     # Do not constrain MCP refs with schema enums. When a requested MCP is
     # absent, enums can force the model to pick an unrelated available MCP.
     # Catalog resolution and quality feedback provide the durable guardrail.
@@ -173,6 +182,7 @@ def build_edit_mode_tool_schemas(
     available_models: list[dict[str, Any]] | None = None,
     available_kbs: list[dict[str, Any]] | None = None,
     available_mcps: AIBuilderMCPResourceInput = None,
+    resource_catalog: AIBuilderResourceCatalog | None = None,
 ) -> list[dict[str, Any]]:
     """Build the full tool set for edit mode.
 
@@ -189,6 +199,7 @@ def build_edit_mode_tool_schemas(
             available_models,
             available_kbs,
             available_mcps,
+            resource_catalog,
         ),
         build_ask_structured_question_tool_schema(),
         build_confirm_requirements_tool_schema(),

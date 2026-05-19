@@ -65,12 +65,12 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
     )
 
     assert "Available resources:" in prompt
-    assert "ref=`model-fast`" in prompt
-    assert "ref=`kb-policy`" in prompt
-    assert "server_ref=`case-server`" in prompt
-    assert "tool_ref=`case-lookup`" in prompt
+    assert "ref=`model.fast-model`" in prompt
+    assert "ref=`knowledge.policy-kb`" in prompt
+    assert "server_ref=`mcp_server.case-system`" in prompt
+    assert "tool_ref=`mcp_tool.case-system-lookup-case`" in prompt
     assert (
-        "Exception: when the Available resources section gives canonical resource refs"
+        "Exception: when the Available resources section gives portable resource slot refs"
         in prompt
     )
     assert "human-readable `flow_name`" in prompt
@@ -193,14 +193,14 @@ def test_plan_proposal_prompt_honors_selected_mcp_server():
                 ],
             }
         ],
-        mcp_selection_values={"use_mcp_server:time-server"},
+        mcp_selection_values={"use_mcp_server:mcp_server.time-mcp"},
     )
 
-    assert "The user allowed these MCP server refs: `time-server`." in prompt
+    assert "The user allowed these MCP server refs: `mcp_server.time-mcp`." in prompt
     assert "Prefer specific `mcp_tool_refs`" in prompt
     assert "Selected MCP tools available for step-level use" in prompt
-    assert "tool_ref=`current-time`" in prompt
-    assert "server_ref=`time-server`" in prompt
+    assert "tool_ref=`mcp_tool.time-mcp-get-current-time`" in prompt
+    assert "server_ref=`mcp_server.time-mcp`" in prompt
 
 
 def test_plan_proposal_prompt_drops_selected_mcp_ref_that_is_not_in_catalog():
@@ -221,6 +221,6 @@ def test_plan_proposal_prompt_drops_selected_mcp_ref_that_is_not_in_catalog():
     )
 
     assert "Available resources:" in prompt
-    assert "server_ref=`time-server`" in prompt
+    assert "server_ref=`mcp_server.time-mcp`" in prompt
     assert "MCP selection decision:" not in prompt
     assert "missing-server" not in prompt

@@ -90,6 +90,10 @@ CATEGORY_MAPPINGS = {
     ActionType.FLOW_RUN_ARTIFACT_DOWNLOADED.value: "file_operations",
     ActionType.FLOW_EVIDENCE_VIEWED.value: "audit_access",
     ActionType.FLOW_EVIDENCE_EXPORTED_JSON.value: "audit_access",
+    # Package exports can leave the tenant boundary, so audit views should group them
+    # with evidence exports rather than ordinary authoring changes.
+    ActionType.FLOW_PACKAGE_EXPORTED.value: "audit_access",
+    ActionType.FLOW_PACKAGE_DRAFT_INSTALLED.value: "user_actions",
     ActionType.FLOW_RUN_REVIEW_CHECKPOINT_OPENED.value: "user_actions",
     ActionType.FLOW_RUN_REVIEW_CHECKPOINT_EDITED.value: "user_actions",
     ActionType.FLOW_RUN_REVIEW_CHECKPOINT_APPROVED.value: "user_actions",

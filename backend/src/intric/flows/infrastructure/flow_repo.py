@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Sequence
 from uuid import UUID
@@ -19,6 +19,7 @@ from intric.database.tables.assistant_table import (
 )
 from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.flow_tables import (
+    FlowResourceBindings,
     FlowRuns,
     FlowRunStepResultFiles,
     Flows,
@@ -29,9 +30,21 @@ from intric.database.tables.mcp_server_table import MCPServers, MCPServerTools
 from intric.database.tables.prompts_table import Prompts, PromptsAssistants
 from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.users_table import Users
+from intric.flows.assistant_authoring_snapshot import (
+    AssistantAuthoringResourceRef,
+    AssistantAuthoringSnapshot,
+    AssistantAuthoringSnapshots,
+)
 from intric.flows.domain.flow import Flow, FlowSparse, FlowStep, FlowStepResult
 from intric.flows.enums import ACTIVE_FLOW_RUN_STATUSES, FlowStepResultStatus
 from intric.flows.flow_factory import FlowFactory
+from intric.flows.flow_resource_bindings import (
+    FlowResourceBindingSource,
+    LocalResourceBinding,
+    LocalResourceKind,
+    ResourceSlotKind,
+    ResourceSlotRef,
+)
 from intric.flows.flow_review_policy import dump_flow_step_review_policy
 from intric.flows.flow_run_step_result_file import FlowStepResultFileReference
 from intric.main.exceptions import BadRequestException, NotFoundException
@@ -42,6 +55,42 @@ class AssistantScopeRow:
     id: UUID
     origin: str | None
     managing_flow_id: UUID | None
+
+
+@dataclass
+class _AssistantAuthoringSnapshotBuilder:
+    instructions: str
+    model: AssistantAuthoringResourceRef | None
+    knowledge_refs: list[AssistantAuthoringResourceRef] = field(
+        default_factory=lambda: list[AssistantAuthoringResourceRef]()
+    )
+    mcp_server_refs: list[AssistantAuthoringResourceRef] = field(
+        default_factory=lambda: list[AssistantAuthoringResourceRef]()
+    )
+    mcp_tool_refs: list[AssistantAuthoringResourceRef] = field(
+        default_factory=lambda: list[AssistantAuthoringResourceRef]()
+    )
+
+    def snapshot(self) -> AssistantAuthoringSnapshot:
+        return AssistantAuthoringSnapshot(
+            instructions=self.instructions,
+            model=self.model,
+            knowledge_refs=tuple(self.knowledge_refs),
+            mcp_server_refs=tuple(self.mcp_server_refs),
+            mcp_tool_refs=tuple(self.mcp_tool_refs),
+        )
+
+
+def _resource_binding_from_row(row: FlowResourceBindings) -> LocalResourceBinding:
+    return LocalResourceBinding(
+        slot_ref=ResourceSlotRef(
+            kind=ResourceSlotKind(row.slot_kind),
+            slot=row.slot,
+            label=row.slot_label,
+        ),
+        local_kind=LocalResourceKind(row.local_resource_kind),
+        local_id=row.local_resource_id,
+    )
 
 
 _ACTIVE_FLOW_RUN_STATUS_VALUES = tuple(
@@ -217,12 +266,85 @@ class FlowRepository:
         flow_rows = (await self.session.execute(stmt)).scalars().all()
         return [self.factory.from_flow_sparse_db(row) for row in flow_rows]
 
+    async def replace_resource_bindings(
+        self,
+        *,
+        flow_id: UUID,
+        tenant_id: UUID,
+        bindings: tuple[LocalResourceBinding, ...],
+        source: FlowResourceBindingSource,
+    ) -> None:
+        flow_space_id = await self.session.scalar(
+            sa.select(Flows.space_id)
+            .where(Flows.id == flow_id)
+            .where(Flows.tenant_id == tenant_id)
+            .where(Flows.deleted_at.is_(None))
+        )
+        if flow_space_id is None:
+            raise NotFoundException("Flow not found.")
+
+        await self.session.execute(
+            sa.delete(FlowResourceBindings)
+            .where(FlowResourceBindings.flow_id == flow_id)
+            .where(FlowResourceBindings.tenant_id == tenant_id)
+        )
+        if not bindings:
+            return
+
+        rows = [
+            {
+                "flow_id": flow_id,
+                "tenant_id": tenant_id,
+                "space_id": flow_space_id,
+                "slot_kind": binding.slot_ref.kind.value,
+                "slot": binding.slot_ref.slot,
+                "slot_label": binding.slot_ref.label,
+                "local_resource_kind": binding.local_kind.value,
+                "local_resource_id": binding.local_id,
+                "source": source.value,
+            }
+            for binding in bindings
+        ]
+        await self.session.execute(sa.insert(FlowResourceBindings).values(rows))
+
+    async def list_resource_bindings(
+        self,
+        *,
+        flow_id: UUID,
+        tenant_id: UUID,
+    ) -> tuple[LocalResourceBinding, ...]:
+        flow_exists = await self.session.scalar(
+            sa.select(Flows.id)
+            .where(Flows.id == flow_id)
+            .where(Flows.tenant_id == tenant_id)
+            .where(Flows.deleted_at.is_(None))
+        )
+        if flow_exists is None:
+            raise NotFoundException("Flow not found.")
+
+        rows = (
+            (
+                await self.session.execute(
+                    sa.select(FlowResourceBindings)
+                    .where(FlowResourceBindings.flow_id == flow_id)
+                    .where(FlowResourceBindings.tenant_id == tenant_id)
+                    .order_by(
+                        FlowResourceBindings.slot_kind.asc(),
+                        FlowResourceBindings.slot.asc(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return tuple(_resource_binding_from_row(row) for row in rows)
+
     async def get_assistant_snapshots(
         self,
         *,
         assistant_ids: list[UUID],
         tenant_id: UUID,
-    ) -> dict[UUID, dict[str, Any]]:
+    ) -> AssistantAuthoringSnapshots:
         if not assistant_ids:
             return {}
 
@@ -252,20 +374,19 @@ class FlowRepository:
             )
         ).all()
 
-        snapshots: dict[UUID, dict[str, Any]] = {
-            row.id: {
-                "instructions": getattr(row, "instructions", None),
-                "model_ref": str(row.completion_model_id)
-                if row.completion_model_id
-                else None,
-                "model_label": getattr(row, "model_name", None),
-                "knowledge_refs": [],
-                "knowledge_labels": [],
-                "mcp_server_refs": [],
-                "mcp_server_labels": [],
-                "mcp_tool_refs": [],
-                "mcp_tool_labels": [],
-            }
+        snapshots: dict[UUID, _AssistantAuthoringSnapshotBuilder] = {
+            row.id: _AssistantAuthoringSnapshotBuilder(
+                instructions=getattr(row, "instructions", None) or "",
+                model=(
+                    AssistantAuthoringResourceRef(
+                        local_ref=str(row.completion_model_id),
+                        label=getattr(row, "model_name", None),
+                        local_kind=LocalResourceKind.COMPLETION_MODEL,
+                    )
+                    if row.completion_model_id
+                    else None
+                ),
+            )
             for row in assistant_rows
         }
 
@@ -291,8 +412,13 @@ class FlowRepository:
         for row in collection_rows:
             if row.assistant_id not in snapshots:
                 continue
-            snapshots[row.assistant_id]["knowledge_refs"].append(str(row.id))
-            snapshots[row.assistant_id]["knowledge_labels"].append(row.name)
+            snapshots[row.assistant_id].knowledge_refs.append(
+                AssistantAuthoringResourceRef(
+                    local_ref=str(row.id),
+                    label=row.name,
+                    local_kind=LocalResourceKind.COLLECTION,
+                )
+            )
 
         mcp_server_rows = (
             await self.session.execute(
@@ -313,11 +439,12 @@ class FlowRepository:
         for row in mcp_server_rows:
             if row.assistant_id not in snapshots:
                 continue
-            snapshots[row.assistant_id].setdefault("mcp_server_refs", []).append(
-                str(row.id)
-            )
-            snapshots[row.assistant_id].setdefault("mcp_server_labels", []).append(
-                row.name
+            snapshots[row.assistant_id].mcp_server_refs.append(
+                AssistantAuthoringResourceRef(
+                    local_ref=str(row.id),
+                    label=row.name,
+                    local_kind=LocalResourceKind.MCP_SERVER,
+                )
             )
 
         mcp_tool_rows = (
@@ -344,15 +471,16 @@ class FlowRepository:
         for row in mcp_tool_rows:
             if row.assistant_id not in snapshots:
                 continue
-            snapshots[row.assistant_id].setdefault("mcp_tool_refs", []).append(
-                str(row.id)
-            )
-            snapshots[row.assistant_id].setdefault("mcp_tool_labels", []).append(
-                row.name
+            snapshots[row.assistant_id].mcp_tool_refs.append(
+                AssistantAuthoringResourceRef(
+                    local_ref=str(row.id),
+                    label=row.name,
+                    local_kind=LocalResourceKind.MCP_TOOL,
+                )
             )
 
         return {
-            assistant_id: snapshots[assistant_id]
+            assistant_id: snapshots[assistant_id].snapshot()
             for assistant_id in assistant_ids
             if assistant_id in snapshots
         }

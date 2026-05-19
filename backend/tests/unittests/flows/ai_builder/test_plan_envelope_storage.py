@@ -12,6 +12,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
+from intric.flows.ai_builder.ai_builder_api_models import PlanResponse
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -27,6 +28,13 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.ai_builder.ai_builder_repo import (
     _envelope_json_for_storage,
     _plan_from_row,
+    _resource_bindings_json_for_storage,
+)
+from intric.flows.flow_resource_bindings import (
+    LocalResourceBinding,
+    LocalResourceKind,
+    ResourceSlotKind,
+    ResourceSlotRef,
 )
 
 
@@ -53,6 +61,7 @@ def _row(
     *,
     spec: FlowDraftSpecCore,
     envelope_json: dict[str, object],
+    resource_bindings_json: list[dict[str, object]] | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid4(),
@@ -62,9 +71,22 @@ def _row(
         spec_json=spec.model_dump(mode="json"),
         spec_hash=spec.spec_hash(),
         envelope_json=envelope_json,
+        resource_bindings_json=resource_bindings_json or [],
         edit_result_json=None,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
+    )
+
+
+def _binding() -> LocalResourceBinding:
+    return LocalResourceBinding(
+        slot_ref=ResourceSlotRef(
+            kind=ResourceSlotKind.MODEL,
+            slot="fast-model",
+            label="Fast model",
+        ),
+        local_kind=LocalResourceKind.COMPLETION_MODEL,
+        local_id=uuid4(),
     )
 
 
@@ -75,6 +97,13 @@ def test_envelope_json_for_storage_drops_spec() -> None:
     assert "spec" not in stored
     assert stored["assumptions"] == ["A1"]
     assert stored["plan_rationale"] == "why"
+    assert "resource_bindings" not in stored
+    assert "resource_bindings_json" not in stored
+
+
+def test_plan_response_does_not_expose_resource_bindings() -> None:
+    assert "resource_bindings" not in PlanResponse.model_fields
+    assert "resource_bindings_json" not in PlanResponse.model_fields
 
 
 def test_plan_from_row_rehydrates_spec_from_spec_json() -> None:
@@ -90,6 +119,27 @@ def test_plan_from_row_rehydrates_spec_from_spec_json() -> None:
     assert plan.envelope.spec.flow_name == "Canonical from spec_json"
     assert plan.spec.flow_name == "Canonical from spec_json"
     assert plan.spec.spec_hash() == plan.envelope.spec.spec_hash()
+
+
+def test_plan_from_row_rehydrates_resource_bindings() -> None:
+    spec = _make_spec("Binding roundtrip")
+    binding = _binding()
+    plan = _plan_from_row(
+        _row(
+            spec=spec,
+            envelope_json={
+                "assumptions": [],
+                "lint_warnings": [],
+                "risk_acknowledgments": [],
+                "reasoning": None,
+                "plan_rationale": None,
+            },
+            resource_bindings_json=_resource_bindings_json_for_storage((binding,)),
+        )
+    )
+
+    assert plan.resource_bindings == (binding,)
+    assert plan.resource_bindings[0].slot_ref.label == "Fast model"
 
 
 def test_plan_from_row_ignores_legacy_envelope_spec_copy() -> None:

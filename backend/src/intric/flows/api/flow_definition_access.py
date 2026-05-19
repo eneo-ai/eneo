@@ -54,12 +54,14 @@ async def require_flow_edit_access(
     *,
     flow_id: UUID,
     require_flow_lookup_without_scope: bool = False,
+    allow_service_key_principals: bool = False,
 ) -> common.FlowAccessContext:
     access_context = await common.get_flow_access_context_for_request(
         request,
         container,
         flow_id=flow_id,
         required_access=common.FlowApiAction.EDIT,
+        allow_service_key_principals=allow_service_key_principals,
     )
     if require_flow_lookup_without_scope:
         pass

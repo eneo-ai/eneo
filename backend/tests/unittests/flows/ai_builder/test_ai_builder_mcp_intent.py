@@ -26,6 +26,11 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
 
+SVELTE_SERVER_SLOT = "mcp_server.svelte-mcp"
+SVELTE_TOOL_SLOT = "mcp_tool.svelte-mcp-get-documentation"
+TIME_SERVER_SLOT = "mcp_server.time-mcp"
+TIME_TOOL_SLOT = "mcp_tool.time-mcp-get-current-time"
+
 
 def _catalog_with_enabled_svelte_mcp():
     return build_ai_builder_resource_catalog(
@@ -100,8 +105,8 @@ def test_detects_requested_mcp_that_is_not_enabled_in_catalog() -> None:
         spec=_spec_with_step(
             name="Hämta aktuell tid via Time MCP",
             instructions="Hämta aktuell tid för angiven tidszon.",
-            mcp_server_refs=["svelte-server"],
-            mcp_tool_refs=["svelte-docs"],
+            mcp_server_refs=[SVELTE_SERVER_SLOT],
+            mcp_tool_refs=[SVELTE_TOOL_SLOT],
         ),
         catalog=_catalog_with_enabled_svelte_mcp(),
         signal_text="Använd Time MCP för tidszonskonvertering.",
@@ -110,7 +115,7 @@ def test_detects_requested_mcp_that_is_not_enabled_in_catalog() -> None:
     assert issue is not None
     assert issue.reason == "unavailable_requested_server"
     assert issue.requested_name == "Time"
-    assert issue.selected_server_refs == frozenset({"svelte-server"})
+    assert issue.selected_server_refs == frozenset({SVELTE_SERVER_SLOT})
 
 
 def test_detects_enabled_named_mcp_request_before_planning() -> None:
@@ -121,7 +126,7 @@ def test_detects_enabled_named_mcp_request_before_planning() -> None:
 
     assert issue is not None
     assert issue.reason == "missing_selection"
-    assert issue.resolved_server_ref == "time-server"
+    assert issue.resolved_server_ref == TIME_SERVER_SLOT
 
 
 def test_explicit_mcp_name_prefers_name_before_marker_over_purpose_after_marker() -> (
@@ -163,7 +168,7 @@ def test_detects_available_named_mcp_without_attached_refs() -> None:
 
     assert issue is not None
     assert issue.reason == "missing_selection"
-    assert issue.resolved_server_ref == "time-server"
+    assert issue.resolved_server_ref == TIME_SERVER_SLOT
     assert issue.selected_server_refs == frozenset()
 
 
@@ -172,7 +177,7 @@ def test_accepts_matching_tool_ref_for_named_mcp() -> None:
         spec=_spec_with_step(
             name="Hämta aktuell tid via Time MCP",
             instructions="Hämta aktuell tid för angiven tidszon.",
-            mcp_tool_refs=["current-time"],
+            mcp_tool_refs=[TIME_TOOL_SLOT],
         ),
         catalog=_time_catalog(),
         signal_text="Använd Time MCP för tidszonskonvertering.",
@@ -190,7 +195,7 @@ def test_global_named_mcp_request_only_needs_one_matching_step() -> None:
                 name="Hämta tid",
                 assistant_spec=AssistantSpec(
                     instructions="Hämta aktuell tid.",
-                    mcp_tool_refs=["current-time"],
+                    mcp_tool_refs=[TIME_TOOL_SLOT],
                 ),
                 input_source=InputSource.FLOW_INPUT,
                 output_mode=OutputMode.PASS_THROUGH,
@@ -227,7 +232,7 @@ def test_downstream_step_can_reference_selected_mcp_without_own_tool_ref() -> No
                 name="Hämta tid via Time MCP",
                 assistant_spec=AssistantSpec(
                     instructions="Hämta aktuell tid.",
-                    mcp_tool_refs=["current-time"],
+                    mcp_tool_refs=[TIME_TOOL_SLOT],
                 ),
                 input_source=InputSource.FLOW_INPUT,
                 output_mode=OutputMode.PASS_THROUGH,
@@ -289,7 +294,7 @@ def test_downstream_named_mcp_reference_requires_an_owner_step_ref() -> None:
     assert issue is not None
     assert issue.reason == "missing_selection"
     assert issue.step_ref == "step_b"
-    assert issue.resolved_server_ref == "time-server"
+    assert issue.resolved_server_ref == TIME_SERVER_SLOT
 
 
 def test_selected_mcp_generic_tool_phrase_does_not_count_as_unavailable_name() -> None:
@@ -297,7 +302,7 @@ def test_selected_mcp_generic_tool_phrase_does_not_count_as_unavailable_name() -
         spec=_spec_with_step(
             name="Hämta aktuell tid",
             instructions="Använd valda MCP-verktyg för att hämta aktuell tid.",
-            mcp_tool_refs=["current-time"],
+            mcp_tool_refs=[TIME_TOOL_SLOT],
         ),
         catalog=_time_catalog(),
         signal_text="Använd Time MCP för tidszonskonvertering.",
@@ -347,14 +352,14 @@ def test_detects_mcp_usage_before_user_selection() -> None:
         spec=_spec_with_step(
             name="Hämta tid",
             instructions="Hämta aktuell tid.",
-            mcp_tool_refs=["current-time"],
+            mcp_tool_refs=[TIME_TOOL_SLOT],
         ),
         catalog=_time_catalog(),
     )
 
     assert issue is not None
     assert issue.reason == "missing_selection"
-    assert issue.resolved_server_ref == "time-server"
+    assert issue.resolved_server_ref == TIME_SERVER_SLOT
 
 
 def test_mcp_selection_question_lists_only_enabled_servers() -> None:
@@ -385,8 +390,8 @@ def test_mcp_selection_question_lists_only_enabled_servers() -> None:
     ]
     assert question_data["allow_custom"] is False
     values = [option["value"] for option in question_data["options"]]
-    assert "use_mcp_server:svelte-server" in values
-    assert all("time-server" not in str(value) for value in values)
+    assert f"use_mcp_server:{SVELTE_SERVER_SLOT}" in values
+    assert all(TIME_SERVER_SLOT not in str(value) for value in values)
 
 
 def test_mcp_selection_question_event_preserves_explicit_confirm_flag() -> None:
@@ -429,7 +434,7 @@ def test_policy_feedback_rejects_mcp_after_user_declined() -> None:
         spec=_spec_with_step(
             name="Hämta tid",
             instructions="Hämta aktuell tid.",
-            mcp_tool_refs=["current-time"],
+            mcp_tool_refs=[TIME_TOOL_SLOT],
         ),
         catalog=_time_catalog(),
     )
@@ -587,7 +592,7 @@ def test_policy_feedback_rejects_unselected_mcp_server() -> None:
                 metadata={
                     "question_answer": {
                         "question_id": "mcp_resource_selection",
-                        "selected_values": ["use_mcp_server:time-server"],
+                            "selected_values": [f"use_mcp_server:{TIME_SERVER_SLOT}"],
                     }
                 },
             )
@@ -595,7 +600,7 @@ def test_policy_feedback_rejects_unselected_mcp_server() -> None:
         spec=_spec_with_step(
             name="Fel MCP",
             instructions="Använd Svelte MCP.",
-            mcp_tool_refs=["svelte-docs"],
+            mcp_tool_refs=[SVELTE_TOOL_SLOT],
         ),
         catalog=catalog,
     )
@@ -614,7 +619,7 @@ def test_policy_feedback_accepts_selected_mcp_tool() -> None:
                 metadata={
                     "question_answer": {
                         "question_id": "mcp_resource_selection",
-                        "selected_values": ["use_mcp_server:time-server"],
+                            "selected_values": [f"use_mcp_server:{TIME_SERVER_SLOT}"],
                     }
                 },
             )
@@ -622,7 +627,7 @@ def test_policy_feedback_accepts_selected_mcp_tool() -> None:
         spec=_spec_with_step(
             name="Hämta tid",
             instructions="Hämta aktuell tid.",
-            mcp_tool_refs=["current-time"],
+            mcp_tool_refs=[TIME_TOOL_SLOT],
         ),
         catalog=_time_catalog(),
     )

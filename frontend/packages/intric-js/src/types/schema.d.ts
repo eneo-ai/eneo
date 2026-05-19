@@ -4819,6 +4819,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/{id}/package-exports/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Export Flow Package
+     * @description Export a draft Flow as a portable `.eneo-flowpkg` bundle. The export contains a typed flow template and dependency requirements, never local database IDs, run history, secrets, or source-instance provenance. Use this endpoint for offline sharing first; future marketplace installs can consume the same package format. The endpoint requires human draft edit access so package metadata and dependency guidance are reviewed by the flow owner or an authorized space/tenant administrator before distribution.
+     */
+    post: operations["export_flow_package"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flow-packages/validate/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Validate Flow Package
+     * @description Upload a portable Flow package and validate its structure, schema versions, content checksum, and local-resource portability before a target space is chosen. Use this endpoint for tenant-level package inspection, upload preflight, or catalog review. Space-specific import wizards can call the import-plan endpoint directly because that response also contains the package summary needed by the setup UI.
+     */
+    post: operations["validate_flow_package"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/icons/{id}/": {
     parameters: {
       query?: never;
@@ -5315,6 +5355,46 @@ export interface paths {
     get: operations["get_organization_space_api_v1_spaces_type_organization__get"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{id}/flow-packages/import-plan/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create Flow Package Import Plan
+     * @description Upload a portable Flow package and preview how its model, knowledge, and unsupported template requirements resolve against one target space. The response is a side-effect-free setup checklist: it shows suggested local resources, unresolved required dependencies, sensitivity guidance, and whether the imported draft could be published after the mappings are confirmed.
+     */
+    post: operations["create_flow_package_import_plan"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{id}/flow-packages/imports/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Import Flow Package As Draft
+     * @description Import a portable Flow package into a target space as a new draft Flow. The request uses typed selected resource bindings so API consumers can map package model and knowledge slots to local resources without parsing free-form JSON strings. The endpoint does not publish the Flow, does not persist package bytes, and records a compact import provenance row for successful draft creation or trusted-package install failures.
+     */
+    post: operations["import_flow_package_as_draft"];
     delete?: never;
     options?: never;
     head?: never;
@@ -8379,6 +8459,8 @@ export interface components {
       | "flow_run_artifact_downloaded"
       | "flow_evidence_viewed"
       | "flow_evidence_exported_json"
+      | "flow_package_exported"
+      | "flow_package_draft_installed"
       | "flow_run_review_checkpoint_opened"
       | "flow_run_review_checkpoint_edited"
       | "flow_run_review_checkpoint_approved"
@@ -9788,10 +9870,7 @@ export interface components {
        */
       completion_model_id?: string | null;
     };
-    /**
-     * AssistantSpec
-     * @description Inline assistant definition embedded in each step spec.
-     */
+    /** AssistantSpec */
     AssistantSpec: {
       /** Instructions */
       instructions: string;
@@ -10181,6 +10260,15 @@ export interface components {
        */
       client_secret?: string | null;
     };
+    /** Body_create_flow_package_import_plan */
+    Body_create_flow_package_import_plan: {
+      /**
+       * Package File
+       * Format: binary
+       * @description Portable `.eneo-flowpkg` bundle. The server validates the package structure, checksum, schema versions, and local-resource portability.
+       */
+      package_file: string;
+    };
     /** Body_create_icon_api_v1_icons__post */
     Body_create_icon_api_v1_icons__post: {
       /**
@@ -10229,6 +10317,15 @@ export interface components {
        * @description DOCX template file to store for later template_fill steps.
        */
       upload_file: string;
+    };
+    /** Body_validate_flow_package */
+    Body_validate_flow_package: {
+      /**
+       * Package File
+       * Format: binary
+       * @description Portable `.eneo-flowpkg` bundle. The server validates the package structure, checksum, schema versions, and local-resource portability.
+       */
+      package_file: string;
     };
     /**
      * BulkCrawlRequest
@@ -11863,6 +11960,11 @@ export interface components {
       is_org_enabled?: boolean | null;
     };
     /**
+     * EneoPackageKind
+     * @enum {string}
+     */
+    EneoPackageKind: "flow" | "assistant" | "app";
+    /**
      * EntityType
      * @description Categorize what type of entity was affected
      * @enum {string}
@@ -12622,10 +12724,7 @@ export interface components {
       /** Max Object Fields */
       max_object_fields?: number | null;
     };
-    /**
-     * FlowDraftSpecCore
-     * @description Canonical portable flow definition.
-     */
+    /** FlowDraftSpecCore */
     FlowDraftSpecCore: {
       /** Flow Name */
       flow_name: string;
@@ -12863,6 +12962,566 @@ export interface components {
      * @enum {string}
      */
     FlowOutputType: "text" | "json" | "pdf" | "docx";
+    /** FlowPackageCompletionModelConstraints */
+    FlowPackageCompletionModelConstraints: {
+      /** Minimum Context Tokens */
+      minimum_context_tokens?: number | null;
+      /**
+       * Requires Vision
+       * @default false
+       */
+      requires_vision?: boolean;
+      /**
+       * Requires Reasoning
+       * @default false
+       */
+      requires_reasoning?: boolean;
+      /**
+       * Requires Tool Calling
+       * @default false
+       */
+      requires_tool_calling?: boolean;
+    };
+    /**
+     * FlowPackageExportRequest
+     * @example {
+     *       "description": "Creates a structured case report from approved local material.",
+     *       "name": "Case Report",
+     *       "package_id": "se.demo.case-report",
+     *       "package_kind": "flow",
+     *       "package_version": "1.0.0",
+     *       "payload_schema": "eneo.flow_package.v1"
+     *     }
+     */
+    FlowPackageExportRequest: {
+      /**
+       * Package Id
+       * @description Portable package identifier. Use a stable lowercase dot or hyphen separated name owned by the publisher, for example `se.demo.case-report`.
+       */
+      package_id: string;
+      /**
+       * Package Version
+       * @description Publisher-assigned package version for the exported template.
+       */
+      package_version: string;
+      /**
+       * Name
+       * @description Human-readable package name shown on import.
+       */
+      name: string;
+      /**
+       * Description
+       * @description Publisher-supplied package description shown before import planning.
+       * @default
+       */
+      description?: string;
+    };
+    /** FlowPackageImportPlan */
+    FlowPackageImportPlan: {
+      /** Package Id */
+      package_id: string;
+      /** Package Version */
+      package_version: string;
+      package_kind: components["schemas"]["EneoPackageKind"];
+      /** Payload Schema */
+      payload_schema: string;
+      /** Content Checksum */
+      content_checksum: string;
+      package_summary: components["schemas"]["FlowPackageImportPlanSummary"];
+      /** Dependency Resolutions */
+      dependency_resolutions?: (
+        | components["schemas"]["FlowPackageModelDependencyResolution"]
+        | components["schemas"]["FlowPackageKnowledgeDependencyResolution"]
+        | components["schemas"]["FlowPackageMcpToolDependencyResolution"]
+        | components["schemas"]["FlowPackageTemplateAssetDependencyResolution"]
+      )[];
+      /** Can Publish After Import */
+      readonly can_publish_after_import: boolean;
+    };
+    /**
+     * FlowPackageImportPlanStatus
+     * @enum {string}
+     */
+    FlowPackageImportPlanStatus:
+      | "resolved_exact"
+      | "requires_human_confirmation"
+      | "unresolved_required"
+      | "skipped_optional"
+      | "unsupported";
+    /** FlowPackageImportPlanSummary */
+    FlowPackageImportPlanSummary: {
+      /** Name */
+      name: string;
+      /** Description */
+      description: string;
+      /** Spec Hash */
+      spec_hash: string;
+      /** Steps Count */
+      steps_count: number;
+      /** Requirements Count */
+      requirements_count: number;
+      /** Requirements By Kind */
+      requirements_by_kind: {
+        [key: string]: number;
+      };
+    };
+    /**
+     * FlowPackageImportPublic
+     * @example {
+     *       "content_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+     *       "flow_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+     *       "flow_name": "Case Report",
+     *       "import_id": "99999999-9999-4999-8999-999999999999",
+     *       "package_id": "se.demo.case-report",
+     *       "package_version": "1.0.0",
+     *       "resource_bindings_count": 3,
+     *       "steps_created": 4
+     *     }
+     */
+    FlowPackageImportPublic: {
+      /**
+       * Import Id
+       * Format: uuid
+       * @description Identifier of the package import record.
+       */
+      import_id: string;
+      /**
+       * Flow Id
+       * Format: uuid
+       * @description Identifier of the imported draft Flow.
+       */
+      flow_id: string;
+      /**
+       * Flow Name
+       * @description Name of the imported draft Flow.
+       */
+      flow_name: string;
+      /**
+       * Package Id
+       * @description Portable package identifier.
+       */
+      package_id: string;
+      /**
+       * Package Version
+       * @description Publisher-assigned package version.
+       */
+      package_version: string;
+      /**
+       * Content Checksum
+       * @description SHA-256 based checksum covering the imported package content.
+       */
+      content_checksum: string;
+      /**
+       * Steps Created
+       * @description Number of Flow steps created during import.
+       */
+      steps_created: number;
+      /**
+       * Resource Bindings Count
+       * @description Number of selected local resource bindings persisted for the draft.
+       */
+      resource_bindings_count: number;
+    };
+    /**
+     * FlowPackageImportRequest
+     * @example {
+     *       "package_base64": "UEsDBBQAAAAIA...",
+     *       "selected_bindings": [
+     *         {
+     *           "local_id": "11111111-1111-4111-8111-111111111111",
+     *           "local_kind": "completion_model",
+     *           "slot_ref": {
+     *             "kind": "model",
+     *             "label": "Structured extraction",
+     *             "slot": "structured"
+     *           }
+     *         }
+     *       ]
+     *     }
+     */
+    FlowPackageImportRequest: {
+      /**
+       * Package Base64
+       * @description Base64-encoded `.eneo-flowpkg` bytes. The decoded package must stay within the Flow package upload byte cap.
+       */
+      package_base64: string;
+      /**
+       * Selected Bindings
+       * @description Local target resources selected for package dependency slots.
+       */
+      selected_bindings?: components["schemas"]["FlowPackageImportResourceBindingRequest"][];
+    };
+    /** FlowPackageImportResourceBindingRequest */
+    FlowPackageImportResourceBindingRequest: {
+      /** @description Package dependency slot selected by the importer. */
+      slot_ref: components["schemas"]["FlowPackageImportResourceSlotRefRequest"];
+      /** @description Kind of the local target resource selected for the slot. */
+      local_kind: components["schemas"]["LocalResourceKind"];
+      /**
+       * Local Id
+       * Format: uuid
+       * @description Identifier of the local target resource selected for the slot.
+       */
+      local_id: string;
+    };
+    /** FlowPackageImportResourceSlotRefRequest */
+    FlowPackageImportResourceSlotRefRequest: {
+      /** @description Portable dependency slot kind declared by the package. */
+      kind: components["schemas"]["ResourceSlotKind"];
+      /**
+       * Slot
+       * @description Portable dependency slot identifier.
+       */
+      slot: string;
+      /**
+       * Label
+       * @description Human-readable dependency slot label.
+       */
+      label: string;
+    };
+    /** FlowPackageKnowledgeDependencyResolution */
+    FlowPackageKnowledgeDependencyResolution: {
+      slot_ref: {
+        [key: string]: string;
+      };
+      /** Required */
+      required: boolean;
+      /** Used By Steps */
+      used_by_steps?: string[];
+      data_sensitivity?: components["schemas"]["FlowPackageRequirementDataSensitivity"] | null;
+      status: components["schemas"]["FlowPackageImportPlanStatus"];
+      /** Publish Blocks */
+      publish_blocks: boolean;
+      /** Auto Select Allowed */
+      auto_select_allowed: boolean;
+      /** Suggestions */
+      suggestions: components["schemas"]["FlowPackageLocalCandidate"][];
+      /** Total Candidate Count */
+      total_candidate_count: number;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "knowledge";
+      guidance?: components["schemas"]["FlowPackageKnowledgeGuidance"] | null;
+    };
+    /** FlowPackageKnowledgeGuidance */
+    FlowPackageKnowledgeGuidance: {
+      /** Summary */
+      summary?: string | null;
+      /** Recommended Sources */
+      recommended_sources?: string[];
+      /** Do Not Include */
+      do_not_include?: string[];
+      /** Setup Notes */
+      setup_notes?: string | null;
+    };
+    /** FlowPackageLocalCandidate */
+    FlowPackageLocalCandidate: {
+      local_kind: components["schemas"]["LocalResourceKind"];
+      /**
+       * Local Id
+       * Format: uuid
+       */
+      local_id: string;
+      /** Label */
+      label: string;
+    };
+    /** FlowPackageMcpToolDependencyResolution */
+    FlowPackageMcpToolDependencyResolution: {
+      slot_ref: {
+        [key: string]: string;
+      };
+      /** Required */
+      required: boolean;
+      /** Used By Steps */
+      used_by_steps?: string[];
+      data_sensitivity?: components["schemas"]["FlowPackageRequirementDataSensitivity"] | null;
+      status: components["schemas"]["FlowPackageImportPlanStatus"];
+      /** Publish Blocks */
+      publish_blocks: boolean;
+      /** Auto Select Allowed */
+      auto_select_allowed: boolean;
+      /** Suggestions */
+      suggestions: components["schemas"]["FlowPackageLocalCandidate"][];
+      /** Total Candidate Count */
+      total_candidate_count: number;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "mcp_tool";
+      guidance?: components["schemas"]["FlowPackageMcpToolGuidance"] | null;
+      server_slot_ref?: {
+        [key: string]: string;
+      } | null;
+    };
+    /** FlowPackageMcpToolGuidance */
+    FlowPackageMcpToolGuidance: {
+      /** Summary */
+      summary?: string | null;
+      /** Expected Behavior */
+      expected_behavior?: string | null;
+      /** Auth Notes */
+      auth_notes?: string | null;
+      /** Risk Notes */
+      risk_notes?: string | null;
+    };
+    /** FlowPackageModelCandidate */
+    FlowPackageModelCandidate: {
+      local_kind: components["schemas"]["LocalResourceKind"];
+      /**
+       * Local Id
+       * Format: uuid
+       */
+      local_id: string;
+      /** Label */
+      label: string;
+      model_kind: components["schemas"]["FlowPackageModelKind"];
+      identity: components["schemas"]["FlowPackageModelIdentity"];
+      /** Security Level */
+      security_level?: number | null;
+      /** Max Context Tokens */
+      max_context_tokens?: number | null;
+      /**
+       * Supports Vision
+       * @default false
+       */
+      supports_vision?: boolean;
+      /**
+       * Supports Reasoning
+       * @default false
+       */
+      supports_reasoning?: boolean;
+      /**
+       * Supports Tool Calling
+       * @default false
+       */
+      supports_tool_calling?: boolean;
+    };
+    /** FlowPackageModelDependencyResolution */
+    FlowPackageModelDependencyResolution: {
+      slot_ref: {
+        [key: string]: string;
+      };
+      /** Required */
+      required: boolean;
+      /** Used By Steps */
+      used_by_steps?: string[];
+      data_sensitivity?: components["schemas"]["FlowPackageRequirementDataSensitivity"] | null;
+      status: components["schemas"]["FlowPackageImportPlanStatus"];
+      /** Publish Blocks */
+      publish_blocks: boolean;
+      /** Auto Select Allowed */
+      auto_select_allowed: boolean;
+      /** Suggestions */
+      suggestions: components["schemas"]["FlowPackageModelCandidate"][];
+      /** Total Candidate Count */
+      total_candidate_count: number;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "model";
+      guidance?: components["schemas"]["FlowPackageModelGuidance"] | null;
+      model_kind: components["schemas"]["FlowPackageModelKind"];
+      matching_preferences: components["schemas"]["FlowPackageModelMatchingPreferences"];
+      completion_constraints?:
+        | components["schemas"]["FlowPackageCompletionModelConstraints"]
+        | null;
+      /** Eligible Candidate Count */
+      eligible_candidate_count: number;
+      policy_status: components["schemas"]["FlowPackagePolicyStatus"];
+      /** Selection Warnings */
+      selection_warnings?: components["schemas"]["FlowPackageModelMatchIssue"][];
+      /** Rejected Candidates */
+      rejected_candidates?: components["schemas"]["FlowPackageRejectedModelCandidate"][];
+    };
+    /** FlowPackageModelGuidance */
+    FlowPackageModelGuidance: {
+      /** Summary */
+      summary?: string | null;
+      /** Quality Notes */
+      quality_notes?: string | null;
+      /** Minimum Expected Quality */
+      minimum_expected_quality?: string | null;
+    };
+    /** FlowPackageModelIdentity */
+    FlowPackageModelIdentity: {
+      /** Provider */
+      provider: string;
+      /** Model */
+      model: string;
+    };
+    /**
+     * FlowPackageModelKind
+     * @enum {string}
+     */
+    FlowPackageModelKind: "completion_model" | "transcription_model";
+    /**
+     * FlowPackageModelMatchIssue
+     * @enum {string}
+     */
+    FlowPackageModelMatchIssue:
+      | "model_context_too_small"
+      | "model_identity_not_preferred"
+      | "model_kind_mismatch"
+      | "model_reasoning_required"
+      | "model_tool_calling_required"
+      | "model_vision_required";
+    /** FlowPackageModelMatchingPreferences */
+    FlowPackageModelMatchingPreferences: {
+      /** Tested With */
+      tested_with?: components["schemas"]["FlowPackageModelIdentity"][];
+      /** Publisher Suggested */
+      publisher_suggested?: components["schemas"]["FlowPackageModelIdentity"][];
+    };
+    /**
+     * FlowPackagePolicyStatus
+     * @enum {string}
+     */
+    FlowPackagePolicyStatus: "allowed" | "warning" | "blocked" | "unknown";
+    /** FlowPackageRejectedModelCandidate */
+    FlowPackageRejectedModelCandidate: {
+      candidate: components["schemas"]["FlowPackageModelCandidate"];
+      /** Reasons */
+      reasons: components["schemas"]["FlowPackageModelMatchIssue"][];
+    };
+    /** FlowPackageRequirementDataSensitivity */
+    FlowPackageRequirementDataSensitivity: {
+      /**
+       * Handles Personal Data
+       * @default false
+       */
+      handles_personal_data?: boolean;
+      /**
+       * Handles Sensitive Case Data
+       * @default false
+       */
+      handles_sensitive_case_data?: boolean;
+      /** Publisher Classification Label */
+      publisher_classification_label?: string | null;
+      /** Publisher Classification Description */
+      publisher_classification_description?: string | null;
+      /** Notes */
+      notes?: string | null;
+    };
+    /**
+     * FlowPackageRequirementKind
+     * @enum {string}
+     */
+    FlowPackageRequirementKind: "model" | "knowledge" | "mcp_tool" | "template_asset";
+    /** FlowPackageTemplateAssetDependencyResolution */
+    FlowPackageTemplateAssetDependencyResolution: {
+      slot_ref: {
+        [key: string]: string;
+      };
+      /** Required */
+      required: boolean;
+      /** Used By Steps */
+      used_by_steps?: string[];
+      data_sensitivity?: components["schemas"]["FlowPackageRequirementDataSensitivity"] | null;
+      status: components["schemas"]["FlowPackageImportPlanStatus"];
+      /** Publish Blocks */
+      publish_blocks: boolean;
+      /** Auto Select Allowed */
+      auto_select_allowed: boolean;
+      /** Suggestions */
+      suggestions: components["schemas"]["FlowPackageLocalCandidate"][];
+      /** Total Candidate Count */
+      total_candidate_count: number;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "template_asset";
+      guidance?: components["schemas"]["FlowPackageTemplateAssetGuidance"] | null;
+    };
+    /** FlowPackageTemplateAssetGuidance */
+    FlowPackageTemplateAssetGuidance: {
+      /** Summary */
+      summary?: string | null;
+      /** Replacement Notes */
+      replacement_notes?: string | null;
+      /** Placeholder Notes */
+      placeholder_notes?: string | null;
+    };
+    /**
+     * FlowPackageValidationPublic
+     * @example {
+     *       "content_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+     *       "description": "Creates a structured case report from approved local material.",
+     *       "name": "Case Report",
+     *       "package_id": "se.demo.case-report",
+     *       "package_version": "1.0.0",
+     *       "requirements_by_kind": {
+     *         "knowledge": 1,
+     *         "model": 1
+     *       },
+     *       "requirements_count": 3,
+     *       "spec_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+     *       "steps_count": 4
+     *     }
+     */
+    FlowPackageValidationPublic: {
+      /**
+       * Package Id
+       * @description Portable package identifier from the package manifest.
+       */
+      package_id: string;
+      /**
+       * Package Version
+       * @description Publisher-assigned package version from the package manifest.
+       */
+      package_version: string;
+      /**
+       * Package Kind
+       * @description Generic package kind. Flow package V1 currently imports only `flow`.
+       */
+      package_kind: string;
+      /**
+       * Payload Schema
+       * @description Payload schema identifier used by the package kind.
+       */
+      payload_schema: string;
+      /**
+       * Name
+       * @description Human-readable package name.
+       */
+      name: string;
+      /**
+       * Description
+       * @description Publisher-supplied package description.
+       */
+      description: string;
+      /**
+       * Content Checksum
+       * @description SHA-256 based checksum covering the portable package content.
+       */
+      content_checksum: string;
+      /**
+       * Spec Hash
+       * @description Hash of the portable flow draft spec inside the package.
+       */
+      spec_hash: string;
+      /**
+       * Steps Count
+       * @description Number of flow draft steps included in the package.
+       */
+      steps_count: number;
+      /**
+       * Requirements Count
+       * @description Number of dependency requirements declared by the package.
+       */
+      requirements_count: number;
+      /**
+       * Requirements By Kind
+       * @description Requirement counts keyed by package requirement kind.
+       */
+      requirements_by_kind: {
+        [key: string]: number;
+      };
+    };
     /**
      * FlowPublic
      * @example {
@@ -16478,10 +17137,7 @@ export interface components {
        */
       order?: number | null;
     };
-    /**
-     * FormFieldSpec
-     * @description Form field definition for flow runtime input forms.
-     */
+    /** FormFieldSpec */
     FormFieldSpec: {
       /** Name */
       name: string;
@@ -17334,6 +17990,19 @@ export interface components {
       /** @default warning */
       severity?: components["schemas"]["LintSeverity"];
     };
+    /**
+     * LocalResourceKind
+     * @enum {string}
+     */
+    LocalResourceKind:
+      | "completion_model"
+      | "transcription_model"
+      | "collection"
+      | "website"
+      | "integration_knowledge"
+      | "mcp_server"
+      | "mcp_tool"
+      | "template_asset";
     /** LoggingDetailsPublic */
     LoggingDetailsPublic: {
       /** Context */
@@ -19373,7 +20042,7 @@ export interface components {
      *                 "knowledge_refs": [],
      *                 "mcp_server_refs": [],
      *                 "mcp_tool_refs": [],
-     *                 "model_ref": "model:gpt-5.4"
+     *                 "model_ref": "model.gpt-5-4"
      *               },
      *               "input_source": "flow_input",
      *               "input_type": "audio",
@@ -19388,7 +20057,7 @@ export interface components {
      *                 "knowledge_refs": [],
      *                 "mcp_server_refs": [],
      *                 "mcp_tool_refs": [],
-     *                 "model_ref": "model:gpt-5.4"
+     *                 "model_ref": "model.gpt-5-4"
      *               },
      *               "input_bindings": {
      *                 "question": "{{ step_a.output.text }}"
@@ -19642,6 +20311,21 @@ export interface components {
        * @default none
        */
       flow_evidence?: components["schemas"]["ResourcePermissionLevel"];
+    };
+    /**
+     * ResourceSlotKind
+     * @enum {string}
+     */
+    ResourceSlotKind: "model" | "knowledge" | "mcp_server" | "mcp_tool" | "template_asset";
+    /** ResourceSlotRef */
+    ResourceSlotRef: {
+      kind: components["schemas"]["ResourceSlotKind"];
+      /** Slot */
+      slot: string;
+      /** Label */
+      label: string;
+      /** Ref */
+      readonly ref: string;
     };
     /**
      * RetentionPolicyResponse
@@ -20293,7 +20977,7 @@ export interface components {
      *                     "knowledge_refs": [],
      *                     "mcp_server_refs": [],
      *                     "mcp_tool_refs": [],
-     *                     "model_ref": "model:gpt-5.4"
+     *                     "model_ref": "model.gpt-5-4"
      *                   },
      *                   "input_source": "flow_input",
      *                   "input_type": "audio",
@@ -20308,7 +20992,7 @@ export interface components {
      *                     "knowledge_refs": [],
      *                     "mcp_server_refs": [],
      *                     "mcp_tool_refs": [],
-     *                     "model_ref": "model:gpt-5.4"
+     *                     "model_ref": "model.gpt-5-4"
      *                   },
      *                   "input_bindings": {
      *                     "question": "{{ step_a.output.text }}"
@@ -20934,10 +21618,7 @@ export interface components {
        */
       file_ids?: string[];
     };
-    /**
-     * StepSpec
-     * @description Single step in a FlowDraftSpecCore.
-     */
+    /** StepSpec */
     StepSpec: {
       /**
        * Plan Step Ref
@@ -39890,6 +40571,146 @@ export interface operations {
       };
     };
   };
+  export_flow_package: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the draft Flow to export. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowPackageExportRequest"];
+      };
+    };
+    responses: {
+      /** @description Portable Flow package bundle. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /** @example PK...binary .eneo-flowpkg zip payload... */
+          "application/vnd.eneo.flow-package+zip": string;
+        };
+      };
+      /** @description The flow cannot be exported as a portable package until the reported authoring or dependency issue is fixed. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks Flow edit permission, flow-owner authority, or API-key scope for this flow. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow was not found in the current tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Not found",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The exported package exceeds the package export byte cap. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  validate_flow_package: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_validate_flow_package"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowPackageValidationPublic"];
+        };
+      };
+      /** @description The uploaded package is not a valid portable Flow package. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks tenant Flow authoring permission or API-key scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The uploaded package exceeds the package upload size cap. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_icon_api_v1_icons__id___get: {
     parameters: {
       query?: never;
@@ -41413,6 +42234,164 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SpacePublic"];
+        };
+      };
+    };
+  };
+  create_flow_package_import_plan: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the target space for dependency planning. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_create_flow_package_import_plan"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowPackageImportPlan"];
+        };
+      };
+      /** @description The uploaded package is not a valid portable Flow package. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks Flow authoring permission, target-space Flow edit permission, or API-key scope for the target space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Target space was not found in the current tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Not found",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The uploaded package exceeds the package upload size cap. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  import_flow_package_as_draft: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the target space for package import. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowPackageImportRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowPackageImportPublic"];
+        };
+      };
+      /** @description The package payload, selected mappings, or install attempt is invalid. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks Flow authoring permission, target-space Flow edit permission, or API-key scope for the target space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Target space was not found in the current tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Not found",
+           *       "intric_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The decoded package exceeds the package upload size cap. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

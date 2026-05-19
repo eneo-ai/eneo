@@ -102,6 +102,7 @@ from intric.flows.api.flow_upload_router import (
     upload_flow_file,
     upload_flow_runtime_file,
 )
+from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
 from intric.flows.enums import FlowRunRerunOperationStatus, FlowRunReviewCheckpointState
 from intric.flows.flow import (
     Flow,
@@ -2273,14 +2274,16 @@ async def test_update_flow_assistant_forwards_payload():
     kwargs = flow_service.update_flow_assistant.await_args.kwargs
     assert kwargs["flow_id"] == flow_id
     assert kwargs["assistant_id"] == assistant_id
-    assert kwargs["name"] == "Updated assistant"
-    assert kwargs["attachment_ids"] == [attachment_id]
-    assert kwargs["websites"] == [website_id]
-    assert kwargs["groups"] == [group_id]
-    assert kwargs["integration_knowledge_ids"] == [integration_knowledge_id]
-    assert kwargs["mcp_server_ids"] == [mcp_server_id]
-    assert kwargs["mcp_tools"] == [(mcp_tool_id, True)]
-    assert kwargs["completion_model_id"] == completion_model_id
+    update = kwargs["update"]
+    assert isinstance(update, FlowAssistantUpdateCommand)
+    assert update.name == "Updated assistant"
+    assert update.attachment_ids == [attachment_id]
+    assert update.websites == [website_id]
+    assert update.groups == [group_id]
+    assert update.integration_knowledge_ids == [integration_knowledge_id]
+    assert update.mcp_server_ids == [mcp_server_id]
+    assert update.mcp_tools == [(mcp_tool_id, True)]
+    assert update.completion_model_id == completion_model_id
     audit_service.log_async.assert_awaited_once()
 
 

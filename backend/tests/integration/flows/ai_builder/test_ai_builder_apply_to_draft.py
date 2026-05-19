@@ -28,9 +28,22 @@ from intric.flows.ai_builder.ai_builder_materialization_bridge import (
     apply_to_draft,
     materialize,
 )
-from intric.flows.ai_builder.ai_builder_models import TargetKind
+from intric.flows.ai_builder.ai_builder_models import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    InputSource,
+    PlannerPlanEnvelope,
+    StepSpec,
+    TargetKind,
+)
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.planning_state import ArchitectureCommit, StepTriple
+from intric.flows.flow_resource_bindings import (
+    LocalResourceBinding,
+    LocalResourceKind,
+    ResourceSlotKind,
+    ResourceSlotRef,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -142,6 +155,7 @@ async def test_apply_to_draft_persists_materialized_spec_byte_identical(
         fetched = await repo.get_plan(plan_id=plan.id, tenant_id=user.tenant_id)
 
     assert fetched.id == plan.id
+    assert fetched.resource_bindings == tuple()
     assert fetched.spec.model_dump(mode="json") == expected_spec_json
     # Envelope metadata survives the round-trip; spec field on the
     # rehydrated envelope matches the original (re-injected from
@@ -155,3 +169,61 @@ async def test_apply_to_draft_persists_materialized_spec_byte_identical(
         "Chose summarize_text because single-step text→text."
     )
     assert fetched.envelope.spec.model_dump(mode="json") == expected_spec_json
+
+
+@pytest.mark.asyncio
+async def test_create_plan_roundtrips_resource_bindings_json(db_container) -> None:
+    space_id = await _create_space(
+        db_container=db_container,
+        space_name="AI Builder resource binding roundtrip",
+    )
+    local_model_id = UUID("11111111-1111-4111-8111-111111111111")
+    binding = LocalResourceBinding(
+        slot_ref=ResourceSlotRef(
+            kind=ResourceSlotKind.MODEL,
+            slot="fast-model",
+            label="Fast model",
+        ),
+        local_kind=LocalResourceKind.COMPLETION_MODEL,
+        local_id=local_model_id,
+    )
+    spec = FlowDraftSpecCore(
+        flow_name="Resource binding roundtrip",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Use model",
+                assistant_spec=AssistantSpec(
+                    instructions="Use the selected model.",
+                    model_ref="model.fast-model",
+                ),
+                input_source=InputSource.FLOW_INPUT,
+            )
+        ],
+    )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=space_id,
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        plan = await repo.create_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            spec=spec,
+            envelope=PlannerPlanEnvelope(spec=spec),
+            resource_bindings=(binding,),
+        )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        fetched = await repo.get_plan(plan_id=plan.id, tenant_id=user.tenant_id)
+
+    assert fetched.resource_bindings == (binding,)
+    assert fetched.resource_bindings[0].slot_ref.label == "Fast model"

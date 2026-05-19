@@ -37,6 +37,7 @@ class AIBuilderPlannerContext:
 
 
 def serialize_space_models(space: "Space") -> list[dict[str, str]]:
+    """Serialize local model IDs for catalog allocation, not prompt authoring refs."""
     return [
         {
             "id": str(model.id),
@@ -50,6 +51,7 @@ def serialize_space_models(space: "Space") -> list[dict[str, str]]:
 
 
 def serialize_space_kbs(space: "Space") -> list[dict[str, str]]:
+    """Serialize local knowledge IDs for catalog allocation, not prompt authoring refs."""
     return [
         {
             "id": str(collection.id),
@@ -63,7 +65,7 @@ def serialize_space_kbs(space: "Space") -> list[dict[str, str]]:
 
 
 def serialize_space_mcps(space: "Space") -> list[AIBuilderMCPServerResource]:
-    """Serialize space-visible MCP servers and enabled tools for AI Builder."""
+    """Serialize local MCP IDs for catalog allocation, not prompt authoring refs."""
     raw_servers: list[dict[str, Any]] = []
     for server in getattr(space, "mcp_servers", []):
         server_id = getattr(server, "id", None)

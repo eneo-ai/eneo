@@ -67,6 +67,16 @@ TAGS_METADATA = [
         ),
     },
     {
+        "name": "flow-packages",
+        "description": (
+            "Flow package export, validation, and import-planning operations for "
+            "portable `.eneo-flowpkg` bundles. Export a draft Flow into a typed "
+            "package, validate a package before choosing a target space, then create "
+            "a space-scoped import plan to inspect required model, knowledge, MCP, "
+            "and template mappings before any imported draft flow is created."
+        ),
+    },
+    {
         "name": "jobs",
         "description": "Job operations. Use this to keep track of running and completed jobs.",
     },

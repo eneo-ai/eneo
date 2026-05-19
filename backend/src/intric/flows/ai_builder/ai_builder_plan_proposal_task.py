@@ -21,6 +21,7 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
     user_relevant_requirement_text,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderResourceCatalog,
     AIBuilderResourceReferenceMaterial,
     build_ai_builder_resource_catalog,
     build_ai_builder_resource_reference_material,
@@ -39,6 +40,7 @@ def build_plan_proposal_system_prompt(
     available_kbs: list[dict[str, Any]] | None = None,
     available_mcps: AIBuilderMCPResourceInput = None,
     mcp_selection_values: set[str] | frozenset[str] | None = None,
+    resource_catalog: AIBuilderResourceCatalog | None = None,
     plan_revision_context: str | None = None,
 ) -> str:
     """Build a compact task prompt for create/edit flow proposal."""
@@ -47,12 +49,13 @@ def build_plan_proposal_system_prompt(
     selected_mcp_server_refs = mcp_selected_server_refs_from_values(
         set(mcp_selection_values or ())
     )
+    catalog = resource_catalog or build_ai_builder_resource_catalog(
+        available_models=available_models,
+        available_kbs=available_kbs,
+        available_mcps=available_mcps,
+    )
     resource_material = build_ai_builder_resource_reference_material(
-        catalog=build_ai_builder_resource_catalog(
-            available_models=available_models,
-            available_kbs=available_kbs,
-            available_mcps=available_mcps,
-        ),
+        catalog=catalog,
         selected_mcp_server_refs=selected_mcp_server_refs,
     )
     create_mode_rules = (
@@ -84,7 +87,7 @@ def build_plan_proposal_system_prompt(
         "- Describe each step's semantic work; the backend derives runtime uploads and final output mechanics from the committed architecture.",
         "- Do not author field-level previous-step paths; let the backend wire dataflow.",
         "- Do not write template variables, raw JSON Schema, raw input bindings, IDs, hashes, timestamps, or backend-owned refs.",
-        "- Exception: when the Available resources section gives canonical resource refs, use those refs only in their dedicated fields (`model_ref`, `knowledge_refs`, `mcp_server_refs`, `mcp_tool_refs`).",
+        "- Exception: when the Available resources section gives portable resource slot refs, use those refs only in their dedicated fields (`model_ref`, `knowledge_refs`, `mcp_server_refs`, `mcp_tool_refs`).",
         "- The backend will compile, validate, and persist the plan for user approval.",
         *create_mode_rules,
         "",

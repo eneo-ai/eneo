@@ -25,6 +25,10 @@ from intric.flows.ai_builder.ai_builder_models import (
     InputType,
     OutputType,
 )
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    build_ai_builder_resource_catalog,
+)
+from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
 from intric.flows.flow import FlowStep
 from intric.prompts.api.prompt_models import PromptCreate
 
@@ -265,7 +269,11 @@ async def test_output_only_edit_updates_stale_flow_description_when_terminal_art
         await flow_service.update_flow_assistant(
             flow_id=flow.id,
             assistant_id=assistant.id,
-            prompt=PromptCreate(text="Skriv ett kort beslutsunderlag i textformat."),
+            update=FlowAssistantUpdateCommand(
+                prompt=PromptCreate(
+                    text="Skriv ett kort beslutsunderlag i textformat."
+                )
+            ),
         )
         flow = await flow_service.update_flow(
             flow_id=flow.id,
@@ -294,6 +302,23 @@ async def test_output_only_edit_updates_stale_flow_description_when_terminal_art
         )
 
         assistant_snapshots = await flow_service.get_flow_assistant_snapshots(flow)
+        snapshot_model = next(iter(assistant_snapshots.values())).model
+        assert snapshot_model is not None
+        resource_catalog = build_ai_builder_resource_catalog(
+            available_models=[
+                {
+                    "id": snapshot_model.local_ref,
+                    "name": snapshot_model.label or model.name,
+                }
+            ],
+            available_kbs=[],
+            available_mcps=[],
+        )
+        resource_bindings = tuple(
+            binding
+            for binding in (entry.local_binding for entry in resource_catalog.models)
+            if binding is not None
+        )
         compiled = compile_edit_draft(
             edit_draft,
             list(flow.steps),
@@ -301,6 +326,7 @@ async def test_output_only_edit_updates_stale_flow_description_when_terminal_art
             flow_name=flow.name,
             flow_description=flow.description,
             assistant_snapshots=assistant_snapshots,
+            resource_catalog=resource_catalog,
         )
         changeset = compile_changeset(compiled.compiled_spec, current_flow=flow)
 
@@ -310,6 +336,7 @@ async def test_output_only_edit_updates_stale_flow_description_when_terminal_art
             space_id=space.id,
             flow_id=flow.id,
             expected_revision=flow.draft_revision,
+            resource_bindings=resource_bindings,
         )
 
         updated = await flow_service.get_flow(flow.id)
@@ -319,6 +346,6 @@ async def test_output_only_edit_updates_stale_flow_description_when_terminal_art
             "Tar emot uppladdade ärendedokument vid körning och skapar ett kort "
             "svenskt beslutsunderlag i DOCX-format."
         )
-        assert updated_snapshots[updated.steps[0].assistant_id]["instructions"] == (
+        assert updated_snapshots[updated.steps[0].assistant_id].instructions == (
             "Skriv ett kort beslutsunderlag i textformat."
         )

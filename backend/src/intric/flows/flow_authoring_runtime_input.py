@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
@@ -28,16 +28,9 @@ _DEFAULT_RUNTIME_INPUT_DESCRIPTIONS: dict[InputType, str] = {
 }
 
 
-def normalize_builder_draft_runtime_inputs(
+def normalize_flow_draft_runtime_inputs(
     spec: FlowDraftSpecCore,
 ) -> FlowDraftSpecCore:
-    """Normalize runtime-upload defaults for newly proposed builder draft steps.
-
-    Only new steps are normalized here. Existing-step edits are left untouched at the
-    draft layer because the stored flow may already have richer runtime-input config
-    that should be preserved during apply.
-    """
-
     updated_steps = [
         step
         if step.existing_step_ref is not None

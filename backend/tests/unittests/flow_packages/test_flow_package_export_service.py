@@ -1,0 +1,900 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
+
+import pytest
+
+from intric.flow_packages.application.flow_package_export_service import (
+    MAX_PACKAGE_EXPORT_BYTES,
+    FlowPackageExportService,
+    build_flow_package_export_envelope,
+)
+from intric.flow_packages.domain.flow_package_errors import (
+    FlowPackageExportError,
+    FlowPackageExportErrorCode,
+)
+from intric.flow_packages.domain.flow_package_manifest import (
+    FlowPackageManifestMetadata,
+)
+from intric.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
+from intric.flow_packages.domain.flow_package_requirements import (
+    FlowPackageModelKind,
+    FlowPackageModelRequirement,
+)
+from intric.flow_packages.infrastructure.flow_package_zip_reader import (
+    read_flow_package,
+)
+from intric.flow_packages.infrastructure.flow_package_zip_writer import (
+    write_flow_package,
+)
+from intric.flows.assistant_authoring_snapshot import (
+    AssistantAuthoringResourceRef,
+    AssistantAuthoringSnapshot,
+    AssistantAuthoringSnapshots,
+)
+from intric.flows.domain.flow import Flow, FlowStep, JsonObject
+from intric.flows.flow_resource_bindings import (
+    LocalResourceBinding,
+    LocalResourceKind,
+    ResourceSlotKind,
+    ResourceSlotRef,
+)
+
+
+@pytest.mark.anyio
+async def test_export_service_builds_zip_with_side_effect_free_dependencies() -> None:
+    assistant_id = uuid4()
+    model_id = uuid4()
+    flow_id = uuid4()
+    flow = _flow(
+        steps=[
+            _step(
+                1,
+                assistant_id=assistant_id,
+                input_bindings={"question": "{{ flow_input.text }}"},
+            )
+        ]
+    )
+    snapshots = {
+        assistant_id: _snapshot(
+            model_ref=AssistantAuthoringResourceRef(
+                local_ref=str(model_id),
+                label="Structured model",
+                local_kind=LocalResourceKind.COMPLETION_MODEL,
+            )
+        )
+    }
+    bindings = (
+        _binding(
+            slot_kind=ResourceSlotKind.MODEL,
+            slot="structured-model",
+            label="Structured model",
+            local_kind=LocalResourceKind.COMPLETION_MODEL,
+            local_id=model_id,
+        ),
+    )
+    dependency_service = _FakeFlowPackageExportFlowService(
+        assistant_snapshots=snapshots,
+        resource_bindings=bindings,
+    )
+    export_service = FlowPackageExportService(
+        flow_service=dependency_service,
+        package_writer=write_flow_package,
+        clock=lambda: datetime(2026, 5, 18, 12, 0, tzinfo=timezone.utc),
+    )
+
+    result = await export_service.export_to_bytes(
+        flow_id=flow_id,
+        flow=flow,
+        manifest_metadata=_manifest_metadata(),
+    )
+
+    assert dependency_service.flow == flow
+    assert dependency_service.flow_id == flow_id
+    assert result.filename == "se.demo.meeting-report-1.0.0.eneo-flowpkg"
+    reparsed = read_flow_package(result.package_bytes)
+    assert reparsed == result.envelope
+    assert reparsed.provenance.source_instance_id is None
+    assert reparsed.provenance.exported_by is None
+    assert reparsed.provenance.exported_at == datetime(
+        2026,
+        5,
+        18,
+        12,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+
+@pytest.mark.anyio
+async def test_export_service_rejects_oversized_package_bytes() -> None:
+    assistant_id = uuid4()
+    flow = _flow(steps=[_step(1, assistant_id=assistant_id)])
+    export_service = FlowPackageExportService(
+        flow_service=_FakeFlowPackageExportFlowService(
+            assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+            resource_bindings=tuple(),
+        ),
+        package_writer=lambda envelope: b"x" * (MAX_PACKAGE_EXPORT_BYTES + 1),
+    )
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        await export_service.export_to_bytes(
+            flow_id=uuid4(),
+            flow=flow,
+            manifest_metadata=_manifest_metadata(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.PACKAGE_BYTES_TOO_LARGE
+    assert exc_info.value.context == {
+        "package_size_bytes": MAX_PACKAGE_EXPORT_BYTES + 1,
+        "max_package_export_bytes": MAX_PACKAGE_EXPORT_BYTES,
+    }
+
+
+def test_export_builds_portable_envelope_and_round_trips_zip() -> None:
+    assistant_id = uuid4()
+    model_id = uuid4()
+    envelope = build_flow_package_export_envelope(
+        flow=_flow(
+            steps=[
+                _step(
+                    1,
+                    assistant_id=assistant_id,
+                    input_bindings={"question": "{{ flow_input.text }}"},
+                )
+            ]
+        ),
+        assistant_snapshots={
+            assistant_id: _snapshot(
+                model_ref=AssistantAuthoringResourceRef(
+                    local_ref=str(model_id),
+                    label="Structured model",
+                    local_kind=LocalResourceKind.COMPLETION_MODEL,
+                )
+            )
+        },
+        resource_bindings=(
+            _binding(
+                slot_kind=ResourceSlotKind.MODEL,
+                slot="structured-model",
+                label="Structured model",
+                local_kind=LocalResourceKind.COMPLETION_MODEL,
+                local_id=model_id,
+            ),
+        ),
+        manifest_metadata=_manifest_metadata(),
+        provenance=_provenance(),
+    )
+
+    step = envelope.draft.spec.steps[0]
+    assert step.plan_step_ref == "step_1"
+    assert step.assistant_spec.model_ref == "model.structured-model"
+    assert all(step.existing_step_ref is None for step in envelope.draft.spec.steps)
+    requirement = envelope.requirements.requirements[0]
+    assert isinstance(requirement, FlowPackageModelRequirement)
+    assert requirement.slot_ref.ref == "model.structured-model"
+    assert requirement.slot_ref.label == "Structured model"
+    assert requirement.used_by_steps == ["step_1"]
+    assert requirement.model_kind is FlowPackageModelKind.COMPLETION_MODEL
+    assert read_flow_package(write_flow_package(envelope)) == envelope
+
+
+def test_export_preserves_form_fields_from_flow_metadata() -> None:
+    assistant_id = uuid4()
+    envelope = _build_envelope(
+        flow=_flow(
+            metadata_json={
+                "form_schema": {
+                    "fields": [
+                        {
+                            "name": "case_id",
+                            "type": "text",
+                            "label": "Case ID",
+                            "required": True,
+                        }
+                    ]
+                }
+            },
+            steps=[
+                _step(
+                    1,
+                    assistant_id=assistant_id,
+                    input_bindings={"question": "{{ flow_input.case_id }}"},
+                )
+            ],
+        ),
+        assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+        resource_bindings=tuple(),
+    )
+
+    assert envelope.draft.spec.form_fields is not None
+    assert envelope.draft.spec.form_fields[0].name == "case_id"
+    assert envelope.draft.spec.form_fields[0].label == "Case ID"
+    assert envelope.draft.spec.form_fields[0].required is True
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["server_only", "tool_only", "knowledge_and_tool"],
+)
+def test_export_rejects_mcp_resources_as_manual_setup_scope(
+    case: str,
+) -> None:
+    assistant_id = uuid4()
+    snapshot = _mcp_snapshot(case)
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(steps=[_step(1, assistant_id=assistant_id)]),
+            assistant_snapshots={assistant_id: snapshot},
+            resource_bindings=tuple(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.MCP_EXPORT_UNSUPPORTED
+
+
+def _mcp_snapshot(case: str) -> AssistantAuthoringSnapshot:
+    if case == "server_only":
+        return _snapshot(
+            model_ref=None,
+            mcp_server_refs=(AssistantAuthoringResourceRef(local_ref=str(uuid4())),),
+        )
+    if case == "tool_only":
+        return _snapshot(
+            model_ref=None,
+            mcp_tool_refs=(AssistantAuthoringResourceRef(local_ref=str(uuid4())),),
+        )
+    if case == "knowledge_and_tool":
+        return _snapshot(
+            model_ref=None,
+            knowledge_refs=(AssistantAuthoringResourceRef(local_ref=str(uuid4())),),
+            mcp_tool_refs=(AssistantAuthoringResourceRef(local_ref=str(uuid4())),),
+        )
+    raise AssertionError(f"Unknown MCP export test case: {case}")
+
+
+@pytest.mark.parametrize(
+    "step_kwargs",
+    [
+        {"input_bindings": {"question": "{{ missing_value }}"}},
+        {"input_contract": {"description": "{{ missing_value }}"}},
+        {"output_contract": {"description": "{{ missing_value }}"}},
+        {"input_config": {"description": "{{ missing_value }}"}},
+        {"output_config": {"description": "{{ missing_value }}"}},
+    ],
+)
+def test_export_rejects_invalid_template_references_in_step_payloads(
+    step_kwargs: dict[str, JsonObject],
+) -> None:
+    assistant_id = uuid4()
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(steps=[_step(1, assistant_id=assistant_id, **step_kwargs)]),
+            assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+            resource_bindings=tuple(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.VARIABLE_REFERENCE_INVALID
+    assert exc_info.value.context["step_order"] == 1
+
+
+def test_export_rejects_invalid_template_references_in_assistant_instructions() -> None:
+    assistant_id = uuid4()
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(steps=[_step(1, assistant_id=assistant_id)]),
+            assistant_snapshots={
+                assistant_id: _snapshot(
+                    instructions="Use {{ missing_value }}",
+                    model_ref=None,
+                )
+            },
+            resource_bindings=tuple(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.VARIABLE_REFERENCE_INVALID
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "{{ step_2.output.text }}",
+        "{{ step_input.unknown_key }}",
+        "{{ flow_input.unregistered_field }}",
+    ],
+)
+def test_export_rejects_forward_or_invalid_runtime_references(template: str) -> None:
+    assistant_id = uuid4()
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(
+                steps=[
+                    _step(
+                        1,
+                        assistant_id=assistant_id,
+                        input_bindings={"question": template},
+                    )
+                ]
+            ),
+            assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+            resource_bindings=tuple(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.VARIABLE_REFERENCE_INVALID
+
+
+def test_export_sorts_used_by_steps_by_step_order_not_lexicographic_ref() -> None:
+    assistant_a = uuid4()
+    assistant_b = uuid4()
+    model_id = uuid4()
+    envelope = _build_envelope(
+        flow=_flow(
+            steps=[
+                _step(10, assistant_id=assistant_b),
+                _step(2, assistant_id=assistant_a),
+            ]
+        ),
+        assistant_snapshots={
+            assistant_a: _snapshot(
+                model_ref=AssistantAuthoringResourceRef(
+                    local_ref=str(model_id),
+                    local_kind=LocalResourceKind.COMPLETION_MODEL,
+                )
+            ),
+            assistant_b: _snapshot(
+                model_ref=AssistantAuthoringResourceRef(
+                    local_ref=str(model_id),
+                    local_kind=LocalResourceKind.COMPLETION_MODEL,
+                )
+            ),
+        },
+        resource_bindings=(
+            _binding(
+                slot_kind=ResourceSlotKind.MODEL,
+                slot="shared-model",
+                label="Shared model",
+                local_kind=LocalResourceKind.COMPLETION_MODEL,
+                local_id=model_id,
+            ),
+        ),
+    )
+
+    requirement = envelope.requirements.requirements[0]
+    assert isinstance(requirement, FlowPackageModelRequirement)
+    assert requirement.used_by_steps == ["step_2", "step_10"]
+
+
+def test_export_rejects_missing_assistant_snapshot() -> None:
+    assistant_id = uuid4()
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(steps=[_step(1, assistant_id=assistant_id)]),
+            assistant_snapshots={},
+            resource_bindings=tuple(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.MISSING_ASSISTANT_SNAPSHOT
+
+
+def test_export_rejects_unsupported_output_mode() -> None:
+    assistant_id = uuid4()
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(
+                steps=[_step(1, assistant_id=assistant_id, output_mode="http_post")]
+            ),
+            assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+            resource_bindings=tuple(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.UNSUPPORTED_STEP_IO
+
+
+def test_export_rejects_template_fill_steps() -> None:
+    assistant_id = uuid4()
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(
+                steps=[_step(1, assistant_id=assistant_id, output_mode="template_fill")]
+            ),
+            assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+            resource_bindings=tuple(),
+        )
+
+    assert (
+        exc_info.value.code
+        is FlowPackageExportErrorCode.TEMPLATE_ASSET_PAYLOAD_UNSUPPORTED
+    )
+
+
+def test_export_rejects_template_asset_refs_in_output_config() -> None:
+    assistant_id = uuid4()
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(
+                steps=[
+                    _step(
+                        1,
+                        assistant_id=assistant_id,
+                        output_config={"template_asset_id": str(uuid4())},
+                    )
+                ]
+            ),
+            assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+            resource_bindings=tuple(),
+        )
+
+    assert (
+        exc_info.value.code
+        is FlowPackageExportErrorCode.TEMPLATE_ASSET_PAYLOAD_UNSUPPORTED
+    )
+
+
+def test_export_does_not_reject_unrelated_template_named_config_keys() -> None:
+    assistant_id = uuid4()
+    envelope = _build_envelope(
+        flow=_flow(
+            steps=[
+                _step(
+                    1,
+                    assistant_id=assistant_id,
+                    output_config={"template_filename_preview": "example.docx"},
+                )
+            ]
+        ),
+        assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+        resource_bindings=tuple(),
+    )
+
+    assert envelope.draft.spec.steps[0].output_config == {
+        "template_filename_preview": "example.docx"
+    }
+
+
+def test_export_allocates_package_slots_for_unbound_snapshot_resources() -> None:
+    assistant_id = uuid4()
+    model_id = uuid4()
+    knowledge_id = uuid4()
+
+    envelope = _build_envelope(
+        flow=_flow(steps=[_step(1, assistant_id=assistant_id)]),
+        assistant_snapshots={
+            assistant_id: _snapshot(
+                model_ref=AssistantAuthoringResourceRef(
+                    local_ref=str(model_id),
+                    label="Structured model",
+                    local_kind=LocalResourceKind.COMPLETION_MODEL,
+                ),
+                knowledge_refs=(
+                    AssistantAuthoringResourceRef(
+                        local_ref=str(knowledge_id),
+                        label="Policy",
+                        local_kind=LocalResourceKind.COLLECTION,
+                    ),
+                ),
+            )
+        },
+        resource_bindings=tuple(),
+    )
+
+    step = envelope.draft.spec.steps[0]
+    assert step.assistant_spec.model_ref == "model.structured-model"
+    assert step.assistant_spec.knowledge_refs == ["knowledge.policy"]
+    requirement_refs = {
+        requirement.slot_ref.ref for requirement in envelope.requirements.requirements
+    }
+    assert requirement_refs == {"knowledge.policy", "model.structured-model"}
+
+
+def test_export_reuses_one_package_slot_for_shared_unbound_snapshot_resource() -> None:
+    assistant_a = uuid4()
+    assistant_b = uuid4()
+    model_id = uuid4()
+
+    envelope = _build_envelope(
+        flow=_flow(
+            steps=[
+                _step(1, assistant_id=assistant_a),
+                _step(2, assistant_id=assistant_b),
+            ]
+        ),
+        assistant_snapshots={
+            assistant_a: _snapshot(
+                model_ref=AssistantAuthoringResourceRef(
+                    local_ref=str(model_id),
+                    label="Shared model",
+                    local_kind=LocalResourceKind.COMPLETION_MODEL,
+                )
+            ),
+            assistant_b: _snapshot(
+                model_ref=AssistantAuthoringResourceRef(
+                    local_ref=str(model_id),
+                    label="Shared model",
+                    local_kind=LocalResourceKind.COMPLETION_MODEL,
+                )
+            ),
+        },
+        resource_bindings=tuple(),
+    )
+
+    assert [step.assistant_spec.model_ref for step in envelope.draft.spec.steps] == [
+        "model.shared-model",
+        "model.shared-model",
+    ]
+    requirements = envelope.requirements.requirements
+    assert len(requirements) == 1
+    requirement = requirements[0]
+    assert isinstance(requirement, FlowPackageModelRequirement)
+    assert requirement.slot_ref.ref == "model.shared-model"
+    assert requirement.used_by_steps == ["step_1", "step_2"]
+
+
+def test_export_uses_short_uuid_slot_when_snapshot_resource_label_is_missing() -> None:
+    assistant_id = uuid4()
+    model_id = UUID("11111111-1111-4111-8111-111111111111")
+
+    envelope = _build_envelope(
+        flow=_flow(steps=[_step(1, assistant_id=assistant_id)]),
+        assistant_snapshots={
+            assistant_id: _snapshot(
+                model_ref=AssistantAuthoringResourceRef(
+                    local_ref=str(model_id),
+                    local_kind=LocalResourceKind.COMPLETION_MODEL,
+                )
+            )
+        },
+        resource_bindings=tuple(),
+    )
+
+    step = envelope.draft.spec.steps[0]
+    assert step.assistant_spec.model_ref == "model.model-11111111"
+    requirement = envelope.requirements.requirements[0]
+    assert isinstance(requirement, FlowPackageModelRequirement)
+    assert requirement.slot_ref.ref == "model.model-11111111"
+    assert requirement.slot_ref.label == "model 11111111"
+
+
+def test_export_rejects_untyped_snapshot_resource_ref() -> None:
+    assistant_id = uuid4()
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(steps=[_step(1, assistant_id=assistant_id)]),
+            assistant_snapshots={
+                assistant_id: _snapshot(
+                    model_ref=AssistantAuthoringResourceRef(local_ref=str(uuid4()))
+                )
+            },
+            resource_bindings=tuple(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.UNMAPPED_RESOURCE_REF
+
+
+def test_export_rejects_non_uuid_snapshot_resource_ref() -> None:
+    assistant_id = uuid4()
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(steps=[_step(1, assistant_id=assistant_id)]),
+            assistant_snapshots={
+                assistant_id: _snapshot(
+                    model_ref=AssistantAuthoringResourceRef(
+                        local_ref="model.gpt",
+                        local_kind=LocalResourceKind.COMPLETION_MODEL,
+                    )
+                )
+            },
+            resource_bindings=tuple(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.UNMAPPED_RESOURCE_REF
+
+
+def test_export_rejects_snapshot_local_kind_that_cannot_satisfy_slot_kind() -> None:
+    assistant_id = uuid4()
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(steps=[_step(1, assistant_id=assistant_id)]),
+            assistant_snapshots={
+                assistant_id: _snapshot(
+                    model_ref=AssistantAuthoringResourceRef(
+                        local_ref=str(uuid4()),
+                        local_kind=LocalResourceKind.COLLECTION,
+                    )
+                )
+            },
+            resource_bindings=tuple(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.UNMAPPED_RESOURCE_REF
+
+
+def test_export_collapses_ambiguous_prior_slots_that_share_one_local_target() -> None:
+    first_assistant_id = uuid4()
+    second_assistant_id = uuid4()
+    model_id = uuid4()
+
+    envelope = _build_envelope(
+        flow=_flow(
+            steps=[
+                _step(1, assistant_id=first_assistant_id),
+                _step(2, assistant_id=second_assistant_id),
+            ]
+        ),
+        assistant_snapshots={
+            first_assistant_id: _snapshot(
+                model_ref=AssistantAuthoringResourceRef(
+                    local_ref=str(model_id),
+                    label="Shared production model",
+                    local_kind=LocalResourceKind.COMPLETION_MODEL,
+                )
+            ),
+            second_assistant_id: _snapshot(
+                model_ref=AssistantAuthoringResourceRef(
+                    local_ref=str(model_id),
+                    label="Shared production model",
+                    local_kind=LocalResourceKind.COMPLETION_MODEL,
+                )
+            ),
+        },
+        resource_bindings=(
+            _binding(
+                slot_kind=ResourceSlotKind.MODEL,
+                slot="source-model-a",
+                label="Source model A",
+                local_kind=LocalResourceKind.COMPLETION_MODEL,
+                local_id=model_id,
+            ),
+            _binding(
+                slot_kind=ResourceSlotKind.MODEL,
+                slot="source-model-b",
+                label="Source model B",
+                local_kind=LocalResourceKind.COMPLETION_MODEL,
+                local_id=model_id,
+            ),
+        ),
+    )
+
+    assert [step.assistant_spec.model_ref for step in envelope.draft.spec.steps] == [
+        "model.shared-production-model",
+        "model.shared-production-model",
+    ]
+    requirements = envelope.requirements.requirements
+    assert len(requirements) == 1
+    requirement = requirements[0]
+    assert isinstance(requirement, FlowPackageModelRequirement)
+    assert requirement.slot_ref.ref == "model.shared-production-model"
+    assert requirement.used_by_steps == ["step_1", "step_2"]
+
+
+def test_export_rejects_duplicate_resource_bindings_for_same_slot() -> None:
+    assistant_id = uuid4()
+    model_id = uuid4()
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(steps=[_step(1, assistant_id=assistant_id)]),
+            assistant_snapshots={
+                assistant_id: _snapshot(
+                    model_ref=AssistantAuthoringResourceRef(
+                        local_ref=str(model_id),
+                        local_kind=LocalResourceKind.COMPLETION_MODEL,
+                    )
+                )
+            },
+            resource_bindings=(
+                _binding(
+                    slot_kind=ResourceSlotKind.MODEL,
+                    slot="shared-model",
+                    label="Shared model",
+                    local_kind=LocalResourceKind.COMPLETION_MODEL,
+                    local_id=model_id,
+                ),
+                _binding(
+                    slot_kind=ResourceSlotKind.MODEL,
+                    slot="shared-model",
+                    label="Shared model",
+                    local_kind=LocalResourceKind.COMPLETION_MODEL,
+                    local_id=uuid4(),
+                ),
+            ),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.DUPLICATE_RESOURCE_BINDING
+
+
+def test_export_rejects_invalid_form_schema() -> None:
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(metadata_json={"form_schema": []}, steps=[]),
+            assistant_snapshots={},
+            resource_bindings=tuple(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.FORM_SCHEMA_INVALID
+
+
+def test_export_rejects_deeply_nested_json_payloads() -> None:
+    assistant_id = uuid4()
+    nested_payload: object = "{{ flow_input.text }}"
+    for _ in range(40):
+        nested_payload = {"nested": nested_payload}
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(
+                steps=[
+                    _step(
+                        1,
+                        assistant_id=assistant_id,
+                        output_config={"root": nested_payload},
+                    )
+                ]
+            ),
+            assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+            resource_bindings=tuple(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.JSON_PAYLOAD_TOO_DEEP
+
+
+def _build_envelope(
+    *,
+    flow: Flow,
+    assistant_snapshots: dict[UUID, AssistantAuthoringSnapshot],
+    resource_bindings: tuple[LocalResourceBinding, ...],
+):
+    return build_flow_package_export_envelope(
+        flow=flow,
+        assistant_snapshots=assistant_snapshots,
+        resource_bindings=resource_bindings,
+        manifest_metadata=_manifest_metadata(),
+        provenance=_provenance(),
+    )
+
+
+def _flow(
+    *,
+    steps: list[FlowStep],
+    metadata_json: JsonObject | None = None,
+) -> Flow:
+    user_id = uuid4()
+    return Flow(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        name="Reusable meeting flow",
+        description="Portable package export fixture.",
+        created_by_user_id=user_id,
+        owner_user_id=user_id,
+        published_version=None,
+        metadata_json=metadata_json,
+        data_retention_days=30,
+        created_at=None,
+        updated_at=None,
+        steps=steps,
+    )
+
+
+class _FakeFlowPackageExportFlowService:
+    def __init__(
+        self,
+        *,
+        assistant_snapshots: AssistantAuthoringSnapshots,
+        resource_bindings: tuple[LocalResourceBinding, ...],
+    ) -> None:
+        self._assistant_snapshots = assistant_snapshots
+        self._resource_bindings = resource_bindings
+        self.flow: Flow | None = None
+        self.flow_id: UUID | None = None
+
+    async def get_flow_assistant_snapshots(
+        self,
+        flow: Flow,
+    ) -> AssistantAuthoringSnapshots:
+        self.flow = flow
+        return self._assistant_snapshots
+
+    async def list_resource_bindings(
+        self,
+        *,
+        flow_id: UUID,
+    ) -> tuple[LocalResourceBinding, ...]:
+        self.flow_id = flow_id
+        return self._resource_bindings
+
+
+def _step(
+    step_order: int,
+    *,
+    assistant_id: UUID,
+    input_source: str = "flow_input",
+    input_type: str = "text",
+    output_mode: str = "pass_through",
+    output_type: str = "text",
+    input_bindings: JsonObject | None = None,
+    input_contract: JsonObject | None = None,
+    output_contract: JsonObject | None = None,
+    input_config: JsonObject | None = None,
+    output_config: JsonObject | None = None,
+) -> FlowStep:
+    return FlowStep(
+        id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=uuid4(),
+        assistant_id=assistant_id,
+        step_order=step_order,
+        user_description=f"Step {step_order}",
+        input_source=input_source,
+        input_type=input_type,
+        input_contract=input_contract,
+        output_mode=output_mode,
+        output_type=output_type,
+        output_contract=output_contract,
+        input_bindings=input_bindings,
+        output_classification_override=None,
+        mcp_policy="inherit",
+        input_config=input_config,
+        output_config=output_config,
+    )
+
+
+def _snapshot(
+    *,
+    instructions: str = "Follow the package instructions.",
+    model_ref: AssistantAuthoringResourceRef | None,
+    knowledge_refs: tuple[AssistantAuthoringResourceRef, ...] = tuple(),
+    mcp_server_refs: tuple[AssistantAuthoringResourceRef, ...] = tuple(),
+    mcp_tool_refs: tuple[AssistantAuthoringResourceRef, ...] = tuple(),
+) -> AssistantAuthoringSnapshot:
+    return AssistantAuthoringSnapshot(
+        instructions=instructions,
+        model=model_ref,
+        knowledge_refs=knowledge_refs,
+        mcp_server_refs=mcp_server_refs,
+        mcp_tool_refs=mcp_tool_refs,
+    )
+
+
+def _binding(
+    *,
+    slot_kind: ResourceSlotKind,
+    slot: str,
+    label: str,
+    local_kind: LocalResourceKind,
+    local_id: UUID,
+) -> LocalResourceBinding:
+    return LocalResourceBinding(
+        slot_ref=ResourceSlotRef(kind=slot_kind, slot=slot, label=label),
+        local_kind=local_kind,
+        local_id=local_id,
+    )
+
+
+def _manifest_metadata() -> FlowPackageManifestMetadata:
+    return FlowPackageManifestMetadata(
+        schema_version=1,
+        package_id="se.demo.meeting-report",
+        package_version="1.0.0",
+        name="Meeting report",
+        description="Reusable meeting report flow.",
+    )
+
+
+def _provenance() -> FlowPackageProvenance:
+    return FlowPackageProvenance(
+        schema_version=1,
+        exported_at=datetime(2026, 5, 18, tzinfo=timezone.utc),
+        source_instance_id="source-instance",
+    )

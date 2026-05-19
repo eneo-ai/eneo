@@ -268,12 +268,12 @@ async def update_flow_assistant(
     flow_service = _get_flow_service(container)
     assistant_assembler = _get_assistant_assembler(container)
     user = container.user()
-    update_payload = common.extract_assistant_update_payload(assistant_in)
+    update = common.extract_assistant_update_payload(assistant_in)
 
     updated_assistant, permissions = await flow_service.update_flow_assistant(
         flow_id=id,
         assistant_id=assistant_id,
-        **update_payload,
+        update=update,
     )
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,

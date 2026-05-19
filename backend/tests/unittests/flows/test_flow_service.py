@@ -9,12 +9,21 @@ import pytest
 
 from intric.ai_models.completion_models.completion_model import ModelKwargs
 from intric.assistants.assistant import Assistant, AssistantOrigin
+from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
 from intric.flows.application.flow_service import FlowService
 from intric.flows.assistant_execution_snapshot import stable_hash
 from intric.flows.flow import Flow, FlowStep, FlowVersion
+from intric.flows.flow_resource_bindings import (
+    FlowResourceBindingSource,
+    LocalResourceBinding,
+    LocalResourceKind,
+    ResourceSlotKind,
+    ResourceSlotRef,
+)
 from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from intric.main.exceptions import BadRequestException, NotFoundException
 from intric.main.models import NOT_PROVIDED
+from intric.prompts.api.prompt_models import PromptCreate
 
 
 class _FakeEncryptionService:
@@ -195,6 +204,53 @@ async def test_list_flows_passes_published_only_to_full_repo_path(user):
         published_only=True,
         limit=5,
         offset=0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_replace_resource_bindings_uses_current_user_tenant(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    flow_id = uuid4()
+    binding = LocalResourceBinding(
+        slot_ref=ResourceSlotRef(
+            kind=ResourceSlotKind.MODEL,
+            slot="default-model",
+            label="Default model",
+        ),
+        local_kind=LocalResourceKind.COMPLETION_MODEL,
+        local_id=uuid4(),
+    )
+
+    await service.replace_resource_bindings(
+        flow_id=flow_id,
+        bindings=(binding,),
+        source=FlowResourceBindingSource.AI_BUILDER,
+    )
+
+    flow_repo.replace_resource_bindings.assert_awaited_once_with(
+        flow_id=flow_id,
+        tenant_id=user.tenant_id,
+        bindings=(binding,),
+        source=FlowResourceBindingSource.AI_BUILDER,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_resource_bindings_uses_current_user_tenant(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    flow_id = uuid4()
+    flow_repo.list_resource_bindings.return_value = tuple()
+
+    bindings = await service.list_resource_bindings(flow_id=flow_id)
+
+    assert bindings == tuple()
+    flow_repo.list_resource_bindings.assert_awaited_once_with(
+        flow_id=flow_id,
+        tenant_id=user.tenant_id,
     )
 
 
@@ -1633,7 +1689,7 @@ async def test_update_flow_assistant_rejects_when_flow_published(user):
         await service.update_flow_assistant(
             flow_id=flow_id,
             assistant_id=uuid4(),
-            name="Updated",
+            update=FlowAssistantUpdateCommand(name="Updated"),
         )
 
 
@@ -1814,14 +1870,227 @@ async def test_update_flow_assistant_passes_include_hidden(user):
     await service.update_flow_assistant(
         flow_id=flow_id,
         assistant_id=owned_assistant.id,
-        name="Updated",
+        update=FlowAssistantUpdateCommand(name="Updated"),
     )
 
     assistant_service.update_assistant.assert_awaited_once_with(
         assistant_id=owned_assistant.id,
         include_hidden=True,
         name="Updated",
+        prompt=None,
+        completion_model_id=None,
+        completion_model_kwargs=None,
+        logging_enabled=None,
+        groups=None,
+        websites=None,
+        integration_knowledge_ids=None,
+        mcp_server_ids=None,
+        mcp_tools=None,
+        attachment_ids=None,
+        description=NOT_PROVIDED,
+        insight_enabled=None,
+        data_retention_days=NOT_PROVIDED,
+        metadata_json=NOT_PROVIDED,
+        icon_id=NOT_PROVIDED,
     )
+
+
+@pytest.mark.asyncio
+async def test_update_flow_assistant_forwards_every_command_field(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    assistant_service = AsyncMock()
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=assistant_service,
+        file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+    )
+
+    flow_id = uuid4()
+    space_id = uuid4()
+    flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=space_id,
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[],
+    )
+    flow_repo.get.return_value = flow
+    assistant = _build_assistant(flow_id=flow_id, space_id=space_id, user=user)
+    assistant_service.get_assistant.return_value = (assistant, [])
+    assistant_service.update_assistant.return_value = (assistant, [])
+
+    model_id = uuid4()
+    group_id = uuid4()
+    website_id = uuid4()
+    integration_id = uuid4()
+    server_id = uuid4()
+    tool_id = uuid4()
+    attachment_id = uuid4()
+    icon_id = uuid4()
+    model_kwargs = ModelKwargs(reasoning_effort="low")
+
+    update = FlowAssistantUpdateCommand(
+        name="Updated",
+        prompt=PromptCreate(text="Updated prompt"),
+        completion_model_id=model_id,
+        completion_model_kwargs=model_kwargs,
+        logging_enabled=True,
+        groups=[group_id],
+        websites=[website_id],
+        integration_knowledge_ids=[integration_id],
+        mcp_server_ids=[server_id],
+        mcp_tools=[(tool_id, False)],
+        attachment_ids=[attachment_id],
+        description=None,
+        insight_enabled=True,
+        data_retention_days=30,
+        metadata_json={"source": "test"},
+        icon_id=icon_id,
+    )
+
+    await service.update_flow_assistant(
+        flow_id=flow_id,
+        assistant_id=assistant.id,
+        update=update,
+    )
+
+    assistant_service.update_assistant.assert_awaited_once_with(
+        assistant_id=assistant.id,
+        include_hidden=True,
+        name="Updated",
+        prompt=update.prompt,
+        completion_model_id=model_id,
+        completion_model_kwargs=model_kwargs,
+        logging_enabled=True,
+        groups=[group_id],
+        websites=[website_id],
+        integration_knowledge_ids=[integration_id],
+        mcp_server_ids=[server_id],
+        mcp_tools=[(tool_id, False)],
+        attachment_ids=[attachment_id],
+        description=None,
+        insight_enabled=True,
+        data_retention_days=30,
+        metadata_json={"source": "test"},
+        icon_id=icon_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_flow_assistant_skips_security_validation_without_security_fields(
+    user,
+):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    assistant_service = AsyncMock()
+    space_service = AsyncMock()
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=assistant_service,
+        file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+        space_service=space_service,
+    )
+
+    flow_id = uuid4()
+    step = _step(step_order=1)
+    flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[step],
+    )
+    flow_repo.get.return_value = flow
+    assistant = _build_assistant(flow_id=flow_id, space_id=flow.space_id, user=user)
+    assistant.id = step.assistant_id
+    assistant_service.get_assistant.return_value = (assistant, [])
+    assistant_service.update_assistant.return_value = (assistant, [])
+
+    await service.update_flow_assistant(
+        flow_id=flow_id,
+        assistant_id=assistant.id,
+        update=FlowAssistantUpdateCommand(name="Renamed"),
+    )
+
+    space_service.get_space.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_flow_assistant_validates_explicit_security_field_set_to_none(
+    user,
+):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    assistant_service = AsyncMock()
+    space_service = AsyncMock()
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=assistant_service,
+        file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+        space_service=space_service,
+    )
+
+    flow_id = uuid4()
+    step = _step(step_order=1)
+    flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[step],
+    )
+    flow_repo.get.return_value = flow
+    assistant = _build_assistant(flow_id=flow_id, space_id=flow.space_id, user=user)
+    assistant.id = step.assistant_id
+    assistant.completion_model = SimpleNamespace(
+        security_classification=_classification(1),
+        can_access=True,
+    )
+    assistant_service.get_assistant.return_value = (assistant, [])
+    assistant_service.update_assistant.return_value = (assistant, [])
+    space_service.get_space.return_value = _FlowSecuritySpaceStub(level=1)
+
+    await service.update_flow_assistant(
+        flow_id=flow_id,
+        assistant_id=assistant.id,
+        update=FlowAssistantUpdateCommand(groups=None),
+    )
+
+    space_service.get_space.assert_awaited_once_with(flow.space_id)
 
 
 @pytest.mark.asyncio
@@ -1892,7 +2161,7 @@ async def test_update_flow_assistant_rejects_step_incompatible_mcp_server(user):
         await service.update_flow_assistant(
             flow_id=flow_id,
             assistant_id=second_assistant.id,
-            mcp_server_ids=[low_server.id],
+            update=FlowAssistantUpdateCommand(mcp_server_ids=[low_server.id]),
         )
 
     assert exc_info.value.code == "flow_step_mcp_security_classification_mismatch"
@@ -1950,7 +2219,7 @@ async def test_update_flow_assistant_rejects_unavailable_mcp_server(user):
         await service.update_flow_assistant(
             flow_id=flow_id,
             assistant_id=assistant.id,
-            mcp_server_ids=unavailable_server_ids,
+            update=FlowAssistantUpdateCommand(mcp_server_ids=unavailable_server_ids),
         )
 
     assert exc_info.value.code == "flow_mcp_server_not_available"
@@ -2033,7 +2302,7 @@ async def test_update_flow_assistant_rejects_changes_that_invalidate_downstream_
         await service.update_flow_assistant(
             flow_id=flow_id,
             assistant_id=first_assistant.id,
-            mcp_server_ids=[high_server.id],
+            update=FlowAssistantUpdateCommand(mcp_server_ids=[high_server.id]),
         )
 
     assert exc_info.value.code == "flow_step_mcp_security_classification_mismatch"
@@ -2094,7 +2363,7 @@ async def test_update_flow_assistant_current_step_output_override_does_not_raise
     await service.update_flow_assistant(
         flow_id=flow_id,
         assistant_id=assistant.id,
-        mcp_server_ids=[low_server.id],
+        update=FlowAssistantUpdateCommand(mcp_server_ids=[low_server.id]),
     )
 
     assistant_service.update_assistant.assert_awaited_once()

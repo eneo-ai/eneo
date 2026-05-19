@@ -10,7 +10,7 @@ from intric.flows.ai_builder.ai_builder_context import (
 )
 
 
-def test_serialize_space_models_exposes_id_as_canonical_ref() -> None:
+def test_serialize_space_models_keeps_local_id_for_catalog_input() -> None:
     model_id = uuid4()
     space = SimpleNamespace(
         completion_models=[
@@ -29,7 +29,7 @@ def test_serialize_space_models_exposes_id_as_canonical_ref() -> None:
     ]
 
 
-def test_serialize_space_kbs_exposes_id_as_canonical_ref() -> None:
+def test_serialize_space_kbs_keeps_local_id_for_catalog_input() -> None:
     kb_id = uuid4()
     space = SimpleNamespace(
         collections=[

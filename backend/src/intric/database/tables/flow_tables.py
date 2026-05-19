@@ -24,6 +24,10 @@ from intric.database.tables.job_table import Jobs
 from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
+from intric.flow_packages.domain.flow_package_import_record import (
+    FlowPackageImportSource,
+    FlowPackageImportStatus,
+)
 from intric.flows.enums import (
     ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES,
     RECONCILABLE_REVIEW_CHECKPOINT_STATES,
@@ -40,6 +44,14 @@ from intric.flows.enums import (
     FlowStepAttemptStatus,
     FlowStepResultStatus,
     FlowTemplateAssetStatus,
+)
+from intric.flows.flow_resource_bindings import (
+    FLOW_RESOURCE_BINDING_SOURCE_VALUES,
+    RESOURCE_SLOT_LOCAL_KIND_PAIRS,
+    RESOURCE_SLOT_PATTERN,
+    UUID_SHAPED_RESOURCE_REF_PATTERN,
+    LocalResourceKind,
+    ResourceSlotKind,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode
 
@@ -93,10 +105,21 @@ MODULE_COMPAT_STATUS_VALUES = ("compatible", "incompatible", "unknown")
 FLOW_TEMPLATE_ASSET_STATUS_VALUES = tuple(
     item.value for item in FlowTemplateAssetStatus
 )
+FLOW_RESOURCE_SLOT_KIND_VALUES = tuple(item.value for item in ResourceSlotKind)
+FLOW_RESOURCE_LOCAL_RESOURCE_KIND_VALUES = tuple(
+    item.value for item in LocalResourceKind
+)
+FLOW_RESOURCE_SLOT_LOCAL_KIND_PAIR_VALUES = RESOURCE_SLOT_LOCAL_KIND_PAIRS
+FLOW_PACKAGE_IMPORT_SOURCE_VALUES = tuple(item.value for item in FlowPackageImportSource)
+FLOW_PACKAGE_IMPORT_STATUS_VALUES = tuple(item.value for item in FlowPackageImportStatus)
 
 
 def _check_values(values: tuple[str, ...]) -> str:
     return ",".join(f"'{value}'" for value in values)
+
+
+def _check_value_pairs(values: tuple[tuple[str, str], ...]) -> str:
+    return ",".join(f"('{left}','{right}')" for left, right in values)
 
 
 class Flows(BasePublic):
@@ -370,6 +393,151 @@ class FlowTemplateAssets(BasePublic):
             "flow_id",
             "updated_at",
             postgresql_where=sa.text("deleted_at IS NULL"),
+        ),
+    )
+
+
+class FlowResourceBindings(BasePublic):
+    """Canonical local-resource binding store; never serialized into .eneo-flowpkg."""
+
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Flows.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    space_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Spaces.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    slot_kind: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    slot: Mapped[str] = mapped_column(sa.String(96), nullable=False)
+    slot_label: Mapped[str] = mapped_column(sa.String(160), nullable=False)
+    local_resource_kind: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    local_resource_id: Mapped[UUID] = mapped_column(nullable=False)
+    source: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "flow_id",
+            "slot_kind",
+            "slot",
+            name="uq_flow_resource_bindings_flow_slot",
+        ),
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_resource_bindings_flow_tenant",
+        ),
+        CheckConstraint(
+            f"slot_kind IN ({_check_values(FLOW_RESOURCE_SLOT_KIND_VALUES)})",
+            name="ck_flow_resource_bindings_slot_kind",
+        ),
+        CheckConstraint(
+            f"slot ~ '{RESOURCE_SLOT_PATTERN}'",
+            name="ck_flow_resource_bindings_slot_format",
+        ),
+        CheckConstraint(
+            f"slot !~* '{UUID_SHAPED_RESOURCE_REF_PATTERN}'",
+            name="ck_flow_resource_bindings_slot_not_uuid",
+        ),
+        CheckConstraint(
+            "length(btrim(slot_label)) > 0",
+            name="ck_flow_resource_bindings_slot_label_not_empty",
+        ),
+        CheckConstraint(
+            "local_resource_kind IN "
+            f"({_check_values(FLOW_RESOURCE_LOCAL_RESOURCE_KIND_VALUES)})",
+            name="ck_flow_resource_bindings_local_resource_kind",
+        ),
+        CheckConstraint(
+            "(slot_kind, local_resource_kind) IN "
+            f"({_check_value_pairs(FLOW_RESOURCE_SLOT_LOCAL_KIND_PAIR_VALUES)})",
+            name="ck_flow_resource_bindings_slot_local_kind_pair",
+        ),
+        CheckConstraint(
+            f"source IN ({_check_values(FLOW_RESOURCE_BINDING_SOURCE_VALUES)})",
+            name="ck_flow_resource_bindings_source",
+        ),
+        Index(
+            "ix_flow_resource_bindings_local_target",
+            "local_resource_kind",
+            "local_resource_id",
+        ),
+        Index("ix_flow_resource_bindings_tenant_flow", "tenant_id", "flow_id"),
+    )
+
+
+class FlowPackageImports(BasePublic):
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    space_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Spaces.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Flows.id, ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"),
+        nullable=True,
+    )
+    package_id: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    package_version: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    content_checksum: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    source: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    import_plan_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    selected_mappings_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+    )
+    failure_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            f"source IN ({_check_values(FLOW_PACKAGE_IMPORT_SOURCE_VALUES)})",
+            name="ck_flow_package_imports_source",
+        ),
+        CheckConstraint(
+            f"status IN ({_check_values(FLOW_PACKAGE_IMPORT_STATUS_VALUES)})",
+            name="ck_flow_package_imports_status",
+        ),
+        CheckConstraint(
+            "content_checksum ~ '^[0-9a-f]{64}$'",
+            name="ck_flow_package_imports_content_checksum",
+        ),
+        CheckConstraint(
+            "("
+            "status = 'draft_created' AND flow_id IS NOT NULL AND failure_json IS NULL"
+            ") OR ("
+            "status = 'failed' AND flow_id IS NULL AND failure_json IS NOT NULL"
+            ")",
+            name="ck_flow_package_imports_terminal_shape",
+        ),
+        Index(
+            "ix_flow_package_imports_tenant_space_created",
+            "tenant_id",
+            "space_id",
+            "created_at",
+        ),
+        Index(
+            "ix_flow_package_imports_space_checksum_created",
+            "space_id",
+            "content_checksum",
+            "created_at",
         ),
     )
 
@@ -1625,6 +1793,15 @@ class BuilderPlans(BasePublic):
     spec_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     spec_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     envelope_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    resource_bindings_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=sa.text("'[]'::jsonb"),
+        comment=(
+            "Plan-scoped binding snapshot taken at proposal; transferred to "
+            "FlowResourceBindings on apply."
+        ),
+    )
     edit_result_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
         JSONB, nullable=True
     )

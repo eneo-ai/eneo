@@ -27,12 +27,22 @@ from intric.flows.ai_builder.ai_builder_models import (
     OutputType,
     StepSpec,
 )
-from intric.flows.ai_builder.ai_builder_reference_rewriter import (
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderResourceCatalog,
+    AssistantSnapshotResourceUnavailableError,
+    build_ai_builder_resource_catalog,
+)
+from intric.flows.ai_builder.ai_builder_validator import validate_spec
+from intric.flows.assistant_authoring_snapshot import (
+    AssistantAuthoringResourceRef,
+    AssistantAuthoringSnapshot,
+    AssistantAuthoringSnapshots,
+)
+from intric.flows.flow import FlowStep
+from intric.flows.flow_authoring_variable_rewriting import (
     build_ref_to_order,
     rewrite_step_spec_variables,
 )
-from intric.flows.ai_builder.ai_builder_validator import validate_spec
-from intric.flows.flow import FlowStep
 from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 
 
@@ -71,15 +81,83 @@ def _make_flow_step(
     )
 
 
-def _make_assistant_snapshots(*steps: FlowStep) -> dict:
-    snapshots = {}
+def _make_assistant_snapshot_context(
+    *steps: FlowStep,
+) -> tuple[AssistantAuthoringSnapshots, AIBuilderResourceCatalog]:
+    snapshots: AssistantAuthoringSnapshots = {}
+    available_models: list[dict[str, str]] = []
+    available_kbs: list[dict[str, str]] = []
     for index, step in enumerate(steps, start=1):
-        snapshots[step.assistant_id] = {
-            "instructions": f"Original prompt {index}",
-            "model_ref": str(uuid4()),
-            "knowledge_refs": [f"kb-{index}"],
-        }
-    return snapshots
+        model_ref = str(uuid4())
+        kb_ref = str(uuid4())
+        snapshots[step.assistant_id] = AssistantAuthoringSnapshot(
+            instructions=f"Original prompt {index}",
+            model=AssistantAuthoringResourceRef(
+                local_ref=model_ref,
+                label=f"Model {index}",
+            ),
+            knowledge_refs=(
+                AssistantAuthoringResourceRef(
+                    local_ref=kb_ref,
+                    label=f"KB {index}",
+                ),
+            ),
+        )
+        available_models.append(
+            {"id": model_ref, "ref": model_ref, "name": f"Model {index}"}
+        )
+        available_kbs.append({"id": kb_ref, "ref": kb_ref, "name": f"KB {index}"})
+    return snapshots, build_ai_builder_resource_catalog(
+        available_models=available_models,
+        available_kbs=available_kbs,
+    )
+
+
+def _make_mcp_assistant_snapshot_context(
+    step: FlowStep,
+) -> tuple[AssistantAuthoringSnapshots, AIBuilderResourceCatalog, AssistantSpec]:
+    snapshot = AssistantAuthoringSnapshot(
+        instructions="Original prompt",
+        mcp_server_refs=(
+            AssistantAuthoringResourceRef(local_ref="server-1", label="server-1"),
+        ),
+        mcp_tool_refs=(
+            AssistantAuthoringResourceRef(local_ref="tool-1", label="tool-1"),
+        ),
+    )
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "server-1",
+                "ref": "server-1",
+                "name": "server-1",
+                "tools": [{"id": "tool-1", "ref": "tool-1", "name": "tool-1"}],
+            }
+        ],
+    )
+    return {step.assistant_id: snapshot}, catalog, catalog.assistant_spec_from_snapshot(
+        snapshot
+    )
+
+
+def _make_knowledge_assistant_snapshot_context(
+    step: FlowStep,
+) -> tuple[AssistantAuthoringSnapshots, AIBuilderResourceCatalog, AssistantSpec]:
+    snapshot = AssistantAuthoringSnapshot(
+        instructions="Original prompt",
+        knowledge_refs=(
+            AssistantAuthoringResourceRef(local_ref="kb-1", label="kb-1"),
+        ),
+    )
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[{"id": "kb-1", "ref": "kb-1", "name": "kb-1"}],
+    )
+    return {step.assistant_id: snapshot}, catalog, catalog.assistant_spec_from_snapshot(
+        snapshot
+    )
 
 
 def _make_add_payload(
@@ -653,25 +731,22 @@ def test_edit_compiler_preserves_mcp_refs_when_patch_omits_resource_fields() -> 
         ],
         plan_rationale="Update wording only.",
     )
+    assistant_snapshots, resource_catalog, expected_snapshot_spec = (
+        _make_mcp_assistant_snapshot_context(existing_step)
+    )
 
     result = compile_edit_draft(
         draft,
         [existing_step],
         base_flow_revision=1,
-        assistant_snapshots={
-            existing_step.assistant_id: {
-                "instructions": "Original prompt",
-                "knowledge_refs": [],
-                "mcp_server_refs": ["server-1"],
-                "mcp_tool_refs": ["tool-1"],
-            }
-        },
+        assistant_snapshots=assistant_snapshots,
+        resource_catalog=resource_catalog,
     )
 
     assistant_spec = result.compiled_spec.steps[0].assistant_spec
     assert assistant_spec.instructions == "Use the case data."
-    assert assistant_spec.mcp_server_refs == ["server-1"]
-    assert assistant_spec.mcp_tool_refs == ["tool-1"]
+    assert assistant_spec.mcp_server_refs == expected_snapshot_spec.mcp_server_refs
+    assert assistant_spec.mcp_tool_refs == expected_snapshot_spec.mcp_tool_refs
 
 
 def test_edit_compiler_clears_mcp_refs_when_patch_sets_empty_lists() -> None:
@@ -692,19 +767,16 @@ def test_edit_compiler_clears_mcp_refs_when_patch_sets_empty_lists() -> None:
         ],
         plan_rationale="Remove external lookup.",
     )
+    assistant_snapshots, resource_catalog, _ = _make_mcp_assistant_snapshot_context(
+        existing_step
+    )
 
     result = compile_edit_draft(
         draft,
         [existing_step],
         base_flow_revision=1,
-        assistant_snapshots={
-            existing_step.assistant_id: {
-                "instructions": "Original prompt",
-                "knowledge_refs": [],
-                "mcp_server_refs": ["server-1"],
-                "mcp_tool_refs": ["tool-1"],
-            }
-        },
+        assistant_snapshots=assistant_snapshots,
+        resource_catalog=resource_catalog,
     )
 
     assistant_spec = result.compiled_spec.steps[0].assistant_spec
@@ -730,19 +802,16 @@ def test_edit_compiler_switches_mcp_step_to_knowledge_without_stale_mcp_refs() -
         ],
         plan_rationale="Replace live lookup with static knowledge.",
     )
+    assistant_snapshots, resource_catalog, _ = _make_mcp_assistant_snapshot_context(
+        existing_step
+    )
 
     result = compile_edit_draft(
         draft,
         [existing_step],
         base_flow_revision=1,
-        assistant_snapshots={
-            existing_step.assistant_id: {
-                "instructions": "Original prompt",
-                "knowledge_refs": [],
-                "mcp_server_refs": ["server-1"],
-                "mcp_tool_refs": ["tool-1"],
-            }
-        },
+        assistant_snapshots=assistant_snapshots,
+        resource_catalog=resource_catalog,
     )
 
     assistant_spec = result.compiled_spec.steps[0].assistant_spec
@@ -769,25 +838,63 @@ def test_edit_compiler_switches_knowledge_step_to_mcp_without_stale_kb_refs() ->
         ],
         plan_rationale="Replace static policy lookup with live case lookup.",
     )
+    assistant_snapshots, resource_catalog, _ = _make_knowledge_assistant_snapshot_context(
+        existing_step
+    )
 
     result = compile_edit_draft(
         draft,
         [existing_step],
         base_flow_revision=1,
-        assistant_snapshots={
-            existing_step.assistant_id: {
-                "instructions": "Original prompt",
-                "knowledge_refs": ["kb-1"],
-                "mcp_server_refs": [],
-                "mcp_tool_refs": [],
-            }
-        },
+        assistant_snapshots=assistant_snapshots,
+        resource_catalog=resource_catalog,
     )
 
     assistant_spec = result.compiled_spec.steps[0].assistant_spec
     assert assistant_spec.knowledge_refs == []
     assert assistant_spec.mcp_server_refs == ["server-1"]
     assert assistant_spec.mcp_tool_refs == ["tool-1"]
+
+
+def test_edit_compiler_rejects_snapshot_resource_missing_from_catalog() -> None:
+    existing_step = _make_flow_step(step_order=1, user_description="Search policies")
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(name="Search policies carefully"),
+            )
+        ],
+        plan_rationale="Update wording only.",
+    )
+    snapshots: AssistantAuthoringSnapshots = {
+        existing_step.assistant_id: AssistantAuthoringSnapshot(
+            instructions="Original prompt",
+            knowledge_refs=(
+                AssistantAuthoringResourceRef(
+                    local_ref="missing-kb",
+                    label="Sensitive policy name",
+                ),
+            ),
+        )
+    }
+    resource_catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+    )
+
+    with pytest.raises(AssistantSnapshotResourceUnavailableError) as exc_info:
+        compile_edit_draft(
+            draft,
+            [existing_step],
+            base_flow_revision=1,
+            assistant_snapshots=snapshots,
+            resource_catalog=resource_catalog,
+        )
+
+    assert exc_info.value.kind == "knowledge_base"
+    assert "Sensitive policy name" not in str(exc_info.value)
 
 
 def test_edit_compiler_derives_transcribe_mode_when_modify_changes_audio_text_step() -> (
@@ -1897,7 +2004,9 @@ class TestAssistantSnapshotPreservation:
         existing = [
             _make_flow_step(step_order=1, user_description="Skriv slutrapport"),
         ]
-        assistant_snapshots = _make_assistant_snapshots(*existing)
+        assistant_snapshots, resource_catalog = _make_assistant_snapshot_context(
+            *existing
+        )
 
         draft = FlowEditDraft(
             operations=[
@@ -1914,21 +2023,24 @@ class TestAssistantSnapshotPreservation:
             existing,
             base_flow_revision=1,
             assistant_snapshots=assistant_snapshots,
+            resource_catalog=resource_catalog,
         )
 
         assistant_spec = result.compiled_spec.steps[0].assistant_spec
-        assert assistant_spec.instructions == "Original prompt 1"
-        assert (
-            assistant_spec.model_ref
-            == assistant_snapshots[existing[0].assistant_id]["model_ref"]
+        expected_spec = resource_catalog.assistant_spec_from_snapshot(
+            assistant_snapshots[existing[0].assistant_id]
         )
-        assert assistant_spec.knowledge_refs == ["kb-1"]
+        assert assistant_spec.instructions == "Original prompt 1"
+        assert assistant_spec.model_ref == expected_spec.model_ref
+        assert assistant_spec.knowledge_refs == expected_spec.knowledge_refs
 
     def test_partial_assistant_patch_merges_with_existing_snapshot(self):
         existing = [
             _make_flow_step(step_order=1, user_description="IBIC-extraktion"),
         ]
-        assistant_snapshots = _make_assistant_snapshots(*existing)
+        assistant_snapshots, resource_catalog = _make_assistant_snapshot_context(
+            *existing
+        )
 
         draft = FlowEditDraft(
             operations=[
@@ -1949,15 +2061,16 @@ class TestAssistantSnapshotPreservation:
             existing,
             base_flow_revision=1,
             assistant_snapshots=assistant_snapshots,
+            resource_catalog=resource_catalog,
         )
 
         assistant_spec = result.compiled_spec.steps[0].assistant_spec
-        assert assistant_spec.instructions == "Uppdaterad prompt för IBIC-analys."
-        assert (
-            assistant_spec.model_ref
-            == assistant_snapshots[existing[0].assistant_id]["model_ref"]
+        expected_spec = resource_catalog.assistant_spec_from_snapshot(
+            assistant_snapshots[existing[0].assistant_id]
         )
-        assert assistant_spec.knowledge_refs == ["kb-1"]
+        assert assistant_spec.instructions == "Uppdaterad prompt för IBIC-analys."
+        assert assistant_spec.model_ref == expected_spec.model_ref
+        assert assistant_spec.knowledge_refs == expected_spec.knowledge_refs
 
 
 class TestFlowDescriptionSemantics:

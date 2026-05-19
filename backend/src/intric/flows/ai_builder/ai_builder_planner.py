@@ -110,6 +110,7 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
     resolve_requirements_state,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
 from intric.flows.ai_builder.ai_builder_response_format import (
@@ -143,6 +144,7 @@ from intric.flows.ai_builder.planning_state import (
 from intric.flows.ai_builder.planning_state_builder import (
     carry_forward_persisted_planner_state,
 )
+from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY
 from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException
@@ -263,6 +265,7 @@ class PlannerPreparedRequest:
     # model's revision against the same stable target.
     plan_edit_context: AIBuilderPlanEditContext | None = None
     prior_plan_for_revision: BuilderPlan | None = None
+    proposal_resource_catalog: AIBuilderResourceCatalog | None = None
 
 
 def _default_structured_output_decision() -> StructuredOutputCapabilityDecision:
@@ -553,7 +556,7 @@ class AIBuilderPlanner:
         available_models: list[dict[str, Any]] | None,
         available_kbs: list[dict[str, Any]] | None,
         flow: "Flow | None",
-        assistant_snapshots: dict[UUID, dict[str, Any]] | None,
+        assistant_snapshots: AssistantAuthoringSnapshots | None,
         attachment_files: list[File] | None = None,
         max_input_tokens: int,
         max_output_tokens: int,
@@ -596,14 +599,40 @@ class AIBuilderPlanner:
                 edit_scope=discovery_profile.edit_scope,
             )
 
+        prior_resource_bindings = (
+            prior_plan_for_revision.resource_bindings
+            if prior_plan_for_revision is not None
+            else tuple()
+        )
+        resource_catalog = build_ai_builder_resource_catalog(
+            available_models=available_models,
+            available_kbs=available_kbs,
+            available_mcps=available_mcps,
+            prior_bindings=prior_resource_bindings,
+        )
         models_ctx = (
-            build_available_models_context(available_models)
+            build_available_models_context(
+                available_models,
+                resource_catalog=resource_catalog,
+            )
             if available_models
             else None
         )
-        kbs_ctx = build_available_kbs_context(available_kbs) if available_kbs else None
+        kbs_ctx = (
+            build_available_kbs_context(
+                available_kbs,
+                resource_catalog=resource_catalog,
+            )
+            if available_kbs
+            else None
+        )
         mcps_ctx = (
-            build_available_mcp_context(available_mcps) if available_mcps else None
+            build_available_mcp_context(
+                available_mcps,
+                resource_catalog=resource_catalog,
+            )
+            if available_mcps
+            else None
         )
         clarification_hints = build_clarification_hints(
             conversation=conversation,
@@ -678,6 +707,7 @@ class AIBuilderPlanner:
                 available_kbs=available_kbs,
                 available_mcps=available_mcps,
                 mcp_selection_values=mcp_resource_selection_values(conversation),
+                resource_catalog=resource_catalog,
                 plan_revision_context=build_plan_revision_prompt_block(
                     context=plan_edit_context,
                     prior_plan=prior_plan_for_revision,
@@ -732,6 +762,7 @@ class AIBuilderPlanner:
                 proposal_mode=True,
                 plan_edit_context=plan_edit_context,
                 prior_plan_for_revision=prior_plan_for_revision,
+                proposal_resource_catalog=resource_catalog,
             )
 
         planning_state_block = render_llm_prompt_context(
@@ -1014,7 +1045,7 @@ class AIBuilderPlanner:
         available_kbs: list[dict[str, Any]] | None = None,
         available_mcps: AIBuilderMCPResourceInput = None,
         flow: "Flow | None" = None,
-        assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+        assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         attachment_files: list[File] | None = None,
         max_input_tokens: int | None = None,
         max_output_tokens: int | None = None,
@@ -1273,10 +1304,13 @@ class AIBuilderPlanner:
                 return
 
             if prepared_request.proposal_mode:
-                resource_catalog = build_ai_builder_resource_catalog(
-                    available_models=available_models,
-                    available_kbs=available_kbs,
-                    available_mcps=available_mcps,
+                resource_catalog = (
+                    prepared_request.proposal_resource_catalog
+                    or build_ai_builder_resource_catalog(
+                        available_models=available_models,
+                        available_kbs=available_kbs,
+                        available_mcps=available_mcps,
+                    )
                 )
                 async for event in self.proposal_processor.propose_plan(
                     session_id=session_id,

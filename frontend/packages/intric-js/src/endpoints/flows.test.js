@@ -69,6 +69,117 @@ describe("flows templates endpoint", () => {
     expect(fetch.mock.calls[0][1].method).toBe("get");
   });
 
+  it("validates portable flow packages through multipart upload", async () => {
+    const fetch = vi.fn(async () => ({ package_id: "se.demo.report" }));
+    const flows = initFlows({ fetch });
+    const file = new File(["pkg"], "report.eneo-flowpkg", {
+      type: "application/octet-stream"
+    });
+
+    await flows.packages.validate({ file });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flow-packages/validate/");
+    expect(fetch.mock.calls[0][1].method).toBe("post");
+    const formData = fetch.mock.calls[0][1].requestBody["multipart/form-data"];
+    expect(formData).toBeInstanceOf(FormData);
+    expectFlowPackageFile(formData.get("package_file"), {
+      name: "report.eneo-flowpkg",
+      type: "application/octet-stream",
+      size: 3
+    });
+  });
+
+  it("creates package import plans for a target space", async () => {
+    const fetch = vi.fn(async () => ({ package_id: "se.demo.report" }));
+    const flows = initFlows({ fetch });
+    const file = new File(["pkg"], "report.eneo-flowpkg");
+
+    await flows.packages.createImportPlan({ spaceId: "space-1", file });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/spaces/{id}/flow-packages/import-plan/");
+    expect(fetch.mock.calls[0][1]).toMatchObject({
+      method: "post",
+      params: { path: { id: "space-1" } }
+    });
+    expectFlowPackageFile(
+      fetch.mock.calls[0][1].requestBody["multipart/form-data"].get("package_file"),
+      {
+        name: "report.eneo-flowpkg",
+        type: "",
+        size: 3
+      }
+    );
+  });
+
+  it("imports packages as drafts with selected resource bindings", async () => {
+    const fetch = vi.fn(async () => ({ flow_id: "flow-1" }));
+    const flows = initFlows({ fetch });
+    const selectedBindings = [
+      {
+        slot_ref: { kind: "model", slot: "structured", label: "Structured model" },
+        local_kind: "completion_model",
+        local_id: "model-1"
+      }
+    ];
+
+    await flows.packages.importDraft({
+      spaceId: "space-1",
+      packageBase64: "UEsDBAo=",
+      selectedBindings
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/spaces/{id}/flow-packages/imports/");
+    expect(fetch.mock.calls[0][1]).toEqual({
+      method: "post",
+      params: { path: { id: "space-1" } },
+      requestBody: {
+        "application/json": {
+          package_base64: "UEsDBAo=",
+          selected_bindings: selectedBindings
+        }
+      }
+    });
+  });
+
+  it("exports packages through binary fetch", async () => {
+    const fetch = vi.fn();
+    const binaryFetch = vi.fn(async () => ({
+      blob: new Blob(["pkg"]),
+      contentType: "application/octet-stream",
+      filename: "report.eneo-flowpkg",
+      headers: new Headers()
+    }));
+    const flows = initFlows({ fetch, binaryFetch });
+
+    await flows.packages.export({
+      id: "flow-1",
+      packageId: "se.demo.report",
+      packageVersion: "1.0.0",
+      name: "Report",
+      description: "Reusable report flow"
+    });
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(binaryFetch).toHaveBeenCalledTimes(1);
+    expect(binaryFetch.mock.calls[0][0]).toBe("/api/v1/flows/{id}/package-exports/");
+    expect(binaryFetch.mock.calls[0][1]).toEqual({
+      method: "post",
+      params: { path: { id: "flow-1" } },
+      requestBody: {
+        "application/json": {
+          package_id: "se.demo.report",
+          package_version: "1.0.0",
+          name: "Report",
+          description: "Reusable report flow"
+        }
+      },
+      signal: undefined
+    });
+  });
+
   it("generates template signed url from flow route", async () => {
     const fetch = vi.fn(async () => ({ url: "https://example.com" }));
     const flows = initFlows({ fetch });
@@ -384,3 +495,10 @@ describe("flows templates endpoint", () => {
     });
   });
 });
+
+function expectFlowPackageFile(file, expected) {
+  expect(file).toBeInstanceOf(File);
+  expect(file.name).toBe(expected.name);
+  expect(file.type).toBe(expected.type);
+  expect(file.size).toBe(expected.size);
+}

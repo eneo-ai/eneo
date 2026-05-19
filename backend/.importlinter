@@ -13,6 +13,7 @@ allow_indirect_imports = true
 source_modules =
     intric.flows.api
     intric.flows.application
+    intric.flows.assistant_authoring_snapshot
     intric.flows.assistant_execution_snapshot
     intric.flows.citation_sidecar
     intric.flows.domain
@@ -20,6 +21,11 @@ source_modules =
     intric.flows.execution_backend
     intric.flows.flow
     intric.flows.flow_access_policy
+    intric.flows.flow_authoring_name
+    intric.flows.flow_authoring_runtime_input
+    intric.flows.flow_authoring_spec
+    intric.flows.flow_authoring_transcription
+    intric.flows.flow_authoring_variable_rewriting
     intric.flows.flow_capability_manifest
     intric.flows.flow_care_data_policy
     intric.flows.flow_document_limits
@@ -27,17 +33,24 @@ source_modules =
     intric.flows.flow_factory
     intric.flows.flow_file_upload_service
     intric.flows.flow_input_limits
+    intric.flows.flow_metadata
     intric.flows.flow_permissions
     intric.flows.flow_review_policy
+    intric.flows.flow_review_expiry_policy
+    intric.flows.flow_resource_bindings
     intric.flows.flow_retention_policy
     intric.flows.flow_retention_tombstone
     intric.flows.flow_run_contract_models
     intric.flows.flow_run_contract_service
+    intric.flows.flow_run_dispatch_request
+    intric.flows.flow_run_error
     intric.flows.flow_run_evidence
     intric.flows.flow_run_evidence_bundle
+    intric.flows.flow_run_evidence_export_summary
     intric.flows.flow_run_evidence_export_manifest
     intric.flows.flow_run_export_json
     intric.flows.flow_run_input_payload
+    intric.flows.flow_run_payload_validation
     intric.flows.flow_run_provenance
     intric.flows.flow_run_redaction
     intric.flows.flow_run_rerun_graph
@@ -85,6 +98,50 @@ name = FCM must not import AI Builder
 type = forbidden
 source_modules =
     intric.flows.flow_capability_manifest
+forbidden_modules =
+    intric.flows.ai_builder
+
+[importlinter:contract:flow-packages-application-no-ai-builder]
+# Flow package application services may consume the shared Flow authoring
+# contracts, but they must not depend on AI Builder orchestration or catalogs.
+name = Flow package application must not import AI Builder
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    intric.flow_packages.application
+forbidden_modules =
+    intric.flows.ai_builder
+
+[importlinter:contract:flow-packages-domain-no-ai-builder]
+# Flow package domain owns portable package schemas and must not depend on
+# AI Builder session, planning, or orchestration modules.
+name = Flow package domain must not import AI Builder
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    intric.flow_packages.domain
+forbidden_modules =
+    intric.flows.ai_builder
+
+[importlinter:contract:flow-packages-domain-no-infrastructure]
+# Package schemas, checksums, and envelope invariants are the portable contract.
+# Zip parsing/writing remains infrastructure and must not leak back into domain.
+name = Flow package domain must not import infrastructure
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    intric.flow_packages.domain
+forbidden_modules =
+    intric.flow_packages.infrastructure
+
+[importlinter:contract:flow-packages-infrastructure-no-ai-builder]
+# Zip/package adapters may parse the portable authoring graph, but they must not
+# couple package IO to AI Builder internals.
+name = Flow package infrastructure must not import AI Builder
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    intric.flow_packages.infrastructure
 forbidden_modules =
     intric.flows.ai_builder
 

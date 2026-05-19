@@ -1,6 +1,7 @@
 /**
  * @typedef {Object} Client
  * @property {import('../types/fetch').IntricFetchFunction} fetch Typed fetch function for the Intric backend.
+ * @property {import('../types/fetch').IntricBinaryFetchFunction} binaryFetch Typed fetch function for authenticated binary downloads.
  * @property {import('../types/fetch').IntricStreamFunction} stream Fetch function specifically for streaming answers from an assistant.
  * @property {import('../types/fetch').IntricXhrFunction} xhr
  * @property {URL} baseUrl Base url this client uses
@@ -55,11 +56,39 @@ export function createClient(args) {
           signal,
           credentials: "include" // Required for cookies (audit sessions, etc.)
         });
-        /** @type {any} We need to cast this through any – we just got to hope for the correctness of the schema... */
+        /** @type {any} The generated fetch type owns the response shape; runtime validation belongs at the API boundary. */
         const parsed = await parseResponse(response);
         return parsed;
       } catch (error) {
         IntricError.throw(error, { endpoint: requestEndpoint, payload });
+        throw error;
+      }
+    },
+
+    binaryFetch: async (endpoint, { method, params, requestBody, signal, headers }) => {
+      const payload = parsePayload(requestBody);
+      const httpMethod = String(method).toUpperCase();
+      let requestEndpoint = `${httpMethod}@${baseUrl}${endpoint}`;
+
+      try {
+        const url = parseUrl(baseUrl, endpoint, params);
+        requestEndpoint = `${httpMethod}@${url}`;
+        const response = await _fetch(url, {
+          method: httpMethod,
+          headers: {
+            ...auth,
+            ...payload.header,
+            ...parseHeaderParams(params),
+            ...headers
+          },
+          body: payload.body,
+          signal,
+          credentials: "include"
+        });
+        return await parseBinaryResponse(response);
+      } catch (error) {
+        IntricError.throw(error, { endpoint: requestEndpoint, payload });
+        throw error;
       }
     },
 
@@ -117,7 +146,7 @@ export function createClient(args) {
           callbacks,
           abortController
         );
-        /** @type {any} We need to cast this through any – we just got to hope for the correctness of the schema... */
+        /** @type {any} The generated fetch type owns the response shape; runtime validation belongs at the API boundary. */
         const parsed = await parseResponse(response);
         return parsed;
       } catch (error) {
@@ -180,7 +209,7 @@ function parseHeaderParams(params = undefined) {
 }
 
 /**
- * Parse a requestbody into a payload
+ * Parse a request body into a payload.
  * @param requestBody {Record<string, any> | undefined} Object of Content-Type and payload, e.g. {"application/json": {...}}
  * @returns Returns appropriate header and serialized payload
  */
@@ -209,7 +238,7 @@ function parsePayload(requestBody = undefined) {
 }
 
 /**
- * Parse the Resposes body
+ * Parse the response body.
  *  - will return parsed json if body is present
  *  - will return undefined if body is empty
  * Throws error if body is returned but cannot be parsed or reponse is not ok
@@ -223,7 +252,7 @@ async function parseResponse(response) {
   try {
     text = await response.text(); // Parse it as text
     if (text !== "") {
-      parsed = JSON.parse(text); //
+      parsed = JSON.parse(text);
     }
   } catch (err) {
     throw new PartialError(
@@ -242,6 +271,43 @@ async function parseResponse(response) {
   }
 
   throw new PartialError("RESPONSE", response.status, parsed, response.headers);
+}
+
+/**
+ * Parse a successful binary response without losing the authenticated error
+ * handling path used by JSON endpoints.
+ * @param response {Response} `Response` from fetch
+ * @returns {Promise<import('../types/fetch').IntricBinaryResponse>}
+ * @throws {PartialError}
+ */
+async function parseBinaryResponse(response) {
+  if (!response.ok) {
+    await parseResponse(response);
+  }
+
+  const contentDisposition = response.headers.get("Content-Disposition") ?? undefined;
+  return {
+    blob: await response.blob(),
+    contentType: response.headers.get("Content-Type") ?? "application/octet-stream",
+    filename: getContentDispositionFilename(contentDisposition),
+    headers: response.headers
+  };
+}
+
+/**
+ * @param {string | undefined} contentDisposition
+ * @returns {string | undefined}
+ */
+function getContentDispositionFilename(contentDisposition) {
+  if (!contentDisposition) {
+    return undefined;
+  }
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(contentDisposition);
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1].replaceAll("+", "%20"));
+  }
+  const asciiMatch = /filename="?([^";]+)"?/i.exec(contentDisposition);
+  return asciiMatch?.[1];
 }
 
 /** An intermediate error that is throw during running a request on the client. Needs to be finalised into an IntricError */

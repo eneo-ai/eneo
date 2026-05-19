@@ -1,4 +1,4 @@
-"""Tests for AI Builder transcription defaults — setup and cleanup."""
+"""Tests for Flow authoring transcription defaults."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     InputType,
     StepSpec,
 )
-from intric.flows.ai_builder.ai_builder_transcription_defaults import (
+from intric.flows.flow_authoring_transcription import (
     apply_audio_transcription_defaults,
 )
 

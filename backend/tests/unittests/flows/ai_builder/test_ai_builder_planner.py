@@ -1,19 +1,30 @@
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 from intric.files.file_models import File, FileType
+from intric.flows.ai_builder.ai_builder_domain_models import BuilderPlan
 from intric.flows.ai_builder.ai_builder_event_models import (
     KeyDecisionPayload,
     RequirementsSummaryPayload,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage, SessionStatus
-from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
+from intric.flows.ai_builder.ai_builder_planner import (
+    AIBuilderPlanner,
+    PlannerMetadataResolution,
+    PlannerPreparedRequest,
+)
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderResourceCatalog,
+    build_ai_builder_resource_catalog,
+)
 from intric.flows.ai_builder.ai_builder_semantic_adjudication import (
     PendingQuestionResolution,
 )
@@ -25,6 +36,12 @@ from intric.flows.ai_builder.planning_state import (
 )
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
+)
+from intric.flows.flow_resource_bindings import (
+    LocalResourceBinding,
+    LocalResourceKind,
+    ResourceSlotKind,
+    ResourceSlotRef,
 )
 from intric.main.exceptions import BadRequestException
 
@@ -320,7 +337,7 @@ async def test_prepare_planner_request_builds_llm_messages_with_system_prompt_he
         patch(
             "intric.flows.ai_builder.ai_builder_planner.build_system_prompt",
             return_value="system prompt",
-        ),
+        ) as build_system_prompt,
         patch(
             "intric.flows.ai_builder.ai_builder_planner.compute_conversation_token_budget",
             return_value=256,
@@ -335,8 +352,12 @@ async def test_prepare_planner_request_builds_llm_messages_with_system_prompt_he
             message="Build a flow",
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
-            available_models=[{"ref": "model-a"}],
-            available_kbs=[{"ref": "kb-a"}],
+            available_models=[
+                {"id": "11111111-1111-4111-8111-111111111111", "name": "Model A"}
+            ],
+            available_kbs=[
+                {"id": "22222222-2222-4222-8222-222222222222", "name": "KB A"}
+            ],
             flow=None,
             assistant_snapshots=None,
             max_input_tokens=4096,
@@ -352,6 +373,22 @@ async def test_prepare_planner_request_builds_llm_messages_with_system_prompt_he
     assert prepared.requirements_state is requirements_state
     assert prepared.should_emit_forced_followup is False
     assert prepared.llm_messages[0] == {"role": "system", "content": "system prompt"}
+    assert build_system_prompt.call_args.kwargs["available_models"] == [
+        {
+            "ref": "model.model-a",
+            "name": "Model A",
+            "display_name": "Model A",
+            "provider": "unknown",
+        }
+    ]
+    assert build_system_prompt.call_args.kwargs["available_knowledge_bases"] == [
+        {
+            "ref": "knowledge.kb-a",
+            "name": "KB A",
+            "display_name": "KB A",
+            "description": "",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -1012,6 +1049,107 @@ async def test_send_message_rejects_when_another_send_is_already_in_progress() -
             ),
         ):
             pass
+
+
+@pytest.mark.asyncio
+async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    session_id = uuid4()
+    local_model_id = uuid4()
+    prior_binding = LocalResourceBinding(
+        slot_ref=ResourceSlotRef(
+            kind=ResourceSlotKind.MODEL,
+            slot="fast-model",
+            label="Fast model",
+        ),
+        local_kind=LocalResourceKind.COMPLETION_MODEL,
+        local_id=local_model_id,
+    )
+    prior_plan = SimpleNamespace(resource_bindings=(prior_binding,))
+    planner.repo.get_session.return_value = SimpleNamespace(
+        conversation=[],
+        status=SessionStatus.CHATTING,
+        planning_state_version=1,
+    )
+    planner.repo.load_planning_state.return_value = None
+
+    async def noop_lease(**_: object) -> None:
+        return None
+
+    async def fake_prepare(**_: object) -> PlannerPreparedRequest:
+        return PlannerPreparedRequest(
+            requirements_state=SimpleNamespace(confirmed=True),
+            ui_language="sv",
+            discovery_block_message=None,
+            llm_messages=[{"role": "system", "content": "proposal"}],
+            should_emit_forced_followup=False,
+            rebuilt_planning_state=PlanningState.empty(),
+            proposal_mode=True,
+            prior_plan_for_revision=cast(BuilderPlan, prior_plan),
+            proposal_resource_catalog=build_ai_builder_resource_catalog(
+                available_models=[
+                    {"id": str(local_model_id), "name": "Renamed model"}
+                ],
+                available_kbs=[],
+                prior_bindings=(prior_binding,),
+            ),
+        )
+
+    captured: dict[str, object] = {}
+
+    async def fake_propose_plan(
+        **kwargs: object,
+    ) -> AsyncGenerator[dict[str, str], None]:
+        captured.update(kwargs)
+        yield {"event": "proposal", "data": "{}"}
+
+    monkeypatch.setattr(
+        "intric.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
+        AsyncMock(return_value=(None, prior_plan)),
+    )
+    monkeypatch.setattr(
+        planner,
+        "_resolve_message_metadata",
+        AsyncMock(
+            return_value=PlannerMetadataResolution(
+                metadata=None,
+                is_requirements_confirmation=False,
+                used_auxiliary_llm=False,
+            )
+        ),
+    )
+    monkeypatch.setattr(planner, "_prepare_planner_request", fake_prepare)
+    monkeypatch.setattr(planner, "_maintain_send_lock_lease", noop_lease)
+    monkeypatch.setattr(planner.proposal_processor, "propose_plan", fake_propose_plan)
+
+    events = [
+        event
+        async for event in planner.send_message(
+            session_id=session_id,
+            message="Revise the plan",
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            available_models=[{"id": str(local_model_id), "name": "Renamed model"}],
+            available_kbs=[],
+            flow=None,
+            assistant_snapshots=None,
+            attachment_files=None,
+            max_input_tokens=4096,
+            max_output_tokens=1024,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=128,
+                minimum_conversation_budget_tokens=256,
+                unknown_model_context_window_tokens=8192,
+            ),
+        )
+    ]
+
+    resource_catalog = cast(AIBuilderResourceCatalog, captured["resource_catalog"])
+    assert resource_catalog.models[0].authoring_ref == "model.fast-model"
+    assert resource_catalog.models[0].slot_ref.label == "Renamed model"
+    assert events[-1] == {"event": "done", "data": ""}
 
 
 @pytest.mark.asyncio

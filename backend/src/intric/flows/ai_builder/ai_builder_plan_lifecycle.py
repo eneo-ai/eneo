@@ -33,9 +33,8 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
-    canonicalize_flow_spec_resources,
-    format_resource_resolution_feedback,
 )
 from intric.flows.ai_builder.ai_builder_session_spec_validator import (
     normalize_compiled_spec_for_session,
@@ -44,6 +43,7 @@ from intric.flows.ai_builder.ai_builder_session_spec_validator import (
 from intric.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
 )
+from intric.flows.flow_resource_bindings import LocalResourceBinding, LocalResourceKind
 from intric.main.exceptions import BadRequestException, UnauthorizedException
 from intric.main.logging import get_logger
 
@@ -75,6 +75,34 @@ def _build_changeset_count_summary(changeset: FlowChangeSet) -> ChangesetCountSu
     )
 
 
+def _spec_has_assistant_resource_refs(spec: FlowDraftSpecCore) -> bool:
+    for step in spec.steps:
+        assistant_spec = step.assistant_spec
+        if (
+            assistant_spec.model_ref is not None
+            or assistant_spec.knowledge_refs
+            or assistant_spec.mcp_server_refs
+            or assistant_spec.mcp_tool_refs
+        ):
+            return True
+    return False
+
+
+def _available_local_binding_targets(
+    catalog: AIBuilderResourceCatalog,
+) -> set[tuple[LocalResourceKind, UUID]]:
+    targets: set[tuple[LocalResourceKind, UUID]] = set()
+    for entry in (
+        *catalog.models,
+        *catalog.knowledge_bases,
+        *catalog.mcp_servers,
+        *catalog.mcp_tools,
+    ):
+        if entry.local_binding is not None:
+            targets.add((entry.local_binding.local_kind, entry.local_binding.local_id))
+    return targets
+
+
 class AIBuilderPlanLifecycle:
     def __init__(
         self,
@@ -82,7 +110,7 @@ class AIBuilderPlanLifecycle:
         user: "UserInDB",
         repo: AIBuilderRepository,
         flow_service: "FlowService",
-        space_service: "SpaceService | None" = None,
+        space_service: "SpaceService",
     ) -> None:
         self.user = user
         self.repo = repo
@@ -135,8 +163,9 @@ class AIBuilderPlanLifecycle:
             target_kind=session.target_kind,
         )
         spec, _ = normalize_ai_builder_spec(spec)
-        spec = await self._canonicalize_plan_spec_resources(
+        resource_bindings = await self._plan_resource_bindings_for_apply(
             session=session,
+            plan=plan,
             spec=spec,
         )
         self._require_valid_compiled_spec_for_session(
@@ -207,6 +236,7 @@ class AIBuilderPlanLifecycle:
                 space_id=session.space_id,
                 flow_id=session.flow_id,
                 expected_revision=expected_revision,
+                resource_bindings=resource_bindings,
                 progress_callback=record_materializer_progress,
             )
         except Exception as exc:
@@ -247,21 +277,29 @@ class AIBuilderPlanLifecycle:
         self,
         space_id: UUID,
     ) -> UUID | None:
-        if self.space_service is None:
-            return None
-
         space = await self.space_service.get_space(space_id)
         model = space.get_default_transcription_model()
         return None if model is None else model.id
 
-    async def _canonicalize_plan_spec_resources(
+    async def _plan_resource_bindings_for_apply(
         self,
         *,
         session: BuilderSession,
+        plan: BuilderPlan,
         spec: FlowDraftSpecCore,
-    ) -> FlowDraftSpecCore:
-        if self.space_service is None:
-            return spec
+    ) -> tuple[LocalResourceBinding, ...]:
+        if not _spec_has_assistant_resource_refs(spec):
+            return tuple()
+
+        if not plan.resource_bindings:
+            raise BadRequestException(
+                "The plan is missing resource bindings. Generate a new proposal and try again.",
+                code="ai_builder_plan_resource_bindings_missing",
+                context={
+                    "plan_id": str(plan.id),
+                    "session_id": str(session.id),
+                },
+            )
 
         space = await self.space_service.get_space(session.space_id)
         catalog = build_ai_builder_resource_catalog(
@@ -269,30 +307,23 @@ class AIBuilderPlanLifecycle:
             available_kbs=serialize_space_kbs(space),
             available_mcps=serialize_space_mcps(space),
         )
-        normalized_spec, resolution_issues = canonicalize_flow_spec_resources(
-            spec,
-            catalog=catalog,
-        )
-        if not resolution_issues:
-            return normalized_spec
-
-        raise BadRequestException(
-            format_resource_resolution_feedback(resolution_issues),
-            code=resolution_issues[0].code,
-            context={
-                "session_id": str(session.id),
-                "resource_resolution_issues": [
-                    {
-                        "kind": issue.kind,
-                        "code": issue.code,
-                        "provided_value": issue.provided_value,
-                        "location": issue.location,
-                        "valid_options": list(issue.valid_options),
-                    }
-                    for issue in resolution_issues
-                ],
-            },
-        )
+        available_targets = _available_local_binding_targets(catalog)
+        for binding in plan.resource_bindings:
+            if (binding.local_kind, binding.local_id) in available_targets:
+                continue
+            raise BadRequestException(
+                "A resource used by the plan is no longer available in this space. "
+                "Generate a new proposal and choose available resources.",
+                code="ai_builder_plan_resource_binding_unavailable",
+                context={
+                    "plan_id": str(plan.id),
+                    "session_id": str(session.id),
+                    "slot_ref": binding.slot_ref.ref,
+                    "slot_kind": binding.slot_ref.kind.value,
+                    "local_kind": binding.local_kind.value,
+                },
+            )
+        return plan.resource_bindings
 
     async def _get_plan(self, plan_id: UUID) -> BuilderPlan:
         return await self.repo.get_plan(

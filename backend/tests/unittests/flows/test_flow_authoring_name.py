@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_flow_name import normalize_flow_name
+from intric.flows.flow_authoring_name import (
+    MAX_FLOW_NAME_LENGTH,
+    normalize_flow_name,
+    normalize_optional_flow_name,
+)
 
 
 def test_normalize_flow_name_preserves_human_names() -> None:
@@ -22,3 +26,16 @@ def test_normalize_flow_name_humanizes_generated_slug_like_names() -> None:
 def test_normalize_flow_name_rejects_empty_names() -> None:
     with pytest.raises(ValueError, match="must not be empty"):
         normalize_flow_name("   ")
+
+
+def test_normalize_flow_name_rejects_names_above_length_limit() -> None:
+    with pytest.raises(ValueError, match=f"at most {MAX_FLOW_NAME_LENGTH}"):
+        normalize_flow_name("a" * (MAX_FLOW_NAME_LENGTH + 1))
+
+
+def test_normalize_optional_flow_name_preserves_absent_value() -> None:
+    assert normalize_optional_flow_name(None) is None
+
+
+def test_normalize_optional_flow_name_normalizes_present_value() -> None:
+    assert normalize_optional_flow_name("  report_pdf  ") == "report_pdf"

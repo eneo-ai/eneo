@@ -407,8 +407,8 @@ def test_accepts_mcp_selection_when_resource_metadata_matches_step_intent() -> N
                 name="Hämta aktuell tid via Time MCP",
                 assistant_spec=AssistantSpec(
                     instructions="Hämta aktuell tid för angiven tidszon.",
-                    mcp_server_refs=["time-server"],
-                    mcp_tool_refs=["current-time"],
+                    mcp_server_refs=["mcp_server.time-mcp"],
+                    mcp_tool_refs=["mcp_tool.time-mcp-get-current-time"],
                 ),
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.TEXT,

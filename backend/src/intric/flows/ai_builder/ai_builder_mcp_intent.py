@@ -447,7 +447,7 @@ def selected_mcp_server_refs(
     for ref in assistant_spec.mcp_server_refs:
         entry = catalog.entry_for_ref(kind="mcp_server", ref=ref)
         if entry is not None:
-            selected_refs.add(entry.ref)
+            selected_refs.add(entry.authoring_ref)
     for ref in assistant_spec.mcp_tool_refs:
         entry = catalog.entry_for_ref(kind="mcp_tool", ref=ref)
         if entry is not None and entry.parent_ref is not None:
@@ -535,7 +535,7 @@ def build_mcp_resource_selection_question(
 
     options.extend(
         {
-            "id": f"use_mcp_server_{_safe_option_id(server.ref)}",
+            "id": f"use_mcp_server_{_safe_option_id(server.authoring_ref)}",
             "label": f"{use_prefix} {server.display_name}",
             "description": _server_option_description(
                 server=server,
@@ -544,7 +544,7 @@ def build_mcp_resource_selection_question(
                 fallback=no_description,
                 tools_label=tools_label,
             ),
-            "value": f"{MCP_SELECTION_USE_SERVER_PREFIX}{server.ref}",
+            "value": f"{MCP_SELECTION_USE_SERVER_PREFIX}{server.authoring_ref}",
         }
         for server in available_servers
     )
@@ -682,7 +682,7 @@ def _server_option_description(
     tool_names = [
         tool.display_name.split(": ", 1)[-1]
         for tool in catalog.mcp_tools
-        if tool.parent_ref == server.ref
+        if tool.parent_ref == server.authoring_ref
     ]
     tool_summary = ", ".join(tool_names[:3])
     if len(tool_names) > 3:

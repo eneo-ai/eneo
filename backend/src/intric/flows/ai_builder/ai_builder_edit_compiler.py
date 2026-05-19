@@ -10,7 +10,6 @@ from __future__ import annotations
 import re
 from copy import deepcopy
 from typing import Any, cast
-from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_description_semantics import (
     FlowSemanticSignature,
@@ -27,7 +26,6 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     StepEditOperation,
     StepPatch,
 )
-from intric.flows.ai_builder.ai_builder_flow_name import normalize_flow_name
 from intric.flows.ai_builder.ai_builder_form_fields import (
     extract_form_fields_from_metadata,
 )
@@ -57,11 +55,14 @@ from intric.flows.ai_builder.ai_builder_primary_input_fields import (
     remove_primary_runtime_input_shadow_names,
     split_primary_runtime_input_shadow_names,
 )
+from intric.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from intric.flows.ai_builder.ai_builder_step_transition_policy import (
     StepNormalizationChange,
     normalize_ai_builder_spec,
 )
+from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from intric.flows.domain.flow import FlowStep
+from intric.flows.flow_authoring_name import normalize_flow_name
 from intric.flows.flow_variable_definitions import form_field_reference_expression
 
 _RUNTIME_STEP_ALIAS_PATTERN = re.compile(r"\{\{\s*step_(\d+)(\.[^{}]+?)\s*\}\}")
@@ -75,7 +76,8 @@ def compile_edit_draft(
     flow_name: str | None = None,
     flow_description: str | None = None,
     current_metadata_json: dict[str, Any] | None = None,
-    assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+    assistant_snapshots: AssistantAuthoringSnapshots | None = None,
+    resource_catalog: AIBuilderResourceCatalog | None = None,
 ) -> CompiledEditResult:
     """Compile edit operations into a concrete flow preview + diff.
 
@@ -142,6 +144,7 @@ def compile_edit_draft(
                     plan_ref,
                     patch,
                     assistant_snapshots=assistant_snapshots,
+                    resource_catalog=resource_catalog,
                     current_steps=current_steps,
                     primary_runtime_input_type=primary_runtime_input_type,
                 )
@@ -205,6 +208,7 @@ def compile_edit_draft(
         compiled_steps=compiled_steps,
         removed_refs=removed_refs,
         assistant_snapshots=assistant_snapshots,
+        resource_catalog=resource_catalog,
     )
 
     # Build diff
@@ -405,7 +409,8 @@ def _flow_step_to_spec(
     plan_ref: str,
     patch: StepPatch | None = None,
     *,
-    assistant_snapshots: dict[UUID, dict[str, Any]] | None = None,
+    assistant_snapshots: AssistantAuthoringSnapshots | None = None,
+    resource_catalog: AIBuilderResourceCatalog | None = None,
     current_steps: list[FlowStep] | None = None,
     primary_runtime_input_type: InputType | None = None,
 ) -> StepSpec:
@@ -415,6 +420,7 @@ def _flow_step_to_spec(
     base_assistant_spec = _resolve_existing_assistant_spec(
         step=step,
         assistant_snapshots=assistant_snapshots,
+        resource_catalog=resource_catalog,
     )
 
     spec = StepSpec(
@@ -549,48 +555,28 @@ def _document_delivery_mode_for_effective_step(spec: StepSpec) -> DocumentDelive
 def _resolve_existing_assistant_spec(
     *,
     step: FlowStep,
-    assistant_snapshots: dict[UUID, dict[str, Any]] | None,
+    assistant_snapshots: AssistantAuthoringSnapshots | None,
+    resource_catalog: AIBuilderResourceCatalog | None,
 ) -> AssistantSpec:
     if not assistant_snapshots:
         return AssistantSpec(instructions="")
 
     snapshot = assistant_snapshots.get(step.assistant_id)
-    if not isinstance(snapshot, dict):
+    if snapshot is None:
         return AssistantSpec(instructions="")
 
-    instructions_raw = snapshot.get("instructions")
-    model_ref_raw = snapshot.get("model_ref")
-    knowledge_refs_raw = snapshot.get("knowledge_refs")
-    mcp_server_refs_raw = snapshot.get("mcp_server_refs")
-    mcp_tool_refs_raw = snapshot.get("mcp_tool_refs")
-    knowledge_refs = (
-        cast(list[object], knowledge_refs_raw)
-        if isinstance(knowledge_refs_raw, list)
-        else []
-    )
-    mcp_server_refs = (
-        cast(list[object], mcp_server_refs_raw)
-        if isinstance(mcp_server_refs_raw, list)
-        else []
-    )
-    mcp_tool_refs = (
-        cast(list[object], mcp_tool_refs_raw)
-        if isinstance(mcp_tool_refs_raw, list)
-        else []
-    )
-    return AssistantSpec(
-        instructions=instructions_raw.strip()
-        if isinstance(instructions_raw, str)
-        else "",
-        model_ref=model_ref_raw
-        if isinstance(model_ref_raw, str) and model_ref_raw.strip()
-        else None,
-        knowledge_refs=[str(ref).strip() for ref in knowledge_refs if str(ref).strip()],
-        mcp_server_refs=[
-            str(ref).strip() for ref in mcp_server_refs if str(ref).strip()
-        ],
-        mcp_tool_refs=[str(ref).strip() for ref in mcp_tool_refs if str(ref).strip()],
-    )
+    if resource_catalog is None:
+        if (
+            snapshot.model is None
+            and not snapshot.knowledge_refs
+            and not snapshot.mcp_server_refs
+            and not snapshot.mcp_tool_refs
+        ):
+            return AssistantSpec(instructions=snapshot.instructions)
+        raise ValueError(
+            "Resource catalog is required to translate assistant snapshots."
+        )
+    return resource_catalog.assistant_spec_from_snapshot(snapshot)
 
 
 def _merge_assistant_specs(
@@ -662,7 +648,8 @@ def _build_step_changes(
     current_steps: list[FlowStep],
     compiled_steps: list[StepSpec],
     removed_refs: set[str],
-    assistant_snapshots: dict[UUID, dict[str, Any]] | None,
+    assistant_snapshots: AssistantAuthoringSnapshots | None,
+    resource_catalog: AIBuilderResourceCatalog | None,
 ) -> list[StepChange]:
     existing_order_to_plan_ref = {
         existing_order: step.plan_step_ref
@@ -678,6 +665,7 @@ def _build_step_changes(
             step,
             plan_ref,
             assistant_snapshots=assistant_snapshots,
+            resource_catalog=resource_catalog,
             current_steps=current_steps,
         )
         baseline_steps.append(

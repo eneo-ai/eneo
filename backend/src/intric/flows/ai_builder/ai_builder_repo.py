@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, cast
 from uuid import UUID
 
 import sqlalchemy as sa
+from pydantic import TypeAdapter
 from sqlalchemy import insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,10 +44,13 @@ from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
 )
+from intric.flows.flow_resource_bindings import LocalResourceBinding
 from intric.main.exceptions import BadRequestException, NotFoundException
 
 if TYPE_CHECKING:
     from intric.flows.flow import Flow
+
+_LOCAL_RESOURCE_BINDING_ADAPTER = TypeAdapter(LocalResourceBinding)
 
 
 class AIBuilderRepository:
@@ -757,6 +761,7 @@ class AIBuilderRepository:
         tenant_id: UUID,
         spec: FlowDraftSpecCore,
         envelope: PlannerPlanEnvelope,
+        resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
         edit_result_json: dict[str, object] | None = None,
     ) -> BuilderPlan:
         async with self._transaction():
@@ -768,6 +773,9 @@ class AIBuilderRepository:
                 "spec_json": spec.model_dump(mode="json"),
                 "spec_hash": spec_hash,
                 "envelope_json": _envelope_json_for_storage(envelope),
+                "resource_bindings_json": _resource_bindings_json_for_storage(
+                    resource_bindings
+                ),
             }
             if edit_result_json is not None:
                 values["edit_result_json"] = edit_result_json
@@ -1077,6 +1085,7 @@ class _PlanRowData(TypedDict):
     spec_json: dict[str, object]
     spec_hash: str
     envelope_json: dict[str, object]
+    resource_bindings_json: list[dict[str, object]]
     edit_result_json: dict[str, object] | None
     created_at: datetime | None
     updated_at: datetime | None
@@ -1134,6 +1143,9 @@ def _plan_row_data(row: Any) -> _PlanRowData:
             "spec_json": cast(dict[str, object], mapping["spec_json"]),
             "spec_hash": cast(str, mapping["spec_hash"]),
             "envelope_json": cast(dict[str, object], mapping["envelope_json"]),
+            "resource_bindings_json": cast(
+                list[dict[str, object]], mapping["resource_bindings_json"]
+            ),
             "edit_result_json": cast(
                 dict[str, object] | None, mapping.get("edit_result_json")
             ),
@@ -1149,6 +1161,9 @@ def _plan_row_data(row: Any) -> _PlanRowData:
         "spec_json": cast(dict[str, object], row.spec_json),
         "spec_hash": cast(str, row.spec_hash),
         "envelope_json": cast(dict[str, object], row.envelope_json),
+        "resource_bindings_json": cast(
+            list[dict[str, object]], row.resource_bindings_json
+        ),
         "edit_result_json": cast(
             dict[str, object] | None, getattr(row, "edit_result_json", None)
         ),
@@ -1195,6 +1210,23 @@ def _envelope_json_for_storage(envelope: PlannerPlanEnvelope) -> dict[str, objec
     return envelope.model_dump(mode="json", exclude={"spec"})
 
 
+def _resource_bindings_json_for_storage(
+    bindings: tuple[LocalResourceBinding, ...],
+) -> list[dict[str, object]]:
+    return [binding.model_dump(mode="json", round_trip=True) for binding in bindings]
+
+
+def _resource_bindings_from_json(
+    resource_bindings_json: list[dict[str, object]],
+) -> tuple[LocalResourceBinding, ...]:
+    return tuple(
+        # JSONB rehydrates UUIDs/enums as JSON primitives; validation returns
+        # the strict domain model before the value leaves the repository.
+        _LOCAL_RESOURCE_BINDING_ADAPTER.validate_python(binding_json, strict=False)
+        for binding_json in resource_bindings_json
+    )
+
+
 def _plan_from_row(row: Any) -> BuilderPlan:
     """Convert a DB row/mapping to a BuilderPlan domain model."""
     data = _plan_row_data(row)
@@ -1212,6 +1244,9 @@ def _plan_from_row(row: Any) -> BuilderPlan:
         spec=spec,
         spec_hash=data["spec_hash"],
         envelope=envelope,
+        resource_bindings=_resource_bindings_from_json(
+            data["resource_bindings_json"]
+        ),
         edit_result_json=data["edit_result_json"],
         created_at=data["created_at"],
         updated_at=data["updated_at"],

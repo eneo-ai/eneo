@@ -21,6 +21,7 @@ from intric.flows.api.flow_models import (
     FlowUpdateRequest,
 )
 from intric.flows.application import flow_dispatch
+from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
 from intric.flows.flow_access_policy import FlowApiAction
 from intric.flows.flow_file_upload_service import FlowFileUploadService
 from intric.flows.flow_run_contract_service import FlowRunContractService
@@ -47,87 +48,59 @@ def find_classification_overrides(
 
 def extract_assistant_update_payload(
     assistant: AssistantUpdatePublic,
-) -> dict[str, Any]:
+) -> FlowAssistantUpdateCommand:
     payload = assistant.model_dump(exclude_unset=True)
-    groups = (
-        [group.id for group in (assistant.groups or [])]
-        if "groups" in payload
-        else None
-    )
-    websites = (
-        [website.id for website in (assistant.websites or [])]
-        if "websites" in payload
-        else None
-    )
-    integration_knowledge_ids = (
-        [knowledge.id for knowledge in (assistant.integration_knowledge_list or [])]
-        if "integration_knowledge_list" in payload
-        else None
-    )
-    attachment_ids = None
+    command_fields: dict[str, object] = {
+        "data_retention_days": assistant.data_retention_days,
+    }
+    if "groups" in payload:
+        command_fields["groups"] = [group.id for group in (assistant.groups or [])]
+    if "websites" in payload:
+        command_fields["websites"] = [
+            website.id for website in (assistant.websites or [])
+        ]
+    if "integration_knowledge_list" in payload:
+        command_fields["integration_knowledge_ids"] = [
+            knowledge.id for knowledge in (assistant.integration_knowledge_list or [])
+        ]
     if "attachments" in payload:
         attachments = assistant.attachments or []
-        attachment_ids = [attachment.id for attachment in attachments]
-    mcp_server_ids = (
-        [server.id for server in (assistant.mcp_servers or [])]
-        if "mcp_servers" in payload
-        else None
-    )
-    mcp_tools = None
+        command_fields["attachment_ids"] = [attachment.id for attachment in attachments]
+    if "mcp_servers" in payload:
+        command_fields["mcp_server_ids"] = [
+            server.id for server in (assistant.mcp_servers or [])
+        ]
     if "mcp_tools" in payload:
         tools = assistant.mcp_tools or []
-        mcp_tools = [(tool.tool_id, tool.is_enabled) for tool in tools]
-    completion_model_id = (
-        assistant.completion_model.id
-        if "completion_model" in payload and assistant.completion_model is not None
-        else None
-    )
-    completion_model_kwargs = (
-        assistant.completion_model_kwargs
-        if "completion_model_kwargs" in payload
-        else None
-    )
+        command_fields["mcp_tools"] = [
+            (tool.tool_id, tool.is_enabled) for tool in tools
+        ]
+    if "completion_model" in payload:
+        command_fields["completion_model_id"] = (
+            assistant.completion_model.id
+            if assistant.completion_model is not None
+            else None
+        )
+    if "completion_model_kwargs" in payload:
+        command_fields["completion_model_kwargs"] = assistant.completion_model_kwargs
 
-    description: str | Any = (
-        cast(str, payload["description"]) if "description" in payload else None
-    )
-    metadata_json: dict[str, Any] | None | Any = (
-        cast(dict[str, Any] | None, payload["metadata_json"])
-        if "metadata_json" in payload
-        else None
-    )
-
-    icon_id: UUID | None | Any = None
+    if "description" in payload:
+        command_fields["description"] = assistant.description
+    if "metadata_json" in payload:
+        command_fields["metadata_json"] = assistant.metadata_json
     if "icon_id" in payload:
-        icon_id = cast(UUID | None, payload["icon_id"])
+        command_fields["icon_id"] = assistant.icon_id
 
-    from intric.main.models import NOT_PROVIDED
+    if "name" in payload:
+        command_fields["name"] = assistant.name
+    if "prompt" in payload:
+        command_fields["prompt"] = assistant.prompt
+    if "logging_enabled" in payload:
+        command_fields["logging_enabled"] = assistant.logging_enabled
+    if "insight_enabled" in payload:
+        command_fields["insight_enabled"] = assistant.insight_enabled
 
-    if "description" not in payload:
-        description = NOT_PROVIDED
-    if "metadata_json" not in payload:
-        metadata_json = NOT_PROVIDED
-    if "icon_id" not in payload:
-        icon_id = NOT_PROVIDED
-
-    return {
-        "name": assistant.name,
-        "prompt": assistant.prompt,
-        "completion_model_id": completion_model_id,
-        "completion_model_kwargs": completion_model_kwargs,
-        "logging_enabled": assistant.logging_enabled,
-        "groups": groups,
-        "websites": websites,
-        "integration_knowledge_ids": integration_knowledge_ids,
-        "mcp_server_ids": mcp_server_ids,
-        "mcp_tools": mcp_tools,
-        "attachment_ids": attachment_ids,
-        "description": description,
-        "insight_enabled": assistant.insight_enabled,
-        "data_retention_days": assistant.data_retention_days,
-        "metadata_json": metadata_json,
-        "icon_id": icon_id,
-    }
+    return FlowAssistantUpdateCommand.model_validate(command_fields)
 
 
 def required_uuid(value: UUID | None, *, field: str) -> UUID:

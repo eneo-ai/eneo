@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, cast
 
-from intric.flows.ai_builder.ai_builder_models import AssistantSpec, StepSpec
+from intric.flows.flow_authoring_spec import AssistantSpec, StepSpec
 
 _TEMPLATE_EXPRESSION_PATTERN = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
 
