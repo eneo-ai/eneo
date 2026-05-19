@@ -33,7 +33,6 @@ from intric.sessions.session_service import (
     persist_partial_question_answer,
 )
 
-
 # ----- Helpers --------------------------------------------------------------
 
 
@@ -70,32 +69,82 @@ def _make_session_in_db() -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_create_question_placeholder_inserts_row_with_empty_answer():
+async def test_create_question_placeholder_inserts_row_with_seeded_question_tokens():
+    """Placeholder commits with the user's question, empty answer, and a best-effort
+    `count_tokens(question, model)` so abort-only requests don't undercount in
+    analytics."""
     new_question_id = uuid4()
     service = _make_session_service(question_id=new_question_id)
 
-    returned = await service.create_question_placeholder(
-        question="how do I cancel a stream?",
-        session=_make_session_in_db(),
-        files=None,
-        assistant_id=uuid4(),
-        completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
-    )
+    with patch.object(
+        session_service_module, "count_tokens", return_value=42
+    ) as count_mock:
+        returned = await service.create_question_placeholder(
+            question="how do I cancel a stream?",
+            session=_make_session_in_db(),
+            files=None,
+            assistant_id=uuid4(),
+            completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+        )
 
     assert returned == new_question_id
+    count_mock.assert_called_once_with("how do I cancel a stream?", "gpt-4")
     service.question_repo.add.assert_awaited_once()
 
     args, kwargs = service.question_repo.add.call_args
     question_add = args[0]
     assert question_add.question == "how do I cancel a stream?"
     assert question_add.answer == ""
-    assert question_add.num_tokens_question == 0
+    assert question_add.num_tokens_question == 42
     assert question_add.num_tokens_answer == 0
     assert question_add.tenant_id == service.user.tenant_id
     # No info_blob_chunks / generated_files / web_search on a placeholder
     assert kwargs.get("info_blob_chunks") == []
     assert kwargs.get("generated_files") == []
     assert kwargs.get("web_search_results") == []
+
+
+@pytest.mark.asyncio
+async def test_create_question_placeholder_falls_back_to_zero_when_count_tokens_raises():
+    """tiktoken can raise on unknown model names — the placeholder write must still
+    succeed with num_tokens_question=0 instead of crashing the request."""
+    service = _make_session_service()
+
+    def boom(*_: object, **__: object) -> int:
+        raise KeyError("unknown model")
+
+    with patch.object(session_service_module, "count_tokens", side_effect=boom):
+        await service.create_question_placeholder(
+            question="test",
+            session=_make_session_in_db(),
+            files=None,
+            assistant_id=uuid4(),
+            completion_model=SimpleNamespace(id=uuid4(), name="exotic-model-9000"),
+        )
+
+    service.question_repo.add.assert_awaited_once()
+    args, _ = service.question_repo.add.call_args
+    assert args[0].num_tokens_question == 0
+
+
+@pytest.mark.asyncio
+async def test_create_question_placeholder_without_model_records_zero_tokens():
+    """If no completion model is configured (e.g. some sysadmin/test paths), don't
+    even try to count — store 0 and move on."""
+    service = _make_session_service()
+
+    with patch.object(session_service_module, "count_tokens") as count_mock:
+        await service.create_question_placeholder(
+            question="test",
+            session=_make_session_in_db(),
+            files=None,
+            assistant_id=None,
+            completion_model=None,
+        )
+
+    count_mock.assert_not_called()
+    args, _ = service.question_repo.add.call_args
+    assert args[0].num_tokens_question == 0
 
 
 # ----- SessionService.complete_question_with_answer -------------------------
@@ -172,7 +221,9 @@ async def test_persist_partial_question_answer_uses_fresh_session():
 
     with (
         patch.object(
-            session_service_module, "sessionmanager", SimpleNamespace(session=fake_session)
+            session_service_module,
+            "sessionmanager",
+            SimpleNamespace(session=fake_session),
         ),
         patch.object(session_service_module, "QuestionRepository", FakeRepo),
     ):
@@ -389,3 +440,176 @@ async def test_streaming_handle_response_no_partial_save_on_normal_completion():
 
     # Crucially: no partial-save task was scheduled on a clean finish.
     assert persist_calls == []
+
+
+@pytest.mark.asyncio
+async def test_streaming_handle_response_skips_partial_save_when_no_content():
+    """When the stream is aborted *before* any TEXT chunk arrives — or the LLM
+    raises before producing output — `response_string` is empty and an UPDATE
+    setting answer='' would be a no-op against the placeholder. The finally must
+    skip the redundant background save in that case."""
+
+    async def empty_then_error_stream():
+        # Mimic an LLM that errors before the first chunk is yielded.
+        if False:  # pragma: no cover - keeps it an async generator
+            yield None
+        raise RuntimeError("upstream LLM unreachable")
+
+    response = SimpleNamespace(
+        completion=empty_then_error_stream(),
+        total_token_count=0,
+        usage=None,
+        extended_logging=None,
+    )
+    datastore_result = SimpleNamespace(info_blobs=[], no_duplicate_chunks=[])
+
+    session_service_mock = AsyncMock()
+    svc = _make_assistant_service_for_streaming(session_service_mock)
+
+    persist_calls: list[dict[str, object]] = []
+
+    async def tracking_persist(**kwargs: object) -> None:
+        persist_calls.append(kwargs)
+
+    with patch.object(
+        session_service_module,
+        "persist_partial_question_answer",
+        tracking_persist,
+    ):
+        from intric.assistants.assistant_service import AssistantService
+
+        gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+            svc,  # pyright: ignore[reportArgumentType]
+            response=response,
+            datastore_result=datastore_result,
+            question="hello?",
+            files=[],
+            completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+            session=_make_session_in_db(),
+            stream=True,
+            assistant_id=uuid4(),
+            question_id=uuid4(),
+        )
+
+        with pytest.raises(RuntimeError, match="upstream LLM unreachable"):
+            async for _ in gen:
+                pass
+
+        await asyncio.sleep(0)
+
+    assert persist_calls == [], (
+        "no partial-save should be scheduled when no content was streamed; "
+        "the placeholder row already captures the user's question"
+    )
+
+
+@pytest.mark.asyncio
+async def test_streaming_handle_response_count_tokens_failure_still_persists_partial():
+    """The pre-fix code computed count_tokens inline inside `finally` — if tiktoken
+    raised on an exotic model name, the asyncio.create_task call was never reached
+    and the partial save collapsed silently. Verify the safe wrapper now lets the
+    save through with num_tokens_answer=0."""
+
+    async def fake_completion_stream():
+        yield SimpleNamespace(
+            reasoning_token_count=0,
+            usage=None,
+            response_type=ResponseType.TEXT,
+            text="partial",
+            reference_chunks=[],
+        )
+        # Hang on the next chunk — the consumer will aclose() in between.
+        await asyncio.sleep(10)
+        yield SimpleNamespace(
+            reasoning_token_count=0,
+            usage=None,
+            response_type=ResponseType.TEXT,
+            text="lost",
+            reference_chunks=[],
+        )
+
+    response = SimpleNamespace(
+        completion=fake_completion_stream(),
+        total_token_count=2,
+        usage=None,
+        extended_logging=None,
+    )
+    datastore_result = SimpleNamespace(info_blobs=[], no_duplicate_chunks=[])
+
+    session_service_mock = AsyncMock()
+    svc = _make_assistant_service_for_streaming(session_service_mock)
+
+    persist_calls: list[dict[str, object]] = []
+
+    async def tracking_persist(**kwargs: object) -> None:
+        persist_calls.append(kwargs)
+
+    def boom(*_: object, **__: object) -> int:
+        raise KeyError("unknown model")
+
+    with (
+        patch.object(
+            session_service_module,
+            "persist_partial_question_answer",
+            tracking_persist,
+        ),
+        patch.object(session_service_module, "count_tokens", side_effect=boom),
+    ):
+        from intric.assistants.assistant_service import AssistantService
+
+        gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+            svc,  # pyright: ignore[reportArgumentType]
+            response=response,
+            datastore_result=datastore_result,
+            question="hi",
+            files=[],
+            completion_model=SimpleNamespace(id=uuid4(), name="exotic-model"),
+            session=_make_session_in_db(),
+            stream=True,
+            assistant_id=uuid4(),
+            question_id=uuid4(),
+        )
+
+        first = await _drain_until(gen, 1)
+        assert [c.text for c in first] == ["partial"]
+
+        await gen.aclose()
+        await asyncio.sleep(0)
+
+    assert len(persist_calls) == 1, (
+        "partial save must still fire even when count_tokens raises"
+    )
+    assert persist_calls[0]["answer"] == "partial"
+    assert persist_calls[0]["num_tokens_answer"] == 0
+
+
+# ----- _schedule_background_save strong-ref invariant -----------------------
+
+
+@pytest.mark.asyncio
+async def test_schedule_background_save_holds_strong_reference_until_done():
+    """asyncio.create_task internally holds only a weak reference — without
+    `_background_save_tasks` keeping a strong one, the GC can collect the task
+    mid-flight and silently drop the persistence write."""
+    started = asyncio.Event()
+    finish = asyncio.Event()
+    ran_to_completion = False
+
+    async def slow_coro() -> None:
+        nonlocal ran_to_completion
+        started.set()
+        await finish.wait()
+        ran_to_completion = True
+
+    task = session_service_module.schedule_background_save(slow_coro())
+
+    await started.wait()
+    # The task should be tracked while in-flight.
+    assert task in session_service_module._background_save_tasks
+
+    finish.set()
+    await task
+
+    # And removed after completion via the add_done_callback.
+    assert task not in session_service_module._background_save_tasks
+    assert ran_to_completion is True

@@ -1,4 +1,3 @@
-import asyncio
 import re
 from collections.abc import AsyncGenerator, Callable, Sequence
 from datetime import datetime
@@ -863,25 +862,31 @@ class AssistantService:
                         ),
                     )
                 finally:
-                    if not completed:
-                        # Stream was aborted before the answer could be saved. Persist
-                        # whatever was streamed so far via a fresh DB session so the
-                        # user's question + partial answer aren't lost. No await here —
-                        # the request-scoped AsyncSession may already be torn down and
-                        # `await` across GeneratorExit is fragile; fire-and-forget on
-                        # the event loop.
-                        if completion_model is not None:
-                            partial_tokens_answer = (
-                                count_tokens(response_string, completion_model.name)
-                                + reasoning_token_count
-                            )
-                        else:
-                            partial_tokens_answer = 0
+                    # Stream did not reach normal completion: client abort, LLM
+                    # error, network drop, etc. The placeholder row already captures
+                    # the user's question, so an empty `response_string` means there
+                    # is nothing further to persist — skip the redundant UPDATE.
+                    # Anything else (partial answer streamed before abort) must be
+                    # saved via a fresh DB session because the request-scoped
+                    # AsyncSession may already be torn down and `await` across
+                    # GeneratorExit is fragile.
+                    if not completed and response_string:
                         from intric.sessions.session_service import (
                             persist_partial_question_answer,
+                            safe_count_tokens,
+                            schedule_background_save,
                         )
 
-                        asyncio.create_task(
+                        model_name = (
+                            completion_model.name
+                            if completion_model is not None
+                            else None
+                        )
+                        partial_tokens_answer = (
+                            safe_count_tokens(response_string, model_name)
+                            + reasoning_token_count
+                        )
+                        schedule_background_save(
                             persist_partial_question_answer(
                                 tenant_id=tenant_id,
                                 question_id=question_id,

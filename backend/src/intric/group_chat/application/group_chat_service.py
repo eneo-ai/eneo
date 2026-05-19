@@ -384,15 +384,20 @@ class GroupChatService:
                     )
                     completed = True
                 finally:
-                    if not completed:
-                        partial_tokens_answer = count_tokens(
-                            response_string, completion_model.name
-                        )
+                    # Selector-echo stream did not reach normal completion. The
+                    # placeholder already captures the question; only schedule a
+                    # background UPDATE when there's actual content to persist.
+                    if not completed and response_string:
                         from intric.sessions.session_service import (
                             persist_partial_question_answer,
+                            safe_count_tokens,
+                            schedule_background_save,
                         )
 
-                        asyncio.create_task(
+                        partial_tokens_answer = safe_count_tokens(
+                            response_string, completion_model.name
+                        )
+                        schedule_background_save(
                             persist_partial_question_answer(
                                 tenant_id=tenant_id,
                                 question_id=question_id,
