@@ -31,16 +31,59 @@ from typing import Any
 import sqlalchemy as sa
 
 from alembic import op
-from intric.model_providers.domain.model_defaults_lookup import (
-    is_ambiguous,
-    resolve_model_defaults,
-)
 
 # revision identifiers, used by Alembic
 revision = "20260501_backfill_model_costs"
 down_revision = "20260430_add_model_costs"
 branch_labels = None
 depends_on = None
+
+
+# Inlined from intric.model_providers.domain.model_defaults_lookup so this
+# migration stays runnable on a fresh DB even if the app module is later
+# moved or renamed. Keep semantics in sync with that module if either
+# changes — both paths must agree on which LiteLLM row a given
+# (name, provider_type) maps to.
+def resolve_model_defaults(
+    model_cost: dict[str, dict[str, Any]],
+    names: list[str | None] | str,
+    provider_type: str | None,
+) -> dict[str, Any] | None:
+    candidates: list[str] = [
+        n for n in ([names] if isinstance(names, str) else names) if n
+    ]
+    if not candidates:
+        return None
+
+    if provider_type:
+        for n in candidates:
+            info = model_cost.get(f"{provider_type}/{n}")
+            if info is not None:
+                return info
+
+    for n in candidates:
+        info = model_cost.get(n)
+        if info is not None:
+            return info
+
+    if provider_type is None:
+        prefixes = {key.split("/", 1)[0] for key in model_cost if "/" in key}
+        for n in candidates:
+            matching = [p for p in prefixes if f"{p}/{n}" in model_cost]
+            if len(matching) == 1:
+                return model_cost[f"{matching[0]}/{n}"]
+    return None
+
+
+def is_ambiguous(model_cost: dict[str, Any], name: str | None) -> bool:
+    if not name or name in model_cost:
+        return False
+    prefixes = {
+        key.split("/", 1)[0]
+        for key in model_cost
+        if "/" in key and key.split("/", 1)[1] == name
+    }
+    return len(prefixes) > 1
 
 
 def _load_model_cost() -> dict[str, dict[str, Any]]:
