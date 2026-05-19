@@ -150,6 +150,30 @@ async def test_update_request_rejects_empty_allowed_origins_for_pk():
 
 
 @pytest.mark.asyncio
+async def test_update_request_rejects_null_allowed_origins_for_pk():
+    """An explicit `allowed_origins: None` PATCH for a pk_ key would land a row
+    that the fail-closed _validate_origin check then rejects on every request.
+    Block it at the update boundary so the key never gets into that state."""
+    service = _service()
+    key = SimpleNamespace(
+        key_type=ApiKeyType.PK.value,
+        tenant_id=uuid4(),
+        permission=ApiKeyPermission.READ.value,
+        resource_permissions=None,
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_update_request(
+            key=key,
+            updates={"allowed_origins": None},
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+    assert "at least one allowed origin" in exc.value.message
+
+
+@pytest.mark.asyncio
 async def test_update_request_rejects_non_read_permission_for_pk():
     service = _service()
     key = SimpleNamespace(

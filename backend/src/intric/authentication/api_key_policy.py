@@ -386,8 +386,11 @@ class ApiKeyPolicyService:
                     code="invalid_request",
                     message="allowed_origins is only supported for pk_ keys.",
                 )
-            if key_type == ApiKeyType.PK and allowed_origins is not None:
-                if len(allowed_origins) == 0:
+            if key_type == ApiKeyType.PK:
+                # Mirror create-path: pk_ keys must always carry a non-empty
+                # origin list. NULL is rejected here so the fail-closed check
+                # in _validate_origin never traps a key the admin just edited.
+                if allowed_origins is None or len(allowed_origins) == 0:
                     raise ApiKeyValidationError(
                         status_code=400,
                         code="invalid_request",
