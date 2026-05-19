@@ -153,7 +153,6 @@ export const CRAWLER_SETTINGS_NUMBER_FIELDS: CrawlerNumberField[] = [
     displayUnit: "native",
     step: 100
   },
-  // Tenant-scoped runtime knobs exposed in admin-settings sub-tranche 3a.
   // Values are read at crawl start, so changes do not affect already-running
   // crawls; each new crawl picks up the updated value. Bounds come from the
   // backend specs via the response so the API boundary stays authoritative.

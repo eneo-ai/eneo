@@ -45,7 +45,7 @@ test("crawler settings page exposes user-safe crawler controls and tenant runtim
     "dns_timeout",
     "retry_times",
     "closespider_itemcount",
-    // Sub-tranche 3a runtime knobs (tenant-scoped, bounded by CrawlerSettingSpec)
+    // Runtime knobs that are tenant-scoped and bounded by CrawlerSettingSpec.
     "crawl_max_length",
     "crawl_stale_threshold_minutes",
     "queued_stale_threshold_minutes",
@@ -58,7 +58,8 @@ test("crawler settings page exposes user-safe crawler controls and tenant runtim
   expect(editableKeys).not.toContain("crawl_feeder_enabled");
   expect(editableKeys).not.toContain("crawl_feeder_interval_seconds");
   expect(editableKeys).not.toContain("crawl_feeder_batch_size");
-  // crawl_page_batch_size deferred to the token-efficiency tranche; HTTP cache is not a real setting today.
+  // Batch size stays out of self-service until retention and cost are visible.
+  // HTTP cache is not a real setting today.
   expect(editableKeys).not.toContain("crawl_page_batch_size");
   expect(editableKeys).not.toContain("crawl_http_cache_enabled");
 });
