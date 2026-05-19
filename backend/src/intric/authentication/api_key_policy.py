@@ -568,12 +568,15 @@ class ApiKeyPolicyService:
         # Per-key allowed_origins is the only authority. The central tenant
         # allowlist was dropped: trust the key creator to list exactly the
         # origins their integration needs.
+        #
+        # Fail closed: a pk_ key without an allowed_origins list (NULL or
+        # empty) cannot authenticate. The earlier NULL-passthrough opened a
+        # hole — any legacy pk_ row missing the column would have accepted
+        # every origin. New pk_ keys are required to carry a non-empty list
+        # at create time; legacy rows that ended up NULL need explicit
+        # remediation (rotate with an origin list).
         key_patterns = key.allowed_origins
-        if key_patterns is None:
-            # Legacy keys minted before allowed_origins became required.
-            # New pk_ keys always carry a non-empty list.
-            return
-        if len(key_patterns) == 0:
+        if not key_patterns:
             raise ApiKeyValidationError(
                 status_code=403,
                 code="origin_not_allowed",

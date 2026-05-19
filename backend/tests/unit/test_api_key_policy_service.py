@@ -692,16 +692,17 @@ async def test_pk_empty_allowed_origins_blocks_all():
 
 
 @pytest.mark.asyncio
-async def test_pk_none_allowed_origins_permits_legacy_keys():
-    """Legacy pk_ rows whose allowed_origins is NULL are permitted (no constraint).
-
-    New pk_ keys minted after the allowlist requirement always carry a non-empty
-    list; this branch only exists for pre-existing data.
-    """
+async def test_pk_null_allowed_origins_blocks_all():
+    """A pk_ key without an allowed_origins list (NULL) is misconfigured —
+    earlier behaviour was to silently permit every origin, which let any
+    legacy row missing the column bypass CORS-style origin enforcement.
+    Fail closed: NULL and empty list both return origin_not_allowed."""
     service = _service()
     key = _make_pk_key(allowed_origins=None)
 
-    await service._validate_origin(key=key, origin="https://anything.example")
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service._validate_origin(key=key, origin="https://anything.example")
+    assert exc.value.code == "origin_not_allowed"
 
 
 # ---------------------------------------------------------------------------
