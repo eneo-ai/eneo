@@ -225,11 +225,10 @@ class CrawlerSettingsSelfServiceUpdate(BaseModel):
         le=_SPECS["closespider_itemcount"].max,
         description=_SPECS["closespider_itemcount"].description,
     )
-    # Tenant-scoped runtime knobs exposed in sub-tranche 3a. Values are read
-    # at crawl start, so a tenant-admin change does not affect already-running
-    # crawls; each new crawl picks up the updated value. Bounds match the
-    # canonical CrawlerSettingSpec definitions so the same min/max protects
-    # the API boundary and the worker runtime.
+    # Values are read at crawl start, so a tenant-admin change cannot mutate an
+    # already-running crawl's runtime contract. Bounds match the canonical
+    # CrawlerSettingSpec definitions so the API boundary and worker runtime are
+    # protected by the same limits.
     crawl_max_length: int | None = Field(
         None,
         ge=_SPECS["crawl_max_length"].min,

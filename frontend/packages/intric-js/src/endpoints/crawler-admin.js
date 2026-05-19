@@ -63,7 +63,7 @@ export function initCrawlerAdmin(client) {
     },
 
     /**
-     * Get recent crawler runs stopped by lifecycle protection for the current tenant.
+     * Get recent crawler runs terminated by the watchdog for the current tenant.
      * @param {{days?: number, limit?: number, offset?: number}} [params]
      * @returns {Promise<CrawlerRecentFailuresResponse>}
      * @throws {IntricError}
