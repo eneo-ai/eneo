@@ -529,8 +529,19 @@ export class ChatService {
               }
             },
             onToolApprovalRequired: (event) => {
-              if (!ref || isStale()) return;
+              if (isStale()) return;
               if (!ensureCurrentSession(event)) return;
+              // tool_approval_required can race ahead of onFirstChunk when the
+              // model returns a tool call before any text. Dropping the event
+              // would leave pendingToolApproval unset, hiding the approve/deny
+              // buttons forever while the backend keeps waiting. Materialise
+              // the message here so the approval UI has something to attach to.
+              if (!ref) {
+                this.currentConversation.messages?.push(emptyMessage({ question }));
+                ref =
+                  this.currentConversation.messages[this.currentConversation.messages.length - 1];
+                this.currentConversation.id = event.session_id;
+              }
               // Add tools to the message so they display in the UI
               // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
               if (!ref.mcp_tool_calls) {
