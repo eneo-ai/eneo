@@ -493,7 +493,11 @@ export class ChatService {
               }
             },
             onToolCall: (event) => {
-              ensureCurrentSession(event);
+              // Guard order matches the other SSE handlers: ref is only set
+              // after onFirstChunk lands, so an early tool_call event would
+              // otherwise crash trying to read mcp_tool_calls on undefined.
+              if (!ref || isStale()) return;
+              if (!ensureCurrentSession(event)) return;
               // Store tool calls for rendering with translations
               // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
               if (!ref.mcp_tool_calls) {
@@ -525,7 +529,8 @@ export class ChatService {
               }
             },
             onToolApprovalRequired: (event) => {
-              ensureCurrentSession(event);
+              if (!ref || isStale()) return;
+              if (!ensureCurrentSession(event)) return;
               // Add tools to the message so they display in the UI
               // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
               if (!ref.mcp_tool_calls) {
