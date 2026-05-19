@@ -203,37 +203,61 @@ class MCPClient:
 
         Errors are NOT wrapped here — they propagate to connect() which
         has the diagnostic fallback for unhelpful cancel scope errors.
+
+        Two flavors:
+          1. Fresh connect (no resume_mcp_session_id): open transport, run
+             ``initialize()``, capture the server-assigned session id.
+          2. Resume (resume_mcp_session_id set): open transport with
+             ``terminate_on_close=False`` so the previous turn's DELETE didn't
+             evict the server-side session, pre-seed the SDK transport's
+             session_id with the persisted value, and SKIP ``initialize()``.
+             Calling ``initialize()`` on resume is fatal — the eneo-knowledge
+             server mints a fresh Mcp-Session-Id on every initialize regardless
+             of the resume header, and the SDK then adopts the new id; tool
+             calls land on the new session and lose all per-session state (eg
+             file-workbench ingest rows). See the cross-turn contract in
+             ``ChatSessionMcpStateRepo``.
         """
         headers = self._build_auth_headers()
 
-        # Create the streamable HTTP context manager with timeout delegated
-        # to the transport layer (avoids asyncio.wait_for vs anyio conflicts)
+        # terminate_on_close=False: the SDK otherwise sends DELETE /mcp on
+        # transport teardown, which evicts the server-side session and breaks
+        # the next turn's resume. Server idle TTL bounds the leak.
         streams_context = streamablehttp_client(
             url=self.mcp_server.http_url,
             headers=headers,
             timeout=timedelta(seconds=self.timeout),
+            terminate_on_close=False,
         )
 
-        # Enter the streams context
         streams = await streams_context.__aenter__()
 
-        # Successfully entered - now save the reference
         self._streams_context = streams_context
         read, write, get_session_id = streams
-        # ``get_session_id`` is a callable the transport exposes that returns
-        # the current MCP-protocol session id (server-assigned, captured from
-        # response headers). It returns None until ``initialize()`` completes.
+        # ``get_session_id`` is the bound ``transport.get_session_id`` method;
+        # its ``__self__`` is the StreamableHTTPTransport instance, which is
+        # the only handle we have on the transport's session_id field (the
+        # outer ``streamablehttp_client`` async generator does not expose it
+        # directly). Pre-seeding session_id is required for resume — see the
+        # docstring.
         self._get_session_id_callable = get_session_id
+        transport = getattr(get_session_id, "__self__", None)
+        if transport is None:
+            await streams_context.__aexit__(None, None, None)
+            self._streams_context = None
+            raise MCPClientError(
+                "MCP SDK transport not accessible — get_session_id is not a "
+                "bound method. The SDK version may be incompatible with eneo's "
+                "cross-turn resume mechanism."
+            )
         logger.debug(
             f"Streamable HTTP transport connected to {self.mcp_server.http_url}"
         )
 
-        # Create and enter session context
         session_context = ClientSession(read, write)
         try:
             session = await session_context.__aenter__()
         except BaseException:
-            # Session entry failed - cleanup streams context
             try:
                 await streams_context.__aexit__(None, None, None)
             except BaseException:
@@ -241,13 +265,28 @@ class MCPClient:
             self._streams_context = None
             raise
 
-        # Successfully entered - save references
         self._session_context = session_context
         self.session = session
 
-        # Initialize the MCP protocol session. Capture the result so we can
-        # surface serverInfo (name/version) — required to detect custom server
-        # contracts like file-workbench before any tool dispatch happens.
+        if self.resume_mcp_session_id:
+            # Resume path: pre-seed the SDK's session_id so every outgoing
+            # request carries the persisted Mcp-Session-Id, and DO NOT call
+            # initialize(). serverInfo/protocol_version stay None on this
+            # transport — that's fine because the server negotiated them on
+            # the original turn for this logical session, and the SDK only
+            # sends MCP-Protocol-Version when it has a value (skipping is
+            # acceptable for a resumed session).
+            transport.session_id = self.resume_mcp_session_id
+            self.assigned_mcp_session_id = self.resume_mcp_session_id
+            logger.info(
+                "Resumed MCP session for %s (session_id=%s, skipped initialize)",
+                self.mcp_server.name,
+                self.resume_mcp_session_id,
+            )
+            return
+
+        # Fresh-connect path: negotiate via initialize() and capture the
+        # server-assigned session id.
         try:
             init_result = await self.session.initialize()
         except BaseException:

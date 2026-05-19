@@ -90,44 +90,33 @@ class _InformationChunkLike(Protocol):
 
 
 def _build_files_string(files: list[File]) -> str:
-    """Surface chat attachments to the LLM as URLs pointing at the external
-    file-storage service that holds the bytes.
+    """Surface chat attachments to the LLM inline in the user turn, the
+    way vendor chat clients render attachments: one bracketed line per file
+    with filename + storage URL. The model treats it as part of the user's
+    intent and passes the URL to whichever tool accepts a URL input.
 
-    Raw bytes are pushed to the storage service at file-upload time and the
-    returned URL is persisted on ``file.storage_url``. We just read it here
-    — no per-turn upload, no signing, no map threading. Files without a
-    persisted URL (storage unconfigured at upload time, upload failed, or
-    rows predating the feature) are skipped.
+    Files without a persisted ``storage_url`` are skipped (storage
+    unconfigured at upload time, upload failed, or rows predating the
+    feature).
     """
     if not files:
         return ""
 
-    entries: list[str] = []
-    for file in files:
-        if not file.storage_url:
-            continue
-        entries.append(
-            json.dumps(
-                {
-                    "filename": file.name,
-                    "mimetype": file.mimetype,
-                    "size_bytes": file.size,
-                    "url": file.storage_url,
-                }
-            )
-        )
-
+    entries = [
+        f"[Attached: {file.name} → {file.storage_url}]"
+        for file in files
+        if file.storage_url
+    ]
     if not entries:
         return ""
 
-    files_block = "\n".join(entries)
+    # The bracket lines alone don't reliably trigger tool use — models read
+    # them as "here's a reference" rather than "go fetch this." A short
+    # trailing nudge ties the URL to tool invocation without bloating the
+    # turn the way the old verbose preamble did.
     return (
-        "The user has attached files to this chat. Each entry below includes "
-        "a URL that the file-storage service exposes for that file — pass the "
-        "URL to whichever tool accepts a URL input (or follow it directly "
-        "when your tools support it) to read the file. The file's raw "
-        "content is NOT in this prompt.\n\n"
-        f"{files_block}"
+        "\n".join(entries)
+        + "\n(Use an available tool that accepts a URL to read attached files.)"
     )
 
 

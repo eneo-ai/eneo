@@ -21,7 +21,9 @@ class Files(BasePublic):
     file_type: Mapped[str] = mapped_column(server_default=FileType.TEXT)
     transcription: Mapped[Optional[str]] = mapped_column()
     # URL returned by the external file-storage service (today
-    # eneo-knowledge) when raw bytes were pushed there at upload time.
+    # eneo-knowledge's temporary file-upload feature) when raw bytes
+    # were pushed there at upload time. The URL is just a generic
+    # hosting URL — the MCP later ingests it like any other URL.
     # NULL when storage is unconfigured or the upload failed.
     storage_url: Mapped[Optional[str]] = mapped_column(Text)
 
