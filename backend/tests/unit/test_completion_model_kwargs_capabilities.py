@@ -383,6 +383,8 @@ def test_public_completion_model_preserves_litellm_capabilities():
         max_input_tokens=128000,
         max_output_tokens=4096,
         is_deprecated=False,
+        is_effectively_deprecated=False,
+        litellm_deprecation_date=None,
         nr_billion_parameters=None,
         hf_link=None,
         stability=None,
