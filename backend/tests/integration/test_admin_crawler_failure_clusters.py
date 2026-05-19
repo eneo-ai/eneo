@@ -183,6 +183,7 @@ async def test_admin_crawler_failure_clusters_group_failures_with_attribution(
             pages_crawled=2,
             files_downloaded=1,
             pages_failed=1,
+            terminal_source=CrawlTerminalSource.WATCHDOG,
         )
         latest_job = await _create_job(
             session,
@@ -200,6 +201,7 @@ async def test_admin_crawler_failure_clusters_group_failures_with_attribution(
             pages_crawled=3,
             files_downloaded=2,
             files_failed=1,
+            terminal_source=CrawlTerminalSource.WATCHDOG,
         )
         empty_output_job = await _create_job(
             session,
