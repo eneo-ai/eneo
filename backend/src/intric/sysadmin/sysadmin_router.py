@@ -1369,17 +1369,22 @@ async def delete_embedding_model(
 
     async with session.begin():
         if not force:
-            usage_counts = await session.execute(
-                sa.select(
-                    sa.func.count().filter(CollectionsTable.embedding_model_id == id),
-                    sa.func.count().filter(Websites.embedding_model_id == id),
-                    sa.func.count().filter(
-                        IntegrationKnowledge.embedding_model_id == id
-                    ),
+            # Three separate counts — combining them in one SELECT pulls all three
+            # tables into the FROM clause, producing a cartesian product.
+            collections_count = await session.scalar(
+                sa.select(sa.func.count()).where(
+                    CollectionsTable.embedding_model_id == id
                 )
             )
-            collections_count, websites_count, integrations_count = usage_counts.one()
-            if collections_count > 0 or websites_count > 0 or integrations_count > 0:
+            websites_count = await session.scalar(
+                sa.select(sa.func.count()).where(Websites.embedding_model_id == id)
+            )
+            integrations_count = await session.scalar(
+                sa.select(sa.func.count()).where(
+                    IntegrationKnowledge.embedding_model_id == id
+                )
+            )
+            if collections_count or websites_count or integrations_count:
                 raise BadRequestException("MODEL_IN_USE")
 
         repo = AdminEmbeddingModelsService(session=session)

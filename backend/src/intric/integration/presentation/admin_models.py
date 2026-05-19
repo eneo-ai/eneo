@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 def _empty_uuid_list() -> list[UUID]:
@@ -43,17 +43,17 @@ class TenantSharePointAppPublic(BaseModel):
     id: UUID
     tenant_id: UUID
     client_id: str
-    client_secret_masked: str = Field(  # type: ignore[call-overload]
+    client_secret_masked: str = Field(
         ...,
         description="Masked client secret (last 4 chars visible)",
-        example="********xyz789",
+        json_schema_extra={"example": "********xyz789"},
     )
     tenant_domain: str
     is_active: bool
-    auth_method: str = Field(  # type: ignore[call-overload]
+    auth_method: str = Field(
         ...,
         description="Authentication method: 'tenant_app' or 'service_account'",
-        example="service_account",
+        json_schema_extra={"example": "service_account"},
     )
     service_account_email: Optional[str] = Field(
         None,
@@ -64,8 +64,7 @@ class TenantSharePointAppPublic(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TenantAppTestResult(BaseModel):
@@ -130,8 +129,7 @@ class SharePointSubscriptionPublic(BaseModel):
     )
     owner_type: str = Field(..., description="Type of owner: 'user' or 'organization'")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SubscriptionRenewalResult(BaseModel):
