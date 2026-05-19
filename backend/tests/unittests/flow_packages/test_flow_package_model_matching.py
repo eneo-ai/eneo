@@ -49,7 +49,9 @@ def test_exact_model_identity_can_be_auto_selected_when_policy_is_allowed() -> N
     )
 
     assert resolution.status is FlowPackageImportPlanStatus.RESOLVED_EXACT
+    assert resolution.install_blocks is False
     assert resolution.publish_blocks is False
+    assert resolution.selection_required_for_install is True
     assert resolution.auto_select_allowed is True
     assert resolution.policy_status is FlowPackagePolicyStatus.ALLOWED
     assert resolution.suggestions == [candidate]
@@ -75,7 +77,9 @@ def test_publisher_suggested_model_requires_human_confirmation() -> None:
     )
 
     assert resolution.status is FlowPackageImportPlanStatus.REQUIRES_HUMAN_CONFIRMATION
+    assert resolution.install_blocks is False
     assert resolution.publish_blocks is True
+    assert resolution.selection_required_for_install is True
     assert resolution.auto_select_allowed is False
     assert resolution.selection_warnings == []
     assert resolution.suggestions == [candidate]
@@ -99,6 +103,8 @@ def test_unknown_but_eligible_model_requires_confirmation_with_warning() -> None
     )
 
     assert resolution.status is FlowPackageImportPlanStatus.REQUIRES_HUMAN_CONFIRMATION
+    assert resolution.install_blocks is False
+    assert resolution.selection_required_for_install is True
     assert resolution.auto_select_allowed is False
     assert resolution.selection_warnings == [
         FlowPackageModelMatchIssue.MODEL_IDENTITY_NOT_PREFERRED
@@ -126,7 +132,9 @@ def test_data_sensitivity_prevents_exact_match_auto_selection() -> None:
     )
 
     assert resolution.status is FlowPackageImportPlanStatus.REQUIRES_HUMAN_CONFIRMATION
+    assert resolution.install_blocks is False
     assert resolution.publish_blocks is True
+    assert resolution.selection_required_for_install is True
     assert resolution.auto_select_allowed is False
     assert resolution.policy_status is FlowPackagePolicyStatus.UNKNOWN
 
@@ -149,7 +157,9 @@ def test_optional_eligible_model_is_never_auto_selected() -> None:
     )
 
     assert resolution.status is FlowPackageImportPlanStatus.SKIPPED_OPTIONAL
+    assert resolution.install_blocks is False
     assert resolution.publish_blocks is False
+    assert resolution.selection_required_for_install is False
     assert resolution.auto_select_allowed is False
     assert resolution.suggestions == [candidate]
 
@@ -168,7 +178,9 @@ def test_required_model_without_eligible_candidate_blocks_publish() -> None:
     )
 
     assert resolution.status is FlowPackageImportPlanStatus.UNRESOLVED_REQUIRED
+    assert resolution.install_blocks is True
     assert resolution.publish_blocks is True
+    assert resolution.selection_required_for_install is True
     assert resolution.auto_select_allowed is False
     assert resolution.suggestions == []
     assert resolution.selection_warnings == []
@@ -366,7 +378,9 @@ def test_model_resolution_rejects_invalid_auto_select_contract() -> None:
             slot_ref=_slot_ref(),
             required=True,
             status=FlowPackageImportPlanStatus.REQUIRES_HUMAN_CONFIRMATION,
+            install_blocks=False,
             publish_blocks=True,
+            selection_required_for_install=True,
             auto_select_allowed=True,
             suggestions=[],
             total_candidate_count=0,

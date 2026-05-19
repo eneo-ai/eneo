@@ -538,7 +538,7 @@
                           <Badge variant="secondary" class="h-5 font-medium">
                             {requirementKindLabel(resolution.kind)}
                           </Badge>
-                          {#if resolution.required}
+                          {#if resolution.selection_required_for_install}
                             <span
                               class="border-warning-default/40 bg-warning-dimmer/50 text-warning-stronger dark:bg-warning-dimmer/30 inline-flex h-5 items-center gap-1 rounded-full border px-1.5 text-[11px] font-medium"
                             >
@@ -547,6 +547,12 @@
                                 class="bg-warning-stronger size-1.5 rounded-full"
                               ></span>
                               {m.flow_package_required()}
+                            </span>
+                          {:else if resolution.required}
+                            <span
+                              class="border-default/70 text-muted inline-flex h-5 items-center rounded-full border px-1.5 text-[11px] font-medium"
+                            >
+                              {m.flow_package_recommended_setup()}
                             </span>
                           {:else}
                             <span
@@ -601,6 +607,11 @@
                                 })}
                               {/if}
                             </span>
+                          </div>
+                        {:else if resolution.status === "manual_setup_required"}
+                          <div class="text-warning-stronger flex items-start gap-1.5 text-sm">
+                            <AlertTriangle class="mt-0.5 size-4 shrink-0" />
+                            <span>{m.flow_package_manual_setup_required()}</span>
                           </div>
                         {:else if resolution.suggestions.length === 0}
                           <div class="text-destructive flex items-start gap-1.5 text-sm">

@@ -13035,6 +13035,8 @@ export interface components {
         | components["schemas"]["FlowPackageMcpToolDependencyResolution"]
         | components["schemas"]["FlowPackageTemplateAssetDependencyResolution"]
       )[];
+      /** Can Install As Draft */
+      readonly can_install_as_draft: boolean;
       /** Can Publish After Import */
       readonly can_publish_after_import: boolean;
     };
@@ -13045,6 +13047,7 @@ export interface components {
     FlowPackageImportPlanStatus:
       | "resolved_exact"
       | "requires_human_confirmation"
+      | "manual_setup_required"
       | "unresolved_required"
       | "skipped_optional"
       | "unsupported";
@@ -13190,8 +13193,12 @@ export interface components {
       used_by_steps?: string[];
       data_sensitivity?: components["schemas"]["FlowPackageRequirementDataSensitivity"] | null;
       status: components["schemas"]["FlowPackageImportPlanStatus"];
+      /** Install Blocks */
+      install_blocks: boolean;
       /** Publish Blocks */
       publish_blocks: boolean;
+      /** Selection Required For Install */
+      selection_required_for_install: boolean;
       /** Auto Select Allowed */
       auto_select_allowed: boolean;
       /** Suggestions */
@@ -13238,8 +13245,12 @@ export interface components {
       used_by_steps?: string[];
       data_sensitivity?: components["schemas"]["FlowPackageRequirementDataSensitivity"] | null;
       status: components["schemas"]["FlowPackageImportPlanStatus"];
+      /** Install Blocks */
+      install_blocks: boolean;
       /** Publish Blocks */
       publish_blocks: boolean;
+      /** Selection Required For Install */
+      selection_required_for_install: boolean;
       /** Auto Select Allowed */
       auto_select_allowed: boolean;
       /** Suggestions */
@@ -13310,8 +13321,12 @@ export interface components {
       used_by_steps?: string[];
       data_sensitivity?: components["schemas"]["FlowPackageRequirementDataSensitivity"] | null;
       status: components["schemas"]["FlowPackageImportPlanStatus"];
+      /** Install Blocks */
+      install_blocks: boolean;
       /** Publish Blocks */
       publish_blocks: boolean;
+      /** Selection Required For Install */
+      selection_required_for_install: boolean;
       /** Auto Select Allowed */
       auto_select_allowed: boolean;
       /** Suggestions */
@@ -13422,8 +13437,12 @@ export interface components {
       used_by_steps?: string[];
       data_sensitivity?: components["schemas"]["FlowPackageRequirementDataSensitivity"] | null;
       status: components["schemas"]["FlowPackageImportPlanStatus"];
+      /** Install Blocks */
+      install_blocks: boolean;
       /** Publish Blocks */
       publish_blocks: boolean;
+      /** Selection Required For Install */
+      selection_required_for_install: boolean;
       /** Auto Select Allowed */
       auto_select_allowed: boolean;
       /** Suggestions */

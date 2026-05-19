@@ -139,7 +139,17 @@ export function getFlowPackageImportReadiness(
       continue;
     }
 
-    if (resolution.required) {
+    if (selectedCandidateKey && !selectedCandidate) {
+      blockingReasons.push({
+        code: "selected_resource_unavailable",
+        slotKey,
+        slotLabel: slotRef.label,
+        kind: resolution.kind
+      });
+      continue;
+    }
+
+    if (resolution.selection_required_for_install) {
       totalRequiredCount += 1;
       if (selectedCandidate) {
         selectedRequiredCount += 1;
@@ -155,9 +165,12 @@ export function getFlowPackageImportReadiness(
       continue;
     }
 
-    if (selectedCandidateKey && !selectedCandidate) {
+    if (resolution.install_blocks) {
       blockingReasons.push({
-        code: "selected_resource_unavailable",
+        code:
+          resolution.kind === "template_asset"
+            ? "template_asset_unsupported"
+            : "dependency_unsupported",
         slotKey,
         slotLabel: slotRef.label,
         kind: resolution.kind

@@ -35,6 +35,7 @@ MAX_IMPORT_PLAN_SUGGESTIONS: Final[int] = 10
 class FlowPackageImportPlanStatus(StrEnum):
     RESOLVED_EXACT = "resolved_exact"
     REQUIRES_HUMAN_CONFIRMATION = "requires_human_confirmation"
+    MANUAL_SETUP_REQUIRED = "manual_setup_required"
     UNRESOLVED_REQUIRED = "unresolved_required"
     SKIPPED_OPTIONAL = "skipped_optional"
     # The importer can inspect the package, but V1 has no mapping/install path for this dependency kind.
@@ -133,7 +134,9 @@ class FlowPackageDependencyResolutionBase(
     used_by_steps: list[str] = Field(default_factory=list)
     data_sensitivity: FlowPackageRequirementDataSensitivity | None = None
     status: FlowPackageImportPlanStatus
+    install_blocks: bool
     publish_blocks: bool
+    selection_required_for_install: bool
     auto_select_allowed: bool
     suggestions: list[SuggestionCandidateT]
     total_candidate_count: int = Field(ge=0)
@@ -177,6 +180,7 @@ class FlowPackageModelDependencyResolution(
         if self.auto_select_allowed and (
             self.status is not FlowPackageImportPlanStatus.RESOLVED_EXACT
             or self.policy_status is not FlowPackagePolicyStatus.ALLOWED
+            or self.install_blocks
             or self.publish_blocks
             or self.selection_warnings
         ):
@@ -281,6 +285,13 @@ class FlowPackageImportPlan(BaseModel):
     dependency_resolutions: list[FlowPackageDependencyResolutionEntry] = Field(
         default_factory=_empty_dependency_resolutions
     )
+
+    @computed_field
+    @property
+    def can_install_as_draft(self) -> bool:
+        return all(
+            not resolution.install_blocks for resolution in self.dependency_resolutions
+        )
 
     @computed_field
     @property

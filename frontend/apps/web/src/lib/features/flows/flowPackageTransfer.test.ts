@@ -43,21 +43,39 @@ describe("flowPackageTransfer", () => {
     ]);
   });
 
-  it("blocks import when a required dependency has no selected local resource", () => {
+  it("blocks import when an install-blocking model has no selected local resource", () => {
     const plan = flowPackageImportPlan({
+      can_install_as_draft: false,
+      can_publish_after_import: false,
       dependency_resolutions: [
         {
-          kind: "knowledge",
-          slot_ref: { kind: "knowledge", slot: "local-rules", label: "Local rules" },
+          kind: "model",
+          slot_ref: {
+            kind: "model",
+            slot: "structured-extraction",
+            label: "Structured extraction"
+          },
           required: true,
-          used_by_steps: ["compose-report"],
+          used_by_steps: ["extract-fields"],
           data_sensitivity: null,
           status: "unresolved_required",
+          install_blocks: true,
           publish_blocks: true,
+          selection_required_for_install: true,
           auto_select_allowed: false,
           suggestions: [],
           total_candidate_count: 0,
-          guidance: null
+          guidance: null,
+          model_kind: "completion_model",
+          matching_preferences: {
+            tested_with: [],
+            publisher_suggested: []
+          },
+          completion_constraints: null,
+          eligible_candidate_count: 0,
+          policy_status: "allowed",
+          selection_warnings: [],
+          rejected_candidates: []
         }
       ]
     });
@@ -68,11 +86,44 @@ describe("flowPackageTransfer", () => {
     expect(readiness.blockingReasons).toEqual([
       {
         code: "required_mapping_missing",
-        slotKey: "knowledge.local-rules",
-        slotLabel: "Local rules",
-        kind: "knowledge"
+        slotKey: "model.structured-extraction",
+        slotLabel: "Structured extraction",
+        kind: "model"
       }
     ]);
+  });
+
+  it("allows draft import when knowledge requires manual setup after import", () => {
+    const plan = flowPackageImportPlan({
+      dependency_resolutions: [
+        {
+          kind: "knowledge",
+          slot_ref: { kind: "knowledge", slot: "local-rules", label: "Local rules" },
+          required: true,
+          used_by_steps: ["compose-report"],
+          data_sensitivity: null,
+          status: "manual_setup_required",
+          install_blocks: false,
+          publish_blocks: false,
+          selection_required_for_install: false,
+          auto_select_allowed: false,
+          suggestions: [],
+          total_candidate_count: 0,
+          guidance: null
+        }
+      ]
+    });
+
+    const readiness = getFlowPackageImportReadiness(plan, {});
+
+    expect(readiness).toMatchObject({
+      canImport: true,
+      canPublishAfterImport: true,
+      selectedRequiredCount: 0,
+      totalRequiredCount: 0,
+      unresolvedRequiredCount: 0,
+      blockingReasons: []
+    });
   });
 
   it("does not preselect candidates that require human confirmation", () => {
@@ -80,11 +131,14 @@ describe("flowPackageTransfer", () => {
     if (!modelResolution) throw new Error("Expected sample model resolution.");
     const plan = flowPackageImportPlan({
       can_publish_after_import: false,
+      can_install_as_draft: true,
       dependency_resolutions: [
         {
           ...modelResolution,
           status: "requires_human_confirmation",
+          install_blocks: false,
           publish_blocks: true,
+          selection_required_for_install: true,
           auto_select_allowed: false
         }
       ]
@@ -113,7 +167,9 @@ describe("flowPackageTransfer", () => {
           used_by_steps: ["render-report"],
           data_sensitivity: null,
           status: "unsupported",
+          install_blocks: true,
           publish_blocks: true,
+          selection_required_for_install: false,
           auto_select_allowed: false,
           suggestions: [],
           total_candidate_count: 0,
@@ -229,6 +285,7 @@ function flowPackageImportPlan(
       }
     },
     can_publish_after_import: true,
+    can_install_as_draft: true,
     dependency_resolutions: [
       {
         kind: "model",
@@ -243,7 +300,9 @@ function flowPackageImportPlan(
           notes: null
         },
         status: "resolved_exact",
+        install_blocks: false,
         publish_blocks: false,
+        selection_required_for_install: true,
         auto_select_allowed: true,
         suggestions: [
           {
@@ -279,7 +338,9 @@ function flowPackageImportPlan(
         used_by_steps: ["compose-report"],
         data_sensitivity: null,
         status: "skipped_optional",
+        install_blocks: false,
         publish_blocks: false,
+        selection_required_for_install: false,
         auto_select_allowed: false,
         suggestions: [
           {

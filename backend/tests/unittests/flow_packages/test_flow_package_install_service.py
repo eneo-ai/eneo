@@ -21,6 +21,7 @@ from intric.flow_packages.domain.flow_package_errors import (
     FlowPackageValidationError,
 )
 from intric.flow_packages.domain.flow_package_import_plan import (
+    FlowPackageLocalCandidate,
     FlowPackageModelCandidate,
 )
 from intric.flow_packages.domain.flow_package_manifest import (
@@ -29,6 +30,7 @@ from intric.flow_packages.domain.flow_package_manifest import (
 from intric.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
 from intric.flow_packages.domain.flow_package_requirements import (
     FlowPackageCompletionModelConstraints,
+    FlowPackageKnowledgeRequirement,
     FlowPackageMcpToolRequirement,
     FlowPackageModelIdentity,
     FlowPackageModelKind,
@@ -111,6 +113,97 @@ async def test_install_rejects_missing_required_model_before_creating_flow() -> 
     )
     assert exc_info.value.context["slot_ref"] == "model.structured"
     service.create_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_install_allows_unbound_knowledge_without_creating_dangling_refs() -> (
+    None
+):
+    flow_id = uuid4()
+    assistant_id = uuid4()
+    model_id = uuid4()
+    model_binding = _binding(
+        slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
+        local_kind=LocalResourceKind.COMPLETION_MODEL,
+        local_id=model_id,
+    )
+    knowledge_slot = _slot_ref(ResourceSlotKind.KNOWLEDGE, "local-rules")
+    service = _flow_service(flow_id=flow_id, assistant_id=assistant_id)
+
+    result = await FlowPackageInstallService().install_as_draft(
+        envelope=_envelope(
+            requirements=[
+                FlowPackageModelRequirement(
+                    slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
+                ),
+                FlowPackageKnowledgeRequirement(slot_ref=knowledge_slot),
+            ],
+            assistant=AssistantSpec(
+                instructions="Use local guidance.",
+                model_ref="model.structured",
+                knowledge_refs=[knowledge_slot.ref],
+            ),
+        ),
+        flow_service=service,
+        space_id=uuid4(),
+        selected_bindings=(model_binding,),
+        candidates=_candidates(models=[_model_candidate(model_id)]),
+    )
+
+    assert result.resource_bindings_count == 1
+    update = service.update_flow_assistant.await_args.kwargs["update"]
+    assert update.groups == []
+    replace_kwargs = service.replace_resource_bindings.await_args.kwargs
+    assert replace_kwargs["bindings"] == (model_binding,)
+
+
+@pytest.mark.asyncio
+async def test_install_preserves_selected_knowledge_binding() -> None:
+    flow_id = uuid4()
+    assistant_id = uuid4()
+    model_id = uuid4()
+    knowledge_id = uuid4()
+    model_binding = _binding(
+        slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
+        local_kind=LocalResourceKind.COMPLETION_MODEL,
+        local_id=model_id,
+    )
+    knowledge_slot = _slot_ref(ResourceSlotKind.KNOWLEDGE, "local-rules")
+    knowledge_binding = _binding(
+        slot_ref=knowledge_slot,
+        local_kind=LocalResourceKind.COLLECTION,
+        local_id=knowledge_id,
+    )
+    service = _flow_service(flow_id=flow_id, assistant_id=assistant_id)
+
+    result = await FlowPackageInstallService().install_as_draft(
+        envelope=_envelope(
+            requirements=[
+                FlowPackageModelRequirement(
+                    slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
+                ),
+                FlowPackageKnowledgeRequirement(slot_ref=knowledge_slot),
+            ],
+            assistant=AssistantSpec(
+                instructions="Use local guidance.",
+                model_ref="model.structured",
+                knowledge_refs=[knowledge_slot.ref],
+            ),
+        ),
+        flow_service=service,
+        space_id=uuid4(),
+        selected_bindings=(model_binding, knowledge_binding),
+        candidates=_candidates(
+            models=[_model_candidate(model_id)],
+            knowledge=[_knowledge_candidate(knowledge_id)],
+        ),
+    )
+
+    assert result.resource_bindings_count == 2
+    update = service.update_flow_assistant.await_args.kwargs["update"]
+    assert update.groups == [knowledge_id]
+    replace_kwargs = service.replace_resource_bindings.await_args.kwargs
+    assert replace_kwargs["bindings"] == (model_binding, knowledge_binding)
 
 
 @pytest.mark.asyncio
@@ -562,9 +655,19 @@ def _model_candidate(
 def _candidates(
     *,
     models: list[FlowPackageModelCandidate] | None = None,
+    knowledge: list[FlowPackageLocalCandidate] | None = None,
 ) -> FlowPackageImportPlannerCandidates:
     return FlowPackageImportPlannerCandidates(
         models=models or [],
+        knowledge=knowledge or [],
+    )
+
+
+def _knowledge_candidate(local_id: UUID) -> FlowPackageLocalCandidate:
+    return FlowPackageLocalCandidate(
+        local_kind=LocalResourceKind.COLLECTION,
+        local_id=local_id,
+        label="Local Rules",
     )
 
 

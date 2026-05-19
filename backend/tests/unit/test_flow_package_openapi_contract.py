@@ -316,14 +316,11 @@ def test_openapi_flow_package_response_schemas_are_public_contracts(
         "requirements_count",
         "requirements_by_kind",
     }
-    assert "can_publish_after_import" in plan_schema.get("properties", {})
-    assert "can_publish_after_import" in plan_schema.get("required", [])
-    assert (
-        plan_schema.get("properties", {})
-        .get("can_publish_after_import", {})
-        .get("readOnly")
-        is True
-    )
+    plan_properties = plan_schema.get("properties", {})
+    for computed_plan_field in ("can_install_as_draft", "can_publish_after_import"):
+        assert computed_plan_field in plan_properties
+        assert computed_plan_field in plan_schema.get("required", [])
+        assert plan_properties.get(computed_plan_field, {}).get("readOnly") is True
 
     assert import_schema.get("additionalProperties") is False
     assert set(import_schema.get("required", [])) == {
@@ -340,8 +337,13 @@ def test_openapi_flow_package_response_schemas_are_public_contracts(
     status_schema = schemas.get("FlowPackageImportPlanStatus", {})
     status_values = set(status_schema.get("enum", []))
     assert "resolved_compatible" not in status_values
+    assert "manual_setup_required" in status_values
     assert "unsupported" in status_values
     model_resolution_schema = schemas.get("FlowPackageModelDependencyResolution", {})
+    assert "install_blocks" in model_resolution_schema.get("required", [])
+    assert "selection_required_for_install" in model_resolution_schema.get(
+        "required", []
+    )
     assert "auto_select_allowed" in model_resolution_schema.get("required", [])
     assert "policy_status" in model_resolution_schema.get("required", [])
 

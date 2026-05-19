@@ -67,9 +67,12 @@ def test_planner_returns_unresolved_required_when_no_matching_model_exists() -> 
     assert len(plan.dependency_resolutions) == 1
     resolution = plan.dependency_resolutions[0]
     assert resolution.status is FlowPackageImportPlanStatus.UNRESOLVED_REQUIRED
+    assert resolution.install_blocks is True
     assert resolution.publish_blocks is True
+    assert resolution.selection_required_for_install is True
     assert resolution.auto_select_allowed is False
     assert resolution.suggestions == []
+    assert plan.can_install_as_draft is False
     assert plan.can_publish_after_import is False
 
 
@@ -102,7 +105,9 @@ def test_planner_resolves_required_model_when_exact_candidate_exists() -> None:
 
     resolution = plan.dependency_resolutions[0]
     assert resolution.status is FlowPackageImportPlanStatus.RESOLVED_EXACT
+    assert resolution.install_blocks is False
     assert resolution.publish_blocks is False
+    assert resolution.selection_required_for_install is True
     assert resolution.auto_select_allowed is True
     assert resolution.required is True
     assert resolution.used_by_steps == ["extract"]
@@ -113,6 +118,7 @@ def test_planner_resolves_required_model_when_exact_candidate_exists() -> None:
     assert resolution.eligible_candidate_count == 1
     assert resolution.selection_warnings == []
     assert resolution.total_candidate_count == 1
+    assert plan.can_install_as_draft is True
     assert plan.can_publish_after_import is True
 
 
@@ -139,11 +145,71 @@ def test_planner_preserves_model_rejection_telemetry() -> None:
     resolution = plan.dependency_resolutions[0]
     assert isinstance(resolution, FlowPackageModelDependencyResolution)
     assert resolution.status is FlowPackageImportPlanStatus.REQUIRES_HUMAN_CONFIRMATION
+    assert resolution.install_blocks is False
     assert resolution.publish_blocks is True
+    assert resolution.selection_required_for_install is True
     assert resolution.auto_select_allowed is False
     assert resolution.selection_warnings == [
         FlowPackageModelMatchIssue.MODEL_IDENTITY_NOT_PREFERRED
     ]
+
+
+def test_planner_marks_required_knowledge_without_candidates_as_manual_setup() -> None:
+    envelope = _envelope(
+        requirements=[
+            FlowPackageKnowledgeRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.KNOWLEDGE, "policy"),
+            )
+        ]
+    )
+
+    plan = build_flow_package_import_plan(
+        envelope,
+        candidates=FlowPackageImportPlannerCandidates(),
+    )
+
+    resolution = plan.dependency_resolutions[0]
+    assert resolution.status is FlowPackageImportPlanStatus.MANUAL_SETUP_REQUIRED
+    assert resolution.install_blocks is False
+    assert resolution.publish_blocks is False
+    assert resolution.selection_required_for_install is False
+    assert resolution.auto_select_allowed is False
+    assert resolution.suggestions == []
+    assert plan.can_install_as_draft is True
+    assert plan.can_publish_after_import is True
+
+
+def test_planner_marks_required_knowledge_with_suggestions_as_confirmation_only() -> (
+    None
+):
+    envelope = _envelope(
+        requirements=[
+            FlowPackageKnowledgeRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.KNOWLEDGE, "policy"),
+            )
+        ]
+    )
+    candidate = _candidate(
+        local_kind=LocalResourceKind.COLLECTION,
+        local_id="22222222-2222-4222-8222-222222222222",
+        label="Local policy",
+    )
+
+    plan = build_flow_package_import_plan(
+        envelope,
+        candidates=FlowPackageImportPlannerCandidates(knowledge=[candidate]),
+    )
+
+    resolution = plan.dependency_resolutions[0]
+    assert resolution.status is FlowPackageImportPlanStatus.REQUIRES_HUMAN_CONFIRMATION
+    assert resolution.install_blocks is False
+    assert resolution.publish_blocks is False
+    assert resolution.selection_required_for_install is False
+    assert resolution.auto_select_allowed is False
+    assert resolution.suggestions == [candidate]
+    assert resolution.total_candidate_count == 1
+    assert plan.can_install_as_draft is True
+    assert plan.can_publish_after_import is True
 
 
 def test_planner_skips_optional_requirement_without_candidates() -> None:
@@ -163,38 +229,12 @@ def test_planner_skips_optional_requirement_without_candidates() -> None:
 
     resolution = plan.dependency_resolutions[0]
     assert resolution.status is FlowPackageImportPlanStatus.SKIPPED_OPTIONAL
+    assert resolution.install_blocks is False
     assert resolution.publish_blocks is False
+    assert resolution.selection_required_for_install is False
     assert resolution.auto_select_allowed is False
     assert resolution.suggestions == []
-    assert plan.can_publish_after_import is True
-
-
-def test_planner_skips_optional_requirement_with_suggestions() -> None:
-    envelope = _envelope(
-        requirements=[
-            FlowPackageKnowledgeRequirement(
-                slot_ref=_slot_ref(ResourceSlotKind.KNOWLEDGE, "policy"),
-                required=False,
-            )
-        ]
-    )
-    candidate = _candidate(
-        local_kind=LocalResourceKind.COLLECTION,
-        local_id="22222222-2222-4222-8222-222222222222",
-        label="Local policy",
-    )
-
-    plan = build_flow_package_import_plan(
-        envelope,
-        candidates=FlowPackageImportPlannerCandidates(knowledge=[candidate]),
-    )
-
-    resolution = plan.dependency_resolutions[0]
-    assert resolution.status is FlowPackageImportPlanStatus.SKIPPED_OPTIONAL
-    assert resolution.publish_blocks is False
-    assert resolution.auto_select_allowed is False
-    assert resolution.suggestions == [candidate]
-    assert resolution.total_candidate_count == 1
+    assert plan.can_install_as_draft is True
     assert plan.can_publish_after_import is True
 
 
@@ -214,7 +254,9 @@ def test_planner_marks_mcp_requirements_as_manual_setup_unsupported() -> None:
 
     resolution = plan.dependency_resolutions[0]
     assert resolution.status is FlowPackageImportPlanStatus.UNSUPPORTED
+    assert resolution.install_blocks is True
     assert resolution.publish_blocks is True
+    assert resolution.selection_required_for_install is False
     assert resolution.auto_select_allowed is False
     assert resolution.suggestions == []
 
@@ -235,7 +277,9 @@ def test_planner_marks_template_assets_as_unsupported_until_installer_exists() -
 
     resolution = plan.dependency_resolutions[0]
     assert resolution.status is FlowPackageImportPlanStatus.UNSUPPORTED
+    assert resolution.install_blocks is True
     assert resolution.publish_blocks is True
+    assert resolution.selection_required_for_install is False
     assert resolution.auto_select_allowed is False
     assert resolution.suggestions == []
 
@@ -352,6 +396,7 @@ def test_planner_summary_counts_requirements_by_kind() -> None:
         FlowPackageRequirementKind.MODEL: 1,
         FlowPackageRequirementKind.KNOWLEDGE: 2,
     }
+    assert plan.can_install_as_draft is False
 
 
 def test_candidate_bucket_rejects_wrong_non_model_local_resource_kind() -> None:

@@ -31,11 +31,12 @@ from intric.flows.application.flow_draft_materialization_executor import (
     FlowDraftMaterializer,
 )
 from intric.flows.application.flow_service import FlowService
-from intric.flows.flow_authoring_spec import AssistantSpec, FlowDraftSpecCore
+from intric.flows.flow_authoring_spec import AssistantSpec, FlowDraftSpecCore, StepSpec
 from intric.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
     LocalResourceKind,
+    ResourceSlotKind,
     ResourceSlotRef,
     index_local_resource_bindings,
 )
@@ -78,8 +79,12 @@ class FlowPackageInstallService:
             selected_bindings=selected_bindings,
             candidates=candidates,
         )
+        install_spec = _spec_with_unbound_knowledge_refs_removed(
+            spec=envelope.spec,
+            selected_slot_refs=selection.selected_slot_refs,
+        )
         changeset = compile_flow_draft_changeset(
-            envelope.spec,
+            install_spec,
             current_flow=None,
             default_transcription_model_id=default_transcription_model_id,
         )
@@ -133,8 +138,10 @@ def validate_flow_package_install_selection(
         candidates=candidates,
     )
 
-    required_slot_refs = (
-        _required_requirement_slot_refs(envelope) | referenced_slot_refs
+    required_slot_refs = _install_required_slot_refs(
+        envelope=envelope,
+        referenced_slot_refs=referenced_slot_refs,
+        declared_slot_refs=declared_slot_refs,
     )
     _reject_missing_required_bindings(
         required_slot_refs=required_slot_refs,
@@ -178,6 +185,41 @@ def _assistant_slot_refs(assistant: AssistantSpec) -> tuple[str, ...]:
     refs.extend(assistant.mcp_server_refs)
     refs.extend(assistant.mcp_tool_refs)
     return tuple(refs)
+
+
+def _spec_with_unbound_knowledge_refs_removed(
+    *,
+    spec: FlowDraftSpecCore,
+    selected_slot_refs: frozenset[str],
+) -> FlowDraftSpecCore:
+    """Remove setup-only knowledge slots that the importer did not bind locally."""
+
+    updated_steps: list[StepSpec] = []
+    changed = False
+    for step in spec.steps:
+        selected_knowledge_refs = [
+            ref
+            for ref in step.assistant_spec.knowledge_refs
+            if ref in selected_slot_refs
+        ]
+        if selected_knowledge_refs == step.assistant_spec.knowledge_refs:
+            updated_steps.append(step)
+            continue
+
+        changed = True
+        updated_steps.append(
+            step.model_copy(
+                update={
+                    "assistant_spec": step.assistant_spec.model_copy(
+                        update={"knowledge_refs": selected_knowledge_refs}
+                    )
+                }
+            )
+        )
+
+    if not changed:
+        return spec
+    return spec.model_copy(update={"steps": updated_steps})
 
 
 def _reject_mcp_setup_requirements(envelope: FlowPackageEnvelope) -> None:
@@ -328,12 +370,25 @@ def _iter_candidates(
     yield from candidates.template_assets
 
 
-def _required_requirement_slot_refs(envelope: FlowPackageEnvelope) -> frozenset[str]:
-    return frozenset(
+def _install_required_slot_refs(
+    *,
+    envelope: FlowPackageEnvelope,
+    referenced_slot_refs: frozenset[str],
+    declared_slot_refs: dict[str, ResourceSlotRef],
+) -> frozenset[str]:
+    required_model_requirements = {
         requirement.slot_ref.ref
         for requirement in envelope.requirements.requirements
-        if requirement.required
-    )
+        if isinstance(requirement, FlowPackageModelRequirement) and requirement.required
+    }
+    # The install validator rejects undeclared refs before this helper, so every
+    # referenced slot can be classified by its declared portable slot kind here.
+    referenced_model_slots = {
+        ref
+        for ref in referenced_slot_refs
+        if declared_slot_refs[ref].kind is ResourceSlotKind.MODEL
+    }
+    return frozenset(required_model_requirements | referenced_model_slots)
 
 
 def _reject_missing_required_bindings(

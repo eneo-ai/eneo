@@ -46,7 +46,9 @@ class _ModelCandidateEvaluation:
 @dataclass(frozen=True)
 class _ModelResolutionOutcome:
     status: FlowPackageImportPlanStatus
+    install_blocks: bool
     publish_blocks: bool
+    selection_required_for_install: bool
     auto_select_allowed: bool
     suggestions: list[FlowPackageModelCandidate]
     selection_warnings: list[FlowPackageModelMatchIssue]
@@ -101,7 +103,9 @@ def resolve_model_requirement(
         matching_preferences=requirement.matching_preferences,
         completion_constraints=requirement.completion_constraints,
         status=outcome.status,
+        install_blocks=outcome.install_blocks,
         publish_blocks=outcome.publish_blocks,
+        selection_required_for_install=outcome.selection_required_for_install,
         auto_select_allowed=outcome.auto_select_allowed,
         suggestions=outcome.suggestions,
         total_candidate_count=len(candidates),
@@ -203,14 +207,18 @@ def _resolution_outcome(
         if required:
             return _ModelResolutionOutcome(
                 status=FlowPackageImportPlanStatus.UNRESOLVED_REQUIRED,
+                install_blocks=True,
                 publish_blocks=True,
+                selection_required_for_install=True,
                 auto_select_allowed=False,
                 suggestions=[],
                 selection_warnings=[],
             )
         return _ModelResolutionOutcome(
             status=FlowPackageImportPlanStatus.SKIPPED_OPTIONAL,
+            install_blocks=False,
             publish_blocks=False,
+            selection_required_for_install=False,
             auto_select_allowed=False,
             suggestions=[],
             selection_warnings=[],
@@ -223,7 +231,9 @@ def _resolution_outcome(
     if not required:
         return _ModelResolutionOutcome(
             status=FlowPackageImportPlanStatus.SKIPPED_OPTIONAL,
+            install_blocks=False,
             publish_blocks=False,
+            selection_required_for_install=False,
             auto_select_allowed=False,
             suggestions=suggestions,
             selection_warnings=[],
@@ -240,7 +250,9 @@ def _resolution_outcome(
             if is_exact_allowed
             else FlowPackageImportPlanStatus.REQUIRES_HUMAN_CONFIRMATION
         ),
+        install_blocks=False,
         publish_blocks=not is_exact_allowed,
+        selection_required_for_install=True,
         auto_select_allowed=is_exact_allowed,
         suggestions=suggestions,
         selection_warnings=list(selected_evaluation.selection_warnings),

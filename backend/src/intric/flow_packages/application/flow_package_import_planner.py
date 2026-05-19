@@ -140,7 +140,7 @@ def _resolve_requirement(
                 candidates=tuple(candidates.models),
             )
         case FlowPackageKnowledgeRequirement():
-            return _resolve_standard_requirement(requirement, candidates)
+            return _resolve_knowledge_requirement(requirement, candidates)
         case FlowPackageMcpToolRequirement():
             return _resolve_mcp_setup_requirement(requirement)
         case FlowPackageTemplateAssetRequirement():
@@ -149,7 +149,7 @@ def _resolve_requirement(
             assert_never(requirement)
 
 
-def _resolve_standard_requirement(
+def _resolve_knowledge_requirement(
     requirement: FlowPackageKnowledgeRequirement,
     candidates: FlowPackageImportPlannerCandidates,
 ) -> FlowPackageKnowledgeDependencyResolution:
@@ -157,7 +157,7 @@ def _resolve_standard_requirement(
     matching_candidates = candidates.for_non_model_slot_kind(slot_kind)
     total_candidate_count = len(matching_candidates)
     suggestions = list(matching_candidates[:MAX_IMPORT_PLAN_SUGGESTIONS])
-    status, publish_blocks = _resolution_status(
+    status = _knowledge_resolution_status(
         required=requirement.required,
         total_candidate_count=total_candidate_count,
     )
@@ -169,7 +169,9 @@ def _resolve_standard_requirement(
         data_sensitivity=requirement.data_sensitivity,
         guidance=requirement.guidance,
         status=status,
-        publish_blocks=publish_blocks,
+        install_blocks=False,
+        publish_blocks=False,
+        selection_required_for_install=False,
         auto_select_allowed=False,
         suggestions=suggestions,
         total_candidate_count=total_candidate_count,
@@ -187,7 +189,9 @@ def _resolve_mcp_setup_requirement(
         guidance=requirement.guidance,
         server_slot_ref=requirement.server_slot_ref,
         status=FlowPackageImportPlanStatus.UNSUPPORTED,
+        install_blocks=True,
         publish_blocks=True,
+        selection_required_for_install=False,
         auto_select_allowed=False,
         suggestions=[],
         total_candidate_count=0,
@@ -204,23 +208,25 @@ def _resolve_unsupported_template_requirement(
         data_sensitivity=requirement.data_sensitivity,
         guidance=requirement.guidance,
         status=FlowPackageImportPlanStatus.UNSUPPORTED,
+        install_blocks=True,
         publish_blocks=True,
+        selection_required_for_install=False,
         auto_select_allowed=False,
         suggestions=[],
         total_candidate_count=0,
     )
 
 
-def _resolution_status(
+def _knowledge_resolution_status(
     *,
     required: bool,
     total_candidate_count: int,
-) -> tuple[FlowPackageImportPlanStatus, bool]:
+) -> FlowPackageImportPlanStatus:
     if not required:
-        return FlowPackageImportPlanStatus.SKIPPED_OPTIONAL, False
+        return FlowPackageImportPlanStatus.SKIPPED_OPTIONAL
     if total_candidate_count == 0:
-        return FlowPackageImportPlanStatus.UNRESOLVED_REQUIRED, True
-    return FlowPackageImportPlanStatus.REQUIRES_HUMAN_CONFIRMATION, True
+        return FlowPackageImportPlanStatus.MANUAL_SETUP_REQUIRED
+    return FlowPackageImportPlanStatus.REQUIRES_HUMAN_CONFIRMATION
 
 
 def _validated_sorted_candidates(
