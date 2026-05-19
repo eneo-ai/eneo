@@ -24,7 +24,9 @@ Unless the user explicitly asks for implementation:
 - Do not modify migrations.
 - Do not add dependencies.
 - Do not run destructive commands.
-- Only write review/planning/PRD output under `docs/refactor/`.
+- Do not add temporary review, planning, goal, or PRD artifacts to repository
+  docs by default. Use `.codex/artifacts/` for local working notes unless the
+  user explicitly asks for durable project documentation.
 - If a source change seems necessary, document it as a proposed work item instead.
 
 ## Evidence standard
@@ -110,7 +112,8 @@ Avoid mixed prefixes inside an existing surface. If a translation namespace, Ope
 
 If renaming user-facing translated strings, update `sv.json` and `en.json` together and run the i18n compile command.
 
-Per-batch migration ownership lives in `docs/refactor/implementation-order.md` under "Branding And Namespace Migration Touchpoints".
+Track branding and namespace migration decisions in the implementation issue or
+durable ADR for that migration, not in temporary refactor planning files.
 
 ## Human maintainability principles
 
