@@ -82,7 +82,7 @@ async def add_tenant_integration(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.INTEGRATION_ADDED,
         entity_type=EntityType.INTEGRATION,
         entity_id=tenant_integration.id,
@@ -123,7 +123,7 @@ async def remove_tenant_integration(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.INTEGRATION_REMOVED,
         entity_type=EntityType.INTEGRATION,
         entity_id=tenant_integration_id,
@@ -228,7 +228,7 @@ async def disconnect_user_integration(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.INTEGRATION_DISCONNECTED,
         entity_type=EntityType.INTEGRATION,
         entity_id=user_integration_id,

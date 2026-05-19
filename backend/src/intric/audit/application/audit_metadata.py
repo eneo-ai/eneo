@@ -325,7 +325,7 @@ class AuditMetadata:
 
         Example:
             metadata = AuditMetadata.minimal(
-                actor_id=user.id,
+                user=user,
                 target_id=file.id,
                 extra={"size_bytes": file.size}
             )

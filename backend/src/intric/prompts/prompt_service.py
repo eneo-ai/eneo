@@ -36,11 +36,24 @@ class PromptService:
 
         return prompt
 
-    async def create_prompt(self, text: str, description: str | None = None):
+    async def create_prompt(
+        self,
+        text: str,
+        description: str | None = None,
+        owner_user_id: UUID | None = None,
+    ):
+        """Create a prompt.
+
+        ``owner_user_id`` overrides the caller's user id for the ``user_id``
+        FK. Pass the owning resource's user_id when the prompt is created as
+        a child of an existing entity (e.g. an assistant's or app's prompt
+        being edited). Required when the caller is a service key, whose
+        synthetic id has no row in ``users``.
+        """
         prompt = self.factory.create_prompt(
             text=text,
             description=description,
-            user_id=self.user.id,
+            user_id=owner_user_id if owner_user_id is not None else self.user.id,
             tenant_id=self.user.tenant_id,
         )
 

@@ -27,6 +27,7 @@ from intric.main.request_context import get_request_context
 
 if TYPE_CHECKING:
     from intric.feature_flag.feature_flag_service import FeatureFlagService
+    from intric.users.user import UserInDB
 
 logger = logging.getLogger(__name__)
 
@@ -110,15 +111,21 @@ class AuditService:
 
     async def log(
         self,
+        *,
         tenant_id: UUID,
-        actor_id: Optional[UUID],
         action: ActionType,
         entity_type: EntityType,
         entity_id: UUID,
         description: str,
         metadata: dict[str, Any],
-        outcome: Outcome = Outcome.SUCCESS,
+        # Pass `user` to derive actor_id/actor_type via audit_actor_for so
+        # service-key callers don't FK-violate audit_log.actor_id (their
+        # synthetic UUID has no users row). Sysadmin paths that act without
+        # a user keep using the explicit form with actor_type=SYSTEM.
+        user: Optional["UserInDB"] = None,
+        actor_id: Optional[UUID] = None,
         actor_type: ActorType = ActorType.USER,
+        outcome: Outcome = Outcome.SUCCESS,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
         request_id: Optional[UUID] = None,
@@ -152,6 +159,11 @@ class AuditService:
         should_log = await self._should_log_action(tenant_id, action)
         if not should_log:
             return None
+
+        if user is not None:
+            from intric.authentication.auth_models import audit_actor_for
+
+            actor_id, actor_type = audit_actor_for(user)
 
         if actor_type != ActorType.SYSTEM and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
@@ -255,15 +267,19 @@ class AuditService:
 
     async def log_async(
         self,
+        *,
         tenant_id: UUID,
-        actor_id: Optional[UUID],
         action: ActionType,
         entity_type: EntityType,
         entity_id: UUID,
         description: str,
         metadata: dict[str, Any],
-        outcome: Outcome = Outcome.SUCCESS,
+        # See `log()` for `user` semantics — derives actor_id/actor_type via
+        # audit_actor_for so service-key callers don't FK-violate.
+        user: Optional["UserInDB"] = None,
+        actor_id: Optional[UUID] = None,
         actor_type: ActorType = ActorType.USER,
+        outcome: Outcome = Outcome.SUCCESS,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
         request_id: Optional[UUID] = None,
@@ -304,6 +320,11 @@ class AuditService:
         should_log = await self._should_log_action(tenant_id, action)
         if not should_log:
             return None
+
+        if user is not None:
+            from intric.authentication.auth_models import audit_actor_for
+
+            actor_id, actor_type = audit_actor_for(user)
 
         if actor_type != ActorType.SYSTEM and actor_id is None:
             raise ValueError("actor_id required for non-system actions")

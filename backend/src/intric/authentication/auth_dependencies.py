@@ -200,6 +200,39 @@ async def require_user_identity(
         )
 
 
+async def require_user_for_creation(
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+) -> None:
+    """Reject service-key callers on resource-creation endpoints.
+
+    Service keys are automation principals: they read, update, and delete
+    existing resources via their scope, but they do not author new ones.
+    Concretely, most resource tables carry a NOT NULL ``user_id`` FK to
+    ``users.id`` — service keys resolve to a synthetic UserInDB whose id
+    has no matching row, so the INSERT would FK-violate. Beyond the FK
+    mechanics, "service account owns this resource" has no product meaning
+    today; ownership of authored resources belongs to humans.
+
+    Apply this guard to every POST endpoint that creates a new resource
+    whose ownership column is ``user_id``. Bearer-token users and
+    user-owned API keys pass.
+    """
+    from intric.authentication.auth_models import is_service_api_key
+
+    if is_service_api_key(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "service_key_cannot_create_resources",
+                "message": (
+                    "Service API keys cannot create new resources. "
+                    "Create the resource with a user account; the service "
+                    "key can then operate on it via its scope."
+                ),
+            },
+        )
+
+
 ASSISTANTS_READ_OVERRIDES: frozenset[str] = frozenset(
     {
         "ask_assistant",

@@ -322,7 +322,7 @@ async def update_app(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.APP_UPDATED,
         entity_type=EntityType.APP,
         entity_id=id,
@@ -378,7 +378,7 @@ async def delete_app(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.APP_DELETED,
         entity_type=EntityType.APP,
         entity_id=id,
@@ -432,7 +432,7 @@ async def run_app(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.APP_EXECUTED,
         entity_type=EntityType.APP,
         entity_id=id,
@@ -524,7 +524,7 @@ async def publish_app(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.APP_PUBLISHED,
         entity_type=EntityType.APP,
         entity_id=id,
