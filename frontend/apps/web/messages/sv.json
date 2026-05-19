@@ -2007,6 +2007,7 @@
   "failed_to_create_model": "Misslyckades att skapa modell",
   "model_created_success": "Modell skapad",
   "models_created_success": "{count} modeller skapade",
+  "models_partially_created": "Skapade {succeeded} av {total} modeller. Misslyckades: {failed}. Åtgärda felen och försök igen.",
   "failed_to_create_embedding_model": "Misslyckades att skapa inbäddningsmodell",
   "failed_to_create_transcription_model": "Misslyckades att skapa transkriptionsmodell",
   "edit_model": "Redigera modell",

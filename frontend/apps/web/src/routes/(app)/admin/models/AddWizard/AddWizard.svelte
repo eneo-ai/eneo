@@ -317,17 +317,56 @@
   }
 
   async function createModels(models: WizardModelDraft[], providerId: string) {
+    // Track per-model outcomes so a mid-loop failure does not leave the
+    // already-created rows hidden behind a dialog the user has to close
+    // and reopen. Previously a single throw aborted the loop, the toast
+    // never fired, and wizardData.models still listed the succeeded rows
+    // — re-submitting then hit duplicate-name errors on the backend.
+    const succeeded: WizardModelDraft[] = [];
+    const failures: { model: WizardModelDraft; error: unknown }[] = [];
+
     for (const model of models) {
-      await createOneModel(model, providerId);
+      try {
+        await createOneModel(model, providerId);
+        succeeded.push(model);
+      } catch (err) {
+        failures.push({ model, error: err });
+      }
     }
 
-    toast.success(
-      models.length === 1
-        ? m.model_created_success()
-        : m.models_created_success({ count: models.length })
-    );
+    // Drop the succeeded entries from the wizard list so a retry only
+    // resubmits what actually failed. wizardData.models keeps reference
+    // identity with the source array, so filter on identity.
+    if (succeeded.length > 0) {
+      wizardData.models = wizardData.models.filter((m) => !succeeded.includes(m));
+    }
 
-    await reloadAndClose();
+    if (failures.length === 0) {
+      toast.success(
+        models.length === 1
+          ? m.model_created_success()
+          : m.models_created_success({ count: models.length })
+      );
+      await reloadAndClose();
+      return;
+    }
+
+    if (succeeded.length === 0) {
+      // All failed — propagate the first error so the dialog's catch
+      // sets the error banner and the dialog stays open.
+      throw failures[0].error;
+    }
+
+    // Partial: surface a warning that names the failing models and
+    // leave the dialog open with only the failed rows still queued.
+    const failedNames = failures.map((f) => f.model.name).join(", ");
+    toast.warning(
+      m.models_partially_created({
+        succeeded: succeeded.length,
+        total: models.length,
+        failed: failedNames
+      })
+    );
   }
 
   async function createOneModel(

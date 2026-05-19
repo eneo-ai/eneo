@@ -1973,6 +1973,7 @@
   "failed_to_create_model": "Failed to create model",
   "model_created_success": "Model created successfully",
   "models_created_success": "{count} models created successfully",
+  "models_partially_created": "Created {succeeded} of {total} models. Failed: {failed}. Resolve the errors and try again.",
   "failed_to_create_embedding_model": "Failed to create embedding model",
   "failed_to_create_transcription_model": "Failed to create transcription model",
   "edit_model": "Edit model",
