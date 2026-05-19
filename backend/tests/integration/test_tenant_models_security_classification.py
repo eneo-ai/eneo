@@ -78,7 +78,6 @@ async def tenant_classification(db_container, default_user):
         )
         session.add(classification)
         await session.flush()
-        await session.commit()
         return classification.id
 
 
@@ -107,7 +106,6 @@ async def other_tenant_classification(db_container):
         )
         session.add(classification)
         await session.flush()
-        await session.commit()
         return classification.id
 
 
@@ -726,7 +724,6 @@ async def test_update_completion_in_other_tenant_404(
         )
         session.add(foreign_model)
         await session.flush()
-        await session.commit()
         foreign_model_id = foreign_model.id
 
     response = await client.put(
