@@ -196,7 +196,11 @@ class CompletionModelMigrationService:
             )
 
         except ValidationException as ve:
-            self.logger.info(
+            # WARNING (not INFO): a rejected migration represents an admin
+            # action that the system blocked — operators set alarm rules on
+            # this level. The earlier demotion to INFO buried it in normal
+            # success-step logs (MIGRATION_DEBUG [1/7..7/7]).
+            self.logger.warning(
                 f"Migration validation rejected: {ve}",
                 extra={
                     "from_model_id": str(from_model_id),
