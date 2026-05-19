@@ -182,13 +182,9 @@ def find_stored_http_config(flow: Any, direction: str) -> HttpAuthoredConfig | N
     return None
 
 
-_find_stored_http_config = find_stored_http_config
-
-
 __all__ = [
     "HttpTestRequest",
     "HttpTestResponse",
-    "_find_stored_http_config",
     "find_stored_http_config",
     "execute_http_test",
     "router",

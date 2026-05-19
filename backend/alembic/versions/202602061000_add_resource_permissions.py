@@ -6,9 +6,8 @@ Create Date: 2026-02-06 10:00:00.000000
 """
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB
-
 from alembic import op
+from sqlalchemy.dialects.postgresql import JSONB
 
 # revision identifiers, used by Alembic
 revision = "202602061000"

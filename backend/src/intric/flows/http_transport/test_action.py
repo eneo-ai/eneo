@@ -39,16 +39,8 @@ async def execute_http_test(
     send_http_request: Callable[..., Awaitable[httpx.Response]],
     max_timeout: float = 120.0,
 ) -> HttpTestResult:
-    """Execute a draft-safe HTTP test. Does NOT persist anything.
+    """Execute a draft-safe HTTP test without persisting authored config."""
 
-    1. Validates the submitted config
-    2. Merges sentinel values with stored encrypted values
-    3. Decrypts secrets
-    4. Compiles to effective request
-    5. Sends HTTP request
-    6. Returns result
-    """
-    # Validate
     errors = validate_authored_config(
         config, direction=direction, method=method, max_timeout=max_timeout
     )
@@ -59,15 +51,12 @@ async def execute_http_test(
             error_message=_error_message(errors[0]),
         )
 
-    # Merge secrets if stored config exists
     merged = config
     if stored_config is not None:
         merged = merge_secrets_on_update(config, stored_config)
 
-    # Decrypt
     decrypted = decrypt_authored_config(merged, encryption_service)
 
-    # Compile
     effective = compile_http_config(
         decrypted,
         direction=direction,
@@ -75,7 +64,6 @@ async def execute_http_test(
         variables=test_variables,
     )
 
-    # Build request preview (with secrets masked)
     request_preview = {
         "method": effective.method,
         "url": effective.url,
@@ -83,7 +71,6 @@ async def execute_http_test(
         "body_preview": _body_preview(effective),
     }
 
-    # Send
     start = time.monotonic()
     try:
         response = await send_http_request(
@@ -115,7 +102,6 @@ async def execute_http_test(
 
     duration_ms = (time.monotonic() - start) * 1000
 
-    # Read response preview
     response_preview = None
     try:
         text = response.text[:2000]

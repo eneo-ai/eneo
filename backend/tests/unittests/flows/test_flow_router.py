@@ -790,7 +790,7 @@ def test_find_stored_http_config_logs_parse_failures(caplog, monkeypatch):
     monkeypatch.setattr(logger, "propagate", True)
 
     with caplog.at_level("WARNING", logger=logger.name):
-        result = flow_http_test_router_module._find_stored_http_config(flow, "output")
+        result = flow_http_test_router_module.find_stored_http_config(flow, "output")
 
     assert result is None
     assert "Failed to parse stored HTTP config" in caplog.text

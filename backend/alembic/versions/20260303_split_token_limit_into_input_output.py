@@ -6,7 +6,6 @@ Create Date: 2026-03-03
 """
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision = "20260303_split_token_limit"
