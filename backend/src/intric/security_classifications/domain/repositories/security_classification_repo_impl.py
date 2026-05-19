@@ -161,10 +161,17 @@ class SecurityClassificationRepoImpl(BaseRepository):
         from intric.database.tables.mcp_server_table import MCPServers
         from intric.database.tables.spaces_table import Spaces
 
+        # Soft-deleted completion models still carry their FK to the
+        # classification, but they're not active anymore — counting them
+        # produces an "in use" error the admin can't act on. Embedding /
+        # transcription models have no soft-delete column today.
         counts = await self.session.execute(
             sa.select(
                 sa.select(sa.func.count())
-                .where(CompletionModels.security_classification_id == id)
+                .where(
+                    CompletionModels.security_classification_id == id,
+                    CompletionModels.deleted_at.is_(None),
+                )
                 .scalar_subquery()
                 .label("completion_models"),
                 sa.select(sa.func.count())
