@@ -13,8 +13,7 @@ Tests cover:
 - update_interval filter narrows to one bucket
 - space_id filter narrows to one space
 - owner_user_id filter narrows to one creator
-- failure_state filter mirrors the existing CrawlerFailureState classification
-- crawler_state=healthy filters before pagination
+- crawler_state filters by healthy/auto-disabled/backed-off state before pagination
 - website_id resolves a single tenant-owned website for off-page drill-downs
 - pagination contract (limit/offset/total)
 - the endpoint has no tenant_id query parameter (forces current-tenant scope)
@@ -346,13 +345,13 @@ async def test_admin_crawler_tenant_website_inventory_search_or_matches_url_and_
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_admin_crawler_tenant_website_inventory_filters_by_failure_state(
+async def test_admin_crawler_tenant_website_inventory_filters_by_crawler_state(
     client,
     db_session,
     admin_user,
     admin_user_api_key,
 ):
-    """`failure_state=AUTO_DISABLED` narrows to auto-disabled rows only.
+    """`crawler_state=auto_disabled` narrows to auto-disabled rows only.
 
     Seeds an auto-disabled (NEVER + ≥threshold consecutive failures) row,
     a backed-off (counter > 0, has next_retry_at) row, and a healthy row.
@@ -397,7 +396,7 @@ async def test_admin_crawler_tenant_website_inventory_filters_by_failure_state(
 
     auto_resp = await client.get(
         "/api/v1/admin/crawler/websites",
-        params={"limit": 25, "failure_state": "AUTO_DISABLED"},
+        params={"limit": 25, "crawler_state": "auto_disabled"},
         headers={"X-API-Key": admin_user_api_key.key},
     )
     assert auto_resp.status_code == 200, auto_resp.text
@@ -408,7 +407,7 @@ async def test_admin_crawler_tenant_website_inventory_filters_by_failure_state(
 
     backed_resp = await client.get(
         "/api/v1/admin/crawler/websites",
-        params={"limit": 25, "failure_state": "BACKED_OFF"},
+        params={"limit": 25, "crawler_state": "backed_off"},
         headers={"X-API-Key": admin_user_api_key.key},
     )
     assert backed_resp.status_code == 200, backed_resp.text

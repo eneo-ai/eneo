@@ -27240,7 +27240,6 @@ export interface operations {
         space_id?: string | null;
         owner_user_id?: string | null;
         crawler_state?: components["schemas"]["CrawlerTenantWebsiteInventoryStateFilter"];
-        failure_state?: components["schemas"]["CrawlerFailureState"] | null;
         website_id?: string | null;
         sort?: components["schemas"]["CrawlerTenantWebsiteInventorySort"];
       };

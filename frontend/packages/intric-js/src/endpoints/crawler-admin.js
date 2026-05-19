@@ -8,7 +8,6 @@
 /** @typedef {import('../types/schema').components["schemas"]["CrawlerTenantWebsiteInventoryResponse"]} CrawlerTenantWebsiteInventoryResponse */
 /** @typedef {import('../types/schema').components["schemas"]["CrawlerTenantWebsiteInventorySort"]} CrawlerTenantWebsiteInventorySort */
 /** @typedef {import('../types/schema').components["schemas"]["CrawlerTenantWebsiteInventoryStateFilter"]} CrawlerTenantWebsiteInventoryStateFilter */
-/** @typedef {import('../types/schema').components["schemas"]["CrawlerFailureState"]} CrawlerFailureState */
 /** @typedef {import('../types/schema').components["schemas"]["CrawlerFailureClusterSource"]} CrawlerFailureClusterSource */
 /** @typedef {import('../types/schema').components["schemas"]["CrawlOutcomeCategory"]} CrawlOutcomeCategory */
 /** @typedef {import('../types/schema').components["schemas"]["UpdateInterval"]} CrawlerUpdateInterval */
@@ -196,7 +195,7 @@ export function initCrawlerAdmin(client) {
      * List every website in the current tenant with consolidated governance
      * attribution (space, collection, owner email, schedule, failure state).
      * Powers the Webbplatser admin tab — search by URL/name/owner, filter by
-     * interval/space/owner/failure-state, sort, paginate. Tenant scope is
+     * interval/space/owner/crawler-state, sort, paginate. Tenant scope is
      * implicit (`current_user.tenant_id` on the backend); admin role required.
      * @param {{
      *   limit?: number,
@@ -206,7 +205,6 @@ export function initCrawlerAdmin(client) {
      *   space_id?: string,
      *   owner_user_id?: string,
      *   crawler_state?: CrawlerTenantWebsiteInventoryStateFilter,
-     *   failure_state?: CrawlerFailureState,
      *   website_id?: string,
      *   sort?: CrawlerTenantWebsiteInventorySort
      * }} [params]
