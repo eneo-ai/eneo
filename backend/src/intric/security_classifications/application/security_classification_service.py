@@ -126,15 +126,12 @@ class SecurityClassificationService:
         if not force:
             # KNOWN RACE: count_usages → delete in READ COMMITTED isolation
             # can miss a parallel CREATE/UPDATE that links a new model to
-            # this classification between the two statements. Because the
-            # FK is ON DELETE SET NULL, the racing-in row ends up with
-            # security_classification_id = NULL — which is the default,
-            # most-restrictive state (no upgrade in access) so the damage
-            # is operational (admin must reassign) rather than a privilege
-            # escalation. A row-level SELECT FOR UPDATE on the classification
-            # would not help: PG does not propagate row locks across FK
-            # checks, so blocking the racing INSERT would need SERIALIZABLE.
-            # Documented here so the next reviewer understands the gap.
+            # this classification between the two statements. Because the FK
+            # is ON DELETE SET NULL, the racing-in row ends up with
+            # security_classification_id = NULL — the default, most-restrictive
+            # state, so the damage is operational (admin must reassign) rather
+            # than a privilege escalation. Closing the gap properly needs
+            # SERIALIZABLE: PG does not propagate row locks across FK checks.
             usages = await self.repo.count_usages(id)
             total = sum(usages.values())
             if total > 0:

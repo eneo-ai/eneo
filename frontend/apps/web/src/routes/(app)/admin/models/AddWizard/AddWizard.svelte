@@ -317,11 +317,9 @@
   }
 
   async function createModels(models: WizardModelDraft[], providerId: string) {
-    // Track per-model outcomes so a mid-loop failure does not leave the
-    // already-created rows hidden behind a dialog the user has to close
-    // and reopen. Previously a single throw aborted the loop, the toast
-    // never fired, and wizardData.models still listed the succeeded rows
-    // — re-submitting then hit duplicate-name errors on the backend.
+    // Track per-model outcomes: a single throw mid-loop would leave the
+    // already-created rows queued in wizardData.models, so the user could
+    // not retry without hitting duplicate-name errors on the backend.
     const succeeded: WizardModelDraft[] = [];
     const failures: { model: WizardModelDraft; error: unknown }[] = [];
 
