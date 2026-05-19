@@ -115,6 +115,20 @@ export function isCostValueOverflow(value: number | null | undefined, perMinute 
 }
 
 /**
+ * Completion models cannot be saved without positive token budgets — the
+ * backend rejects 0/null and downstream tokenizer math divides by them.
+ * Embedding and transcription drafts have no equivalent constraint.
+ */
+export function hasValidCompletionTokenBudgets(draft: ModelDraftState): boolean {
+  return (
+    draft.maxInputTokensStr !== "" &&
+    parseInt(draft.maxInputTokensStr, 10) > 0 &&
+    draft.maxOutputTokensStr !== "" &&
+    parseInt(draft.maxOutputTokensStr, 10) > 0
+  );
+}
+
+/**
  * "Complete enough to be saved." Mirrors the rules used by the original
  * StepModels.canAddModel — embeddings and transcription only need a name
  * and display name; completion also requires non-zero token budgets.
@@ -122,12 +136,7 @@ export function isCostValueOverflow(value: number | null | undefined, perMinute 
 export function isDraftComplete(draft: ModelDraftState, modelType: ModelType): boolean {
   if (draft.name.trim() === "" || draft.displayName.trim() === "") return false;
   if (modelType !== "completion") return true;
-  return (
-    draft.maxInputTokensStr !== "" &&
-    parseInt(draft.maxInputTokensStr, 10) > 0 &&
-    draft.maxOutputTokensStr !== "" &&
-    parseInt(draft.maxOutputTokensStr, 10) > 0
-  );
+  return hasValidCompletionTokenBudgets(draft);
 }
 
 /**

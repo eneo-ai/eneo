@@ -1968,6 +1968,7 @@
   "please_select_or_create_provider": "Please select or create a provider",
   "model_name_required": "Model name is required",
   "display_name_required": "Display name is required",
+  "completion_token_budgets_required": "Max input and output tokens are required for completion models and must be greater than 0.",
   "cost_value_too_large": "Cost is too large. Maximum is {max} USD.",
   "failed_to_create_model": "Failed to create model",
   "model_created_success": "Model created successfully",

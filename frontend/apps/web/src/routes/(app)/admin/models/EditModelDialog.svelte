@@ -37,6 +37,7 @@
   import {
     createEmptyDraft,
     findDraftCostOverflow,
+    hasValidCompletionTokenBudgets,
     MAX_COST_INPUT,
     modelToDraft,
     rawCostToNumber,
@@ -169,6 +170,13 @@
     error = null;
     if (!draft.displayName.trim()) {
       error = m.display_name_required();
+      return;
+    }
+    // Mirror the AddWizard guard: completion models cannot persist with
+    // null/0 token budgets — the backend rejects them and downstream code
+    // would divide by zero on context-window math.
+    if (modelType === "completion" && !hasValidCompletionTokenBudgets(draft)) {
+      error = m.completion_token_budgets_required();
       return;
     }
     if (findDraftCostOverflow(draft) !== null) {
