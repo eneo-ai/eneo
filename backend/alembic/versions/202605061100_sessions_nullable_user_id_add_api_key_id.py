@@ -72,6 +72,22 @@ def downgrade() -> None:
     # dropping api_key_id — otherwise the column is gone and there is no way
     # to tell service-key sessions apart from corrupted user sessions when the
     # SET NOT NULL below fails on the remaining NULLs.
+    #
+    # DATA LOSS: every service-key session and its questions (CASCADE via
+    # Questions.session_id) is deleted by this downgrade. Operators rolling
+    # back this migration in production should snapshot the sessions and
+    # questions tables first; the rows cannot be reconstructed afterwards.
+    result = op.get_bind().execute(
+        sa.text("SELECT COUNT(*) FROM sessions WHERE user_id IS NULL")
+    )
+    purge_count = result.scalar() or 0
+    if purge_count:
+        # Surface the impact in the alembic log so the operator sees how
+        # many service-key sessions are about to be dropped.
+        print(  # noqa: T201
+            f"[downgrade] purging {purge_count} service-key sessions "
+            "(and their questions via CASCADE) — these cannot be recovered."
+        )
     op.execute("DELETE FROM sessions WHERE user_id IS NULL")
     op.execute("ALTER TABLE sessions ALTER COLUMN user_id SET NOT NULL")
     op.drop_index("ix_sessions_api_key_id", table_name="sessions")

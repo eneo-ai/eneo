@@ -283,6 +283,12 @@ async def migrate_model_usage(
             audit_service = container.audit_service()
             completion_model_repo = container.completion_model_repo2()
             from_model = await completion_model_repo.one(model_id=model_id)
+            to_model = await completion_model_repo.one(
+                model_id=migration_request.to_model_id
+            )
+            to_model_label = (
+                to_model.name if to_model else str(migration_request.to_model_id)
+            )
             await audit_service.log_async(
                 tenant_id=user.tenant_id,
                 actor_id=user.id,
@@ -291,7 +297,7 @@ async def migrate_model_usage(
                 entity_id=model_id,
                 description=(
                     f"Migrated model usage from {from_model.name} to "
-                    f"{migration_request.to_model_id} "
+                    f"{to_model_label} "
                     f"({result.migrated_count} entities)"
                 ),
                 metadata=AuditMetadata.standard(

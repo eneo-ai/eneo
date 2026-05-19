@@ -190,6 +190,7 @@ class ConversationService:
         input_tokens = count_tokens(question, model.name) + selector_tokens
 
         file_tokens = 0
+        excluded_file_count = 0
         if file_ids:
             # User-scoped lookup matches the actual chat endpoint (assistant_service.ask
             # uses get_files_by_ids), so preflight refuses files the user can't send.
@@ -197,6 +198,7 @@ class ConversationService:
             # Only text files reach the LLM via the input string; binary/image
             # files use provider-specific token accounting we can't preview here.
             text_files = [f for f in files if f.file_type == FileType.TEXT and f.text]
+            excluded_file_count = len(files) - len(text_files)
             if text_files:
                 # Mirror context_builder.build_files_string: that wrapper text
                 # is what actually gets tokenized when the request runs.
@@ -205,6 +207,7 @@ class ConversationService:
         return PreflightResponse(
             input_tokens=input_tokens,
             file_tokens=file_tokens,
+            excluded_file_count=excluded_file_count,
             model_name=model.name,
             context_window=model.token_limit,
         )

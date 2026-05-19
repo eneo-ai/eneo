@@ -79,10 +79,16 @@ class PreflightResponse(BaseModel):
     `model_name` and `context_window` are echoed so a client can compute the
     percentage fill locally without a separate round-trip to fetch model
     metadata.
+
+    `excluded_file_count` is the number of attached files we could not
+    tokenise here (images and other binary payloads use provider-specific
+    multimodal accounting). Callers should treat the response as a
+    conservative lower bound when this is non-zero.
     """
 
     input_tokens: int
     file_tokens: int
+    excluded_file_count: int = 0
     model_name: str
     context_window: int
 
