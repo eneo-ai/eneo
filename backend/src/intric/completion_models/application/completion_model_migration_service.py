@@ -116,6 +116,17 @@ class CompletionModelMigrationService:
         final_entity_types: list[str] = normalized_entity_types or list(
             MIGRATABLE_ENTITY_TYPES
         )
+        # Coupling note: if "assistants" is in final_entity_types but "spaces"
+        # is not, _migrate_assistants_with_kwargs enables the target on the
+        # spaces those assistants live on (so the new model can run) but the
+        # source model is *not* removed from SpacesCompletionModels. Front-
+        # filters on `migrated_to_model_id` hide it from the space-settings
+        # picker, so the dangling row is cosmetic rather than functional —
+        # cleanup-worker removes it when the source model is hard-deleted.
+        # API callers that want a clean SpacesCompletionModels state should
+        # include "spaces" in entity_types (the frontend passes undefined,
+        # which expands to all MIGRATABLE_ENTITY_TYPES, so this is satisfied
+        # by default).
         self.logger.debug(f"Final entity_types for migration: {final_entity_types}")
 
         # Validate models exist and belong to tenant
@@ -441,7 +452,17 @@ class CompletionModelMigrationService:
                 },
             )
 
-            # Update migration history with failure
+            # Update migration history with failure.
+            #
+            # KNOWN EDGE CASE: at "true" DB failures (deadlock, connection
+            # loss) the outer transaction is already aborted in PG's view, so
+            # the SELECT inside update_migration_history will itself fail
+            # with InFailedSqlTransactionError and the row never lands.
+            # Validation / app-level SQLAlchemyError paths still persist
+            # correctly because their session is reusable. A proper fix
+            # would route this write through a separate session, but that
+            # requires reworking DI to expose a sessionmaker here; left as
+            # a follow-up so we don't risk new bugs in the happy path.
             duration = (datetime.now(timezone.utc) - start_time).total_seconds()
             await self.migration_history_repo.update_migration_history(
                 migration_id=migration_id,
