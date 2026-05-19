@@ -335,8 +335,14 @@
     // Drop the succeeded entries from the wizard list so a retry only
     // resubmits what actually failed. wizardData.models keeps reference
     // identity with the source array, so filter on identity.
+    // pendingDraft is pushed into modelsToCreate by reference in finishWizard,
+    // so if it succeeded it must be cleared too — otherwise the next finish
+    // resubmits it and the backend rejects on duplicate name.
     if (succeeded.length > 0) {
       wizardData.models = wizardData.models.filter((m) => !succeeded.includes(m));
+      if (pendingDraft && succeeded.includes(pendingDraft)) {
+        pendingDraft = null;
+      }
     }
 
     if (failures.length === 0) {
