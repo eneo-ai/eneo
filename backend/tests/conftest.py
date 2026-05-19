@@ -17,6 +17,7 @@ if not os.getenv("TENANT_WORKER_SEMAPHORE_TTL_SECONDS"):
     os.environ["TENANT_WORKER_SEMAPHORE_TTL_SECONDS"] = "3600"  # 1 hour
 
 import asyncio
+import warnings
 from typing import TYPE_CHECKING
 
 import pytest
@@ -25,6 +26,46 @@ from tests.warning_filters import IGNORED_WARNINGS
 
 if TYPE_CHECKING:
     from _pytest.terminal import TerminalReporter
+
+
+def _install_warning_ignores_eagerly() -> None:
+    """Apply the structured ignores via warnings.filterwarnings() right now.
+
+    pytest's own ``filterwarnings = error`` (from pytest.ini) is active during
+    conftest import, which means any warning raised while importing the
+    integration conftest below would crash collection before pytest_configure
+    has a chance to register our ignores. Pushing the ignores onto the global
+    warnings filter list here ensures they win the match for import-time
+    warnings (e.g. starlette pulling in legacy `multipart`).
+
+    pytest_configure also registers them with the pytest config so they show
+    up in -W reports and the terminal summary stays consistent.
+    """
+    for entry in IGNORED_WARNINGS:
+        category = _resolve_category(entry.category)
+        warnings.filterwarnings(
+            "ignore",
+            message=entry.pattern,
+            category=category,
+            module=entry.module or "",
+        )
+
+
+def _resolve_category(name: str) -> type[Warning]:
+    """Map a category string (e.g. ``"DeprecationWarning"``) to its class."""
+    if not name:
+        return Warning
+    if "." in name:
+        module_name, attr = name.rsplit(".", 1)
+        import importlib
+
+        module = importlib.import_module(module_name)
+        return getattr(module, attr)
+    return getattr(__builtins__, name, None) or globals().get(name) or Warning
+
+
+_install_warning_ignores_eagerly()
+
 
 # Import shared fixture modules
 # These fixtures are automatically discovered by pytest
