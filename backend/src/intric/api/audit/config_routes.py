@@ -104,7 +104,7 @@ async def update_audit_config(
     if changes:
         await audit_service.log_async(
             tenant_id=user.tenant_id,
-            actor_id=user.id,
+            user=user,
             action=ActionType.TENANT_SETTINGS_UPDATED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=user.tenant_id,
@@ -192,7 +192,7 @@ async def update_action_config(
     if request.updates:
         await audit_service.log_async(
             tenant_id=user.tenant_id,
-            actor_id=user.id,
+            user=user,
             action=ActionType.TENANT_SETTINGS_UPDATED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=user.tenant_id,

@@ -2,7 +2,7 @@ import random
 from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Optional, cast
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import UUID
 
 import jwt
 import sqlalchemy as sa
@@ -729,10 +729,6 @@ class UserService:
         settings_upsert = SettingsUpsert(user_id=user_in_db.id)
         await self.settings_repo.add(settings_upsert)
 
-        api_key = await self.auth_service.create_user_api_key_v2(
-            user_id=user_in_db.id, tenant_id=user_in_db.tenant_id
-        )
-
         access_token = AccessToken(
             access_token=self.auth_service.create_access_token_for_user(
                 user=user_in_db
@@ -740,7 +736,7 @@ class UserService:
             token_type="bearer",
         )
 
-        return user_in_db, access_token, api_key
+        return user_in_db, access_token
 
     async def _get_user_from_token(self, token: str):
         username = self.auth_service.get_username_from_token(
@@ -800,10 +796,13 @@ class UserService:
             raise BadRequestException(
                 f"Tenant {key.tenant_id} does not exist for service key {key.id}"
             )
-        synthetic_id = uuid5(NAMESPACE_URL, f"service-key:{key.id}")
 
+        # Use the key id directly as the synthetic user id. No row in `users`
+        # carries this id, so it remains "obviously not a real user" — but it
+        # now correlates with the actual key in logs, audit metadata, and
+        # caches without an extra uuid5 derivation step.
         synthetic_role = RoleInDB(
-            id=uuid5(NAMESPACE_URL, f"service-key-role:{key.id}"),
+            id=key.id,
             tenant_id=key.tenant_id,
             name=f"Service Key Role ({key.name})",
             permissions=sorted(
@@ -814,7 +813,7 @@ class UserService:
 
         key_suffix = key.key_suffix or key.id.hex[:8]
         return UserInDBModel(
-            id=synthetic_id,
+            id=key.id,
             email=f"sk-{key_suffix}@service.key",
             username=f"Service Key ({key.name})",
             state=UserState.ACTIVE,

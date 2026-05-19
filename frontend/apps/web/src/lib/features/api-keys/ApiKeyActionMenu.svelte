@@ -206,8 +206,8 @@
         </DropdownMenu.Item>
       {/if}
 
-      {#if isAdmin && onEditRequested}
-        <DropdownMenu.Item onclick={onEditRequested}>
+      {#if onEditRequested}
+        <DropdownMenu.Item onclick={onEditRequested} disabled={!canManage}>
           <Pencil />
           {m.api_keys_admin_action_edit()}
         </DropdownMenu.Item>

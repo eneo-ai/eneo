@@ -135,7 +135,7 @@ async def register_new_user(
     user_service = container.user_service()
 
     # Create user
-    created_user, access_token, api_key = await user_service.register(new_user)
+    created_user, access_token = await user_service.register(new_user)
 
     # Audit logging (system action since no authenticated user for sysadmin)
     audit_service = container.audit_service()
@@ -162,7 +162,6 @@ async def register_new_user(
     return UserCreated(
         **created_user.model_dump(exclude={"api_key"}),
         access_token=access_token,
-        api_key=api_key,
     )
 
 
