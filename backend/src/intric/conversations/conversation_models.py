@@ -58,6 +58,7 @@ class PreflightRequest(_ConversationTarget):
 
     question: str = ""
     file_ids: list[UUID] = Field(default=[], max_length=_MAX_FILES_PER_PREFLIGHT)
+    tools: Optional[UseTools] = None
 
     @model_validator(mode="after")
     def _require_question_or_files(self) -> "PreflightRequest":

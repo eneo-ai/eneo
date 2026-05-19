@@ -3014,7 +3014,7 @@ export interface paths {
     };
     /**
      * Get Model Usage Details
-     * @description Get detailed list of entities using this model with cursor pagination
+     * @description Get detailed list of entities using this model with cursor pagination.
      */
     get: operations["get_model_usage_details_api_v1_completion_models__model_id__usage_details_get"];
     put?: never;
@@ -3056,7 +3056,12 @@ export interface paths {
     put?: never;
     /**
      * Migrate Model Usage
-     * @description Migrate all usage from one model to another with safety checks
+     * @description Migrate all usage from one model to another.
+     *
+     *     Source/target validity, same-model rejection, tenant ownership and
+     *     entity-type whitelisting all live in
+     *     `CompletionModelMigrationService.migrate_model_usage` — the router
+     *     only enforces admin permission and persists the audit log on success.
      */
     post: operations["migrate_model_usage_api_v1_completion_models__model_id__migrate_post"];
     delete?: never;
@@ -3074,7 +3079,7 @@ export interface paths {
     };
     /**
      * Get All Models Usage Summary
-     * @description Get usage summary for all models (optimized with pre-aggregation)
+     * @description Get usage summary for all models (optimized with pre-aggregation).
      */
     get: operations["get_all_models_usage_summary_api_v1_completion_models_usage_summary_get"];
     put?: never;
@@ -13301,6 +13306,7 @@ export interface components {
        * @default []
        */
       file_ids?: string[];
+      tools?: components["schemas"]["UseTools"] | null;
     };
     /**
      * PreflightResponse

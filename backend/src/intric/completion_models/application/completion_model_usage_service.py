@@ -441,6 +441,7 @@ class CompletionModelUsageService:
                 Spaces.name.label("space_name"),
                 Users.username.label("owner_name"),
             ],
+            cursor_data=cursor_data,
         )
 
     async def _get_service_details(
@@ -464,6 +465,7 @@ class CompletionModelUsageService:
                 Services.user_id,
                 Users.username.label("owner_name"),
             ],
+            cursor_data=cursor_data,
         )
 
     async def _get_assistant_template_details(

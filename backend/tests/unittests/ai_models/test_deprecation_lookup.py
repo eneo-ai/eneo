@@ -11,6 +11,7 @@ import pytest
 from intric.ai_models.deprecation_lookup import (
     get_litellm_deprecation_date,
     is_model_deprecated,
+    is_model_effectively_deprecated,
 )
 
 # Past and future dates are derived from today so the "is it deprecated yet?"
@@ -127,3 +128,26 @@ class TestIsModelDeprecated:
         with patch("litellm.model_cost", mock_model_cost):
             result = is_model_deprecated("nonexistent", "openai")
             assert result is False
+
+
+class TestIsModelEffectivelyDeprecated:
+    def test_manual_deprecation_wins_without_litellm_date(self, mock_model_cost):
+        with patch("litellm.model_cost", mock_model_cost):
+            result = is_model_effectively_deprecated(
+                "nonexistent",
+                "openai",
+                manually_deprecated=True,
+            )
+
+        assert result is True
+
+    def test_litellm_deprecation_counts_when_manual_flag_is_false(
+        self, mock_model_cost
+    ):
+        with patch("litellm.model_cost", mock_model_cost):
+            result = is_model_effectively_deprecated(
+                "gpt-4-0613",
+                manually_deprecated=False,
+            )
+
+        assert result is True

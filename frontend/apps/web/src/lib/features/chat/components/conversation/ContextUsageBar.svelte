@@ -117,6 +117,8 @@
   const fmt = (n: number) => n.toLocaleString();
 
   const modelName = $derived.by(() => {
+    if (chat.pendingModelName) return chat.pendingModelName;
+
     const messages = chat.currentConversation?.messages;
     for (let i = (messages?.length ?? 0) - 1; i >= 0; i--) {
       const name = messages?.[i].completion_model?.name;

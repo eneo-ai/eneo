@@ -43,3 +43,12 @@ def is_model_deprecated(model_name: str, provider_type: Optional[str] = None) ->
     if not dep_date:
         return False
     return dep_date <= date.today().isoformat()
+
+
+def is_model_effectively_deprecated(
+    model_name: str,
+    provider_type: Optional[str] = None,
+    manually_deprecated: bool = False,
+) -> bool:
+    """Check persisted and LiteLLM-derived deprecation state together."""
+    return manually_deprecated or is_model_deprecated(model_name, provider_type)

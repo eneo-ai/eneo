@@ -168,6 +168,7 @@ class ConversationService:
         session_id: Optional["UUID"] = None,
         assistant_id: Optional["UUID"] = None,
         group_chat_id: Optional["UUID"] = None,
+        tool_assistant_id: Optional["UUID"] = None,
     ) -> PreflightResponse:
         """Count the tokens this request would add to context, without sending.
 
@@ -177,14 +178,16 @@ class ConversationService:
         no stable cost to report up-front. Model name and context window are
         echoed so the caller can compute percentage fill without a round-trip.
         """
-        model = await self._resolve_completion_model(
+        model, selector_tokens = await self._resolve_preflight_model(
+            question=question,
             session_id=session_id,
             assistant_id=assistant_id,
             group_chat_id=group_chat_id,
+            tool_assistant_id=tool_assistant_id,
         )
 
         # count_tokens already returns 0 for empty input — no need to short-circuit.
-        input_tokens = count_tokens(question, model.name)
+        input_tokens = count_tokens(question, model.name) + selector_tokens
 
         file_tokens = 0
         if file_ids:
@@ -206,17 +209,20 @@ class ConversationService:
             context_window=model.token_limit,
         )
 
-    async def _resolve_completion_model(
+    async def _resolve_preflight_model(
         self,
+        question: str,
         session_id: Optional["UUID"],
         assistant_id: Optional["UUID"],
         group_chat_id: Optional["UUID"],
-    ) -> "CompletionModel":
+        tool_assistant_id: Optional["UUID"] = None,
+    ) -> "tuple[CompletionModel, int]":
         """Resolve the completion model the next chat request would target.
 
         Mirrors ask_conversation routing rules so the preflight count uses the
-        same tokenizer the actual request will. For group chats: first assistant,
-        matching GroupChatService._find_suitable_completion_model.
+        same tokenizer the actual request will. Group chat auto-routing is
+        selected by an LLM at send time, so preflight uses the smallest context
+        window among the candidate assistants as a conservative projection.
 
         Raises BadRequestException for the same configurations that would fail
         on actual send (no assistants in group chat, no completion model set).
@@ -225,18 +231,28 @@ class ConversationService:
             session = await self.session_service.get_session_by_uuid(session_id)
             assert session is not None
             if session.group_chat_id:
-                model = await self._first_group_chat_model(session.group_chat_id)
+                model, selector_tokens = await self._group_chat_preflight_model(
+                    session.group_chat_id,
+                    question=question,
+                    tool_assistant_id=tool_assistant_id,
+                )
             else:
                 assert session.assistant is not None
                 assistant, _ = await self.assistant_service.get_assistant(
                     session.assistant.id
                 )
                 model = assistant.completion_model
+                selector_tokens = 0
         elif assistant_id:
             assistant, _ = await self.assistant_service.get_assistant(assistant_id)
             model = assistant.completion_model
+            selector_tokens = 0
         elif group_chat_id:
-            model = await self._first_group_chat_model(group_chat_id)
+            model, selector_tokens = await self._group_chat_preflight_model(
+                group_chat_id,
+                question=question,
+                tool_assistant_id=tool_assistant_id,
+            )
         else:
             raise BadRequestException(
                 "Provide session_id, assistant_id, or group_chat_id."
@@ -246,15 +262,51 @@ class ConversationService:
             raise BadRequestException(
                 "No completion model configured for this conversation."
             )
-        return model
+        return model, selector_tokens
 
-    async def _first_group_chat_model(
-        self, group_chat_id: "UUID"
-    ) -> "CompletionModel | None":
+    async def _group_chat_preflight_model(
+        self,
+        group_chat_id: "UUID",
+        question: str,
+        tool_assistant_id: Optional["UUID"] = None,
+    ) -> "tuple[CompletionModel | None, int]":
         group_chat = await self.group_chat_service.get_group_chat(group_chat_id)
         if not group_chat.assistants:
             raise BadRequestException("No assistants in the group chat")
-        return group_chat.assistants[0].assistant.completion_model
+
+        if tool_assistant_id is not None:
+            if not group_chat.allow_mentions:
+                raise BadRequestException(
+                    "This group chat does not allow targeting specific assistants"
+                )
+            selected = group_chat.get_assistant_by_id(tool_assistant_id)
+            if selected is None:
+                raise BadRequestException(
+                    "The specified assistant is not part of this group chat"
+                )
+            return selected.assistant.completion_model, 0
+
+        models = [
+            group_chat_assistant.assistant.completion_model
+            for group_chat_assistant in group_chat.assistants
+            if group_chat_assistant.assistant.completion_model is not None
+        ]
+        if not models:
+            return None, 0
+        if len(group_chat.assistants) <= 1:
+            return models[0], 0
+
+        selector_model = await self.group_chat_service.find_suitable_completion_model(
+            group_chat.assistants
+        )
+        if selector_model is None:
+            return min(models, key=lambda model: model.token_limit), 0
+
+        selection_prompt = self.group_chat_service.create_assistant_selection_prompt(
+            question, group_chat.assistants
+        )
+        selector_tokens = count_tokens(selection_prompt, selector_model.name)
+        return min(models, key=lambda model: model.token_limit), selector_tokens
 
     async def set_title_of_conversation(
         self, session_id: "UUID"

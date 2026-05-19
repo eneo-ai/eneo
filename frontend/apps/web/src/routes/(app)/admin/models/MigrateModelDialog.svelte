@@ -85,6 +85,7 @@
       .filter((mod) => mod.id !== sourceModel.id)
       .filter((mod) => mod.provider_id != null)
       .filter((mod) => mod.is_org_enabled)
+      .filter((mod) => !mod.is_deprecated)
       .filter((mod) => !mod.migrated_to_model_id)
   );
 

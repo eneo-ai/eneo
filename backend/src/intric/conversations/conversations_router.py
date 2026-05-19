@@ -395,12 +395,17 @@ async def preflight_tokens(
         )
 
         conversation_service = container.conversation_service()
+        tool_assistant_id = None
+        if request.tools is not None and request.tools.assistants:
+            tool_assistant_id = request.tools.assistants[0].id
+
         return await conversation_service.preflight_tokens(
             question=request.question,
             file_ids=request.file_ids,
             session_id=request.session_id,
             assistant_id=request.assistant_id,
             group_chat_id=request.group_chat_id,
+            tool_assistant_id=tool_assistant_id,
         )
 
 

@@ -43,22 +43,12 @@ class EmbeddingModelPublic(BaseResponse):
 
     @classmethod
     def from_domain(cls, model: EmbeddingModel):
-        from intric.ai_models.deprecation_lookup import (
-            get_litellm_deprecation_date,
-            is_model_deprecated,
-        )
-
         security_classification = None
         if model.security_classification:
             security_classification = SecurityClassificationPublic.from_domain(
                 model.security_classification,
                 return_none_if_not_enabled=False,
             )
-
-        dep_date = get_litellm_deprecation_date(model.name, model.provider_type)
-        deprecated = model.is_deprecated or is_model_deprecated(
-            model.name, model.provider_type
-        )
 
         return cls(
             id=model.id,
@@ -67,7 +57,7 @@ class EmbeddingModelPublic(BaseResponse):
             name=model.name,
             nickname=model.nickname,
             family=model.family,
-            is_deprecated=deprecated,
+            is_deprecated=model.is_effectively_deprecated,
             open_source=model.open_source,
             max_input=model.max_input,
             hf_link=model.hf_link,
@@ -89,7 +79,7 @@ class EmbeddingModelPublic(BaseResponse):
             provider_id=model.provider_id,
             provider_name=model.provider_name,
             provider_type=model.provider_type,
-            deprecation_date=dep_date,
+            deprecation_date=model.litellm_deprecation_date,
         )
 
 

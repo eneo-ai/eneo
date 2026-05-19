@@ -210,10 +210,11 @@ export function initConversations(client) {
      * @param {{id: string} | Conversation} [params.conversation] Existing conversation to continue
      * @param {string} params.question The pending input
      * @param {{id: string}[]} [params.files] Pending file attachments
+     * @param {import("../types/resources").ConversationTools} [params.tools] Pending assistant target
      * @returns {Promise<import('../types/resources').PreflightResponse>}
      * @throws {IntricError}
      */
-    preflight: async ({ chatPartner, conversation, question, files }) => {
+    preflight: async ({ chatPartner, conversation, question, files, tools }) => {
       /** @type {{session_id?: string, assistant_id?: string, group_chat_id?: string}} */
       const target = { session_id: undefined, assistant_id: undefined, group_chat_id: undefined };
 
@@ -238,7 +239,8 @@ export function initConversations(client) {
           "application/json": {
             ...target,
             question,
-            file_ids: (files ?? []).map((f) => f.id)
+            file_ids: (files ?? []).map((f) => f.id),
+            tools
           }
         }
       });

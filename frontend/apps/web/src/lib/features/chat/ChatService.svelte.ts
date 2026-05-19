@@ -81,13 +81,17 @@ export class ChatService {
   // add equals `pendingInputTokens + pendingFileTokens`.
   pendingInputTokens = $state<number>(0);
   pendingFileTokens = $state<number>(0);
+  pendingModelName = $state<string>("");
+  pendingContextWindow = $state<number>(0);
   #preflightDebounce: ReturnType<typeof setTimeout> | null = null;
   #preflightGen = 0;
-  // Prefer the model recorded on the most recent message (covers group chats
-  // where the active model varies per turn); fall back to the partner's own
-  // completion model for fresh conversations.
+  // Prefer the pending preflight model/window while the user is composing;
+  // otherwise use the model recorded on the most recent message (covers group
+  // chats where the active model varies per turn), then the partner's own
+  // completion model for fresh assistant conversations.
   contextLimit = $derived<number>(
-    this.#latestMessageTokenLimit() ??
+    this.pendingContextWindow ||
+      this.#latestMessageTokenLimit() ||
       (this.#chatPartner && "completion_model" in this.#chatPartner
         ? (this.#chatPartner.completion_model?.token_limit ?? 0)
         : 0)
@@ -190,6 +194,8 @@ export class ChatService {
     }
     this.pendingInputTokens = 0;
     this.pendingFileTokens = 0;
+    this.pendingModelName = "";
+    this.pendingContextWindow = 0;
   }
 
   /**
@@ -197,7 +203,7 @@ export class ChatService {
    * spamming the backend on every keystroke. Race-safe via generation
    * counter — only the latest in-flight call wins.
    */
-  requestPreflight(question: string, fileIds: string[], delayMs = 400) {
+  requestPreflight(question: string, fileIds: string[], tools?: ConversationTools, delayMs = 400) {
     if (this.#preflightDebounce) {
       clearTimeout(this.#preflightDebounce);
     }
@@ -217,7 +223,8 @@ export class ChatService {
           chatPartner: partnerAtStart,
           conversation: conversationAtStart.id ? { id: conversationAtStart.id } : undefined,
           question,
-          files: fileIds.map((id) => ({ id }))
+          files: fileIds.map((id) => ({ id })),
+          tools
         });
 
         // Discard if a newer request started or the user switched context
@@ -227,11 +234,15 @@ export class ChatService {
 
         this.pendingInputTokens = res.input_tokens;
         this.pendingFileTokens = res.file_tokens;
+        this.pendingModelName = res.model_name;
+        this.pendingContextWindow = res.context_window;
       } catch {
         // Silent failure — preflight is best-effort, not a blocker
         if (gen === this.#preflightGen) {
           this.pendingInputTokens = 0;
           this.pendingFileTokens = 0;
+          this.pendingModelName = "";
+          this.pendingContextWindow = 0;
         }
       }
     }, delayMs);

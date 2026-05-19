@@ -19,6 +19,7 @@ from intric.conversations.conversation_models import (
     PreflightResponse,
 )
 from intric.conversations.conversations_router import preflight_tokens
+from intric.questions.question import ToolAssistant, UseTools
 
 
 def _make_request() -> Request:
@@ -97,6 +98,7 @@ async def test_preflight_router_returns_service_result():
         session_id=None,
         assistant_id=request_body.assistant_id,
         group_chat_id=None,
+        tool_assistant_id=None,
     )
 
 
@@ -128,6 +130,37 @@ async def test_preflight_router_propagates_session_id():
     assert call_kwargs["session_id"] == session_id
     assert call_kwargs["assistant_id"] is None
     assert call_kwargs["group_chat_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_preflight_router_forwards_tool_assistant_id():
+    """Mention targets are forwarded so group-chat preflight can use the same model."""
+    container, service = _make_container(preflight_result=_sample_response())
+
+    target_id = uuid4()
+    request_body = PreflightRequest(
+        question="hi",
+        group_chat_id=uuid4(),
+        tools=UseTools(assistants=[ToolAssistant(id=target_id, handle="target")]),
+    )
+
+    with (
+        patch(
+            "intric.conversations.conversations_router._validate_conversation_scope",
+            new=AsyncMock(),
+        ),
+        patch(
+            "intric.conversations.conversations_router.enforce_rate_limit",
+            new=AsyncMock(),
+        ),
+    ):
+        await preflight_tokens(
+            request=request_body,
+            http_request=_make_request(),
+            container=container,
+        )
+
+    assert service.preflight_tokens.call_args.kwargs["tool_assistant_id"] == target_id
 
 
 @pytest.mark.asyncio

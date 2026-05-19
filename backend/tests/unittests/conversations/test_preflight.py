@@ -26,6 +26,17 @@ def _make_service(
     group_chat_service = AsyncMock()
     if group_chat is not None:
         group_chat_service.get_group_chat = AsyncMock(return_value=group_chat)
+        first_model = (
+            group_chat.assistants[0].assistant.completion_model
+            if group_chat.assistants
+            else None
+        )
+        group_chat_service.find_suitable_completion_model = AsyncMock(
+            return_value=first_model
+        )
+        group_chat_service.create_assistant_selection_prompt = MagicMock(
+            return_value="selector prompt"
+        )
 
     session_service = AsyncMock()
     if session is not None:
@@ -239,8 +250,8 @@ async def test_preflight_rejects_empty_group_chat():
 
 
 @pytest.mark.asyncio
-async def test_preflight_group_chat_uses_first_assistant_model():
-    """Group chat preflight tokenizes against the first assistant's model."""
+async def test_preflight_group_chat_uses_single_assistant_model():
+    """Single-assistant group chat preflight tokenizes against that assistant's model."""
     member = MagicMock()
     member.assistant.completion_model = _make_completion_model("gpt-4o")
 
@@ -257,3 +268,68 @@ async def test_preflight_group_chat_uses_first_assistant_model():
 
     assert result.input_tokens > 0
     assert result.model_name == "gpt-4o"
+
+
+@pytest.mark.asyncio
+async def test_preflight_group_chat_counts_selector_tokens_and_uses_smallest_window():
+    """Multi-assistant group chat includes selector prompt cost and projects conservatively."""
+    first_member = MagicMock()
+    first_member.assistant.completion_model = _make_completion_model(
+        "gpt-4o", token_limit=128000
+    )
+    second_member = MagicMock()
+    second_member.assistant.completion_model = _make_completion_model(
+        "small-context-model", token_limit=4096
+    )
+
+    group_chat = MagicMock()
+    group_chat.assistants = [first_member, second_member]
+
+    service = _make_service(group_chat=group_chat)
+
+    result = await service.preflight_tokens(
+        question="hello",
+        file_ids=[],
+        group_chat_id=uuid4(),
+    )
+
+    expected_selector_tokens = count_tokens("selector prompt", "gpt-4o")
+    expected_question_tokens = count_tokens("hello", "small-context-model")
+    assert result.input_tokens == expected_question_tokens + expected_selector_tokens
+    assert result.model_name == "small-context-model"
+    assert result.context_window == 4096
+
+
+@pytest.mark.asyncio
+async def test_preflight_group_chat_mention_uses_target_assistant_model():
+    """Mention-targeted group chat preflight mirrors the actual target assistant."""
+    target_id = uuid4()
+    first_member = MagicMock()
+    first_member.assistant.id = uuid4()
+    first_member.assistant.completion_model = _make_completion_model(
+        "gpt-4o", token_limit=128000
+    )
+    target_member = MagicMock()
+    target_member.assistant.id = target_id
+    target_member.assistant.completion_model = _make_completion_model(
+        "target-model", token_limit=32000
+    )
+
+    group_chat = MagicMock()
+    group_chat.allow_mentions = True
+    group_chat.assistants = [first_member, target_member]
+    group_chat.get_assistant_by_id.return_value = target_member
+
+    service = _make_service(group_chat=group_chat)
+
+    result = await service.preflight_tokens(
+        question="hello",
+        file_ids=[],
+        group_chat_id=uuid4(),
+        tool_assistant_id=target_id,
+    )
+
+    assert result.input_tokens == count_tokens("hello", "target-model")
+    assert result.model_name == "target-model"
+    assert result.context_window == 32000
+    service.group_chat_service.find_suitable_completion_model.assert_not_awaited()

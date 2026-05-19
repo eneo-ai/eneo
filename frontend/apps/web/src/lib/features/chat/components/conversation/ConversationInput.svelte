@@ -196,7 +196,15 @@
     const fileIds = $attachments
       .map((a) => a.fileRef?.id)
       .filter((id): id is string => Boolean(id));
-    chat.requestPreflight($question, fileIds);
+    const tools =
+      $mentions.length > 0
+        ? {
+            assistants: $mentions.map((mention) => {
+              return { id: mention.id, handle: mention.handle };
+            })
+          }
+        : undefined;
+    chat.requestPreflight($question, fileIds, tools);
   });
 
   let useWebSearch = $state(false);

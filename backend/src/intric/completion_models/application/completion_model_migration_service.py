@@ -524,7 +524,7 @@ class CompletionModelMigrationService:
         blocker_codes: list[str] = []
 
         # Check if target model is deprecated
-        if to_model.is_deprecated:
+        if to_model.is_effectively_deprecated:
             issues.append("Target model is deprecated")
             issue_codes.append("target_deprecated")
 

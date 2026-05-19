@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -99,6 +99,51 @@ async def test_user_can_not_access_completion_models(service: AIModelsService):
 
     for model in models:
         assert not model.can_access
+
+
+async def test_completion_models_use_effective_deprecation(
+    service: AIModelsService,
+):
+    service.user = TEST_ADMIN_USER
+    model = TEST_MODEL_CHATGPT.model_copy(
+        update={
+            "name": "gpt-4-0613",
+            "is_org_enabled": True,
+            "is_deprecated": False,
+            "provider_type": "openai",
+        }
+    )
+    service.completion_model_repo.get_models.return_value = [model]
+
+    with patch(
+        "litellm.model_cost",
+        {"openai/gpt-4-0613": {"deprecation_date": "2025-06-13"}},
+    ):
+        models = await service.get_completion_models()
+
+    assert models[0].is_deprecated is True
+    assert models[0].can_access is False
+
+
+async def test_embedding_models_use_effective_deprecation(service: AIModelsService):
+    service.user = TEST_ADMIN_USER
+    model = TEST_EMBEDDING_MODEL.model_copy(
+        update={
+            "name": "text-embedding-ada-002",
+            "is_org_enabled": True,
+            "is_deprecated": False,
+        }
+    )
+    service.embedding_model_repo.get_models.return_value = [model]
+
+    with patch(
+        "litellm.model_cost",
+        {"text-embedding-ada-002": {"deprecation_date": "2025-06-13"}},
+    ):
+        models = await service.get_embedding_models()
+
+    assert models[0].is_deprecated is True
+    assert models[0].can_access is False
 
 
 async def test_completion_models_flags_settings_not_exists(service: AIModelsService):
