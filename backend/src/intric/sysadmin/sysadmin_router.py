@@ -1240,6 +1240,14 @@ async def create_completion_model(
     This creates the model metadata only. To enable it for a tenant,
     use POST /api/v1/completion-models/{id}/ with tenant credentials.
     """
+    # AUDIT GAP: sysadmin model lifecycle does not emit audit_log rows.
+    # audit_logs.tenant_id is NOT NULL but a global model has no owning
+    # tenant at create time. The tenant-scoped /tenant-models/ routes
+    # already audit COMPLETION_MODEL_CREATED via tenant_model_service;
+    # this path is reachable only by ENEO_SUPER_API_KEY (cross-tenant
+    # operator), and observability lives in app logs for now. A clean
+    # fix needs either a system-tenant convention or a separate
+    # sysadmin_audit store; tracked as follow-up.
     session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = CompletionModelsRepository(session=session)
@@ -1300,6 +1308,8 @@ async def delete_completion_model(
     WARNING: Affects all tenants. Use with caution.
     Set force=true to hard-delete (may break references).
     """
+    # AUDIT GAP: same constraint as create_completion_model — no tenant
+    # to attach the audit row to. App logs are the only trace today.
     session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = CompletionModelsRepository(session=session)
@@ -1347,6 +1357,8 @@ async def create_embedding_model(
     This creates the model metadata only. To enable it for a tenant,
     use POST /api/v1/embedding-models/{id}/ with tenant credentials.
     """
+    # AUDIT GAP: see create_completion_model — no owning tenant for a
+    # global model row, so no audit_log entry is emitted today.
     session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = AdminEmbeddingModelsService(session=session)
@@ -1406,6 +1418,8 @@ async def delete_embedding_model(
 
     WARNING: Deletion affects all tenants. Use with caution.
     """
+    # AUDIT GAP: see create_embedding_model — no owning tenant to attach
+    # the audit row to. App logs are the only trace today.
     session = cast(AsyncSession, container.session())
 
     async with session.begin():
@@ -1423,7 +1437,16 @@ async def delete_embedding_model(
             if collections_count > 0 or websites_count > 0 or integrations_count > 0:
                 raise ModelInUseException()
 
+        # Mirror the completion-model force-delete contract: if the DB
+        # refuses the delete because of a FK constraint (e.g. websites
+        # without ondelete, integration_knowledge references) surface it
+        # as MODEL_IN_USE (400) rather than letting it bubble up as a 500.
+        from sqlalchemy.exc import IntegrityError
+
         repo = AdminEmbeddingModelsService(session=session)
-        await repo.delete_model(id)
+        try:
+            await repo.delete_model(id)
+        except IntegrityError as exc:
+            raise ModelInUseException() from exc
 
     return {"success": True, "message": f"Model {id} deleted successfully"}
