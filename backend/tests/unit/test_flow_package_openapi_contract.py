@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 
 import pytest
+from pydantic import BaseModel, TypeAdapter
 
+from intric.flow_packages.api.flow_package_models import (
+    FlowPackageExportRequest,
+    FlowPackageImportPublic,
+    FlowPackageImportRequest,
+    FlowPackageValidationPublic,
+)
 from intric.flow_packages.domain.flow_package_errors import FlowPackageExportErrorCode
 from intric.main.models import GeneralError
 from intric.server.main import get_application
@@ -95,6 +103,24 @@ def test_openapi_flow_package_export_request_uses_manifest_metadata(
         "name",
     }
     assert "schema_version" not in resolved.get("properties", {})
+
+
+@pytest.mark.parametrize(
+    "model_cls",
+    [
+        FlowPackageExportRequest,
+        FlowPackageValidationPublic,
+        FlowPackageImportRequest,
+        FlowPackageImportPublic,
+    ],
+)
+def test_openapi_flow_package_examples_validate_against_schema(
+    model_cls: type[BaseModel],
+) -> None:
+    example = model_cls.model_config.get("json_schema_extra", {}).get("example")
+
+    assert isinstance(example, dict)
+    TypeAdapter(model_cls).validate_json(json.dumps(example))
 
 
 def test_openapi_flow_package_import_request_uses_typed_json_bindings(
@@ -245,7 +271,7 @@ def test_openapi_flow_package_error_examples_are_actionable(
         "duplicate_slot_binding",
         "flow_package_base64_invalid",
         "flow_package_import_missing_required_resource_binding",
-        "flow_package_import_mcp_manual_setup_required",
+        "flow_package_import_mcp_unsupported",
         "flow_package_import_selected_model_ineligible",
         "flow_package_import_unavailable_local_resource",
         "transcription_model_required",

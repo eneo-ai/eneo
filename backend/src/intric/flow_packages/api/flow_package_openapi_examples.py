@@ -208,15 +208,15 @@ FLOW_PACKAGE_IMPORT_BAD_REQUEST_EXAMPLES: dict[str, dict[str, object]] = {
             },
         },
     },
-    "mcp_manual_setup_required": {
-        "summary": "Package contains MCP resources that require manual setup",
+    "mcp_unsupported": {
+        "summary": "Package contains unsupported MCP resources",
         "value": {
             "message": (
-                "Flow package import does not install or map MCP resources in this version; "
-                "remove MCP resource slots from the package and document the required manual setup."
+                "Flow package import does not support MCP resource installation or mapping. "
+                "Remove MCP resource slots from the package and document any required MCP setup externally."
             ),
             "intric_error_code": int(ErrorCodes.BAD_REQUEST),
-            "code": FlowPackageErrorCode.IMPORT_MCP_MANUAL_SETUP_REQUIRED.value,
+            "code": FlowPackageErrorCode.IMPORT_MCP_UNSUPPORTED.value,
             "context": {"slot_ref": "mcp_tool.case-lookup", "ref_count": 1},
         },
     },
@@ -266,7 +266,7 @@ _FLOW_PACKAGE_EXPORT_BAD_REQUEST_MESSAGES = {
         "Flow package export found duplicate package-slot mappings for a local resource."
     ),
     FlowPackageExportErrorCode.MCP_EXPORT_UNSUPPORTED: (
-        "Flow package export does not include MCP resources; remove MCP bindings from the package and document the required manual setup externally."
+        "Flow package export does not support portable MCP resources; remove MCP bindings from the package and document any required MCP setup externally."
     ),
     FlowPackageExportErrorCode.TEMPLATE_ASSET_PAYLOAD_UNSUPPORTED: (
         "Flow package export does not support portable template assets yet."

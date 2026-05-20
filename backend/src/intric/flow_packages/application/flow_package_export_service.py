@@ -326,9 +326,9 @@ def _assistant_spec(
         raise FlowPackageExportError(
             code=FlowPackageExportErrorCode.MCP_EXPORT_UNSUPPORTED,
             message=(
-                "Flow package export does not include MCP resources in this version. "
-                "Remove MCP bindings from the shared package and document the required "
-                "manual setup in marketplace or forum guidance."
+                "Flow package export does not support portable MCP resources. "
+                "Remove MCP bindings from the shared package and document any required "
+                "MCP setup in marketplace or forum guidance."
             ),
             context={"step_order": usage.step_order},
         )
@@ -474,7 +474,7 @@ def _requirement_from_draft(draft: _RequirementDraft) -> FlowPackageRequirementE
         case ResourceSlotKind.MCP_TOOL:
             raise FlowPackageExportError(
                 code=FlowPackageExportErrorCode.MCP_EXPORT_UNSUPPORTED,
-                message="Flow package export does not include MCP resources in this version.",
+                message="Flow package export does not support portable MCP resources.",
                 context={"resource_ref": draft.binding.slot_ref.ref},
             )
         case ResourceSlotKind.TEMPLATE_ASSET:
@@ -486,7 +486,7 @@ def _requirement_from_draft(draft: _RequirementDraft) -> FlowPackageRequirementE
         case ResourceSlotKind.MCP_SERVER:
             raise FlowPackageExportError(
                 code=FlowPackageExportErrorCode.MCP_EXPORT_UNSUPPORTED,
-                message="Flow package export does not include MCP resources in this version.",
+                message="Flow package export does not support portable MCP resources.",
                 context={"resource_ref": draft.binding.slot_ref.ref},
             )
 

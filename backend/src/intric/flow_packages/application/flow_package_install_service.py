@@ -119,7 +119,7 @@ def validate_flow_package_install_selection(
     referenced_slot_refs = _referenced_slot_refs(envelope.spec)
 
     _reject_template_asset_requirements(envelope)
-    _reject_mcp_setup_requirements(envelope)
+    _reject_unsupported_mcp_requirements(envelope)
     _reject_unknown_referenced_slots(
         referenced_slot_refs=referenced_slot_refs,
         declared_slot_refs=declared_slot_refs,
@@ -222,7 +222,7 @@ def _spec_with_unbound_knowledge_refs_removed(
     return spec.model_copy(update={"steps": updated_steps})
 
 
-def _reject_mcp_setup_requirements(envelope: FlowPackageEnvelope) -> None:
+def _reject_unsupported_mcp_requirements(envelope: FlowPackageEnvelope) -> None:
     requirement_refs = sorted(
         requirement.slot_ref.ref
         for requirement in envelope.requirements.requirements
@@ -242,10 +242,10 @@ def _reject_mcp_setup_requirements(envelope: FlowPackageEnvelope) -> None:
     if not mcp_refs:
         return
     raise FlowPackageValidationError(
-        code=FlowPackageErrorCode.IMPORT_MCP_MANUAL_SETUP_REQUIRED,
+        code=FlowPackageErrorCode.IMPORT_MCP_UNSUPPORTED,
         message=(
-            "Flow package import does not install or map MCP resources in this version; "
-            "remove MCP resource slots from the package and document the required manual setup."
+            "Flow package import does not support MCP resource installation or mapping. "
+            "Remove MCP resource slots from the package and document any required MCP setup externally."
         ),
         context={"slot_ref": mcp_refs[0], "ref_count": len(mcp_refs)},
     )

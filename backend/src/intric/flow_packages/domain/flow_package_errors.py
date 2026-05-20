@@ -27,7 +27,7 @@ class FlowPackageErrorCode(StrEnum):
     )
     IMPORT_UNAVAILABLE_LOCAL_RESOURCE = "flow_package_import_unavailable_local_resource"
     IMPORT_SELECTED_MODEL_INELIGIBLE = "flow_package_import_selected_model_ineligible"
-    IMPORT_MCP_MANUAL_SETUP_REQUIRED = "flow_package_import_mcp_manual_setup_required"
+    IMPORT_MCP_UNSUPPORTED = "flow_package_import_mcp_unsupported"
     IMPORT_TEMPLATE_ASSETS_UNSUPPORTED = (
         "flow_package_import_template_assets_unsupported"
     )

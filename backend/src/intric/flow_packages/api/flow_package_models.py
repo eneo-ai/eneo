@@ -32,8 +32,6 @@ class FlowPackageExportRequest(FlowPackageManifestMetadataFields):
             "example": {
                 "package_id": "se.demo.case-report",
                 "package_version": "1.0.0",
-                "package_kind": "flow",
-                "payload_schema": "eneo.flow_package.v1",
                 "name": "Case Report",
                 "description": (
                     "Creates a structured case report from approved local material."
@@ -77,6 +75,8 @@ class FlowPackageValidationPublic(BaseModel):
             "example": {
                 "package_id": "se.demo.case-report",
                 "package_version": "1.0.0",
+                "package_kind": "flow",
+                "payload_schema": "eneo.flow_package.v1",
                 "name": "Case Report",
                 "description": "Creates a structured case report from approved local material.",
                 "content_checksum": "0" * 64,
@@ -98,7 +98,7 @@ class FlowPackageValidationPublic(BaseModel):
         description="Publisher-assigned package version from the package manifest."
     )
     package_kind: str = Field(
-        description="Generic package kind. Flow package V1 currently imports only `flow`."
+        description="Generic package kind. Flow package import accepts only `flow` payloads."
     )
     payload_schema: str = Field(
         description="Payload schema identifier used by the package kind."
@@ -222,7 +222,11 @@ class FlowPackageImportRequest(BaseModel):
     )
     selected_bindings: list[FlowPackageImportResourceBindingRequest] = Field(
         default_factory=_empty_import_resource_binding_requests,
-        description="Local target resources selected for package dependency slots.",
+        description=(
+            "Local target resources selected for package dependency slots. "
+            "Knowledge slots may target `collection`, `website`, or "
+            "`integration_knowledge` resources."
+        ),
     )
 
     def import_selection(self) -> FlowPackageImportSelection:
