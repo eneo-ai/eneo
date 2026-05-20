@@ -140,7 +140,7 @@
                 class="hover:bg-hover-default border-default flex items-center gap-2 rounded-md border px-2 py-1 text-sm"
                 onclick={showSnippet}
               >
-                {info.title}
+                {info.title}{info.section ? ` → ${info.section}` : ""}
               </button>
             {/snippet}
           </McpResourceSnippetModal>

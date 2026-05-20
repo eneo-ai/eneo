@@ -51,11 +51,13 @@
       const title = meta["eneoknowledge.title"] ?? hostFromUri(ref.uri);
       const pageRange = meta["eneoknowledge.pageRange"] ?? null;
       const section = meta["eneoknowledge.section"] ?? null;
+      const labelText = section ? `${title} → ${section}` : title;
       return {
         id: ref.id,
         uri: ref.uri,
         content: ref.content ?? null,
         title,
+        labelText,
         sourceType: sourceType ?? null,
         pageRange,
         section,
@@ -152,7 +154,7 @@
       >
         {#snippet children({ showSnippet }: { showSnippet: () => void })}
           <button onclick={showSnippet} class={["reference", token.level]}>
-            {@render label(mcpReference?.number ?? 0, mcpReference?.title ?? "")}
+            {@render label(mcpReference?.number ?? 0, mcpReference?.labelText ?? "")}
           </button>
         {/snippet}
       </McpResourceSnippetModal>
