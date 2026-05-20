@@ -13,6 +13,7 @@
   import { IconRefresh } from "@intric/icons/refresh";
   import IntegrationsTable from "./integrations/IntegrationsTable.svelte";
   import SyncHistoryDialog from "./integrations/SyncHistoryDialog.svelte";
+  import KnowledgeSourcesPanel from "./sources/KnowledgeSourcesPanel.svelte";
   import ImportKnowledgeDialog from "$lib/features/integrations/components/import/ImportKnowledgeDialog.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -131,6 +132,7 @@
       {#if userCanSeeIntegrations}
         <Page.TabTrigger tab="integrations">{m.integrations()}</Page.TabTrigger>
       {/if}
+      <Page.TabTrigger tab="sources">Kunskapskällor</Page.TabTrigger>
     </Page.Tabbar>
     <div class="flex-grow"></div>
     <Page.Flex>
@@ -195,6 +197,9 @@
         <WebsiteTable bind:selectedWebsiteIds></WebsiteTable>
       </Page.Tab>
     {/if}
+    <Page.Tab id="sources">
+      <KnowledgeSourcesPanel />
+    </Page.Tab>
     {#if userCanSeeIntegrations}
       <Page.Tab id="integrations">
         {#if showIntegrationsNotice}

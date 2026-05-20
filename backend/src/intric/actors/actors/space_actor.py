@@ -37,6 +37,7 @@ class SpaceResourceType(str, Enum):
     MEMBER = "member"
     GROUP_MEMBER = "group_member"
     DEFAULT_ASSISTANT = "default assistant"
+    MCP_SERVER = "mcp_server"
 
 
 class SpaceRole(str, Enum):
@@ -62,6 +63,7 @@ SHARED_SPACE_PERMISSIONS = {
         SpaceResourceType.INTEGRATION_KNOWLEDGE: {
             SpaceAction.READ,
         },
+        SpaceResourceType.MCP_SERVER: {SpaceAction.READ},
     },
     SpaceRole.EDITOR: {
         SpaceResourceType.ASSISTANT: {
@@ -118,6 +120,12 @@ SHARED_SPACE_PERMISSIONS = {
         SpaceResourceType.INFO_BLOB: {
             SpaceAction.READ,
             SpaceAction.CREATE,
+            SpaceAction.DELETE,
+        },
+        SpaceResourceType.MCP_SERVER: {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
             SpaceAction.DELETE,
         },
         SpaceResourceType.SPACE: {
@@ -184,6 +192,12 @@ SHARED_SPACE_PERMISSIONS = {
         SpaceResourceType.INFO_BLOB: {
             SpaceAction.READ,
             SpaceAction.CREATE,
+            SpaceAction.DELETE,
+        },
+        SpaceResourceType.MCP_SERVER: {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
             SpaceAction.DELETE,
         },
         SpaceResourceType.SPACE: {
@@ -266,6 +280,12 @@ PERSONAL_SPACE_PERMISSIONS = {
             SpaceAction.CREATE,
             SpaceAction.DELETE,
         },
+        SpaceResourceType.MCP_SERVER: {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+        },
         SpaceResourceType.SPACE: {
             SpaceAction.READ,
         },
@@ -337,6 +357,12 @@ ORG_SPACE_PERMISSIONS = {
         SpaceResourceType.INFO_BLOB: {
             SpaceAction.READ,
             SpaceAction.CREATE,
+            SpaceAction.DELETE,
+        },
+        SpaceResourceType.MCP_SERVER: {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
             SpaceAction.DELETE,
         },
         SpaceResourceType.SPACE: {
@@ -886,6 +912,30 @@ class SpaceActor:
         return self.can_perform_action(
             action=SpaceAction.DELETE,
             resource_type=SpaceResourceType.WEBSITE,
+        )
+
+    def can_read_mcp_servers(self):
+        return self.can_perform_action(
+            action=SpaceAction.READ,
+            resource_type=SpaceResourceType.MCP_SERVER,
+        )
+
+    def can_create_mcp_servers(self):
+        return self.can_perform_action(
+            action=SpaceAction.CREATE,
+            resource_type=SpaceResourceType.MCP_SERVER,
+        )
+
+    def can_edit_mcp_servers(self):
+        return self.can_perform_action(
+            action=SpaceAction.EDIT,
+            resource_type=SpaceResourceType.MCP_SERVER,
+        )
+
+    def can_delete_mcp_servers(self):
+        return self.can_perform_action(
+            action=SpaceAction.DELETE,
+            resource_type=SpaceResourceType.MCP_SERVER,
         )
 
     def can_read_integrations(self):

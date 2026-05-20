@@ -71,6 +71,7 @@ class MCPServerAssembler:
 
         return {
             "id": str(mcp_server.id),
+            "space_id": str(mcp_server.space_id) if mcp_server.space_id else None,
             "name": mcp_server.name,
             "description": mcp_server.description,
             "http_url": mcp_server.http_url,
@@ -94,6 +95,7 @@ class MCPServerAssembler:
         """Convert MCPServer domain entity to DTO."""
         return MCPServerPublic(
             id=mcp_server.id,
+            space_id=mcp_server.space_id,
             name=mcp_server.name,
             description=mcp_server.description,
             http_url=mcp_server.http_url,

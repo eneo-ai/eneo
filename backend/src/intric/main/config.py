@@ -417,6 +417,15 @@ class Settings(BaseSettings):
     file_storage_url: Optional[str] = None
     file_storage_bearer_token: Optional[str] = None
 
+    # eneo-knowledge integration: proxy-create a Collection inside the shared
+    # eneo-knowledge instance when a user adds a "Knowledge source" in a space.
+    # Eneo holds an API key and acts on the user's behalf; tenant + space
+    # isolation is enforced in eneo via the knowledge_sources ownership
+    # table (eneo-knowledge stays single-tenant for the POC). The embedding
+    # model is picked server-side by eneo-knowledge — eneo never supplies one.
+    knowledge_url: Optional[str] = None
+    knowledge_api_key: Optional[str] = None
+
     # Dev
     testing: bool = False
     dev: bool = False

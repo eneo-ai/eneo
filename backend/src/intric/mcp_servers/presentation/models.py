@@ -20,9 +20,16 @@ class BaseListModel(BaseModel, Generic[T]):
 
 
 class MCPServerPublic(BaseModel):
-    """Public DTO for MCP server (HTTP-only, uses Streamable HTTP transport)."""
+    """Public DTO for MCP server (HTTP-only, uses Streamable HTTP transport).
+
+    ``space_id`` is non-null when the server is space-private (created via
+    the self-service / knowledge-source flow) and null for the tenant-wide
+    admin-curated catalog. Frontends use this to group the assistant
+    picker (no other behavioural branching depends on it).
+    """
 
     id: UUID
+    space_id: Optional[UUID] = None
     name: str
     description: Optional[str]
     http_url: str

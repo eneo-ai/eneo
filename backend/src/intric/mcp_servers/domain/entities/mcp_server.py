@@ -41,13 +41,18 @@ class MCPServerTool(Entity):
 
 
 class MCPServer(Entity):
-    """Domain entity for MCP server (tenant-scoped, HTTP-only)."""
+    """Domain entity for MCP server (HTTP-only).
+
+    Tenant-wide entry: ``space_id`` is ``None`` (admin-curated catalog).
+    Space-private entry: ``space_id`` is the owning space (self-service).
+    """
 
     def __init__(
         self,
         tenant_id: UUID,
         name: str,
         http_url: str,
+        space_id: Optional[UUID] = None,
         description: Optional[str] = None,
         http_auth_type: str = "none",
         http_auth_config_schema: Optional[dict[str, Any]] = None,
@@ -64,6 +69,7 @@ class MCPServer(Entity):
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.tenant_id = tenant_id
+        self.space_id = space_id
         self.name = name
         self.description = description
         self.http_url = http_url

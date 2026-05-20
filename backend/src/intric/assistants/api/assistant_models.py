@@ -80,6 +80,7 @@ class AssistantGuard(BaseModel):
 
 class MCPServerPublicDict(TypedDict):
     id: str
+    space_id: str | None
     name: str
     description: str | None
     http_url: str | None

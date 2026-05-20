@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
-from sqlalchemy import Boolean, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Index, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -15,15 +15,38 @@ if TYPE_CHECKING:
 
 
 class MCPServers(BasePublic):
-    """Tenant MCP server catalog (HTTP-only)."""
+    """Tenant MCP server catalog (HTTP-only).
+
+    ``space_id`` IS NULL means a tenant-wide, admin-curated entry. A non-null
+    ``space_id`` makes the entry private to that space, created via the
+    space-scoped self-service endpoint. Uniqueness is enforced separately
+    for each scope via partial unique indexes.
+    """
 
     __tablename__ = "mcp_servers"  # type: ignore[assignment]
     __table_args__ = (
-        UniqueConstraint("tenant_id", "name", name="uq_mcp_servers_tenant_name"),
+        Index(
+            "uq_mcp_servers_tenant_name_global",
+            "tenant_id",
+            "name",
+            unique=True,
+            postgresql_where=text("space_id IS NULL"),
+        ),
+        Index(
+            "uq_mcp_servers_tenant_space_name",
+            "tenant_id",
+            "space_id",
+            "name",
+            unique=True,
+            postgresql_where=text("space_id IS NOT NULL"),
+        ),
     )
 
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=False
+    )
+    space_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("spaces.id", ondelete="CASCADE"), nullable=True, index=True
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)

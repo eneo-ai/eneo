@@ -21,7 +21,14 @@ from intric.integration.presentation.assemblers.integration_knowledge_assembler 
 from intric.integration.presentation.models import IntegrationKnowledgePublic
 from intric.jobs.job_models import JobPublic
 from intric.main.container.container import Container
+from intric.main.exceptions import BadRequestException
 from intric.main.models import NOT_PROVIDED, ModelId, PaginatedResponse, is_provided
+from intric.mcp_servers.presentation.models import (
+    MCPConnectionStatus,
+    MCPServerCreate,
+    MCPServerCreateResponse,
+    MCPServerPublic,
+)
 from intric.roles.permissions import Permission, validate_permission
 from intric.server import protocol
 from intric.server.dependencies.container import get_container
@@ -732,6 +739,250 @@ async def create_space_websites(
     )
 
     return WebsitePublic.from_domain(created_website)
+
+
+@router.get(
+    "/{id}/mcp-servers/",
+    response_model=list[MCPServerPublic],
+    responses=responses.get_responses([403, 404]),
+    summary="List MCP servers private to this space",
+    description=(
+        "Returns only the space-private MCP servers owned by this space. "
+        "Tenant-wide MCP servers are still surfaced through the space's "
+        "available MCP list (`GET /spaces/{id}/`)."
+    ),
+)
+async def list_space_mcp_servers(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    service = container.mcp_server_service()
+    assembler = container.mcp_server_assembler()
+    servers = await service.list_space_mcp_servers(space_id=id)
+    return [assembler.from_domain_to_model(server) for server in servers]
+
+
+@router.post(
+    "/{id}/mcp-servers/",
+    response_model=MCPServerCreateResponse,
+    status_code=201,
+    responses=responses.get_responses([400, 403, 404]),
+    summary="Create a space-private MCP server",
+    description=(
+        "Registers an HTTP MCP server scoped to this space. Editors and "
+        "admins of the space can create entries here without involving a "
+        "tenant admin. Connection is validated and the tool catalog is "
+        "discovered before the row is saved; on failure 400 is returned."
+    ),
+)
+async def create_space_mcp_server(
+    id: UUID,
+    data: MCPServerCreate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    service = container.mcp_server_service()
+    assembler = container.mcp_server_assembler()
+    user = container.user()
+
+    result = await service.create_space_mcp_server(
+        space_id=id,
+        name=data.name,
+        http_url=str(data.http_url),
+        http_auth_type=data.http_auth_type,
+        description=data.description,
+        http_auth_config_schema=data.http_auth_config_schema,
+        tags=data.tags,
+        icon_url=str(data.icon_url) if data.icon_url else None,
+        documentation_url=str(data.documentation_url)
+        if data.documentation_url
+        else None,
+    )
+
+    if not result.connection.success:
+        raise BadRequestException(
+            result.connection.error_message or "Failed to connect to MCP server"
+        )
+
+    space = None
+    try:
+        space_service = container.space_service()
+        space = await space_service.get_space(id)
+    except Exception:
+        pass
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.MCP_SERVER_CREATED,
+        entity_type=EntityType.MCP_SERVER,
+        entity_id=result.server.id,
+        description=(
+            f"Created space-private MCP server '{result.server.name}' "
+            f"in space '{space.name if space else 'unknown'}'"
+        ),
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=result.server,
+            space=space,
+            extra={"space_id": str(id)},
+        ),
+    )
+
+    return MCPServerCreateResponse(
+        server=assembler.from_domain_to_model(result.server),
+        connection=MCPConnectionStatus(
+            success=result.connection.success,
+            tools_discovered=result.connection.tools_discovered,
+            error_message=result.connection.error_message,
+        ),
+    )
+
+
+@router.delete(
+    "/{id}/mcp-servers/{mcp_server_id}/",
+    status_code=204,
+    responses=responses.get_responses([403, 404]),
+    summary="Delete a space-private MCP server",
+    description=(
+        "If the MCP server was provisioned through the knowledge-source flow, "
+        "the matching upstream eneo-knowledge collection is also deleted. "
+        "Plain space-private MCP servers (no knowledge-source mapping) are "
+        "just removed locally."
+    ),
+)
+async def delete_space_mcp_server(
+    id: UUID,
+    mcp_server_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    service = container.mcp_server_service()
+    knowledge_source_service = container.knowledge_source_service()
+    user = container.user()
+
+    # Detect knowledge-source ownership BEFORE delete so we can clean up the
+    # paired upstream collection. Knowledge-source rows are space-scoped and
+    # the service-level authz check in `delete_space_mcp_server` is what
+    # gates this whole flow — we do not authz separately here.
+    ownership = await knowledge_source_service.find_by_mcp_server_id(mcp_server_id)
+    if ownership is not None and ownership.space_id != id:
+        # Defensive: the FK CASCADE means we shouldn't be able to delete an
+        # ownership row from the wrong space, but bail explicitly rather than
+        # silently scope-cross.
+        from intric.main.exceptions import UnauthorizedException
+
+        raise UnauthorizedException("Knowledge source belongs to a different space")
+
+    deleted = await service.delete_space_mcp_server(
+        space_id=id, mcp_server_id=mcp_server_id
+    )
+
+    # Local row is gone (FK CASCADE removed the knowledge_sources row too).
+    # Now best-effort upstream cleanup.
+    if ownership is not None:
+        await knowledge_source_service.delete_upstream_collection(
+            slug=ownership.eneo_knowledge_slug
+        )
+
+    space = None
+    try:
+        space_service = container.space_service()
+        space = await space_service.get_space(id)
+    except Exception:
+        pass
+
+    audit_service = container.audit_service()
+    description = (
+        f"Deleted space-private MCP server '{deleted.name}' "
+        f"from space '{space.name if space else 'unknown'}'"
+    )
+    extra: dict[str, str] = {"space_id": str(id)}
+    if ownership is not None:
+        description = (
+            f"Deleted knowledge source '{deleted.name}' (eneo-knowledge slug "
+            f"'{ownership.eneo_knowledge_slug}') from space "
+            f"'{space.name if space else 'unknown'}'"
+        )
+        extra["eneo_knowledge_slug"] = ownership.eneo_knowledge_slug
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.MCP_SERVER_DELETED,
+        entity_type=EntityType.MCP_SERVER,
+        entity_id=mcp_server_id,
+        description=description,
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=deleted,
+            space=space,
+            extra=extra,
+        ),
+    )
+
+
+@router.post(
+    "/{id}/mcp-servers/{mcp_server_id}/refresh-tools/",
+    response_model=MCPConnectionStatus,
+    responses=responses.get_responses([400, 403, 404]),
+    summary="Re-discover and upsert tool definitions for a space-private MCP",
+    description=(
+        "Calls `tools/list` against the MCP server and writes the returned "
+        "descriptions/schemas directly onto the existing tool rows — bypasses "
+        "the admin pending/approval queue because the user owns this server. "
+        "Use this after the upstream eneo-knowledge tool definitions change."
+    ),
+)
+async def refresh_space_mcp_server_tools(
+    id: UUID,
+    mcp_server_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    service = container.mcp_server_service()
+    user = container.user()
+
+    connection = await service.refresh_space_mcp_server_tools(
+        space_id=id, mcp_server_id=mcp_server_id
+    )
+    if not connection.success:
+        raise BadRequestException(
+            connection.error_message or "Failed to refresh tool definitions"
+        )
+
+    space = None
+    try:
+        space_service = container.space_service()
+        space = await space_service.get_space(id)
+    except Exception:
+        pass
+
+    server = await service.get_mcp_server(mcp_server_id)
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.MCP_SERVER_UPDATED,
+        entity_type=EntityType.MCP_SERVER,
+        entity_id=mcp_server_id,
+        description=(
+            f"Refreshed tool definitions for '{server.name}' in space "
+            f"'{space.name if space else 'unknown'}'"
+        ),
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=server,
+            space=space,
+            extra={
+                "space_id": str(id),
+                "tools_discovered": str(connection.tools_discovered),
+            },
+        ),
+    )
+
+    return MCPConnectionStatus(
+        success=connection.success,
+        tools_discovered=connection.tools_discovered,
+        error_message=connection.error_message,
+    )
 
 
 @router.post(

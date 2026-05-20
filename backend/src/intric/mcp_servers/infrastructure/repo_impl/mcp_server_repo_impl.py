@@ -37,9 +37,17 @@ class MCPServerRepoImpl(
         return self.mapper.to_entities(records)
 
     async def query(  # type: ignore[override]
-        self, tags: list[str] | None = None, **filters: object
+        self,
+        tags: list[str] | None = None,
+        include_space_scoped: bool = False,
+        **filters: object,
     ) -> list[MCPServer]:
-        """Query MCP servers with optional tag filtering."""
+        """Query MCP servers with optional tag filtering.
+
+        By default returns tenant-wide entries only (``space_id IS NULL``).
+        Pass ``include_space_scoped=True`` to also return space-private rows
+        (used by the space-scoped catalog/listing endpoints).
+        """
         query = select(self._db_model)
 
         if tags:
@@ -51,6 +59,9 @@ class MCPServerRepoImpl(
         if filters:
             query = query.filter_by(**filters)
 
+        if not include_space_scoped:
+            query = query.where(self._db_model.space_id.is_(None))
+
         result = await self.session.scalars(query)
         records = result.all()
         if not records:
@@ -60,10 +71,35 @@ class MCPServerRepoImpl(
 
     @override
     async def query_by_tenant(self, tenant_id: UUID) -> list[MCPServer]:
-        """Get all MCP servers for a specific tenant with tools loaded."""
+        """Get tenant-wide MCP servers for a tenant with tools loaded.
+
+        Excludes space-private entries (``space_id IS NOT NULL``); those are
+        only visible inside their owning space.
+        """
         query = (
             select(self._db_model)
             .where(self._db_model.tenant_id == tenant_id)
+            .where(self._db_model.space_id.is_(None))
+            .options(
+                selectinload(self._db_model.tools),
+                selectinload(self._db_model.security_classification).selectinload(
+                    SecurityClassificationDBModel.tenant
+                ),
+            )
+        )
+        result = await self.session.scalars(query)
+        records = result.all()
+        if not records:
+            return []
+
+        return self.mapper.to_entities(records)
+
+    async def query_by_space(self, tenant_id: UUID, space_id: UUID) -> list[MCPServer]:
+        """Get space-private MCP servers owned by a given space."""
+        query = (
+            select(self._db_model)
+            .where(self._db_model.tenant_id == tenant_id)
+            .where(self._db_model.space_id == space_id)
             .options(
                 selectinload(self._db_model.tools),
                 selectinload(self._db_model.security_classification).selectinload(

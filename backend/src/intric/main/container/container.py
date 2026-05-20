@@ -84,6 +84,8 @@ from intric.embedding_models.infrastructure.create_embeddings_service import (
     CreateEmbeddingsService,
 )
 from intric.embedding_models.infrastructure.datastore import Datastore
+from intric.eneo_knowledge.client import EneoKnowledgeClient
+from intric.eneo_knowledge.service import KnowledgeSourceService
 from intric.feature_flag.feature_flag_factory import FeatureFlagFactory
 from intric.feature_flag.feature_flag_repo import FeatureFlagRepository
 from intric.feature_flag.feature_flag_service import FeatureFlagService
@@ -342,6 +344,15 @@ from intric.worker.tenant_concurrency import TenantConcurrencyLimiter
 from intric.workflows.step_repo import StepRepository
 
 _logger = get_logger(__name__)
+
+
+def _build_eneo_knowledge_client() -> EneoKnowledgeClient | None:
+    settings = get_settings()
+    url = settings.knowledge_url
+    api_key = settings.knowledge_api_key
+    if not url or not api_key:
+        return None
+    return EneoKnowledgeClient(base_url=url, api_key=api_key)
 
 
 def _create_redis_client() -> aioredis.Redis:
@@ -1145,6 +1156,20 @@ class Container(containers.DeclarativeContainer):
         mcp_server_tool_repo=mcp_server_tool_repo,
         user=user,
         encryption_service=encryption_service,
+        space_service=space_service,
+        actor_manager=actor_manager,
+    )
+
+    eneo_knowledge_client = providers.Singleton(_build_eneo_knowledge_client)
+
+    knowledge_source_service = providers.Factory(
+        KnowledgeSourceService,
+        session=session,
+        user=user,
+        space_service=space_service,
+        actor_manager=actor_manager,
+        mcp_server_service=mcp_server_service,
+        eneo_knowledge_client=eneo_knowledge_client,
     )
     mcp_server_settings_service = providers.Factory(
         MCPServerSettingsService,

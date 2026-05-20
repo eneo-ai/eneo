@@ -85,6 +85,7 @@ class MCPServerMapper:
             created_at=db_model.created_at,  # type: ignore[arg-type]
             updated_at=db_model.updated_at,  # type: ignore[arg-type]
             tenant_id=db_model.tenant_id,
+            space_id=db_model.space_id,
             name=db_model.name,
             description=db_model.description,
             http_url=db_model.http_url,
@@ -110,6 +111,7 @@ class MCPServerMapper:
         return {
             "id": entity.id,
             "tenant_id": entity.tenant_id,
+            "space_id": entity.space_id,
             "name": entity.name,
             "description": entity.description,
             "http_url": entity.http_url,

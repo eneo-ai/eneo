@@ -13,6 +13,7 @@ from intric.mcp_servers.infrastructure.client.mcp_client import (
 from intric.roles.permissions import Permission, validate_permissions
 
 if TYPE_CHECKING:
+    from intric.actors.actor_manager import ActorManager
     from intric.mcp_servers.domain.repositories.mcp_server_repo import (
         MCPServerRepository,
     )
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
         SecurityClassification,
     )
     from intric.settings.encryption_service import EncryptionService
+    from intric.spaces.space_service import SpaceService
     from intric.users.user import UserInDB
 
 logger = logging.getLogger(__name__)
@@ -89,21 +91,46 @@ class MCPServerService:
         mcp_server_tool_repo: "MCPServerToolRepository",
         user: "UserInDB",
         encryption_service: "EncryptionService | None" = None,
+        space_service: "SpaceService | None" = None,
+        actor_manager: "ActorManager | None" = None,
     ):
         super().__init__()
         self.repo = mcp_server_repo
         self.tool_repo = mcp_server_tool_repo
         self.user = user
         self.encryption_service = encryption_service
+        self.space_service = space_service
+        self.actor_manager = actor_manager
 
     # Keys in http_auth_config_schema that contain secrets
     _SECRET_KEYS = ("token",)
 
     async def _get_server_for_tenant(self, mcp_server_id: UUID) -> MCPServer:
-        """Fetch an MCP server and verify it belongs to the current user's tenant."""
+        """Fetch a tenant-wide MCP server and verify tenant ownership.
+
+        Rejects space-private entries — those are managed via the
+        space-scoped endpoints, not the admin catalog.
+        """
         server = await self.repo.one(id=mcp_server_id)
         if server.tenant_id != self.user.tenant_id:
             raise UnauthorizedException("MCP server not accessible")
+        if server.space_id is not None:
+            raise UnauthorizedException(
+                "MCP server is space-private; use the space-scoped endpoint"
+            )
+        return server
+
+    async def _get_space_server(self, mcp_server_id: UUID, space_id: UUID) -> MCPServer:
+        """Fetch a space-private MCP server and verify ownership.
+
+        Both ``tenant_id`` and ``space_id`` must match — space-private rows
+        are not visible across spaces, even within the same tenant.
+        """
+        server = await self.repo.one(id=mcp_server_id)
+        if server.tenant_id != self.user.tenant_id:
+            raise UnauthorizedException("MCP server not accessible")
+        if server.space_id != space_id:
+            raise UnauthorizedException("MCP server not in this space")
         return server
 
     def _encrypt_auth_config(
@@ -313,6 +340,179 @@ class MCPServerService:
         """Delete an MCP server from global catalog (admin only)."""
         await self._get_server_for_tenant(mcp_server_id)
         await self.repo.delete(id=mcp_server_id)
+
+    async def list_space_mcp_servers(self, space_id: UUID) -> list[MCPServer]:
+        """List space-private MCP servers in a given space.
+
+        Authorization via space actor (``can_read_mcp_servers``); space-private
+        rows are never visible outside their owning space.
+        """
+        assert self.space_service is not None
+        assert self.actor_manager is not None
+        space = await self.space_service.get_space(space_id)
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+        if not actor.can_read_mcp_servers():
+            raise UnauthorizedException()
+        assert space.id is not None
+        return await self.repo.query_by_space(
+            tenant_id=self.user.tenant_id, space_id=space.id
+        )
+
+    async def create_space_mcp_server(
+        self,
+        space_id: UUID,
+        name: str,
+        http_url: str,
+        http_auth_type: str = "none",
+        description: str | None = None,
+        http_auth_config_schema: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
+        icon_url: str | None = None,
+        documentation_url: str | None = None,
+    ) -> MCPServerCreateResult:
+        """Create a space-private MCP server, gated by space role.
+
+        Connection is validated against the supplied URL+credentials before
+        the row is persisted; on failure the row is not written. Tools are
+        auto-discovered via ``tools/list`` exactly like the admin path.
+        """
+        assert self.space_service is not None
+        assert self.actor_manager is not None
+        space = await self.space_service.get_space(space_id)
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+        if not actor.can_create_mcp_servers():
+            raise UnauthorizedException()
+        assert space.id is not None
+
+        http_url = str(http_url)
+        if icon_url is not None:
+            icon_url = str(icon_url)
+        if documentation_url is not None:
+            documentation_url = str(documentation_url)
+
+        mcp_server = MCPServer(
+            tenant_id=self.user.tenant_id,
+            space_id=space.id,
+            name=name,
+            http_url=http_url,
+            http_auth_type=http_auth_type,
+            description=description,
+            http_auth_config_schema=http_auth_config_schema,
+            tags=tags,
+            icon_url=icon_url,
+            documentation_url=documentation_url,
+        )
+
+        auth_credentials = http_auth_config_schema if http_auth_config_schema else None
+        tools, connection_result = await self._test_connection_and_discover_tools(
+            mcp_server, auth_credentials
+        )
+        if not connection_result.success:
+            return MCPServerCreateResult(
+                server=mcp_server, connection=connection_result
+            )
+
+        if http_auth_type != "none" and http_auth_config_schema:
+            mcp_server.http_auth_config_schema = self._encrypt_auth_config(
+                http_auth_config_schema
+            )
+        else:
+            mcp_server.http_auth_config_schema = None
+
+        mcp_server = await self.repo.add(mcp_server)
+
+        # Auto-enable the new MCP in the owning space. Downstream code (the
+        # space factory and the assistant update validator) reads the
+        # SpacesMCPServers join table; without a row here, the new server
+        # would be invisible to assistants in this space.
+        import sqlalchemy as _sa
+
+        from intric.database.tables.mcp_server_table import (
+            SpacesMCPServers as _SpacesMCPServers,
+        )
+
+        await self.repo.session.execute(
+            _sa.insert(_SpacesMCPServers).values(
+                space_id=space.id,
+                mcp_server_id=mcp_server.id,
+            )
+        )
+
+        for tool_def in tools:
+            tool = MCPServerTool(
+                mcp_server_id=mcp_server.id,
+                name=tool_def["name"],
+                description=tool_def.get("description"),
+                input_schema=tool_def.get("input_schema"),
+                is_enabled_by_default=True,
+            )
+            await self.tool_repo.upsert_by_server_and_name(tool)
+
+        connection_result.tools_discovered = len(tools)
+        return MCPServerCreateResult(server=mcp_server, connection=connection_result)
+
+    async def refresh_space_mcp_server_tools(
+        self, space_id: UUID, mcp_server_id: UUID
+    ) -> ConnectionResult:
+        """Re-discover and upsert tool definitions for a space-private MCP.
+
+        Bypasses the pending/approval queue used by the admin path: changes
+        are applied directly because eneo (the operator) owns both the MCP
+        server and the upstream service for space-private knowledge sources.
+        Decrypts the stored bearer to call ``tools/list``, then upserts the
+        returned definitions onto the existing rows.
+
+        Returns the connection result so the caller can surface failure
+        cleanly to the UI; tool rows are only modified on success.
+        """
+        assert self.space_service is not None
+        assert self.actor_manager is not None
+        space = await self.space_service.get_space(space_id)
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+        if not actor.can_edit_mcp_servers():
+            raise UnauthorizedException()
+        assert space.id is not None
+        server = await self._get_space_server(mcp_server_id, space.id)
+
+        auth_credentials = self._decrypt_auth_config(server.http_auth_config_schema)
+        tools, connection = await self._test_connection_and_discover_tools(
+            server, auth_credentials
+        )
+        if not connection.success:
+            return connection
+
+        for tool_def in tools:
+            tool = MCPServerTool(
+                mcp_server_id=server.id,
+                name=tool_def["name"],
+                description=tool_def.get("description"),
+                input_schema=tool_def.get("input_schema"),
+                is_enabled_by_default=True,
+            )
+            await self.tool_repo.upsert_by_server_and_name(tool)
+
+        connection.tools_discovered = len(tools)
+        return connection
+
+    async def delete_space_mcp_server(
+        self, space_id: UUID, mcp_server_id: UUID
+    ) -> MCPServer:
+        """Delete a space-private MCP server.
+
+        Returns the deleted server so callers can use it for audit context.
+        Rejects mismatched ``space_id`` even if the requester has tenant
+        admin rights elsewhere; the space boundary is the authoritative one.
+        """
+        assert self.space_service is not None
+        assert self.actor_manager is not None
+        space = await self.space_service.get_space(space_id)
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+        if not actor.can_delete_mcp_servers():
+            raise UnauthorizedException()
+        assert space.id is not None
+        server = await self._get_space_server(mcp_server_id, space.id)
+        await self.repo.delete(id=mcp_server_id)
+        return server
 
     async def _test_connection_and_discover_tools(
         self,

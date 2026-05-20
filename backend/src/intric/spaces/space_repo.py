@@ -1265,10 +1265,19 @@ class SpaceRepository:
             SecurityClassification as SecurityClassificationDBModel,
         )
 
+        # Visible MCP servers for this space:
+        # - tenant-wide entries (space_id IS NULL) — admin-curated catalog
+        # - space-private entries owned by this space (space_id == entry_in_db.id)
         mcp_servers_query = (
             sa.select(MCPServersTable)
             .where(MCPServersTable.tenant_id == self.user.tenant_id)
             .where(MCPServersTable.is_enabled == True)  # noqa: E712
+            .where(
+                sa.or_(
+                    MCPServersTable.space_id.is_(None),
+                    MCPServersTable.space_id == entry_in_db.id,
+                )
+            )
             .options(
                 _selectinload(MCPServersTable.security_classification).selectinload(
                     SecurityClassificationDBModel.tenant
@@ -1288,6 +1297,7 @@ class SpaceRepository:
             MCPServer(
                 id=server.id,
                 tenant_id=server.tenant_id,
+                space_id=server.space_id,
                 name=server.name,
                 description=server.description,
                 http_url=server.http_url,

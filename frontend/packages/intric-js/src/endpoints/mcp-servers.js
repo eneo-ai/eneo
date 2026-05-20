@@ -334,6 +334,197 @@ export function initMCPServers(client) {
     },
 
     /**
+     * List MCP servers private to a space (does not include tenant-wide entries).
+     * Space members with READ permission on mcp_servers can call this.
+     * @param {Object} params
+     * @param {string} params.space_id Space ID to list servers for
+     * @throws {IntricError}
+     * */
+    listForSpace: async ({ space_id }) => {
+      const res = await client.fetch("/api/v1/spaces/{id}/mcp-servers/", {
+        method: "get",
+        params: {
+          path: { id: space_id }
+        }
+      });
+      return res;
+    },
+
+    /**
+     * Create a space-private MCP server. Connection is validated before save;
+     * the response includes connection details and the discovered tools.
+     * @param {Object} params
+     * @param {string} params.space_id Space ID to attach the server to
+     * @param {string} params.name Name of the MCP server
+     * @param {string} params.http_url HTTP URL to the MCP server
+     * @param {"none" | "bearer"} [params.http_auth_type] Authentication type (default: none)
+     * @param {string} [params.description] Description
+     * @param {{[key: string]: unknown} | null} [params.http_auth_config_schema] Auth config
+     * @param {string[]} [params.tags] Tags
+     * @param {string} [params.icon_url] Icon URL
+     * @param {string} [params.documentation_url] Documentation URL
+     * @throws {IntricError}
+     * */
+    createForSpace: async ({
+      space_id,
+      name,
+      http_url,
+      http_auth_type,
+      description,
+      http_auth_config_schema,
+      tags,
+      icon_url,
+      documentation_url
+    }) => {
+      /** @type {any} */
+      const body = {
+        name,
+        http_url,
+        http_auth_type,
+        description,
+        http_auth_config_schema,
+        tags,
+        icon_url,
+        documentation_url
+      };
+      const res = await client.fetch("/api/v1/spaces/{id}/mcp-servers/", {
+        method: "post",
+        params: { path: { id: space_id } },
+        requestBody: { "application/json": body }
+      });
+      return res;
+    },
+
+    /**
+     * Provision an eneo-knowledge collection and its paired MCP server in one
+     * call. The user only supplies a display name; eneo derives the upstream
+     * slug and uses the configured default embedding model. The resulting MCP
+     * server then appears in the assistant editor like any other.
+     * @param {Object} params
+     * @param {string} params.space_id Owning space ID
+     * @param {string} params.name Display name for the knowledge source
+     * @throws {IntricError}
+     * */
+    createKnowledgeSource: async ({ space_id, name }) => {
+      const res = await client.fetch("/api/v1/spaces/{id}/knowledge-sources/", {
+        method: "post",
+        params: { path: { id: space_id } },
+        requestBody: { "application/json": { name } }
+      });
+      return res;
+    },
+
+    /**
+     * List knowledge-source ownership rows for a space (sparse: id, slug, mcp_server_id).
+     * Used to map MCP server entries to their file-management surface.
+     * @param {Object} params
+     * @param {string} params.space_id Owning space ID
+     * @throws {IntricError}
+     * */
+    listSpaceKnowledgeSources: async ({ space_id }) => {
+      const res = await client.fetch("/api/v1/spaces/{id}/knowledge-sources/", {
+        method: "get",
+        params: { path: { id: space_id } }
+      });
+      return res;
+    },
+
+    /**
+     * List files in a knowledge source (proxy to eneo-knowledge).
+     * Status passes through verbatim: queued -> processing -> ready (or failed).
+     * @param {Object} params
+     * @param {string} params.space_id Owning space ID
+     * @param {string} params.knowledge_source_id Knowledge source ownership row ID
+     * @throws {IntricError}
+     * */
+    listKnowledgeSourceFiles: async ({ space_id, knowledge_source_id }) => {
+      const res = await client.fetch(
+        "/api/v1/spaces/{id}/knowledge-sources/{knowledge_source_id}/files/",
+        {
+          method: "get",
+          params: { path: { id: space_id, knowledge_source_id } }
+        }
+      );
+      return res;
+    },
+
+    /**
+     * Upload a file to a knowledge source. Returns the file's initial metadata;
+     * poll listKnowledgeSourceFiles to follow ingestion.
+     * @param {Object} params
+     * @param {string} params.space_id Owning space ID
+     * @param {string} params.knowledge_source_id Knowledge source ownership row ID
+     * @param {File} params.file Browser File to upload
+     * @throws {IntricError}
+     * */
+    uploadKnowledgeSourceFile: async ({ space_id, knowledge_source_id, file }) => {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await client.fetch(
+        "/api/v1/spaces/{id}/knowledge-sources/{knowledge_source_id}/files/",
+        {
+          method: "post",
+          params: { path: { id: space_id, knowledge_source_id } },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          requestBody: { "multipart/form-data": /** @type {any} */ (form) }
+        }
+      );
+      return res;
+    },
+
+    /**
+     * Delete a file from a knowledge source.
+     * @param {Object} params
+     * @param {string} params.space_id Owning space ID
+     * @param {string} params.knowledge_source_id Knowledge source ownership row ID
+     * @param {string} params.file_id Upstream file ID
+     * @throws {IntricError}
+     * */
+    deleteKnowledgeSourceFile: async ({ space_id, knowledge_source_id, file_id }) => {
+      await client.fetch(
+        "/api/v1/spaces/{id}/knowledge-sources/{knowledge_source_id}/files/{file_id}/",
+        {
+          method: "delete",
+          params: { path: { id: space_id, knowledge_source_id, file_id } }
+        }
+      );
+    },
+
+    /**
+     * Re-discover and upsert tool definitions for a space-private MCP.
+     * Bypasses the pending/approval queue used by the admin path because
+     * the user owns this server.
+     * @param {Object} params
+     * @param {string} params.space_id Owning space ID
+     * @param {string} params.mcp_server_id MCP server ID
+     * @throws {IntricError}
+     * */
+    refreshSpaceMcpServerTools: async ({ space_id, mcp_server_id }) => {
+      const res = await client.fetch(
+        "/api/v1/spaces/{id}/mcp-servers/{mcp_server_id}/refresh-tools/",
+        {
+          method: "post",
+          params: { path: { id: space_id, mcp_server_id } }
+        }
+      );
+      return res;
+    },
+
+    /**
+     * Delete a space-private MCP server.
+     * @param {Object} params
+     * @param {string} params.space_id Owning space ID
+     * @param {string} params.id MCP server ID to delete
+     * @throws {IntricError}
+     * */
+    deleteFromSpace: async ({ space_id, id }) => {
+      await client.fetch("/api/v1/spaces/{id}/mcp-servers/{mcp_server_id}/", {
+        method: "delete",
+        params: { path: { id: space_id, mcp_server_id: id } }
+      });
+    },
+
+    /**
      * Update tenant-level enablement for a tool (admin only).
      * Creates or updates a record in mcp_server_tool_settings.
      * @param {Object} params

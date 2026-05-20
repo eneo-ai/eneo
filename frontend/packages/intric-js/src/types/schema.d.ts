@@ -3845,6 +3845,70 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/spaces/{id}/mcp-servers/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List MCP servers private to this space
+     * @description Returns only the space-private MCP servers owned by this space. Tenant-wide MCP servers are still surfaced through the space's available MCP list (`GET /spaces/{id}/`).
+     */
+    get: operations["list_space_mcp_servers_api_v1_spaces__id__mcp_servers__get"];
+    put?: never;
+    /**
+     * Create a space-private MCP server
+     * @description Registers an HTTP MCP server scoped to this space. Editors and admins of the space can create entries here without involving a tenant admin. Connection is validated and the tool catalog is discovered before the row is saved; on failure 400 is returned.
+     */
+    post: operations["create_space_mcp_server_api_v1_spaces__id__mcp_servers__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{id}/mcp-servers/{mcp_server_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Delete a space-private MCP server
+     * @description If the MCP server was provisioned through the knowledge-source flow, the matching upstream eneo-knowledge collection is also deleted. Plain space-private MCP servers (no knowledge-source mapping) are just removed locally.
+     */
+    delete: operations["delete_space_mcp_server_api_v1_spaces__id__mcp_servers__mcp_server_id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{id}/mcp-servers/{mcp_server_id}/refresh-tools/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Re-discover and upsert tool definitions for a space-private MCP
+     * @description Calls `tools/list` against the MCP server and writes the returned descriptions/schemas directly onto the existing tool rows — bypasses the admin pending/approval queue because the user owns this server. Use this after the upstream eneo-knowledge tool definitions change.
+     */
+    post: operations["refresh_space_mcp_server_tools_api_v1_spaces__id__mcp_servers__mcp_server_id__refresh_tools__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/spaces/{id}/knowledge/integrations/add/{user_integration_id}/": {
     parameters: {
       query?: never;
@@ -4063,6 +4127,65 @@ export interface paths {
     put?: never;
     post?: never;
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{id}/knowledge-sources/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List knowledge sources owned by this space */
+    get: operations["list_space_knowledge_sources_api_v1_spaces__id__knowledge_sources__get"];
+    put?: never;
+    /**
+     * Provision a knowledge source (plug-and-play)
+     * @description Create an eneo-knowledge Collection on the user's behalf and register the paired MCP server as a space-private entry. The user only supplies a display name; eneo derives the upstream slug and uses the configured default embedding model. The resulting MCP server then appears in the assistant editor like any other.
+     */
+    post: operations["create_space_knowledge_source_api_v1_spaces__id__knowledge_sources__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{id}/knowledge-sources/{knowledge_source_id}/files/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List files in a knowledge source */
+    get: operations["list_knowledge_source_files_api_v1_spaces__id__knowledge_sources__knowledge_source_id__files__get"];
+    put?: never;
+    /**
+     * Upload a file to a knowledge source
+     * @description Multipart upload. eneo proxies the file to eneo-knowledge which ingests asynchronously — the returned status is typically `queued`. Poll the list endpoint to follow `queued -> processing -> ready`.
+     */
+    post: operations["upload_knowledge_source_file_api_v1_spaces__id__knowledge_sources__knowledge_source_id__files__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{id}/knowledge-sources/{knowledge_source_id}/files/{file_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Delete a file from a knowledge source */
+    delete: operations["delete_knowledge_source_file_api_v1_spaces__id__knowledge_sources__knowledge_source_id__files__file_id___delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -6894,6 +7017,7 @@ export interface components {
       | "tool_approval_submitted"
       | "file_uploaded"
       | "file_deleted"
+      | "file_signed_url_minted"
       | "website_created"
       | "website_updated"
       | "website_deleted"
@@ -8661,6 +8785,14 @@ export interface components {
     };
     /** Body_upload_file_api_v1_groups__id__info_blobs_upload__post */
     Body_upload_file_api_v1_groups__id__info_blobs_upload__post: {
+      /**
+       * File
+       * Format: binary
+       */
+      file: string;
+    };
+    /** Body_upload_knowledge_source_file_api_v1_spaces__id__knowledge_sources__knowledge_source_id__files__post */
+    Body_upload_knowledge_source_file_api_v1_spaces__id__knowledge_sources__knowledge_source_id__files__post: {
       /**
        * File
        * Format: binary
@@ -11225,6 +11357,76 @@ export interface components {
       websites: components["schemas"]["PaginatedPermissions_WebsitePublic_"];
       integration_knowledge_list: components["schemas"]["PaginatedPermissions_IntegrationKnowledgePublic_"];
     };
+    /**
+     * KnowledgeSourceCreate
+     * @description Body for proxied knowledge-source creation.
+     *
+     *     Plug-and-play: only the user-visible display name is required.
+     *     Eneo derives the upstream slug and selects the configured default
+     *     embedding model.
+     */
+    KnowledgeSourceCreate: {
+      /** Name */
+      name: string;
+    };
+    /** KnowledgeSourceCreateResponse */
+    KnowledgeSourceCreateResponse: {
+      /**
+       * Knowledge Source Id
+       * Format: uuid
+       */
+      knowledge_source_id: string;
+      /** Eneo Knowledge Slug */
+      eneo_knowledge_slug: string;
+      mcp_server: components["schemas"]["MCPServerPublic"];
+      /** Description */
+      description?: string | null;
+    };
+    /**
+     * KnowledgeSourceFile
+     * @description File metadata as surfaced to the SpaceMCPServers UI.
+     *
+     *     Status is passed through from eneo-knowledge verbatim:
+     *     ``queued`` -> ``processing`` -> ``ready`` (or ``failed``).
+     */
+    KnowledgeSourceFile: {
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
+      /** Mime Type */
+      mime_type: string;
+      /** Size Bytes */
+      size_bytes: number;
+      /** Status */
+      status: string;
+      /** Error */
+      error?: string | null;
+      /** Page Count */
+      page_count?: number | null;
+      /** Created At */
+      created_at: string;
+      /** Processed At */
+      processed_at?: string | null;
+    };
+    /**
+     * KnowledgeSourceSparse
+     * @description Listing entry — just enough for the UI to map MCP servers to ownership rows.
+     */
+    KnowledgeSourceSparse: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Eneo Knowledge Slug */
+      eneo_knowledge_slug: string;
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       */
+      mcp_server_id: string;
+    };
     /** Limit */
     Limit: {
       /** Max Files */
@@ -11306,6 +11508,11 @@ export interface components {
     /**
      * MCPServerPublic
      * @description Public DTO for MCP server (HTTP-only, uses Streamable HTTP transport).
+     *
+     *     ``space_id`` is non-null when the server is space-private (created via
+     *     the self-service / knowledge-source flow) and null for the tenant-wide
+     *     admin-curated catalog. Frontends use this to group the assistant
+     *     picker (no other behavioural branching depends on it).
      */
     MCPServerPublic: {
       /**
@@ -11313,6 +11520,8 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      /** Space Id */
+      space_id?: string | null;
       /** Name */
       name: string;
       /** Description */
@@ -11337,6 +11546,8 @@ export interface components {
     MCPServerPublicDict: {
       /** Id */
       id: string;
+      /** Space Id */
+      space_id: string | null;
       /** Name */
       name: string;
       /** Description */
@@ -11378,6 +11589,8 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      /** Space Id */
+      space_id?: string | null;
       /** Name */
       name: string;
       /** Description */
@@ -29087,6 +29300,224 @@ export interface operations {
       };
     };
   };
+  list_space_mcp_servers_api_v1_spaces__id__mcp_servers__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPServerPublic"][];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_space_mcp_server_api_v1_spaces__id__mcp_servers__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPServerCreateResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_space_mcp_server_api_v1_spaces__id__mcp_servers__mcp_server_id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        mcp_server_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  refresh_space_mcp_server_tools_api_v1_spaces__id__mcp_servers__mcp_server_id__refresh_tools__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        mcp_server_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPConnectionStatus"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   create_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_add__user_integration_id___post: {
     parameters: {
       query?: never;
@@ -29763,6 +30194,279 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SpacePublic"];
+        };
+      };
+    };
+  };
+  list_space_knowledge_sources_api_v1_spaces__id__knowledge_sources__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["KnowledgeSourceSparse"][];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_space_knowledge_source_api_v1_spaces__id__knowledge_sources__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["KnowledgeSourceCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["KnowledgeSourceCreateResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_knowledge_source_files_api_v1_spaces__id__knowledge_sources__knowledge_source_id__files__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        knowledge_source_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["KnowledgeSourceFile"][];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  upload_knowledge_source_file_api_v1_spaces__id__knowledge_sources__knowledge_source_id__files__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        knowledge_source_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_knowledge_source_file_api_v1_spaces__id__knowledge_sources__knowledge_source_id__files__post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["KnowledgeSourceFile"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_knowledge_source_file_api_v1_spaces__id__knowledge_sources__knowledge_source_id__files__file_id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        knowledge_source_id: string;
+        file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

@@ -19,14 +19,27 @@ class MCPServerRepository(ABC):
 
     @abstractmethod
     async def query(
-        self, tags: list[str] | None = None, **filters: object
+        self,
+        tags: list[str] | None = None,
+        include_space_scoped: bool = False,
+        **filters: object,
     ) -> list["MCPServer"]:
-        """Query MCP servers with optional tag filtering."""
+        """Query MCP servers with optional tag filtering.
+
+        By default returns tenant-wide entries only (``space_id IS NULL``).
+        """
         ...
 
     @abstractmethod
     async def query_by_tenant(self, tenant_id: UUID) -> list["MCPServer"]:
-        """Get all MCP servers for a specific tenant."""
+        """Get tenant-wide MCP servers for a tenant (excludes space-private)."""
+        ...
+
+    @abstractmethod
+    async def query_by_space(
+        self, tenant_id: UUID, space_id: UUID
+    ) -> list["MCPServer"]:
+        """Get space-private MCP servers owned by a given space."""
         ...
 
     @abstractmethod
