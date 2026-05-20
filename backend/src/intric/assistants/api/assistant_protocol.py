@@ -16,7 +16,11 @@ from intric.info_blobs.info_blob import (
     InfoBlobMetadata,
 )
 from intric.main.logging import get_logger
-from intric.questions.question import UseTools, WebSearchResultPublic
+from intric.questions.question import (
+    McpToolReferencePublic,
+    UseTools,
+    WebSearchResultPublic,
+)
 from intric.sessions.session import (
     AskChatResponse,
     AskResponse,
@@ -60,6 +64,8 @@ class _SupportsToolCallMetadata(Protocol):
     tool_call_id: str | None
     approved: bool | None
     result_status: str | None
+    result: str | None
+    mcp_tool_name: str | None
 
 
 def to_ask_response(
@@ -181,6 +187,11 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
         tool_calls = cast(
             Sequence[_SupportsToolCallMetadata], chunk.tool_calls_metadata or []
         )
+        # `result` is intentionally omitted from the SSE payload — tool
+        # outputs can be large and only a niche view ("Visa svar") needs
+        # them. Frontend lazy-fetches via the tool-call-result endpoint
+        # when the user expands the panel; historic sessions get them
+        # preloaded with the Message row.
         data = SSEToolCall(
             session_id=session_id,
             tools=[
@@ -191,8 +202,21 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                     tool_call_id=tc.tool_call_id or "",
                     approved=tc.approved,
                     result_status=tc.result_status,
+                    mcp_tool_name=tc.mcp_tool_name,
                 )
                 for tc in tool_calls
+            ],
+            mcp_tool_references=[
+                McpToolReferencePublic(
+                    id=ref.id,
+                    uri=ref.uri,
+                    mime_type=ref.mime_type,
+                    content=ref.content,
+                    meta=ref.meta,
+                    tool_call_id=ref.tool_call_id,
+                    mcp_tool_name=ref.mcp_tool_name,
+                )
+                for ref in (chunk.mcp_tool_references or [])
             ],
         )
 

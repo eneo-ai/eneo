@@ -6,6 +6,7 @@ from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import (
     Completion,
+    McpToolReference,
     ModelKwargs,
     ResponseType,
     TokenUsage,
@@ -669,6 +670,10 @@ class AssistantService:
                 response_string = ""
                 generated_files: list[File] = []
                 tool_calls: list[ToolCallInfo] = []
+                mcp_tool_references: list[McpToolReference] = []
+                # Dedup key for MCP refs: (tool_call_id, uri). TOOL_CALL chunks
+                # can fire twice in the approval flow; this guards persistence.
+                mcp_ref_seen: set[tuple[str | None, str]] = set()
                 stream_usage: TokenUsage | None = None
 
                 completion = response.completion
@@ -702,6 +707,13 @@ class AssistantService:
                         yield chunk
 
                     if chunk.response_type == ResponseType.TOOL_CALL:
+                        if chunk.mcp_tool_references:
+                            for ref in chunk.mcp_tool_references:
+                                key = (ref.tool_call_id, ref.uri)
+                                if key in mcp_ref_seen:
+                                    continue
+                                mcp_ref_seen.add(key)
+                                mcp_tool_references.append(ref)
                         if chunk.tool_calls_metadata:
                             for tc in chunk.tool_calls_metadata:
                                 # Check if this tool_call already exists (from TOOL_APPROVAL_REQUIRED)
@@ -846,6 +858,7 @@ class AssistantService:
                     assistant_id=assistant_id,
                     web_search_results=list(web_search_results or []),
                     tool_calls=tool_calls if tool_calls else None,
+                    mcp_tool_references=mcp_tool_references or None,
                 )
 
                 # Send token usage event to frontend
@@ -864,6 +877,7 @@ class AssistantService:
             final_answer = ""
             generated_files: list[File] = []
 
+            non_streaming_mcp_refs: list[McpToolReference] = []
             if response.completion is not None:
                 answer = response.completion
                 if isinstance(answer, str):
@@ -871,6 +885,9 @@ class AssistantService:
                 else:
                     reasoning_token_count = getattr(answer, "reasoning_token_count", 0)
                     final_answer = getattr(answer, "text", "")
+                    non_streaming_mcp_refs = (
+                        getattr(answer, "mcp_tool_references", None) or []
+                    )
 
             reference_chunks = get_references(
                 response_string=final_answer,
@@ -921,6 +938,7 @@ class AssistantService:
                 or LoggingDetails(model_kwargs={}),
                 assistant_id=assistant_id,
                 web_search_results=list(web_search_results or []),
+                mcp_tool_references=non_streaming_mcp_refs or None,
             )
 
             return final_answer

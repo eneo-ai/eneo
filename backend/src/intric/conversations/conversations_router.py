@@ -43,6 +43,7 @@ from intric.sessions.session import (
     SSEToolApprovalTimeout,
     SSEToolCall,
     ToolApprovalResponse,
+    ToolCallResultPublic,
 )
 from intric.sessions.session_protocol import (
     to_session_public,
@@ -434,6 +435,41 @@ async def get_conversation(
     assert session is not None
 
     return to_session_public(session)
+
+
+@router.get(
+    "/{session_id}/tool-calls/{tool_call_id}/result/",
+    response_model=ToolCallResultPublic,
+    responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+async def get_tool_call_result(
+    session_id: Annotated[
+        UUID, Path(description="The UUID of the conversation/session")
+    ],
+    tool_call_id: Annotated[
+        str, Path(description="The LLM-issued tool_call_id within this session")
+    ],
+    container: Annotated[Container, Depends(get_container(with_user=True))],  # pyright: ignore[reportCallInDefaultInitializer]
+):
+    """Lazy-load a single tool call's upstream response text.
+
+    Kept out of the SSE hot path because tool outputs can be large and only
+    the niche "Visa svar" panel needs them. Historic sessions get tool
+    results preloaded with their Message rows; this endpoint covers the
+    in-flight / just-streamed case.
+    """
+    session_service = container.session_service()
+    result, mcp_tool_name = await session_service.get_tool_call_result(
+        session_id=session_id, tool_call_id=tool_call_id
+    )
+    if result is None and mcp_tool_name is None:
+        raise NotFoundException("Tool call not found in this session")
+    return ToolCallResultPublic(
+        tool_call_id=tool_call_id,
+        result=result,
+        mcp_tool_name=mcp_tool_name,
+    )
 
 
 @router.delete(

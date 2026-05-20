@@ -1,5 +1,20 @@
 # flake8: noqa
 
+# Header for the MCP-tool citation footer that the adapter appends to a tool
+# result before forwarding it to the LLM. The LLM is multilingual so a Swedish
+# label is fine, but having it here makes the convention discoverable.
+MCP_TOOL_REFERENCES_HEADER = "Källor:"
+
+# Inline instruction appended to the Källor footer. Lives next to the data so
+# the model gets the citation rule whenever a tool returns resources — without
+# requiring the system-level SHOW_REFERENCES_PROMPT (that one only fires when
+# knowledge/web_search results are present, leaving MCP-only flows untaught).
+MCP_TOOL_REFERENCES_INSTRUCTION = (
+    "Citera varje påstående som bygger på en källa ovan med dess "
+    '<inref id="..."/>-tagg direkt efter relevant text. Använd '
+    "8-teckens-id:t från [N] ovan."
+)
+
 SHOW_REFERENCES_PROMPT = """Use the provided sources delimited by triple quotes to answer questions.
 Only use the sources to answer questions. You MUST reference every source you use by adding an inline XML self-closing tag immediately after the information: <inref id="<source_id>"/>
 

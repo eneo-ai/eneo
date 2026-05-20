@@ -4,6 +4,7 @@
   import { Button, Tooltip } from "@intric/ui";
   import BlobPreview from "$lib/features/knowledge/components/BlobPreview.svelte";
   import LinkReference from "$lib/features/knowledge/components/LinkReference.svelte";
+  import McpResourceSnippetModal from "./McpResourceSnippetModal.svelte";
   import { getFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
 
@@ -15,6 +16,35 @@
 
   const faviconService = getFaviconUrlService();
   import { m } from "$lib/paraglide/messages";
+
+  const mcpRefs = $derived(message.mcp_tool_references ?? []);
+
+  type MetaBag = Record<string, unknown> & {
+    "eneoknowledge.sourceType"?: string;
+    "eneoknowledge.title"?: string;
+    "eneoknowledge.pageRange"?: string;
+    "eneoknowledge.section"?: string;
+  };
+
+  function readMeta(ref: (typeof mcpRefs)[number]) {
+    const meta = (ref.meta ?? {}) as MetaBag;
+    let host = ref.uri;
+    try {
+      host = new URL(ref.uri).hostname || ref.uri;
+    } catch {
+      /* leave as URI */
+    }
+    return {
+      sourceType: meta["eneoknowledge.sourceType"] ?? null,
+      title: meta["eneoknowledge.title"] ?? host,
+      pageRange: meta["eneoknowledge.pageRange"] ?? null,
+      section: meta["eneoknowledge.section"] ?? null
+    };
+  }
+
+  const totalRefs = $derived(
+    message.references.length + message.web_search_references.length + mcpRefs.length
+  );
 </script>
 
 <div
@@ -42,7 +72,7 @@
       </Button>
     </Tooltip>
 
-    {#if message.references.length > 0 || message.web_search_references.length > 0}
+    {#if totalRefs > 0}
       <Button
         unstyled
         class="border-default hover:bg-hover-dimmer flex gap-1 rounded-lg border p-1.5 pr-2.5 shadow-sm"
@@ -53,7 +83,7 @@
         <IconChevronRight
           class={referencesExpanded ? "rotate-90 transition-all" : "transition-all"}
         />
-        {message.references.length + message.web_search_references.length}
+        {totalRefs}
         {m.references()}
       </Button>
     {/if}
@@ -71,14 +101,50 @@
       {#each message.web_search_references as searchResult (searchResult.id)}
         <!-- eslint-disable svelte/no-navigation-without-resolve -- external web search result URL -->
         <a class="hover:bg-hover-default flex items-center gap-2" href={searchResult.url}>
-          <img
-            src={faviconService.getFavicon(searchResult.url)}
-            alt=""
-            class="border-default h-6 w-6 rounded-md border p-0.5"
-          />
+          <span
+            class="favicon-bg border-default inline-block h-6 w-6 rounded-md border p-0.5"
+            style:background-image="url({faviconService.getFavicon(searchResult.url)})"
+            role="img"
+            aria-label=""
+          ></span>
           {searchResult.title}
         </a>
         <!-- eslint-enable svelte/no-navigation-without-resolve -->
+      {/each}
+
+      {#each mcpRefs as ref (ref.id)}
+        {@const info = readMeta(ref)}
+        {#if info.sourceType === "crawl-page" && /^https?:\/\//i.test(ref.uri)}
+          <!-- eslint-disable svelte/no-navigation-without-resolve -- external MCP crawl-page URL -->
+          <a class="hover:bg-hover-default flex items-center gap-2" href={ref.uri}>
+            <span
+              class="favicon-bg border-default inline-block h-6 w-6 rounded-md border p-0.5"
+              style:background-image="url({faviconService.getFavicon(ref.uri)})"
+              role="img"
+              aria-label=""
+            ></span>
+            {info.title}
+          </a>
+          <!-- eslint-enable svelte/no-navigation-without-resolve -->
+        {:else}
+          <McpResourceSnippetModal
+            title={info.title}
+            uri={ref.uri}
+            content={ref.content}
+            pageRange={info.pageRange}
+            section={info.section}
+          >
+            {#snippet children({ showSnippet }: { showSnippet: () => void })}
+              <button
+                type="button"
+                class="hover:bg-hover-default border-default flex items-center gap-2 rounded-md border px-2 py-1 text-sm"
+                onclick={showSnippet}
+              >
+                {info.title}
+              </button>
+            {/snippet}
+          </McpResourceSnippetModal>
+        {/if}
       {/each}
     </div>
   {/if}

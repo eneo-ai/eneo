@@ -15,6 +15,32 @@
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { writable } from "svelte/store";
 
+  import CrawlSourceEditor from "./CrawlSourceEditor.svelte";
+  import CrawlSourceList from "./CrawlSourceList.svelte";
+
+  type CrawlSourceRow = {
+    id: string;
+    url: string;
+    crawlType: "crawl" | "sitemap";
+    depth: number;
+    httpAuthUser: string | null;
+    createdAt: string;
+  };
+
+  type CrawlSourceValues = {
+    url: string;
+    crawlType: "crawl" | "sitemap";
+    depth: number;
+    httpAuth: { user: string; password: string } | null;
+  };
+
+  type CrawlSourcePatch = Partial<{
+    url: string;
+    crawlType: "crawl" | "sitemap";
+    depth: number;
+    httpAuth: { user: string; password: string } | null;
+  }>;
+
   type SpaceMCPServer = {
     id: string;
     name: string;
@@ -32,16 +58,18 @@
     name: string;
   };
 
+  // Shape matches eneo-knowledge's File JSON verbatim — the generic /upstream
+  // proxy relays upstream camelCase unchanged, no snake_case translation.
   type KnowledgeFile = {
     id: string;
     name: string;
-    mime_type: string;
-    size_bytes: number;
+    mimeType: string;
+    sizeBytes: number;
     status: string;
     error?: string | null;
-    page_count?: number | null;
-    created_at: string;
-    processed_at?: string | null;
+    pageCount?: number | null;
+    createdAt: string;
+    processedAt?: string | null;
   };
 
   const intric = getIntric();
@@ -101,6 +129,18 @@
   const fileError = new SvelteMap<string, string>();
   const uploadingByMcp = new SvelteSet<string>();
   const deletingFile = new SvelteSet<string>();
+
+  type TabKey = "files" | "crawl-sources";
+  const activeTab = new SvelteMap<string, TabKey>();
+  const crawlSourcesByMcp = new SvelteMap<string, CrawlSourceRow[]>();
+  const crawlSourcesLoading = new SvelteSet<string>();
+  const crawlSourcesError = new SvelteMap<string, string>();
+  let deletingCrawlSourceId = $state<string | null>(null);
+
+  const crawlEditorOpen = writable(false);
+  let crawlEditorMode = $state<"create" | "edit">("create");
+  let crawlEditorTargetMcp = $state<string | null>(null);
+  let crawlEditorInitial = $state<CrawlSourceRow | undefined>(undefined);
 
   $effect(() => {
     if (!$showAddDialog) {
@@ -182,8 +222,108 @@
       return;
     }
     expanded.add(mcpServerId);
-    if (!filesByMcp.has(mcpServerId)) {
+    const tab = activeTab.get(mcpServerId) ?? "files";
+    activeTab.set(mcpServerId, tab);
+    if (tab === "files" && !filesByMcp.has(mcpServerId)) {
       await loadFiles(mcpServerId);
+    }
+    if (tab === "crawl-sources" && !crawlSourcesByMcp.has(mcpServerId)) {
+      await loadCrawlSources(mcpServerId);
+    }
+  }
+
+  async function setTab(mcpServerId: string, tab: TabKey) {
+    activeTab.set(mcpServerId, tab);
+    if (tab === "files" && !filesByMcp.has(mcpServerId)) {
+      await loadFiles(mcpServerId);
+    }
+    if (tab === "crawl-sources" && !crawlSourcesByMcp.has(mcpServerId)) {
+      await loadCrawlSources(mcpServerId);
+    }
+  }
+
+  async function loadCrawlSources(mcpServerId: string) {
+    const ks = knowledgeSourceByMcp.get(mcpServerId);
+    if (!ks) return;
+    crawlSourcesLoading.add(mcpServerId);
+    crawlSourcesError.delete(mcpServerId);
+    try {
+      const list = (await intric.mcpServers.listKnowledgeSourceCrawlSources({
+        space_id: spaceId,
+        knowledge_source_id: ks.id
+      })) as { items: CrawlSourceRow[] };
+      crawlSourcesByMcp.set(mcpServerId, list?.items ?? []);
+    } catch (err) {
+      const e = err as { message?: string; body?: { message?: string } };
+      crawlSourcesError.set(
+        mcpServerId,
+        e?.message ?? e?.body?.message ?? "Kunde inte hämta crawl-källor."
+      );
+    } finally {
+      crawlSourcesLoading.delete(mcpServerId);
+    }
+  }
+
+  function openCreateCrawlSource(mcpServerId: string) {
+    crawlEditorMode = "create";
+    crawlEditorTargetMcp = mcpServerId;
+    crawlEditorInitial = undefined;
+    $crawlEditorOpen = true;
+  }
+
+  function openEditCrawlSource(mcpServerId: string, row: CrawlSourceRow) {
+    crawlEditorMode = "edit";
+    crawlEditorTargetMcp = mcpServerId;
+    crawlEditorInitial = row;
+    $crawlEditorOpen = true;
+  }
+
+  async function handleCrawlSourceCreate(values: CrawlSourceValues) {
+    if (!crawlEditorTargetMcp) return;
+    const ks = knowledgeSourceByMcp.get(crawlEditorTargetMcp);
+    if (!ks) throw new Error("Kunskapskällan kunde inte hittas.");
+    await intric.mcpServers.createKnowledgeSourceCrawlSource({
+      space_id: spaceId,
+      knowledge_source_id: ks.id,
+      url: values.url,
+      crawlType: values.crawlType,
+      depth: values.depth,
+      httpAuth: values.httpAuth
+    });
+    await loadCrawlSources(crawlEditorTargetMcp);
+  }
+
+  async function handleCrawlSourcePatch(patch: CrawlSourcePatch) {
+    if (!crawlEditorTargetMcp || !crawlEditorInitial) return;
+    const ks = knowledgeSourceByMcp.get(crawlEditorTargetMcp);
+    if (!ks) throw new Error("Kunskapskällan kunde inte hittas.");
+    if (Object.keys(patch).length === 0) return;
+    await intric.mcpServers.updateKnowledgeSourceCrawlSource({
+      space_id: spaceId,
+      knowledge_source_id: ks.id,
+      source_id: crawlEditorInitial.id,
+      patch
+    });
+    await loadCrawlSources(crawlEditorTargetMcp);
+  }
+
+  async function handleCrawlSourceDelete(mcpServerId: string, row: CrawlSourceRow) {
+    if (!confirm(`Ta bort crawl-källan ${row.url}?`)) return;
+    const ks = knowledgeSourceByMcp.get(mcpServerId);
+    if (!ks) return;
+    deletingCrawlSourceId = row.id;
+    try {
+      await intric.mcpServers.deleteKnowledgeSourceCrawlSource({
+        space_id: spaceId,
+        knowledge_source_id: ks.id,
+        source_id: row.id
+      });
+      await loadCrawlSources(mcpServerId);
+    } catch (err) {
+      const e = err as { message?: string; body?: { message?: string } };
+      alert(e?.message ?? e?.body?.message ?? "Det gick inte att ta bort crawl-källan.");
+    } finally {
+      deletingCrawlSourceId = null;
     }
   }
 
@@ -390,6 +530,8 @@
           </div>
 
           {#if isExpanded}
+            {@const currentTab = activeTab.get(server.id) ?? "files"}
+            {@const crawlRows = crawlSourcesByMcp.get(server.id) ?? []}
             <div class="border-default bg-secondary/30 border-t px-4 py-3">
               {#if !isManaged}
                 <p class="text-muted text-sm">
@@ -397,81 +539,123 @@
                   kunskapskälla".
                 </p>
               {:else}
-                <div class="flex items-center justify-between gap-3 pb-3">
-                  <span class="text-default text-sm font-medium">Filer</span>
-                  <label class="inline-flex items-center">
-                    <input
-                      type="file"
-                      multiple
-                      class="hidden"
-                      accept=".pdf,.docx,.md,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown,text/plain"
-                      disabled={uploadingByMcp.has(server.id)}
-                      onchange={(e) => {
-                        const target = e.currentTarget as HTMLInputElement;
-                        handleUpload(server, target.files);
-                        target.value = "";
-                      }}
-                    />
-                    <span
-                      class="border-default bg-primary ring-accent-default hover:bg-hover-dimmer inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium shadow-sm"
-                      class:opacity-50={uploadingByMcp.has(server.id)}
-                    >
-                      <Upload class="h-4 w-4" />
-                      {uploadingByMcp.has(server.id) ? m.loading() : "Lägg till fil"}
-                    </span>
-                  </label>
+                <div
+                  class="border-default mb-3 flex gap-1 border-b pb-0"
+                  role="tablist"
+                  aria-label="Innehållstyper för {server.name}"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={currentTab === "files"}
+                    class="border-b-2 px-3 py-1.5 text-sm font-medium {currentTab === 'files'
+                      ? 'border-accent-default text-default'
+                      : 'text-muted hover:text-default border-transparent'}"
+                    onclick={() => setTab(server.id, "files")}
+                  >
+                    Filer
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={currentTab === "crawl-sources"}
+                    class="border-b-2 px-3 py-1.5 text-sm font-medium {currentTab ===
+                    'crawl-sources'
+                      ? 'border-accent-default text-default'
+                      : 'text-muted hover:text-default border-transparent'}"
+                    onclick={() => setTab(server.id, "crawl-sources")}
+                  >
+                    Crawl-källor
+                  </button>
                 </div>
 
-                {#if fileError.has(server.id)}
-                  <div
-                    class="border-negative-default/30 bg-negative-dimmer text-negative-stronger mb-3 rounded-md border px-3 py-2 text-sm"
-                    role="alert"
-                  >
-                    {fileError.get(server.id)}
-                  </div>
-                {/if}
-
-                {#if filesLoading.has(server.id) && files.length === 0}
-                  <p class="text-muted text-sm">Hämtar filer…</p>
-                {:else if files.length === 0}
-                  <p class="text-muted text-sm">
-                    Inga filer än. Ladda upp PDF, DOCX, MD eller TXT för att börja.
-                  </p>
+                {#if currentTab === "crawl-sources"}
+                  <CrawlSourceList
+                    rows={crawlRows}
+                    loading={crawlSourcesLoading.has(server.id)}
+                    error={crawlSourcesError.get(server.id) ?? null}
+                    deletingId={deletingCrawlSourceId}
+                    onAdd={() => openCreateCrawlSource(server.id)}
+                    onEdit={(row) => openEditCrawlSource(server.id, row)}
+                    onDelete={(row) => handleCrawlSourceDelete(server.id, row)}
+                  />
                 {:else}
-                  <ul class="border-default divide-default bg-primary divide-y rounded-md border">
-                    {#each files as file (file.id)}
-                      <li class="flex items-start justify-between gap-3 px-3 py-2">
-                        <div class="flex min-w-0 flex-1 flex-col gap-1">
-                          <span class="truncate text-sm font-medium">{file.name}</span>
-                          <span class="text-muted text-xs">
-                            {humanSize(file.size_bytes)}
-                            {#if file.page_count}
-                              · {file.page_count} sidor
+                  <div class="flex items-center justify-between gap-3 pb-3">
+                    <span class="text-default text-sm font-medium">Filer</span>
+                    <label class="inline-flex items-center">
+                      <input
+                        type="file"
+                        multiple
+                        class="hidden"
+                        accept=".pdf,.docx,.md,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown,text/plain"
+                        disabled={uploadingByMcp.has(server.id)}
+                        onchange={(e) => {
+                          const target = e.currentTarget as HTMLInputElement;
+                          handleUpload(server, target.files);
+                          target.value = "";
+                        }}
+                      />
+                      <span
+                        class="border-default bg-primary ring-accent-default hover:bg-hover-dimmer inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium shadow-sm"
+                        class:opacity-50={uploadingByMcp.has(server.id)}
+                      >
+                        <Upload class="h-4 w-4" />
+                        {uploadingByMcp.has(server.id) ? m.loading() : "Lägg till fil"}
+                      </span>
+                    </label>
+                  </div>
+
+                  {#if fileError.has(server.id)}
+                    <div
+                      class="border-negative-default/30 bg-negative-dimmer text-negative-stronger mb-3 rounded-md border px-3 py-2 text-sm"
+                      role="alert"
+                    >
+                      {fileError.get(server.id)}
+                    </div>
+                  {/if}
+
+                  {#if filesLoading.has(server.id) && files.length === 0}
+                    <p class="text-muted text-sm">Hämtar filer…</p>
+                  {:else if files.length === 0}
+                    <p class="text-muted text-sm">
+                      Inga filer än. Ladda upp PDF, DOCX, MD eller TXT för att börja.
+                    </p>
+                  {:else}
+                    <ul class="border-default divide-default bg-primary divide-y rounded-md border">
+                      {#each files as file (file.id)}
+                        <li class="flex items-start justify-between gap-3 px-3 py-2">
+                          <div class="flex min-w-0 flex-1 flex-col gap-1">
+                            <span class="truncate text-sm font-medium">{file.name}</span>
+                            <span class="text-muted text-xs">
+                              {humanSize(file.sizeBytes)}
+                              {#if file.pageCount}
+                                · {file.pageCount} sidor
+                              {/if}
+                            </span>
+                            {#if file.status === "failed" && file.error}
+                              <span class="text-negative-stronger text-xs">{file.error}</span>
                             {/if}
+                          </div>
+                          <span
+                            class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {statusClass(
+                              file.status
+                            )}"
+                          >
+                            {statusLabel(file.status)}
                           </span>
-                          {#if file.status === "failed" && file.error}
-                            <span class="text-negative-stronger text-xs">{file.error}</span>
-                          {/if}
-                        </div>
-                        <span
-                          class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {statusClass(
-                            file.status
-                          )}"
-                        >
-                          {statusLabel(file.status)}
-                        </span>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          disabled={deletingFile.has(file.id)}
-                          onclick={() => handleDeleteFile(server, file)}
-                          aria-label="Ta bort {file.name}"
-                        >
-                          <Trash2 class="h-4 w-4" />
-                        </Button>
-                      </li>
-                    {/each}
-                  </ul>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            disabled={deletingFile.has(file.id)}
+                            onclick={() => handleDeleteFile(server, file)}
+                            aria-label="Ta bort {file.name}"
+                          >
+                            <Trash2 class="h-4 w-4" />
+                          </Button>
+                        </li>
+                      {/each}
+                    </ul>
+                  {/if}
                 {/if}
               {/if}
             </div>
@@ -532,3 +716,11 @@
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>
+
+<CrawlSourceEditor
+  open={crawlEditorOpen}
+  mode={crawlEditorMode}
+  initial={crawlEditorInitial}
+  onCreate={handleCrawlSourceCreate}
+  onPatch={handleCrawlSourcePatch}
+/>

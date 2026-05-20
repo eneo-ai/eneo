@@ -35,6 +35,9 @@
           arguments?: Record<string, unknown>;
           tool_call_id?: string;
           approved?: boolean;
+          result?: string | null;
+          result_status?: string | null;
+          mcp_tool_name?: string | null;
         }>
       | undefined
   );

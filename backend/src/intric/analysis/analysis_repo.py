@@ -200,6 +200,11 @@ class AnalysisRepository:
                     Questions.web_search_results
                 ),
             )
+            .options(
+                selectinload(Sessions.questions).selectinload(
+                    Questions.mcp_tool_references
+                ),
+            )
         )
 
         sessions = await self.session.scalars(stmt)
@@ -259,6 +264,11 @@ class AnalysisRepository:
             .options(
                 selectinload(Sessions.questions).selectinload(
                     Questions.web_search_results
+                ),
+            )
+            .options(
+                selectinload(Sessions.questions).selectinload(
+                    Questions.mcp_tool_references
                 ),
             )
         )

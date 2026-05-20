@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import TYPE_CHECKING, AsyncIterator
+from typing import TYPE_CHECKING, AsyncIterator, Optional
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import CompletionModel
@@ -28,6 +28,7 @@ from intric.sessions.sessions_repo import SessionRepository
 from intric.users.user import UserInDB
 
 if TYPE_CHECKING:
+    from intric.ai_models.completion_models.completion_model import McpToolReference
     from intric.completion_models.infrastructure.web_search import WebSearchResult
 
 
@@ -131,6 +132,24 @@ class SessionService:
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
 
+    async def get_tool_call_result(
+        self,
+        session_id: UUID,
+        tool_call_id: str,
+    ) -> tuple[Optional[str], Optional[str]]:
+        """Return (result, mcp_tool_name) for one tool call in this session.
+
+        Permission check piggybacks on get_session_by_uuid (raises if the
+        session isn't visible to the user). Returns (None, None) if no
+        matching tool_call_id is found — the endpoint maps that to 404.
+        """
+        session = await self.get_session_by_uuid(session_id)
+        for question in session.questions or []:
+            for tc in question.tool_calls or []:
+                if tc.tool_call_id and tc.tool_call_id == tool_call_id:
+                    return tc.result, tc.mcp_tool_name
+        return None, None
+
     async def get_sessions_by_assistant(
         self,
         assistant_id: UUID,
@@ -199,6 +218,7 @@ class SessionService:
         assistant_id: UUID | None = None,
         web_search_results: Sequence["WebSearchResult"] | None = None,
         tool_calls: list[ToolCallInfo] | None = None,
+        mcp_tool_references: list["McpToolReference"] | None = None,
     ) -> object:
         completion_model_id = completion_model.id if completion_model else None
         question_add = QuestionAdd(
@@ -221,6 +241,7 @@ class SessionService:
                 files=list(files or []),
                 generated_files=list(generated_files or []),
                 web_search_results=list(web_search_results or []),
+                mcp_tool_references=list(mcp_tool_references or []) or None,
             )
 
     async def leave_feedback(

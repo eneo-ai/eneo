@@ -21,22 +21,21 @@ Public surface:
 - ``is_enabled()`` — feature-flag helper based on settings
 """
 
+from typing import Any
+
 from intric.eneo_knowledge.client import (
     CreatedCollection,
     EneoKnowledgeClient,
     EneoKnowledgeError,
     KnowledgeCollection,
     PairedMcpServer,
-    UploadedFileInfo,
 )
 from intric.eneo_knowledge.feature_flag import is_enabled
 from intric.eneo_knowledge.models import (
     KnowledgeSourceCreate,
     KnowledgeSourceCreateResponse,
-    KnowledgeSourceFile,
     KnowledgeSourceSparse,
 )
-from intric.eneo_knowledge.router import router
 from intric.eneo_knowledge.service import (
     KnowledgeSourceCreated,
     KnowledgeSourceRow,
@@ -44,6 +43,29 @@ from intric.eneo_knowledge.service import (
 )
 from intric.eneo_knowledge.table import KnowledgeSources
 
+
+def __getattr__(name: str) -> Any:
+    """Lazy-resolve ``router`` to avoid an import cycle through ``Container``.
+
+    ``container.py`` imports this package early (line ~87) to get
+    ``EneoKnowledgeClient`` — long before ``class Container`` is declared
+    at the bottom of that module. Eager-importing ``router`` here would
+    pull ``Container`` back into a half-initialised state. Deferring the
+    import to first attribute access keeps ``server/routers.py`` working
+    (``from intric import eneo_knowledge; eneo_knowledge.router``) while
+    letting ``container.py`` finish defining ``Container`` first.
+    """
+    if name == "router":
+        from intric.eneo_knowledge.router import router as _router
+
+        return _router
+    raise AttributeError(f"module 'intric.eneo_knowledge' has no attribute {name!r}")
+
+
+# ``router`` is intentionally resolved via ``__getattr__`` above (lazy import
+# to break the Container cycle) but pyright can't see it statically. Keeping
+# it out of __all__ avoids the reportUnsupportedDunderAll false-positive;
+# callers still get it via `from intric.eneo_knowledge import router`.
 __all__ = [
     "CreatedCollection",
     "EneoKnowledgeClient",
@@ -52,13 +74,10 @@ __all__ = [
     "KnowledgeSourceCreate",
     "KnowledgeSourceCreateResponse",
     "KnowledgeSourceCreated",
-    "KnowledgeSourceFile",
     "KnowledgeSourceRow",
     "KnowledgeSourceService",
     "KnowledgeSourceSparse",
     "KnowledgeSources",
     "PairedMcpServer",
-    "UploadedFileInfo",
     "is_enabled",
-    "router",
 ]

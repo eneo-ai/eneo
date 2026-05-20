@@ -1339,6 +1339,31 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/result/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Tool Call Result
+     * @description Lazy-load a single tool call's upstream response text.
+     *
+     *     Kept out of the SSE hot path because tool outputs can be large and only
+     *     the niche "Visa svar" panel needs them. Historic sessions get tool
+     *     results preloaded with their Message rows; this endpoint covers the
+     *     in-flight / just-streamed case.
+     */
+    get: operations["get_tool_call_result_api_v1_conversations__session_id__tool_calls__tool_call_id__result__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/conversations/{session_id}/feedback/": {
     parameters: {
       query?: never;
@@ -4153,42 +4178,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/spaces/{id}/knowledge-sources/{knowledge_source_id}/files/": {
+  "/api/v1/spaces/{id}/knowledge-sources/{knowledge_source_id}/upstream/{upstream_path}": {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** List files in a knowledge source */
-    get: operations["list_knowledge_source_files_api_v1_spaces__id__knowledge_sources__knowledge_source_id__files__get"];
-    put?: never;
     /**
-     * Upload a file to a knowledge source
-     * @description Multipart upload. eneo proxies the file to eneo-knowledge which ingests asynchronously — the returned status is typically `queued`. Poll the list endpoint to follow `queued -> processing -> ready`.
+     * Proxy a request to the eneo-knowledge collection backing this knowledge source
+     * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on eneo-knowledge. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
      */
-    post: operations["upload_knowledge_source_file_api_v1_spaces__id__knowledge_sources__knowledge_source_id__files__post"];
-    delete?: never;
+    get: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete"];
+    /**
+     * Proxy a request to the eneo-knowledge collection backing this knowledge source
+     * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on eneo-knowledge. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
+     */
+    put: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete"];
+    /**
+     * Proxy a request to the eneo-knowledge collection backing this knowledge source
+     * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on eneo-knowledge. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
+     */
+    post: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete"];
+    /**
+     * Proxy a request to the eneo-knowledge collection backing this knowledge source
+     * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on eneo-knowledge. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
+     */
+    delete: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete"];
     options?: never;
     head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/spaces/{id}/knowledge-sources/{knowledge_source_id}/files/{file_id}/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    post?: never;
-    /** Delete a file from a knowledge source */
-    delete: operations["delete_knowledge_source_file_api_v1_spaces__id__knowledge_sources__knowledge_source_id__files__file_id___delete"];
-    options?: never;
-    head?: never;
-    patch?: never;
+    /**
+     * Proxy a request to the eneo-knowledge collection backing this knowledge source
+     * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on eneo-knowledge. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
+     */
+    patch: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete"];
     trace?: never;
   };
   "/api/v1/dashboard/": {
@@ -8124,6 +8147,11 @@ export interface components {
       tools: components["schemas"]["UseTools"];
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
+      /**
+       * Mcp Tool References
+       * @default []
+       */
+      mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
       model?: components["schemas"]["CompletionModelPublic"] | null;
     };
     /**
@@ -8785,14 +8813,6 @@ export interface components {
     };
     /** Body_upload_file_api_v1_groups__id__info_blobs_upload__post */
     Body_upload_file_api_v1_groups__id__info_blobs_upload__post: {
-      /**
-       * File
-       * Format: binary
-       */
-      file: string;
-    };
-    /** Body_upload_knowledge_source_file_api_v1_spaces__id__knowledge_sources__knowledge_source_id__files__post */
-    Body_upload_knowledge_source_file_api_v1_spaces__id__knowledge_sources__knowledge_source_id__files__post: {
       /**
        * File
        * Format: binary
@@ -11383,33 +11403,6 @@ export interface components {
       description?: string | null;
     };
     /**
-     * KnowledgeSourceFile
-     * @description File metadata as surfaced to the SpaceMCPServers UI.
-     *
-     *     Status is passed through from eneo-knowledge verbatim:
-     *     ``queued`` -> ``processing`` -> ``ready`` (or ``failed``).
-     */
-    KnowledgeSourceFile: {
-      /** Id */
-      id: string;
-      /** Name */
-      name: string;
-      /** Mime Type */
-      mime_type: string;
-      /** Size Bytes */
-      size_bytes: number;
-      /** Status */
-      status: string;
-      /** Error */
-      error?: string | null;
-      /** Page Count */
-      page_count?: number | null;
-      /** Created At */
-      created_at: string;
-      /** Processed At */
-      processed_at?: string | null;
-    };
-    /**
      * KnowledgeSourceSparse
      * @description Listing entry — just enough for the UI to map MCP servers to ownership rows.
      */
@@ -11770,6 +11763,43 @@ export interface components {
       /** Is Enabled */
       is_enabled: boolean;
     };
+    /**
+     * McpToolReferencePublic
+     * @description One MCP resource block captured from a tool call.
+     *
+     *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+     *     raw `meta` dict are exposed. Frontend may read well-known keys from
+     *     `meta` (e.g. `eneoknowledge.sourceType`, `eneoknowledge.title`) to drive
+     *     richer affordances but must degrade gracefully when meta is empty.
+     */
+    McpToolReferencePublic: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Uri */
+      uri: string;
+      /** Mime Type */
+      mime_type?: string | null;
+      /** Content */
+      content?: string | null;
+      /**
+       * Meta
+       * @default {}
+       */
+      meta?: {
+        [key: string]: unknown;
+      };
+      /** Tool Call Id */
+      tool_call_id?: string | null;
+      /** Mcp Tool Name */
+      mcp_tool_name?: string | null;
+    };
     /** Message */
     Message: {
       /** Created At */
@@ -11792,6 +11822,11 @@ export interface components {
       generated_files: components["schemas"]["FilePublic"][];
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
+      /**
+       * Mcp Tool References
+       * @default []
+       */
+      mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
       /**
        * Tool Calls
        * @default []
@@ -11820,6 +11855,11 @@ export interface components {
       generated_files: components["schemas"]["FilePublic"][];
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
+      /**
+       * Mcp Tool References
+       * @default []
+       */
+      mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
       /**
        * Tool Calls
        * @default []
@@ -15382,6 +15422,22 @@ export interface components {
       mcp_tool_name?: string | null;
     };
     /**
+     * ToolCallResultPublic
+     * @description Lazy-loaded payload for a single tool call's upstream response.
+     *
+     *     Only the niche "Visa svar" view fetches this — keeping it out of the
+     *     streaming hot path lets the SSE payload stay small even when a tool
+     *     returns several KB of text.
+     */
+    ToolCallResultPublic: {
+      /** Tool Call Id */
+      tool_call_id: string;
+      /** Result */
+      result?: string | null;
+      /** Mcp Tool Name */
+      mcp_tool_name?: string | null;
+    };
+    /**
      * ToolChangePublic
      * @description DTO for a tool change detected during sync.
      */
@@ -16911,6 +16967,11 @@ export interface components {
       intric_event_type?: components["schemas"]["IntricEventType"];
       /** Tools */
       tools: components["schemas"]["ToolCallInfo"][];
+      /**
+       * Mcp Tool References
+       * @default []
+       */
+      mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
     };
     /**
      * SSEToolApprovalRequired
@@ -16996,6 +17057,11 @@ export interface components {
       tools: components["schemas"]["UseTools"];
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
+      /**
+       * Mcp Tool References
+       * @default []
+       */
+      mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
     };
     /** SSEError */
     SSEError: {
@@ -20507,6 +20573,11 @@ export interface operations {
             tools: components["schemas"]["UseTools"];
             /** Web Search References */
             web_search_references: components["schemas"]["WebSearchResultPublic"][];
+            /**
+             * Mcp Tool References
+             * @default []
+             */
+            mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
             model?: components["schemas"]["CompletionModelPublic"] | null;
             $defs: {
               /** CompletionModelPublic */
@@ -20652,6 +20723,43 @@ export interface operations {
                 embedding_model_id: string;
                 /** Size */
                 size: number;
+              };
+              /**
+               * McpToolReferencePublic
+               * @description One MCP resource block captured from a tool call.
+               *
+               *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+               *     raw `meta` dict are exposed. Frontend may read well-known keys from
+               *     `meta` (e.g. `eneoknowledge.sourceType`, `eneoknowledge.title`) to drive
+               *     richer affordances but must degrade gracefully when meta is empty.
+               */
+              McpToolReferencePublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                /** Uri */
+                uri: string;
+                /** Mime Type */
+                mime_type?: string | null;
+                /** Content */
+                content?: string | null;
+                /**
+                 * Meta
+                 * @default {}
+                 */
+                meta?: {
+                  [key: string]: unknown;
+                };
+                /** Tool Call Id */
+                tool_call_id?: string | null;
+                /** Mcp Tool Name */
+                mcp_tool_name?: string | null;
               };
               /** ModelKwargCapability */
               ModelKwargCapability: {
@@ -20856,6 +20964,11 @@ export interface operations {
             tools: components["schemas"]["UseTools"];
             /** Web Search References */
             web_search_references: components["schemas"]["WebSearchResultPublic"][];
+            /**
+             * Mcp Tool References
+             * @default []
+             */
+            mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
             model?: components["schemas"]["CompletionModelPublic"] | null;
             $defs: {
               /** CompletionModelPublic */
@@ -21001,6 +21114,43 @@ export interface operations {
                 embedding_model_id: string;
                 /** Size */
                 size: number;
+              };
+              /**
+               * McpToolReferencePublic
+               * @description One MCP resource block captured from a tool call.
+               *
+               *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+               *     raw `meta` dict are exposed. Frontend may read well-known keys from
+               *     `meta` (e.g. `eneoknowledge.sourceType`, `eneoknowledge.title`) to drive
+               *     richer affordances but must degrade gracefully when meta is empty.
+               */
+              McpToolReferencePublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                /** Uri */
+                uri: string;
+                /** Mime Type */
+                mime_type?: string | null;
+                /** Content */
+                content?: string | null;
+                /**
+                 * Meta
+                 * @default {}
+                 */
+                meta?: {
+                  [key: string]: unknown;
+                };
+                /** Tool Call Id */
+                tool_call_id?: string | null;
+                /** Mcp Tool Name */
+                mcp_tool_name?: string | null;
               };
               /** ModelKwargCapability */
               ModelKwargCapability: {
@@ -21852,6 +22002,11 @@ export interface operations {
                 intric_event_type?: components["schemas"]["IntricEventType"];
                 /** Tools */
                 tools: components["schemas"]["ToolCallInfo"][];
+                /**
+                 * Mcp Tool References
+                 * @default []
+                 */
+                mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
                 $defs: {
                   /**
                    * IntricEventType
@@ -21863,6 +22018,43 @@ export interface operations {
                     | "tool_approval_required"
                     | "tool_approval_timeout"
                     | "token_usage";
+                  /**
+                   * McpToolReferencePublic
+                   * @description One MCP resource block captured from a tool call.
+                   *
+                   *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+                   *     raw `meta` dict are exposed. Frontend may read well-known keys from
+                   *     `meta` (e.g. `eneoknowledge.sourceType`, `eneoknowledge.title`) to drive
+                   *     richer affordances but must degrade gracefully when meta is empty.
+                   */
+                  McpToolReferencePublic: {
+                    /** Created At */
+                    created_at?: string | null;
+                    /** Updated At */
+                    updated_at?: string | null;
+                    /**
+                     * Id
+                     * Format: uuid
+                     */
+                    id: string;
+                    /** Uri */
+                    uri: string;
+                    /** Mime Type */
+                    mime_type?: string | null;
+                    /** Content */
+                    content?: string | null;
+                    /**
+                     * Meta
+                     * @default {}
+                     */
+                    meta?: {
+                      [key: string]: unknown;
+                    };
+                    /** Tool Call Id */
+                    tool_call_id?: string | null;
+                    /** Mcp Tool Name */
+                    mcp_tool_name?: string | null;
+                  };
                   /**
                    * ToolCallInfo
                    * @description Info about a single tool being called.
@@ -22039,6 +22231,11 @@ export interface operations {
                 tools: components["schemas"]["UseTools"];
                 /** Web Search References */
                 web_search_references: components["schemas"]["WebSearchResultPublic"][];
+                /**
+                 * Mcp Tool References
+                 * @default []
+                 */
+                mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
                 $defs: {
                   /** FilePublic */
                   FilePublic: {
@@ -22094,6 +22291,43 @@ export interface operations {
                     embedding_model_id: string;
                     /** Size */
                     size: number;
+                  };
+                  /**
+                   * McpToolReferencePublic
+                   * @description One MCP resource block captured from a tool call.
+                   *
+                   *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+                   *     raw `meta` dict are exposed. Frontend may read well-known keys from
+                   *     `meta` (e.g. `eneoknowledge.sourceType`, `eneoknowledge.title`) to drive
+                   *     richer affordances but must degrade gracefully when meta is empty.
+                   */
+                  McpToolReferencePublic: {
+                    /** Created At */
+                    created_at?: string | null;
+                    /** Updated At */
+                    updated_at?: string | null;
+                    /**
+                     * Id
+                     * Format: uuid
+                     */
+                    id: string;
+                    /** Uri */
+                    uri: string;
+                    /** Mime Type */
+                    mime_type?: string | null;
+                    /** Content */
+                    content?: string | null;
+                    /**
+                     * Meta
+                     * @default {}
+                     */
+                    meta?: {
+                      [key: string]: unknown;
+                    };
+                    /** Tool Call Id */
+                    tool_call_id?: string | null;
+                    /** Mcp Tool Name */
+                    mcp_tool_name?: string | null;
                   };
                   /** ToolAssistant */
                   ToolAssistant: {
@@ -22234,6 +22468,58 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_tool_call_result_api_v1_conversations__session_id__tool_calls__tool_call_id__result__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+        /** @description The LLM-issued tool_call_id within this session */
+        tool_call_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ToolCallResultPublic"];
+        };
       };
       /** @description Bad Request */
       400: {
@@ -30309,13 +30595,14 @@ export interface operations {
       };
     };
   };
-  list_knowledge_source_files_api_v1_spaces__id__knowledge_sources__knowledge_source_id__files__get: {
+  proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete: {
     parameters: {
       query?: never;
       header?: never;
       path: {
         id: string;
         knowledge_source_id: string;
+        upstream_path: string;
       };
       cookie?: never;
     };
@@ -30327,61 +30614,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["KnowledgeSourceFile"][];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  upload_knowledge_source_file_api_v1_spaces__id__knowledge_sources__knowledge_source_id__files__post: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: string;
-        knowledge_source_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "multipart/form-data": components["schemas"]["Body_upload_knowledge_source_file_api_v1_spaces__id__knowledge_sources__knowledge_source_id__files__post"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      202: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["KnowledgeSourceFile"];
+          "application/json": unknown;
         };
       };
       /** @description Bad Request */
@@ -30422,25 +30655,216 @@ export interface operations {
       };
     };
   };
-  delete_knowledge_source_file_api_v1_spaces__id__knowledge_sources__knowledge_source_id__files__file_id___delete: {
+  proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete: {
     parameters: {
       query?: never;
       header?: never;
       path: {
         id: string;
         knowledge_source_id: string;
-        file_id: string;
+        upstream_path: string;
       };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
       /** @description Successful Response */
-      204: {
+      200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        knowledge_source_id: string;
+        upstream_path: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        knowledge_source_id: string;
+        upstream_path: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        knowledge_source_id: string;
+        upstream_path: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Forbidden */
       403: {

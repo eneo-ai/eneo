@@ -2,6 +2,39 @@
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
  */
 export function initMCPServers(client) {
+  /**
+   * Generic eneo-knowledge proxy. Forwards `method` + `upstream_path` to
+   * `/api/collections/{slug}/{upstream_path}` on eneo-knowledge.
+   * Pass `formData` for multipart uploads (file ingestion), `body` for JSON
+   * payloads. Mutually exclusive — `formData` wins if both are set.
+   * @param {{ space_id: string, knowledge_source_id: string, upstream_path: string, method?: "GET"|"POST"|"PATCH"|"PUT"|"DELETE", body?: unknown, formData?: FormData }} params
+   */
+  async function proxyKnowledgeSource({
+    space_id,
+    knowledge_source_id,
+    upstream_path,
+    method = "GET",
+    body,
+    formData
+  }) {
+    const httpMethod = /** @type {"get"|"post"|"patch"|"put"|"delete"} */ (method.toLowerCase());
+    /** @type {Parameters<typeof client.fetch>[1]} The OpenAPI doc for this passthrough route has no declared request body — cast through any so JSON and multipart payloads forward without a typed schema. */
+    const init = /** @type {any} */ ({
+      method: httpMethod,
+      params: { path: { id: space_id, knowledge_source_id, upstream_path } },
+      ...(formData !== undefined
+        ? { requestBody: { "multipart/form-data": formData } }
+        : body !== undefined
+          ? { requestBody: { "application/json": body } }
+          : {})
+    });
+    const res = await client.fetch(
+      "/api/v1/spaces/{id}/knowledge-sources/{knowledge_source_id}/upstream/{upstream_path}",
+      init
+    );
+    return res;
+  }
+
   return {
     /**
      * Lists all MCP servers from the global catalog (admin only).
@@ -430,65 +463,120 @@ export function initMCPServers(client) {
     },
 
     /**
-     * List files in a knowledge source (proxy to eneo-knowledge).
-     * Status passes through verbatim: queued -> processing -> ready (or failed).
-     * @param {Object} params
-     * @param {string} params.space_id Owning space ID
-     * @param {string} params.knowledge_source_id Knowledge source ownership row ID
-     * @throws {IntricError}
-     * */
-    listKnowledgeSourceFiles: async ({ space_id, knowledge_source_id }) => {
-      const res = await client.fetch(
-        "/api/v1/spaces/{id}/knowledge-sources/{knowledge_source_id}/files/",
-        {
-          method: "get",
-          params: { path: { id: space_id, knowledge_source_id } }
-        }
-      );
-      return res;
-    },
+     * List files in a knowledge source. Status passes through verbatim:
+     * queued -> processing -> ready (or failed). Goes through the generic
+     * /upstream proxy.
+     * @param {{ space_id: string, knowledge_source_id: string }} params
+     */
+    listKnowledgeSourceFiles: ({ space_id, knowledge_source_id }) =>
+      proxyKnowledgeSource({
+        space_id,
+        knowledge_source_id,
+        upstream_path: "files",
+        method: "GET"
+      }),
 
     /**
-     * Upload a file to a knowledge source. Returns the file's initial metadata;
-     * poll listKnowledgeSourceFiles to follow ingestion.
-     * @param {Object} params
-     * @param {string} params.space_id Owning space ID
-     * @param {string} params.knowledge_source_id Knowledge source ownership row ID
-     * @param {File} params.file Browser File to upload
-     * @throws {IntricError}
-     * */
-    uploadKnowledgeSourceFile: async ({ space_id, knowledge_source_id, file }) => {
+     * Upload a file to a knowledge source via the generic proxy. Returns the
+     * upstream JSON (file's initial metadata); poll listKnowledgeSourceFiles
+     * to follow ingestion.
+     * @param {{ space_id: string, knowledge_source_id: string, file: File }} params
+     */
+    uploadKnowledgeSourceFile: ({ space_id, knowledge_source_id, file }) => {
       const form = new FormData();
       form.append("file", file);
-      const res = await client.fetch(
-        "/api/v1/spaces/{id}/knowledge-sources/{knowledge_source_id}/files/",
-        {
-          method: "post",
-          params: { path: { id: space_id, knowledge_source_id } },
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          requestBody: { "multipart/form-data": /** @type {any} */ (form) }
-        }
-      );
-      return res;
+      return proxyKnowledgeSource({
+        space_id,
+        knowledge_source_id,
+        upstream_path: "files",
+        method: "POST",
+        formData: form
+      });
     },
 
     /**
-     * Delete a file from a knowledge source.
-     * @param {Object} params
-     * @param {string} params.space_id Owning space ID
-     * @param {string} params.knowledge_source_id Knowledge source ownership row ID
-     * @param {string} params.file_id Upstream file ID
-     * @throws {IntricError}
-     * */
-    deleteKnowledgeSourceFile: async ({ space_id, knowledge_source_id, file_id }) => {
-      await client.fetch(
-        "/api/v1/spaces/{id}/knowledge-sources/{knowledge_source_id}/files/{file_id}/",
-        {
-          method: "delete",
-          params: { path: { id: space_id, knowledge_source_id, file_id } }
+     * Delete a file from a knowledge source. Goes through the generic /upstream proxy.
+     * @param {{ space_id: string, knowledge_source_id: string, file_id: string }} params
+     */
+    deleteKnowledgeSourceFile: ({ space_id, knowledge_source_id, file_id }) =>
+      proxyKnowledgeSource({
+        space_id,
+        knowledge_source_id,
+        upstream_path: `files/${encodeURIComponent(file_id)}`,
+        method: "DELETE"
+      }),
+
+    /**
+     * Generic eneo-knowledge proxy — see the closure-scope `proxyKnowledgeSource`
+     * for the full contract. Re-exposed on the returned object so callers can
+     * invoke arbitrary upstream paths (runs, preview, ...) without a wrapper.
+     */
+    proxyKnowledgeSource,
+
+    /**
+     * Convenience wrapper: list crawl sources in a knowledge source.
+     * @param {{ space_id: string, knowledge_source_id: string }} params
+     */
+    listKnowledgeSourceCrawlSources: ({ space_id, knowledge_source_id }) =>
+      proxyKnowledgeSource({
+        space_id,
+        knowledge_source_id,
+        upstream_path: "sources",
+        method: "GET"
+      }),
+
+    /**
+     * Convenience wrapper: register a crawl source.
+     * @param {{ space_id: string, knowledge_source_id: string, url: string, crawlType: "crawl"|"sitemap", depth: number, httpAuth?: { user: string, password: string } | null }} params
+     */
+    createKnowledgeSourceCrawlSource: ({
+      space_id,
+      knowledge_source_id,
+      url,
+      crawlType,
+      depth,
+      httpAuth
+    }) =>
+      proxyKnowledgeSource({
+        space_id,
+        knowledge_source_id,
+        upstream_path: "sources",
+        method: "POST",
+        body: {
+          url,
+          crawlType,
+          depth,
+          ...(httpAuth !== undefined ? { httpAuth } : {})
         }
-      );
-    },
+      }),
+
+    /**
+     * Convenience wrapper: patch a crawl source. `httpAuth: null` clears the
+     * stored credential. Pass only fields you want changed.
+     * @param {{ space_id: string, knowledge_source_id: string, source_id: string, patch: Record<string, unknown> }} params
+     */
+    updateKnowledgeSourceCrawlSource: ({ space_id, knowledge_source_id, source_id, patch }) =>
+      proxyKnowledgeSource({
+        space_id,
+        knowledge_source_id,
+        upstream_path: `sources/${encodeURIComponent(source_id)}`,
+        method: "PATCH",
+        body: patch
+      }),
+
+    /**
+     * Convenience wrapper: unlink a crawl source.
+     * Returns `{ unlinked, deleted, remainingLinkCount }`. `deleted: true`
+     * indicates the upstream cascade-removed the source row.
+     * @param {{ space_id: string, knowledge_source_id: string, source_id: string }} params
+     */
+    deleteKnowledgeSourceCrawlSource: ({ space_id, knowledge_source_id, source_id }) =>
+      proxyKnowledgeSource({
+        space_id,
+        knowledge_source_id,
+        upstream_path: `sources/${encodeURIComponent(source_id)}`,
+        method: "DELETE"
+      }),
 
     /**
      * Re-discover and upsert tool definitions for a space-private MCP.

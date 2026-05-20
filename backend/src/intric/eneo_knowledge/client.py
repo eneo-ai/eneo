@@ -4,9 +4,12 @@ Eneo holds a single ``KNOWLEDGE_API_KEY`` and proxies calls on behalf of all
 tenants; tenant/space isolation is enforced inside eneo via the
 ``knowledge_sources`` ownership table.
 
-Kept deliberately small — only the surface the proxied "New knowledge source"
-flow needs. Other eneo-knowledge endpoints (sources, crawl runs, files)
-will be added here when their flows land.
+Three operations live here as explicit methods because they participate in
+eneo-side state changes (collection create/delete) or are the generic
+passthrough used by everything else: ``create_collection``,
+``delete_collection``, ``proxy_collection_request``. All other
+eneo-knowledge endpoints (files, crawl sources, runs, ...) are reached via
+the proxy mount in ``router.py`` — no per-operation method needed here.
 """
 
 from __future__ import annotations
@@ -52,22 +55,18 @@ class CreatedCollection:
 
 
 @dataclass(frozen=True)
-class UploadedFileInfo:
-    """Metadata for a file in an eneo-knowledge collection.
+class ProxiedResponse:
+    """Raw upstream response payload, forwarded by the generic proxy mount.
 
-    ``status`` follows eneo-knowledge's lifecycle: ``queued`` ->
-    ``processing`` -> ``ready`` (or ``failed`` with ``error`` populated).
+    The eneo router relays ``status_code``, ``content`` (bytes), and
+    ``content_type`` verbatim to the eneo user — no schema validation, no
+    body translation. Eneo-knowledge is the source of truth for the wire
+    contract under ``/api/collections/{slug}/**``.
     """
 
-    id: str
-    name: str
-    mime_type: str
-    size_bytes: int
-    status: str
-    error: str | None
-    page_count: int | None
-    created_at: str
-    processed_at: str | None
+    status_code: int
+    content: bytes
+    content_type: str | None
 
 
 class EneoKnowledgeError(BadRequestException):
@@ -191,114 +190,35 @@ class EneoKnowledgeClient:
                 f"eneo-knowledge rejected collection delete ({response.status_code})"
             )
 
-    async def upload_file(
+    async def proxy_collection_request(
         self,
         *,
         slug: str,
-        filename: str,
-        content: bytes,
-        content_type: str,
-    ) -> UploadedFileInfo:
-        """Upload a file to a collection. eneo-knowledge ingests asynchronously."""
-        files = {"file": (filename, content, content_type)}
+        method: str,
+        upstream_path: str,
+        body: bytes | None,
+        content_type: str | None,
+    ) -> "ProxiedResponse":
+        """Forward an arbitrary request to /api/collections/{slug}/{upstream_path}.
+
+        Used by the generic eneo-knowledge proxy mount: the caller already
+        validated the upstream path and resolved tenant + space ownership.
+        The admin bearer is injected here; the response is returned verbatim
+        for the FastAPI handler to relay to the eneo user.
+        """
+        headers = dict(self._headers)
+        if content_type:
+            headers["Content-Type"] = content_type
+        url = f"{self._base_url}/api/collections/{slug}/{upstream_path}"
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.post(
-                f"{self._base_url}/api/collections/{slug}/files",
-                files=files,
-                headers=self._headers,
+            response = await client.request(
+                method.upper(),
+                url,
+                content=body,
+                headers=headers,
             )
-
-        if response.status_code == 404:
-            raise EneoKnowledgeError(
-                f"Knowledge collection '{slug}' not found upstream"
-            )
-        if response.status_code >= 400:
-            error_msg = _extract_upstream_error(response)
-            logger.warning(
-                "eneo-knowledge POST /api/collections/%s/files failed: %s %s",
-                slug,
-                response.status_code,
-                response.text,
-            )
-            raise EneoKnowledgeError(
-                error_msg
-                or f"eneo-knowledge rejected file upload ({response.status_code})"
-            )
-
-        return _parse_uploaded_file(response.json())
-
-    async def list_files(self, *, slug: str) -> list[UploadedFileInfo]:
-        """List files in a collection with their ingest status."""
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.get(
-                f"{self._base_url}/api/collections/{slug}/files",
-                headers=self._headers,
-            )
-
-        if response.status_code == 404:
-            raise EneoKnowledgeError(
-                f"Knowledge collection '{slug}' not found upstream"
-            )
-        if response.status_code >= 400:
-            logger.warning(
-                "eneo-knowledge GET /api/collections/%s/files failed: %s %s",
-                slug,
-                response.status_code,
-                response.text,
-            )
-            raise EneoKnowledgeError(
-                f"eneo-knowledge rejected file list ({response.status_code})"
-            )
-
-        return [_parse_uploaded_file(item) for item in response.json()]
-
-    async def delete_file(self, *, slug: str, file_id: str) -> None:
-        """Delete a single file from a collection (cascades chunks + S3 object)."""
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.delete(
-                f"{self._base_url}/api/collections/{slug}/files/{file_id}",
-                headers=self._headers,
-            )
-
-        if response.status_code in (404, 200, 204):
-            # 404 is treated as idempotent — the row may have been deleted
-            # by an admin tool out-of-band.
-            return
-        if response.status_code >= 400:
-            logger.warning(
-                "eneo-knowledge DELETE /api/collections/%s/files/%s failed: %s %s",
-                slug,
-                file_id,
-                response.status_code,
-                response.text,
-            )
-            raise EneoKnowledgeError(
-                f"eneo-knowledge rejected file delete ({response.status_code})"
-            )
-
-
-def _extract_upstream_error(response: httpx.Response) -> str | None:
-    """Best-effort extraction of an ``error`` string from an upstream JSON body."""
-    try:
-        payload = response.json()
-    except Exception:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    body: dict[str, Any] = payload  # type: ignore[assignment]
-    raw = body.get("error")
-    return raw if isinstance(raw, str) else None
-
-
-def _parse_uploaded_file(payload: dict[str, Any]) -> UploadedFileInfo:
-    return UploadedFileInfo(
-        id=payload["id"],
-        name=payload["name"],
-        mime_type=payload["mimeType"],
-        size_bytes=payload["sizeBytes"],
-        status=payload["status"],
-        error=payload.get("error"),
-        page_count=payload.get("pageCount"),
-        created_at=payload["createdAt"],
-        processed_at=payload.get("processedAt"),
-    )
+        return ProxiedResponse(
+            status_code=response.status_code,
+            content=response.content,
+            content_type=response.headers.get("content-type"),
+        )

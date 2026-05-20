@@ -10,6 +10,8 @@
   import { Check, ChevronRight, Wrench, X } from "lucide-svelte";
   import { untrack } from "svelte";
   import { formatToolArgValue } from "./toolCallFormatting";
+  import { getIntric } from "$lib/core/Intric";
+  import { getChatService } from "../../ChatService.svelte";
 
   type ToolCall = {
     server_name: string;
@@ -17,6 +19,9 @@
     arguments?: Record<string, unknown>;
     tool_call_id?: string;
     approved?: boolean;
+    result?: string | null;
+    result_status?: string | null;
+    mcp_tool_name?: string | null;
   };
 
   type Props = {
@@ -41,18 +46,62 @@
     onDeny
   }: Props = $props();
 
+  const intric = getIntric();
+  const chat = getChatService();
+
   const hasArgs = $derived(!!call.arguments && Object.keys(call.arguments).length > 0);
+  // Result may be preloaded (historic Message) OR fetched lazily on first
+  // expand of the inner "Visa svar" panel. We keep a local override so
+  // refetches don't mutate the upstream message object.
+  let lazyResult = $state<string | null>(null);
+  let lazyLoading = $state(false);
+  let lazyError = $state<string | null>(null);
+  const effectiveResult = $derived(call.result ?? lazyResult);
+  const hasResult = $derived(!!effectiveResult && effectiveResult.trim().length > 0);
+  const canLoadResult = $derived(
+    !hasResult && !!call.tool_call_id && !!chat.currentConversation?.id
+  );
+
   // Pending rows auto-open so the user sees args + Approve/Deny without
   // hunting for the chevron. We capture the INITIAL pending state only via
   // ``untrack`` — once the user approves/denies, ``isPending`` flips false
   // but we don't want the row to snap shut from under their cursor.
   let open = $state(untrack(() => isPending));
+  let responseOpen = $state(false);
+
+  async function loadResult() {
+    if (!canLoadResult || lazyLoading) return;
+    const sessionId = chat.currentConversation?.id;
+    const toolCallId = call.tool_call_id;
+    if (!sessionId || !toolCallId) return;
+    lazyLoading = true;
+    lazyError = null;
+    try {
+      const res = await intric.conversations.getToolCallResult({
+        sessionId,
+        toolCallId
+      });
+      lazyResult = res.result ?? "";
+    } catch (e) {
+      console.error("Failed to fetch tool call result", e);
+      lazyError = e instanceof Error ? e.message : String(e);
+    } finally {
+      lazyLoading = false;
+    }
+  }
+
+  function onResponseToggle(next: boolean) {
+    responseOpen = next;
+    if (next && !hasResult && canLoadResult) {
+      loadResult();
+    }
+  }
 </script>
 
 <Collapsible.Root bind:open class={shouldPulse ? "animate-pulse" : ""}>
   <Collapsible.Trigger
     class="group/row hover:bg-hover-dimmer flex w-full items-center gap-2 px-3 py-1 text-left transition-colors disabled:cursor-default disabled:opacity-100"
-    disabled={!hasArgs && !isPending}
+    disabled={!hasArgs && !isPending && !hasResult && !canLoadResult}
   >
     <Wrench
       class="h-3.5 w-3.5 shrink-0 {isDenied
@@ -84,7 +133,7 @@
       </span>
     {/if}
 
-    {#if hasArgs || isPending}
+    {#if hasArgs || isPending || hasResult || canLoadResult}
       <ChevronRight
         class="text-muted h-3.5 w-3.5 shrink-0 transition-transform duration-200 {open
           ? 'rotate-90'
@@ -108,6 +157,36 @@
           </div>
         {/each}
       </div>
+    {/if}
+
+    {#if hasResult || canLoadResult}
+      <Collapsible.Root bind:open={responseOpen} onOpenChange={onResponseToggle}>
+        <Collapsible.Trigger
+          class="group/result border-dimmer hover:bg-hover-dimmer flex w-full items-center gap-2 border-t px-3 py-1.5 text-left transition-colors"
+        >
+          <ChevronRight
+            class="text-muted h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-data-[state=open]/result:rotate-90"
+          />
+          <span class="text-muted text-[10px] font-semibold tracking-wider uppercase">
+            {m.mcp_tool_response_view()}
+          </span>
+          {#if lazyLoading}
+            <span class="text-muted ml-auto text-[10px]">…</span>
+          {/if}
+        </Collapsible.Trigger>
+        <Collapsible.Content>
+          <div class="border-dimmer space-y-1 border-t px-3 py-2">
+            {#if lazyLoading && !hasResult}
+              <p class="text-muted text-xs italic">…</p>
+            {:else if lazyError && !hasResult}
+              <p class="text-negative-default text-xs">{lazyError}</p>
+            {:else}
+              <pre
+                class="text-secondary max-h-72 overflow-auto font-mono text-xs leading-snug break-words whitespace-pre-wrap">{effectiveResult}</pre>
+            {/if}
+          </div>
+        </Collapsible.Content>
+      </Collapsible.Root>
     {/if}
 
     {#if isPending && call.tool_call_id}

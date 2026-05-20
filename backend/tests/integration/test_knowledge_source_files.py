@@ -1,18 +1,23 @@
-"""Phase 3 tests for the file-upload proxy flow on knowledge sources.
+"""Integration tests for the generic eneo-knowledge proxy mount.
 
-What this file owns:
-- Happy-path upload + list + delete proxy through the eneo-knowledge HTTP
-  surface (with the upstream client stubbed).
-- Tenant + space gating on file ops: a knowledge source owned by space A
-  cannot be acted on through space B's URL, nor by users in other tenants.
+The "files" surface (upload + list + delete) used to live in its own explicit
+endpoints; it now goes through `/upstream/{path:rest}` like every other
+upstream operation. These tests exercise the proxy:
 
-Reuses the same configure_knowledge_proxy + stub_eneo_knowledge_client
-+ stub_mcp_connection_probe fixtures pattern as ``test_knowledge_sources.py``,
-but extends the upstream stub with file methods.
+- Happy-path POST/GET/DELETE roundtrip with the upstream client stubbed.
+- Tenant + space gating: a knowledge source owned by space A cannot be
+  acted on through space B's URL, nor by users in other tenants.
+
+Stub strategy: ``stub_eneo_knowledge_proxy`` patches the single client
+method (``proxy_collection_request``) and synthesises minimal upstream
+responses based on the (method, path) it sees, including parsing the
+multipart filename out of POST bodies for assertion symmetry.
 """
 
 from __future__ import annotations
 
+import json
+import re
 from uuid import uuid4
 
 import pytest
@@ -24,7 +29,7 @@ from intric.eneo_knowledge.client import (
     EneoKnowledgeClient,
     KnowledgeCollection,
     PairedMcpServer,
-    UploadedFileInfo,
+    ProxiedResponse,
 )
 from intric.eneo_knowledge.table import KnowledgeSources
 from intric.main.config import get_settings, set_settings
@@ -63,24 +68,23 @@ def configure_knowledge_proxy(monkeypatch):
     set_settings(original)
 
 
-@pytest.fixture
-def stub_eneo_knowledge_client(monkeypatch):
-    """Stub all upstream HTTP — collection create/delete + file methods.
+_FILENAME_RE = re.compile(rb'filename="([^"]+)"')
 
-    File state lives in ``files_by_slug`` so list/delete reflect prior uploads
-    deterministically. Tests can inspect ``calls`` for assertion.
+
+@pytest.fixture
+def stub_eneo_knowledge_proxy(monkeypatch):
+    """Stub the upstream client at the proxy boundary.
+
+    The single ``proxy_collection_request`` method now handles every file
+    operation. We track every call and synthesise an upstream response per
+    (method, upstream_path). Multipart uploads have their ``filename``
+    parsed out of the body so tests can assert round-trip naming.
     """
-    calls: dict[str, list] = {
-        "create_collection": [],
-        "delete_collection": [],
-        "upload_file": [],
-        "list_files": [],
-        "delete_file": [],
-    }
-    files_by_slug: dict[str, list[UploadedFileInfo]] = {}
+    calls: list[dict] = []
+    files_by_slug: dict[str, list[dict]] = {}
 
     async def fake_create_collection(self, *, slug, name):
-        calls["create_collection"].append({"slug": slug, "name": name})
+        calls.append({"op": "create_collection", "slug": slug, "name": name})
         files_by_slug.setdefault(slug, [])
         return CreatedCollection(
             collection=KnowledgeCollection(
@@ -97,41 +101,63 @@ def stub_eneo_knowledge_client(monkeypatch):
         )
 
     async def fake_delete_collection(self, *, slug):
-        calls["delete_collection"].append({"slug": slug})
+        calls.append({"op": "delete_collection", "slug": slug})
         files_by_slug.pop(slug, None)
 
-    async def fake_upload_file(self, *, slug, filename, content, content_type):
-        calls["upload_file"].append(
+    async def fake_proxy(
+        self, *, slug, method, upstream_path, body, content_type
+    ) -> ProxiedResponse:
+        calls.append(
             {
+                "op": "proxy",
                 "slug": slug,
-                "filename": filename,
-                "size": len(content),
+                "method": method.upper(),
+                "upstream_path": upstream_path,
+                "body_size": len(body) if body else 0,
                 "content_type": content_type,
             }
         )
-        info = UploadedFileInfo(
-            id=str(uuid4()),
-            name=filename,
-            mime_type=content_type,
-            size_bytes=len(content),
-            status="queued",
-            error=None,
-            page_count=None,
-            created_at="2026-05-19T00:00:00Z",
-            processed_at=None,
+
+        if upstream_path == "files" and method.upper() == "POST":
+            filename = "unknown"
+            if body and (m := _FILENAME_RE.search(body)):
+                filename = m.group(1).decode()
+            info = {
+                "id": str(uuid4()),
+                "name": filename,
+                "mimeType": "application/pdf",
+                "sizeBytes": len(body) if body else 0,
+                "status": "queued",
+                "createdAt": "2026-05-19T00:00:00Z",
+            }
+            files_by_slug.setdefault(slug, []).append(info)
+            return ProxiedResponse(
+                status_code=202,
+                content=json.dumps(info).encode(),
+                content_type="application/json",
+            )
+
+        if upstream_path == "files" and method.upper() == "GET":
+            payload = files_by_slug.get(slug, [])
+            return ProxiedResponse(
+                status_code=200,
+                content=json.dumps(payload).encode(),
+                content_type="application/json",
+            )
+
+        if upstream_path.startswith("files/") and method.upper() == "DELETE":
+            file_id = upstream_path.split("/", 1)[1]
+            files_by_slug[slug] = [
+                f for f in files_by_slug.get(slug, []) if f["id"] != file_id
+            ]
+            return ProxiedResponse(status_code=204, content=b"", content_type=None)
+
+        # Anything we haven't taught the stub about: 404.
+        return ProxiedResponse(
+            status_code=404,
+            content=b'{"error":"unhandled in stub"}',
+            content_type="application/json",
         )
-        files_by_slug.setdefault(slug, []).append(info)
-        return info
-
-    async def fake_list_files(self, *, slug):
-        calls["list_files"].append({"slug": slug})
-        return list(files_by_slug.get(slug, []))
-
-    async def fake_delete_file(self, *, slug, file_id):
-        calls["delete_file"].append({"slug": slug, "file_id": file_id})
-        files_by_slug[slug] = [
-            f for f in files_by_slug.get(slug, []) if f.id != file_id
-        ]
 
     monkeypatch.setattr(
         EneoKnowledgeClient, "create_collection", fake_create_collection
@@ -139,9 +165,7 @@ def stub_eneo_knowledge_client(monkeypatch):
     monkeypatch.setattr(
         EneoKnowledgeClient, "delete_collection", fake_delete_collection
     )
-    monkeypatch.setattr(EneoKnowledgeClient, "upload_file", fake_upload_file)
-    monkeypatch.setattr(EneoKnowledgeClient, "list_files", fake_list_files)
-    monkeypatch.setattr(EneoKnowledgeClient, "delete_file", fake_delete_file)
+    monkeypatch.setattr(EneoKnowledgeClient, "proxy_collection_request", fake_proxy)
     return calls
 
 
@@ -186,13 +210,17 @@ async def _create_knowledge_source(
     return response.json()
 
 
+def _proxy_calls(calls: list[dict]) -> list[dict]:
+    return [c for c in calls if c["op"] == "proxy"]
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_upload_list_delete_roundtrip(
     client,
     default_user_token,
     configure_knowledge_proxy,
-    stub_eneo_knowledge_client,
+    stub_eneo_knowledge_proxy,
     stub_mcp_connection_probe,
 ):
     """Upload then list returns the file; delete then list returns empty."""
@@ -203,7 +231,7 @@ async def test_upload_list_delete_roundtrip(
     ks_id = ks["knowledge_source_id"]
 
     upload = await client.post(
-        f"/api/v1/spaces/{space_id}/knowledge-sources/{ks_id}/files/",
+        f"/api/v1/spaces/{space_id}/knowledge-sources/{ks_id}/upstream/files",
         files={"file": ("handbok.pdf", b"%PDF-1.4 fake content", "application/pdf")},
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
@@ -213,7 +241,7 @@ async def test_upload_list_delete_roundtrip(
     assert uploaded["status"] == "queued"
 
     listed = await client.get(
-        f"/api/v1/spaces/{space_id}/knowledge-sources/{ks_id}/files/",
+        f"/api/v1/spaces/{space_id}/knowledge-sources/{ks_id}/upstream/files",
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
     assert listed.status_code == 200, listed.text
@@ -222,22 +250,30 @@ async def test_upload_list_delete_roundtrip(
     assert items[0]["id"] == uploaded["id"]
 
     deleted = await client.delete(
-        f"/api/v1/spaces/{space_id}/knowledge-sources/{ks_id}/files/{uploaded['id']}/",
+        f"/api/v1/spaces/{space_id}/knowledge-sources/{ks_id}/upstream/files/{uploaded['id']}",
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
     assert deleted.status_code == 204, deleted.text
 
     listed_again = await client.get(
-        f"/api/v1/spaces/{space_id}/knowledge-sources/{ks_id}/files/",
+        f"/api/v1/spaces/{space_id}/knowledge-sources/{ks_id}/upstream/files",
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
     assert listed_again.status_code == 200
     assert listed_again.json() == []
 
     # Upstream was called with the matching slug at every step.
-    upstream_slug = stub_eneo_knowledge_client["create_collection"][0]["slug"]
-    assert stub_eneo_knowledge_client["upload_file"][0]["slug"] == upstream_slug
-    assert stub_eneo_knowledge_client["delete_file"][0]["slug"] == upstream_slug
+    create_call = next(
+        c for c in stub_eneo_knowledge_proxy if c["op"] == "create_collection"
+    )
+    upstream_slug = create_call["slug"]
+    proxy_calls = _proxy_calls(stub_eneo_knowledge_proxy)
+    assert any(
+        c["method"] == "POST" and c["upstream_path"] == "files" for c in proxy_calls
+    )
+    delete_call = next(c for c in proxy_calls if c["method"] == "DELETE")
+    assert delete_call["slug"] == upstream_slug
+    assert delete_call["upstream_path"].startswith("files/")
 
 
 @pytest.mark.integration
@@ -246,7 +282,7 @@ async def test_cross_space_file_op_rejected(
     client,
     default_user_token,
     configure_knowledge_proxy,
-    stub_eneo_knowledge_client,
+    stub_eneo_knowledge_proxy,
     stub_mcp_connection_probe,
 ):
     """A knowledge source owned by space A cannot be addressed via space B's URL."""
@@ -256,20 +292,20 @@ async def test_cross_space_file_op_rejected(
     ks_id = ks["knowledge_source_id"]
 
     cross_upload = await client.post(
-        f"/api/v1/spaces/{space_b}/knowledge-sources/{ks_id}/files/",
+        f"/api/v1/spaces/{space_b}/knowledge-sources/{ks_id}/upstream/files",
         files={"file": ("x.pdf", b"x", "application/pdf")},
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
     assert cross_upload.status_code == 404, cross_upload.text
 
     cross_list = await client.get(
-        f"/api/v1/spaces/{space_b}/knowledge-sources/{ks_id}/files/",
+        f"/api/v1/spaces/{space_b}/knowledge-sources/{ks_id}/upstream/files",
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
     assert cross_list.status_code == 404, cross_list.text
 
-    # And the upstream upload was never called (gate fires before HTTP).
-    assert stub_eneo_knowledge_client["upload_file"] == []
+    # And no proxy call ever hit the upstream client (gate fires before HTTP).
+    assert _proxy_calls(stub_eneo_knowledge_proxy) == []
 
 
 @pytest.mark.integration
@@ -280,7 +316,7 @@ async def test_cross_tenant_file_op_rejected(
     default_user,
     default_user_token,
     configure_knowledge_proxy,
-    stub_eneo_knowledge_client,
+    stub_eneo_knowledge_proxy,
     stub_mcp_connection_probe,
     tenant_factory,
     user_factory,
@@ -319,14 +355,14 @@ async def test_cross_tenant_file_op_rejected(
 
     # Probing tenant A's space directly: rejected by space-membership gate.
     direct = await client.get(
-        f"/api/v1/spaces/{space_a}/knowledge-sources/{ks_id}/files/",
+        f"/api/v1/spaces/{space_a}/knowledge-sources/{ks_id}/upstream/files",
         headers={"Authorization": f"Bearer {other_user_token}"},
     )
     assert direct.status_code in (401, 403, 404), direct.text
 
     # Even using their OWN space's URL with tenant A's knowledge_source_id: 404.
     spoof = await client.get(
-        f"/api/v1/spaces/{other_space_id}/knowledge-sources/{ks_id}/files/",
+        f"/api/v1/spaces/{other_space_id}/knowledge-sources/{ks_id}/upstream/files",
         headers={"Authorization": f"Bearer {other_user_token}"},
     )
     assert spoof.status_code == 404, spoof.text
@@ -338,7 +374,7 @@ async def test_list_returns_knowledge_sources_for_space(
     client,
     default_user_token,
     configure_knowledge_proxy,
-    stub_eneo_knowledge_client,
+    stub_eneo_knowledge_proxy,
     stub_mcp_connection_probe,
     db_container,
     default_user,

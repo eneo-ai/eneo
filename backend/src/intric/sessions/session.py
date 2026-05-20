@@ -9,6 +9,7 @@ from intric.files.file_models import FilePublic
 from intric.info_blobs.info_blob import InfoBlobAskAssistantPublic
 from intric.main.models import DateTimeModelMixin, InDB
 from intric.questions.question import (
+    McpToolReferencePublic,
     Message,
     Question,
     ToolCallInfo,
@@ -87,6 +88,7 @@ class AskChatResponse(BaseModel):
     references: list[InfoBlobAskAssistantPublic]
     tools: UseTools
     web_search_references: list[WebSearchResultPublic]
+    mcp_tool_references: list[McpToolReferencePublic] = []
 
 
 class AskResponse(AskChatResponse):
@@ -130,6 +132,20 @@ class SSEToolCall(SSEBase):
 
     intric_event_type: IntricEventType = IntricEventType.TOOL_CALL
     tools: list[ToolCallInfo]
+    mcp_tool_references: list[McpToolReferencePublic] = []
+
+
+class ToolCallResultPublic(BaseModel):
+    """Lazy-loaded payload for a single tool call's upstream response.
+
+    Only the niche "Visa svar" view fetches this — keeping it out of the
+    streaming hot path lets the SSE payload stay small even when a tool
+    returns several KB of text.
+    """
+
+    tool_call_id: str
+    result: Optional[str] = None
+    mcp_tool_name: Optional[str] = None
 
 
 class SSEToolApprovalRequired(SSEBase):

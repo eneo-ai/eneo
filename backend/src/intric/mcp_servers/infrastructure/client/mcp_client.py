@@ -3,7 +3,7 @@
 import asyncio
 from datetime import timedelta
 from types import TracebackType
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import httpx
 from mcp import ClientSession
@@ -20,6 +20,44 @@ _settings = get_settings()
 MCP_CONNECTION_TIMEOUT_DEFAULT = _settings.mcp_client_connect_timeout_seconds
 MCP_LIST_TOOLS_TIMEOUT_DEFAULT = _settings.mcp_client_list_tools_timeout_seconds
 MCP_TOOL_CALL_TIMEOUT_DEFAULT = _settings.mcp_client_call_timeout_seconds
+
+# Defensive caps for resource content blocks. An adversarial MCP server can
+# emit arbitrarily large `text` / `_meta` payloads; we keep what we forward to
+# the LLM intact but truncate what we persist (the LLM-facing path uses the
+# original `text` value before this cap is applied at the parser level).
+RESOURCE_TEXT_MAX_BYTES = 8 * 1024
+RESOURCE_META_MAX_BYTES = 16 * 1024
+
+
+def _truncate_text(value: Optional[str], max_bytes: int) -> Optional[str]:
+    if value is None:
+        return None
+    encoded = value.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value
+    return encoded[:max_bytes].decode("utf-8", errors="ignore")
+
+
+def _truncate_meta(meta: Any, max_bytes: int) -> dict[str, Any]:
+    """Best-effort cap on the JSON-serialized size of an MCP resource _meta dict.
+
+    Keeps the structure (returns a dict) but drops keys from the tail until the
+    JSON payload fits. Non-dict input collapses to an empty dict.
+    """
+    import json
+
+    if not isinstance(meta, dict):
+        return {}
+    typed_meta = cast(dict[str, Any], meta)
+    if len(json.dumps(typed_meta).encode("utf-8")) <= max_bytes:
+        return typed_meta
+    truncated: dict[str, Any] = {}
+    for k, v in typed_meta.items():
+        candidate: dict[str, Any] = {**truncated, k: v}
+        if len(json.dumps(candidate).encode("utf-8")) > max_bytes:
+            break
+        truncated = candidate
+    return truncated
 
 
 def _extract_error_message(exc: BaseException) -> str:
@@ -406,11 +444,30 @@ class MCPClient:
                         }
                     )
                 elif content_item.type == "resource":
+                    # The MCP SDK wraps the resource in an `EmbeddedResource`
+                    # whose `.resource` is `TextResourceContents | BlobResourceContents`.
+                    # Older shapes flatten the fields onto the content item;
+                    # probe both so we work across SDK versions.
+                    resource = getattr(content_item, "resource", content_item)
+                    raw_meta: Any = (
+                        getattr(resource, "_meta", None)
+                        or getattr(resource, "meta", None)
+                        or {}
+                    )
+                    raw_uri = getattr(resource, "uri", None)
+                    # Pydantic AnyUrl on the SDK side; asyncpg won't coerce it,
+                    # and downstream consumers expect a plain string.
+                    uri_str = str(raw_uri) if raw_uri is not None else None
                     content_list.append(
                         {
                             "type": "resource",
-                            "uri": getattr(content_item, "uri", None),
-                            "text": getattr(content_item, "text", None),
+                            "uri": uri_str,
+                            "text": _truncate_text(
+                                getattr(resource, "text", None),
+                                RESOURCE_TEXT_MAX_BYTES,
+                            ),
+                            "mime_type": getattr(resource, "mimeType", None),
+                            "meta": _truncate_meta(raw_meta, RESOURCE_META_MAX_BYTES),
                         }
                     )
 

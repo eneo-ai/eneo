@@ -29,7 +29,7 @@ import sqlalchemy as sa
 from intric.eneo_knowledge.client import (
     EneoKnowledgeClient,
     EneoKnowledgeError,
-    UploadedFileInfo,
+    ProxiedResponse,
 )
 from intric.eneo_knowledge.table import KnowledgeSources
 from intric.main.exceptions import (
@@ -308,71 +308,39 @@ class KnowledgeSourceService:
             mcp_server_id=row.mcp_server_id,
         )
 
-    async def list_files(
-        self, *, space_id: UUID, knowledge_source_id: UUID
-    ) -> list[UploadedFileInfo]:
-        """List files in a knowledge source. Space members with READ can call this."""
-        space = await self._space_service.get_space(space_id)
-        actor = self._actor_manager.get_space_actor_from_space(space=space)
-        if not actor.can_read_mcp_servers():
-            raise UnauthorizedException()
-        ownership = await self._resolve_owned_source(
-            space_id=space_id, knowledge_source_id=knowledge_source_id
-        )
-        if self._client is None:
-            raise BadRequestException(
-                "Knowledge sources are not configured for this deployment"
-            )
-        return await self._client.list_files(slug=ownership.eneo_knowledge_slug)
-
-    async def upload_file(
+    async def proxy_request(
         self,
         *,
         space_id: UUID,
         knowledge_source_id: UUID,
-        filename: str,
-        content: bytes,
-        content_type: str,
-    ) -> tuple[KnowledgeSourceRow, UploadedFileInfo]:
-        """Upload a file to a knowledge source.
+        method: str,
+        upstream_path: str,
+        body: bytes | None,
+        content_type: str | None,
+    ) -> tuple[KnowledgeSourceRow, ProxiedResponse]:
+        """Forward a request to /api/collections/{slug}/{upstream_path}.
 
-        Returns ``(ownership_row, uploaded_file)`` so the router can write the
-        audit log entry without a second lookup. Eneo-knowledge ingests the
-        file asynchronously; the returned status will typically be ``queued``.
+        Pure passthrough after the tenant + space + ownership gate and the
+        method → actor capability check. Specific endpoints that need to
+        persist eneo-side state (session ids, ownership rows, ...) stay
+        explicit and bypass this generic mount.
         """
         space = await self._space_service.get_space(space_id)
         actor = self._actor_manager.get_space_actor_from_space(space=space)
-        if not actor.can_edit_mcp_servers():
-            raise UnauthorizedException()
-        ownership = await self._resolve_owned_source(
-            space_id=space_id, knowledge_source_id=knowledge_source_id
-        )
-        if self._client is None:
-            raise BadRequestException(
-                "Knowledge sources are not configured for this deployment"
-            )
-        if not filename or not content:
-            raise BadRequestException("File is empty")
-        info = await self._client.upload_file(
-            slug=ownership.eneo_knowledge_slug,
-            filename=filename,
-            content=content,
-            content_type=content_type or "application/octet-stream",
-        )
-        return ownership, info
 
-    async def delete_file(
-        self,
-        *,
-        space_id: UUID,
-        knowledge_source_id: UUID,
-        file_id: str,
-    ) -> KnowledgeSourceRow:
-        """Delete a file from a knowledge source. Idempotent if file is gone upstream."""
-        space = await self._space_service.get_space(space_id)
-        actor = self._actor_manager.get_space_actor_from_space(space=space)
-        if not actor.can_delete_mcp_servers():
-            raise UnauthorizedException()
+        normalized = method.upper()
+        if normalized == "GET":
+            if not actor.can_read_mcp_servers():
+                raise UnauthorizedException()
+        elif normalized == "DELETE":
+            if not actor.can_delete_mcp_servers():
+                raise UnauthorizedException()
+        elif normalized in {"POST", "PATCH", "PUT"}:
+            if not actor.can_edit_mcp_servers():
+                raise UnauthorizedException()
+        else:
+            raise BadRequestException(f"Unsupported proxy method '{method}'")
+
         ownership = await self._resolve_owned_source(
             space_id=space_id, knowledge_source_id=knowledge_source_id
         )
@@ -380,10 +348,14 @@ class KnowledgeSourceService:
             raise BadRequestException(
                 "Knowledge sources are not configured for this deployment"
             )
-        await self._client.delete_file(
-            slug=ownership.eneo_knowledge_slug, file_id=file_id
+        response = await self._client.proxy_collection_request(
+            slug=ownership.eneo_knowledge_slug,
+            method=normalized,
+            upstream_path=upstream_path,
+            body=body,
+            content_type=content_type,
         )
-        return ownership
+        return ownership, response
 
     async def delete_upstream_collection(self, *, slug: str) -> None:
         """Best-effort upstream cleanup. 404 is silently swallowed.

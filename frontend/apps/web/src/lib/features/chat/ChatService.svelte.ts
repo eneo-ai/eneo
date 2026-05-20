@@ -343,6 +343,28 @@ export class ChatService {
                   ref.mcp_tool_calls.push(tool);
                 }
               }
+              // Accumulate per-tool MCP resource refs on the live message so
+              // inline <inref/> chips and the bottom counter populate without
+              // a page reload. Dedup by id since approval-flow may fire twice.
+              const newRefs = (event as unknown as { mcp_tool_references?: Array<{ id: string }> })
+                .mcp_tool_references;
+              if (ref && newRefs && newRefs.length) {
+                if (!ref.mcp_tool_references) {
+                  ref.mcp_tool_references = [];
+                }
+                // Local-only dedup set; reactive surface is the
+                // mcp_tool_references array on the message ref. A plain Set
+                // is fine here — its lifetime is one handler invocation.
+                // eslint-disable-next-line svelte/prefer-svelte-reactivity
+                const seen = new Set(ref.mcp_tool_references.map((r) => r.id));
+                for (const newRef of newRefs) {
+                  if (!seen.has(newRef.id)) {
+                    seen.add(newRef.id);
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    ref.mcp_tool_references.push(newRef as any);
+                  }
+                }
+              }
             },
             onToolApprovalRequired: (event) => {
               ensureCurrentSession(event);
