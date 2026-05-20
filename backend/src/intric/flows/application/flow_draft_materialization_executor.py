@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
+from typing import assert_never
 from uuid import UUID, uuid4
 
 from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
@@ -26,7 +27,9 @@ from intric.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
     ResourceSlotKind,
+    assistant_update_field_for_knowledge_local_kind,
     index_local_resource_bindings,
+    local_resource_kinds_for_slot_kind,
     resolve_local_resource_ref,
 )
 from intric.main.exceptions import BadRequestException
@@ -35,7 +38,6 @@ from intric.prompts.api.prompt_models import PromptCreate
 logger = logging.getLogger(__name__)
 
 _MODEL_LOCAL_KINDS = frozenset({LocalResourceKind.COMPLETION_MODEL})
-_KNOWLEDGE_LOCAL_KINDS = frozenset({LocalResourceKind.COLLECTION})
 _MCP_SERVER_LOCAL_KINDS = frozenset({LocalResourceKind.MCP_SERVER})
 _MCP_TOOL_LOCAL_KINDS = frozenset({LocalResourceKind.MCP_TOOL})
 
@@ -340,22 +342,12 @@ async def _configure_assistant(
         websites = []
         integration_knowledge_ids = []
     elif uses_knowledge:
-        groups = [
-            _resolve_materializer_resource_ref(
-                ref,
-                expected_slot_kind=ResourceSlotKind.KNOWLEDGE,
-                allowed_local_kinds=_KNOWLEDGE_LOCAL_KINDS,
-                resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
-                invalid_code="invalid_kb_ref",
-                invalid_message=f"Invalid knowledge base reference '{ref}'.",
-                invalid_context={"knowledge_refs": assistant_spec.knowledge_refs},
-            )
-            for ref in assistant_spec.knowledge_refs
-        ]
+        groups, websites, integration_knowledge_ids = _resolve_knowledge_refs(
+            knowledge_refs=assistant_spec.knowledge_refs,
+            resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
+        )
         mcp_server_ids = []
         mcp_tools = []
-        websites = []
-        integration_knowledge_ids = []
     else:
         groups = []
         websites = []
@@ -376,6 +368,43 @@ async def _configure_assistant(
     )
 
 
+def _resolve_knowledge_refs(
+    *,
+    knowledge_refs: Sequence[str],
+    resource_bindings_by_slot_ref: Mapping[str, LocalResourceBinding],
+) -> tuple[list[UUID], list[UUID], list[UUID]]:
+    groups: list[UUID] = []
+    websites: list[UUID] = []
+    integration_knowledge_ids: list[UUID] = []
+
+    for ref in knowledge_refs:
+        binding = _resolve_materializer_resource_binding(
+            ref,
+            expected_slot_kind=ResourceSlotKind.KNOWLEDGE,
+            allowed_local_kinds=local_resource_kinds_for_slot_kind(
+                ResourceSlotKind.KNOWLEDGE
+            ),
+            resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
+            invalid_code="invalid_kb_ref",
+            invalid_message=f"Invalid knowledge base reference '{ref}'.",
+            invalid_context={"knowledge_refs": knowledge_refs},
+        )
+        target_field = assistant_update_field_for_knowledge_local_kind(
+            binding.local_kind
+        )
+        match target_field:
+            case "groups":
+                groups.append(binding.local_id)
+            case "websites":
+                websites.append(binding.local_id)
+            case "integration_knowledge_ids":
+                integration_knowledge_ids.append(binding.local_id)
+            case _:
+                assert_never(target_field)
+
+    return groups, websites, integration_knowledge_ids
+
+
 def _resolve_materializer_resource_ref(
     resource_ref: str,
     *,
@@ -386,13 +415,35 @@ def _resolve_materializer_resource_ref(
     invalid_message: str,
     invalid_context: dict[str, object],
 ) -> UUID:
+    return _resolve_materializer_resource_binding(
+        resource_ref,
+        expected_slot_kind=expected_slot_kind,
+        allowed_local_kinds=allowed_local_kinds,
+        resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
+        invalid_code=invalid_code,
+        invalid_message=invalid_message,
+        invalid_context=invalid_context,
+    ).local_id
+
+
+def _resolve_materializer_resource_binding(
+    resource_ref: str,
+    *,
+    expected_slot_kind: ResourceSlotKind,
+    allowed_local_kinds: frozenset[LocalResourceKind],
+    resource_bindings_by_slot_ref: Mapping[str, LocalResourceBinding],
+    invalid_code: str,
+    invalid_message: str,
+    invalid_context: dict[str, object],
+) -> LocalResourceBinding:
     try:
-        return resolve_local_resource_ref(
+        resolve_local_resource_ref(
             resource_ref,
             expected_slot_kind=expected_slot_kind,
             bindings_by_slot_ref=resource_bindings_by_slot_ref,
             allowed_local_kinds=allowed_local_kinds,
         )
+        return resource_bindings_by_slot_ref[resource_ref.strip()]
     except FlowResourceBindingResolutionError as exc:
         raise _slot_binding_bad_request(
             exc,
@@ -413,13 +464,19 @@ def _slot_binding_bad_request(
         return BadRequestException(
             invalid_message or str(error),
             code=invalid_code or error.reason.value,
-            context=invalid_context or error.context(),
+            context=invalid_context or _bad_request_context(error),
         )
     return BadRequestException(
         str(error),
         code=error.reason.value,
-        context=error.context(),
+        context=_bad_request_context(error),
     )
+
+
+def _bad_request_context(
+    error: FlowResourceBindingResolutionError,
+) -> dict[str, object]:
+    return dict(error.context())
 
 
 async def _deduplicate_flow_name(

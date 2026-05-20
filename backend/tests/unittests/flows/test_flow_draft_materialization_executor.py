@@ -324,6 +324,70 @@ async def test_slot_refs_configure_model_knowledge_and_mcp() -> None:
 
 
 @pytest.mark.asyncio
+async def test_knowledge_bindings_are_materialized_by_local_kind() -> None:
+    flow_id = uuid4()
+    collection_id = uuid4()
+    website_id = uuid4()
+    integration_knowledge_id = uuid4()
+    service = _flow_service()
+    service.create_flow.return_value = _flow(flow_id=flow_id)
+    assistant = MagicMock()
+    assistant.id = uuid4()
+    service.create_flow_assistant.return_value = (assistant, [])
+
+    await FlowDraftMaterializer().execute(
+        changeset=FlowDraftChangeSet(
+            flow_name="Knowledge flow",
+            flow_description="",
+            assistants_to_create=[
+                FlowDraftAssistantToCreate(
+                    plan_step_ref="knowledge",
+                    assistant_spec=AssistantSpec(
+                        instructions="Use local knowledge.",
+                        knowledge_refs=[
+                            "knowledge.policy",
+                            "knowledge.website",
+                            "knowledge.integration",
+                        ],
+                    ),
+                )
+            ],
+            compiled_steps=[_compiled_step(plan_step_ref="knowledge", step_order=1)],
+        ),
+        flow_service=service,
+        space_id=uuid4(),
+        flow_id=None,
+        resource_bindings=(
+            _resource_binding(
+                slot="policy",
+                slot_kind=ResourceSlotKind.KNOWLEDGE,
+                local_kind=LocalResourceKind.COLLECTION,
+                local_id=collection_id,
+            ),
+            _resource_binding(
+                slot="website",
+                slot_kind=ResourceSlotKind.KNOWLEDGE,
+                local_kind=LocalResourceKind.WEBSITE,
+                local_id=website_id,
+            ),
+            _resource_binding(
+                slot="integration",
+                slot_kind=ResourceSlotKind.KNOWLEDGE,
+                local_kind=LocalResourceKind.INTEGRATION_KNOWLEDGE,
+                local_id=integration_knowledge_id,
+            ),
+        ),
+        binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+    )
+
+    command = service.update_flow_assistant.await_args.kwargs["update"]
+    assert isinstance(command, FlowAssistantUpdateCommand)
+    assert command.groups == [collection_id]
+    assert command.websites == [website_id]
+    assert command.integration_knowledge_ids == [integration_knowledge_id]
+
+
+@pytest.mark.asyncio
 async def test_step_without_knowledge_or_mcp_clears_resource_lists() -> None:
     flow_id = uuid4()
     service = _flow_service()

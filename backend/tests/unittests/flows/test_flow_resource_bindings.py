@@ -16,6 +16,7 @@ from intric.flows.flow_resource_bindings import (
     ResourceSlotAllocator,
     ResourceSlotKind,
     ResourceSlotRef,
+    assistant_update_field_for_knowledge_local_kind,
     index_local_resource_bindings,
     is_uuid_shaped_resource_ref,
     local_resource_kinds_for_slot_kind,
@@ -116,6 +117,28 @@ def test_local_resource_kinds_for_slot_kind_exposes_binding_contract() -> None:
     assert local_resource_kinds_for_slot_kind(ResourceSlotKind.MCP_TOOL) == frozenset(
         {LocalResourceKind.MCP_TOOL}
     )
+
+
+def test_knowledge_local_kinds_have_assistant_update_fields() -> None:
+    knowledge_local_kinds = local_resource_kinds_for_slot_kind(
+        ResourceSlotKind.KNOWLEDGE
+    )
+
+    assert {
+        local_kind: assistant_update_field_for_knowledge_local_kind(local_kind)
+        for local_kind in knowledge_local_kinds
+    } == {
+        LocalResourceKind.COLLECTION: "groups",
+        LocalResourceKind.WEBSITE: "websites",
+        LocalResourceKind.INTEGRATION_KNOWLEDGE: "integration_knowledge_ids",
+    }
+
+
+def test_non_knowledge_local_kind_has_no_assistant_update_field() -> None:
+    with pytest.raises(ValueError, match="cannot be applied as assistant knowledge"):
+        assistant_update_field_for_knowledge_local_kind(
+            LocalResourceKind.COMPLETION_MODEL
+        )
 
 
 def test_binding_source_values_are_canonical() -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Mapping
 from enum import Enum
+from typing import Literal, TypeAlias
 from uuid import UUID
 
 from pydantic import (
@@ -130,6 +131,19 @@ RESOURCE_SLOT_LOCAL_KIND_PAIRS = tuple(
 FLOW_RESOURCE_BINDING_SOURCE_VALUES = tuple(
     source.value for source in FlowResourceBindingSource
 )
+KnowledgeAssistantUpdateField: TypeAlias = Literal[
+    "groups",
+    "websites",
+    "integration_knowledge_ids",
+]
+_KNOWLEDGE_ASSISTANT_UPDATE_FIELD_BY_LOCAL_KIND: dict[
+    LocalResourceKind,
+    KnowledgeAssistantUpdateField,
+] = {
+    LocalResourceKind.COLLECTION: "groups",
+    LocalResourceKind.WEBSITE: "websites",
+    LocalResourceKind.INTEGRATION_KNOWLEDGE: "integration_knowledge_ids",
+}
 
 
 class ResourceSlotRef(BaseModel):
@@ -207,6 +221,17 @@ def local_resource_kinds_for_slot_kind(
     slot_kind: ResourceSlotKind,
 ) -> frozenset[LocalResourceKind]:
     return _LOCAL_KINDS_BY_SLOT_KIND[slot_kind]
+
+
+def assistant_update_field_for_knowledge_local_kind(
+    local_kind: LocalResourceKind,
+) -> KnowledgeAssistantUpdateField:
+    try:
+        return _KNOWLEDGE_ASSISTANT_UPDATE_FIELD_BY_LOCAL_KIND[local_kind]
+    except KeyError as exc:
+        raise ValueError(
+            f"{local_kind.value} cannot be applied as assistant knowledge."
+        ) from exc
 
 
 class ResourceSlotAllocator:

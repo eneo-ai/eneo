@@ -207,6 +207,69 @@ async def test_install_preserves_selected_knowledge_binding() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("local_kind", "expected_field"),
+    [
+        (LocalResourceKind.WEBSITE, "websites"),
+        (LocalResourceKind.INTEGRATION_KNOWLEDGE, "integration_knowledge_ids"),
+    ],
+)
+async def test_install_preserves_selected_non_collection_knowledge_binding(
+    local_kind: LocalResourceKind,
+    expected_field: str,
+) -> None:
+    flow_id = uuid4()
+    assistant_id = uuid4()
+    model_id = uuid4()
+    knowledge_id = uuid4()
+    model_binding = _binding(
+        slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
+        local_kind=LocalResourceKind.COMPLETION_MODEL,
+        local_id=model_id,
+    )
+    knowledge_slot = _slot_ref(ResourceSlotKind.KNOWLEDGE, "local-rules")
+    knowledge_binding = _binding(
+        slot_ref=knowledge_slot,
+        local_kind=local_kind,
+        local_id=knowledge_id,
+    )
+    service = _flow_service(flow_id=flow_id, assistant_id=assistant_id)
+
+    result = await FlowPackageInstallService().install_as_draft(
+        envelope=_envelope(
+            requirements=[
+                FlowPackageModelRequirement(
+                    slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
+                ),
+                FlowPackageKnowledgeRequirement(slot_ref=knowledge_slot),
+            ],
+            assistant=AssistantSpec(
+                instructions="Use local guidance.",
+                model_ref="model.structured",
+                knowledge_refs=[knowledge_slot.ref],
+            ),
+        ),
+        flow_service=service,
+        space_id=uuid4(),
+        selected_bindings=(model_binding, knowledge_binding),
+        candidates=_candidates(
+            models=[_model_candidate(model_id)],
+            knowledge=[_knowledge_candidate(knowledge_id, local_kind=local_kind)],
+        ),
+    )
+
+    assert result.resource_bindings_count == 2
+    update = service.update_flow_assistant.await_args.kwargs["update"]
+    assert update.groups == ([] if expected_field != "groups" else [knowledge_id])
+    assert update.websites == (
+        [knowledge_id] if expected_field == "websites" else []
+    )
+    assert update.integration_knowledge_ids == (
+        [knowledge_id] if expected_field == "integration_knowledge_ids" else []
+    )
+
+
+@pytest.mark.asyncio
 async def test_install_rejects_optional_slot_referenced_by_step_before_creating_flow() -> (
     None
 ):
@@ -358,7 +421,7 @@ async def test_install_rejects_selected_local_id_not_available_in_target_space()
     service.create_flow.assert_not_called()
 
 
-def test_validate_rejects_mcp_requirements_as_manual_setup_scope() -> None:
+def test_validate_rejects_mcp_requirements_as_unsupported_scope() -> None:
     envelope = _mcp_envelope(required=True)
 
     with pytest.raises(FlowPackageValidationError) as exc_info:
@@ -368,7 +431,7 @@ def test_validate_rejects_mcp_requirements_as_manual_setup_scope() -> None:
             candidates=_candidates(),
         )
 
-    assert exc_info.value.code is FlowPackageErrorCode.IMPORT_MCP_MANUAL_SETUP_REQUIRED
+    assert exc_info.value.code is FlowPackageErrorCode.IMPORT_MCP_UNSUPPORTED
     assert exc_info.value.context["slot_ref"] == "mcp_tool.case-lookup"
 
 
@@ -388,7 +451,7 @@ def test_validate_rejects_mcp_draft_refs_even_without_declared_requirement() -> 
             candidates=_candidates(),
         )
 
-    assert exc_info.value.code is FlowPackageErrorCode.IMPORT_MCP_MANUAL_SETUP_REQUIRED
+    assert exc_info.value.code is FlowPackageErrorCode.IMPORT_MCP_UNSUPPORTED
     assert exc_info.value.context["slot_ref"] == "mcp_tool.case-lookup"
 
 
@@ -663,9 +726,13 @@ def _candidates(
     )
 
 
-def _knowledge_candidate(local_id: UUID) -> FlowPackageLocalCandidate:
+def _knowledge_candidate(
+    local_id: UUID,
+    *,
+    local_kind: LocalResourceKind = LocalResourceKind.COLLECTION,
+) -> FlowPackageLocalCandidate:
     return FlowPackageLocalCandidate(
-        local_kind=LocalResourceKind.COLLECTION,
+        local_kind=local_kind,
         local_id=local_id,
         label="Local Rules",
     )

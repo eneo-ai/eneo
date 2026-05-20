@@ -219,7 +219,7 @@ def test_export_preserves_form_fields_from_flow_metadata() -> None:
     "case",
     ["server_only", "tool_only", "knowledge_and_tool"],
 )
-def test_export_rejects_mcp_resources_as_manual_setup_scope(
+def test_export_rejects_mcp_resources_as_unsupported_scope(
     case: str,
 ) -> None:
     assistant_id = uuid4()
@@ -493,6 +493,55 @@ def test_export_allocates_package_slots_for_unbound_snapshot_resources() -> None
         requirement.slot_ref.ref for requirement in envelope.requirements.requirements
     }
     assert requirement_refs == {"knowledge.policy", "model.structured-model"}
+
+
+def test_export_allocates_package_slots_for_all_knowledge_resource_kinds() -> None:
+    assistant_id = uuid4()
+    collection_id = uuid4()
+    website_id = uuid4()
+    integration_knowledge_id = uuid4()
+
+    envelope = _build_envelope(
+        flow=_flow(steps=[_step(1, assistant_id=assistant_id)]),
+        assistant_snapshots={
+            assistant_id: _snapshot(
+                model_ref=None,
+                knowledge_refs=(
+                    AssistantAuthoringResourceRef(
+                        local_ref=str(collection_id),
+                        label="Policy",
+                        local_kind=LocalResourceKind.COLLECTION,
+                    ),
+                    AssistantAuthoringResourceRef(
+                        local_ref=str(website_id),
+                        label="Public guidance",
+                        local_kind=LocalResourceKind.WEBSITE,
+                    ),
+                    AssistantAuthoringResourceRef(
+                        local_ref=str(integration_knowledge_id),
+                        label="SharePoint folder",
+                        local_kind=LocalResourceKind.INTEGRATION_KNOWLEDGE,
+                    ),
+                ),
+            )
+        },
+        resource_bindings=tuple(),
+    )
+
+    step = envelope.draft.spec.steps[0]
+    assert step.assistant_spec.knowledge_refs == [
+        "knowledge.policy",
+        "knowledge.public-guidance",
+        "knowledge.sharepoint-folder",
+    ]
+    requirement_refs = {
+        requirement.slot_ref.ref for requirement in envelope.requirements.requirements
+    }
+    assert requirement_refs == {
+        "knowledge.policy",
+        "knowledge.public-guidance",
+        "knowledge.sharepoint-folder",
+    }
 
 
 def test_export_reuses_one_package_slot_for_shared_unbound_snapshot_resource() -> None:
