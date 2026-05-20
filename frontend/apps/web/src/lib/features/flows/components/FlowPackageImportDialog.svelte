@@ -34,6 +34,7 @@
     getFlowPackageImportReadiness,
     getFlowPackageResolutionSlotKey,
     getFlowPackageResolutionSlotLabel,
+    mapFlowPackageImportError,
     type FlowPackageCandidate,
     type FlowPackageImportSelectionState
   } from "$lib/features/flows/flowPackageTransfer";
@@ -141,7 +142,9 @@
       selections = createInitialFlowPackageImportSelections(nextPlan);
     } catch (error) {
       if (!isCurrentPlanLoad(requestId, signal)) return;
-      const message = error instanceof IntricError ? error.getReadableMessage() : String(error);
+      const message =
+        mapFlowPackageImportError(error) ??
+        (error instanceof IntricError ? error.getReadableMessage() : String(error));
       loadError = m.flow_package_import_plan_failed({ message });
     } finally {
       if (isCurrentPlanLoad(requestId, signal)) {
@@ -177,7 +180,9 @@
       reset();
       goto(resolve(`/spaces/${spaceRouteId}/flows/${result.flow_id}`));
     } catch (error) {
-      const message = error instanceof IntricError ? error.getReadableMessage() : String(error);
+      const message =
+        mapFlowPackageImportError(error) ??
+        (error instanceof IntricError ? error.getReadableMessage() : String(error));
       importError = m.flow_package_import_failed({ message });
     } finally {
       importing = false;
@@ -196,10 +201,22 @@
   }
 
   function requirementKindLabel(kind: FlowPackageDependencyResolution["kind"]) {
-    if (kind === "model") return m.flow_package_kind_model();
-    if (kind === "knowledge") return m.flow_package_kind_knowledge();
-    if (kind === "mcp_tool") return m.flow_package_kind_mcp_tool();
-    return m.flow_package_kind_template_asset();
+    switch (kind) {
+      case "model":
+        return m.flow_package_kind_model();
+      case "knowledge":
+        return m.flow_package_kind_knowledge();
+      case "mcp_tool":
+        return m.flow_package_kind_mcp_tool();
+      case "template_asset":
+        return m.flow_package_kind_template_asset();
+      default:
+        return assertNever(kind);
+    }
+  }
+
+  function assertNever(value: never): never {
+    throw new Error(`Unsupported flow package dependency kind: ${value}`);
   }
 
   function requirementCountLabel(count: number) {
@@ -529,6 +546,7 @@
                     {@const slotKey = getFlowPackageResolutionSlotKey(resolution)}
                     {@const slotLabel = getFlowPackageResolutionSlotLabel(resolution)}
                     {@const guide = guidanceText(resolution)}
+                    {@const usedBySteps = resolution.used_by_steps ?? []}
                     <li
                       class="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-start sm:justify-between sm:gap-5"
                     >
@@ -562,10 +580,10 @@
                             </span>
                           {/if}
                         </div>
-                        {#if resolution.used_by_steps.length > 0}
+                        {#if usedBySteps.length > 0}
                           <p class="text-muted mt-1.5 text-xs">
                             {m.flow_package_used_by_steps({
-                              steps: resolution.used_by_steps.join(", ")
+                              steps: usedBySteps.join(", ")
                             })}
                           </p>
                         {/if}

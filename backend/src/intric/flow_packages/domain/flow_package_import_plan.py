@@ -38,7 +38,7 @@ class FlowPackageImportPlanStatus(StrEnum):
     MANUAL_SETUP_REQUIRED = "manual_setup_required"
     UNRESOLVED_REQUIRED = "unresolved_required"
     SKIPPED_OPTIONAL = "skipped_optional"
-    # The importer can inspect the package, but V1 has no mapping/install path for this dependency kind.
+    # Unsupported dependencies stay visible in validation/import plans so users know why import is blocked.
     UNSUPPORTED = "unsupported"
 
 

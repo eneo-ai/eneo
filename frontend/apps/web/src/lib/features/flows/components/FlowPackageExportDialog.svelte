@@ -18,7 +18,8 @@
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import {
     defaultFlowPackageId,
-    downloadFlowPackageFile
+    downloadFlowPackageFile,
+    mapFlowPackageExportError
   } from "$lib/features/flows/flowPackageTransfer";
   import { m } from "$lib/paraglide/messages";
 
@@ -96,7 +97,9 @@
       toast.success(m.flow_package_export_success());
       open = false;
     } catch (error) {
-      const message = error instanceof IntricError ? error.getReadableMessage() : String(error);
+      const message =
+        mapFlowPackageExportError(error) ??
+        (error instanceof IntricError ? error.getReadableMessage() : String(error));
       exportError = m.flow_package_export_failed({ message });
     } finally {
       exporting = false;

@@ -1,14 +1,21 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import type { FlowPackageImportPlan } from "@intric/intric-js";
+import { IntricError, type FlowPackageImportPlan } from "@intric/intric-js";
+import { m } from "$lib/paraglide/messages";
 
 import {
+  FLOW_PACKAGE_EXPORT_ERROR_CODES,
+  FLOW_PACKAGE_IMPORT_ERROR_CODES,
+  type FlowPackageExportErrorCode,
+  type FlowPackageImportErrorCode,
   buildSelectedFlowPackageResourceBindings,
   createInitialFlowPackageImportSelections,
   defaultFlowPackageId,
   downloadFlowPackageFile,
   encodeFlowPackageFileToBase64,
-  getFlowPackageImportReadiness
+  getFlowPackageImportReadiness,
+  mapFlowPackageExportError,
+  mapFlowPackageImportError
 } from "./flowPackageTransfer";
 
 describe("flowPackageTransfer", () => {
@@ -188,6 +195,65 @@ describe("flowPackageTransfer", () => {
     });
   });
 
+  it("maps public import error codes to package-specific copy", () => {
+    for (const code of FLOW_PACKAGE_IMPORT_ERROR_CODES) {
+      const error = new IntricError(code, "RESPONSE", 400, 0, { code }, { endpoint: "POST@test" });
+
+      expect(mapFlowPackageImportError(error)).toBe(expectedFlowPackageErrorMessage(code));
+    }
+  });
+
+  it("maps public export error codes to package-specific copy", () => {
+    for (const code of FLOW_PACKAGE_EXPORT_ERROR_CODES) {
+      const error = new IntricError(code, "RESPONSE", 400, 0, { code }, { endpoint: "POST@test" });
+
+      expect(mapFlowPackageExportError(error)).toBe(expectedFlowPackageErrorMessage(code));
+    }
+  });
+
+  it("maps package error codes from legacy client code fields when response codes are absent", () => {
+    const importError = new IntricError(
+      "missing binding",
+      "RESPONSE",
+      400,
+      0,
+      {},
+      { endpoint: "POST@test" }
+    );
+    Object.defineProperty(importError, "code", {
+      value: "flow_package_import_missing_required_resource_binding"
+    });
+
+    expect(mapFlowPackageImportError(importError)).toBe(
+      expectedFlowPackageErrorMessage("flow_package_import_missing_required_resource_binding")
+    );
+
+    const exportError = new IntricError("mcp unsupported", "RESPONSE", 400, 0, undefined, {
+      endpoint: "POST@test"
+    });
+    Object.defineProperty(exportError, "code", {
+      value: "flow_package_export_mcp_unsupported"
+    });
+
+    expect(mapFlowPackageExportError(exportError)).toBe(
+      expectedFlowPackageErrorMessage("flow_package_export_mcp_unsupported")
+    );
+  });
+
+  it("ignores unknown package error codes so dialogs can fall back to server text", () => {
+    const error = new IntricError(
+      "unknown",
+      "RESPONSE",
+      400,
+      0,
+      { code: "not_a_flow_package_error" },
+      { endpoint: "POST@test" }
+    );
+
+    expect(mapFlowPackageImportError(error)).toBeNull();
+    expect(mapFlowPackageExportError(error)).toBeNull();
+  });
+
   it("encodes package files to base64 without relying on whole-array string spreading", async () => {
     const file = new File(["hello"], "hello.eneo-flowpkg");
 
@@ -263,6 +329,13 @@ function flowPackageDownloadDeps() {
 
 const MODEL_ID = "11111111-1111-4111-8111-111111111111";
 const KNOWLEDGE_ID = "22222222-2222-4222-8222-222222222222";
+
+type FlowPackageErrorCode = FlowPackageImportErrorCode | FlowPackageExportErrorCode;
+type FlowPackageErrorMessageKey = `flow_package_error_${FlowPackageErrorCode}`;
+
+function expectedFlowPackageErrorMessage(code: FlowPackageErrorCode): string {
+  return m[`flow_package_error_${code}` as FlowPackageErrorMessageKey]();
+}
 
 function flowPackageImportPlan(
   overrides: Partial<FlowPackageImportPlan> = {}

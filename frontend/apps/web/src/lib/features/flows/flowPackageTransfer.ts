@@ -7,6 +7,8 @@ import type {
   FlowPackageResourceSlotRef,
   IntricBinaryResponse
 } from "@intric/intric-js";
+import { IntricError } from "@intric/intric-js";
+import { m } from "$lib/paraglide/messages";
 
 export type FlowPackageImportSelectionState = Record<string, string | null>;
 
@@ -34,6 +36,47 @@ export type FlowPackageImportReadiness = {
 };
 
 export type FlowPackageCandidate = FlowPackageLocalCandidate | FlowPackageModelCandidate;
+
+export const FLOW_PACKAGE_IMPORT_ERROR_CODES = [
+  "duplicate_slot_binding",
+  "flow_package_base64_invalid",
+  "flow_package_zip_unsafe",
+  "flow_package_manifest_invalid",
+  "flow_package_requirements_invalid",
+  "flow_package_flow_draft_invalid",
+  "flow_package_provenance_invalid",
+  "flow_package_schema_unsupported",
+  "flow_package_kind_unsupported",
+  "flow_package_checksum_mismatch",
+  "flow_package_local_resource_refs_not_portable",
+  "flow_package_import_draft_references_undeclared_slot",
+  "flow_package_import_unknown_resource_binding",
+  "flow_package_import_missing_required_resource_binding",
+  "flow_package_import_unavailable_local_resource",
+  "flow_package_import_selected_model_ineligible",
+  "flow_package_import_mcp_unsupported",
+  "flow_package_import_template_assets_unsupported",
+  "flow_package_file_too_large",
+  "transcription_model_required"
+] as const;
+
+export const FLOW_PACKAGE_EXPORT_ERROR_CODES = [
+  "flow_package_export_missing_assistant_snapshot",
+  "flow_package_export_unsupported_step_io",
+  "flow_package_export_unmapped_resource_ref",
+  "flow_package_export_duplicate_resource_binding",
+  "flow_package_export_mcp_unsupported",
+  "flow_package_export_template_asset_payload_unsupported",
+  "flow_package_export_variable_reference_invalid",
+  "flow_package_export_json_payload_too_deep",
+  "flow_package_export_form_schema_invalid",
+  "flow_package_export_too_large"
+] as const;
+
+export type FlowPackageImportErrorCode = (typeof FLOW_PACKAGE_IMPORT_ERROR_CODES)[number];
+export type FlowPackageExportErrorCode = (typeof FLOW_PACKAGE_EXPORT_ERROR_CODES)[number];
+type FlowPackageErrorCode = FlowPackageImportErrorCode | FlowPackageExportErrorCode;
+type FlowPackageErrorMessageKey = `flow_package_error_${FlowPackageErrorCode}`;
 
 const RESOURCE_SLOT_KINDS = new Set<FlowPackageResourceSlotRef["kind"]>([
   "model",
@@ -178,6 +221,7 @@ export function getFlowPackageImportReadiness(
     }
   }
 
+  // Backend owns the package plan; the browser owns readiness after the user changes selections.
   const canImport = blockingReasons.length === 0;
   return {
     canImport,
@@ -239,6 +283,18 @@ export function defaultFlowPackageId(flowName: string): string {
   return `local.${slug || "flow-package"}`;
 }
 
+export function mapFlowPackageImportError(error: unknown): string | null {
+  const code = getFlowPackageResponseCode(error);
+  if (!code || !isFlowPackageImportErrorCode(code)) return null;
+  return m[flowPackageErrorMessageKey(code)]();
+}
+
+export function mapFlowPackageExportError(error: unknown): string | null {
+  const code = getFlowPackageResponseCode(error);
+  if (!code || !isFlowPackageExportErrorCode(code)) return null;
+  return m[flowPackageErrorMessageKey(code)]();
+}
+
 function indexFlowPackageCandidatesBySlot(
   plan: FlowPackageImportPlan
 ): Map<string, Map<string, FlowPackageCandidate>> {
@@ -285,4 +341,30 @@ function normalizeFlowPackageSlotRef(
 
 function isResourceSlotKind(value: string): value is FlowPackageResourceSlotRef["kind"] {
   return RESOURCE_SLOT_KINDS.has(value as FlowPackageResourceSlotRef["kind"]);
+}
+
+function flowPackageErrorMessageKey(code: FlowPackageErrorCode): FlowPackageErrorMessageKey {
+  return `flow_package_error_${code}`;
+}
+
+function isFlowPackageImportErrorCode(code: string): code is FlowPackageImportErrorCode {
+  const codes: readonly string[] = FLOW_PACKAGE_IMPORT_ERROR_CODES;
+  return codes.includes(code);
+}
+
+function isFlowPackageExportErrorCode(code: string): code is FlowPackageExportErrorCode {
+  const codes: readonly string[] = FLOW_PACKAGE_EXPORT_ERROR_CODES;
+  return codes.includes(code);
+}
+
+function getFlowPackageResponseCode(error: unknown): string | null {
+  if (!(error instanceof IntricError)) return null;
+  if (isObject(error.response) && typeof error.response.code === "string") {
+    return error.response.code;
+  }
+  return typeof error.code === "string" ? error.code : null;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
