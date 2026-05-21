@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T006
+active_task: T007
 
 scoring_target:
   dimensions:
@@ -62,7 +62,7 @@ current_scorecard:
     - "Conversation metadata and edit-result JSON remain raw hidden schemas."
     - "SSE/public API contracts remain generated-client weak."
     - "Live eval still shows runtime-input/form-field prompts can produce no form fields."
-    - "Retry self-correction still crosses an untyped process_tool_kwargs dict-bag boundary."
+    - "Retry self-correction still crosses an untyped process_tool_kwargs dict-bag boundary; recorded as the next typed retry-context candidate after T007."
     - "ai_builder_proposal_processor.py remains oversized; handler extraction is recorded as T006 after the SessionSendTurn boundary."
     - "Antigravity T005 post-implementation runner attempts did not return a usable Antigravity verdict body, so the final Antigravity gate is explicitly missing rather than passed."
     - "Full Flow unit sweeps still hit unrelated baseline/environment failures."
@@ -677,7 +677,7 @@ tasks:
   - id: T006
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: xhigh
     objective: "Plan and peer-gate the proposal tool handler extraction now that SessionSendTurn is stable, unless current evidence proves a higher-ROI blocker outranks it."
     inputs:
@@ -695,6 +695,120 @@ tasks:
       - "Acceptance criteria."
       - "Verification plan."
       - "Peer gate verdicts or exact Antigravity tooling failure."
+    receipt:
+      completed_at: "2026-05-21T12:29:46+02:00"
+      result: done
+      selected_scope: "Scope A: create proposal lifecycle extraction plus proposal policy and tool-contract ownership."
+      summary: "Peer-gated a bounded T007 worker slice that removes create proposal lifecycle and shared policy/contract ownership from ai_builder_proposal_processor.py without mixing in typed retry context or repair-transport cleanup."
+      architecture_diagnosis:
+        - "ai_builder_proposal_processor.py remains a 2571-line orchestrator that owns create processing, shared proposal policy, tool contracts, dispatch, repair plumbing, question recovery, and edit dispatch."
+        - "T005 made SessionSendTurn stable enough to extract create/edit active-turn proposal processing without reintroducing loose lease primitives."
+        - "The clean next boundary is create proposal processing as a peer of existing edit proposal processing, plus leaf ownership for shared proposal policy and tool result/retry dataclasses."
+      canonical_owners_after_t007:
+        create_proposal_processing: "ai_builder_create_proposal.py"
+        shared_proposal_policy: "ai_builder_proposal_policy.py"
+        tool_processing_contracts: "ai_builder_proposal_tool_contracts.py"
+        proposal_dispatch_context: "ai_builder_proposal_processor.py until dispatch extraction"
+        retry_context_typing: "T008 candidate after T007"
+        repair_transport_cleanup: "T008 candidate after T007"
+      rejected_alternatives:
+        - "Broad full processor split: rejected because it would mix create, edit, dispatch, retry, question recovery, and test moves in one hard-to-review diff."
+        - "Arbitrary line-count split: rejected because it creates shallow files with the same wide interface."
+        - "Typed retry context inside T007: rejected for this tranche after Claude green-lit deferral; it touches repair, create, edit, confirm-requirements, direct JSON-as-text retry, and tests."
+        - "Repair transport deletion inside T007: rejected because it mixes retry transport ownership with create/policy extraction."
+        - "JSONB/SSE/live-eval tranche now: rejected for this step because the user explicitly challenged processor maintainability after T005; these remain broader-goal score blockers."
+      codex_self_review:
+        verdict: "pass"
+        notes:
+          - "The selected scope is not the first plausible split; draft v1 was revised after Claude blocked unresolved policy and test ownership."
+          - "The tranche reduces real future debt by moving create proposal lifecycle and shared policy/contracts to named canonical owners, not just moving lines."
+          - "The plan avoids parallel implementations: logic moves, no duplicate compatibility path or handler registry."
+          - "The first implementation scope is correctly sized: bigger than a contracts-only patch, smaller than mixing retry repair transport with create extraction."
+      claude_gate:
+        iteration_1:
+          artifact: ".codex/artifacts/claude-peer-loop-t006-proposal-processor-extraction-plan-gate-20260521T102028Z.md"
+          verdict: "GREEN_LIGHT no; VERDICT changes_required; MIN_SCORE 6"
+          blockers: "policy ownership, terminal-output home, mandatory test moves, and retry-dict scope ambiguity were unresolved."
+        iteration_2:
+          artifact: ".codex/artifacts/claude-peer-loop-t006-proposal-processor-extraction-plan-gate-v2-20260521T102824Z.md"
+          verdict: "GREEN_LIGHT yes; VERDICT green; MIN_SCORE 8"
+      parallel_architecture_reviewer:
+        verdict: "Proceed with proposal-surface cleanup now, but argued for a larger Scope B including typed ProposalRetryContext and repair-transport cleanup."
+        codex_response: "Accepted the criticism as a high-priority T008 candidate, but kept T007 on Claude-green Scope A to preserve human reviewability and avoid mixing create extraction with retry state-machine changes."
+      antigravity_gate:
+        status: "missing_due_tooling_failure_not_passed"
+        attempts:
+          - artifact: ".codex/artifacts/antigravity-peer-loop-t006-proposal-extraction-scope-arbitration-20260521T102909Z.md"
+            exact_failure: "Runner exited 0 and provider usage was not exhausted, but Antigravity Output was empty and no GREEN_LIGHT/VERDICT/MIN_SCORE tokens were present."
+          - artifact: ".codex/artifacts/antigravity-peer-loop-t006-proposal-extraction-scope-verdict-only-20260521T102946Z.md"
+            exact_failure: "Verdict-only retry again exited 0 without provider exhaustion, but Antigravity Output was empty and no verdict tokens were present."
+        codex_decision_after_missing_antigravity: "Proceed because Claude returned green on the exact revised plan, the parallel reviewer agreed T006 should remain proposal-surface work, and Antigravity failure is a tooling-output failure rather than a blocking architecture finding."
+      selected_worker_slice:
+        objective: "Extract create proposal processing plus shared proposal policy/tool contracts from ai_builder_proposal_processor.py."
+        allowed_files:
+          - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_create_proposal.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_proposal_policy.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_policy.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_proposal.py"
+          - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+          - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+
+  - id: T007
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Implement the approved create proposal, proposal policy, and proposal tool-contract extraction without broad retry-context or repair-transport changes."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_proposal.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_policy.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_policy.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_proposal.py"
+      - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    implementation_requirements:
+      - "Move ToolProcessingResult and ToolRetryConfig to ai_builder_proposal_tool_contracts.py; do not move ProposalContext or SubmissionToolHandlerConfig."
+      - "Move terminal_output_type_for_conversation and its private helpers/constants to ai_builder_proposal_policy.py."
+      - "Move shared format_quality_feedback and format_contextual_quality_feedback policy to ai_builder_proposal_policy.py; delete processor wrappers unless a real in-class caller remains."
+      - "Move create-only outline parsing/create draft processing to ai_builder_create_proposal.py, including the create contextual critic chain."
+      - "Update ai_builder_edit_proposal.py to import moved contracts/policy from the new canonical owners, not from ai_builder_proposal_processor.py."
+      - "Do not touch ai_builder_proposal_repair.py or ai_builder_repair_transport.py in this tranche."
+      - "Do not reintroduce loose lease_request_id, lease_lock_token, or standalone base-version kwargs."
+      - "Do not add generic manager/helper/utils/service/compat/shim modules, handler registries, fake interfaces, or one-implementation ports."
+    verify:
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_policy.py tests/unittests/flows/ai_builder/test_ai_builder_edit_proposal.py -q"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_rejects_lost_session_send_lease_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_edit_flow_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_confirm_requirements_with_lost_lease_rolls_back -q"
+      - "scripts/gate-local/check_ai_builder_session_turn_contract.sh"
+      - "uv run ruff check <T007 touched source/test files>"
+      - "uv run ruff format --check <T007 touched source/test files>"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pyright <T007 touched source files>"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run python -c \"import intric.flows.ai_builder.ai_builder_create_proposal; import intric.flows.ai_builder.ai_builder_edit_proposal; import intric.flows.ai_builder.ai_builder_proposal_processor; print('imports ok')\""
+      - "rg -n \"from intric\\.flows\\.ai_builder\\.ai_builder_proposal_processor import\" backend/src/intric/flows/ai_builder/ai_builder_create_proposal.py backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py should show no runtime in-function imports for moved symbols"
+      - "rg -n \"OutlineFlowArgumentError|compile_outline_to_create_draft|_format_create_contextual_quality_feedback|terminal_output_type_for_conversation\" backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py should show no create/policy ownership leftovers except intentional imports/call references"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Need to type process_tool_kwargs or change ai_builder_proposal_repair.py to make the extraction work."
+      - "Need to delete/merge ai_builder_repair_transport.py to make the extraction work."
+      - "Need to keep processor compatibility/shim wrappers with no real caller."
+      - "Need to preserve in-function imports from ai_builder_proposal_processor.py for moved symbols."
+      - "Verification fails twice for the same reason."
+      - "Implementation would require staging unrelated dirty files."
+    expected_output:
+      - "Moved create proposal lifecycle and shared policy/contracts."
+      - "Tests moved with symbols."
+      - "Verification results."
+      - "Receipt with residual T008 typed retry-context candidate."
     receipt: null
 
 checks:
