@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T025
+active_task: T026b0
 
 scoring_target:
   dimensions:
@@ -50,7 +50,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T024 implementation/post-review: conversation metadata/tool-call JSONB, public error diagnostics, frontend diagnostic reports, targeted runtime-field intent, AI Builder model import ownership, and builder session send-lock persistence now have typed/canonical ownership or DB-backed invariants. The broader score floor is still below 9 because broad live eval/output coverage, full-source Pyright/test baseline, API/error-code discipline, large orchestration files, and remaining AI-slop/readability cleanup still block production-readiness."
+  source: "After T026a implementation/post-review: conversation metadata/tool-call JSONB, public error diagnostics, frontend diagnostic reports, targeted runtime-field intent, AI Builder model import ownership, builder session send-lock persistence, and the live-eval harness now have typed/canonical ownership or DB-backed/runtime evidence. The broader score floor remains 8 because the five-case live eval still fails C4 runtime form fields, full-source Pyright/test baseline and API/error-code discipline remain below 9, and readability/module/test topology still needs consolidation."
   Maintainability: 8
   Code_Quality: 8
   Clean_Architecture: 8
@@ -68,7 +68,7 @@ current_scorecard:
   Overall: 8
   blockers:
     - "Public/lifecycle/CAS error-code discipline improved, but calls that omit code= entirely can still silently use generic codes; future error-contract work must continue without creating a third public context carrier."
-    - "The targeted runtime-field prompt now produces form fields, but the broader five-case live eval gate is still incomplete and other vague/edit/document-output cases remain unproven."
+    - "The five-case authenticated live eval now proves C1 vague meeting notes, C2 JSON-with-document-words, C3 audio-to-DOCX, and C5 revise/edit through the public API, but C4 runtime form fields still fails with planner_invalid_repair_response after the requirements summary misclassifies the prompt as document input."
     - "ai_builder_proposal_processor.py is materially smaller after T011 but still oversized at 1830 LOC; structured-question recovery, confirm requirements, and retry orchestration remain in one processor."
     - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, and full-source Pyright baseline failures outside AI Builder."
     - "Overall remains 8 until broad live eval/output quality, full-source typing/test baseline, API/error-code discipline, and consolidation/readability tranches prove every dimension is honestly at least 9."
@@ -2893,7 +2893,7 @@ tasks:
   - id: T025
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: xhigh
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T024, now that runtime/data lock invariants are DB-backed and the remaining floor is broad live eval/output quality, API/error discipline, full-source baseline, and readability/test topology."
     inputs:
@@ -2922,6 +2922,217 @@ tasks:
       - "The next slice requires product direction beyond the current goal artifacts."
       - "Reviewer gates disagree on blockers after two rounds."
       - "Required review tooling failure removes enough coverage that proceeding would be speculative."
+    receipt:
+      summary: "Re-ranked the next tranche after T024 from current evidence. Selected T026a as a small durable authenticated five-case normal-user live-eval runner and evidence-led output-quality ledger, followed by T026b as a one-owner product fix only after T026a names the failing owner. The first combined eval+fix draft was rejected by Claude as too broad and too prone to keyword patches; the revised split plan passed Claude with GREEN_LIGHT yes / MIN_SCORE 8."
+      selected_next_task: T026a
+      broader_goal_status: "active; strict overall floor remains 8/10 and the broader Flow AI Builder 9/10 goal is not complete."
+      evidence:
+        - ".codex/artifacts/flow-ai-builder-t025-next-tranche-ranking.md"
+        - ".codex/artifacts/flow-ai-builder-live-eval.md: existing five-case eval remains incomplete; C2/C4 were fixed only through targeted deterministic or scoped live checks, while C1/C3/C5 remain unproven."
+        - "Local Docker stack is up and authenticated API calls with X-API-Key returned 200 for flows and completion models."
+        - "Focused AI Builder Pyright is clean; full backend Pyright still has 112 pre-existing errors outside AI Builder."
+      peer_review:
+        codex_self_review: "pass after revision; T026a/T026b split is cleaner than the initial combined eval+fix tranche and avoids product edits before evidence."
+        claude:
+          iteration_1:
+            artifact: ".codex/artifacts/claude-peer-loop-t026-normal-user-live-eval-and-bounded-output-quality-fix-plan-20260521T232231Z.md"
+            verdict: "changes_required"
+            green_light: false
+            min_score: 6
+            accepted_blockers:
+              - "Allowed files were too broad for a bounded fix."
+              - "The fix could become another keyword/trigger-list patch."
+              - "The plan lacked a pre-declared failure hypothesis."
+              - "The score gate was too soft."
+              - "The live-eval harness needed warmup and a deterministic revise/edit seed strategy."
+          iteration_2:
+            artifact: ".codex/artifacts/claude-peer-loop-t026-normal-user-live-eval-and-bounded-output-quality-fix-plan-revised-20260521T232934Z.md"
+            verdict: "green"
+            green_light: true
+            min_score: 8
+        antigravity:
+          status: "SKIPPED_DUE_TO_QUOTA"
+          evidence: "Quota probe at 2026-05-22T01:14:58+02:00 reported Gemini models at 0% and recommended skipping Antigravity; missing coverage, not a pass."
+      selected_scope:
+        - "T026a writes only backend/scripts/flow_ai_builder_live_eval.py, .codex live-eval artifacts, and this board."
+        - "T026a must not modify product source behavior."
+        - "T026b, when activated, must touch exactly one product source owner and one matching test file per commit unless a fresh Judge gate expands scope."
+        - "T026b must not add tuple entries to trigger/keyword/marker lists as the core fix; if that is the only apparent fix, stop and re-plan."
+      rejected_alternatives:
+        - "Combined eval+fix tranche: rejected after Claude R1 because the mid-run product scope was too discretionary."
+        - "Processor/planner split now: rejected because output-quality evidence should decide the exact failing path before topology work."
+        - "API/error-code discipline now: queued, but less urgent than proving normal-user output behavior after T024."
+        - "Full-source Pyright baseline now: too broad and mostly outside AI Builder."
+      scorecard_impact:
+        Normal_User_Output_Quality: "Expected to remain 8 after T026a unless all five cases pass and existing deterministic coverage is enough for Claude to accept 9; otherwise T026b must handle a concrete owner."
+        Overall: "Expected to remain 8 after T026a. The broader goal remains incomplete."
+
+  - id: T026a
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: xhigh
+    objective: "Add and run a small durable authenticated five-case Flow AI Builder live-eval runner, update the evidence ledger, and name the single highest-confidence failing owner for the next one-owner product fix."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-t025-next-tranche-ranking.md"
+      - ".codex/artifacts/flow-ai-builder-live-eval.md"
+      - "Claude green plan gate artifact for revised T026a/T026b split"
+      - "Local API credentials from environment variables only"
+    constraints:
+      - "Do not modify product source behavior in T026a."
+      - "Do not write API keys, prompts with secrets, full conversations, LLM payload blobs, or file contents into artifacts."
+      - "Use a small typed runner, not an observability platform, issue tracker, persisted report endpoint, or arbitrary redactor."
+      - "Run cases sequentially and avoid rapid parallel force_new=true sessions."
+      - "If the eval reveals product failures, name one T026b owner; do not fix product code until T026b is active and peer-gated if scope changes."
+      - "Preserve unrelated dirty files and do not push."
+    allowed_files:
+      - "backend/scripts/flow_ai_builder_live_eval.py"
+      - ".codex/artifacts/flow-ai-builder-live-eval.md"
+      - ".codex/artifacts/flow-ai-builder-t026a-live-eval-plan.md"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    acceptance_criteria:
+      - "Runner has no hard-coded API key and reads ENEO_API_KEY or API_KEY plus ENEO_FLOW_TEST_SPACE_ID from environment variables."
+      - "Runner uses typed dataclasses or equivalent typed structures for cases, expected outcomes, and results; expected outcome discriminants should use Literal where practical."
+      - "Runner writes raw artifacts only under /tmp/flow-ai-builder-t026-live-eval/<timestamp> with secrets omitted."
+      - "Runner performs warmup probes before the five cases: authenticated model list, flow list, session create, send/cancel smoke, and seed-plan creation feasibility."
+      - "Runner defines and executes the five cases: vague meeting notes/action items, JSON with document words and explicit DOCX/PDF negation, audio to DOCX meeting report, runtime form-field prompt, and revise/edit flow."
+      - "Revise/edit case uses a plan from a create case or a dedicated seed prompt; if no seed plan exists, the case is incomplete, not pass."
+      - "Each case records prompt, session ID, plan ID if produced, requirements summary, plan summary, final output intent, file/form mapping, error codes, and verdict."
+      - ".codex/artifacts/flow-ai-builder-live-eval.md is updated with the new results and raw artifact paths without secrets."
+      - "If any case fails, T026a names exactly one T026b top candidate with canonical owner, file:line evidence, proposed non-keyword fix shape, deterministic test, and risk if deferred."
+      - "Normal-User Output Quality remains 8 unless all five cases pass and post-review agrees existing behavior tests are enough for 9."
+    verify:
+      - "cd backend && uv run ruff check scripts/flow_ai_builder_live_eval.py"
+      - "cd backend && uv run ruff format --check scripts/flow_ai_builder_live_eval.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright scripts/flow_ai_builder_live_eval.py"
+      - "cd backend && uv run python scripts/flow_ai_builder_live_eval.py"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+      - "git status --short --branch"
+      - "Claude post-implementation review for T026a if the runner/ledger diff is non-trivial."
+    stop_if:
+      - "Local API, auth, model list, or session warmup is unavailable after one clear retry."
+      - "A product fix is required before the eval can proceed."
+      - "The runner needs files outside allowed_files."
+      - "The eval reveals more than one failing owner and prioritization is not obvious."
+    receipt:
+      summary: "Implemented and ran the authenticated five-case Flow AI Builder live-eval runner without product source changes. The first run exposed harness/model artifacts: it selected the org-default nano model and reused an arbitrary non-proposed seed plan for revise. The runner was corrected to use the API's first accessible model, fetch public plan status through GET /plans/{id}, and create a dedicated proposed seed plan for revise. The cleaned rerun proves C1 vague meeting notes, C2 JSON-with-document-words, C3 audio-to-DOCX, and C5 revise/edit pass through the public API. C4 runtime form fields still fails under gpt-5.4-2026-03-05 with planner_invalid_repair_response after the requirements summary classifies the prompt as document input/final result needs review. Normal-User Output Quality remains 8 and the broader 9/10 goal is not complete."
+      committed_source_behavior_change: false
+      artifacts:
+        runner: "backend/scripts/flow_ai_builder_live_eval.py"
+        ledger: ".codex/artifacts/flow-ai-builder-live-eval.md"
+        raw_clean_run: "/tmp/flow-ai-builder-t026-live-eval/20260521T234246Z"
+        raw_initial_harness_run: "/tmp/flow-ai-builder-t026-live-eval/20260521T233618Z"
+        claude_commit_gate: ".codex/artifacts/claude-peer-loop-t026a-live-eval-runner-implementation-commit-gate-20260521T235300Z.md"
+      validation:
+        - "cd backend && uv run ruff check scripts/flow_ai_builder_live_eval.py: All checks passed."
+        - "cd backend && uv run ruff format --check scripts/flow_ai_builder_live_eval.py: 1 file already formatted."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright scripts/flow_ai_builder_live_eval.py: 0 errors, 0 warnings, 0 informations."
+        - "Authenticated live eval with ENEO_API_KEY/API_KEY/ENEO_FLOW_TEST_SPACE_ID from environment: exit 1 because C4 failed; runner completed and wrote raw artifacts."
+      live_eval_results:
+        model: "gpt-5.4-2026-03-05 (f5ca5e76-fd30-47cb-8ddc-f694ef62b441)"
+        warmup: "flows list, session create, send-message, and cancel succeeded."
+        cases:
+          C1_vague_meeting_notes: "pass; session ce161b28-7b37-4c82-a92f-38063c63ee7f; plan 37d95352-fe2f-45e6-a76e-612444e06ee4; status proposed; terminal structured_text; inputs text,json."
+          C2_json_with_document_words: "pass; session 4a2a1854-00f0-403f-8cf5-511dd4a0551b; plan 31772ccc-3053-441a-90a5-8dbe946b771a; status proposed; terminal structured_json; inputs document,json,text; DOCX/PDF not selected."
+          C3_audio_to_docx_report: "pass; session aaabafa7-3120-4438-bffa-c474794a2d22; plan a2b360b2-f456-438c-aa9b-ac7f663cdc49; status proposed; terminal docx_document; inputs audio,text."
+          C4_runtime_form_fields: "fail; session 0315d7e3-3261-4e9b-9b8c-ca8cd9f2f5e2; no plan; requirements_summary says Documents/final result needs review; confirmation turns return planner_invalid_repair_response in self_correction."
+          C5_revise_edit_flow: "pass; seed plan aff60685-4d64-41d4-8510-6d306eae0a0d proposed; revise returned replacement plan 95d418a5-6c76-419e-a388-97a61981bee2 proposed."
+      peer_review:
+        codex_self_review: "pass for T026a; the harness is bounded, typed, public-API-only, env-secret-only, and did not change product behavior. It is measurement infrastructure, not a product fix."
+        claude:
+          artifact: ".codex/artifacts/claude-peer-loop-t026a-live-eval-runner-implementation-commit-gate-20260521T235300Z.md"
+          verdict: green
+          green_light: true
+          min_score: 8
+          accepted_findings:
+            - "Fixed comment/code drift in model selection wording before commit."
+            - "T026b owner is plausible but under-evidenced at the proximate-cause level; do not start product edits until raw C4 failure path is quoted and verified."
+        antigravity:
+          status: "SKIPPED_DUE_TO_QUOTA"
+          evidence: "Known quota exhaustion/0% availability for this window; missing coverage, not a pass."
+      t026b_candidate:
+        failing_case: C4_runtime_form_fields
+        candidate_owner: "backend/src/intric/flows/ai_builder/ai_builder_create_outline.py"
+        evidence:
+          - "backend/src/intric/flows/ai_builder/ai_builder_create_proposal.py:137-150 extracts runtime_input_field_hints from aggregate_freeform_user_text only when runtime_metadata_allows_input_fields."
+          - "backend/src/intric/flows/ai_builder/ai_builder_create_outline.py:1174-1232 is the canonical compiler owner that turns outline input_fields plus referenced runtime_input_field_hints into Flow form_fields."
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py:1650-1693 and 1811-1871 currently encode the behavior that high-confidence hints are dropped if the planner does not reference them."
+          - "Raw live eval C4: /tmp/flow-ai-builder-t026-live-eval/20260521T234246Z/C4_runtime_form_fields/turn-01-events.json and result.json show no plan, document-only requirements summary, and planner_invalid_repair_response on confirmation."
+        caveat: "Claude accepted T026a but requires T026b0 to verify the proximate failure path before product edits; the compiler owner is a candidate, not yet binding."
+        proposed_non_keyword_fix_shape: "If raw evidence confirms the planner/critic failure is missing or dropped high-confidence runtime form fields, add a structural compiler-level fallback for detailed_case_metadata prompts that promotes allowed non-primary extracted hints into form_fields and attaches them to a safe consumer step instead of relying on keyword-list patches."
+        required_test_shape: "A deterministic behavior test must fail before the product fix and pass after it, preferably around the C4 prompt and the compiler/outline boundary rather than a mock-heavy planner choreography test."
+        risk_if_deferred: "Normal users who ask for customer name and analysis request at runtime can still get planner repair failure or a flow without the needed runtime fields; Normal-User Output Quality stays below 9."
+      scorecard_impact:
+        Normal_User_Output_Quality: "remains 8; C4 failed."
+        Overall: "remains 8; broader goal remains active and incomplete."
+
+  - id: T026b0
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: xhigh
+    objective: "Verify the proximate C4 runtime-form-field failure path from T026a raw artifacts, then either approve a one-owner T026b product fix scope or re-rank if the failure belongs to planner prompts, quality critic, repair recovery, or another owner."
+    inputs:
+      - "T026a receipt"
+      - ".codex/artifacts/flow-ai-builder-live-eval.md"
+      - "/tmp/flow-ai-builder-t026-live-eval/20260521T234246Z/C4_runtime_form_fields"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_outline.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_proposal.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+    constraints:
+      - "Do not edit product source in T026b0."
+      - "Do not assume ai_builder_create_outline.py is the owner until raw C4 evidence quotes the failing outline or critic invariant."
+      - "If the raw artifacts do not contain enough proximate evidence, record the missing diagnostic gap and choose a diagnostic-first slice instead of guessing."
+      - "Do not add keyword/trigger/marker-list entries as the planned core fix."
+      - "Keep unrelated dirty files out of scope and do not push."
+    allowed_files:
+      - ".codex/artifacts/flow-ai-builder-t026b0-proximate-cause.md"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    acceptance_criteria:
+      - "The artifact quotes the raw C4 event sequence, requirements summary, request IDs, and exact public error codes from /tmp artifacts."
+      - "The artifact identifies whether the first product edit should belong to create-outline compilation, planner prompt/tool schema, quality critic, repair recovery, or diagnostics."
+      - "The artifact names one canonical owner for T026b with file:line evidence, or explicitly blocks product edits because the proximate cause is not observable."
+      - "T026b allowed_files, deterministic test file, verification commands, and stop conditions are filled only after owner verification."
+      - "Claude reviews the T026b0 owner decision if it changes the T026b source owner from the T026a candidate."
+    verify:
+      - "jq . /tmp/flow-ai-builder-t026-live-eval/20260521T234246Z/C4_runtime_form_fields/result.json"
+      - "for f in /tmp/flow-ai-builder-t026-live-eval/20260521T234246Z/C4_runtime_form_fields/turn-*-events.json; do jq . \"$f\"; done"
+      - "rg/nl source evidence for selected owner and tests"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+    stop_if:
+      - "Raw artifacts do not include enough detail to choose between compiler, planner, critic, and repair owners."
+      - "The fix requires more than one product source owner."
+      - "The only apparent fix is another keyword-list patch."
+    receipt: null
+
+  - id: T026b
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: xhigh
+    objective: "Implement exactly one product fix selected from T026a live-eval evidence, with one source owner, one matching behavior test, and no keyword-list patch as the core fix."
+    inputs:
+      - "T026a receipt and live-eval artifact"
+      - "T026b0 proximate-cause artifact, selected canonical owner, and deterministic test requirement"
+    constraints:
+      - "Do not activate until T026b0 verifies the C4 proximate failure path and approves one canonical owner."
+      - "Touch exactly one product source owner and one matching test file per commit unless a fresh Judge gate expands scope."
+      - "Do not add tuple entries to trigger/keyword/marker lists as the core fix."
+      - "If the owner is processor/planner topology, return to Judge for a narrow extraction plan instead of broad splitting."
+    allowed_files: []
+    acceptance_criteria:
+      - "A deterministic behavior regression test fails before the fix and passes after it."
+      - "The fix is structural: typed predicate, role-scoped decision, pattern/FCM-derived rule, validated state transition, or deletion/consolidation of a bad fallback."
+      - "The five-case live eval is rerun after the fix when local service remains available."
+      - "Normal-User Output Quality moves to 9 only if all five cases pass and every previously failing case has behavior-test coverage."
+    verify:
+      - "To be filled from T026a evidence."
+    stop_if:
+      - "The fix needs more than one source owner."
+      - "The only apparent fix is adding trigger/keyword phrases."
+      - "The behavior requires product direction beyond the current goal."
     receipt: null
 
 checks:
@@ -2930,17 +3141,14 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T024 implementation validation and Claude post-implementation review are green; BuilderSessions send-lock all-or-none invariant is enforced by SQLAlchemy/Alembic and DB-backed lifecycle tests. Antigravity review is missing due quota; T025 is active to re-rank the next score-moving tranche. Broader goal remains incomplete with overall strict floor 8/10."
-    task: T024
+    result: "T026a completed. The live-eval runner is typed, public-API-only, env-secret-only, and Claude green-lit it for commit with MIN_SCORE 8. Cleaned authenticated run passed C1/C2/C3/C5 and failed C4 runtime form fields with planner_invalid_repair_response, so T026b0 is active to verify proximate ownership before any product edit. Broader goal remains incomplete with overall strict floor 8/10."
+    task: T026a
     commands:
-      - "cd backend && uv run alembic heads: 20260522_builder_lock (head)"
-      - "cd backend && uv run alembic upgrade head: applied 20260521_plan_edit_json -> 20260522_builder_lock"
-      - "cd backend && uv run alembic downgrade 20260521_plan_edit_json && uv run alembic upgrade head && uv run alembic current: current 20260522_builder_lock (head)"
-      - "cd backend && uv run ruff check src/intric/database/tables/flow_tables.py tests/integration/flows/test_ai_builder_session_api_regressions.py alembic/versions/20260522_builder_send_lock_invariant.py: All checks passed"
-      - "cd backend && uv run ruff format --check src/intric/database/tables/flow_tables.py tests/integration/flows/test_ai_builder_session_api_regressions.py alembic/versions/20260522_builder_send_lock_invariant.py: 3 files already formatted"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/database/tables/flow_tables.py src/intric/flows/ai_builder/ai_builder_repo.py tests/integration/flows/test_ai_builder_session_api_regressions.py: 0 errors, 0 warnings, 0 informations"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py -k 'send_lock or claim_session_send or release_session_send or revise_plan' -q: 8 passed, 41 deselected"
-      - "Claude T024 commit gate: .codex/artifacts/claude-peer-loop-t024-send-lock-invariant-implementation-20260521T230916Z.md: GREEN_LIGHT yes; MIN_SCORE 8"
-      - "Antigravity T024 post-implementation gate: SKIPPED_DUE_TO_QUOTA; not passed"
-      - "git diff --check: clean"
+      - "cd backend && uv run ruff check scripts/flow_ai_builder_live_eval.py: All checks passed"
+      - "cd backend && uv run ruff format --check scripts/flow_ai_builder_live_eval.py: 1 file already formatted"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright scripts/flow_ai_builder_live_eval.py: 0 errors, 0 warnings, 0 informations"
+      - "Authenticated T026a live eval with env-only API key/space id: completed with exit 1 because C4 failed; raw artifacts /tmp/flow-ai-builder-t026-live-eval/20260521T234246Z"
+      - "T026a clean run cases: C1 pass, C2 pass, C3 pass, C4 fail planner_invalid_repair_response, C5 pass"
+      - "Claude T026a commit gate: .codex/artifacts/claude-peer-loop-t026a-live-eval-runner-implementation-commit-gate-20260521T235300Z.md: GREEN_LIGHT yes; MIN_SCORE 8"
+      - "Antigravity T026a post-implementation gate: SKIPPED_DUE_TO_QUOTA; not passed"
       - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"': yaml ok"
