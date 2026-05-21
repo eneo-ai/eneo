@@ -68,6 +68,9 @@ from intric.model_providers.presentation.model_provider_router import (
     router as model_providers_router,
 )
 from intric.modules.module_router import router as module_router
+from intric.prompt_library.presentation.prompt_library_router import (
+    router as prompt_library_router,
+)
 from intric.prompts.api.prompt_router import router as prompt_router
 from intric.security_classifications.presentation.security_classification_router import (
     router as security_classifications_router,
@@ -477,6 +480,12 @@ router.include_router(
     mcp_server_router,
     prefix="/mcp-servers",
     tags=["mcp-servers"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    prompt_library_router,
+    prefix="/admin/prompt-library",
+    tags=["admin", "prompt-library"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(

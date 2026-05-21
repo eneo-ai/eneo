@@ -26,6 +26,7 @@ _TABLE_MODULES = (
     "intric.database.tables.job_table",
     "intric.database.tables.logging_table",
     "intric.database.tables.module_table",
+    "intric.database.tables.prompt_library_table",
     "intric.database.tables.prompts_table",
     "intric.database.tables.questions_table",
     "intric.database.tables.roles_table",

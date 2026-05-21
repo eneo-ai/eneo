@@ -253,6 +253,15 @@ from intric.mcp_servers.presentation.assemblers.mcp_server_tool_assembler import
     MCPServerToolAssembler,
 )
 from intric.modules.module_repo import ModuleRepository
+from intric.prompt_library.application.prompt_library_service import (
+    PromptLibraryService,
+)
+from intric.prompt_library.infrastructure.prompt_library_repo_impl import (
+    PromptLibraryRepoImpl,
+)
+from intric.prompt_library.presentation.prompt_library_assembler import (
+    PromptLibraryAssembler,
+)
 from intric.prompts.api.prompt_assembler import PromptAssembler
 from intric.prompts.prompt_factory import PromptFactory
 from intric.prompts.prompt_repo import PromptRepository
@@ -576,6 +585,8 @@ class Container(containers.DeclarativeContainer):
     prompt_repo = providers.Factory(
         PromptRepository, session=session, factory=prompt_factory
     )
+    prompt_library_repo = providers.Factory(PromptLibraryRepoImpl, session=session)
+    prompt_library_assembler = providers.Factory(PromptLibraryAssembler)
 
     api_key_repo = providers.Factory(ApiKeysRepository, session=session)
     api_key_v2_repo = providers.Factory(ApiKeysV2Repository, session=session)
@@ -1007,6 +1018,11 @@ class Container(containers.DeclarativeContainer):
     )
     prompt_service = providers.Factory(
         PromptService, user=user, repo=prompt_repo, factory=prompt_factory
+    )
+    prompt_library_service = providers.Factory(
+        PromptLibraryService,
+        user=user,
+        repo=prompt_library_repo,
     )
     file_protocol = providers.Factory(
         FileProtocol,

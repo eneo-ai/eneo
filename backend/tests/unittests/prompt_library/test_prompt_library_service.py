@@ -1,0 +1,139 @@
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
+
+import pytest
+
+from intric.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
+from intric.prompt_library.application.prompt_library_service import (
+    PromptLibraryService,
+)
+from intric.prompt_library.domain.prompt_library import PromptLibraryEntry
+from intric.roles.permissions import Permission
+
+
+def _admin_user(tenant_id):
+    user = MagicMock()
+    user.id = uuid4()
+    user.tenant_id = tenant_id
+    user.permissions = {Permission.ADMIN}
+    return user
+
+
+def _non_admin_user(tenant_id):
+    user = MagicMock()
+    user.id = uuid4()
+    user.tenant_id = tenant_id
+    user.permissions = set()
+    return user
+
+
+def _entry(tenant_id, name="Standard"):
+    return PromptLibraryEntry(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        name=name,
+        description=None,
+        text="text",
+        created_by_user_id=uuid4(),
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_requires_admin():
+    tenant_id = uuid4()
+    repo = AsyncMock()
+    service = PromptLibraryService(user=_non_admin_user(tenant_id), repo=repo)
+    with pytest.raises(UnauthorizedException):
+        await service.list_entries()
+
+
+@pytest.mark.asyncio
+async def test_list_returns_repo_entries():
+    tenant_id = uuid4()
+    entry = _entry(tenant_id)
+    repo = AsyncMock()
+    repo.list_by_tenant.return_value = [entry]
+    service = PromptLibraryService(user=_admin_user(tenant_id), repo=repo)
+
+    result = await service.list_entries()
+    assert result == [entry]
+    repo.list_by_tenant.assert_awaited_once_with(tenant_id)
+
+
+@pytest.mark.asyncio
+async def test_create_rejects_duplicate_name():
+    tenant_id = uuid4()
+    repo = AsyncMock()
+    repo.exists_by_name.return_value = True
+    service = PromptLibraryService(user=_admin_user(tenant_id), repo=repo)
+
+    with pytest.raises(BadRequestException):
+        await service.create_entry(name="Standard", description=None, text="t")
+
+
+@pytest.mark.asyncio
+async def test_create_calls_repo_with_user_id_and_tenant_id():
+    tenant_id = uuid4()
+    user = _admin_user(tenant_id)
+    repo = AsyncMock()
+    repo.exists_by_name.return_value = False
+    captured: list[PromptLibraryEntry] = []
+
+    async def fake_add(entry):
+        captured.append(entry)
+        entry.id = uuid4()
+        entry.created_at = datetime.now(timezone.utc)
+        entry.updated_at = datetime.now(timezone.utc)
+        return entry
+
+    repo.add.side_effect = fake_add
+    service = PromptLibraryService(user=user, repo=repo)
+
+    await service.create_entry(name="N", description="d", text="t")
+
+    assert len(captured) == 1
+    assert captured[0].tenant_id == tenant_id
+    assert captured[0].created_by_user_id == user.id
+
+
+@pytest.mark.asyncio
+async def test_get_entry_returns_404_when_missing():
+    tenant_id = uuid4()
+    repo = AsyncMock()
+    repo.get.return_value = None
+    service = PromptLibraryService(user=_admin_user(tenant_id), repo=repo)
+
+    with pytest.raises(NotFoundException):
+        await service.get_entry(uuid4())
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_duplicate_name():
+    tenant_id = uuid4()
+    target = _entry(tenant_id, name="Old")
+    repo = AsyncMock()
+    repo.get.return_value = target
+    repo.exists_by_name.return_value = True
+    service = PromptLibraryService(user=_admin_user(tenant_id), repo=repo)
+
+    with pytest.raises(BadRequestException):
+        await service.update_entry(target.id, name="New")
+
+
+@pytest.mark.asyncio
+async def test_delete_calls_repo():
+    tenant_id = uuid4()
+    target = _entry(tenant_id)
+    repo = AsyncMock()
+    repo.get.return_value = target
+    service = PromptLibraryService(user=_admin_user(tenant_id), repo=repo)
+
+    await service.delete_entry(target.id)
+    repo.delete.assert_awaited_once_with(id=target.id, tenant_id=tenant_id)
