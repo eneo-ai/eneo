@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T012
+active_task: T013
 
 scoring_target:
   dimensions:
@@ -1308,6 +1308,88 @@ tasks:
       - "Codex self-review pass or blocker."
       - "Claude GREEN_LIGHT yes artifact."
       - "Antigravity pass artifact or exact tooling failure."
+    receipt:
+      completed_at: "2026-05-21T14:14:00+02:00"
+      result: done
+      summary: "Re-ranked the next score-moving tranche from current evidence. The expected JSONB metadata tranche remains important, but a newly proven public runtime bug outranks it: /plans/{plan_id}/revise still called the active-send plan persistence function with the removed primitive signature. Final v5 plan separates active send-turn proposal persistence from out-of-band user lifecycle revision, renames the misleading persist_plan helper, adds explicit no-send-lease latest-plan replacement, and handles expired stale locks by clearing lock fields to fence old workers."
+      selected_tranche: "Fix revise-plan runtime boundary and stale-lock-safe lifecycle persistence."
+      rejected_alternatives:
+        - "Do typed conversation/edit-result JSONB first: still the score floor, but it should not be built on a broken public lifecycle endpoint."
+        - "Add optional leases to public persistence methods: would reintroduce missing-lease ambiguity."
+        - "Fake SessionSendTurn for revise-plan: would lie about runtime ownership."
+        - "Split ai_builder_proposal_processor.py next: valuable but lower risk than the public endpoint break."
+      artifacts:
+        plan: ".codex/artifacts/flow-ai-builder-t012-revise-plan-runtime-boundary-plan-v5.md"
+        claude_final: ".codex/artifacts/claude-peer-loop-t012-revise-plan-runtime-boundary-final-v5-20260521T141146Z.md"
+        antigravity_final: ".codex/artifacts/antigravity-peer-loop-t012-revise-plan-runtime-boundary-final-v5-20260521T141319Z.md"
+      peer_gates:
+        codex_self_review: "pass; v5 plan is cleaner than weakening leases and correctly sized for one public lifecycle endpoint."
+        claude: "GREEN_LIGHT yes; MIN_SCORE 8; final v5 artifact approved."
+        antigravity: "GREEN_LIGHT yes; MIN_SCORE 9; final v5 artifact approved, with stale-lock recovery incorporated."
+      implementation_scope:
+        allowed_files:
+          - "backend/src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_service.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_plan_store.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_repo.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_service.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py"
+          - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+          - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      spawned_tasks:
+        - T013
+
+  - id: T013
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Implement the peer-approved T012 v5 revise-plan runtime boundary tranche."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-t012-revise-plan-runtime-boundary-plan-v5.md"
+      - ".codex/artifacts/claude-peer-loop-t012-revise-plan-runtime-boundary-final-v5-20260521T141146Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t012-revise-plan-runtime-boundary-final-v5-20260521T141319Z.md"
+    constraints:
+      - "Implement the v5 plan, not an older draft."
+      - "Do not introduce public SessionSendLease | None surfaces."
+      - "Active-send update_session_latest_plan must remain lease-required and must not inherit no-lock/expired-lock OR filters."
+      - "No-lease lifecycle revision must reject unexpired active sends, accept expired stale locks, and clear stale lock fields in the same update."
+      - "No implementation files outside allowed_files without a new peer-reviewed plan."
+      - "Preserve unrelated dirty files and do not push."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_service.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_store.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_repo.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_service.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py"
+      - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    expected_output:
+      - "Red tests that fail on the current revise-plan runtime boundary."
+      - "Service revise_plan delegates to AIBuilderPlanLifecycle."
+      - "AIBuilderPlanLifecycle owns revise-plan lifecycle composition inside repo.savepoint()."
+      - "Plan-store active-send helper renamed to _persist_active_send_plan_proposal with no compatibility alias."
+      - "Repository latest-plan update has lease-required and no-send-lease wrappers over one private implementation."
+      - "Integration coverage for revise success, unexpired active-lock rollback, and expired-lock recovery/fencing."
+      - "Ruff, Pyright, targeted unit tests, targeted integration tests, and static grep gates."
+      - "Post-implementation Codex, Claude, and Antigravity review because runtime/API behavior changes."
+    verify:
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_service.py::TestRevisePlan::test_keep_current_description_delegates_to_plan_lifecycle -q"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py::TestAIBuilderPlanLifecycle::test_revise_plan_persists_replacement_without_active_send_turn -q"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_service.py::TestRevisePlan tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py::TestAIBuilderPlanLifecycle tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py -q"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py::<new_success_revise_test> tests/integration/flows/test_ai_builder_session_api_regressions.py::<new_unexpired_active_send_atomicity_test> tests/integration/flows/test_ai_builder_session_api_regressions.py::<new_expired_lock_recovery_test> -q"
+      - "cd backend && uv run ruff check <T013 touched files>"
+      - "cd backend && uv run ruff format --check <T013 touched files>"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder/ai_builder_service.py src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_repo.py"
+      - "rg -n \"\\bpersist_plan\\b\" backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder backend/tests/integration/flows/test_ai_builder_session_api_regressions.py should return no active source/test hits."
+    stop_if:
+      - "Implementation needs files outside allowed_files."
+      - "Product semantics require revision to proceed during an unexpired active send."
+      - "Expired-lock recovery requires redesigning _lease_filters or active-send fencing globally."
+      - "Tests cannot construct the approved success, active-lock rollback, and expired-lock fencing cases."
     receipt: null
 
 checks:
