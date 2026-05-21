@@ -872,19 +872,25 @@ class UserService:
                 )
 
             # Verify the owner still has the permissions required for this key's scope.
-            # Tenant-scoped keys require the owner to be a tenant admin.
+            # Only tenant+admin keys grant admin-grade trust; tenant+read/write keys
+            # inherit the owner's live role permissions through the endpoint-level
+            # guards (the v1 model that legacy-migrated keys depend on).
+            key_permission = resolved.key.permission
+            if hasattr(key_permission, "value"):
+                key_permission = key_permission.value
             if (
                 resolved.key.scope_type
                 in (
                     ApiKeyScopeType.TENANT,
                     ApiKeyScopeType.TENANT.value,
                 )
+                and key_permission == ApiKeyPermission.ADMIN.value
                 and Permission.ADMIN not in user.permissions
             ):
                 raise ApiKeyValidationError(
                     status_code=403,
                     code="owner_permission_revoked",
-                    message="API key owner no longer has admin permissions required for tenant-scoped keys.",
+                    message="API key owner no longer has admin permissions required for an admin tenant-scoped key.",
                 )
 
             # Scoped keys require the owner to still be a member of the target space.

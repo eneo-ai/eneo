@@ -189,13 +189,19 @@ class AuthService:
         if self.api_key_v2_repo is None:
             return
         tenant_id = await self._get_user_tenant_id(user_id)
+        # v1 keys inherit the owner's live role permissions at request time.
+        # Record the owner's current trust level so the runtime gate
+        # (user_service._resolve_api_key) treats admin vs non-admin owners
+        # consistently with api_key_resolver._migrate_legacy_key.
+        has_admin = await self._user_has_admin_permission(user_id)
+        permission = ApiKeyPermission.ADMIN if has_admin else ApiKeyPermission.WRITE
         await self.api_key_v2_repo.create(
             tenant_id=tenant_id,
             owner_user_id=user_id,
             created_by_user_id=user_id,
             scope_type=ApiKeyScopeType.TENANT.value,
             scope_id=None,
-            permission=ApiKeyPermission.ADMIN.value,
+            permission=permission.value,
             key_type=ApiKeyType.SK.value,
             key_hash=api_key.hashed_key,
             hash_version=ApiKeyHashVersion.SHA256.value,
@@ -238,6 +244,23 @@ class AuthService:
         if row is None:
             raise AuthenticationException("No authenticated user.")
         return row.tenant_id
+
+    async def _user_has_admin_permission(self, user_id: UUID) -> bool:
+        from intric.database.tables.roles_table import Roles
+        from intric.database.tables.users_table import users_roles_table
+        from intric.roles.permissions import Permission
+
+        stmt = (
+            sa.select(sa.literal(1))
+            .select_from(users_roles_table)
+            .join(Roles, Roles.id == users_roles_table.c.role_id)
+            .where(
+                users_roles_table.c.user_id == user_id,
+                Roles.permissions.contains([Permission.ADMIN.value]),
+            )
+            .limit(1)
+        )
+        return await self.api_key_repo.session.scalar(stmt) is not None
 
     async def _get_assistant_owner_and_tenant(
         self, assistant_id: UUID

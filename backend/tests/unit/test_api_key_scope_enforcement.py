@@ -725,6 +725,132 @@ class TestResolveApiKeyScopeWiring:
 
 
 # ---------------------------------------------------------------------------
+# TestResolveApiKeyOwnerPermissionGate — owner-permission revocation gate
+# ---------------------------------------------------------------------------
+
+
+class TestResolveApiKeyOwnerPermissionGate:
+    """The tenant-scope owner-permission gate only applies to tenant+admin keys.
+
+    Legacy v1 keys auto-migrate to tenant+write when the owner is non-admin
+    (api_key_resolver._migrate_legacy_key). Those keys must keep working — the
+    endpoint-level permission guards already enforce what a non-admin owner can do.
+    """
+
+    @staticmethod
+    def _build_request() -> SimpleNamespace:
+        request = SimpleNamespace(
+            method="GET",
+            headers={},
+            scope={},
+            client=SimpleNamespace(host="127.0.0.1"),
+            state=State(),
+            url=SimpleNamespace(path="/api/v1/assistants"),
+        )
+        return request
+
+    @staticmethod
+    def _build_service(key, *, user_permissions: set[Permission]) -> object:
+        from intric.users.user_service import UserService
+
+        svc = object.__new__(UserService)
+        svc.api_key_auth_resolver = SimpleNamespace(
+            resolve=AsyncMock(return_value=SimpleNamespace(key=key))
+        )
+        svc.repo = SimpleNamespace(
+            get_user_by_id=AsyncMock(
+                return_value=SimpleNamespace(
+                    id=key.owner_user_id,
+                    tenant_id=key.tenant_id,
+                    permissions=user_permissions,
+                    state=UserState.ACTIVE,
+                )
+            )
+        )
+        svc.space_service = AsyncMock()
+        svc.api_key_rate_limiter = None
+        svc._session = None
+        svc.api_key_v2_repo = SimpleNamespace(update_last_used_at=AsyncMock())
+        svc._log_api_key_auth_failed = AsyncMock()
+        svc._maybe_log_api_key_used = AsyncMock()
+        svc._enforce_api_key_scope = AsyncMock()
+        return svc
+
+    @staticmethod
+    def _patch_policy_and_settings(monkeypatch) -> None:
+        class _PolicyServiceStub:
+            def __init__(self, **kwargs):
+                pass
+
+            async def enforce_guardrails(self, *, key, origin, client_ip):
+                return None
+
+        monkeypatch.setattr(
+            "intric.users.user_service.ApiKeyPolicyService", _PolicyServiceStub
+        )
+        monkeypatch.setattr(
+            "intric.users.user_service.get_settings",
+            lambda: SimpleNamespace(
+                api_key_enforce_resource_permissions=False,
+                api_key_last_used_min_interval_seconds=0,
+            ),
+        )
+
+    @pytest.mark.asyncio
+    async def test_tenant_admin_key_with_admin_owner_passes(self, monkeypatch):
+        key = _make_key(
+            scope_type=ApiKeyScopeType.TENANT,
+            scope_id=None,
+            permission=ApiKeyPermission.ADMIN,
+        )
+        svc = self._build_service(key, user_permissions={Permission.ADMIN})
+        self._patch_policy_and_settings(monkeypatch)
+
+        await svc._resolve_api_key("sk_test_key", request=self._build_request())
+
+    @pytest.mark.asyncio
+    async def test_tenant_admin_key_with_non_admin_owner_is_rejected(self, monkeypatch):
+        key = _make_key(
+            scope_type=ApiKeyScopeType.TENANT,
+            scope_id=None,
+            permission=ApiKeyPermission.ADMIN,
+        )
+        svc = self._build_service(key, user_permissions={Permission.ASSISTANTS})
+        self._patch_policy_and_settings(monkeypatch)
+
+        with pytest.raises(ApiKeyValidationError) as exc_info:
+            await svc._resolve_api_key("sk_test_key", request=self._build_request())
+
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.code == "owner_permission_revoked"
+
+    @pytest.mark.asyncio
+    async def test_tenant_write_key_with_non_admin_owner_passes(self, monkeypatch):
+        """Legacy-migrated tenant+write keys must work for non-admin owners."""
+        key = _make_key(
+            scope_type=ApiKeyScopeType.TENANT,
+            scope_id=None,
+            permission=ApiKeyPermission.WRITE,
+        )
+        svc = self._build_service(key, user_permissions={Permission.ASSISTANTS})
+        self._patch_policy_and_settings(monkeypatch)
+
+        await svc._resolve_api_key("sk_test_key", request=self._build_request())
+
+    @pytest.mark.asyncio
+    async def test_tenant_read_key_with_non_admin_owner_passes(self, monkeypatch):
+        key = _make_key(
+            scope_type=ApiKeyScopeType.TENANT,
+            scope_id=None,
+            permission=ApiKeyPermission.READ,
+        )
+        svc = self._build_service(key, user_permissions={Permission.ASSISTANTS})
+        self._patch_policy_and_settings(monkeypatch)
+
+        await svc._resolve_api_key("sk_test_key", request=self._build_request())
+
+
+# ---------------------------------------------------------------------------
 # TestScopeRouteGuardCoverage — CI guard for route coverage
 # ---------------------------------------------------------------------------
 

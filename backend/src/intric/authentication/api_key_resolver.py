@@ -294,9 +294,10 @@ class ApiKeyAuthResolver:
                 legacy_record.user_id
             )
             # v1 keys had no permission tier — they inherited the owner's live
-            # access. Map to tenant+admin only if the owner currently has
-            # Permission.ADMIN; otherwise tenant+write, so the resolver's
-            # owner-admin guard doesn't reject the migrated key on first use.
+            # role permissions at request time. Map to tenant+admin if the
+            # owner currently has Permission.ADMIN, otherwise tenant+write,
+            # which the runtime gate accepts on behalf of non-admin owners
+            # (endpoint-level permission guards then enforce what the key can do).
             has_admin = await self._user_has_admin_permission(owner_user_id)
             permission = ApiKeyPermission.ADMIN if has_admin else ApiKeyPermission.WRITE
             try:
