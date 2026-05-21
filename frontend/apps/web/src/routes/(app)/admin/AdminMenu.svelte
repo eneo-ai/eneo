@@ -40,6 +40,12 @@
     icon={IconLibrary}
     label={m.organisation()}
   />
+  <Navigation.Link
+    href={localizeHref("/admin/personal-chat")}
+    isActive={isSelected("/admin/personal-chat", currentRoute)}
+    icon={MessageSquare}
+    label="Personlig chatt"
+  />
 
   <div class="border-default my-2 border-b-[0.5px]"></div>
   <Navigation.Link
@@ -73,12 +79,6 @@
     isActive={isSelected("/admin/mcp-servers", currentRoute)}
     icon={Plug}
     label={m.mcp()}
-  />
-  <Navigation.Link
-    href={localizeHref("/admin/personal-chat")}
-    isActive={isSelected("/admin/personal-chat", currentRoute)}
-    icon={MessageSquare}
-    label="Personlig chatt"
   />
   <Navigation.Link
     href="/admin/audit-logs"
