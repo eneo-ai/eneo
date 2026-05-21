@@ -16,18 +16,16 @@ environments that need them.
 """
 
 from dataclasses import dataclass
-from enum import Enum
 
+from intric.help_assistants.domain.helper_kind import HelperKind
 
-class HelperKind(str, Enum):
-    """Kinds of Help Assistants shipped with Eneo.
-
-    Defined here (rather than the domain layer) so the seed migration can
-    import the enum without depending on the domain package. Step 008
-    re-exports the same enum from ``intric.help_assistants.domain``.
-    """
-
-    PROMPT_GUIDE = "prompt_guide"
+__all__ = [
+    "DEFAULTS_BY_KIND",
+    "HelperAssistantDefaults",
+    "HelperKind",
+    "PROMPT_GUIDE_DEFAULTS",
+    "get_defaults",
+]
 
 
 @dataclass(frozen=True)
