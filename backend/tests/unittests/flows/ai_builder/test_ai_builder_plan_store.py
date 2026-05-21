@@ -23,10 +23,10 @@ from intric.flows.ai_builder.ai_builder_models import (
     StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_plan_store import (
+    _persist_active_send_plan_proposal,
     append_plan_messages,
     build_lint_warnings,
     format_validation_feedback,
-    persist_plan,
     store_plan_and_update_conversation,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import (
@@ -293,7 +293,7 @@ async def test_store_plan_and_update_conversation_passes_resource_bindings_to_re
 
 
 @pytest.mark.asyncio
-async def test_persist_plan_uses_only_bindings_for_current_plan() -> None:
+async def test_active_send_plan_proposal_uses_only_bindings_for_current_plan() -> None:
     repo = _make_repo_mock()
     tenant_id = uuid4()
     session_id = uuid4()
@@ -301,14 +301,14 @@ async def test_persist_plan_uses_only_bindings_for_current_plan() -> None:
     second_binding = _make_binding()
     spec = _make_turn_spec()
 
-    await persist_plan(
+    await _persist_active_send_plan_proposal(
         repo=repo,
         turn=_make_turn(tenant_id=tenant_id, session_id=session_id),
         spec=spec,
         envelope=PlannerPlanEnvelope(spec=spec),
         resource_bindings=(first_binding,),
     )
-    await persist_plan(
+    await _persist_active_send_plan_proposal(
         repo=repo,
         turn=_make_turn(tenant_id=tenant_id, session_id=session_id),
         spec=spec,

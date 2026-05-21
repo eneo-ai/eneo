@@ -578,40 +578,127 @@ class AIBuilderRepository:
         plan_id: UUID,
         lease: SessionSendLease,
     ) -> None:
+        await self._update_session_latest_plan(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            plan_id=plan_id,
+            lease=lease,
+        )
+
+    async def update_session_latest_plan_without_send_lease(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+        plan_id: UUID,
+    ) -> None:
+        """Replace latest plan during user lifecycle revision and clear expired locks."""
+        await self._update_session_latest_plan(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            plan_id=plan_id,
+            lease=None,
+        )
+
+    async def _update_session_latest_plan(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+        plan_id: UUID,
+        lease: SessionSendLease | None,
+    ) -> None:
         async with self._transaction():
-            current_stmt = select(BuilderSessions.status).where(
+            current_stmt = select(
+                BuilderSessions.status,
+                BuilderSessions.active_request_id,
+                BuilderSessions.lock_token,
+                BuilderSessions.lock_expires_at,
+            ).where(
                 BuilderSessions.id == session_id,
                 BuilderSessions.tenant_id == tenant_id,
             )
-            current_value = (
-                await self.session.execute(current_stmt)
-            ).scalar_one_or_none()
-            if current_value is None:
+            current_row = (await self.session.execute(current_stmt)).one_or_none()
+            if current_row is None:
                 raise NotFoundException("Builder session not found.")
-            ensure_valid_session_status_transition(
-                current=SessionStatus(current_value),
-                next_status=SessionStatus.AWAITING_APPROVAL,
-            )
-            stmt = (
-                update(BuilderSessions)
-                .where(
+            (
+                current_status_value,
+                active_request_id,
+                lock_token,
+                lock_expires_at,
+            ) = current_row
+            current_status = SessionStatus(current_status_value)
+            now = datetime.now(timezone.utc)
+
+            if lease is not None:
+                ensure_valid_session_status_transition(
+                    current=current_status,
+                    next_status=SessionStatus.AWAITING_APPROVAL,
+                )
+                where_clauses = [
                     BuilderSessions.id == session_id,
                     BuilderSessions.tenant_id == tenant_id,
                     *_lease_filters(lease),
+                ]
+                values = {
+                    "latest_plan_id": plan_id,
+                    "status": SessionStatus.AWAITING_APPROVAL.value,
+                    "updated_at": now,
+                }
+            else:
+                if current_status != SessionStatus.AWAITING_APPROVAL:
+                    raise BadRequestException(
+                        "Can only revise plans when the session is awaiting approval.",
+                        code="invalid_session_transition",
+                    )
+                lock_is_set = active_request_id is not None or lock_token is not None
+                lock_is_expired = lock_expires_at is not None and lock_expires_at <= now
+                if lock_is_set and not lock_is_expired:
+                    raise BadRequestException(
+                        "An active send is currently in progress for this session.",
+                        code="session_send_in_progress",
+                    )
+                expired_lock_is_available = sa.and_(
+                    BuilderSessions.lock_expires_at.is_not(None),
+                    BuilderSessions.lock_expires_at <= sa.func.now(),
                 )
-                .values(
-                    latest_plan_id=plan_id,
-                    status=SessionStatus.AWAITING_APPROVAL.value,
-                    updated_at=datetime.now(timezone.utc),
+                lock_is_available = sa.or_(
+                    sa.and_(
+                        BuilderSessions.active_request_id.is_(None),
+                        BuilderSessions.lock_token.is_(None),
+                    ),
+                    expired_lock_is_available,
                 )
-            )
+                where_clauses = [
+                    BuilderSessions.id == session_id,
+                    BuilderSessions.tenant_id == tenant_id,
+                    BuilderSessions.status == SessionStatus.AWAITING_APPROVAL.value,
+                    # Recheck lock availability in the UPDATE so a fresh claim between
+                    # the precheck and write cannot be cleared by this lifecycle update.
+                    lock_is_available,
+                ]
+                values = {
+                    "latest_plan_id": plan_id,
+                    "active_request_id": None,
+                    "lock_token": None,
+                    "locked_at": None,
+                    "lock_expires_at": None,
+                    "updated_at": now,
+                }
+
+            stmt = update(BuilderSessions).where(*where_clauses).values(**values)
             updated_session_id = await self.session.scalar(
                 stmt.returning(BuilderSessions.id)
             )
             if updated_session_id is None:
+                if lease is not None:
+                    raise BadRequestException(
+                        "The AI Builder session lease was lost while recording the latest plan.",
+                        code="session_send_lease_lost",
+                    )
                 raise BadRequestException(
-                    "The AI Builder session lease was lost while recording the latest plan.",
-                    code="session_send_lease_lost",
+                    "The latest plan could not be updated due to a concurrent session change.",
+                    code="session_latest_plan_update_conflict",
                 )
 
     async def update_session_flow_id(

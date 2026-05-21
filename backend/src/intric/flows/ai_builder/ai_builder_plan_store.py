@@ -190,7 +190,7 @@ async def store_plan_and_update_conversation(
         prior_state = await repo.load_planning_state(
             session_id=turn.session_id, tenant_id=turn.tenant_id
         )
-        plan = await persist_plan(
+        plan = await _persist_active_send_plan_proposal(
             repo=repo,
             turn=turn,
             spec=spec,
@@ -221,7 +221,7 @@ async def store_plan_and_update_conversation(
     )
 
 
-async def persist_plan(
+async def _persist_active_send_plan_proposal(
     *,
     repo: AIBuilderRepository,
     turn: SessionSendTurn,

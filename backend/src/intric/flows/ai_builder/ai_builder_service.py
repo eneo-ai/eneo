@@ -52,7 +52,6 @@ from intric.flows.ai_builder.ai_builder_models import (
     ApplyResultResponse,
     BuilderPlan,
     BuilderSession,
-    PlanStatus,
     SessionListItemResponse,
     TargetKind,
 )
@@ -63,7 +62,6 @@ from intric.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifec
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
-from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from intric.main.exceptions import BadRequestException
 from intric.model_providers.infrastructure.litellm_runtime_config import (
@@ -578,62 +576,9 @@ class AIBuilderService:
         plan_id: UUID,
         revision_type: str,
     ) -> BuilderPlan:
-        """Create a new plan version with a structured revision.
-
-        - keep_current_description: copies spec with description_override_manual=True
-        """
-        from intric.flows.ai_builder.ai_builder_plan_store import (
-            build_plan_envelope,
-            persist_plan,
-        )
-
-        plan = await self.repo.get_plan(
+        return await self._build_plan_lifecycle().revise_plan(
             plan_id=plan_id,
-            tenant_id=self.user.tenant_id,
-        )
-        if plan.status != PlanStatus.PROPOSED:
-            raise BadRequestException(
-                "Can only revise proposed plans.",
-                code="plan_not_proposed",
-            )
-
-        session = await self.repo.get_session(
-            session_id=plan.session_id,
-            tenant_id=self.user.tenant_id,
-        )
-        if session.actor_user_id != self.user.id:
-            from intric.main.exceptions import UnauthorizedException
-
-            raise UnauthorizedException(
-                "Only the session creator can revise plans.",
-                code="session_creator_required",
-            )
-
-        if revision_type == "keep_current_description":
-            revised_edit_result = dict(plan.edit_result_json or {})
-            revised_edit_result["description_override_manual"] = True
-
-            envelope = build_plan_envelope(
-                spec=plan.spec,
-                assumptions=plan.envelope.assumptions,
-                plan_rationale=plan.envelope.plan_rationale,
-                reasoning=None,
-                validation=_empty_validation(),
-            )
-            new_plan = await persist_plan(
-                repo=self.repo,
-                tenant_id=self.user.tenant_id,
-                session_id=plan.session_id,
-                spec=plan.spec,
-                envelope=envelope,
-                resource_bindings=plan.resource_bindings,
-                edit_result_json=revised_edit_result,
-            )
-            return new_plan
-
-        raise BadRequestException(
-            f"Unsupported revision type: {revision_type}",
-            code="unsupported_revision_type",
+            revision_type=revision_type,
         )
 
     def _build_planner(self) -> AIBuilderPlanner:
@@ -656,7 +601,3 @@ class AIBuilderService:
             flow_service=self.flow_service,
             space_service=self.space_service,
         )
-
-
-def _empty_validation() -> SpecValidationResult:
-    return SpecValidationResult()

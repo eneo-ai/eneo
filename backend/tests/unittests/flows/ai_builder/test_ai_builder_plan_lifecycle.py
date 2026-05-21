@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -14,6 +16,8 @@ from intric.flows.ai_builder.ai_builder_models import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
+    LintSeverity,
+    LintWarning,
     PlannerPlanEnvelope,
     PlanStatus,
     SessionStatus,
@@ -49,6 +53,17 @@ def _make_space_service() -> AsyncMock:
     space.mcp_servers = []
     space_service.get_space.return_value = space
     return space_service
+
+
+@asynccontextmanager
+async def _noop_savepoint() -> AsyncIterator[None]:
+    yield
+
+
+def _make_repo_mock() -> AsyncMock:
+    repo = AsyncMock()
+    repo.savepoint = _noop_savepoint
+    return repo
 
 
 def _make_spec(*, input_type: InputType = InputType.TEXT) -> FlowDraftSpecCore:
@@ -95,6 +110,7 @@ def _make_plan(
     edit_result_json: dict[str, object] | None = None,
     spec: FlowDraftSpecCore | None = None,
     resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
+    envelope: PlannerPlanEnvelope | None = None,
 ) -> BuilderPlan:
     used_spec = spec or _make_spec()
     return BuilderPlan(
@@ -104,7 +120,7 @@ def _make_plan(
         status=status,
         spec=used_spec,
         spec_hash=used_spec.spec_hash(),
-        envelope=PlannerPlanEnvelope(spec=used_spec),
+        envelope=envelope or PlannerPlanEnvelope(spec=used_spec),
         resource_bindings=resource_bindings,
         edit_result_json=edit_result_json,
     )
@@ -126,7 +142,13 @@ def _make_binding(
 
 
 def _make_session(
-    *, tenant_id, actor_user_id, flow_id, target_kind: TargetKind, space_id=None
+    *,
+    tenant_id,
+    actor_user_id,
+    flow_id,
+    target_kind: TargetKind,
+    space_id=None,
+    status: SessionStatus = SessionStatus.AWAITING_APPROVAL,
 ):
     return BuilderSession(
         id=uuid4(),
@@ -135,11 +157,118 @@ def _make_session(
         actor_user_id=actor_user_id,
         flow_id=flow_id,
         target_kind=target_kind,
-        status=SessionStatus.AWAITING_APPROVAL,
+        status=status,
     )
 
 
 class TestAIBuilderPlanLifecycle:
+    @pytest.mark.anyio
+    async def test_revise_plan_persists_replacement_without_active_send_turn(self):
+        user = _make_user()
+        repo = _make_repo_mock()
+        binding = _make_binding(
+            kind=ResourceSlotKind.MODEL,
+            slot="fast-model",
+            label="Fast model",
+            local_kind=LocalResourceKind.COMPLETION_MODEL,
+            local_id=uuid4(),
+        )
+        plan_spec = _make_spec()
+        plan = _make_plan(
+            session_id=uuid4(),
+            tenant_id=user.tenant_id,
+            status=PlanStatus.PROPOSED,
+            spec=plan_spec,
+            resource_bindings=(binding,),
+            edit_result_json={"other_key": "value"},
+            envelope=PlannerPlanEnvelope(
+                spec=plan_spec,
+                lint_warnings=[
+                    LintWarning(
+                        code="needs_model",
+                        message="Select a model before applying.",
+                        severity=LintSeverity.WARNING,
+                    )
+                ],
+                reasoning="prior proposal reasoning",
+            ),
+        )
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        session.id = plan.session_id
+        revised_plan = _make_plan(
+            session_id=plan.session_id,
+            tenant_id=user.tenant_id,
+            status=PlanStatus.PROPOSED,
+            resource_bindings=(binding,),
+            edit_result_json={
+                "other_key": "value",
+                "description_override_manual": True,
+            },
+        )
+        repo.get_plan.return_value = plan
+        repo.get_session.return_value = session
+        repo.create_plan.return_value = revised_plan
+
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            space_service=_make_space_service(),
+        )
+
+        result = await lifecycle.revise_plan(
+            plan_id=plan.id,
+            revision_type="keep_current_description",
+        )
+
+        assert result == revised_plan
+        repo.supersede_existing_plans.assert_awaited_once_with(
+            session_id=plan.session_id,
+            tenant_id=user.tenant_id,
+        )
+        assert repo.create_plan.await_args is not None
+        create_kwargs = repo.create_plan.await_args.kwargs
+        assert create_kwargs["session_id"] == plan.session_id
+        assert create_kwargs["tenant_id"] == user.tenant_id
+        assert create_kwargs["spec"] == plan.spec
+        assert create_kwargs["envelope"].lint_warnings == plan.envelope.lint_warnings
+        assert create_kwargs["envelope"].reasoning is None
+        assert create_kwargs["resource_bindings"] == (binding,)
+        assert create_kwargs["edit_result_json"] == {
+            "other_key": "value",
+            "description_override_manual": True,
+        }
+        repo.update_session_latest_plan_without_send_lease.assert_awaited_once_with(
+            session_id=plan.session_id,
+            tenant_id=user.tenant_id,
+            plan_id=revised_plan.id,
+        )
+
+    @pytest.mark.anyio
+    async def test_revise_plan_rejects_unsupported_revision_type(self):
+        user = _make_user()
+        repo = _make_repo_mock()
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=AsyncMock(),
+            space_service=_make_space_service(),
+        )
+
+        with pytest.raises(BadRequestException) as exc_info:
+            await lifecycle.revise_plan(
+                plan_id=uuid4(),
+                revision_type="regenerate_description",
+            )
+
+        assert exc_info.value.code == "unsupported_revision_type"
+        repo.get_plan.assert_not_called()
+
     @pytest.mark.anyio
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")

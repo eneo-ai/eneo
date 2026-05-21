@@ -94,10 +94,13 @@ from intric.main.exceptions import BadRequestException, UnauthorizedException
 
 
 def test_quality_retry_codes_exclude_informational_policy_warnings() -> None:
-    assert not {
-        "multi_goal_prompt",
-        "contract_instruction_mismatch",
-    } & QUALITY_RETRY_WARNING_CODES
+    assert (
+        not {
+            "multi_goal_prompt",
+            "contract_instruction_mismatch",
+        }
+        & QUALITY_RETRY_WARNING_CODES
+    )
 
 
 def _make_user(
@@ -1686,84 +1689,32 @@ class TestApprovePlan:
 
 class TestRevisePlan:
     @pytest.mark.anyio
-    @patch(
-        "intric.flows.ai_builder.ai_builder_plan_store.persist_plan",
-        new_callable=AsyncMock,
-    )
-    async def test_keep_current_description_sets_manual_override(
-        self, mock_persist_plan
-    ):
+    async def test_keep_current_description_delegates_to_plan_lifecycle(self):
         user = _make_user()
         repo = AsyncMock()
-
-        plan = _make_plan(
-            status=PlanStatus.PROPOSED,
-            tenant_id=user.tenant_id,
-            resource_bindings=(_make_resource_binding(),),
-            edit_result_json={"other_key": "value"},
-        )
-        session = _make_session(
-            session_id=plan.session_id,
-            actor_user_id=user.id,
-            tenant_id=user.tenant_id,
-        )
         revised_plan = _make_plan(
-            session_id=plan.session_id,
             tenant_id=user.tenant_id,
             edit_result_json={
-                "other_key": "value",
                 "description_override_manual": True,
             },
         )
 
-        repo.get_plan.return_value = plan
-        repo.get_session.return_value = session
-        mock_persist_plan.return_value = revised_plan
-
         service = _make_service(user=user, repo=repo)
-        result = await service.revise_plan(
-            plan_id=plan.id,
-            revision_type="keep_current_description",
-        )
+        lifecycle = AsyncMock()
+        lifecycle.revise_plan.return_value = revised_plan
 
-        assert result == revised_plan
-        assert mock_persist_plan.await_count == 1
-        assert (
-            mock_persist_plan.await_args.kwargs["edit_result_json"][
-                "description_override_manual"
-            ]
-            is True
-        )
-        assert (
-            mock_persist_plan.await_args.kwargs["resource_bindings"]
-            == plan.resource_bindings
-        )
-
-    @pytest.mark.anyio
-    async def test_unsupported_revision_type_raises(self):
-        user = _make_user()
-        repo = AsyncMock()
-
-        plan = _make_plan(
-            status=PlanStatus.PROPOSED,
-            tenant_id=user.tenant_id,
-        )
-        session = _make_session(
-            session_id=plan.session_id,
-            actor_user_id=user.id,
-            tenant_id=user.tenant_id,
-        )
-        repo.get_plan.return_value = plan
-        repo.get_session.return_value = session
-
-        service = _make_service(user=user, repo=repo)
-        with pytest.raises(BadRequestException) as exc_info:
-            await service.revise_plan(
-                plan_id=plan.id,
-                revision_type="regenerate_description",
+        with patch.object(service, "_build_plan_lifecycle", return_value=lifecycle):
+            result = await service.revise_plan(
+                plan_id=revised_plan.id,
+                revision_type="keep_current_description",
             )
 
-        assert exc_info.value.code == "unsupported_revision_type"
+        assert result == revised_plan
+        lifecycle.revise_plan.assert_awaited_once_with(
+            plan_id=revised_plan.id,
+            revision_type="keep_current_description",
+        )
+        repo.get_plan.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

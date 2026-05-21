@@ -132,6 +132,59 @@ class AIBuilderPlanLifecycle:
         )
         return await self._get_plan(plan.id)
 
+    async def revise_plan(
+        self,
+        *,
+        plan_id: UUID,
+        revision_type: str,
+    ) -> BuilderPlan:
+        if revision_type != "keep_current_description":
+            raise BadRequestException(
+                f"Unsupported revision type: {revision_type}",
+                code="unsupported_revision_type",
+            )
+
+        plan = await self._get_plan(plan_id)
+        if plan.status != PlanStatus.PROPOSED:
+            raise BadRequestException(
+                "Can only revise proposed plans.",
+                code="plan_not_proposed",
+            )
+
+        session = await self._require_session_creator(plan.session_id)
+        if session.status != SessionStatus.AWAITING_APPROVAL:
+            raise BadRequestException(
+                "Can only revise plans when the session is awaiting approval.",
+                code="invalid_session_transition",
+            )
+
+        revised_edit_result = (
+            dict(plan.edit_result_json) if plan.edit_result_json is not None else {}
+        )
+        revised_edit_result["description_override_manual"] = True
+        envelope = plan.envelope.model_copy(update={"reasoning": None})
+
+        async with self.repo.savepoint():
+            await self.repo.supersede_existing_plans(
+                session_id=plan.session_id,
+                tenant_id=self.user.tenant_id,
+            )
+            new_plan = await self.repo.create_plan(
+                session_id=plan.session_id,
+                tenant_id=self.user.tenant_id,
+                spec=plan.spec,
+                envelope=envelope,
+                resource_bindings=plan.resource_bindings,
+                edit_result_json=revised_edit_result,
+            )
+            await self.repo.update_session_latest_plan_without_send_lease(
+                session_id=plan.session_id,
+                tenant_id=self.user.tenant_id,
+                plan_id=new_plan.id,
+            )
+
+        return new_plan
+
     async def apply_plan(
         self,
         *,

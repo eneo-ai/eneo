@@ -55,14 +55,38 @@ from intric.flows.ai_builder.planning_state import (
 from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
 from intric.flows.flow import FlowStep
 from intric.main.exceptions import BadRequestException, NotFoundException
+from intric.main.models import ModelId
 from intric.prompts.api.prompt_models import PromptCreate
+from intric.roles.permissions import Permission
+from intric.roles.role import RoleCreate
+from intric.users.user import UserAdd, UserState
 
 
 @pytest.fixture
 async def bearer_token(db_container, patch_auth_service_jwt, admin_user):
     async with db_container() as container:
+        role = await container.role_repo().create_role(
+            RoleCreate(
+                name=f"ai-builder-regression-{uuid4().hex[:8]}",
+                permissions=[
+                    Permission.SHARED_SPACES,
+                    Permission.FLOWS_MANAGE,
+                    Permission.FLOWS_AI_BUILDER,
+                ],
+                tenant_id=admin_user.tenant_id,
+            )
+        )
+        user = await container.user_repo().add(
+            UserAdd(
+                email=f"ai-builder-regression-{uuid4().hex[:8]}@example.com",
+                username=f"ai_builder_regression_{uuid4().hex[:8]}",
+                state=UserState.ACTIVE,
+                tenant_id=admin_user.tenant_id,
+                roles=[ModelId(id=role.id)],
+            )
+        )
         auth_service = container.auth_service()
-        token = auth_service.create_access_token_for_user(admin_user)
+        token = auth_service.create_access_token_for_user(user)
     return token
 
 
@@ -381,6 +405,235 @@ def _make_builder_plan_spec(*, existing_step_ref: str | None) -> FlowDraftSpecCo
             )
         ],
     )
+
+
+async def _create_proposed_ai_builder_plan(
+    *,
+    client,
+    bearer_token: str,
+    db_container,
+    space_id: str,
+) -> tuple[UUID, UUID, UUID, SessionSendLease]:
+    from intric.flows.ai_builder.ai_builder_plan_store import (
+        store_plan_and_update_conversation,
+    )
+
+    session_id = UUID(
+        await _create_ai_builder_session(
+            client=client,
+            bearer_token=bearer_token,
+            space_id=space_id,
+        )
+    )
+
+    async with db_container() as container:
+        tenant_id = (
+            await container.session().execute(
+                select(BuilderSessions.tenant_id).where(
+                    BuilderSessions.id == session_id
+                )
+            )
+        ).scalar_one()
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        stored_plan = await store_plan_and_update_conversation(
+            repo=repo,
+            turn=turn,
+            conversation=[],
+            new_messages_start=0,
+            assistant_content="plan ready",
+            tool_call_id=f"call-revise-{uuid4()}",
+            tool_name=OUTLINE_FLOW_TOOL_NAME,
+            arguments={},
+            spec=_make_builder_plan_spec(existing_step_ref=None),
+            assumptions=[],
+            plan_rationale=None,
+            reasoning=None,
+            validation=MagicMock(warnings=[]),
+            flow=None,
+        )
+        await repo.release_session_send(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            lease=turn.lease,
+        )
+        return session_id, tenant_id, stored_plan.plan.id, turn.lease
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_revise_plan_api_creates_replacement_without_active_send(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Revise Success",
+    )
+    session_id, tenant_id, old_plan_id, _ = await _create_proposed_ai_builder_plan(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        space_id=space_id,
+    )
+
+    response = await client.post(
+        f"/api/v1/flows/ai-builder/plans/{old_plan_id}/revise",
+        json={"type": "keep_current_description"},
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    new_plan_id = UUID(response.json()["plan_id"])
+    assert new_plan_id != old_plan_id
+    assert response.json()["edit_result_json"] == {"description_override_manual": True}
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        plans = await repo.list_session_plans(
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        fetched = await repo.get_session(session_id=session_id, tenant_id=tenant_id)
+
+    statuses = {plan.id: plan.status for plan in plans}
+    assert statuses[old_plan_id] == PlanStatus.SUPERSEDED
+    assert statuses[new_plan_id] == PlanStatus.PROPOSED
+    assert fetched.latest_plan_id == new_plan_id
+    assert fetched.status == SessionStatus.AWAITING_APPROVAL
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_revise_plan_api_rejects_active_send_and_rolls_back(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Revise Active Send",
+    )
+    session_id, tenant_id, old_plan_id, _ = await _create_proposed_ai_builder_plan(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        space_id=space_id,
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        await _claim_session_send_turn(
+            repo=repo,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+
+    response = await client.post(
+        f"/api/v1/flows/ai-builder/plans/{old_plan_id}/revise",
+        json={"type": "keep_current_description"},
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["code"] == "bad_request"
+    assert (
+        response.json()["message"]
+        == "An active send is currently in progress for this session."
+    )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        plans = await repo.list_session_plans(
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        fetched = await repo.get_session(session_id=session_id, tenant_id=tenant_id)
+
+    assert [plan.id for plan in plans] == [old_plan_id]
+    assert plans[0].status == PlanStatus.PROPOSED
+    assert fetched.latest_plan_id == old_plan_id
+    assert fetched.status == SessionStatus.AWAITING_APPROVAL
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_revise_plan_api_recovers_expired_send_lock_and_fences_old_lease(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Revise Expired Send",
+    )
+    session_id, tenant_id, old_plan_id, _ = await _create_proposed_ai_builder_plan(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        space_id=space_id,
+    )
+    stale_lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        claimed = await repo.claim_session_send(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            lease=stale_lease,
+            lock_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+        )
+        assert claimed is True
+
+    response = await client.post(
+        f"/api/v1/flows/ai-builder/plans/{old_plan_id}/revise",
+        json={"type": "keep_current_description"},
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    new_plan_id = UUID(response.json()["plan_id"])
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        fetched = await repo.get_session(session_id=session_id, tenant_id=tenant_id)
+        stale_refresh = await repo.refresh_session_send_lease(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            lease=stale_lease,
+            lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
+        )
+        lock_row = (
+            await repo.session.execute(
+                select(
+                    BuilderSessions.active_request_id,
+                    BuilderSessions.lock_token,
+                    BuilderSessions.locked_at,
+                    BuilderSessions.lock_expires_at,
+                ).where(BuilderSessions.id == session_id)
+            )
+        ).one()
+
+    assert fetched.latest_plan_id == new_plan_id
+    assert fetched.status == SessionStatus.AWAITING_APPROVAL
+    assert stale_refresh is False
+    assert lock_row == (None, None, None, None)
 
 
 @pytest.mark.integration

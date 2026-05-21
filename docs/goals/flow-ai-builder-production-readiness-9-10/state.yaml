@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T013
+active_task: T014
 
 scoring_target:
   dimensions:
@@ -46,7 +46,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "T011 post-implementation PM audit plus Claude GREEN_LIGHT yes and Antigravity GREEN_LIGHT yes implementation gates."
+  source: "T013 post-implementation PM audit plus Claude GREEN_LIGHT yes and Antigravity GREEN_LIGHT yes implementation gates."
   Maintainability: 8
   Code_Quality: 8
   Clean_Architecture: 8
@@ -61,6 +61,8 @@ current_scorecard:
   blockers:
     - "Conversation metadata and edit-result JSON remain raw hidden schemas."
     - "SSE/public API contracts remain generated-client weak."
+    - "Revise-plan active-send conflict still surfaces as generic public bad_request until the API-contract tranche adds typed lifecycle conflict codes."
+    - "builder_sessions can still persist a corrupt lock_token with NULL lock_expires_at; runtime fails safe, but schema-level lock invariants need a migration or explicit corruption policy."
     - "Live eval still shows runtime-input/form-field prompts can produce no form fields."
     - "ai_builder_proposal_processor.py is materially smaller after T011 but still oversized at 1830 LOC; structured-question recovery, confirm requirements, and retry orchestration remain in one processor."
     - "Full Flow unit sweeps still hit unrelated baseline/environment failures."
@@ -1282,7 +1284,7 @@ tasks:
   - id: T012
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: xhigh
     objective: "Re-rank the next score-moving Flow AI Builder production-readiness tranche after T011 and produce a peer-gated implementation-ready plan."
     inputs:
@@ -1343,7 +1345,7 @@ tasks:
   - id: T013
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Implement the peer-approved T012 v5 revise-plan runtime boundary tranche."
     inputs:
@@ -1390,6 +1392,118 @@ tasks:
       - "Product semantics require revision to proceed during an unexpired active send."
       - "Expired-lock recovery requires redesigning _lease_filters or active-send fencing globally."
       - "Tests cannot construct the approved success, active-lock rollback, and expired-lock fencing cases."
+    receipt:
+      completed_at: "2026-05-21T15:50:00+02:00"
+      result: done
+      summary: "Implemented the peer-approved revise-plan runtime-boundary tranche. User lifecycle plan revision no longer reuses active-send proposal persistence or fakes SessionSendTurn authority. The lifecycle now validates revision semantics, preserves prior envelope lint warnings, writes supersede/create/latest-plan updates inside repo.savepoint(), rejects unexpired active sends, recovers expired stale locks, and clears stale lock fields in the same latest-plan update."
+      changed_files:
+        source:
+          - "backend/src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_service.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_plan_store.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_repo.py"
+        tests:
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_service.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py"
+          - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+        board:
+          - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      implementation_evidence:
+        - "AIBuilderService.revise_plan() delegates to AIBuilderPlanLifecycle.revise_plan()."
+        - "AIBuilderPlanLifecycle.revise_plan() owns out-of-band lifecycle composition and calls update_session_latest_plan_without_send_lease()."
+        - "store_plan_and_update_conversation() now calls private _persist_active_send_plan_proposal(); rg found no active persist_plan references."
+        - "update_session_latest_plan() remains lease-required; update_session_latest_plan_without_send_lease() rejects unexpired active sends and accepts expired stale locks."
+        - "No-send-lease UPDATE repeats status and lock-availability predicates and clears stale lock fields atomically."
+        - "Review-driven v2 fixed lifecycle envelope ownership by using plan.envelope.model_copy(update={\"reasoning\": None}) and added an explicit SQL lock_expires_at IS NOT NULL guard."
+      verification:
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_service.py::TestRevisePlan tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py::TestAIBuilderPlanLifecycle tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py -q"
+          result: "21 passed, 1 warning"
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py::test_revise_plan_api_creates_replacement_without_active_send tests/integration/flows/test_ai_builder_session_api_regressions.py::test_revise_plan_api_rejects_active_send_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_revise_plan_api_recovers_expired_send_lock_and_fences_old_lease -q"
+          result: "3 passed, 16 warnings"
+        - command: "cd backend && uv run ruff check <T013 touched files>"
+          result: "All checks passed"
+        - command: "cd backend && uv run ruff format --check <T013 touched files>"
+          result: "8 files already formatted"
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder/ai_builder_service.py src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_repo.py"
+          result: "0 errors, 0 warnings, 0 informations"
+        - command: "rg -n \"\\bpersist_plan\\b\" backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+          result: "no active source/test hits"
+      post_implementation_reviews:
+        codex_self_review:
+          verdict: "pass_for_T013_not_broader_goal"
+          notes:
+            - "Production-ready for the approved revise-plan runtime-boundary tranche after fixing in-scope review P2s."
+            - "Architecture improved: lifecycle revision no longer depends on active-send plan-store persistence and no longer fakes turn authority."
+            - "Runtime reliability improved for success, unexpired active-send rejection, expired stale-lock recovery, and stale-lease fencing."
+            - "Broader 9/10 blockers remain: raw JSONB contracts, generated-client weak SSE/API contracts, public lifecycle conflict codes, schema lock invariants, authenticated live eval behavior, and full baseline tests."
+        claude_iteration_1:
+          artifact: ".codex/artifacts/claude-peer-loop-t013-revise-plan-runtime-boundary-implementation-review-20260521T143900Z.md"
+          verdict: "GREEN_LIGHT yes; VERDICT green; MIN_SCORE 8"
+          findings_fixed:
+            - "Lifecycle imported build_plan_envelope from active-send plan store."
+            - "Revision rebuilt envelope with empty SpecValidationResult and dropped lint warnings."
+        antigravity_iteration_1:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t013-revise-plan-runtime-boundary-implementation-arbitration-20260521T144101Z.md"
+          verdict: "GREEN_LIGHT yes; VERDICT green; MIN_SCORE 8"
+          findings_fixed:
+            - "Explicit SQL null guard for expired-lock availability."
+            - "Use envelope model_copy to preserve lints and remove manual reconstruction."
+        claude_iteration_2:
+          artifact: ".codex/artifacts/claude-peer-loop-t013-revise-plan-runtime-boundary-implementation-review-v2-20260521T144817Z.md"
+          verdict: "GREEN_LIGHT yes; VERDICT green; MIN_SCORE 8"
+        antigravity_iteration_2:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t013-revise-plan-runtime-boundary-implementation-arbitration-v2-20260521T144906Z.md"
+          verdict: "GREEN_LIGHT yes; VERDICT green; MIN_SCORE 9"
+      scorecard_after_t013:
+        Maintainability: 8
+        Code_Quality: 8
+        Clean_Architecture: 8
+        Separation_of_Concerns: 8
+        Single_Source_of_Truth: 8
+        Human_Readability: 8
+        Human_Reviewability: 8
+        Runtime_Reliability: 8
+        Data_Model_Schema_Quality: 6
+        Test_Coverage_Quality: 8
+        Overall: 6
+      residual_risks:
+        - "Public API still reports revise active-send conflict as generic bad_request; typed lifecycle conflict codes are deferred to API-contract tranche."
+        - "builder_sessions lock columns lack schema-level consistency constraints for corrupt token-without-expiry rows."
+        - "Conversation metadata/edit-result JSONB contracts remain untyped hidden schemas."
+        - "SSE/public event contracts remain generated-client weak."
+        - "Authenticated five-case live AI Builder eval still needs rerun and form-field/runtime-input behavior remains weak."
+      ready_to_ship_for_tranche: true
+
+  - id: T014
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: xhigh
+    objective: "Re-rank the next Flow AI Builder production-readiness tranche after T013 and peer-gate an implementation-ready plan."
+    inputs:
+      - "T013 receipt"
+      - "Current scorecard blockers"
+      - ".codex/artifacts/claude-peer-loop-t013-revise-plan-runtime-boundary-implementation-review-v2-20260521T144817Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t013-revise-plan-runtime-boundary-implementation-arbitration-v2-20260521T144906Z.md"
+    constraints:
+      - "Read-only except board/artifact updates."
+      - "Do not implement before a fresh Codex self-review, Claude green, and Antigravity pass or exact Antigravity failure."
+      - "Prefer score-floor work: typed JSONB contracts, API/SSE generated-client contracts, public lifecycle error codes, lock schema invariants, or authenticated live-eval behavior."
+      - "Do not broaden into unrelated dirty files, branch operations, or implementation outside the selected plan."
+    candidate_inputs:
+      - "Typed conversation metadata JSONB and edit-result JSON ownership."
+      - "Typed SSE/public event contract and public lifecycle conflict codes."
+      - "builder_sessions lock consistency constraint or explicit corrupt-lock recovery policy."
+      - "Authenticated five-case live AI Builder eval focused on normal-user prompts."
+      - "Further proposal processor extraction around structured-question recovery/confirm requirements."
+    expected_output:
+      - "Architecture diagnosis update after T013."
+      - "Tranche ranking with rejected alternatives."
+      - "Implementation-ready plan with canonical owner, allowed files, acceptance criteria, tests, live eval relevance, and stop conditions."
+      - "Codex self-review pass or blocker."
+      - "Claude GREEN_LIGHT yes artifact."
+      - "Antigravity pass artifact or exact tooling/quota failure."
     receipt: null
 
 checks:
@@ -1398,14 +1512,13 @@ checks:
     status_checked: true
     result: "dirty; previous tranche uncommitted and unrelated files preserved"
   last_verification:
-    result: "T011 proposal seam cleanup verified and peer-gated; authenticated API read probe and four-case create live eval from T000 remain the latest live-eval evidence."
-    task: T011
+    result: "T013 revise-plan runtime boundary verified and peer-gated; authenticated API read probe and four-case create live eval from T000 remain the latest live-eval evidence."
+    task: T013
     commands:
-      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q: 79 passed"
-      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_rejects_lost_session_send_lease_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_edit_flow_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_confirm_requirements_with_lost_lease_rolls_back -q: 3 passed, 16 warnings"
-      - "scripts/gate-local/check_ai_builder_session_turn_contract.sh: clean"
-      - "uv run ruff check <T011 source/test files>: All checks passed"
-      - "uv run ruff format --check <T011 source/test files>: 4 files already formatted"
-      - "PYTHONDONTWRITEBYTECODE=1 uv run pyright <T011 source files>: 0 errors, 0 warnings, 0 informations"
-      - "Static rg source/test deletion gates: clean"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_service.py::TestRevisePlan tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py::TestAIBuilderPlanLifecycle tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py -q: 21 passed, 1 warning"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py::test_revise_plan_api_creates_replacement_without_active_send tests/integration/flows/test_ai_builder_session_api_regressions.py::test_revise_plan_api_rejects_active_send_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_revise_plan_api_recovers_expired_send_lock_and_fences_old_lease -q: 3 passed, 16 warnings"
+      - "cd backend && uv run ruff check <T013 touched files>: All checks passed"
+      - "cd backend && uv run ruff format --check <T013 touched files>: 8 files already formatted"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder/ai_builder_service.py src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_repo.py: 0 errors, 0 warnings, 0 informations"
+      - "rg -n \"\\bpersist_plan\\b\" backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder backend/tests/integration/flows/test_ai_builder_session_api_regressions.py: no active source/test hits"
       - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"': yaml ok"
