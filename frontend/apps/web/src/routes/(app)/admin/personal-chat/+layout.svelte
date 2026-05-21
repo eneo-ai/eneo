@@ -21,7 +21,7 @@
   }
 </script>
 
-<div class="flex h-full flex-col">
+<div class="flex h-full min-w-0 flex-grow flex-col overflow-hidden">
   <div class="border-default flex items-center gap-1 border-b px-6 pt-4">
     <Button
       variant={isActive(configurationPath) ? "default" : "ghost"}
@@ -38,7 +38,7 @@
       Promptbibliotek
     </Button>
   </div>
-  <div class="flex-1 overflow-auto">
+  <div class="min-h-0 flex-1 overflow-auto">
     {@render children?.()}
   </div>
 </div>
